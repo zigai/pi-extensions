@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6 - 2026-05-06
+
+- Clarifies README install commands for npm, pinned npm, GitHub, and pinned GitHub package installs.
+
 ## 0.1.5 - 2026-05-06
 
 - Counts goal tokens from completed assistant input plus output usage instead of `usage.totalTokens`.

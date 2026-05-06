@@ -12,14 +12,28 @@ Goal state is stored in pi session custom entries, so it follows session history
 
 ## Install
 
+Install from npm:
+
 ```sh
 pi install npm:pi-codex-goal
+```
+
+Install a pinned npm version:
+
+```sh
+pi install npm:pi-codex-goal@0.1.6
 ```
 
 Install from GitHub:
 
 ```sh
 pi install https://github.com/fitchmultz/pi-codex-goal
+```
+
+Install a pinned GitHub release:
+
+```sh
+pi install https://github.com/fitchmultz/pi-codex-goal@v0.1.6
 ```
 
 For local development from this repository:
