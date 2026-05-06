@@ -57,6 +57,8 @@ While a goal is active, the extension:
 
 - tracks elapsed active time between turns and tool completions
 - adds completed assistant turn token usage when the active model reports it
+- pauses when an active assistant turn is aborted, such as when you press Esc
+- resumes a paused goal when you send the next user message or run `/goal resume`
 - marks the goal `budgetLimited` when a positive token budget is reached
 - sends hidden steering messages when budget is reached or when the agent is idle but the goal is still active
 - shows live elapsed active time and compact/exact token counts in the pi footer when UI is available

@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { registerGoalCommand } from "./commands.js";
 import { formatFooterStatus } from "./format.js";
 import { budgetLimitPrompt, continuationPrompt } from "./prompts.js";
-import { applyUsage, clearEntry, goalWithLiveUsage, reconstructGoal, setEntry } from "./state.js";
+import { applyUsage, clearEntry, goalWithLiveUsage, reconstructGoal, setEntry, updateGoalStatus } from "./state.js";
 import { registerGoalTools } from "./tools.js";
 import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type ThreadGoal } from "./types.js";
 
@@ -15,6 +15,17 @@ interface AccountingState {
 
 interface StatusContext {
   ui: Pick<ExtensionContext["ui"], "setStatus">;
+}
+
+function assistantTurnTokens(message: { role: string; usage?: { totalTokens: number } }): number {
+  if (message.role !== "assistant" || !message.usage) {
+    return 0;
+  }
+  return Math.max(0, Math.trunc(message.usage.totalTokens));
+}
+
+function isAbortedAssistantMessage(message: { role: string; stopReason?: string }): boolean {
+  return message.role === "assistant" && message.stopReason === "aborted";
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -75,6 +86,38 @@ export default function (pi: ExtensionAPI): void {
     accounting.lastAccountedAt = null;
     stopStatusRefresh();
     pi.appendEntry(CUSTOM_ENTRY_TYPE, clearEntry(clearedGoalId, source));
+  };
+
+  const pauseForAbort = (ctx: ExtensionContext): void => {
+    if (!goal || goal.status !== "active") {
+      return;
+    }
+
+    const result = updateGoalStatus(goal, "paused");
+    if (!result.ok || !result.goal) {
+      return;
+    }
+
+    continuationQueuedFor = null;
+    accounting.activeGoalId = null;
+    accounting.lastAccountedAt = null;
+    persistGoal(result.goal, "runtime");
+    refreshUi(ctx);
+  };
+
+  const resumeForUserTurn = (ctx: ExtensionContext): void => {
+    if (!goal || goal.status !== "paused") {
+      return;
+    }
+
+    const result = updateGoalStatus(goal, "active");
+    if (!result.ok || !result.goal) {
+      return;
+    }
+
+    continuationQueuedFor = null;
+    persistGoal(result.goal, "runtime");
+    refreshUi(ctx);
   };
 
   const reloadFromSession = (ctx: ExtensionContext): void => {
@@ -189,6 +232,10 @@ export default function (pi: ExtensionAPI): void {
     beginAccounting();
   });
 
+  pi.on("before_agent_start", async (_event, ctx) => {
+    resumeForUserTurn(ctx);
+  });
+
   pi.on("turn_start", async (_event, ctx) => {
     continuationQueuedFor = null;
     beginAccounting();
@@ -200,14 +247,25 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("turn_end", async (_event, ctx) => {
-    const completedTurnTokens =
-      _event.message.role === "assistant" ? Math.max(0, Math.trunc(_event.message.usage.totalTokens)) : 0;
+    const completedTurnTokens = assistantTurnTokens(_event.message);
     accountProgress(ctx, false, completedTurnTokens);
+    if (isAbortedAssistantMessage(_event.message)) {
+      pauseForAbort(ctx);
+      return;
+    }
     maybeContinue(ctx);
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
-    accountProgress(ctx, false);
+  pi.on("agent_end", async (event, ctx) => {
+    const abortedMessages = event.messages.filter(isAbortedAssistantMessage);
+    const abortedTurnTokens = abortedMessages.reduce((sum, message) => {
+      return sum + assistantTurnTokens(message);
+    }, 0);
+    accountProgress(ctx, false, abortedTurnTokens);
+    if (abortedMessages.length > 0) {
+      pauseForAbort(ctx);
+      return;
+    }
     maybeContinue(ctx);
   });
 

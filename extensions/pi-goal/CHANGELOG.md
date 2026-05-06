@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 - 2026-05-06
+
+- Pauses active goals when pi reports an aborted assistant turn, including user Esc aborts.
+- Resumes paused goals automatically on the next user-driven agent start, while keeping `/goal resume` available.
+- Prevents aborted turns from immediately queueing hidden continuation messages.
+
 ## 0.1.3 - 2026-05-06
 
 - Corrects the README behavior summary to describe completed assistant turn token accounting.
