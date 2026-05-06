@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-05-06
+
+- Marks pi runtime peer dependencies as optional so `pi install npm:pi-codex-goal` stays lightweight while still documenting the extension runtime contract.
+
 ## 0.1.0 - 2026-05-06
 
 - Initial public release.
