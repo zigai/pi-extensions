@@ -56,7 +56,7 @@ This intentionally matches Codex TUI behavior: token budgets are set through the
 While a goal is active, the extension:
 
 - tracks elapsed active time between turns and tool completions
-- uses pi's native context usage estimate for token accounting when available
+- adds completed assistant turn token usage when the active model reports it
 - marks the goal `budgetLimited` when a positive token budget is reached
 - sends hidden steering messages when budget is reached or when the agent is idle but the goal is still active
 - shows live elapsed active time and compact/exact token counts in the pi footer when UI is available

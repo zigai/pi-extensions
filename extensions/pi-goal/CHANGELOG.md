@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3 - 2026-05-06
+
+- Corrects the README behavior summary to describe completed assistant turn token accounting.
+
 ## 0.1.2 - 2026-05-06
 
 - Counts completed assistant turn usage via pi's `usage.totalTokens` instead of using context-window deltas, so goal token totals track tokens sent and received across compaction.
