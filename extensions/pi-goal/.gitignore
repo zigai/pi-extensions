@@ -1,0 +1,8 @@
+node_modules/
+.pi/
+npm-debug.log*
+*.tsbuildinfo
+coverage/
+dist/
+.scratchpad.md
+.DS_Store

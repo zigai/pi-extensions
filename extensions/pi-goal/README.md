@@ -1,0 +1,64 @@
+# pi-codex-goal
+
+Codex-style goal tracking for pi.
+
+This package adds a `/goal` command plus three model-callable tools:
+
+- `get_goal`
+- `create_goal`
+- `update_goal`
+
+Goal state is stored in pi session custom entries, so it follows session history, resume, fork, tree navigation, reload, and compaction behavior without an external database.
+
+## Install
+
+```sh
+pi install npm:pi-codex-goal
+```
+
+Install from GitHub:
+
+```sh
+pi install https://github.com/fitchmultz/pi-codex-goal
+```
+
+For local development from this repository:
+
+```sh
+npm install
+pi install .
+```
+
+## User Commands
+
+```text
+/goal
+/goal Build the requested feature and verify it end to end
+/goal pause
+/goal resume
+/goal clear
+```
+
+`/goal` with no arguments reports the current objective, status, token budget, token usage, and elapsed active time. A plain `/goal <objective>` starts a new goal or replaces the current one after confirmation.
+
+This intentionally matches Codex TUI behavior: token budgets are set through the model tool rather than parsed from `/goal --tokens`.
+
+## Model Tools
+
+`create_goal` starts a goal with an objective and optional positive token budget. It fails if a goal already exists.
+
+`get_goal` returns the current goal state and usage.
+
+`update_goal` only accepts `status: "complete"`, matching Codex's model-side contract. The extension reports final token and elapsed-time usage before marking the goal complete.
+
+## Behavior
+
+While a goal is active, the extension:
+
+- tracks elapsed active time between turns and tool completions
+- uses pi's native context usage estimate for token accounting when available
+- marks the goal `budgetLimited` when a positive token budget is reached
+- sends hidden steering messages when budget is reached or when the agent is idle but the goal is still active
+- shows live elapsed active time and compact/exact token counts in the pi footer when UI is available
+
+Token counts are formatted with commas and compact abbreviations, for example `123M (123,456,789) tokens`. The token count is based on pi's current context usage estimate, which is the closest native signal available to extensions. It is not a provider billing counter.

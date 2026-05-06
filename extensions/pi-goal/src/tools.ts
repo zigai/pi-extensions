@@ -1,0 +1,88 @@
+import { StringEnum } from "@mariozechner/pi-ai";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { Type } from "typebox";
+
+import { formatGoalSummary, toToolText } from "./format.js";
+import { createGoal, updateGoalStatus } from "./state.js";
+import { TOOL_PROMPT_GUIDELINES } from "./prompts.js";
+import type { GoalEntrySource, ThreadGoal } from "./types.js";
+
+const EmptyParams = Type.Object({});
+
+const CreateGoalParams = Type.Object({
+  objective: Type.String({
+    description: "Concrete objective to pursue until completion.",
+  }),
+  token_budget: Type.Optional(
+    Type.Number({
+      description: "Optional positive integer token budget.",
+    }),
+  ),
+});
+
+const UpdateGoalParams = Type.Object({
+  status: StringEnum(["complete"] as const, {
+    description: "Only complete is accepted. Do not call this until no required work remains.",
+  }),
+});
+
+export interface ToolHost {
+  getGoal(): ThreadGoal | null;
+  setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: ExtensionContext): void;
+}
+
+function textResult(text: string, goal: ThreadGoal | null, isError = false): AgentToolResult<unknown> {
+  return {
+    content: [{ type: "text", text: isError ? `Error: ${text}` : text }],
+    details: { goal, error: isError ? text : null },
+  };
+}
+
+export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
+  pi.registerTool({
+    name: "get_goal",
+    label: "Get Goal",
+    description: "Get the current Codex-style goal and usage for this pi session.",
+    promptSnippet: "Inspect the current goal, status, token budget, tokens used, and active elapsed time.",
+    promptGuidelines: TOOL_PROMPT_GUIDELINES,
+    parameters: EmptyParams,
+    async execute() {
+      const goal = host.getGoal();
+      return textResult(toToolText(goal), goal);
+    },
+  });
+
+  pi.registerTool({
+    name: "create_goal",
+    label: "Create Goal",
+    description: "Create a Codex-style long-running goal for this pi session.",
+    promptSnippet: "Create one active goal with an objective and optional positive token budget.",
+    promptGuidelines: TOOL_PROMPT_GUIDELINES,
+    parameters: CreateGoalParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = createGoal(host.getGoal(), params.objective, params.token_budget ?? null);
+      if (!result.ok || !result.goal) {
+        return textResult(result.message, result.goal, true);
+      }
+      host.setGoal(result.goal, "tool", ctx);
+      return textResult(formatGoalSummary(result.goal), result.goal);
+    },
+  });
+
+  pi.registerTool({
+    name: "update_goal",
+    label: "Update Goal",
+    description: "Mark the current Codex-style goal complete after the objective is achieved.",
+    promptSnippet: "Mark the current goal complete after all required work is done.",
+    promptGuidelines: TOOL_PROMPT_GUIDELINES,
+    parameters: UpdateGoalParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = updateGoalStatus(host.getGoal(), params.status);
+      if (!result.ok || !result.goal) {
+        return textResult(result.message, result.goal, true);
+      }
+      host.setGoal(result.goal, "tool", ctx);
+      return textResult(formatGoalSummary(result.goal), result.goal);
+    },
+  });
+}

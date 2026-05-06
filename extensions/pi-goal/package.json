@@ -1,0 +1,57 @@
+{
+  "name": "pi-codex-goal",
+  "version": "0.1.0",
+  "description": "Codex-style goal tracking and continuation for pi.",
+  "type": "module",
+  "author": "Mitch Fultz (https://github.com/fitchmultz)",
+  "license": "MIT",
+  "main": "src/index.ts",
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "extension",
+    "codex",
+    "goal"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fitchmultz/pi-codex-goal.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fitchmultz/pi-codex-goal/issues"
+  },
+  "homepage": "https://github.com/fitchmultz/pi-codex-goal#readme",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "0.73.0",
+    "@mariozechner/pi-coding-agent": "0.73.0",
+    "@types/node": "^22.15.3",
+    "tsx": "^4.20.6",
+    "typebox": "1.1.38",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
