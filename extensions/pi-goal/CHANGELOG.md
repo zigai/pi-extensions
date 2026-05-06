@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - 2026-05-06
+
+- Counts completed assistant turn usage via pi's `usage.totalTokens` instead of using context-window deltas, so goal token totals track tokens sent and received across compaction.
+- Keeps elapsed-time accounting stable before and after compaction while continuing to persist active goal state.
+
 ## 0.1.1 - 2026-05-06
 
 - Marks pi runtime peer dependencies as optional so `pi install npm:pi-codex-goal` stays lightweight while still documenting the extension runtime contract.

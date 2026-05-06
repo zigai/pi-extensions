@@ -36,7 +36,6 @@ function createHarness() {
 
   const ctx: GoalCommandContext = {
     hasUI: true,
-    getContextUsage: () => undefined,
     ui: {
       notify(message: string) {
         notifications.push(message);

@@ -10,15 +10,12 @@ import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type ThreadGoal } from "./type
 interface AccountingState {
   activeGoalId: string | null;
   lastAccountedAt: number | null;
-  lastContextTokens: number | null;
   budgetWarningSentFor: string | null;
 }
 
 interface StatusContext {
   ui: Pick<ExtensionContext["ui"], "setStatus">;
 }
-
-type UsageContext = Pick<ExtensionContext, "getContextUsage">;
 
 export default function (pi: ExtensionAPI): void {
   let goal: ThreadGoal | null = null;
@@ -28,7 +25,6 @@ export default function (pi: ExtensionAPI): void {
   const accounting: AccountingState = {
     activeGoalId: null,
     lastAccountedAt: null,
-    lastContextTokens: null,
     budgetWarningSentFor: null,
   };
 
@@ -77,7 +73,6 @@ export default function (pi: ExtensionAPI): void {
     continuationQueuedFor = null;
     accounting.activeGoalId = null;
     accounting.lastAccountedAt = null;
-    accounting.lastContextTokens = null;
     stopStatusRefresh();
     pi.appendEntry(CUSTOM_ENTRY_TYPE, clearEntry(clearedGoalId, source));
   };
@@ -88,42 +83,36 @@ export default function (pi: ExtensionAPI): void {
     if (goal?.status !== "active") {
       accounting.activeGoalId = null;
       accounting.lastAccountedAt = null;
-      accounting.lastContextTokens = null;
     }
     refreshUi(ctx);
   };
 
-  const beginAccounting = (ctx: UsageContext): void => {
+  const beginAccounting = (): void => {
     if (!goal || goal.status !== "active") {
       accounting.activeGoalId = null;
       accounting.lastAccountedAt = null;
-      accounting.lastContextTokens = null;
       return;
     }
 
     accounting.activeGoalId = goal.goalId;
     accounting.lastAccountedAt = Date.now();
-    accounting.lastContextTokens = ctx.getContextUsage()?.tokens ?? null;
   };
 
-  const accountProgress = (ctx: ExtensionContext, allowBudgetSteering: boolean): void => {
+  const accountProgress = (
+    ctx: ExtensionContext,
+    allowBudgetSteering: boolean,
+    completedTurnTokens = 0,
+  ): void => {
     if (!goal || accounting.activeGoalId !== goal.goalId || goal.status !== "active") {
-      beginAccounting(ctx);
+      beginAccounting();
       return;
     }
 
     const now = Date.now();
     const elapsed = accounting.lastAccountedAt === null ? 0 : Math.floor((now - accounting.lastAccountedAt) / 1000);
-    const currentContextTokens = ctx.getContextUsage()?.tokens ?? null;
-    const tokenDelta =
-      currentContextTokens !== null && accounting.lastContextTokens !== null
-        ? Math.max(0, currentContextTokens - accounting.lastContextTokens)
-        : 0;
-
     accounting.lastAccountedAt = now;
-    accounting.lastContextTokens = currentContextTokens;
 
-    const result = applyUsage(goal, tokenDelta, elapsed);
+    const result = applyUsage(goal, completedTurnTokens, elapsed);
     if (!result.changed || !result.goal) {
       return;
     }
@@ -181,7 +170,7 @@ export default function (pi: ExtensionAPI): void {
     getGoal: () => goalForDisplay(),
     setGoal(nextGoal, source, ctx) {
       persistGoal(nextGoal, source);
-      beginAccounting(ctx);
+      beginAccounting();
       refreshUi(ctx);
     },
     clearGoal(source, ctx) {
@@ -192,17 +181,17 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     reloadFromSession(ctx);
-    beginAccounting(ctx);
+    beginAccounting();
   });
 
   pi.on("session_tree", async (_event, ctx) => {
     reloadFromSession(ctx);
-    beginAccounting(ctx);
+    beginAccounting();
   });
 
   pi.on("turn_start", async (_event, ctx) => {
     continuationQueuedFor = null;
-    beginAccounting(ctx);
+    beginAccounting();
     refreshUi(ctx);
   });
 
@@ -211,7 +200,9 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("turn_end", async (_event, ctx) => {
-    accountProgress(ctx, false);
+    const completedTurnTokens =
+      _event.message.role === "assistant" ? Math.max(0, Math.trunc(_event.message.usage.totalTokens)) : 0;
+    accountProgress(ctx, false, completedTurnTokens);
     maybeContinue(ctx);
   });
 

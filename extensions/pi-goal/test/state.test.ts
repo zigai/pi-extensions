@@ -65,6 +65,19 @@ test("updateGoalStatus marks completion without clearing final usage", () => {
   assert.equal(result.goal?.usage.activeSeconds, 9);
 });
 
+test("applyUsage accumulates completed assistant turn total tokens", () => {
+  const created = createGoal(null, "finish", 1_000_000).goal;
+  assert.ok(created);
+
+  const firstTurn = applyUsage(created, 123_456, 3).goal;
+  assert.ok(firstTurn);
+  const secondTurn = applyUsage(firstTurn, 987_654, 5).goal;
+
+  assert.equal(secondTurn?.usage.tokensUsed, 1_111_110);
+  assert.equal(secondTurn?.usage.activeSeconds, 8);
+  assert.equal(secondTurn?.status, "budgetLimited");
+});
+
 test("formatters produce compact summaries", () => {
   const created = createGoal(null, "finish", 10).goal;
   assert.ok(created);

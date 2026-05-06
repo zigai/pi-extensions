@@ -61,4 +61,4 @@ While a goal is active, the extension:
 - sends hidden steering messages when budget is reached or when the agent is idle but the goal is still active
 - shows live elapsed active time and compact/exact token counts in the pi footer when UI is available
 
-Token counts are formatted with commas and compact abbreviations, for example `123M (123,456,789) tokens`. The token count is based on pi's current context usage estimate, which is the closest native signal available to extensions. It is not a provider billing counter.
+Token counts are formatted with commas and compact abbreviations, for example `123M (123,456,789) tokens`. Token totals use pi's completed assistant turn usage (`usage.totalTokens`), which includes input, output, cache read, and cache write tokens when the active model reports them. Pi does not currently expose a separate extension usage total for automatic compaction summary calls.

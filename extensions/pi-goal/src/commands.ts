@@ -17,7 +17,6 @@ export type GoalCommandPi = Pick<ExtensionAPI, "registerCommand" | "sendMessage"
 
 export interface GoalCommandContext {
   hasUI: boolean;
-  getContextUsage: ExtensionCommandContext["getContextUsage"];
   ui: Pick<ExtensionCommandContext["ui"], "confirm" | "notify" | "setStatus">;
 }
 
