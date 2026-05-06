@@ -65,7 +65,7 @@ test("updateGoalStatus marks completion without clearing final usage", () => {
   assert.equal(result.goal?.usage.activeSeconds, 9);
 });
 
-test("applyUsage accumulates completed assistant turn total tokens", () => {
+test("applyUsage accumulates supplied token deltas", () => {
   const created = createGoal(null, "finish", 1_000_000).goal;
   assert.ok(created);
 

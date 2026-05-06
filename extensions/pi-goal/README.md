@@ -56,11 +56,11 @@ This intentionally matches Codex TUI behavior: token budgets are set through the
 While a goal is active, the extension:
 
 - tracks elapsed active time between turns and tool completions
-- adds completed assistant turn token usage when the active model reports it
+- adds completed assistant turn input plus output token usage when the active model reports it
 - pauses when an active assistant turn is aborted, such as when you press Esc
 - resumes a paused goal when you send the next user message or run `/goal resume`
 - marks the goal `budgetLimited` when a positive token budget is reached
 - sends hidden steering messages when budget is reached or when the agent is idle but the goal is still active
 - shows live elapsed active time and compact/exact token counts in the pi footer when UI is available
 
-Token counts are formatted with commas and compact abbreviations, for example `123M (123,456,789) tokens`. Token totals use pi's completed assistant turn usage (`usage.totalTokens`), which includes input, output, cache read, and cache write tokens when the active model reports them. Pi does not currently expose a separate extension usage total for automatic compaction summary calls.
+Token counts are formatted with commas and compact abbreviations, for example `123M (123,456,789) tokens`. Token totals use pi's completed assistant turn input plus output usage. Cache read and cache write channels are excluded because they are provider cache accounting fields, not extra sent and received text tokens. Pi does not currently expose a separate extension usage total for automatic compaction summary calls.

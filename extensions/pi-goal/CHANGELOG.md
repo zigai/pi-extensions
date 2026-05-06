@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5 - 2026-05-06
+
+- Counts goal tokens from completed assistant input plus output usage instead of `usage.totalTokens`.
+- Excludes cache read and cache write accounting channels from goal token budgets so cached provider tokens do not inflate sent and received totals.
+
 ## 0.1.4 - 2026-05-06
 
 - Pauses active goals when pi reports an aborted assistant turn, including user Esc aborts.

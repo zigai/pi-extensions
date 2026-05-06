@@ -170,7 +170,18 @@ function createRuntimeHarness() {
   };
 }
 
-function assistantMessage(stopReason: "stop" | "aborted", totalTokens: number) {
+interface TestAssistantUsage {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+}
+
+function assistantMessage(stopReason: "stop" | "aborted", usage: TestAssistantUsage) {
+  const cacheRead = usage.cacheRead ?? 0;
+  const cacheWrite = usage.cacheWrite ?? 0;
+
   return {
     role: "assistant",
     content: [],
@@ -178,11 +189,11 @@ function assistantMessage(stopReason: "stop" | "aborted", totalTokens: number) {
     provider: "test",
     model: "test",
     usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens,
+      input: usage.input,
+      output: usage.output,
+      cacheRead,
+      cacheWrite,
+      totalTokens: usage.totalTokens ?? usage.input + usage.output + cacheRead + cacheWrite,
       cost: {
         input: 0,
         output: 0,
@@ -205,13 +216,19 @@ test("aborted turns pause goals and do not queue continuation", async () => {
   await harness.emit("turn_end", {
     type: "turn_end",
     turnIndex: 0,
-    message: assistantMessage("aborted", 123),
+    message: assistantMessage("aborted", {
+      input: 40,
+      output: 2,
+      cacheRead: 500,
+      cacheWrite: 600,
+      totalTokens: 1_142,
+    }),
     toolResults: [],
   });
 
   const goal = harness.snapshot().goal;
   assert.equal(goal?.status, "paused");
-  assert.equal(goal?.usage.tokensUsed, 123);
+  assert.equal(goal?.usage.tokensUsed, 42);
   assert.equal(harness.sentMessages.length, 0);
 });
 
@@ -222,7 +239,7 @@ test("a new user-driven agent start resumes a paused goal", async () => {
   await harness.emit("turn_end", {
     type: "turn_end",
     turnIndex: 0,
-    message: assistantMessage("aborted", 10),
+    message: assistantMessage("aborted", { input: 8, output: 2 }),
     toolResults: [],
   });
 
@@ -237,7 +254,7 @@ test("a new user-driven agent start resumes a paused goal", async () => {
   assert.equal(harness.snapshot().goal?.usage.tokensUsed, 10);
 });
 
-test("completed turns continue active goals", async () => {
+test("completed turns count input plus output and continue active goals", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
   harness.sentMessages.length = 0;
@@ -246,7 +263,13 @@ test("completed turns continue active goals", async () => {
   await harness.emit("turn_end", {
     type: "turn_end",
     turnIndex: 0,
-    message: assistantMessage("stop", 42),
+    message: assistantMessage("stop", {
+      input: 30,
+      output: 12,
+      cacheRead: 500,
+      cacheWrite: 600,
+      totalTokens: 1_142,
+    }),
     toolResults: [],
   });
 

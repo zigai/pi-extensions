@@ -17,11 +17,23 @@ interface StatusContext {
   ui: Pick<ExtensionContext["ui"], "setStatus">;
 }
 
-function assistantTurnTokens(message: { role: string; usage?: { totalTokens: number } }): number {
+interface AssistantUsage {
+  input: number;
+  output: number;
+}
+
+function usageChannelTokens(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.trunc(value));
+}
+
+function assistantTurnTokens(message: { role: string; usage?: AssistantUsage }): number {
   if (message.role !== "assistant" || !message.usage) {
     return 0;
   }
-  return Math.max(0, Math.trunc(message.usage.totalTokens));
+  return usageChannelTokens(message.usage.input) + usageChannelTokens(message.usage.output);
 }
 
 function isAbortedAssistantMessage(message: { role: string; stopReason?: string }): boolean {
