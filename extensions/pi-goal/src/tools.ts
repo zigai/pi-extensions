@@ -1,5 +1,5 @@
-import { StringEnum } from "@mariozechner/pi-ai";
-import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { formatGoalSummary, toToolText } from "./format.js";
