@@ -4,21 +4,28 @@ import test from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 import goalExtension from "../src/index.js";
-import { reconstructGoal } from "../src/state.js";
+import { isGoalCustomEntry, reconstructGoal } from "../src/state.js";
 import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
 
-type EventHandler = (event: object, ctx: ExtensionContext) => void | Promise<void>;
+type EventHandler = (event: object, ctx: ExtensionContext) => unknown | Promise<unknown>;
 
 interface SentMessage {
   message: Parameters<ExtensionAPI["sendMessage"]>[0];
   options: Parameters<ExtensionAPI["sendMessage"]>[1];
 }
 
-function createRuntimeHarness() {
+function createRuntimeHarness(options: { idle?: boolean; pendingMessages?: boolean } = {}) {
   const entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]> = [];
   const handlers = new Map<string, EventHandler[]>();
   const sentMessages: SentMessage[] = [];
+  const tools = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>();
+  const runtime = {
+    abortCount: 0,
+    idle: options.idle ?? true,
+    pendingMessages: options.pendingMessages ?? false,
+  };
   let commandHandler: ((args: string, ctx: ExtensionCommandContext) => void | Promise<void>) | null = null;
+  let ctx: ExtensionCommandContext;
   let entryIndex = 0;
 
   const on = ((event: string, handler: EventHandler) => {
@@ -63,7 +70,9 @@ function createRuntimeHarness() {
     registerMessageRenderer() {},
     registerProvider() {},
     registerShortcut() {},
-    registerTool() {},
+    registerTool(tool) {
+      tools.set(tool.name, (params) => tool.execute("tool-call", params as never, undefined, undefined, ctx));
+    },
     sendMessage(message, options) {
       sentMessages.push({ message, options });
     },
@@ -125,16 +134,18 @@ function createRuntimeHarness() {
     theme: {} as ExtensionCommandContext["ui"]["theme"],
   };
 
-  const ctx: ExtensionCommandContext = {
-    abort() {},
+  ctx = {
+    abort() {
+      runtime.abortCount += 1;
+    },
     compact() {},
     cwd: "/tmp",
     fork: async () => ({ cancelled: false }),
     getContextUsage: () => undefined,
     getSystemPrompt: () => "",
     hasUI: true,
-    hasPendingMessages: () => false,
-    isIdle: () => true,
+    hasPendingMessages: () => runtime.pendingMessages,
+    isIdle: () => runtime.idle,
     model: undefined,
     modelRegistry: {} as ExtensionCommandContext["modelRegistry"],
     navigateTree: async () => ({ cancelled: false }),
@@ -155,17 +166,35 @@ function createRuntimeHarness() {
     await commandHandler(args, ctx);
   }
 
-  async function emit(event: string, payload: object): Promise<void> {
+  async function emit(event: string, payload: object): Promise<unknown[]> {
+    const results: unknown[] = [];
     for (const handler of handlers.get(event) ?? []) {
-      await handler(payload, ctx);
+      results.push(await handler(payload, ctx));
     }
+    return results;
+  }
+
+  async function runTool(name: string, params: Record<string, unknown>) {
+    const tool = tools.get(name);
+    assert.ok(tool, `Expected tool ${name} to be registered.`);
+    return tool(params);
   }
 
   return {
     emit,
     entries,
     runCommand,
+    runTool,
     sentMessages,
+    setIdle(idle: boolean) {
+      runtime.idle = idle;
+    },
+    setPendingMessages(pendingMessages: boolean) {
+      runtime.pendingMessages = pendingMessages;
+    },
+    get abortCount() {
+      return runtime.abortCount;
+    },
     snapshot: () => reconstructGoal(entries),
   };
 }
@@ -178,7 +207,11 @@ interface TestAssistantUsage {
   totalTokens?: number;
 }
 
-function assistantMessage(stopReason: "stop" | "aborted", usage: TestAssistantUsage) {
+function waitForContinuationRetry(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 75));
+}
+
+function assistantMessage(stopReason: "stop" | "aborted" | "length" | "toolUse", usage: TestAssistantUsage) {
   const cacheRead = usage.cacheRead ?? 0;
   const cacheWrite = usage.cacheWrite ?? 0;
 
@@ -278,6 +311,230 @@ test("completed turns count input plus output and continue active goals", async 
   assert.equal(goal?.usage.tokensUsed, 42);
   assert.equal(harness.sentMessages.length, 1);
   assert.equal(harness.sentMessages[0]?.message.customType, CUSTOM_ENTRY_TYPE);
+  assert.deepEqual(harness.sentMessages[0]?.message.details, {
+    kind: "continuation",
+    goalId: goal?.goalId,
+  });
+});
+
+test("tool-use turn ends do not queue continuation before tool execution finishes", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  harness.sentMessages.length = 0;
+
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  await harness.emit("turn_end", {
+    type: "turn_end",
+    turnIndex: 0,
+    message: assistantMessage("toolUse", { input: 10, output: 3 }),
+    toolResults: [],
+  });
+
+  assert.equal(harness.snapshot().goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 0);
+});
+
+test("agent end waits for idle before continuing active goals", async () => {
+  const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
+  await harness.runCommand("ship it");
+  harness.sentMessages.length = 0;
+
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [assistantMessage("stop", { input: 30, output: 12 })],
+  });
+
+  assert.equal(harness.sentMessages.length, 0);
+  harness.setIdle(true);
+  harness.setPendingMessages(false);
+  await waitForContinuationRetry();
+
+  const goal = harness.snapshot().goal;
+  assert.equal(goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.message.details, {
+    kind: "continuation",
+    goalId: goal?.goalId,
+  });
+});
+
+test("completing a goal cancels a scheduled continuation before it is sent", async () => {
+  const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
+  await harness.runCommand("ship it");
+  harness.sentMessages.length = 0;
+
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [assistantMessage("stop", { input: 30, output: 12 })],
+  });
+  assert.equal(harness.sentMessages.length, 0);
+
+  await harness.runTool("update_goal", { status: "complete" });
+  const completeSetEntries = harness.entries.filter((entry) => {
+    return (
+      entry.type === "custom" &&
+      entry.customType === CUSTOM_ENTRY_TYPE &&
+      isGoalCustomEntry(entry.data) &&
+      entry.data.kind === "set" &&
+      entry.data.goal.status === "complete"
+    );
+  });
+  assert.equal(completeSetEntries.length, 1);
+  harness.setIdle(true);
+  harness.setPendingMessages(false);
+  await waitForContinuationRetry();
+
+  assert.equal(harness.snapshot().goal?.status, "complete");
+  assert.equal(harness.sentMessages.length, 0);
+});
+
+test("stale queued continuation aborts if the goal became complete before launch", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  const queued = harness.sentMessages[0];
+  assert.ok(queued);
+  const prompt = queued.message.content;
+  if (typeof prompt !== "string") {
+    assert.fail("Expected queued goal message content to be a string.");
+  }
+
+  await harness.runTool("update_goal", { status: "complete" });
+  const results = await harness.emit("before_agent_start", {
+    type: "before_agent_start",
+    prompt,
+    systemPrompt: "base prompt",
+    systemPromptOptions: {},
+  });
+
+  const result = results[0] as { systemPrompt?: string } | undefined;
+  assert.equal(harness.snapshot().goal?.status, "complete");
+  assert.equal(harness.abortCount, 1);
+  assert.match(result?.systemPrompt ?? "", /queued hidden goal continuation is stale/);
+});
+
+test("stale custom goal work messages are replaced before provider context", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  const queued = harness.sentMessages[0];
+  assert.ok(queued);
+
+  const contextMessage = {
+    role: "custom",
+    customType: CUSTOM_ENTRY_TYPE,
+    content: queued.message.content,
+    display: false,
+    details: queued.message.details,
+    timestamp: 1,
+  };
+  const activeResults = await harness.emit("context", {
+    type: "context",
+    messages: [contextMessage],
+  });
+  assert.equal(activeResults[0], undefined);
+
+  await harness.runTool("update_goal", { status: "complete" });
+  const results = await harness.emit("context", {
+    type: "context",
+    messages: [contextMessage],
+  });
+
+  const result = results[0] as { messages?: Array<{ content?: unknown; details?: unknown }> } | undefined;
+  const replacedMessage = result?.messages?.[0];
+  assert.equal(typeof replacedMessage?.content, "string");
+  assert.match(String(replacedMessage?.content), /queued hidden goal continuation is stale/);
+  assert.deepEqual(replacedMessage?.details, {
+    kind: "stale_continuation",
+    goalId: harness.snapshot().goal?.goalId,
+    currentGoalId: harness.snapshot().goal?.goalId,
+    currentStatus: "complete",
+  });
+});
+
+test("goal follow-up guard resets when the queued prompt-based agent turn starts", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  assert.equal(harness.sentMessages.length, 1);
+  const queued = harness.sentMessages[0];
+  assert.ok(queued);
+  const prompt = queued.message.content;
+  if (typeof prompt !== "string") {
+    assert.fail("Expected queued goal message content to be a string.");
+  }
+  harness.sentMessages.length = 0;
+
+  await harness.emit("before_agent_start", {
+    type: "before_agent_start",
+    prompt,
+    systemPrompt: "",
+    systemPromptOptions: {},
+  });
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [assistantMessage("stop", { input: 30, output: 12 })],
+  });
+
+  const goal = harness.snapshot().goal;
+  assert.equal(goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.message.details, {
+    kind: "continuation",
+    goalId: goal?.goalId,
+  });
+});
+
+test("goal follow-up guard resets on turn start for custom-message continuations", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  harness.sentMessages.length = 0;
+
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [assistantMessage("stop", { input: 30, output: 12 })],
+  });
+  assert.equal(harness.sentMessages.length, 1);
+  harness.sentMessages.length = 0;
+
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [assistantMessage("stop", { input: 5, output: 6 })],
+  });
+
+  const goal = harness.snapshot().goal;
+  assert.equal(goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.message.details, {
+    kind: "continuation",
+    goalId: goal?.goalId,
+  });
+});
+
+test("session compaction queues continuation for active goals after length stops", async () => {
+  const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
+  await harness.runCommand("ship it");
+  harness.sentMessages.length = 0;
+
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  await harness.emit("turn_end", {
+    type: "turn_end",
+    turnIndex: 0,
+    message: assistantMessage("length", { input: 30, output: 12 }),
+    toolResults: [],
+  });
+  assert.equal(harness.sentMessages.length, 0);
+
+  harness.setIdle(true);
+  harness.setPendingMessages(false);
+  await harness.emit("session_compact", {
+    type: "session_compact",
+    summary: "compact summary",
+    tokensBefore: 100,
+  });
+
+  const goal = harness.snapshot().goal;
+  assert.equal(goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 1);
   assert.deepEqual(harness.sentMessages[0]?.message.details, {
     kind: "continuation",
     goalId: goal?.goalId,

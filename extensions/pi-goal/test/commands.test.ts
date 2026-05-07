@@ -80,7 +80,7 @@ test("/goal objective creates the goal and starts a hidden follow-up turn", asyn
   if (typeof content !== "string") {
     assert.fail("Expected queued goal message content to be a string.");
   }
-  assert.match(content, /Objective: ship the feature/);
+  assert.match(content, /<untrusted_objective>\nship the feature\n<\/untrusted_objective>/);
   assert.deepEqual(sentMessage.options, { triggerTurn: true, deliverAs: "followUp" });
 });
 
@@ -107,5 +107,5 @@ test("/goal resume restarts a hidden follow-up turn", async () => {
   if (typeof content !== "string") {
     assert.fail("Expected queued goal message content to be a string.");
   }
-  assert.match(content, /Objective: ship the feature/);
+  assert.match(content, /<untrusted_objective>\nship the feature\n<\/untrusted_objective>/);
 });

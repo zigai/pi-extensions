@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7 - 2026-05-07
+
+- Keeps active goals continuing after auto-compaction, including length-stop compactions.
+- Prevents stale queued goal continuations from running after a goal is completed or changed.
+- Strengthens completion-audit prompts and update-goal guidance so goals are marked complete only after verified completion.
+- Avoids duplicate persisted completion entries from `update_goal`.
+
 ## 0.1.6 - 2026-05-06
 
 - Clarifies README install commands for npm, pinned npm, GitHub, and pinned GitHub package installs.

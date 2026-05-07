@@ -3,9 +3,9 @@ import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@mariozech
 import { Type } from "typebox";
 
 import { formatGoalSummary, toToolText } from "./format.js";
-import { createGoal, updateGoalStatus } from "./state.js";
+import { createGoal } from "./state.js";
 import { TOOL_PROMPT_GUIDELINES } from "./prompts.js";
-import type { GoalEntrySource, ThreadGoal } from "./types.js";
+import type { GoalEntrySource, GoalResult, ThreadGoal } from "./types.js";
 
 const EmptyParams = Type.Object({});
 
@@ -29,6 +29,7 @@ const UpdateGoalParams = Type.Object({
 export interface ToolHost {
   getGoal(): ThreadGoal | null;
   setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: ExtensionContext): void;
+  completeGoal(source: GoalEntrySource, ctx: ExtensionContext): GoalResult;
 }
 
 function textResult(text: string, goal: ThreadGoal | null, isError = false): AgentToolResult<unknown> {
@@ -72,16 +73,16 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
   pi.registerTool({
     name: "update_goal",
     label: "Update Goal",
-    description: "Mark the current Codex-style goal complete after the objective is achieved.",
-    promptSnippet: "Mark the current goal complete after all required work is done.",
+    description:
+      "Mark the current Codex-style goal complete only after the objective is actually achieved and no required work remains. Do not use this tool just because work is stopping, budget is low, or partial progress looks sufficient.",
+    promptSnippet: "Mark the current goal complete only after an evidence-backed completion audit proves no required work remains.",
     promptGuidelines: TOOL_PROMPT_GUIDELINES,
     parameters: UpdateGoalParams,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = updateGoalStatus(host.getGoal(), params.status);
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const result = host.completeGoal("tool", ctx);
       if (!result.ok || !result.goal) {
         return textResult(result.message, result.goal, true);
       }
-      host.setGoal(result.goal, "tool", ctx);
       return textResult(formatGoalSummary(result.goal), result.goal);
     },
   });
