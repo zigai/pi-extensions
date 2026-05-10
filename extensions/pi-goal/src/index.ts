@@ -172,8 +172,13 @@ export default function (pi: ExtensionAPI): void {
       accounting.budgetWarningSentFor = null;
       clearStoppedRuntimeState();
     }
-    if (nextGoal.status !== "active") {
+    if (nextGoal.status === "paused" || nextGoal.status === "complete") {
       clearStoppedRuntimeState();
+    } else if (nextGoal.status === "budgetLimited") {
+      clearContinuationState();
+    }
+    if (nextGoal.status !== "budgetLimited") {
+      accounting.budgetWarningSentFor = null;
     }
     pi.appendEntry(CUSTOM_ENTRY_TYPE, setEntry(nextGoal, source));
   };
@@ -201,7 +206,7 @@ export default function (pi: ExtensionAPI): void {
     refreshUi(ctx);
   };
 
-  const resumeForUserTurn = (ctx: ExtensionContext): void => {
+  const resumePausedGoal = (ctx: ExtensionContext): void => {
     if (!goal || goal.status !== "paused") {
       return;
     }
@@ -240,8 +245,10 @@ export default function (pi: ExtensionAPI): void {
     ctx: ExtensionContext,
     allowBudgetSteering: boolean,
     completedTurnTokens = 0,
+    accountBudgetLimited = false,
   ): void => {
-    if (!goal || accounting.activeGoalId !== goal.goalId || goal.status !== "active") {
+    const canAccount = goal?.status === "active" || (accountBudgetLimited && goal?.status === "budgetLimited");
+    if (!goal || accounting.activeGoalId !== goal.goalId || !canAccount) {
       beginAccounting();
       return;
     }
@@ -250,7 +257,10 @@ export default function (pi: ExtensionAPI): void {
     const elapsed = accounting.lastAccountedAt === null ? 0 : Math.floor((now - accounting.lastAccountedAt) / 1000);
     accounting.lastAccountedAt = now;
 
-    const result = applyUsage(goal, completedTurnTokens, elapsed);
+    const result = applyUsage(goal, completedTurnTokens, elapsed, {
+      expectedGoalId: accounting.activeGoalId,
+      accountBudgetLimited,
+    });
     if (!result.changed || !result.goal) {
       return;
     }
@@ -258,11 +268,7 @@ export default function (pi: ExtensionAPI): void {
     persistGoal(result.goal, "runtime");
     refreshUi(ctx);
 
-    if (
-      allowBudgetSteering &&
-      result.crossedBudget &&
-      accounting.budgetWarningSentFor !== result.goal.goalId
-    ) {
+    if (allowBudgetSteering && result.crossedBudget && accounting.budgetWarningSentFor !== result.goal.goalId) {
       accounting.budgetWarningSentFor = result.goal.goalId;
       pi.sendMessage(
         {
@@ -277,7 +283,7 @@ export default function (pi: ExtensionAPI): void {
   };
 
   const completeGoal = (source: GoalEntrySource, ctx: ExtensionContext): GoalResult => {
-    accountProgress(ctx, false);
+    accountProgress(ctx, false, 0, true);
     const result = updateGoalStatus(goal, "complete");
     if (!result.ok || !result.goal) {
       return result;
@@ -340,7 +346,9 @@ export default function (pi: ExtensionAPI): void {
     getGoal: () => goalForDisplay(),
     setGoal(nextGoal, source, ctx) {
       persistGoal(nextGoal, source);
-      beginAccounting();
+      if (source === "command" && nextGoal.status === "active") {
+        continuationQueuedFor = nextGoal.goalId;
+      }
       refreshUi(ctx);
     },
     clearGoal(source, ctx) {
@@ -374,9 +382,16 @@ export default function (pi: ExtensionAPI): void {
     return changed ? { messages } : undefined;
   });
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     reloadFromSession(ctx);
     beginAccounting();
+    if (event.reason === "resume" && goal?.status === "paused" && ctx.hasUI) {
+      const shouldResume = await ctx.ui.confirm("Resume paused goal?", `Goal: ${goal.objective}`);
+      if (shouldResume) {
+        resumePausedGoal(ctx);
+        beginAccounting();
+      }
+    }
     maybeContinue(ctx);
   });
 
@@ -405,7 +420,6 @@ export default function (pi: ExtensionAPI): void {
     } else {
       clearContinuationState();
     }
-    resumeForUserTurn(ctx);
   });
 
   pi.on("turn_start", async (_event, ctx) => {
@@ -415,12 +429,12 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("tool_execution_end", async (_event, ctx) => {
-    accountProgress(ctx, true);
+    accountProgress(ctx, true, 0, true);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
     const completedTurnTokens = assistantTurnTokens(_event.message);
-    accountProgress(ctx, false, completedTurnTokens);
+    accountProgress(ctx, true, completedTurnTokens);
     if (isAbortedAssistantMessage(_event.message)) {
       pauseForAbort(ctx);
       return;
@@ -435,7 +449,7 @@ export default function (pi: ExtensionAPI): void {
     const abortedTurnTokens = abortedMessages.reduce((sum, message) => {
       return sum + assistantTurnTokens(message);
     }, 0);
-    accountProgress(ctx, false, abortedTurnTokens);
+    accountProgress(ctx, false, abortedTurnTokens, true);
     if (abortedMessages.length > 0) {
       pauseForAbort(ctx);
       return;
@@ -444,7 +458,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", async (_event, ctx) => {
-    accountProgress(ctx, false);
+    accountProgress(ctx, false, 0, true);
   });
 
   pi.on("session_compact", async (_event, ctx) => {
@@ -456,7 +470,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    accountProgress(ctx, false);
+    accountProgress(ctx, false, 0, true);
     clearContinuationTimer();
     stopStatusRefresh();
   });

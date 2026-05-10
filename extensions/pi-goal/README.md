@@ -21,7 +21,7 @@ pi install npm:pi-codex-goal
 Install a pinned npm version:
 
 ```sh
-pi install npm:pi-codex-goal@0.1.7
+pi install npm:pi-codex-goal@0.1.9
 ```
 
 Install from GitHub:
@@ -33,7 +33,7 @@ pi install https://github.com/fitchmultz/pi-codex-goal
 Install a pinned GitHub release:
 
 ```sh
-pi install https://github.com/fitchmultz/pi-codex-goal@v0.1.7
+pi install https://github.com/fitchmultz/pi-codex-goal@v0.1.9
 ```
 
 For local development from this repository:
@@ -55,7 +55,7 @@ pi install .
 
 `/goal` with no arguments reports the current objective, status, token budget, token usage, and elapsed active time. A plain `/goal <objective>` starts a new goal or replaces the current one after confirmation.
 
-This intentionally matches Codex TUI behavior: token budgets are set through the model tool rather than parsed from `/goal --tokens`.
+This intentionally matches Codex TUI behavior: token budgets are set through the model tool rather than parsed from `/goal --tokens`. This package keeps its objective size limit at 8000 Unicode characters.
 
 ## Model Tools
 
@@ -72,9 +72,9 @@ While a goal is active, the extension:
 - tracks elapsed active time between turns and tool completions
 - adds completed assistant turn input plus output token usage when the active model reports it
 - pauses when an active assistant turn is aborted, such as when you press Esc
-- resumes a paused goal when you send the next user message or run `/goal resume`
+- prompts on session resume before reactivating a paused goal, and resumes explicitly with `/goal resume`
 - marks the goal `budgetLimited` when a positive token budget is reached
 - sends hidden steering messages when budget is reached or when the agent is idle but the goal is still active
-- shows live elapsed active time and compact/exact token counts in the pi footer when UI is available
+- shows Codex-style status labels with compact token or elapsed-time usage in the pi footer when UI is available
 
 Token counts are formatted with commas and compact abbreviations, for example `123M (123,456,789) tokens`. Token totals use pi's completed assistant turn input plus output usage. Cache read and cache write channels are excluded because they are provider cache accounting fields, not extra sent and received text tokens. Pi does not currently expose a separate extension usage total for automatic compaction summary calls.

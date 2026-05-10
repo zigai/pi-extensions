@@ -12,6 +12,11 @@ import {
   type ThreadGoal,
 } from "./types.js";
 
+export interface ApplyUsageOptions {
+  expectedGoalId?: string | null;
+  accountBudgetLimited?: boolean;
+}
+
 export function unixSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -42,6 +47,13 @@ export function validateTokenBudget(tokenBudget: number | null | undefined): str
     return "Token budget must be a positive integer.";
   }
   return null;
+}
+
+export function statusAfterBudgetLimit(status: GoalStatus, tokensUsed: number, tokenBudget: number | null): GoalStatus {
+  if (status === "active" && tokenBudget !== null && tokensUsed >= tokenBudget) {
+    return "budgetLimited";
+  }
+  return status;
 }
 
 export function createThreadGoal(objective: string, tokenBudget?: number | null, now = unixSeconds()): ThreadGoal {
@@ -146,7 +158,8 @@ export function createGoal(current: ThreadGoal | null, objective: string, tokenB
   if (current) {
     return {
       ok: false,
-      message: "A goal already exists. Clear it before creating another goal.",
+      message:
+        "cannot create a new goal because this thread already has a goal; use update_goal only when the existing goal is complete",
       goal: current,
     };
   }
@@ -198,12 +211,16 @@ export function updateGoalStatus(current: ThreadGoal | null, status: GoalStatus)
   }
 
   const goal = cloneGoal(current);
-  goal.status = status;
+  if (current.status === "budgetLimited" && (status === "active" || status === "paused")) {
+    goal.status = "budgetLimited";
+  } else {
+    goal.status = statusAfterBudgetLimit(status, goal.usage.tokensUsed, goal.tokenBudget);
+  }
   goal.updatedAt = unixSeconds();
 
   return {
     ok: true,
-    message: `Goal marked ${status}.`,
+    message: `Goal marked ${goal.status}.`,
     goal,
   };
 }
@@ -212,8 +229,23 @@ export function applyUsage(
   current: ThreadGoal | null,
   tokensDelta: number,
   activeSecondsDelta: number,
+  options: ApplyUsageOptions = {},
 ): { goal: ThreadGoal | null; changed: boolean; crossedBudget: boolean } {
-  if (!current || current.status !== "active") {
+  if (!current) {
+    return { goal: current, changed: false, crossedBudget: false };
+  }
+
+  if (
+    options.expectedGoalId !== undefined &&
+    options.expectedGoalId !== null &&
+    current.goalId !== options.expectedGoalId
+  ) {
+    return { goal: current, changed: false, crossedBudget: false };
+  }
+
+  const canAccount =
+    current.status === "active" || (options.accountBudgetLimited === true && current.status === "budgetLimited");
+  if (!canAccount) {
     return { goal: current, changed: false, crossedBudget: false };
   }
 
@@ -227,13 +259,14 @@ export function applyUsage(
   const wasUnderBudget = goal.tokenBudget === null || goal.usage.tokensUsed < goal.tokenBudget;
   goal.usage.tokensUsed += tokens;
   goal.usage.activeSeconds += seconds;
+  goal.status = statusAfterBudgetLimit(goal.status, goal.usage.tokensUsed, goal.tokenBudget);
   goal.updatedAt = unixSeconds();
 
-  let crossedBudget = false;
-  if (goal.tokenBudget !== null && goal.usage.tokensUsed >= goal.tokenBudget) {
-    goal.status = "budgetLimited";
-    crossedBudget = wasUnderBudget;
-  }
+  const crossedBudget =
+    current.status === "active" &&
+    wasUnderBudget &&
+    goal.tokenBudget !== null &&
+    goal.usage.tokensUsed >= goal.tokenBudget;
 
   return { goal, changed: true, crossedBudget };
 }

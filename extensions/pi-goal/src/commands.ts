@@ -73,7 +73,7 @@ export async function handleGoalCommand(
     }
     host.setGoal(result.goal, "command", ctx);
     ctx.ui.notify(result.message);
-    if (trimmed === "resume") {
+    if (trimmed === "resume" && result.goal.status === "active") {
       queueGoalTurn(pi, result.goal, "command_resume");
     }
     return;

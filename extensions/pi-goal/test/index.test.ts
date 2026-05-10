@@ -265,7 +265,7 @@ test("aborted turns pause goals and do not queue continuation", async () => {
   assert.equal(harness.sentMessages.length, 0);
 });
 
-test("a new user-driven agent start resumes a paused goal", async () => {
+test("a new user-driven agent start leaves a paused goal paused", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
@@ -283,8 +283,30 @@ test("a new user-driven agent start resumes a paused goal", async () => {
     systemPromptOptions: {},
   });
 
-  assert.equal(harness.snapshot().goal?.status, "active");
+  assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.snapshot().goal?.usage.tokensUsed, 10);
+});
+
+test("session resume prompt can reactivate a paused goal", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  await harness.emit("turn_end", {
+    type: "turn_end",
+    turnIndex: 0,
+    message: assistantMessage("aborted", { input: 8, output: 2 }),
+    toolResults: [],
+  });
+  harness.sentMessages.length = 0;
+
+  await harness.emit("session_start", { type: "session_start", reason: "resume" });
+
+  assert.equal(harness.snapshot().goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.message.details, {
+    kind: "continuation",
+    goalId: harness.snapshot().goal?.goalId,
+  });
 });
 
 test("completed turns count input plus output and continue active goals", async () => {
@@ -332,6 +354,84 @@ test("tool-use turn ends do not queue continuation before tool execution finishe
 
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
+});
+
+test("budget crossing sends one hidden budget-limit steering message", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runTool("create_goal", { objective: "ship it", token_budget: 10 });
+
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  await harness.emit("turn_end", {
+    type: "turn_end",
+    turnIndex: 0,
+    message: assistantMessage("toolUse", { input: 8, output: 3 }),
+    toolResults: [],
+  });
+
+  const goal = harness.snapshot().goal;
+  assert.equal(goal?.status, "budgetLimited");
+  assert.equal(goal?.usage.tokensUsed, 11);
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.message.details, {
+    kind: "budget_limit",
+    goalId: goal?.goalId,
+  });
+
+  await harness.emit("tool_execution_end", {
+    type: "tool_execution_end",
+    toolCallId: "tool-call",
+    toolName: "bash",
+    args: {},
+    result: {},
+    isError: false,
+  });
+  assert.equal(harness.sentMessages.length, 1);
+});
+
+test("replacement during an in-flight turn does not charge old tokens to the new goal", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("old goal");
+  harness.sentMessages.length = 0;
+
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  await harness.runCommand("new goal");
+  const replacement = harness.snapshot().goal;
+  assert.equal(replacement?.objective, "new goal");
+
+  await harness.emit("turn_end", {
+    type: "turn_end",
+    turnIndex: 0,
+    message: assistantMessage("stop", { input: 80, output: 20 }),
+    toolResults: [],
+  });
+
+  const goal = harness.snapshot().goal;
+  assert.equal(goal?.goalId, replacement?.goalId);
+  assert.equal(goal?.usage.tokensUsed, 0);
+  assert.equal(harness.sentMessages.length, 1);
+});
+
+test("goal tools return Codex-shaped response details", async () => {
+  const harness = createRuntimeHarness();
+  const created = (await harness.runTool("create_goal", {
+    objective: "ship it",
+    token_budget: 20,
+  })) as { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
+
+  assert.equal((created.details.goal as { objective?: string }).objective, "ship it");
+  assert.equal((created.details.goal as { tokenBudget?: number }).tokenBudget, 20);
+  assert.equal(created.details.remainingTokens, 20);
+  assert.equal(created.details.completionBudgetReport, null);
+  assert.deepEqual(JSON.parse(created.content[0]?.text ?? ""), {
+    goal: created.details.goal,
+    remainingTokens: 20,
+    completionBudgetReport: null,
+  });
+
+  const completed = (await harness.runTool("update_goal", { status: "complete" })) as {
+    details: Record<string, unknown>;
+  };
+  assert.match(String(completed.details.completionBudgetReport), /^Goal achieved\. Report final budget usage to the user:/);
 });
 
 test("agent end waits for idle before continuing active goals", async () => {
@@ -485,7 +585,7 @@ test("goal follow-up guard resets when the queued prompt-based agent turn starts
 
 test("goal follow-up guard resets on turn start for custom-message continuations", async () => {
   const harness = createRuntimeHarness();
-  await harness.runCommand("ship it");
+  await harness.runTool("create_goal", { objective: "ship it" });
   harness.sentMessages.length = 0;
 
   await harness.emit("agent_end", {

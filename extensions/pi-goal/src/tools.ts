@@ -2,7 +2,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { formatGoalSummary, toToolText } from "./format.js";
+import { goalToolResponse, toToolText, type GoalToolResponse } from "./format.js";
 import { createGoal } from "./state.js";
 import { TOOL_PROMPT_GUIDELINES } from "./prompts.js";
 import type { GoalEntrySource, GoalResult, ThreadGoal } from "./types.js";
@@ -14,8 +14,9 @@ const CreateGoalParams = Type.Object({
     description: "Concrete objective to pursue until completion.",
   }),
   token_budget: Type.Optional(
-    Type.Number({
+    Type.Integer({
       description: "Optional positive integer token budget.",
+      minimum: 1,
     }),
   ),
 });
@@ -32,10 +33,15 @@ export interface ToolHost {
   completeGoal(source: GoalEntrySource, ctx: ExtensionContext): GoalResult;
 }
 
-function textResult(text: string, goal: ThreadGoal | null, isError = false): AgentToolResult<unknown> {
+function textResult(
+  text: string,
+  goal: ThreadGoal | null,
+  isError = false,
+  includeCompletionBudgetReport = false,
+): AgentToolResult<GoalToolResponse & { error: string | null }> {
   return {
     content: [{ type: "text", text: isError ? `Error: ${text}` : text }],
-    details: { goal, error: isError ? text : null },
+    details: { ...goalToolResponse(goal, includeCompletionBudgetReport), error: isError ? text : null },
   };
 }
 
@@ -66,7 +72,7 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
         return textResult(result.message, result.goal, true);
       }
       host.setGoal(result.goal, "tool", ctx);
-      return textResult(formatGoalSummary(result.goal), result.goal);
+      return textResult(toToolText(result.goal), result.goal);
     },
   });
 
@@ -83,7 +89,7 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
       if (!result.ok || !result.goal) {
         return textResult(result.message, result.goal, true);
       }
-      return textResult(formatGoalSummary(result.goal), result.goal);
+      return textResult(toToolText(result.goal, true), result.goal, false, true);
     },
   });
 }
