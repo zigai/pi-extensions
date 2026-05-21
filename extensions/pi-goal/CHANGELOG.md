@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11 - 2026-05-21
+
+- Cancels stale hidden goal continuations before they can reach the model after a goal is completed, cleared, or replaced.
+- Keeps stale abort cleanup from charging tokens, pausing active replacement goals, persisting extra entries, or requeueing continuations during compaction and shutdown.
+- Allows normal interactive and RPC prompts that paste continuation marker text to pass through instead of being treated as hidden extension follow-up work.
+- Adds regression coverage for stale queued work across missing or delayed `agent_end`, late stale terminal events, compaction cleanup, and pasted marker input sources.
+
 ## 0.1.10 - 2026-05-18
 
 - Updated the local pi package baseline to `@earendil-works/*` `0.75.3` and refreshed the npm lockfile.
