@@ -551,6 +551,74 @@ test("stale prompt continuation input is handled before agent start", async () =
   assert.equal(harness.abortCount, 0);
 });
 
+for (const source of ["interactive", "rpc"] as const) {
+  test(`pasted continuation marker input from ${source} is not swallowed`, async () => {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    const queued = harness.sentMessages[0];
+    assert.ok(queued);
+    const prompt = queued.message.content;
+    if (typeof prompt !== "string") {
+      assert.fail("Expected queued goal message content to be a string.");
+    }
+
+    await harness.runTool("update_goal", { status: "complete" });
+    const inputResults = await harness.emit("input", {
+      type: "input",
+      text: prompt,
+      source,
+    });
+    assert.equal(inputResults[0], undefined);
+
+    const beforeAgentStartResults = await harness.emit("before_agent_start", {
+      type: "before_agent_start",
+      prompt,
+      systemPrompt: "base prompt",
+      systemPromptOptions: {},
+    });
+    assert.equal(beforeAgentStartResults[0], undefined);
+
+    const userMessage = {
+      role: "user",
+      content: [{ type: "text", text: prompt }],
+      timestamp: 1,
+    };
+    await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+    await harness.emit("message_start", { type: "message_start", message: userMessage });
+    await harness.emit("message_end", { type: "message_end", message: userMessage });
+    const contextResults = await harness.emit("context", {
+      type: "context",
+      messages: [userMessage],
+    });
+    const secondContextResults = await harness.emit("context", {
+      type: "context",
+      messages: [userMessage],
+    });
+
+    assert.equal(contextResults[0], undefined);
+    assert.equal(secondContextResults[0], undefined);
+    assert.equal(harness.snapshot().goal?.status, "complete");
+    assert.equal(harness.abortCount, 0);
+
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 0,
+      message: assistantMessage("stop", { input: 1, output: 1 }),
+      toolResults: [],
+    });
+
+    const laterUserMessage = {
+      role: "user",
+      content: [{ type: "text", text: prompt }],
+      timestamp: 2,
+    };
+    const laterContextResults = await emitQueuedTurnThroughContext(harness, [laterUserMessage], 1);
+    const laterContextResult = laterContextResults[0] as { messages?: Array<{ content?: unknown }> } | undefined;
+    assert.notEqual(laterContextResult, undefined);
+    assert.equal(harness.abortCount, 1);
+  });
+}
+
 test("stale queued continuation aborts if the goal became complete before launch", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
@@ -807,6 +875,257 @@ test("stale custom queued work aborts without pausing, charging, or requeueing a
     assert.equal(goal?.usage.tokensUsed, 0);
     assert.equal(goal?.usage.activeSeconds, 0);
     assert.equal(harness.sentMessages.length, 0);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("stale custom abort without agent_end does not suppress the next current follow-up", async () => {
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("old goal");
+    const oldQueued = harness.sentMessages[0];
+    assert.ok(oldQueued);
+    const oldMessage = queuedCustomMessage(oldQueued, 1);
+
+    await harness.runCommand("new goal");
+    const currentQueued = harness.sentMessages.at(-1);
+    assert.ok(currentQueued);
+    const currentMessage = queuedCustomMessage(currentQueued, 2);
+    const replacement = harness.snapshot().goal;
+    assert.equal(replacement?.objective, "new goal");
+    harness.sentMessages.length = 0;
+
+    await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
+    assert.equal(harness.abortCount, 1);
+
+    now = 2_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 0,
+      message: assistantMessage("aborted", { input: 20, output: 5 }),
+      toolResults: [],
+    });
+    assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
+    assert.equal(harness.sentMessages.length, 0);
+
+    now = 3_000;
+    await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
+    now = 5_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 1,
+      message: assistantMessage("stop", { input: 30, output: 12 }),
+      toolResults: [],
+    });
+
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.goalId, replacement?.goalId);
+    assert.equal(goal?.status, "active");
+    assert.equal(goal?.usage.tokensUsed, 42);
+    assert.equal(goal?.usage.activeSeconds, 2);
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: replacement?.goalId,
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("late stale turn_end after the next current follow-up starts is ignored", async () => {
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("old goal");
+    const oldQueued = harness.sentMessages[0];
+    assert.ok(oldQueued);
+    const oldMessage = queuedCustomMessage(oldQueued, 1);
+
+    await harness.runCommand("new goal");
+    const currentQueued = harness.sentMessages.at(-1);
+    assert.ok(currentQueued);
+    const currentMessage = queuedCustomMessage(currentQueued, 2);
+    const replacement = harness.snapshot().goal;
+    assert.equal(replacement?.objective, "new goal");
+    harness.sentMessages.length = 0;
+
+    await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
+    assert.equal(harness.abortCount, 1);
+
+    now = 3_000;
+    await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
+
+    now = 4_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 0,
+      message: assistantMessage("aborted", { input: 20, output: 5 }),
+      toolResults: [],
+    });
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
+    assert.equal(harness.sentMessages.length, 0);
+
+    now = 5_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 1,
+      message: assistantMessage("stop", { input: 30, output: 12 }),
+      toolResults: [],
+    });
+
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.goalId, replacement?.goalId);
+    assert.equal(goal?.status, "active");
+    assert.equal(goal?.usage.tokensUsed, 42);
+    assert.equal(goal?.usage.activeSeconds, 2);
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: replacement?.goalId,
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("current follow-up abort is not swallowed by a pending late stale turn_end", async () => {
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("old goal");
+    const oldQueued = harness.sentMessages[0];
+    assert.ok(oldQueued);
+    const oldMessage = queuedCustomMessage(oldQueued, 1);
+
+    await harness.runCommand("new goal");
+    const currentQueued = harness.sentMessages.at(-1);
+    assert.ok(currentQueued);
+    const currentMessage = queuedCustomMessage(currentQueued, 2);
+    const replacement = harness.snapshot().goal;
+    assert.equal(replacement?.objective, "new goal");
+    harness.sentMessages.length = 0;
+
+    await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
+    assert.equal(harness.abortCount, 1);
+
+    now = 3_000;
+    await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
+    now = 5_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 1,
+      message: assistantMessage("aborted", { input: 30, output: 12 }),
+      toolResults: [],
+    });
+
+    let goal = harness.snapshot().goal;
+    assert.equal(goal?.goalId, replacement?.goalId);
+    assert.equal(goal?.status, "paused");
+    assert.equal(goal?.usage.tokensUsed, 42);
+    assert.equal(goal?.usage.activeSeconds, 2);
+    assert.equal(harness.sentMessages.length, 0);
+
+    now = 6_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 0,
+      message: assistantMessage("aborted", { input: 20, output: 5 }),
+      toolResults: [],
+    });
+
+    goal = harness.snapshot().goal;
+    assert.equal(goal?.goalId, replacement?.goalId);
+    assert.equal(goal?.status, "paused");
+    assert.equal(goal?.usage.tokensUsed, 42);
+    assert.equal(goal?.usage.activeSeconds, 2);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("compaction between stale context abort and cleanup does not persist, account, or requeue", async () => {
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("old goal");
+    const oldQueued = harness.sentMessages[0];
+    assert.ok(oldQueued);
+    const oldMessage = queuedCustomMessage(oldQueued, 1);
+
+    await harness.runCommand("clear");
+    await harness.runTool("create_goal", { objective: "new goal" });
+    const replacement = harness.snapshot().goal;
+    assert.equal(replacement?.objective, "new goal");
+    const entryCountBeforeCompaction = harness.entries.length;
+    harness.sentMessages.length = 0;
+
+    await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
+    assert.equal(harness.abortCount, 1);
+
+    now = 5_000;
+    await harness.emit("session_before_compact", {
+      type: "session_before_compact",
+      preparation: {},
+      branchEntries: [],
+      signal: new AbortController().signal,
+    });
+    await harness.emit("session_compact", {
+      type: "session_compact",
+      compactionEntry: {},
+      fromExtension: false,
+    });
+
+    assert.equal(harness.entries.length, entryCountBeforeCompaction);
+    assert.equal(harness.sentMessages.length, 0);
+    assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
+    assert.equal(harness.snapshot().goal?.usage.activeSeconds, 0);
+
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 0,
+      message: assistantMessage("aborted", { input: 20, output: 5 }),
+      toolResults: [],
+    });
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
+
+    const userMessage = {
+      role: "user",
+      content: [{ type: "text", text: "continue now" }],
+      timestamp: 2,
+    };
+    now = 6_000;
+    await emitQueuedTurnThroughContext(harness, [userMessage], 1);
+    now = 8_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 1,
+      message: assistantMessage("stop", { input: 7, output: 3 }),
+      toolResults: [],
+    });
+
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.goalId, replacement?.goalId);
+    assert.equal(goal?.status, "active");
+    assert.equal(goal?.usage.tokensUsed, 10);
+    assert.equal(goal?.usage.activeSeconds, 2);
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: replacement?.goalId,
+    });
   } finally {
     Date.now = originalNow;
   }
