@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.12 - 2026-05-23
+
+- Updated the local pi development baseline to `@earendil-works/*` `0.75.5`, refreshed Node/tsx tooling, and regenerated the npm lockfile.
+- Reviewed the pi `0.75.5` changelog and package guidance; the goal extension remains compatible with current extension lifecycle and package install/update behavior.
+
 ## 0.1.11 - 2026-05-21
 
 - Cancels stale hidden goal continuations before they can reach the model after a goal is completed, cleared, or replaced.
