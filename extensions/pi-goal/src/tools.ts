@@ -36,13 +36,16 @@ export interface ToolHost {
 function textResult(
   text: string,
   goal: ThreadGoal | null,
-  isError = false,
   includeCompletionBudgetReport = false,
 ): AgentToolResult<GoalToolResponse & { error: string | null }> {
   return {
-    content: [{ type: "text", text: isError ? `Error: ${text}` : text }],
-    details: { ...goalToolResponse(goal, includeCompletionBudgetReport), error: isError ? text : null },
+    content: [{ type: "text", text }],
+    details: { ...goalToolResponse(goal, includeCompletionBudgetReport), error: null },
   };
+}
+
+function throwToolError(message: string): never {
+  throw new Error(message);
 }
 
 export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
@@ -63,13 +66,14 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
     name: "create_goal",
     label: "Create Goal",
     description: "Create a Codex-style long-running goal for this pi session.",
-    promptSnippet: "Create one active goal with an objective and optional positive token budget.",
+    promptSnippet:
+      "Create one goal with an objective and optional positive token budget. Fails when a non-complete goal already exists; replaces a completed goal.",
     promptGuidelines: TOOL_PROMPT_GUIDELINES,
     parameters: CreateGoalParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = createGoal(host.getGoal(), params.objective, params.token_budget ?? null);
       if (!result.ok || !result.goal) {
-        return textResult(result.message, result.goal, true);
+        throwToolError(result.message);
       }
       host.setGoal(result.goal, "tool", ctx);
       return textResult(toToolText(result.goal), result.goal);
@@ -87,9 +91,9 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const result = host.completeGoal("tool", ctx);
       if (!result.ok || !result.goal) {
-        return textResult(result.message, result.goal, true);
+        throwToolError(result.message);
       }
-      return textResult(toToolText(result.goal, true), result.goal, false, true);
+      return textResult(toToolText(result.goal, true), result.goal, true);
     },
   });
 }
