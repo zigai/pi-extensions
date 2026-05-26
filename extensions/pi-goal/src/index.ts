@@ -3,290 +3,57 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { registerGoalCommand } from "./commands.js";
 import { formatFooterStatus } from "./format.js";
 import {
-  budgetLimitPrompt,
-  compactContinuationPrompt,
-  continuationGoalIdFromPrompt,
-  continuationPrompt,
-  supersededContinuationMessage,
-} from "./prompts.js";
-import { applyUsage, clearEntry, goalWithLiveUsage, goalsEquivalent, reconstructGoal, setEntry, updateGoalStatus } from "./state.js";
+  assistantTurnTokens,
+  createAccountingState,
+  createGoalAccounting,
+  isAbortedAssistantMessage,
+  isToolUseAssistantMessage,
+} from "./goal-accounting.js";
+import { compactContinuationPrompt, continuationGoalIdFromPrompt } from "./prompts.js";
+import {
+  dedupeActiveGoalContinuations,
+  extensionQueuedGoalWorkMessageId,
+  extensionQueuedGoalWorkMessageIdForRuntime,
+  pendingStaleQueuedGoalWorkIdsFromMessages,
+  staleGoalContinuationContextMessage,
+} from "./queued-goal-work.js";
+import {
+  createGoalRecoveryMachine,
+  resetRecoveryMachine,
+  setRecoveryPausedAttention,
+  type GoalRecoveryMachineState,
+} from "./recovery-machine.js";
+import { createGoalRecoveryRuntime } from "./recovery-runtime.js";
+import {
+  isAssistantContextOverflow,
+  isContextOverflowError,
+  isErrorAssistantMessage,
+  isRecoveryPendingAttention,
+  reasonFromRecoveryPendingAttention,
+  type AssistantErrorMessage,
+} from "./recovery.js";
+import {
+  clearEntry,
+  goalWithLiveUsage,
+  goalsEquivalent,
+  hostOverflowCapResetEntry,
+  reconstructGoal,
+  reconstructHostOverflowCapNeedsUserReset,
+  setEntry,
+  updateGoalStatus,
+} from "./state.js";
 import { registerGoalTools } from "./tools.js";
 import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type GoalResult, type ThreadGoal } from "./types.js";
-
-interface AccountingState {
-  activeGoalId: string | null;
-  lastAccountedAt: number | null;
-  budgetWarningSentFor: string | null;
-}
 
 interface StatusContext {
   ui: Pick<ExtensionContext["ui"], "setStatus">;
 }
 
-interface AssistantUsage {
-  input: number;
-  output: number;
-}
-
-interface QueuedGoalMessageDetails {
-  kind?: unknown;
-  goalId?: unknown;
-}
-
-interface TextMessagePart {
-  type?: unknown;
-  text?: unknown;
-}
-
-function usageChannelTokens(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  return Math.max(0, Math.trunc(value));
-}
-
-function assistantTurnTokens(message: { role: string; usage?: AssistantUsage }): number {
-  if (message.role !== "assistant" || !message.usage) {
-    return 0;
-  }
-  return usageChannelTokens(message.usage.input) + usageChannelTokens(message.usage.output);
-}
-
-function isAbortedAssistantMessage(message: { role: string; stopReason?: string }): boolean {
-  return message.role === "assistant" && message.stopReason === "aborted";
-}
-
-function isToolUseAssistantMessage(message: { role: string; stopReason?: string }): boolean {
-  return message.role === "assistant" && message.stopReason === "toolUse";
-}
-
-function isQueuedGoalWorkKind(kind: unknown): boolean {
-  return kind === "continuation" || kind === "command_start" || kind === "command_resume";
-}
-
-function isSupersededContinuationDetails(details: unknown): boolean {
-  return isQueuedGoalMessageDetails(details) && details.kind === "superseded_continuation";
-}
-
-function isQueuedGoalMessageDetails(details: unknown): details is QueuedGoalMessageDetails {
-  return details !== null && typeof details === "object";
-}
-
-function textContentFromMessageContent(content: unknown): string | null {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return null;
-  }
-
-  const textParts: string[] = [];
-  for (const part of content) {
-    if (part === null || typeof part !== "object") {
-      continue;
-    }
-    const textPart = part as TextMessagePart;
-    if (textPart.type === "text" && typeof textPart.text === "string") {
-      textParts.push(textPart.text);
-    }
-  }
-
-  return textParts.length > 0 ? textParts.join("\n") : null;
-}
-
-function continuationGoalIdFromMessageContent(content: unknown): string | null {
-  const text = textContentFromMessageContent(content);
-  return text === null ? null : continuationGoalIdFromPrompt(text);
-}
-
-function staleGoalContinuationMessage(queuedGoalId: string, currentGoal: ThreadGoal | null): string {
-  const currentState = currentGoal
-    ? `Current goal id: ${currentGoal.goalId}; current status: ${currentGoal.status}.`
-    : "There is no current goal.";
-  return [
-    "A queued hidden goal continuation was stale and has been cancelled before running.",
-    `Queued goal id: ${queuedGoalId}.`,
-    currentState,
-    "Ignore only this stale hidden bookkeeping message; do not perform work for the queued goal id above or mention this cancellation to the user.",
-  ].join("\n");
-}
-
-function extensionQueuedGoalWorkMessageId(message: {
-  role: string;
-  customType?: string;
-  details?: unknown;
-  content?: unknown;
-}): string | null {
-  if (message.role !== "custom" || message.customType !== CUSTOM_ENTRY_TYPE) {
-    return null;
-  }
-
-  if (isSupersededContinuationDetails(message.details)) {
-    return null;
-  }
-
-  if (isQueuedGoalMessageDetails(message.details)) {
-    const { kind, goalId } = message.details;
-    if (isQueuedGoalWorkKind(kind) && typeof goalId === "string") {
-      return goalId;
-    }
-  }
-
-  return continuationGoalIdFromMessageContent(message.content);
-}
-
-function queuedGoalWorkMessageId(message: {
-  role: string;
-  customType?: string;
-  details?: unknown;
-  content?: unknown;
-}): string | null {
-  if (message.role === "user") {
-    return continuationGoalIdFromMessageContent(message.content);
-  }
-
-  return extensionQueuedGoalWorkMessageId(message);
-}
-
-function supersededContinuationContextMessage<TMessage extends { role: string; content?: unknown; display?: boolean; details?: unknown }>(
-  message: TMessage,
-  goalId: string,
-): TMessage {
-  const content = supersededContinuationMessage(goalId);
-
-  if (message.role === "custom") {
-    return {
-      ...message,
-      content,
-      display: false,
-      details: {
-        kind: "superseded_continuation",
-        goalId,
-      },
-    } as TMessage;
-  }
-
-  return {
-    ...message,
-    content: [{ type: "text", text: content }],
-  } as TMessage;
-}
-
-function continuationPromptForProviderContext(
-  goal: ThreadGoal,
-  message: { details?: unknown },
-): string {
-  if (isQueuedGoalMessageDetails(message.details)) {
-    const kind = message.details.kind;
-    if (kind === "command_start" || kind === "command_resume") {
-      return continuationPrompt(goal);
-    }
-  }
-
-  return compactContinuationPrompt(goal);
-}
-
-function dedupeActiveGoalContinuations<TMessage extends {
-  role: string;
-  customType?: string;
-  details?: unknown;
-  content?: unknown;
-  display?: boolean;
-}>(
-  messages: TMessage[],
-  goal: ThreadGoal,
-  resolveQueuedGoalWorkMessageId: (
-    message: { role: string; customType?: string; details?: unknown; content?: unknown },
-  ) => string | null,
-): { messages: TMessage[]; changed: boolean } {
-  const activeGoalId = goal.goalId;
-  const indices: number[] = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (!message) {
-      continue;
-    }
-    const queuedGoalId = resolveQueuedGoalWorkMessageId(message);
-    if (queuedGoalId === activeGoalId) {
-      indices.push(index);
-    }
-  }
-
-  const latestIndex = indices.at(-1);
-  if (latestIndex === undefined) {
-    return { messages, changed: false };
-  }
-
-  let changed = false;
-  const nextMessages = messages.slice();
-
-  for (const index of indices.slice(0, -1)) {
-    const message = nextMessages[index];
-    if (!message) {
-      continue;
-    }
-    nextMessages[index] = supersededContinuationContextMessage(message, activeGoalId);
-    changed = true;
-  }
-
-  const latestMessage = nextMessages[latestIndex];
-  if (!latestMessage) {
-    return { messages, changed };
-  }
-  const refreshedContent = continuationPromptForProviderContext(goal, latestMessage);
-  if (latestMessage.role === "custom") {
-    if (latestMessage.content !== refreshedContent) {
-      nextMessages[latestIndex] = {
-        ...latestMessage,
-        content: refreshedContent,
-        display: false,
-      };
-      changed = true;
-    }
-  } else {
-    const refreshedUserContent = [{ type: "text", text: refreshedContent }];
-    const currentContent = textContentFromMessageContent(latestMessage.content);
-    if (currentContent !== refreshedContent) {
-      nextMessages[latestIndex] = {
-        ...latestMessage,
-        content: refreshedUserContent,
-      } as TMessage;
-      changed = true;
-    }
-  }
-
-  return { messages: nextMessages, changed };
-}
-
-function staleGoalContinuationContextMessage<TMessage extends { role: string; content?: unknown }>(
-  message: TMessage,
-  queuedGoalId: string,
-  currentGoal: ThreadGoal | null,
-): TMessage {
-  const content = staleGoalContinuationMessage(queuedGoalId, currentGoal);
-
-  if (message.role === "custom") {
-    return {
-      ...message,
-      content,
-      display: false,
-      details: {
-        kind: "stale_continuation",
-        goalId: queuedGoalId,
-        currentGoalId: currentGoal?.goalId ?? null,
-        currentStatus: currentGoal?.status ?? null,
-      },
-    } as TMessage;
-  }
-
-  return {
-    ...message,
-    content: [{ type: "text", text: content }],
-  } as TMessage;
-}
-
 const CONTINUATION_RETRY_MS = 50;
+
+export const __testHooks = {
+  continuationRetryMs: CONTINUATION_RETRY_MS,
+};
 
 export default function (pi: ExtensionAPI): void {
   let goal: ThreadGoal | null = null;
@@ -306,11 +73,10 @@ export default function (pi: ExtensionAPI): void {
   let startedStaleQueuedGoalWorkThisTurn = false;
   let startedRunnableWorkThisTurn = false;
   const startedStaleQueuedGoalWorkGoalIds = new Set<string>();
-  const accounting: AccountingState = {
-    activeGoalId: null,
-    lastAccountedAt: null,
-    budgetWarningSentFor: null,
-  };
+  const accounting = createAccountingState();
+  let recoveryState: GoalRecoveryMachineState = createGoalRecoveryMachine();
+  let hostOverflowRecoveryInProgress = false;
+  let hostOverflowCapNeedsUserReset = false;
 
   const goalForDisplay = (): ThreadGoal | null =>
     goalWithLiveUsage(goal, accounting.activeGoalId, accounting.lastAccountedAt);
@@ -328,6 +94,11 @@ export default function (pi: ExtensionAPI): void {
       continuationTimer = null;
     }
     continuationScheduledFor = null;
+  };
+
+  const resetErrorRecovery = (): void => {
+    resetRecoveryMachine(recoveryState);
+    hostOverflowRecoveryInProgress = false;
   };
 
   const clearContinuationState = (): void => {
@@ -406,6 +177,7 @@ export default function (pi: ExtensionAPI): void {
   const clearStoppedRuntimeState = (): void => {
     clearContinuationState();
     clearActiveAccounting();
+    resetErrorRecovery();
   };
 
   const syncStatusRefresh = (): void => {
@@ -415,7 +187,7 @@ export default function (pi: ExtensionAPI): void {
           stopStatusRefresh();
           return;
         }
-        statusContext.ui.setStatus("codex-goal", formatFooterStatus(goalForDisplay()));
+        statusContext.ui.setStatus("codex-goal", formatFooterStatus(goalForDisplay(), recoveryState.attention));
       }, 1_000);
       statusRefreshTimer.unref?.();
       return;
@@ -428,7 +200,7 @@ export default function (pi: ExtensionAPI): void {
 
   const refreshUi = (ctx: StatusContext): void => {
     statusContext = ctx;
-    ctx.ui.setStatus("codex-goal", formatFooterStatus(goalForDisplay()));
+    ctx.ui.setStatus("codex-goal", formatFooterStatus(goalForDisplay(), recoveryState.attention));
     syncStatusRefresh();
   };
 
@@ -468,27 +240,8 @@ export default function (pi: ExtensionAPI): void {
     customType?: string;
     details?: unknown;
     content?: unknown;
-  }): string | null => {
-    if (message.role === "user") {
-      const text = textContentFromMessageContent(message.content);
-      return text === null ? null : continuationGoalIdFromRuntimePrompt(text);
-    }
-
-    return queuedGoalWorkMessageId(message);
-  };
-
-  const pendingStaleQueuedGoalWorkIdsFromMessages = (
-    messages: Array<{ role: string; customType?: string; details?: unknown; content?: unknown }>,
-  ): string[] => {
-    const goalIds: string[] = [];
-    for (const message of messages) {
-      const queuedGoalId = queuedGoalWorkMessageId(message);
-      if (queuedGoalId !== null && staleQueuedGoalWorkAgentEndGoalIds.has(queuedGoalId)) {
-        goalIds.push(queuedGoalId);
-      }
-    }
-    return goalIds;
-  };
+  }): string | null =>
+    extensionQueuedGoalWorkMessageIdForRuntime(message, continuationGoalIdFromRuntimePrompt);
 
   const skipStaleQueuedGoalWorkTurnEnd = (
     turnIndex: number | null,
@@ -530,7 +283,7 @@ export default function (pi: ExtensionAPI): void {
       return false;
     }
 
-    const staleGoalIds = pendingStaleQueuedGoalWorkIdsFromMessages(messages);
+    const staleGoalIds = pendingStaleQueuedGoalWorkIdsFromMessages(messages, staleQueuedGoalWorkAgentEndGoalIds);
     if (staleGoalIds.length === 0) {
       return false;
     }
@@ -553,10 +306,14 @@ export default function (pi: ExtensionAPI): void {
       accounting.budgetWarningSentFor = null;
       clearStoppedRuntimeState();
     }
-    if (nextGoal.status === "paused" || nextGoal.status === "complete") {
+    if (nextGoal.status === "complete") {
       clearStoppedRuntimeState();
+    } else if (nextGoal.status === "paused") {
+      clearContinuationState();
+      clearActiveAccounting();
     } else if (nextGoal.status === "budgetLimited") {
       clearContinuationState();
+      resetErrorRecovery();
     }
     if (nextGoal.status !== "budgetLimited") {
       accounting.budgetWarningSentFor = null;
@@ -598,74 +355,45 @@ export default function (pi: ExtensionAPI): void {
       return;
     }
 
+    resetErrorRecovery();
     clearContinuationState();
     persistGoal(result.goal, "runtime");
     refreshUi(ctx);
   };
 
+  const setHostOverflowCapNeedsUserReset = (needsReset: boolean): void => {
+    if (hostOverflowCapNeedsUserReset === needsReset) {
+      return;
+    }
+    hostOverflowCapNeedsUserReset = needsReset;
+    pi.appendEntry(CUSTOM_ENTRY_TYPE, hostOverflowCapResetEntry(needsReset));
+  };
+
   const reloadFromSession = (ctx: ExtensionContext): void => {
-    goal = reconstructGoal(ctx.sessionManager.getBranch()).goal;
+    const previousGoalId = goal?.goalId ?? null;
+    const branch = ctx.sessionManager.getBranch();
+    goal = reconstructGoal(branch).goal;
+    hostOverflowCapNeedsUserReset = reconstructHostOverflowCapNeedsUserReset(branch);
     clearContinuationState();
     if (goal?.status !== "active") {
       clearActiveAccounting();
     }
+    if ((goal?.goalId ?? null) !== previousGoalId) {
+      resetErrorRecovery();
+    }
     refreshUi(ctx);
   };
 
-  const beginAccounting = (): void => {
-    if (!goal || goal.status !== "active") {
-      accounting.activeGoalId = null;
-      accounting.lastAccountedAt = null;
-      return;
-    }
-
-    accounting.activeGoalId = goal.goalId;
-    accounting.lastAccountedAt = Date.now();
-  };
-
-  const accountProgress = (
-    ctx: ExtensionContext,
-    allowBudgetSteering: boolean,
-    completedTurnTokens = 0,
-    accountBudgetLimited = false,
-  ): void => {
-    const canAccount = goal?.status === "active" || (accountBudgetLimited && goal?.status === "budgetLimited");
-    if (!goal || accounting.activeGoalId !== goal.goalId || !canAccount) {
-      beginAccounting();
-      return;
-    }
-
-    const now = Date.now();
-    const elapsed = accounting.lastAccountedAt === null ? 0 : Math.floor((now - accounting.lastAccountedAt) / 1000);
-    accounting.lastAccountedAt = now;
-
-    const result = applyUsage(goal, completedTurnTokens, elapsed, {
-      expectedGoalId: accounting.activeGoalId,
-      accountBudgetLimited,
-    });
-    if (!result.changed || !result.goal) {
-      return;
-    }
-
-    persistGoal(result.goal, "runtime");
-    refreshUi(ctx);
-
-    if (allowBudgetSteering && result.crossedBudget && accounting.budgetWarningSentFor !== result.goal.goalId) {
-      accounting.budgetWarningSentFor = result.goal.goalId;
-      pi.sendMessage(
-        {
-          customType: CUSTOM_ENTRY_TYPE,
-          content: budgetLimitPrompt(result.goal),
-          display: false,
-          details: { kind: "budget_limit", goalId: result.goal.goalId },
-        },
-        { triggerTurn: true, deliverAs: "steer" },
-      );
-    }
-  };
+  const goalAccounting = createGoalAccounting({
+    getGoal: () => goal,
+    getAccounting: () => accounting,
+    persistGoal,
+    refreshUi,
+    sendMessage: pi.sendMessage.bind(pi),
+  });
 
   const completeGoal = (source: GoalEntrySource, ctx: ExtensionContext): GoalResult => {
-    accountProgress(ctx, false, 0, true);
+    goalAccounting.accountProgress(ctx, false, 0, true);
     const result = updateGoalStatus(goal, "complete");
     if (!result.ok || !result.goal) {
       return result;
@@ -691,8 +419,19 @@ export default function (pi: ExtensionAPI): void {
     );
   };
 
+  const hasPendingRecoveryAttention = (): boolean => {
+    return goal?.status === "active" && isRecoveryPendingAttention(recoveryState.attention);
+  };
+
   const maybeContinue = (ctx: ExtensionContext): void => {
-    if (staleQueuedGoalWorkTurnActive || !goal || goal.status !== "active" || continuationQueuedFor === goal.goalId) {
+    if (
+      staleQueuedGoalWorkTurnActive ||
+      !goal ||
+      goal.status !== "active" ||
+      continuationQueuedFor === goal.goalId ||
+      hasPendingRecoveryAttention() ||
+      hostOverflowRecoveryInProgress
+    ) {
       return;
     }
 
@@ -718,6 +457,68 @@ export default function (pi: ExtensionAPI): void {
     sendContinuation(goal);
   };
 
+  const getContextWindow = (ctx: ExtensionContext): number => ctx.model?.contextWindow ?? 0;
+
+  const recoveryRuntime = createGoalRecoveryRuntime({
+    getGoal: () => goal,
+    getRecoveryState: () => recoveryState,
+    clearContinuationState,
+    pauseGoalForRecovery(ctx, activeGoal) {
+      const result = updateGoalStatus(activeGoal, "paused");
+      if (!result.ok || !result.goal) {
+        return;
+      }
+      persistGoal(result.goal, "runtime");
+    },
+    refreshUi,
+    maybeContinue,
+  });
+
+  const pauseForPendingRecoveryShutdown = (ctx: ExtensionContext): void => {
+    if (!goal || goal.status !== "active" || !recoveryState.attention) {
+      return;
+    }
+
+    const reason = reasonFromRecoveryPendingAttention(recoveryState.attention);
+    if (!reason) {
+      return;
+    }
+
+    const result = updateGoalStatus(goal, "paused");
+    if (!result.ok || !result.goal) {
+      return;
+    }
+
+    clearContinuationState();
+    hostOverflowRecoveryInProgress = false;
+    setRecoveryPausedAttention(recoveryState, reason);
+    persistGoal(result.goal, "runtime");
+    refreshUi(ctx);
+  };
+
+  const beginOverflowRecoveryAttention = (ctx: ExtensionContext): void => {
+    setHostOverflowCapNeedsUserReset(true);
+    hostOverflowRecoveryInProgress = true;
+    recoveryRuntime.beginOverflowRecovery(ctx);
+  };
+
+  const recordAssistantContextOverflow = (
+    message: AssistantErrorMessage,
+    ctx: ExtensionContext,
+  ): boolean => {
+    if (!isAssistantContextOverflow(message, getContextWindow(ctx))) {
+      return false;
+    }
+
+    beginOverflowRecoveryAttention(ctx);
+    if (isErrorAssistantMessage(message)) {
+      recoveryRuntime.handlePersistentAssistantError(message, ctx);
+    } else {
+      recoveryRuntime.handleSilentContextOverflow(ctx);
+    }
+    return true;
+  };
+
   registerGoalTools(pi, {
     getGoal: () => goalForDisplay(),
     setGoal(nextGoal, source, ctx) {
@@ -729,10 +530,19 @@ export default function (pi: ExtensionAPI): void {
 
   registerGoalCommand(pi, {
     getGoal: () => goalForDisplay(),
+    needsHostOverflowCapReset: () => hostOverflowCapNeedsUserReset,
     setGoal(nextGoal, source, ctx) {
+      const wasPaused = goal?.status === "paused";
       persistGoal(nextGoal, source);
-      if (source === "command" && nextGoal.status === "active") {
-        continuationQueuedFor = nextGoal.goalId;
+      if (source === "command") {
+        if (nextGoal.status === "active") {
+          if (wasPaused) {
+            resetErrorRecovery();
+          }
+          continuationQueuedFor = nextGoal.goalId;
+        } else if (nextGoal.status === "paused") {
+          resetErrorRecovery();
+        }
       }
       refreshUi(ctx);
     },
@@ -747,6 +557,8 @@ export default function (pi: ExtensionAPI): void {
     const continuationGoalId = continuationGoalIdFromPrompt(event.text);
 
     if (event.source !== "extension") {
+      hostOverflowRecoveryInProgress = false;
+      recoveryRuntime.onUserInput();
       if (clearStaleQueuedGoalWorkTurn()) {
         refreshUi(ctx);
       }
@@ -799,7 +611,7 @@ export default function (pi: ExtensionAPI): void {
         noteStaleQueuedGoalWorkTerminalEvents();
       }
       staleQueuedGoalWorkTurnActive = true;
-      clearActiveAccounting();
+      goalAccounting.clearActiveAccounting();
       ctx.abort();
       refreshUi(ctx);
     }
@@ -809,12 +621,16 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_start", async (event, ctx) => {
     reloadFromSession(ctx);
-    beginAccounting();
+    goalAccounting.beginAccounting();
     if (event.reason === "resume" && goal?.status === "paused" && ctx.hasUI) {
       const shouldResume = await ctx.ui.confirm("Resume paused goal?", `Goal: ${goal.objective}`);
       if (shouldResume) {
         resumePausedGoal(ctx);
-        beginAccounting();
+        goalAccounting.beginAccounting();
+        if (goal) {
+          pi.sendUserMessage(compactContinuationPrompt(goal), { deliverAs: "followUp" });
+        }
+        return;
       }
     }
     maybeContinue(ctx);
@@ -822,7 +638,7 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_tree", async (_event, ctx) => {
     reloadFromSession(ctx);
-    beginAccounting();
+    goalAccounting.beginAccounting();
     maybeContinue(ctx);
   });
 
@@ -842,6 +658,10 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("message_start", async (event) => {
+    if (event.message.role === "user") {
+      setHostOverflowCapNeedsUserReset(false);
+    }
+
     const queuedGoalId = queuedGoalWorkMessageIdForRuntime(event.message);
     if (queuedGoalId === null) {
       if (event.message.role === "user" || event.message.role === "custom") {
@@ -854,6 +674,15 @@ export default function (pi: ExtensionAPI): void {
     clearContinuationStateFor(queuedGoalId);
     if (isCurrentActiveGoalId(queuedGoalId)) {
       startedRunnableWorkThisTurn = true;
+      const details = (event.message as { details?: unknown }).details;
+      if (
+        details !== null &&
+        typeof details === "object" &&
+        "kind" in details &&
+        (details as { kind?: unknown }).kind === "command_resume"
+      ) {
+        resetErrorRecovery();
+      }
       return;
     }
 
@@ -866,7 +695,7 @@ export default function (pi: ExtensionAPI): void {
     bindPassthroughContinuationInputToTurn(_event.turnIndex);
     clearStartedTurnWork();
     clearStaleQueuedGoalWorkTurn();
-    beginAccounting();
+    goalAccounting.beginAccounting();
     refreshUi(ctx);
   });
 
@@ -875,7 +704,7 @@ export default function (pi: ExtensionAPI): void {
       return;
     }
 
-    accountProgress(ctx, true, 0, true);
+    goalAccounting.accountProgress(ctx, true, 0, true);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
@@ -884,14 +713,21 @@ export default function (pi: ExtensionAPI): void {
     }
 
     const completedTurnTokens = assistantTurnTokens(_event.message);
-    accountProgress(ctx, true, completedTurnTokens);
+    goalAccounting.accountProgress(ctx, true, completedTurnTokens);
     if (isAbortedAssistantMessage(_event.message)) {
       pauseForAbort(ctx);
       return;
     }
-    if (!isToolUseAssistantMessage(_event.message)) {
-      maybeContinue(ctx);
+    if (isErrorAssistantMessage(_event.message)) {
+      return;
     }
+    if (isAssistantContextOverflow(_event.message, getContextWindow(ctx))) {
+      beginOverflowRecoveryAttention(ctx);
+      return;
+    }
+    recoveryRuntime.finishSuccessfulAssistantTurn(_event.message, ctx, {
+      continueGoal: !isToolUseAssistantMessage(_event.message),
+    });
   });
 
   pi.on("agent_end", async (event, ctx) => {
@@ -904,11 +740,29 @@ export default function (pi: ExtensionAPI): void {
     const abortedTurnTokens = abortedMessages.reduce((sum, message) => {
       return sum + assistantTurnTokens(message);
     }, 0);
-    accountProgress(ctx, false, abortedTurnTokens, true);
+    goalAccounting.accountProgress(ctx, false, abortedTurnTokens, true);
     if (abortedMessages.length > 0) {
       pauseForAbort(ctx);
       return;
     }
+    const errorMessages = event.messages.filter(isErrorAssistantMessage);
+    if (errorMessages.length > 0) {
+      const lastError = errorMessages.at(-1) as AssistantErrorMessage | undefined;
+      if (lastError) {
+        recordAssistantContextOverflow(lastError, ctx);
+        if (!isContextOverflowError(lastError.errorMessage)) {
+          recoveryRuntime.handlePersistentAssistantError(lastError, ctx);
+        }
+      }
+      return;
+    }
+
+    const lastAssistant = [...event.messages].reverse().find((message) => message.role === "assistant");
+    if (lastAssistant && recordAssistantContextOverflow(lastAssistant as AssistantErrorMessage, ctx)) {
+      return;
+    }
+    resetErrorRecovery();
+    hostOverflowRecoveryInProgress = false;
     maybeContinue(ctx);
   });
 
@@ -917,7 +771,7 @@ export default function (pi: ExtensionAPI): void {
       return;
     }
 
-    accountProgress(ctx, false, 0, true);
+    goalAccounting.accountProgress(ctx, false, 0, true);
   });
 
   pi.on("session_compact", async (_event, ctx) => {
@@ -928,23 +782,27 @@ export default function (pi: ExtensionAPI): void {
     if (goal) {
       persistGoal(goal, "runtime");
     }
+    recoveryRuntime.onSessionCompact();
     refreshUi(ctx);
-    maybeContinue(ctx);
+    if (!hostOverflowRecoveryInProgress) {
+      maybeContinue(ctx);
+    }
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     clearPassthroughContinuationInput();
     if (staleQueuedGoalWorkTurnActive) {
       clearStaleQueuedGoalWorkTurn();
-      clearStaleQueuedGoalWorkTerminalEvents();
-      clearContinuationTimer();
-      stopStatusRefresh();
-      return;
     }
     clearStaleQueuedGoalWorkTerminalEvents();
 
-    accountProgress(ctx, false, 0, true);
+    goalAccounting.accountProgress(ctx, false, 0, true);
     clearContinuationTimer();
+    if (hasPendingRecoveryAttention()) {
+      pauseForPendingRecoveryShutdown(ctx);
+    } else {
+      resetErrorRecovery();
+    }
     stopStatusRefresh();
   });
 }

@@ -15,12 +15,19 @@ interface SentMessage {
 function createHarness() {
   let goal: ThreadGoal | null = null;
   const sentMessages: SentMessage[] = [];
+  const sentUserMessages: Array<{
+    content: Parameters<GoalCommandPi["sendUserMessage"]>[0];
+    options: Parameters<GoalCommandPi["sendUserMessage"]>[1];
+  }> = [];
   const notifications: string[] = [];
 
   const pi: GoalCommandPi = {
     registerCommand() {},
     sendMessage(message: SentMessage["message"], options: SentMessage["options"]) {
       sentMessages.push({ message, options });
+    },
+    sendUserMessage(content, options) {
+      sentUserMessages.push({ content, options });
     },
   };
 
@@ -32,6 +39,7 @@ function createHarness() {
     clearGoal() {
       goal = null;
     },
+    needsHostOverflowCapReset: () => false,
   };
 
   const ctx: GoalCommandContext = {
@@ -57,6 +65,7 @@ function createHarness() {
     },
     notifications,
     sentMessages,
+    sentUserMessages,
   };
 }
 
@@ -84,7 +93,7 @@ test("/goal objective creates the goal and starts a hidden follow-up turn", asyn
   assert.deepEqual(sentMessage.options, { triggerTurn: true, deliverAs: "followUp" });
 });
 
-test("/goal resume restarts a hidden follow-up turn", async () => {
+test("/goal resume sends a user continuation turn", async () => {
   const harness = createHarness();
 
   await handleGoalCommand(harness.pi, harness.host, "ship the feature", harness.ctx);
@@ -96,18 +105,53 @@ test("/goal resume restarts a hidden follow-up turn", async () => {
   await handleGoalCommand(harness.pi, harness.host, "resume", harness.ctx);
 
   assert.equal(harness.goal?.status, "active");
-  assert.equal(harness.sentMessages.length, 1);
-  const sentMessage = harness.sentMessages[0];
-  assert.ok(sentMessage);
-  assert.deepEqual(sentMessage.message.details, {
-    kind: "command_resume",
-    goalId: harness.goal?.goalId,
-  });
-  const content = sentMessage.message.content;
+  assert.equal(harness.sentMessages.length, 0);
+  assert.equal(harness.sentUserMessages.length, 1);
+  const sentUserMessage = harness.sentUserMessages[0];
+  assert.ok(sentUserMessage);
+  assert.deepEqual(sentUserMessage.options, { deliverAs: "followUp" });
+  const content = sentUserMessage.content;
   if (typeof content !== "string") {
-    assert.fail("Expected queued goal message content to be a string.");
+    assert.fail("Expected queued goal resume content to be a string.");
   }
-  assert.match(content, /<untrusted_objective>\nship the feature\n<\/untrusted_objective>/);
+  assert.doesNotMatch(content, /<untrusted_objective>/);
+  assert.match(content, /<pi_goal_continuation goal_id="/);
+});
+
+test("/goal objective after overflow recovery sends a user start turn", async () => {
+  const harness = createHarness();
+  let needsHostOverflowCapReset = true;
+  const host: CommandHost = {
+    getGoal: () => harness.goal,
+    setGoal(nextGoal: ThreadGoal) {
+      harness.setGoal(nextGoal);
+    },
+    clearGoal() {
+      harness.setGoal(null);
+    },
+    needsHostOverflowCapReset: () => needsHostOverflowCapReset,
+  };
+
+  await handleGoalCommand(harness.pi, host, "ship the feature", harness.ctx);
+
+  assert.equal(harness.goal?.objective, "ship the feature");
+  assert.equal(harness.sentMessages.length, 0);
+  assert.equal(harness.sentUserMessages.length, 1);
+  const sentUserMessage = harness.sentUserMessages[0];
+  assert.ok(sentUserMessage);
+  assert.deepEqual(sentUserMessage.options, { deliverAs: "followUp" });
+  const content = sentUserMessage.content;
+  if (typeof content !== "string") {
+    assert.fail("Expected queued goal start content to be a string.");
+  }
+  assert.match(content, /<pi_goal_continuation goal_id="/);
+  assert.doesNotMatch(content, /<untrusted_objective>/);
+
+  needsHostOverflowCapReset = false;
+  harness.sentUserMessages.length = 0;
+  await handleGoalCommand(harness.pi, host, "another objective", harness.ctx);
+  assert.equal(harness.sentMessages.length, 1);
+  assert.equal(harness.sentUserMessages.length, 0);
 });
 
 test("/goal pause rejects completed and paused goals", async () => {

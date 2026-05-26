@@ -127,9 +127,20 @@ function compactBudgetUsage(goal: ThreadGoal): string {
   return `${formatCompactTokenValue(goal.usage.tokensUsed)} / ${formatCompactTokenValue(goal.tokenBudget)}`;
 }
 
-export function formatFooterStatus(goal: ThreadGoal | null): string | undefined {
+export function formatFooterStatus(goal: ThreadGoal | null, recoveryAttention: string | null = null): string | undefined {
   if (!goal) {
     return undefined;
+  }
+
+  if (goal.status === "budgetLimited") {
+    if (goal.tokenBudget !== null) {
+      return `Goal unmet (${compactBudgetUsage(goal)} tokens)`;
+    }
+    return "Goal abandoned";
+  }
+
+  if (recoveryAttention) {
+    return recoveryAttention;
   }
 
   if (goal.status === "active") {
@@ -144,13 +155,6 @@ export function formatFooterStatus(goal: ThreadGoal | null): string | undefined 
 
   if (goal.status === "paused") {
     return "Goal paused (/goal resume)";
-  }
-
-  if (goal.status === "budgetLimited") {
-    if (goal.tokenBudget !== null) {
-      return `Goal unmet (${compactBudgetUsage(goal)} tokens)`;
-    }
-    return "Goal abandoned";
   }
 
   if (goal.tokenBudget !== null) {

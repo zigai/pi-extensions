@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { formatGoalSummary } from "./format.js";
-import { continuationPrompt } from "./prompts.js";
+import { compactContinuationPrompt, continuationPrompt } from "./prompts.js";
 import { replaceGoal, updateGoalStatus } from "./state.js";
 import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type ThreadGoal } from "./types.js";
 
@@ -9,11 +9,12 @@ export interface CommandHost {
   getGoal(): ThreadGoal | null;
   setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: GoalCommandContext): void;
   clearGoal(source: GoalEntrySource, ctx: GoalCommandContext): void;
+  needsHostOverflowCapReset(): boolean;
 }
 
 const COMMANDS = ["pause", "resume", "clear"] as const;
 
-export type GoalCommandPi = Pick<ExtensionAPI, "registerCommand" | "sendMessage">;
+export type GoalCommandPi = Pick<ExtensionAPI, "registerCommand" | "sendMessage" | "sendUserMessage">;
 
 export interface GoalCommandContext {
   hasUI: boolean;
@@ -38,6 +39,14 @@ function queueGoalTurn(pi: GoalCommandPi, goal: ThreadGoal, kind: "command_start
     },
     { triggerTurn: true, deliverAs: "followUp" },
   );
+}
+
+function queueGoalUserResumeTurn(pi: GoalCommandPi, goal: ThreadGoal): void {
+  pi.sendUserMessage(compactContinuationPrompt(goal), { deliverAs: "followUp" });
+}
+
+function queueGoalUserStartTurn(pi: GoalCommandPi, goal: ThreadGoal): void {
+  pi.sendUserMessage(compactContinuationPrompt(goal), { deliverAs: "followUp" });
 }
 
 export async function handleGoalCommand(
@@ -74,7 +83,7 @@ export async function handleGoalCommand(
     host.setGoal(result.goal, "command", ctx);
     ctx.ui.notify(result.message);
     if (trimmed === "resume" && result.goal.status === "active") {
-      queueGoalTurn(pi, result.goal, "command_resume");
+      queueGoalUserResumeTurn(pi, result.goal);
     }
     return;
   }
@@ -102,7 +111,11 @@ export async function handleGoalCommand(
   }
   host.setGoal(result.goal, "command", ctx);
   ctx.ui.notify(result.message);
-  queueGoalTurn(pi, result.goal, "command_start");
+  if (host.needsHostOverflowCapReset()) {
+    queueGoalUserStartTurn(pi, result.goal);
+  } else {
+    queueGoalTurn(pi, result.goal, "command_start");
+  }
 }
 
 export function registerGoalCommand(pi: GoalCommandPi, host: CommandHost): void {
