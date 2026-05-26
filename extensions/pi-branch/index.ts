@@ -360,11 +360,4 @@ export default function (pi: ExtensionAPI): void {
             await handleBranchOut(pi, args, ctx);
         },
     });
-
-    pi.registerCommand("split-fork", {
-        description: `${description} Alias for /branch-out.`,
-        handler: async (args, ctx) => {
-            await handleBranchOut(pi, args, ctx);
-        },
-    });
 }

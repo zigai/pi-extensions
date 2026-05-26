@@ -34,7 +34,3 @@ Examples:
 A leading positive integer is treated as the number of forks to create. Everything after that integer is sent as the optional initial prompt to each fork. The fork count is capped at 10.
 
 When running inside tmux, each fork opens in a right-hand tmux split. On macOS Ghostty, forks open in Ghostty splits. On Linux Ghostty, forks open in new Ghostty windows.
-
-### `/split-fork [count] [optional prompt]`
-
-Compatibility alias for `/branch-out`.
