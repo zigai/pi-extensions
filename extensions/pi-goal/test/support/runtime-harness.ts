@@ -6,6 +6,13 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import goalExtension, { __testHooks } from "../../src/index.js";
 import { isContextOverflowError } from "../../src/recovery.js";
 import { isGoalCustomEntry, reconstructGoal } from "../../src/state.js";
+import {
+  toQueuedGoalContextCarrier,
+  type ActiveGoalQueuedDetails,
+  type QueuedGoalContextCarrier,
+  type QueuedGoalContextInput,
+  type QueuedGoalUserContent,
+} from "../../src/queued-goal-messages.js";
 import { CUSTOM_ENTRY_TYPE } from "../../src/types.js";
 
 type EventHandler = (event: object, ctx: ExtensionContext) => unknown | Promise<unknown>;
@@ -334,7 +341,7 @@ export async function emitToolExecutionEnd(harness: ReturnType<typeof createRunt
   });
 }
 
-export function queuedCustomMessage(sent: SentMessage, timestamp = 1) {
+export function queuedCustomMessage(sent: SentMessage, timestamp = 1): QueuedGoalContextCarrier {
   return {
     role: "custom",
     customType: sent.message.customType,
@@ -345,19 +352,97 @@ export function queuedCustomMessage(sent: SentMessage, timestamp = 1) {
   };
 }
 
+export function goalCustomContextMessage(options: {
+  content: string;
+  details: ActiveGoalQueuedDetails | Record<string, unknown>;
+  display?: boolean;
+  timestamp: number;
+}): QueuedGoalContextCarrier {
+  return {
+    role: "custom",
+    customType: CUSTOM_ENTRY_TYPE,
+    content: options.content,
+    display: options.display ?? false,
+    details: options.details,
+    timestamp: options.timestamp,
+  };
+}
+
+export interface ProviderContextResult {
+  messages: QueuedGoalContextCarrier[];
+}
+
+export type ProviderContextHandlerResult = ProviderContextResult | undefined;
+
+function parseProviderContextHandlerResult(result: unknown): ProviderContextHandlerResult {
+  if (result === undefined) {
+    return undefined;
+  }
+
+  assert.ok(result && typeof result === "object", "Expected provider context handler result object.");
+  const candidate = result as { messages?: unknown };
+  assert.ok(Array.isArray(candidate.messages), "Expected provider context handler messages array.");
+
+  const messages: QueuedGoalContextCarrier[] = [];
+  for (const [index, message] of candidate.messages.entries()) {
+    const carrier = toQueuedGoalContextCarrier(message as QueuedGoalContextInput);
+    assert.ok(carrier, `Expected provider context message ${index} to include a numeric timestamp.`);
+    messages.push(carrier);
+  }
+
+  return { messages };
+}
+
+export function requireProviderContextResult(
+  results: ProviderContextHandlerResult[],
+): ProviderContextResult {
+  const result = results[0];
+  if (result === undefined) {
+    assert.fail("Expected provider context handler to return rewritten messages.");
+  }
+  return result;
+}
+
+export function providerContextMessageAt(
+  result: ProviderContextResult,
+  index: number,
+): QueuedGoalContextCarrier {
+  const message = result.messages[index];
+  assert.ok(message, `Expected provider context message at index ${index}.`);
+  return message;
+}
+
+export function goalUserContextMessage(text: string, timestamp = 1): QueuedGoalContextCarrier {
+  const content: QueuedGoalUserContent = [{ type: "text", text }];
+  return {
+    role: "user",
+    content,
+    timestamp,
+  };
+}
+
+export async function emitProviderContext(
+  harness: RuntimeHarness,
+  messages: QueuedGoalContextCarrier[],
+): Promise<ProviderContextHandlerResult[]> {
+  const results = await harness.emit("context", { type: "context", messages });
+  return results.map(parseProviderContextHandlerResult);
+}
+
 export type RuntimeHarness = ReturnType<typeof createRuntimeHarness>;
 
 export async function emitQueuedTurnThroughContext(
   harness: RuntimeHarness,
-  messages: Array<Record<string, unknown>>,
+  messages: QueuedGoalContextCarrier[],
   turnIndex = 0,
-): Promise<unknown[]> {
+): Promise<ProviderContextHandlerResult[]> {
   await harness.emit("turn_start", { type: "turn_start", turnIndex, timestamp: turnIndex + 1 });
   for (const message of messages) {
     await harness.emit("message_start", { type: "message_start", message });
     await harness.emit("message_end", { type: "message_end", message });
   }
-  return harness.emit("context", { type: "context", messages });
+  const results = await harness.emit("context", { type: "context", messages });
+  return results.map(parseProviderContextHandlerResult);
 }
 
 export function assistantMessage(

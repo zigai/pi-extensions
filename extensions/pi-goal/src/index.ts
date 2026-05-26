@@ -10,12 +10,12 @@ import {
   isToolUseAssistantMessage,
 } from "./goal-accounting.js";
 import { compactContinuationPrompt, continuationGoalIdFromPrompt } from "./prompts.js";
+import { isCommandResumeQueuedGoalMessage } from "./queued-goal-messages.js";
 import {
-  dedupeActiveGoalContinuations,
+  applyQueuedGoalProviderContextRewrites,
   extensionQueuedGoalWorkMessageId,
   extensionQueuedGoalWorkMessageIdForRuntime,
   pendingStaleQueuedGoalWorkIdsFromMessages,
-  staleGoalContinuationContextMessage,
 } from "./queued-goal-work.js";
 import {
   createGoalRecoveryMachine,
@@ -626,28 +626,11 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("context", async (event, ctx): Promise<{ messages: typeof event.messages } | undefined> => {
-    let changed = false;
-    let messages: typeof event.messages = event.messages.map((message) => {
-      const queuedGoalId = queuedGoalWorkMessageIdForRuntime(message);
-      if (queuedGoalId === null) {
-        return message;
-      }
-
-      if (goal?.goalId === queuedGoalId && goal.status === "active") {
-        return message;
-      }
-
-      changed = true;
-      return staleGoalContinuationContextMessage(message, queuedGoalId, goal);
+    const { messages, changed } = applyQueuedGoalProviderContextRewrites(event.messages, {
+      goal,
+      resolveStaleQueuedGoalWorkMessageId: queuedGoalWorkMessageIdForRuntime,
+      resolveActiveContinuationQueuedGoalWorkMessageId: extensionQueuedGoalWorkMessageId,
     });
-
-    if (goal?.status === "active") {
-      const deduped = dedupeActiveGoalContinuations(messages, goal, extensionQueuedGoalWorkMessageId);
-      if (deduped.changed) {
-        changed = true;
-        messages = deduped.messages;
-      }
-    }
 
     if (startedStaleQueuedGoalWorkThisTurn && !startedRunnableWorkThisTurn) {
       if (!staleQueuedGoalWorkTurnActive) {
@@ -717,13 +700,7 @@ export default function (pi: ExtensionAPI): void {
     clearContinuationStateFor(queuedGoalId);
     if (isCurrentActiveGoalId(queuedGoalId)) {
       startedRunnableWorkThisTurn = true;
-      const details = (event.message as { details?: unknown }).details;
-      if (
-        details !== null &&
-        typeof details === "object" &&
-        "kind" in details &&
-        (details as { kind?: unknown }).kind === "command_resume"
-      ) {
+      if (isCommandResumeQueuedGoalMessage(event.message)) {
         resetErrorRecovery();
       }
       return;

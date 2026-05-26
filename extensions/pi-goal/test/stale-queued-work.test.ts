@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
 import {
   assistantMessage,
   createRuntimeHarness,
+  emitProviderContext,
   emitQueuedTurnThroughContext,
+  goalCustomContextMessage,
+  goalUserContextMessage,
+  providerContextMessageAt,
   queuedCustomMessage,
+  requireProviderContextResult,
 } from "./support/runtime-harness.js";
 
 test("stale prompt continuation input is handled before agent start", async () => {
@@ -58,22 +62,9 @@ for (const source of ["interactive", "rpc"] as const) {
     });
     assert.equal(beforeAgentStartResults[0], undefined);
 
-    const userMessage = {
-      role: "user",
-      content: [{ type: "text", text: prompt }],
-      timestamp: 1,
-    };
-    await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-    await harness.emit("message_start", { type: "message_start", message: userMessage });
-    await harness.emit("message_end", { type: "message_end", message: userMessage });
-    const contextResults = await harness.emit("context", {
-      type: "context",
-      messages: [userMessage],
-    });
-    const secondContextResults = await harness.emit("context", {
-      type: "context",
-      messages: [userMessage],
-    });
+    const userMessage = goalUserContextMessage(prompt, 1);
+    const contextResults = await emitQueuedTurnThroughContext(harness, [userMessage], 0);
+    const secondContextResults = await emitProviderContext(harness, [userMessage]);
 
     assert.equal(contextResults[0], undefined);
     assert.equal(secondContextResults[0], undefined);
@@ -87,14 +78,9 @@ for (const source of ["interactive", "rpc"] as const) {
       toolResults: [],
     });
 
-    const laterUserMessage = {
-      role: "user",
-      content: [{ type: "text", text: prompt }],
-      timestamp: 2,
-    };
+    const laterUserMessage = goalUserContextMessage(prompt, 2);
     const laterContextResults = await emitQueuedTurnThroughContext(harness, [laterUserMessage], 1);
-    const laterContextResult = laterContextResults[0] as { messages?: Array<{ content?: unknown }> } | undefined;
-    assert.notEqual(laterContextResult, undefined);
+    requireProviderContextResult(laterContextResults);
     assert.equal(harness.abortCount, 1);
   });
 }
@@ -120,14 +106,10 @@ test("stale queued continuation aborts if the goal became complete before launch
   assert.equal(results[0], undefined);
   assert.equal(harness.abortCount, 0);
 
-  const queuedMessage = {
-    role: "user",
-    content: [{ type: "text", text: prompt }],
-    timestamp: 1,
-  };
+  const queuedMessage = goalUserContextMessage(prompt, 1);
   const contextResults = await emitQueuedTurnThroughContext(harness, [queuedMessage]);
-  const contextResult = contextResults[0] as { messages?: Array<{ content?: unknown }> } | undefined;
-  assert.deepEqual(contextResult?.messages?.[0]?.content, [
+  const contextResult = requireProviderContextResult(contextResults);
+  assert.deepEqual(providerContextMessageAt(contextResult, 0).content, [
     {
       type: "text",
       text: [
@@ -149,28 +131,15 @@ test("stale custom goal work messages are replaced before provider context", asy
   const queued = harness.sentMessages[0];
   assert.ok(queued);
 
-  const contextMessage = {
-    role: "custom",
-    customType: CUSTOM_ENTRY_TYPE,
-    content: queued.message.content,
-    display: false,
-    details: queued.message.details,
-    timestamp: 1,
-  };
-  const activeResults = await harness.emit("context", {
-    type: "context",
-    messages: [contextMessage],
-  });
+  const contextMessage = queuedCustomMessage(queued, 1);
+  const activeResults = await emitProviderContext(harness, [contextMessage]);
   assert.equal(activeResults[0], undefined);
 
   await harness.runTool("update_goal", { status: "complete" });
-  const results = await harness.emit("context", {
-    type: "context",
-    messages: [contextMessage],
-  });
+  const results = await emitProviderContext(harness, [contextMessage]);
 
-  const result = results[0] as { messages?: Array<{ content?: unknown; details?: unknown }> } | undefined;
-  const replacedMessage = result?.messages?.[0];
+  const result = requireProviderContextResult(results);
+  const replacedMessage = providerContextMessageAt(result, 0);
   assert.equal(typeof replacedMessage?.content, "string");
   assert.match(String(replacedMessage?.content), /queued hidden goal continuation was stale and has been cancelled/);
   assert.deepEqual(replacedMessage?.details, {
@@ -195,53 +164,33 @@ test("stale provider context replacement covers queued work kinds and prompt mar
 
   await harness.runTool("update_goal", { status: "complete" });
   const staleMessages = [
-    {
-      role: "custom",
-      customType: CUSTOM_ENTRY_TYPE,
+    goalCustomContextMessage({
       content: "queued by details",
-      display: false,
       details: { kind: "continuation", goalId: queuedGoalId },
       timestamp: 1,
-    },
-    {
-      role: "custom",
-      customType: CUSTOM_ENTRY_TYPE,
+    }),
+    goalCustomContextMessage({
       content: "queued by details",
-      display: false,
       details: { kind: "command_start", goalId: queuedGoalId },
       timestamp: 1,
-    },
-    {
-      role: "custom",
-      customType: CUSTOM_ENTRY_TYPE,
+    }),
+    goalCustomContextMessage({
       content: "queued by details",
-      display: false,
       details: { kind: "command_resume", goalId: queuedGoalId },
       timestamp: 1,
-    },
-    {
-      role: "custom",
-      customType: CUSTOM_ENTRY_TYPE,
+    }),
+    goalCustomContextMessage({
       content: prompt,
-      display: false,
       details: { kind: "other", goalId: queuedGoalId },
       timestamp: 1,
-    },
-    {
-      role: "user",
-      content: [{ type: "text", text: prompt }],
-      timestamp: 1,
-    },
+    }),
+    goalUserContextMessage(prompt, 1),
   ];
 
-  const results = await harness.emit("context", {
-    type: "context",
-    messages: staleMessages,
-  });
-
-  const result = results[0] as { messages?: Array<{ role: string; content?: unknown; details?: unknown }> } | undefined;
-  assert.equal(result?.messages?.length, staleMessages.length);
-  for (const [index, message] of result?.messages?.entries() ?? []) {
+  const results = await emitProviderContext(harness, staleMessages);
+  const result = requireProviderContextResult(results);
+  assert.equal(result.messages.length, staleMessages.length);
+  for (const [index, message] of result.messages.entries()) {
     if (message.role === "custom") {
       assert.equal(typeof message.content, "string", `custom message ${index} should use string content`);
       assert.match(String(message.content), /do not perform work for the queued goal id above/);
@@ -276,11 +225,7 @@ test("stale prompt-based queued work does not pause or charge a replacement goal
   if (typeof oldPrompt !== "string") {
     assert.fail("Expected queued goal message content to be a string.");
   }
-  const oldMessage = {
-    role: "user",
-    content: [{ type: "text", text: oldPrompt }],
-    timestamp: 1,
-  };
+  const oldMessage = goalUserContextMessage(oldPrompt, 1);
 
   await harness.runCommand("new goal");
   const replacement = harness.snapshot().goal;
@@ -318,14 +263,7 @@ test("stale custom queued work aborts without pausing, charging, or requeueing a
     await harness.runCommand("old goal");
     const oldQueued = harness.sentMessages[0];
     assert.ok(oldQueued);
-    const oldMessage = {
-      role: "custom",
-      customType: CUSTOM_ENTRY_TYPE,
-      content: oldQueued.message.content,
-      display: false,
-      details: oldQueued.message.details,
-      timestamp: 1,
-    };
+    const oldMessage = queuedCustomMessage(oldQueued, 1);
 
     await harness.runCommand("new goal");
     const replacement = harness.snapshot().goal;
@@ -581,11 +519,7 @@ test("compaction between stale context abort and cleanup does not persist, accou
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
 
-    const userMessage = {
-      role: "user",
-      content: [{ type: "text", text: "continue now" }],
-      timestamp: 2,
-    };
+    const userMessage = goalUserContextMessage("continue now", 2);
     now = 6_000;
     await emitQueuedTurnThroughContext(harness, [userMessage], 1);
     now = 8_000;
@@ -629,20 +563,18 @@ test("mixed stale and current follow-up batch neutralizes stale work without abo
   harness.sentMessages.length = 0;
 
   const contextResults = await emitQueuedTurnThroughContext(harness, [oldMessage, currentMessage]);
-  const contextResult = contextResults[0] as
-    | { messages?: Array<{ content?: unknown; details?: unknown }> }
-    | undefined;
+  const contextResult = requireProviderContextResult(contextResults);
 
   assert.equal(harness.abortCount, 0);
-  assert.equal(contextResult?.messages?.length, 2);
-  assert.match(String(contextResult?.messages?.[0]?.content), /queued hidden goal continuation was stale/);
-  assert.deepEqual(contextResult?.messages?.[0]?.details, {
+  assert.equal(contextResult.messages.length, 2);
+  assert.match(String(providerContextMessageAt(contextResult, 0).content), /queued hidden goal continuation was stale/);
+  assert.deepEqual(providerContextMessageAt(contextResult, 0).details, {
     kind: "stale_continuation",
     goalId: oldGoalId,
     currentGoalId: replacement?.goalId,
     currentStatus: "active",
   });
-  assert.deepEqual(contextResult?.messages?.[1]?.details, currentMessage.details);
+  assert.deepEqual(providerContextMessageAt(contextResult, 1).details, currentMessage.details);
 
   await harness.emit("turn_end", {
     type: "turn_end",
