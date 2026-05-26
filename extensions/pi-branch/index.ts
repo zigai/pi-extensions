@@ -215,9 +215,9 @@ function parseArgs(args: string): ParsedArgs {
     return { count, mode, prompt: tokens.slice(index).join(" ") };
 }
 
-function buildForkName(baseName: string, index: number, total: number): string {
+function buildForkName(baseName: string, index: number): string {
     const branchNumber = index + 1;
-    return `${baseName} branch ${branchNumber} of ${total}`;
+    return `${baseName} ${branchNumber}`;
 }
 
 function getBaseSessionName(pi: ExtensionAPI, ctx: ExtensionCommandContext): string {
@@ -398,7 +398,7 @@ async function handleBranchOut(
     let launchedVia: LaunchTarget | undefined;
 
     for (let index = 0; index < parsed.count; index += 1) {
-        const launchName = buildForkName(baseSessionName, index, parsed.count);
+        const launchName = buildForkName(baseSessionName, index);
         const result = await launchOneFork(pi, ctx, launchTargets, parsed.prompt, launchName);
         if (result.launchedVia !== undefined) {
             launchedVia = result.launchedVia;
