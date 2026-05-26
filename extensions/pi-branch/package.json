@@ -1,0 +1,41 @@
+{
+  "name": "pi-branch-out",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi package for branching the current session into parallel tmux or Ghostty panes.",
+  "keywords": [
+    "branch",
+    "fork",
+    "pi-extension",
+    "pi-package",
+    "session"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-branch-out.git"
+  },
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint -c ./.oxlintrc.json .",
+    "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "check": "npm run format:check && npm run lint"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.75.5",
+    "@types/node": "^24.10.1",
+    "oxfmt": "^0.44.0",
+    "oxlint": "^1.59.0",
+    "oxlint-tsgolint": "^0.23.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
