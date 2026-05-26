@@ -35,11 +35,33 @@ const GHOSTTY_SPLIT_SCRIPT = `on run argv
 	end tell
 end run`;
 
-type LaunchTarget = "tmux-split" | "ghostty-split" | "ghostty-window";
+const GHOSTTY_WINDOW_SCRIPT = `on run argv
+	set targetCwd to item 1 of argv
+	set startupInput to item 2 of argv
+	tell application "Ghostty"
+		set cfg to new surface configuration
+		set initial working directory of cfg to targetCwd
+		set initial input of cfg to startupInput
+		new window with configuration cfg
+		activate
+	end tell
+end run`;
+
+type LaunchMode = "windows" | "panes";
+type LaunchTarget = "tmux-window" | "tmux-pane" | "ghostty-split" | "ghostty-window";
 
 type ParsedArgs = {
     count: number;
+    mode: LaunchMode;
     prompt: string;
+};
+
+type SessionInfoEntry = {
+    type: "session_info";
+    id: string;
+    parentId: string | null;
+    timestamp: string;
+    name: string;
 };
 
 function shellQuote(value: string): string {
@@ -87,19 +109,31 @@ function buildPiStartupInput(sessionFile: string | undefined, prompt: string): s
     return `${buildPiShellCommand(sessionFile, prompt)}\n`;
 }
 
-function getLaunchTargets(): LaunchTarget[] {
-    const targets: LaunchTarget[] = [];
-    const inTmux =
+function isTmux(): boolean {
+    return (
         process.env.TMUX !== undefined ||
         process.env.TMUX_PANE !== undefined ||
-        process.env.TERM_PROGRAM === "tmux";
+        process.env.TERM_PROGRAM === "tmux"
+    );
+}
 
-    if (inTmux) {
-        targets.push("tmux-split");
+function getLaunchTargets(mode: LaunchMode): LaunchTarget[] {
+    const targets: LaunchTarget[] = [];
+
+    if (isTmux()) {
+        if (mode === "panes") {
+            targets.push("tmux-pane");
+        } else {
+            targets.push("tmux-window");
+        }
     }
 
     if (process.platform === "darwin") {
-        targets.push("ghostty-split");
+        if (mode === "panes") {
+            targets.push("ghostty-split");
+        } else {
+            targets.push("ghostty-window");
+        }
     } else if (process.platform === "linux") {
         targets.push("ghostty-window");
     }
@@ -109,8 +143,10 @@ function getLaunchTargets(): LaunchTarget[] {
 
 function describeLaunchTarget(target: LaunchTarget): string {
     switch (target) {
-        case "tmux-split":
-            return "a new tmux split";
+        case "tmux-window":
+            return "a new tmux window";
+        case "tmux-pane":
+            return "a new tmux pane";
         case "ghostty-split":
             return "a new Ghostty split";
         case "ghostty-window":
@@ -143,33 +179,60 @@ function formatUnknownError(error: unknown): string {
 function parseArgs(args: string): ParsedArgs {
     const trimmed = args.trim();
     if (trimmed.length === 0) {
-        return { count: 1, prompt: "" };
+        return { count: 1, mode: "windows", prompt: "" };
     }
 
-    const match = /^(\d+)(?:\s+([\s\S]*))?$/.exec(trimmed);
-    if (match === null) {
-        return { count: 1, prompt: trimmed };
+    const tokens = trimmed.split(/\s+/);
+    let mode: LaunchMode = "windows";
+    let index = 0;
+
+    while (index < tokens.length) {
+        const token = tokens[index];
+        if (token === "--panes" || token === "--pane" || token === "-p") {
+            mode = "panes";
+            index += 1;
+        } else if (token === "--windows" || token === "--tabs" || token === "-w") {
+            mode = "windows";
+            index += 1;
+        } else {
+            break;
+        }
     }
 
-    const parsedCount = Number.parseInt(match[1], 10);
-    if (!Number.isSafeInteger(parsedCount) || parsedCount < 1) {
-        return { count: 1, prompt: trimmed };
+    let count = 1;
+    const countToken = tokens[index];
+    if (countToken !== undefined && /^\d+$/.test(countToken)) {
+        const parsedCount = Number.parseInt(countToken, 10);
+        if (Number.isSafeInteger(parsedCount) && parsedCount >= 1) {
+            count = parsedCount;
+            if (count > MAX_FORK_COUNT) {
+                count = MAX_FORK_COUNT;
+            }
+            index += 1;
+        }
     }
 
-    let count = parsedCount;
-    if (count > MAX_FORK_COUNT) {
-        count = MAX_FORK_COUNT;
-    }
-
-    let prompt = "";
-    if (match[2] !== undefined) {
-        prompt = match[2].trim();
-    }
-
-    return { count, prompt };
+    return { count, mode, prompt: tokens.slice(index).join(" ") };
 }
 
-async function createForkedSession(ctx: ExtensionCommandContext): Promise<string | undefined> {
+function buildForkName(baseName: string, index: number, total: number): string {
+    const branchNumber = index + 1;
+    return `${baseName} branch ${branchNumber} of ${total}`;
+}
+
+function getBaseSessionName(pi: ExtensionAPI, ctx: ExtensionCommandContext): string {
+    const sessionName = pi.getSessionName();
+    if (sessionName !== undefined && sessionName.trim().length > 0) {
+        return sessionName.trim();
+    }
+
+    return path.basename(ctx.cwd) || "Pi session";
+}
+
+async function createForkedSession(
+    ctx: ExtensionCommandContext,
+    sessionName: string,
+): Promise<string | undefined> {
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (sessionFile === undefined) {
         return undefined;
@@ -203,10 +266,21 @@ async function createForkedSession(ctx: ExtensionCommandContext): Promise<string
         parentSession: sessionFile,
     };
 
+    const leafId = ctx.sessionManager.getLeafId();
+    const sessionInfoEntry: SessionInfoEntry = {
+        type: "session_info",
+        id: randomUUID(),
+        parentId: leafId,
+        timestamp,
+        name: sessionName,
+    };
+
     const lines =
-        [JSON.stringify(newHeader), ...branchEntries.map((entry) => JSON.stringify(entry))].join(
-            "\n",
-        ) + "\n";
+        [
+            JSON.stringify(newHeader),
+            ...branchEntries.map((entry) => JSON.stringify(entry)),
+            JSON.stringify(sessionInfoEntry),
+        ].join("\n") + "\n";
 
     await fs.mkdir(sessionDir, { recursive: true });
     await fs.writeFile(newSessionFile, lines, "utf8");
@@ -220,9 +294,19 @@ async function launchForkedPi(
     ctx: ExtensionCommandContext,
     sessionFile: string | undefined,
     prompt: string,
+    launchName: string,
 ) {
     switch (target) {
-        case "tmux-split": {
+        case "tmux-window":
+            return pi.exec("tmux", [
+                "new-window",
+                "-n",
+                launchName,
+                "-c",
+                ctx.cwd,
+                buildPiShellCommand(sessionFile, prompt),
+            ]);
+        case "tmux-pane": {
             const tmuxArgs = ["split-window", "-h", "-c", ctx.cwd];
             const targetPane = process.env.TMUX_PANE?.trim();
             if (targetPane !== undefined && targetPane.length > 0) {
@@ -240,6 +324,16 @@ async function launchForkedPi(
                 buildPiStartupInput(sessionFile, prompt),
             ]);
         case "ghostty-window":
+            if (process.platform === "darwin") {
+                return pi.exec("osascript", [
+                    "-e",
+                    GHOSTTY_WINDOW_SCRIPT,
+                    "--",
+                    ctx.cwd,
+                    buildPiStartupInput(sessionFile, prompt),
+                ]);
+            }
+
             return pi.exec("ghostty", [
                 "+new-window",
                 `--working-directory=${ctx.cwd}`,
@@ -254,13 +348,21 @@ async function launchOneFork(
     ctx: ExtensionCommandContext,
     launchTargets: LaunchTarget[],
     prompt: string,
+    launchName: string,
 ): Promise<{ launchedVia?: LaunchTarget; sessionFile?: string; failures: string[] }> {
-    const forkedSessionFile = await createForkedSession(ctx);
+    const forkedSessionFile = await createForkedSession(ctx, launchName);
     const failures: string[] = [];
 
     for (const target of launchTargets) {
         try {
-            const result = await launchForkedPi(pi, target, ctx, forkedSessionFile, prompt);
+            const result = await launchForkedPi(
+                pi,
+                target,
+                ctx,
+                forkedSessionFile,
+                prompt,
+                launchName,
+            );
             if (result.code === 0) {
                 return { launchedVia: target, sessionFile: forkedSessionFile, failures };
             }
@@ -279,7 +381,8 @@ async function handleBranchOut(
     args: string,
     ctx: ExtensionCommandContext,
 ): Promise<void> {
-    const launchTargets = getLaunchTargets();
+    const parsed = parseArgs(args);
+    const launchTargets = getLaunchTargets(parsed.mode);
     if (launchTargets.length === 0) {
         ctx.ui.notify(
             "/branch-out is supported in tmux, Ghostty on macOS, or Ghostty on Linux.",
@@ -289,13 +392,14 @@ async function handleBranchOut(
     }
 
     const wasBusy = !ctx.isIdle();
-    const parsed = parseArgs(args);
+    const baseSessionName = getBaseSessionName(pi, ctx);
     const successfulSessions: string[] = [];
     const failedReasons: string[] = [];
     let launchedVia: LaunchTarget | undefined;
 
     for (let index = 0; index < parsed.count; index += 1) {
-        const result = await launchOneFork(pi, ctx, launchTargets, parsed.prompt);
+        const launchName = buildForkName(baseSessionName, index, parsed.count);
+        const result = await launchOneFork(pi, ctx, launchTargets, parsed.prompt, launchName);
         if (result.launchedVia !== undefined) {
             launchedVia = result.launchedVia;
             if (result.sessionFile !== undefined) {
@@ -351,11 +455,9 @@ async function handleBranchOut(
 }
 
 export default function (pi: ExtensionAPI): void {
-    const description =
-        "Fork this session into one or more parallel Pi processes in tmux/Ghostty. Usage: /branch-out [count] [optional prompt]";
-
     pi.registerCommand("branch-out", {
-        description,
+        description:
+            "Fork this session into one or more parallel Pi processes. Usage: /branch-out [--panes] [count] [optional prompt]",
         handler: async (args, ctx) => {
             await handleBranchOut(pi, args, ctx);
         },
