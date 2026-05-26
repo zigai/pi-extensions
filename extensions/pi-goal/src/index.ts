@@ -34,6 +34,7 @@ import {
 } from "./recovery.js";
 import {
   clearEntry,
+  cloneGoal,
   goalWithLiveUsage,
   goalsEquivalent,
   hostOverflowCapResetEntry,
@@ -50,9 +51,11 @@ interface StatusContext {
 }
 
 const CONTINUATION_RETRY_MS = 50;
+const RUNTIME_PERSIST_INTERVAL_MS = 60_000;
 
 export const __testHooks = {
   continuationRetryMs: CONTINUATION_RETRY_MS,
+  runtimePersistIntervalMs: RUNTIME_PERSIST_INTERVAL_MS,
 };
 
 export default function (pi: ExtensionAPI): void {
@@ -77,6 +80,8 @@ export default function (pi: ExtensionAPI): void {
   let recoveryState: GoalRecoveryMachineState = createGoalRecoveryMachine();
   let hostOverflowRecoveryInProgress = false;
   let hostOverflowCapNeedsUserReset = false;
+  let lastPersistedGoal: ThreadGoal | null = null;
+  let lastRuntimePersistAt: number | null = null;
 
   const goalForDisplay = (): ThreadGoal | null =>
     goalWithLiveUsage(goal, accounting.activeGoalId, accounting.lastAccountedAt);
@@ -295,13 +300,8 @@ export default function (pi: ExtensionAPI): void {
     return true;
   };
 
-  const persistGoal = (nextGoal: ThreadGoal, source: GoalEntrySource): boolean => {
-    if (goal && goalsEquivalent(goal, nextGoal)) {
-      return false;
-    }
-
+  const applyGoalSideEffects = (nextGoal: ThreadGoal): void => {
     const previousGoalId = goal?.goalId ?? null;
-    goal = nextGoal;
     if (previousGoalId !== nextGoal.goalId) {
       accounting.budgetWarningSentFor = null;
       clearStoppedRuntimeState();
@@ -313,18 +313,58 @@ export default function (pi: ExtensionAPI): void {
       clearActiveAccounting();
     } else if (nextGoal.status === "budgetLimited") {
       clearContinuationState();
+      clearActiveAccounting();
       resetErrorRecovery();
     }
     if (nextGoal.status !== "budgetLimited") {
       accounting.budgetWarningSentFor = null;
     }
-    pi.appendEntry(CUSTOM_ENTRY_TYPE, setEntry(nextGoal, source));
+  };
+
+  const setGoalInMemory = (nextGoal: ThreadGoal): void => {
+    applyGoalSideEffects(nextGoal);
+    goal = nextGoal;
+  };
+
+  const flushGoalPersistence = (source: GoalEntrySource): boolean => {
+    if (!goal) {
+      return false;
+    }
+    if (lastPersistedGoal && goalsEquivalent(goal, lastPersistedGoal)) {
+      return false;
+    }
+
+    pi.appendEntry(CUSTOM_ENTRY_TYPE, setEntry(goal, source));
+    lastPersistedGoal = cloneGoal(goal);
+    lastRuntimePersistAt = Date.now();
     return true;
+  };
+
+  const maybeFlushRuntimePersistence = (source: GoalEntrySource): void => {
+    if (!goal || goal.status !== "active") {
+      return;
+    }
+    const now = Date.now();
+    if (lastRuntimePersistAt !== null && now - lastRuntimePersistAt < RUNTIME_PERSIST_INTERVAL_MS) {
+      return;
+    }
+    flushGoalPersistence(source);
+  };
+
+  const persistGoal = (nextGoal: ThreadGoal, source: GoalEntrySource): boolean => {
+    if (goal && goalsEquivalent(goal, nextGoal)) {
+      return false;
+    }
+
+    setGoalInMemory(nextGoal);
+    return flushGoalPersistence(source);
   };
 
   const persistClear = (source: GoalEntrySource): void => {
     const clearedGoalId = goal?.goalId ?? null;
     goal = null;
+    lastPersistedGoal = null;
+    lastRuntimePersistAt = null;
     clearStoppedRuntimeState();
     stopStatusRefresh();
     pi.appendEntry(CUSTOM_ENTRY_TYPE, clearEntry(clearedGoalId, source));
@@ -373,6 +413,8 @@ export default function (pi: ExtensionAPI): void {
     const previousGoalId = goal?.goalId ?? null;
     const branch = ctx.sessionManager.getBranch();
     goal = reconstructGoal(branch).goal;
+    lastPersistedGoal = goal ? cloneGoal(goal) : null;
+    lastRuntimePersistAt = null;
     hostOverflowCapNeedsUserReset = reconstructHostOverflowCapNeedsUserReset(branch);
     clearContinuationState();
     if (goal?.status !== "active") {
@@ -386,8 +428,9 @@ export default function (pi: ExtensionAPI): void {
 
   const goalAccounting = createGoalAccounting({
     getGoal: () => goal,
+    setGoal: setGoalInMemory,
     getAccounting: () => accounting,
-    persistGoal,
+    flushGoalPersistence,
     refreshUi,
     sendMessage: pi.sendMessage.bind(pi),
   });
@@ -705,6 +748,7 @@ export default function (pi: ExtensionAPI): void {
     }
 
     goalAccounting.accountProgress(ctx, true, 0, true);
+    maybeFlushRuntimePersistence("runtime");
   });
 
   pi.on("turn_end", async (_event, ctx) => {
@@ -714,6 +758,7 @@ export default function (pi: ExtensionAPI): void {
 
     const completedTurnTokens = assistantTurnTokens(_event.message);
     goalAccounting.accountProgress(ctx, true, completedTurnTokens);
+    flushGoalPersistence("runtime");
     if (isAbortedAssistantMessage(_event.message)) {
       pauseForAbort(ctx);
       return;
@@ -741,6 +786,7 @@ export default function (pi: ExtensionAPI): void {
       return sum + assistantTurnTokens(message);
     }, 0);
     goalAccounting.accountProgress(ctx, false, abortedTurnTokens, true);
+    flushGoalPersistence("runtime");
     if (abortedMessages.length > 0) {
       pauseForAbort(ctx);
       return;
@@ -772,6 +818,7 @@ export default function (pi: ExtensionAPI): void {
     }
 
     goalAccounting.accountProgress(ctx, false, 0, true);
+    flushGoalPersistence("runtime");
   });
 
   pi.on("session_compact", async (_event, ctx) => {
@@ -779,9 +826,7 @@ export default function (pi: ExtensionAPI): void {
       return;
     }
 
-    if (goal) {
-      persistGoal(goal, "runtime");
-    }
+    flushGoalPersistence("runtime");
     recoveryRuntime.onSessionCompact();
     refreshUi(ctx);
     if (!hostOverflowRecoveryInProgress) {
@@ -797,6 +842,7 @@ export default function (pi: ExtensionAPI): void {
     clearStaleQueuedGoalWorkTerminalEvents();
 
     goalAccounting.accountProgress(ctx, false, 0, true);
+    flushGoalPersistence("runtime");
     clearContinuationTimer();
     if (hasPendingRecoveryAttention()) {
       pauseForPendingRecoveryShutdown(ctx);
