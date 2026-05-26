@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-goal",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Codex-style goal tracking and continuation for pi.",
   "type": "module",
   "author": "Mitch Fultz (https://github.com/fitchmultz)",
@@ -63,7 +63,7 @@
     "typescript": "^6.0.3"
   },
   "engines": {
-    "node": ">=22 <25"
+    "node": ">=22.19.0 <27"
   },
   "packageManager": "npm@11.0.0"
 }

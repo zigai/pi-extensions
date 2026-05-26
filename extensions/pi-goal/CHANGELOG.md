@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.14 - 2026-05-26
+
+- Widens the package Node engine range to support Node 22.19.0 through Node 26.x.
+
 ## 0.1.13 - 2026-05-26
 
 - Bounds hidden goal continuation provider context by superseding older active-goal continuations with short bookkeeping markers, refreshing only the latest continuation, and using compact auto-continuation prompts after `/goal` start or resume.
