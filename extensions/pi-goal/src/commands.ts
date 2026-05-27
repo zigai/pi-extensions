@@ -42,11 +42,7 @@ function queueGoalTurn(pi: GoalCommandPi, goal: ThreadGoal, kind: "command_start
   );
 }
 
-function queueGoalUserResumeTurn(pi: GoalCommandPi, goal: ThreadGoal): void {
-  pi.sendUserMessage(compactContinuationPrompt(goal), { deliverAs: "followUp" });
-}
-
-function queueGoalUserStartTurn(pi: GoalCommandPi, goal: ThreadGoal): void {
+function queueGoalUserTurn(pi: GoalCommandPi, goal: ThreadGoal): void {
   pi.sendUserMessage(compactContinuationPrompt(goal), { deliverAs: "followUp" });
 }
 
@@ -84,7 +80,7 @@ export async function handleGoalCommand(
     host.setGoal(result.goal, "command", ctx);
     ctx.ui.notify(result.message);
     if (trimmed === "resume" && result.goal.status === "active") {
-      queueGoalUserResumeTurn(pi, result.goal);
+      queueGoalUserTurn(pi, result.goal);
     }
     return;
   }
@@ -113,7 +109,7 @@ export async function handleGoalCommand(
   host.setGoal(result.goal, "command", ctx);
   ctx.ui.notify(result.message);
   if (host.getGoalStartTurnStrategy() === "userFollowUp") {
-    queueGoalUserStartTurn(pi, result.goal);
+    queueGoalUserTurn(pi, result.goal);
   } else {
     queueGoalTurn(pi, result.goal, "command_start");
   }

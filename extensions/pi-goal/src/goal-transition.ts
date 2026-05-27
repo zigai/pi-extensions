@@ -275,10 +275,6 @@ function validateActiveToPausedTransition(
   requireStatusHelperImmutableFields(current, nextGoal, kind);
 }
 
-function validateAbortPause(current: ThreadGoal | null, nextGoal: ThreadGoal): void {
-  validateActiveToPausedTransition("abort_pause", current, nextGoal);
-}
-
 function validateResumeActive(current: ThreadGoal | null, nextGoal: ThreadGoal): void {
   const kind = "resume_active";
   requireCurrentGoal(current, kind);
