@@ -2,6 +2,7 @@ import { reduceAbortingQueuedWork } from "./stale-queued-work-aborting.js";
 import { reduceAwaitingTerminalCleanup } from "./stale-queued-work-awaiting-terminal-cleanup.js";
 import { reduceIdleQueuedWork } from "./stale-queued-work-idle.js";
 import { reduceObservingQueuedWork } from "./stale-queued-work-observing.js";
+import { cloneTerminalCleanup } from "./stale-queued-work-terminal-cleanup.js";
 import type {
   StaleQueuedWorkEvent,
   StaleQueuedWorkLifecycleKind,
@@ -29,15 +30,47 @@ export function reduceStaleQueuedWork(
   state: StaleQueuedWorkState,
   event: StaleQueuedWorkEvent,
 ): StaleQueuedWorkTransitionResult {
-  switch (state.kind) {
+  const draft = cloneStaleQueuedWorkState(state);
+  switch (draft.kind) {
     case "idle":
       return reduceIdleQueuedWork(event);
     case "observingTurn":
-      return reduceObservingQueuedWork(state, event);
+      return reduceObservingQueuedWork(draft, event);
     case "abortingTurn":
-      return reduceAbortingQueuedWork(state, event);
+      return reduceAbortingQueuedWork(draft, event);
     case "awaitingTerminalCleanup":
-      return reduceAwaitingTerminalCleanup(state, event);
+      return reduceAwaitingTerminalCleanup(draft, event);
+    default: {
+      const _exhaustive: never = draft;
+      return _exhaustive;
+    }
+  }
+}
+
+function cloneStaleQueuedWorkState(state: StaleQueuedWorkState): StaleQueuedWorkState {
+  switch (state.kind) {
+    case "idle":
+      return { kind: "idle" };
+    case "observingTurn":
+      return {
+        kind: "observingTurn",
+        staleGoalIds: new Set(state.staleGoalIds),
+        hasRunnableWork: state.hasRunnableWork,
+        ...(state.terminalCleanup
+          ? { terminalCleanup: cloneTerminalCleanup(state.terminalCleanup) }
+          : {}),
+      };
+    case "abortingTurn":
+      return {
+        kind: "abortingTurn",
+        activeTurnIndex: state.activeTurnIndex,
+        terminalCleanup: cloneTerminalCleanup(state.terminalCleanup),
+      };
+    case "awaitingTerminalCleanup":
+      return {
+        kind: "awaitingTerminalCleanup",
+        terminalCleanup: cloneTerminalCleanup(state.terminalCleanup),
+      };
     default: {
       const _exhaustive: never = state;
       return _exhaustive;

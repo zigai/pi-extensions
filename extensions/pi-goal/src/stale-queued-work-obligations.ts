@@ -47,21 +47,21 @@ export function consumePendingStaleAgentEnd(
 ): boolean {
   const pendingGoalIds = pendingGoalIdsFromObligations(cleanup.pendingAgentEndObligations);
   const matchedGoalIds = pendingStaleQueuedGoalWorkIdsFromMessages(messages, pendingGoalIds);
-  const goalMatch = consumeMatchingObligations(cleanup.pendingAgentEndObligations, {
-    kind: "goalIds",
+  const goalMatch = consumeGoalBearingTerminal(
+    cleanup.pendingAgentEndObligations,
     matchedGoalIds,
-    phaseOrder: ["older", "active"],
-  });
+    ["older", "active"],
+  );
   if (goalMatch.consumed) {
     return true;
   }
   if (!matchesAnonymousStaleAgentEnd(messages)) {
     return false;
   }
-  return consumeMatchingObligations(cleanup.pendingAgentEndObligations, {
-    kind: "anonymous",
-    phaseOrder: ["older", "active"],
-  }).consumed;
+  return consumeAnonymousTerminal(
+    cleanup.pendingAgentEndObligations,
+    ["older", "active"],
+  ).consumed;
 }
 
 export type AbortingAgentEndConsumption = {
@@ -84,11 +84,11 @@ export function consumeAbortingAgentEnd(
     matchedGoalIds.length > 0 &&
     isSubsetOfSet(matchedGoalIds, pendingGoalIdsByPhase(terminalCleanup, "active"));
 
-  const goalMatch = consumeMatchingObligations(terminalCleanup.pendingAgentEndObligations, {
-    kind: "goalIds",
+  const goalMatch = consumeGoalBearingTerminal(
+    terminalCleanup.pendingAgentEndObligations,
     matchedGoalIds,
-    phaseOrder: preferActiveFirst ? ["active", "older"] : ["older", "active"],
-  });
+    preferActiveFirst ? ["active", "older"] : ["older", "active"],
+  );
 
   let consumedActive = goalMatch.consumedActive;
   let consumedOlder = goalMatch.consumedOlder;
@@ -98,13 +98,9 @@ export function consumeAbortingAgentEnd(
       terminalCleanup.pendingAgentEndObligations.some(
         (obligation) => obligation.phase === "active" && obligation.acceptsAnonymous,
       );
-    const anonymousMatch = consumeMatchingObligations(
+    const anonymousMatch = consumeAnonymousTerminalForAbortingTurn(
       terminalCleanup.pendingAgentEndObligations,
-      {
-        kind: "anonymous",
-        phaseOrder: preferActiveAnonymous ? ["active", "older"] : ["older", "active"],
-        consumeAnyInLastPhase: true,
-      },
+      preferActiveAnonymous ? ["active", "older"] : ["older", "active"],
     );
     consumedActive ||= anonymousMatch.consumedActive;
     consumedOlder ||= anonymousMatch.consumedOlder;
@@ -184,71 +180,110 @@ function obligationMatchesAnyGoal(
   return false;
 }
 
-type ConsumePolicy =
-  | {
-      kind: "goalIds";
-      matchedGoalIds: readonly string[];
-      phaseOrder: readonly TerminalObligationPhase[];
-    }
-  | {
-      kind: "anonymous";
-      phaseOrder: readonly TerminalObligationPhase[];
-      consumeAnyInLastPhase?: boolean;
-    };
-
 type ConsumptionResult = {
   consumed: boolean;
   consumedOlder: boolean;
   consumedActive: boolean;
 };
 
-function consumeMatchingObligations(
+function emptyConsumptionResult(): ConsumptionResult {
+  return { consumed: false, consumedOlder: false, consumedActive: false };
+}
+
+function recordConsumedObligation(result: ConsumptionResult, obligation: AgentEndObligation): void {
+  result.consumed = true;
+  result.consumedOlder ||= obligation.phase === "older";
+  result.consumedActive ||= obligation.phase === "active";
+}
+
+function consumeObligationAt(
   obligations: AgentEndObligation[],
-  policy: ConsumePolicy,
+  index: number,
+): AgentEndObligation | null {
+  const [obligation] = obligations.splice(index, 1);
+  return obligation ?? null;
+}
+
+function consumeGoalBearingTerminal(
+  obligations: AgentEndObligation[],
+  matchedGoalIds: readonly string[],
+  phaseOrder: readonly TerminalObligationPhase[],
 ): ConsumptionResult {
-  const result: ConsumptionResult = {
-    consumed: false,
-    consumedOlder: false,
-    consumedActive: false,
-  };
-  const remainingGoalIds =
-    policy.kind === "goalIds" ? new Set(policy.matchedGoalIds) : new Set<string>();
+  const result = emptyConsumptionResult();
+  const remainingGoalIds = new Set(matchedGoalIds);
 
-  const consumeAt = (index: number): void => {
-    const [obligation] = obligations.splice(index, 1);
-    if (!obligation) {
-      return;
-    }
-    result.consumed = true;
-    result.consumedOlder ||= obligation.phase === "older";
-    result.consumedActive ||= obligation.phase === "active";
-    for (const goalId of obligation.goalIds) {
-      remainingGoalIds.delete(goalId);
-    }
-  };
-
-  for (const phase of policy.phaseOrder) {
+  for (const phase of phaseOrder) {
     for (let index = 0; index < obligations.length; ) {
       const obligation = obligations[index]!;
-      if (obligation.phase !== phase) {
+      if (
+        obligation.phase !== phase ||
+        remainingGoalIds.size === 0 ||
+        !obligationMatchesAnyGoal(obligation, remainingGoalIds)
+      ) {
         index += 1;
         continue;
       }
 
-      const matches =
-        policy.kind === "goalIds"
-          ? remainingGoalIds.size > 0 && obligationMatchesAnyGoal(obligation, remainingGoalIds)
-          : obligation.acceptsAnonymous ||
-            Boolean(policy.consumeAnyInLastPhase && phase === policy.phaseOrder.at(-1));
-      if (!matches) {
-        index += 1;
-        continue;
+      const consumed = consumeObligationAt(obligations, index);
+      if (consumed) {
+        recordConsumedObligation(result, consumed);
+        for (const goalId of consumed.goalIds) {
+          remainingGoalIds.delete(goalId);
+        }
       }
-
-      consumeAt(index);
-      if (policy.kind === "anonymous" || remainingGoalIds.size === 0) {
+      if (remainingGoalIds.size === 0) {
         return result;
       }
+    }
+  }
+
+  return result;
+}
+
+function consumeAnonymousTerminal(
+  obligations: AgentEndObligation[],
+  phaseOrder: readonly TerminalObligationPhase[],
+): ConsumptionResult {
+  const result = emptyConsumptionResult();
+
+  for (const phase of phaseOrder) {
+    for (let index = 0; index < obligations.length; index += 1) {
+      const obligation = obligations[index]!;
+      if (obligation.phase !== phase || !obligation.acceptsAnonymous) {
+        continue;
+      }
+
+      const consumed = consumeObligationAt(obligations, index);
+      if (consumed) {
+        recordConsumedObligation(result, consumed);
+      }
+      return result;
+    }
+  }
+
+  return result;
+}
+
+function consumeAnonymousTerminalForAbortingTurn(
+  obligations: AgentEndObligation[],
+  phaseOrder: readonly TerminalObligationPhase[],
+): ConsumptionResult {
+  const result = emptyConsumptionResult();
+  const fallbackPhase = phaseOrder.at(-1);
+
+  for (const phase of phaseOrder) {
+    for (let index = 0; index < obligations.length; index += 1) {
+      const obligation = obligations[index]!;
+      const matchesCurrentAbort = obligation.acceptsAnonymous || phase === fallbackPhase;
+      if (obligation.phase !== phase || !matchesCurrentAbort) {
+        continue;
+      }
+
+      const consumed = consumeObligationAt(obligations, index);
+      if (consumed) {
+        recordConsumedObligation(result, consumed);
+      }
+      return result;
     }
   }
 

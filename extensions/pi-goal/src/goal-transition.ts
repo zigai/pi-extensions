@@ -35,13 +35,21 @@ export type GoalTransitionEffect =
   | { type: "markContinuationQueued"; goalId: string }
   | { type: "stopStatusRefresh" };
 
-export type GoalTransitionPlan = {
-  persist: "skip" | "defer" | "set" | "clear";
-  nextGoal: ThreadGoal | null;
+type GoalTransitionPlanBase = {
   source: GoalEntrySource;
   beforePersist: GoalTransitionEffect[];
   afterPersist: GoalTransitionEffect[];
 };
+
+export type GoalTransitionPlan =
+  | (GoalTransitionPlanBase & {
+      persist: "skip" | "defer" | "set";
+      nextGoal: ThreadGoal;
+    })
+  | (GoalTransitionPlanBase & {
+      persist: "clear";
+      nextGoal: null;
+    });
 
 function appendEffectOnce(
   effects: GoalTransitionEffect[],
@@ -330,40 +338,20 @@ function validateRuntimeAccounting(current: ThreadGoal | null, nextGoal: ThreadG
   }
 }
 
-type TransitionSpec = {
-  validate: () => void;
-  persist: GoalTransitionPlan["persist"];
-  nextGoal: ThreadGoal | null;
-  source: GoalEntrySource;
-  before: () => GoalTransitionEffect[];
-  after: () => GoalTransitionEffect[];
-};
-
-function buildTransitionPlan(spec: TransitionSpec): GoalTransitionPlan {
-  spec.validate();
-  return {
-    persist: spec.persist,
-    nextGoal: spec.nextGoal,
-    source: spec.source,
-    beforePersist: spec.before(),
-    afterPersist: spec.after(),
-  };
-}
-
 function planActiveToPausedTransition(
   kind: "abort_pause" | "recovery_pause" | "recovery_shutdown_pause",
   current: ThreadGoal | null,
   nextGoal: ThreadGoal,
   extraBefore: readonly GoalTransitionEffect[],
 ): GoalTransitionPlan {
-  return buildTransitionPlan({
-    validate: () => validateActiveToPausedTransition(kind, current, nextGoal),
+  validateActiveToPausedTransition(kind, current, nextGoal);
+  return {
     persist: "set",
     nextGoal,
     source: "runtime",
-    before: () => mergeEffects([...extraBefore], memoryEffectsFromGoalChange(current, nextGoal)),
-    after: () => [],
-  });
+    beforePersist: mergeEffects([...extraBefore], memoryEffectsFromGoalChange(current, nextGoal)),
+    afterPersist: [],
+  };
 }
 
 export function planGoalTransition(
@@ -372,14 +360,13 @@ export function planGoalTransition(
 ): GoalTransitionPlan {
   switch (request.kind) {
     case "clear":
-      return buildTransitionPlan({
-        validate: () => undefined,
+      return {
         persist: "clear",
         nextGoal: null,
         source: request.source,
-        before: () => [...CLEAR_BEFORE_PERSIST],
-        after: () => [{ type: "stopStatusRefresh" }],
-      });
+        beforePersist: [...CLEAR_BEFORE_PERSIST],
+        afterPersist: [{ type: "stopStatusRefresh" }],
+      };
     case "abort_pause":
       return planActiveToPausedTransition(
         "abort_pause",
@@ -388,17 +375,17 @@ export function planGoalTransition(
         ABORT_PAUSE_SET_BEFORE_PERSIST,
       );
     case "resume_active":
-      return buildTransitionPlan({
-        validate: () => validateResumeActive(current, request.nextGoal),
+      validateResumeActive(current, request.nextGoal);
+      return {
         persist: "set",
         nextGoal: request.nextGoal,
         source: "runtime",
-        before: () => mergeEffects(
+        beforePersist: mergeEffects(
           [...RESUME_ACTIVE_BEFORE_PERSIST],
           memoryEffectsFromGoalChange(current, request.nextGoal),
         ),
-        after: () => [],
-      });
+        afterPersist: [],
+      };
     case "recovery_pause":
       return planActiveToPausedTransition(
         "recovery_pause",

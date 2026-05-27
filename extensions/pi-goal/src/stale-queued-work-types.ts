@@ -1,5 +1,3 @@
-import type { AssistantTurnMessage } from "./goal-accounting.js";
-
 export type StaleQueuedWorkEffect =
   | { type: "clearAccounting" }
   | { type: "refreshUi" }
@@ -45,8 +43,7 @@ export type AbortingTurnState = {
 
 export type AwaitingTerminalCleanupState = {
   kind: "awaitingTerminalCleanup";
-  pendingTurnEndIndexes: Set<number>;
-  pendingAgentEndObligations: AgentEndObligation[];
+  terminalCleanup: TerminalCleanup;
 };
 
 export type StaleQueuedWorkState =
@@ -74,7 +71,7 @@ export type StaleQueuedWorkEvent =
   | { type: "toolExecutionEnd" }
   | { type: "sessionBeforeCompact" }
   | { type: "sessionCompact" }
-  | { type: "turnEnd"; turnIndex: number | null; message: AssistantTurnMessage }
+  | { type: "turnEnd"; turnIndex: number | null }
   | { type: "agentEnd"; messages: AgentEndMessage[] }
   | { type: "sessionShutdown" };
 

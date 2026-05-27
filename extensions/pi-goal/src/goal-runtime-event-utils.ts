@@ -10,15 +10,16 @@ import {
 import type { StaleQueuedWorkEffect, StaleQueuedWorkPlan } from "./stale-queued-work-guard.js";
 import type {
   GoalRuntimeContinuationPort,
-  GoalRuntimeEventHandlerDeps,
   QueuedGoalWorkMessage,
   QueuedGoalWorkMessageIdResolver,
+  RecoveryEventDeps,
+  StaleQueuedWorkRuntimePort,
 } from "./goal-runtime-event-handler-types.js";
 
 export function applyStaleQueuedWorkEffects(
   effects: readonly StaleQueuedWorkEffect[],
   ctx: ExtensionContext,
-  deps: Pick<GoalRuntimeEventHandlerDeps, "clearActiveAccounting" | "status">,
+  deps: StaleQueuedWorkRuntimePort,
 ): void {
   for (const effect of effects) {
     switch (effect.type) {
@@ -42,7 +43,7 @@ export function applyStaleQueuedWorkEffects(
 export function runStaleQueuedWorkPlan(
   plan: StaleQueuedWorkPlan,
   ctx: ExtensionContext,
-  deps: GoalRuntimeEventHandlerDeps,
+  deps: StaleQueuedWorkRuntimePort,
 ): boolean {
   applyStaleQueuedWorkEffects(plan.effects, ctx, deps);
   return plan.skip;
@@ -65,7 +66,7 @@ export function getContextWindow(ctx: ExtensionContext): number {
 export function recordAssistantContextOverflow(
   message: AssistantErrorMessage,
   ctx: ExtensionContext,
-  deps: GoalRuntimeEventHandlerDeps,
+  deps: RecoveryEventDeps,
 ): boolean {
   if (!isAssistantContextOverflow(message, getContextWindow(ctx))) {
     return false;
@@ -83,7 +84,7 @@ export function recordAssistantContextOverflow(
 export function handleAgentErrorMessage(
   message: AssistantErrorMessage,
   ctx: ExtensionContext,
-  deps: GoalRuntimeEventHandlerDeps,
+  deps: RecoveryEventDeps,
 ): void {
   recordAssistantContextOverflow(message, ctx, deps);
   if (!isContextOverflowError(message.errorMessage)) {

@@ -5,6 +5,7 @@ import type { StatusContext } from "./goal-runtime-status.js";
 import {
   applyGoalTransitionEffects,
   planGoalTransition,
+  type GoalTransitionEffect,
   type GoalTransitionEffectHandlers,
   type GoalTransitionRequest,
 } from "./goal-transition.js";
@@ -30,9 +31,20 @@ interface GoalStateControllerDeps {
   getRecoveryState: () => GoalRecoveryMachineState;
   transitionEffectHandlers: GoalTransitionEffectHandlers;
   refreshUi: (ctx: StatusContext) => void;
-  clearContinuationState: () => void;
-  clearActiveAccounting: () => void;
-  resetErrorRecovery: () => void;
+}
+
+function reloadRuntimeEffects(
+  previousGoalId: string | null,
+  reconstructed: ThreadGoal | null,
+): GoalTransitionEffect[] {
+  const effects: GoalTransitionEffect[] = [{ type: "clearContinuation" }];
+  if (reconstructed?.status !== "active") {
+    effects.push({ type: "clearActiveAccounting" });
+  }
+  if ((reconstructed?.goalId ?? null) !== previousGoalId) {
+    effects.push({ type: "resetRecovery" });
+  }
+  return effects;
 }
 
 export interface GoalStateController {
@@ -115,7 +127,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     let shouldPersist: boolean;
 
     if (hasActiveGoal) {
-      deps.clearContinuationState();
+      applyGoalTransitionEffects([{ type: "clearContinuation" }], deps.transitionEffectHandlers);
       const { persistHostOverflowCapReset } = beginHostOverflowRecovery(deps.getRecoveryState());
       shouldPersist = persistHostOverflowCapReset;
       deps.refreshUi(ctx);
@@ -138,13 +150,10 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
       deps.getRecoveryState(),
       reconstructHostOverflowCapNeedsUserReset(branch),
     );
-    deps.clearContinuationState();
-    if (reconstructed?.status !== "active") {
-      deps.clearActiveAccounting();
-    }
-    if ((reconstructed?.goalId ?? null) !== previousGoalId) {
-      deps.resetErrorRecovery();
-    }
+    applyGoalTransitionEffects(
+      reloadRuntimeEffects(previousGoalId, reconstructed),
+      deps.transitionEffectHandlers,
+    );
     deps.refreshUi(ctx);
   };
 

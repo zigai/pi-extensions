@@ -13,9 +13,9 @@ import { recoveryPhaseBlocksContinuation } from "./recovery-machine.js";
 import { isRecoveryPendingAttention, reasonFromRecoveryPendingAttention } from "./recovery.js";
 import { updateGoalStatus } from "./state.js";
 import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
-import type { GoalRuntimeEventHandlerDeps } from "./goal-runtime-event-handler-types.js";
+import type { SessionHandlerDeps } from "./goal-runtime-event-handler-types.js";
 
-export function createSessionEventHandlers(deps: GoalRuntimeEventHandlerDeps) {
+export function createSessionEventHandlers(deps: SessionHandlerDeps) {
   const {
     pi,
     runtimeState,
@@ -102,7 +102,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeEventHandlerDeps) {
   };
 }
 
-function hasPendingRecoveryAttention({ runtimeState, stateController }: GoalRuntimeEventHandlerDeps): boolean {
+function hasPendingRecoveryAttention({ runtimeState, stateController }: SessionHandlerDeps): boolean {
   const goal = stateController.getGoal();
   return Boolean(
     goal?.status === "active" && isRecoveryPendingAttention(runtimeState.recoveryState.attention),
@@ -111,7 +111,7 @@ function hasPendingRecoveryAttention({ runtimeState, stateController }: GoalRunt
 
 function pauseForPendingRecoveryShutdown(
   ctx: ExtensionContext,
-  deps: GoalRuntimeEventHandlerDeps,
+  deps: SessionHandlerDeps,
 ): void {
   const { runtimeState, stateController } = deps;
   const goal = stateController.getGoal();

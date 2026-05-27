@@ -1,4 +1,3 @@
-import type { AssistantTurnMessage } from "./goal-accounting.js";
 import {
   createInitialStaleQueuedWorkState,
   lifecycleKindFromState,
@@ -31,7 +30,7 @@ export interface StaleQueuedWorkGuard {
   planToolExecutionEnd(): StaleQueuedWorkPlan;
   planSessionBeforeCompact(): StaleQueuedWorkPlan;
   planSessionCompact(): StaleQueuedWorkPlan;
-  planTurnEnd(turnIndex: number | null, message: AssistantTurnMessage): StaleQueuedWorkPlan;
+  planTurnEnd(turnIndex: number | null): StaleQueuedWorkPlan;
   planAgentEnd(messages: AgentEndMessage[]): StaleQueuedWorkPlan;
   planSessionShutdown(): StaleQueuedWorkPlan;
 }
@@ -100,8 +99,8 @@ export function createStaleQueuedWorkGuard(): StaleQueuedWorkGuard {
       return plan({ type: "sessionCompact" });
     },
 
-    planTurnEnd(turnIndex: number | null, message: AssistantTurnMessage): StaleQueuedWorkPlan {
-      return plan({ type: "turnEnd", turnIndex, message });
+    planTurnEnd(turnIndex: number | null): StaleQueuedWorkPlan {
+      return plan({ type: "turnEnd", turnIndex });
     },
 
     planAgentEnd(messages: AgentEndMessage[]): StaleQueuedWorkPlan {

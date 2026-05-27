@@ -17,6 +17,10 @@ import { CUSTOM_ENTRY_TYPE } from "../../src/types.js";
 
 type EventHandler = (event: object, ctx: ExtensionContext) => unknown | Promise<unknown>;
 
+function unsupportedHarnessMethod(name: string): never {
+  throw new Error(`${name} is not implemented in this test harness.`);
+}
+
 export interface SentMessage {
   message: Parameters<ExtensionAPI["sendMessage"]>[0];
   options: Parameters<ExtensionAPI["sendMessage"]>[1];
@@ -85,9 +89,11 @@ export function createRuntimeHarness(options: {
       });
     },
     events: {
-      emit() {},
+      emit() {
+        unsupportedHarnessMethod("pi.events.emit");
+      },
       on() {
-        return () => {};
+        unsupportedHarnessMethod("pi.events.on");
       },
     },
     exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
@@ -99,9 +105,15 @@ export function createRuntimeHarness(options: {
     getThinkingLevel: () => "medium",
     on,
     registerCommand,
-    registerFlag() {},
-    registerMessageRenderer() {},
-    registerProvider() {},
+    registerFlag() {
+      unsupportedHarnessMethod("pi.registerFlag");
+    },
+    registerMessageRenderer() {
+      unsupportedHarnessMethod("pi.registerMessageRenderer");
+    },
+    registerProvider() {
+      unsupportedHarnessMethod("pi.registerProvider");
+    },
     registerShortcut() {},
     registerTool(tool) {
       tools.set(tool.name, (params) => tool.execute("tool-call", params as never, undefined, undefined, ctx));
@@ -112,12 +124,22 @@ export function createRuntimeHarness(options: {
     sendUserMessage(content, options) {
       sentUserMessages.push({ content, options });
     },
-    setActiveTools() {},
-    setLabel() {},
+    setActiveTools() {
+      unsupportedHarnessMethod("pi.setActiveTools");
+    },
+    setLabel() {
+      unsupportedHarnessMethod("pi.setLabel");
+    },
     setModel: async () => false,
-    setSessionName() {},
-    setThinkingLevel() {},
-    unregisterProvider() {},
+    setSessionName() {
+      unsupportedHarnessMethod("pi.setSessionName");
+    },
+    setThinkingLevel() {
+      unsupportedHarnessMethod("pi.setThinkingLevel");
+    },
+    unregisterProvider() {
+      unsupportedHarnessMethod("pi.unregisterProvider");
+    },
   };
 
   const sessionManager: ExtensionCommandContext["sessionManager"] = {
@@ -180,6 +202,33 @@ export function createRuntimeHarness(options: {
     getContextUsage: () => undefined,
     getSystemPrompt: () => "",
     hasUI: true,
+    compact(options) {
+      const call: (typeof compactCalls)[number] = {};
+      if (options?.customInstructions !== undefined) {
+        call.customInstructions = options.customInstructions;
+      }
+      if (options?.onComplete) {
+        call.onComplete = (result) => options.onComplete?.(result);
+      }
+      if (options?.onError) {
+        call.onError = (error) => options.onError?.(error);
+      }
+      compactCalls.push(call);
+      if (runtime.compactBehavior === "unavailable") {
+        unsupportedHarnessMethod("ctx.compact");
+      }
+      if (runtime.compactBehavior === "error") {
+        options?.onError?.(new Error("compaction failed"));
+        return;
+      }
+      if (runtime.compactCompletion === "immediate") {
+        options?.onComplete?.({
+          summary: "compact summary",
+          tokensBefore: 100,
+          firstKeptEntryId: "entry-1",
+        });
+      }
+    },
     hasPendingMessages: () => runtime.pendingMessages,
     isIdle: () => runtime.idle,
     model: undefined,
@@ -192,7 +241,8 @@ export function createRuntimeHarness(options: {
     signal: undefined,
     switchSession: async () => ({ cancelled: false }),
     ui,
-  } as unknown as ExtensionCommandContext;
+    waitForIdle: async () => {},
+  } satisfies ExtensionCommandContext;
 
   if (options.contextWindow !== undefined) {
     ctx.model = {
@@ -200,33 +250,6 @@ export function createRuntimeHarness(options: {
       provider: "test",
       contextWindow: options.contextWindow,
     } as ExtensionCommandContext["model"];
-  }
-
-  if (runtime.compactBehavior !== "unavailable") {
-    ctx.compact = (options) => {
-      const call: (typeof compactCalls)[number] = {};
-      if (options?.customInstructions !== undefined) {
-        call.customInstructions = options.customInstructions;
-      }
-      if (options?.onComplete) {
-        call.onComplete = (result) => options.onComplete?.(result);
-      }
-      if (options?.onError) {
-        call.onError = (error) => options.onError?.(error);
-      }
-      compactCalls.push(call);
-      if (runtime.compactBehavior === "error") {
-        options?.onError?.(new Error("compaction failed"));
-        return;
-      }
-      if (runtime.compactCompletion === "immediate") {
-        options?.onComplete?.({
-          summary: "compact summary",
-          tokensBefore: 100,
-          firstKeptEntryId: "entry-1",
-        });
-      }
-    };
   }
 
   goalExtension(pi);

@@ -87,9 +87,6 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       stopStatusRefresh: () => status.stopStatusRefresh(),
     },
     refreshUi: (ctx) => status.refreshUi(ctx),
-    clearContinuationState: continuation.clearContinuationState,
-    clearActiveAccounting,
-    resetErrorRecovery,
   });
 
   const goalAccounting = createGoalAccounting({

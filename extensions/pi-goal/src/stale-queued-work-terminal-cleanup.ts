@@ -1,6 +1,5 @@
 import { markAllObligationsOlder } from "./stale-queued-work-obligations.js";
 import type {
-  AwaitingTerminalCleanupState,
   ObservingTurnState,
   StaleQueuedWorkState,
   TerminalCleanup,
@@ -30,18 +29,6 @@ export function noteTerminalEvents(
   }
 }
 
-export function terminalCleanupFromAwaiting(
-  state: AwaitingTerminalCleanupState,
-): { cleanup: TerminalCleanup; observing: null } {
-  return {
-    cleanup: {
-      pendingTurnEndIndexes: state.pendingTurnEndIndexes,
-      pendingAgentEndObligations: state.pendingAgentEndObligations,
-    },
-    observing: null,
-  };
-}
-
 export function terminalCleanupFromObserving(
   state: ObservingTurnState,
 ): { cleanup: TerminalCleanup; observing: ObservingTurnState } | null {
@@ -68,8 +55,7 @@ export function resolveLifecycleAfterTerminalCleanup(
   if (hasPending) {
     return {
       kind: "awaitingTerminalCleanup",
-      pendingTurnEndIndexes: cleanup.pendingTurnEndIndexes,
-      pendingAgentEndObligations: cleanup.pendingAgentEndObligations,
+      terminalCleanup: cleanup,
     };
   }
   return { kind: "idle" };
@@ -82,8 +68,7 @@ export function awaitingFromCleanup(cleanup: TerminalCleanup): StaleQueuedWorkSt
   }
   return {
     kind: "awaitingTerminalCleanup",
-    pendingTurnEndIndexes: cleanup.pendingTurnEndIndexes,
-    pendingAgentEndObligations: cleanup.pendingAgentEndObligations,
+    terminalCleanup: cleanup,
   };
 }
 

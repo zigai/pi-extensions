@@ -57,9 +57,6 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
     refreshUi: () => {
       refreshCount += 1;
     },
-    clearContinuationState: () => {},
-    clearActiveAccounting: () => {},
-    resetErrorRecovery: () => {},
   });
 
   return {

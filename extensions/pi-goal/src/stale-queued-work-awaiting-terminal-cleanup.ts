@@ -3,7 +3,6 @@ import { consumePendingStaleAgentEnd } from "./stale-queued-work-obligations.js"
 import {
   consumePendingStaleTurnEnd,
   resolveLifecycleAfterTerminalCleanup,
-  terminalCleanupFromAwaiting,
 } from "./stale-queued-work-terminal-cleanup.js";
 import { beginObservingTurn } from "./stale-queued-work-observing.js";
 import type {
@@ -52,12 +51,11 @@ function reduceAwaitingTurnEnd(
   state: AwaitingTerminalCleanupState,
   turnIndex: number | null,
 ): StaleQueuedWorkTransitionResult {
-  const pending = terminalCleanupFromAwaiting(state);
-  if (!consumePendingStaleTurnEnd(pending.cleanup, turnIndex)) {
+  if (!consumePendingStaleTurnEnd(state.terminalCleanup, turnIndex)) {
     return transition(state, emptyPlan());
   }
   return transition(
-    resolveLifecycleAfterTerminalCleanup(pending.cleanup, pending.observing),
+    resolveLifecycleAfterTerminalCleanup(state.terminalCleanup, null),
     skipPlan({ type: "refreshUi" }),
   );
 }
@@ -66,12 +64,11 @@ function reduceAwaitingAgentEnd(
   state: AwaitingTerminalCleanupState,
   messages: AgentEndMessage[],
 ): StaleQueuedWorkTransitionResult {
-  const pending = terminalCleanupFromAwaiting(state);
-  if (!consumePendingStaleAgentEnd(pending.cleanup, messages)) {
+  if (!consumePendingStaleAgentEnd(state.terminalCleanup, messages)) {
     return transition(state, emptyPlan());
   }
   return transition(
-    resolveLifecycleAfterTerminalCleanup(pending.cleanup, pending.observing),
+    resolveLifecycleAfterTerminalCleanup(state.terminalCleanup, null),
     skipPlan({ type: "refreshUi" }),
   );
 }

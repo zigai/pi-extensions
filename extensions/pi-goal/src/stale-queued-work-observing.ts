@@ -38,10 +38,7 @@ export function beginObservingTurn(
         kind: "observingTurn",
         staleGoalIds: new Set(),
         hasRunnableWork: false,
-        terminalCleanup: {
-          pendingTurnEndIndexes: lifecycle.pendingTurnEndIndexes,
-          pendingAgentEndObligations: lifecycle.pendingAgentEndObligations,
-        },
+        terminalCleanup: lifecycle.terminalCleanup,
       };
     default: {
       const _exhaustive: never = lifecycle;
@@ -90,8 +87,7 @@ function finishObservingTurn(observing: ObservingTurnState): StaleQueuedWorkStat
   if (cleanup !== undefined && terminalCleanupHasPending(cleanup)) {
     return {
       kind: "awaitingTerminalCleanup",
-      pendingTurnEndIndexes: cleanup.pendingTurnEndIndexes,
-      pendingAgentEndObligations: cleanup.pendingAgentEndObligations,
+      terminalCleanup: cleanup,
     };
   }
   return { kind: "idle" };
@@ -109,8 +105,7 @@ function reduceObservingContextAbort(
     return transition(
       {
         kind: "awaitingTerminalCleanup",
-        pendingTurnEndIndexes: state.terminalCleanup.pendingTurnEndIndexes,
-        pendingAgentEndObligations: state.terminalCleanup.pendingAgentEndObligations,
+        terminalCleanup: state.terminalCleanup,
       },
       null,
     );

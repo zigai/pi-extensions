@@ -17,7 +17,6 @@ export function reduceIdleQueuedWork(event: StaleQueuedWorkEvent): StaleQueuedWo
     case "contextAbort":
       return transition({ kind: "idle" }, null);
     case "sessionShutdown":
-      return transition({ kind: "idle" }, emptyPlan());
     case "userInputClearAbort":
     case "extensionContinuationClearAbort":
     case "beforeAgentStartClearAbort":

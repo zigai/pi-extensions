@@ -127,8 +127,7 @@ function finishActiveAbortingLifecycle(
   const nextState: StaleQueuedWorkState = terminalCleanupHasPending(cleanup)
     ? {
         kind: "awaitingTerminalCleanup",
-        pendingTurnEndIndexes: cleanup.pendingTurnEndIndexes,
-        pendingAgentEndObligations: cleanup.pendingAgentEndObligations,
+        terminalCleanup: cleanup,
       }
     : { kind: "idle" };
   return transition(nextState, skipPlan({ type: "clearAccounting" }, { type: "refreshUi" }));
