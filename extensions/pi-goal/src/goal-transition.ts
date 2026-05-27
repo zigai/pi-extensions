@@ -1,5 +1,16 @@
+import {
+  appendGoalTransitionEffectOnce,
+  mergeGoalTransitionEffects,
+  type GoalTransitionEffect,
+} from "./goal-transition-effects.js";
 import { cloneGoal, goalsEquivalent, statusAfterBudgetLimit, unixSeconds } from "./state.js";
 import type { GoalEntrySource, GoalStatus, ThreadGoal } from "./types.js";
+
+export {
+  applyGoalTransitionEffects,
+  type GoalTransitionEffect,
+  type GoalTransitionEffectHandlers,
+} from "./goal-transition-effects.js";
 
 export type GoalTransitionRequest =
   | {
@@ -23,16 +34,6 @@ export type GoalTransitionRequest =
       nextGoal: ThreadGoal;
     };
 
-export type GoalTransitionEffect =
-  | { type: "clearContinuation" }
-  | { type: "clearActiveAccounting" }
-  | { type: "resetRecovery" }
-  | { type: "clearBudgetWarning" }
-  | { type: "clearHostOverflowRecovery" }
-  | { type: "setRecoveryPausedAttention"; reason: string }
-  | { type: "markContinuationQueued"; goalId: string }
-  | { type: "stopStatusRefresh" };
-
 type GoalTransitionPlanBase = {
   source: GoalEntrySource;
   beforePersist: GoalTransitionEffect[];
@@ -49,16 +50,6 @@ export type GoalTransitionPlan =
       nextGoal: null;
     });
 
-function appendEffectOnce(
-  effects: GoalTransitionEffect[],
-  effect: GoalTransitionEffect,
-): void {
-  const key = effectKey(effect);
-  if (!effects.some((existing) => effectKey(existing) === key)) {
-    effects.push(effect);
-  }
-}
-
 function memoryEffectsFromGoalChange(
   previous: ThreadGoal | null,
   next: ThreadGoal,
@@ -67,48 +58,27 @@ function memoryEffectsFromGoalChange(
   const goalIdChanged = (previous?.goalId ?? null) !== next.goalId;
 
   if (goalIdChanged) {
-    appendEffectOnce(effects, { type: "clearContinuation" });
-    appendEffectOnce(effects, { type: "clearActiveAccounting" });
-    appendEffectOnce(effects, { type: "resetRecovery" });
-    appendEffectOnce(effects, { type: "clearBudgetWarning" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
+    appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearBudgetWarning" });
   }
   if (next.status === "complete") {
-    appendEffectOnce(effects, { type: "clearContinuation" });
-    appendEffectOnce(effects, { type: "clearActiveAccounting" });
-    appendEffectOnce(effects, { type: "resetRecovery" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
+    appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
   } else if (next.status === "paused") {
-    appendEffectOnce(effects, { type: "clearContinuation" });
-    appendEffectOnce(effects, { type: "clearActiveAccounting" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
   } else if (next.status === "budgetLimited") {
-    appendEffectOnce(effects, { type: "clearContinuation" });
-    appendEffectOnce(effects, { type: "clearActiveAccounting" });
-    appendEffectOnce(effects, { type: "resetRecovery" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
+    appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
   }
   if (next.status !== "budgetLimited") {
-    appendEffectOnce(effects, { type: "clearBudgetWarning" });
+    appendGoalTransitionEffectOnce(effects, { type: "clearBudgetWarning" });
   }
   return effects;
-}
-
-function effectKey(effect: GoalTransitionEffect): string {
-  switch (effect.type) {
-    case "setRecoveryPausedAttention":
-      return `${effect.type}:${effect.reason}`;
-    case "markContinuationQueued":
-      return `${effect.type}:${effect.goalId}`;
-    default:
-      return effect.type;
-  }
-}
-
-function mergeEffects(...groups: readonly GoalTransitionEffect[][]): GoalTransitionEffect[] {
-  const result: GoalTransitionEffect[] = [];
-  for (const group of groups) {
-    for (const effect of group) {
-      appendEffectOnce(result, effect);
-    }
-  }
-  return result;
 }
 
 function crossedBudgetTransition(current: ThreadGoal | null, nextGoal: ThreadGoal): boolean {
@@ -255,7 +225,7 @@ function planDerivedActiveToPausedTransition(
     persist: "set",
     nextGoal,
     source: "runtime",
-    beforePersist: mergeEffects([...extraBefore], memoryEffectsFromGoalChange(current, nextGoal)),
+    beforePersist: mergeGoalTransitionEffects([...extraBefore], memoryEffectsFromGoalChange(current, nextGoal)),
     afterPersist: [],
   };
 }
@@ -272,7 +242,7 @@ function planDerivedResumeActiveTransition(
     persist: "set",
     nextGoal,
     source: "runtime",
-    beforePersist: mergeEffects(
+    beforePersist: mergeGoalTransitionEffects(
       [{ type: "clearContinuation" }, { type: "resetRecovery" }],
       memoryEffectsFromGoalChange(current, nextGoal),
     ),
@@ -419,55 +389,6 @@ export function planGoalTransition(
     default: {
       const _exhaustive: never = request;
       throw new Error(`Unhandled goal transition request: ${String(_exhaustive)}`);
-    }
-  }
-}
-
-export interface GoalTransitionEffectHandlers {
-  clearContinuation: () => void;
-  clearActiveAccounting: () => void;
-  resetRecovery: () => void;
-  clearBudgetWarning: () => void;
-  clearHostOverflowRecovery: () => void;
-  setRecoveryPausedAttention: (reason: string) => void;
-  markContinuationQueued: (goalId: string) => void;
-  stopStatusRefresh: () => void;
-}
-
-export function applyGoalTransitionEffects(
-  effects: readonly GoalTransitionEffect[],
-  handlers: GoalTransitionEffectHandlers,
-): void {
-  for (const effect of effects) {
-    switch (effect.type) {
-      case "clearContinuation":
-        handlers.clearContinuation();
-        break;
-      case "clearActiveAccounting":
-        handlers.clearActiveAccounting();
-        break;
-      case "resetRecovery":
-        handlers.resetRecovery();
-        break;
-      case "clearBudgetWarning":
-        handlers.clearBudgetWarning();
-        break;
-      case "clearHostOverflowRecovery":
-        handlers.clearHostOverflowRecovery();
-        break;
-      case "setRecoveryPausedAttention":
-        handlers.setRecoveryPausedAttention(effect.reason);
-        break;
-      case "markContinuationQueued":
-        handlers.markContinuationQueued(effect.goalId);
-        break;
-      case "stopStatusRefresh":
-        handlers.stopStatusRefresh();
-        break;
-      default: {
-        const _exhaustive: never = effect;
-        throw new Error(`Unhandled goal transition effect: ${String(_exhaustive)}`);
-      }
     }
   }
 }

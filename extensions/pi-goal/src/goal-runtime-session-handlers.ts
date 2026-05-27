@@ -12,9 +12,9 @@ import { compactContinuationPrompt } from "./prompts.js";
 import { recoveryPhaseBlocksContinuation } from "./recovery-machine.js";
 import { isRecoveryPendingAttention, reasonFromRecoveryPendingAttention } from "./recovery.js";
 import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
-import type { GoalRuntimeEventContext } from "./goal-runtime-event-handler-types.js";
+import type { GoalRuntimeSessionHandlerContext } from "./goal-runtime-event-handler-types.js";
 
-export function createSessionEventHandlers(deps: GoalRuntimeEventContext) {
+export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContext) {
   const {
     pi,
     runtimeState,
@@ -101,7 +101,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeEventContext) {
   };
 }
 
-function hasPendingRecoveryAttention({ runtimeState, stateController }: GoalRuntimeEventContext): boolean {
+function hasPendingRecoveryAttention({ runtimeState, stateController }: GoalRuntimeSessionHandlerContext): boolean {
   const goal = stateController.getGoal();
   return Boolean(
     goal?.status === "active" && isRecoveryPendingAttention(runtimeState.recoveryState.attention),
@@ -110,7 +110,7 @@ function hasPendingRecoveryAttention({ runtimeState, stateController }: GoalRunt
 
 function pauseForPendingRecoveryShutdown(
   ctx: ExtensionContext,
-  deps: GoalRuntimeEventContext,
+  deps: GoalRuntimeSessionHandlerContext,
 ): void {
   const { runtimeState, stateController } = deps;
   const goal = stateController.getGoal();

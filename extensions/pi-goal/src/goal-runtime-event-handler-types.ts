@@ -79,6 +79,72 @@ export interface RecoveryRuntimePort {
   onUserInput: () => void;
 }
 
+export interface StaleQueuedWorkEffectContext {
+  status: GoalRuntimeStatusPort;
+  clearActiveAccounting: () => void;
+}
+
+export interface GoalRuntimeInputContextHandlerContext extends StaleQueuedWorkEffectContext {
+  runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "staleQueuedWorkGuard">;
+  stateController: Pick<
+    GoalStateController,
+    "getGoal" | "isCurrentActiveGoalId" | "persistHostOverflowUserReset"
+  >;
+  continuation: GoalRuntimeContinuationPort;
+  recoveryRuntime: Pick<RecoveryRuntimePort, "onUserInput">;
+  resetErrorRecovery: () => void;
+}
+
+export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectContext {
+  runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "staleQueuedWorkGuard">;
+  stateController: Pick<
+    GoalStateController,
+    "beginOverflowRecovery" | "flushGoalPersistence" | "maybeFlushRuntimePersistence" | "pauseForAbort"
+  >;
+  continuation: Pick<GoalRuntimeContinuationPort, "bindPassthroughContinuationInputToTurn">;
+  goalAccounting: GoalAccountingPort;
+  recoveryRuntime: Pick<RecoveryRuntimePort, "finishSuccessfulAssistantTurn">;
+}
+
+export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectContext {
+  runtimeState: Pick<GoalRuntimeState, "staleQueuedWorkGuard">;
+  stateController: Pick<GoalStateController, "beginOverflowRecovery" | "flushGoalPersistence" | "pauseForAbort">;
+  continuation: Pick<
+    GoalRuntimeContinuationPort,
+    "clearPassthroughContinuationInput" | "maybeContinue"
+  >;
+  goalAccounting: Pick<GoalAccountingPort, "accountProgress">;
+  recoveryRuntime: Pick<
+    RecoveryRuntimePort,
+    "handlePersistentAssistantError" | "handleSilentContextOverflow"
+  >;
+  resetErrorRecovery: () => void;
+}
+
+export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectContext {
+  pi: Pick<ExtensionAPI, "sendUserMessage">;
+  runtimeState: Pick<GoalRuntimeState, "recoveryState" | "staleQueuedWorkGuard">;
+  stateController: Pick<
+    GoalStateController,
+    "applyGoalTransition" | "flushGoalPersistence" | "getGoal" | "reloadFromSession" | "resumePausedGoal"
+  >;
+  continuation: Pick<
+    GoalRuntimeContinuationPort,
+    "clearContinuationTimer" | "clearPassthroughContinuationInput" | "maybeContinue"
+  >;
+  goalAccounting: GoalAccountingPort;
+  recoveryRuntime: Pick<RecoveryRuntimePort, "onSessionCompact">;
+  resetErrorRecovery: () => void;
+}
+
+export interface GoalRuntimeOverflowRecoveryContext {
+  stateController: Pick<GoalStateController, "beginOverflowRecovery">;
+  recoveryRuntime: Pick<
+    RecoveryRuntimePort,
+    "handlePersistentAssistantError" | "handleSilentContextOverflow"
+  >;
+}
+
 export interface GoalRuntimeEventContext {
   pi: ExtensionAPI;
   runtimeState: GoalRuntimeState;

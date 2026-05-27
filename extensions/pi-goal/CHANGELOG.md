@@ -2,15 +2,18 @@
 
 ## Unreleased
 
-- Updates the local pi development baseline to `@earendil-works/*` `0.76.0` and refreshes the npm lockfile.
-- Aligns recovery retry classification with Pi 0.76.0 so terminal quota, billing, and provider-limit errors do not stay pending for host retries even when they include `429` wording.
-- Validates the cutover with the existing typecheck/test suite plus package metadata and dry-run pack checks.
-
 ## 0.1.15 - 2026-05-27
 
 - Refactors the goal runtime monolith into focused modules for clearer lifecycle ownership, event handling, and continuation orchestration.
+- Narrows runtime handler dependency interfaces so input/context, turn, agent, and session handlers only receive the lifecycle ports they use.
+- Moves goal transition effect application into a focused effect module so transition planning stays centered on goal snapshots and persistence decisions.
+- Reworks the stale queued-work reducer around per-lifecycle default transition tables and focused state reducers, keeping no-op handling centralized while preserving explicit exceptional transitions.
+- Removes the queued provider-context rewrite type assertion by returning typed provider-context rewrite intersections and clarifies the message normalization boundary comments.
 - Hardens stale queued-work cleanup across abort, delayed terminal events, and continuation boundaries so stale work is consumed without mutating replacement-goal accounting.
 - Tightens runtime continuation scheduling, recovery sequencing, and persistence/accounting handoff behavior with expanded regression coverage around lifecycle edge cases.
+- Updates the local pi development baseline to `@earendil-works/*` `0.76.0` and refreshes the npm lockfile.
+- Aligns recovery retry classification with Pi 0.76.0 so terminal quota, billing, and provider-limit errors do not stay pending for host retries even when they include `429` wording.
+- Validates the cutover with the existing typecheck/test suite plus package metadata and dry-run pack checks.
 
 ## 0.1.14 - 2026-05-26
 

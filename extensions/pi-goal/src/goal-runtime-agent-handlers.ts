@@ -7,9 +7,9 @@ import {
   recordAssistantContextOverflow,
   runStaleQueuedWorkPlan,
 } from "./goal-runtime-event-utils.js";
-import type { GoalRuntimeEventContext } from "./goal-runtime-event-handler-types.js";
+import type { GoalRuntimeAgentHandlerContext } from "./goal-runtime-event-handler-types.js";
 
-export function createAgentEventHandlers(deps: GoalRuntimeEventContext) {
+export function createAgentEventHandlers(deps: GoalRuntimeAgentHandlerContext) {
   const { runtimeState, stateController, continuation, goalAccounting, resetErrorRecovery } = deps;
 
   return {

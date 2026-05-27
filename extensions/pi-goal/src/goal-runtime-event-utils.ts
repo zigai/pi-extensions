@@ -2,9 +2,10 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type {
   GoalRuntimeContinuationPort,
-  GoalRuntimeEventContext,
+  GoalRuntimeOverflowRecoveryContext,
   QueuedGoalWorkMessage,
   QueuedGoalWorkMessageIdResolver,
+  StaleQueuedWorkEffectContext,
 } from "./goal-runtime-event-handler-types.js";
 import { extensionQueuedGoalWorkMessageIdForRuntime } from "./queued-goal-work.js";
 import {
@@ -18,7 +19,7 @@ import type { StaleQueuedWorkEffect, StaleQueuedWorkPlan } from "./stale-queued-
 export function applyStaleQueuedWorkEffects(
   effects: readonly StaleQueuedWorkEffect[],
   ctx: ExtensionContext,
-  context: GoalRuntimeEventContext,
+  context: StaleQueuedWorkEffectContext,
 ): void {
   for (const effect of effects) {
     switch (effect.type) {
@@ -42,7 +43,7 @@ export function applyStaleQueuedWorkEffects(
 export function runStaleQueuedWorkPlan(
   plan: StaleQueuedWorkPlan,
   ctx: ExtensionContext,
-  context: GoalRuntimeEventContext,
+  context: StaleQueuedWorkEffectContext,
 ): boolean {
   applyStaleQueuedWorkEffects(plan.effects, ctx, context);
   return plan.skip;
@@ -65,7 +66,7 @@ export function getContextWindow(ctx: ExtensionContext): number {
 export function recordAssistantContextOverflow(
   message: AssistantErrorMessage,
   ctx: ExtensionContext,
-  context: GoalRuntimeEventContext,
+  context: GoalRuntimeOverflowRecoveryContext,
 ): boolean {
   if (!isAssistantContextOverflow(message, getContextWindow(ctx))) {
     return false;
@@ -83,7 +84,7 @@ export function recordAssistantContextOverflow(
 export function handleAgentErrorMessage(
   message: AssistantErrorMessage,
   ctx: ExtensionContext,
-  context: GoalRuntimeEventContext,
+  context: GoalRuntimeOverflowRecoveryContext,
 ): void {
   recordAssistantContextOverflow(message, ctx, context);
   if (!isContextOverflowError(message.errorMessage)) {

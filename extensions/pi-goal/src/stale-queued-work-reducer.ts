@@ -216,6 +216,246 @@ function finishActiveAbortingLifecycle(
   return transition(nextState, skipClearAccountingRefreshPlan());
 }
 
+type EventDefaultAction = "emptyPlan" | "noPlan" | "handled";
+type LifecycleEventDefaults = Record<StaleQueuedWorkEvent["type"], EventDefaultAction>;
+
+const IDLE_EVENT_DEFAULTS = {
+  runnableWorkStarted: "handled",
+  staleWorkStarted: "handled",
+  contextAbort: "noPlan",
+  userInputClearAbort: "emptyPlan",
+  extensionContinuationClearAbort: "emptyPlan",
+  beforeAgentStartClearAbort: "emptyPlan",
+  turnStart: "emptyPlan",
+  toolExecutionEnd: "emptyPlan",
+  sessionBeforeCompact: "emptyPlan",
+  sessionCompact: "emptyPlan",
+  turnEnd: "emptyPlan",
+  agentEnd: "emptyPlan",
+  sessionShutdown: "emptyPlan",
+} as const satisfies LifecycleEventDefaults;
+
+const OBSERVING_TURN_EVENT_DEFAULTS = {
+  runnableWorkStarted: "handled",
+  staleWorkStarted: "handled",
+  contextAbort: "handled",
+  userInputClearAbort: "emptyPlan",
+  extensionContinuationClearAbort: "emptyPlan",
+  beforeAgentStartClearAbort: "emptyPlan",
+  turnStart: "handled",
+  toolExecutionEnd: "emptyPlan",
+  sessionBeforeCompact: "emptyPlan",
+  sessionCompact: "emptyPlan",
+  turnEnd: "handled",
+  agentEnd: "handled",
+  sessionShutdown: "handled",
+} as const satisfies LifecycleEventDefaults;
+
+const ABORTING_TURN_EVENT_DEFAULTS = {
+  runnableWorkStarted: "emptyPlan",
+  staleWorkStarted: "emptyPlan",
+  contextAbort: "handled",
+  userInputClearAbort: "handled",
+  extensionContinuationClearAbort: "handled",
+  beforeAgentStartClearAbort: "handled",
+  turnStart: "handled",
+  toolExecutionEnd: "handled",
+  sessionBeforeCompact: "handled",
+  sessionCompact: "handled",
+  turnEnd: "handled",
+  agentEnd: "handled",
+  sessionShutdown: "handled",
+} as const satisfies LifecycleEventDefaults;
+
+const AWAITING_TERMINAL_CLEANUP_EVENT_DEFAULTS = {
+  runnableWorkStarted: "handled",
+  staleWorkStarted: "handled",
+  contextAbort: "noPlan",
+  userInputClearAbort: "emptyPlan",
+  extensionContinuationClearAbort: "emptyPlan",
+  beforeAgentStartClearAbort: "emptyPlan",
+  turnStart: "emptyPlan",
+  toolExecutionEnd: "emptyPlan",
+  sessionBeforeCompact: "emptyPlan",
+  sessionCompact: "emptyPlan",
+  turnEnd: "handled",
+  agentEnd: "handled",
+  sessionShutdown: "handled",
+} as const satisfies LifecycleEventDefaults;
+
+function applyDefaultTransition(
+  state: StaleQueuedWorkState,
+  event: StaleQueuedWorkEvent,
+  defaults: LifecycleEventDefaults,
+  lifecycle: StaleQueuedWorkLifecycleKind,
+): StaleQueuedWorkTransitionResult {
+  switch (defaults[event.type]) {
+    case "emptyPlan":
+      return transition(state, emptyPlan());
+    case "noPlan":
+      return transition(state, null);
+    case "handled":
+      throw new Error(
+        `Missing stale queued-work reducer handler for ${event.type} in ${lifecycle}`,
+      );
+    default:
+      throw new Error(
+        `Unknown stale queued-work default action for ${event.type} in ${lifecycle}`,
+      );
+  }
+}
+
+function reduceIdleState(
+  draft: Extract<StaleQueuedWorkState, { kind: "idle" }>,
+  event: StaleQueuedWorkEvent,
+): StaleQueuedWorkTransitionResult {
+  switch (event.type) {
+    case "runnableWorkStarted": {
+      const next = beginObservingFromIdleOrAwaiting(draft);
+      next.hasRunnableWork = true;
+      return transition(next, emptyPlan());
+    }
+    case "staleWorkStarted": {
+      const next = beginObservingFromIdleOrAwaiting(draft);
+      next.staleGoalIds.add(event.goalId);
+      return transition(next, emptyPlan());
+    }
+    default:
+      return applyDefaultTransition(draft, event, IDLE_EVENT_DEFAULTS, draft.kind);
+  }
+}
+
+function reduceObservingTurnState(
+  draft: Extract<StaleQueuedWorkState, { kind: "observingTurn" }>,
+  event: StaleQueuedWorkEvent,
+): StaleQueuedWorkTransitionResult {
+  switch (event.type) {
+    case "runnableWorkStarted":
+      return transition({ ...draft, hasRunnableWork: true }, emptyPlan());
+    case "staleWorkStarted":
+      draft.staleGoalIds.add(event.goalId);
+      return transition(draft, emptyPlan());
+    case "contextAbort":
+      return reduceObservingContextAbort(draft, event.currentTurnIndex);
+    case "turnStart":
+      return transition(finishObservingTurn(draft), emptyPlan());
+    case "turnEnd": {
+      if (!draft.terminalCleanup || !consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
+        return transition(draft, emptyPlan());
+      }
+      return transition(
+        resolveCleanupAfterTerminalEvent(draft.terminalCleanup, draft),
+        skipRefreshPlan(),
+      );
+    }
+    case "agentEnd": {
+      if (!draft.terminalCleanup || !consumeCleanupAgentEnd(draft.terminalCleanup, event.messages)) {
+        return transition(draft, emptyPlan());
+      }
+      return transition(
+        resolveCleanupAfterTerminalEvent(draft.terminalCleanup, draft),
+        skipRefreshPlan(),
+      );
+    }
+    case "sessionShutdown":
+      return transition({ kind: "idle" }, emptyPlan());
+    default:
+      return applyDefaultTransition(draft, event, OBSERVING_TURN_EVENT_DEFAULTS, draft.kind);
+  }
+}
+
+function reduceAbortingTurnState(
+  draft: Extract<StaleQueuedWorkState, { kind: "abortingTurn" }>,
+  event: StaleQueuedWorkEvent,
+): StaleQueuedWorkTransitionResult {
+  switch (event.type) {
+    case "contextAbort":
+      return transition(draft, clearAccountingAbortRefreshPlan());
+    case "userInputClearAbort":
+      return releaseAbortingTurn(draft, true);
+    case "extensionContinuationClearAbort":
+    case "beforeAgentStartClearAbort":
+    case "turnStart":
+      return releaseAbortingTurn(draft, false);
+    case "toolExecutionEnd":
+    case "sessionBeforeCompact":
+    case "sessionCompact":
+      return transition(draft, skipClearAccountingRefreshPlan());
+    case "turnEnd": {
+      if (event.turnIndex !== null && draft.activeTurnIndex === event.turnIndex) {
+        draft.terminalCleanup.pendingTurnEndIndexes.delete(event.turnIndex);
+        return transition(draft, skipClearAccountingRefreshPlan());
+      }
+      if (consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
+        return transition(draft, skipRefreshPlan());
+      }
+      return transition(draft, emptyPlan());
+    }
+    case "agentEnd": {
+      const result = consumeAbortingAgentEnd(draft, event.messages);
+      if (result.consumedActive) {
+        return finishActiveAbortingLifecycle(draft);
+      }
+      if (result.consumedOlder) {
+        return transition(draft, skipRefreshPlan());
+      }
+      if (result.activePending) {
+        return transition(draft, emptyPlan());
+      }
+      return finishActiveAbortingLifecycle(draft);
+    }
+    case "sessionShutdown":
+      return transition({ kind: "idle" }, { skip: false, effects: [{ type: "clearAccounting" }] });
+    default:
+      return applyDefaultTransition(draft, event, ABORTING_TURN_EVENT_DEFAULTS, draft.kind);
+  }
+}
+
+function reduceAwaitingTerminalCleanupState(
+  draft: Extract<StaleQueuedWorkState, { kind: "awaitingTerminalCleanup" }>,
+  event: StaleQueuedWorkEvent,
+): StaleQueuedWorkTransitionResult {
+  switch (event.type) {
+    case "runnableWorkStarted": {
+      const next = beginObservingFromIdleOrAwaiting(draft);
+      next.hasRunnableWork = true;
+      return transition(next, emptyPlan());
+    }
+    case "staleWorkStarted": {
+      const next = beginObservingFromIdleOrAwaiting(draft);
+      next.staleGoalIds.add(event.goalId);
+      return transition(next, emptyPlan());
+    }
+    case "turnEnd": {
+      if (!consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
+        return transition(draft, emptyPlan());
+      }
+      return transition(
+        resolveCleanupAfterTerminalEvent(draft.terminalCleanup, null),
+        skipRefreshPlan(),
+      );
+    }
+    case "agentEnd": {
+      if (!consumeCleanupAgentEnd(draft.terminalCleanup, event.messages)) {
+        return transition(draft, emptyPlan());
+      }
+      return transition(
+        resolveCleanupAfterTerminalEvent(draft.terminalCleanup, null),
+        skipRefreshPlan(),
+      );
+    }
+    case "sessionShutdown":
+      return transition({ kind: "idle" }, emptyPlan());
+    default:
+      return applyDefaultTransition(
+        draft,
+        event,
+        AWAITING_TERMINAL_CLEANUP_EVENT_DEFAULTS,
+        draft.kind,
+      );
+  }
+}
+
 export function reduceStaleQueuedWork(
   state: StaleQueuedWorkState,
   event: StaleQueuedWorkEvent,
@@ -223,181 +463,14 @@ export function reduceStaleQueuedWork(
   const draft = cloneState(state);
 
   switch (draft.kind) {
-    case "idle": {
-      switch (event.type) {
-        case "runnableWorkStarted": {
-          const next = beginObservingFromIdleOrAwaiting(draft);
-          next.hasRunnableWork = true;
-          return transition(next, emptyPlan());
-        }
-        case "staleWorkStarted": {
-          const next = beginObservingFromIdleOrAwaiting(draft);
-          next.staleGoalIds.add(event.goalId);
-          return transition(next, emptyPlan());
-        }
-        case "contextAbort":
-          return transition(draft, null);
-        case "userInputClearAbort":
-        case "extensionContinuationClearAbort":
-        case "beforeAgentStartClearAbort":
-        case "turnStart":
-        case "toolExecutionEnd":
-        case "sessionBeforeCompact":
-        case "sessionCompact":
-        case "turnEnd":
-        case "agentEnd":
-        case "sessionShutdown":
-          return transition(draft, emptyPlan());
-        default: {
-          const _exhaustive: never = event;
-          return _exhaustive;
-        }
-      }
-    }
-
-    case "observingTurn": {
-      switch (event.type) {
-        case "runnableWorkStarted":
-          return transition({ ...draft, hasRunnableWork: true }, emptyPlan());
-        case "staleWorkStarted":
-          draft.staleGoalIds.add(event.goalId);
-          return transition(draft, emptyPlan());
-        case "contextAbort":
-          return reduceObservingContextAbort(draft, event.currentTurnIndex);
-        case "turnStart":
-          return transition(finishObservingTurn(draft), emptyPlan());
-        case "turnEnd": {
-          if (!draft.terminalCleanup || !consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
-            return transition(draft, emptyPlan());
-          }
-          return transition(
-            resolveCleanupAfterTerminalEvent(draft.terminalCleanup, draft),
-            skipRefreshPlan(),
-          );
-        }
-        case "agentEnd": {
-          if (!draft.terminalCleanup || !consumeCleanupAgentEnd(draft.terminalCleanup, event.messages)) {
-            return transition(draft, emptyPlan());
-          }
-          return transition(
-            resolveCleanupAfterTerminalEvent(draft.terminalCleanup, draft),
-            skipRefreshPlan(),
-          );
-        }
-        case "sessionShutdown":
-          return transition({ kind: "idle" }, emptyPlan());
-        case "userInputClearAbort":
-        case "extensionContinuationClearAbort":
-        case "beforeAgentStartClearAbort":
-        case "toolExecutionEnd":
-        case "sessionBeforeCompact":
-        case "sessionCompact":
-          return transition(draft, emptyPlan());
-        default: {
-          const _exhaustive: never = event;
-          return _exhaustive;
-        }
-      }
-    }
-
-    case "abortingTurn": {
-      switch (event.type) {
-        case "contextAbort":
-          return transition(draft, clearAccountingAbortRefreshPlan());
-        case "userInputClearAbort":
-          return releaseAbortingTurn(draft, true);
-        case "extensionContinuationClearAbort":
-        case "beforeAgentStartClearAbort":
-        case "turnStart":
-          return releaseAbortingTurn(draft, false);
-        case "toolExecutionEnd":
-        case "sessionBeforeCompact":
-        case "sessionCompact":
-          return transition(draft, skipClearAccountingRefreshPlan());
-        case "turnEnd": {
-          if (event.turnIndex !== null && draft.activeTurnIndex === event.turnIndex) {
-            draft.terminalCleanup.pendingTurnEndIndexes.delete(event.turnIndex);
-            return transition(draft, skipClearAccountingRefreshPlan());
-          }
-          if (consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
-            return transition(draft, skipRefreshPlan());
-          }
-          return transition(draft, emptyPlan());
-        }
-        case "agentEnd": {
-          const result = consumeAbortingAgentEnd(draft, event.messages);
-          if (result.consumedActive) {
-            return finishActiveAbortingLifecycle(draft);
-          }
-          if (result.consumedOlder) {
-            return transition(draft, skipRefreshPlan());
-          }
-          if (result.activePending) {
-            return transition(draft, emptyPlan());
-          }
-          return finishActiveAbortingLifecycle(draft);
-        }
-        case "sessionShutdown":
-          return transition({ kind: "idle" }, { skip: false, effects: [{ type: "clearAccounting" }] });
-        case "runnableWorkStarted":
-        case "staleWorkStarted":
-          return transition(draft, emptyPlan());
-        default: {
-          const _exhaustive: never = event;
-          return _exhaustive;
-        }
-      }
-    }
-
-    case "awaitingTerminalCleanup": {
-      switch (event.type) {
-        case "runnableWorkStarted": {
-          const next = beginObservingFromIdleOrAwaiting(draft);
-          next.hasRunnableWork = true;
-          return transition(next, emptyPlan());
-        }
-        case "staleWorkStarted": {
-          const next = beginObservingFromIdleOrAwaiting(draft);
-          next.staleGoalIds.add(event.goalId);
-          return transition(next, emptyPlan());
-        }
-        case "turnEnd": {
-          if (!consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
-            return transition(draft, emptyPlan());
-          }
-          return transition(
-            resolveCleanupAfterTerminalEvent(draft.terminalCleanup, null),
-            skipRefreshPlan(),
-          );
-        }
-        case "agentEnd": {
-          if (!consumeCleanupAgentEnd(draft.terminalCleanup, event.messages)) {
-            return transition(draft, emptyPlan());
-          }
-          return transition(
-            resolveCleanupAfterTerminalEvent(draft.terminalCleanup, null),
-            skipRefreshPlan(),
-          );
-        }
-        case "sessionShutdown":
-          return transition({ kind: "idle" }, emptyPlan());
-        case "contextAbort":
-          return transition(draft, null);
-        case "userInputClearAbort":
-        case "extensionContinuationClearAbort":
-        case "beforeAgentStartClearAbort":
-        case "turnStart":
-        case "toolExecutionEnd":
-        case "sessionBeforeCompact":
-        case "sessionCompact":
-          return transition(draft, emptyPlan());
-        default: {
-          const _exhaustive: never = event;
-          return _exhaustive;
-        }
-      }
-    }
-
+    case "idle":
+      return reduceIdleState(draft, event);
+    case "observingTurn":
+      return reduceObservingTurnState(draft, event);
+    case "abortingTurn":
+      return reduceAbortingTurnState(draft, event);
+    case "awaitingTerminalCleanup":
+      return reduceAwaitingTerminalCleanupState(draft, event);
     default: {
       const _exhaustive: never = draft;
       return _exhaustive;

@@ -8,11 +8,11 @@ import { assistantTurnTokens, isAbortedAssistantMessage, isToolUseAssistantMessa
 import { isAssistantContextOverflow, isErrorAssistantMessage } from "./recovery.js";
 import { getContextWindow, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
 import type {
-  GoalRuntimeEventContext,
+  GoalRuntimeTurnHandlerContext,
   ToolExecutionEndEvent,
 } from "./goal-runtime-event-handler-types.js";
 
-export function createTurnEventHandlers(deps: GoalRuntimeEventContext) {
+export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
   const { runtimeState, stateController, continuation, goalAccounting, recoveryRuntime, status } = deps;
 
   return {

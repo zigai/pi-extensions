@@ -87,7 +87,7 @@ function customContentFromUnknown(content: unknown): string | QueuedGoalUserCont
   return normalized.length > 0 ? normalized : "";
 }
 
-/** Normalizes external provider-context messages once at the package boundary. */
+/** Copies provider-context fields into a carrier with the runtime-required timestamp. */
 export function toQueuedGoalContextCarrier(message: QueuedGoalContextInput): QueuedGoalContextCarrier | null {
   if (typeof message.timestamp !== "number") {
     return null;
@@ -112,7 +112,7 @@ export function toQueuedGoalContextCarrier(message: QueuedGoalContextInput): Que
   return carrier;
 }
 
-/** Normalizes external provider-context messages once at the package boundary. */
+/** Narrows a carrier to queued-goal user/custom work and normalizes its content. */
 export function toQueuedGoalWorkSource(
   message: QueuedGoalContextCarrier,
 ): QueuedGoalWorkSourceMessage | null {

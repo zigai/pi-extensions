@@ -67,15 +67,18 @@ type RewrittenQueuedGoalWorkMessage =
   | RefreshedActiveQueuedGoalCustomMessage
   | RefreshedActiveQueuedGoalUserMessage;
 
-/** Single bridge from concrete queued-goal rewrites back onto provider-context messages. */
+type ProviderContextRewrite<TMessage extends QueuedGoalContextInput> =
+  TMessage & RewrittenQueuedGoalWorkMessage;
+
+/** Single typed bridge from concrete queued-goal rewrites back onto provider-context messages. */
 function mergeProviderContextMessage<TMessage extends QueuedGoalContextInput>(
   original: TMessage,
   rewritten: RewrittenQueuedGoalWorkMessage,
-): TMessage {
+): ProviderContextRewrite<TMessage> {
   return {
     ...original,
     ...rewritten,
-  } as TMessage;
+  };
 }
 
 function isSupersededContinuationDetails(details: unknown): boolean {
