@@ -186,4 +186,3 @@ test("planBeforeAgentStartClearAbort matches extension clear", () => {
   const plan = guard.planBeforeAgentStartClearAbort();
   assert.deepEqual(effectTypes(plan), ["clearAccounting"]);
 });
-

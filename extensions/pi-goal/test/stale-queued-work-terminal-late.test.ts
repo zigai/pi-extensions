@@ -524,4 +524,3 @@ test("current follow-up abort is not swallowed by a pending late stale turn_end"
     Date.now = originalNow;
   }
 });
-

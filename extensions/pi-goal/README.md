@@ -21,7 +21,7 @@ pi install npm:pi-codex-goal
 Install a pinned npm version:
 
 ```sh
-pi install npm:pi-codex-goal@0.1.14
+pi install npm:pi-codex-goal@0.1.15
 ```
 
 Install from GitHub:
@@ -33,7 +33,7 @@ pi install https://github.com/fitchmultz/pi-codex-goal
 Install a pinned GitHub release:
 
 ```sh
-pi install https://github.com/fitchmultz/pi-codex-goal@v0.1.14
+pi install https://github.com/fitchmultz/pi-codex-goal@v0.1.15
 ```
 
 For local development from this repository:

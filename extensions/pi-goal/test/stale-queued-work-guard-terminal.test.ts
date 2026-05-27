@@ -400,4 +400,3 @@ test("isAbortedAssistantMessage matches aborted assistant turns", () => {
   assert.equal(isAbortedAssistantMessage(abortedAssistant), true);
   assert.equal(isAbortedAssistantMessage(stoppedAssistant), false);
 });
-

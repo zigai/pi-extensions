@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.15 - 2026-05-27
+
+- Refactors the goal runtime monolith into focused modules for clearer lifecycle ownership, event handling, and continuation orchestration.
+- Hardens stale queued-work cleanup across abort, delayed terminal events, and continuation boundaries so stale work is consumed without mutating replacement-goal accounting.
+- Tightens runtime continuation scheduling, recovery sequencing, and persistence/accounting handoff behavior with expanded regression coverage around lifecycle edge cases.
+
 ## 0.1.14 - 2026-05-26
 
 - Widens the package Node engine range to support Node 22.19.0 through Node 26.x.
