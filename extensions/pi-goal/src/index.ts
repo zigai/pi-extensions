@@ -22,9 +22,14 @@ import {
   type StaleQueuedWorkGuard,
 } from "./stale-queued-work-guard.js";
 import {
+  applyHostOverflowUserResetPersistence,
+  clearActiveHostOverflowRecovery,
   createGoalRecoveryMachine,
+  goalStartTurnStrategy,
+  recoveryPhaseBlocksContinuation,
   resetRecoveryMachine,
   setRecoveryPausedAttention,
+  syncHostOverflowUserResetFromSession,
   type GoalRecoveryMachineState,
 } from "./recovery-machine.js";
 import { createGoalRecoveryRuntime } from "./recovery-runtime.js";
@@ -76,8 +81,6 @@ export default function (pi: ExtensionAPI): void {
   let passthroughContinuationInput: { text: string; turnIndex: number | null } | null = null;
   const accounting = createAccountingState();
   let recoveryState: GoalRecoveryMachineState = createGoalRecoveryMachine();
-  let hostOverflowRecoveryInProgress = false;
-  let hostOverflowCapNeedsUserReset = false;
   let lastPersistedGoal: ThreadGoal | null = null;
   let lastRuntimePersistAt: number | null = null;
 
@@ -101,7 +104,6 @@ export default function (pi: ExtensionAPI): void {
 
   const resetErrorRecovery = (): void => {
     resetRecoveryMachine(recoveryState);
-    hostOverflowRecoveryInProgress = false;
   };
 
   const clearContinuationState = (): void => {
@@ -317,11 +319,10 @@ export default function (pi: ExtensionAPI): void {
     refreshUi(ctx);
   };
 
-  const setHostOverflowCapNeedsUserReset = (needsReset: boolean): void => {
-    if (hostOverflowCapNeedsUserReset === needsReset) {
+  const persistHostOverflowUserReset = (needsReset: boolean): void => {
+    if (!applyHostOverflowUserResetPersistence(recoveryState, needsReset)) {
       return;
     }
-    hostOverflowCapNeedsUserReset = needsReset;
     pi.appendEntry(CUSTOM_ENTRY_TYPE, hostOverflowCapResetEntry(needsReset));
   };
 
@@ -331,7 +332,10 @@ export default function (pi: ExtensionAPI): void {
     goal = reconstructGoal(branch).goal;
     lastPersistedGoal = goal ? cloneGoal(goal) : null;
     lastRuntimePersistAt = null;
-    hostOverflowCapNeedsUserReset = reconstructHostOverflowCapNeedsUserReset(branch);
+    syncHostOverflowUserResetFromSession(
+      recoveryState,
+      reconstructHostOverflowCapNeedsUserReset(branch),
+    );
     clearContinuationState();
     if (goal?.status !== "active") {
       clearActiveAccounting();
@@ -389,7 +393,7 @@ export default function (pi: ExtensionAPI): void {
       goal.status !== "active" ||
       continuationQueuedFor === goal.goalId ||
       hasPendingRecoveryAttention() ||
-      hostOverflowRecoveryInProgress
+      recoveryPhaseBlocksContinuation(recoveryState.phase)
     ) {
       return;
     }
@@ -449,16 +453,16 @@ export default function (pi: ExtensionAPI): void {
     }
 
     clearContinuationState();
-    hostOverflowRecoveryInProgress = false;
+    clearActiveHostOverflowRecovery(recoveryState);
     setRecoveryPausedAttention(recoveryState, reason);
     persistGoal(result.goal, "runtime");
     refreshUi(ctx);
   };
 
   const beginOverflowRecoveryAttention = (ctx: ExtensionContext): void => {
-    setHostOverflowCapNeedsUserReset(true);
-    hostOverflowRecoveryInProgress = true;
-    recoveryRuntime.beginOverflowRecovery(ctx);
+    if (recoveryRuntime.beginOverflowRecovery(ctx)) {
+      pi.appendEntry(CUSTOM_ENTRY_TYPE, hostOverflowCapResetEntry(true));
+    }
   };
 
   const recordAssistantContextOverflow = (
@@ -489,7 +493,7 @@ export default function (pi: ExtensionAPI): void {
 
   registerGoalCommand(pi, {
     getGoal: () => goalForDisplay(),
-    needsHostOverflowCapReset: () => hostOverflowCapNeedsUserReset,
+    getGoalStartTurnStrategy: () => goalStartTurnStrategy(recoveryState.phase),
     setGoal(nextGoal, source, ctx) {
       const wasPaused = goal?.status === "paused";
       persistGoal(nextGoal, source);
@@ -516,7 +520,6 @@ export default function (pi: ExtensionAPI): void {
     const continuationGoalId = continuationGoalIdFromPrompt(event.text);
 
     if (event.source !== "extension") {
-      hostOverflowRecoveryInProgress = false;
       recoveryRuntime.onUserInput();
       applyStaleQueuedWorkEffects(staleQueuedWorkGuard.planUserInputClearAbort().effects, ctx);
       if (continuationGoalId !== null) {
@@ -594,7 +597,7 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("message_start", async (event) => {
     if (event.message.role === "user") {
-      setHostOverflowCapNeedsUserReset(false);
+      persistHostOverflowUserReset(false);
     }
 
     const queuedGoalId = queuedGoalWorkMessageIdForRuntime(event.message);
@@ -698,7 +701,6 @@ export default function (pi: ExtensionAPI): void {
       return;
     }
     resetErrorRecovery();
-    hostOverflowRecoveryInProgress = false;
     maybeContinue(ctx);
   });
 
@@ -723,7 +725,7 @@ export default function (pi: ExtensionAPI): void {
     flushGoalPersistence("runtime");
     recoveryRuntime.onSessionCompact();
     refreshUi(ctx);
-    if (!hostOverflowRecoveryInProgress) {
+    if (!recoveryPhaseBlocksContinuation(recoveryState.phase)) {
       maybeContinue(ctx);
     }
   });

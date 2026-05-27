@@ -1,4 +1,12 @@
 import {
+  applyPersistedHostOverflowUserReset,
+  clearHostOverflowRecoveryActive,
+  hostOverflowRecoveringNeedsUserStartPhase,
+  idleRecoveryPhase,
+  recoveryPhaseNeedsUserStartTurn,
+  type RecoveryPhase,
+} from "./recovery-phase.js";
+import {
   CONTEXT_OVERFLOW_SIGNATURE,
   countersForFailureSignature,
   createErrorRecoveryCounters,
@@ -14,6 +22,13 @@ import {
   type ErrorRecoveryCounters,
 } from "./recovery.js";
 
+export type { GoalStartTurnStrategy, RecoveryPhase } from "./recovery-phase.js";
+export {
+  goalStartTurnStrategy,
+  recoveryPhaseBlocksContinuation,
+  recoveryPhaseNeedsUserStartTurn,
+} from "./recovery-phase.js";
+
 export type RecoveryAction =
   | { type: "noop" }
   | { type: "pending"; reason: string }
@@ -22,18 +37,21 @@ export type RecoveryAction =
 export interface GoalRecoveryMachineState {
   counters: ErrorRecoveryCounters;
   attention: string | null;
+  phase: RecoveryPhase;
 }
 
 export function createGoalRecoveryMachine(): GoalRecoveryMachineState {
   return {
     counters: createErrorRecoveryCounters(),
     attention: null,
+    phase: idleRecoveryPhase,
   };
 }
 
 export function resetRecoveryMachine(state: GoalRecoveryMachineState): void {
   state.counters = createErrorRecoveryCounters();
   state.attention = null;
+  clearActiveHostOverflowRecovery(state);
 }
 
 export function resetRecoveryCounters(state: GoalRecoveryMachineState): void {
@@ -81,8 +99,43 @@ export function setRecoveryPausedAttention(state: GoalRecoveryMachineState, reas
   return message;
 }
 
-export function beginHostOverflowRecovery(state: GoalRecoveryMachineState): string {
-  return setRecoveryPendingAttention(state, HOST_OVERFLOW_RECOVERY_REASON);
+export function clearActiveHostOverflowRecovery(state: GoalRecoveryMachineState): void {
+  state.phase = clearHostOverflowRecoveryActive(state.phase);
+}
+
+export function applyHostOverflowUserResetPersistence(
+  state: GoalRecoveryMachineState,
+  needsUserReset: boolean,
+): boolean {
+  if (recoveryPhaseNeedsUserStartTurn(state.phase) === needsUserReset) {
+    return false;
+  }
+  state.phase = applyPersistedHostOverflowUserReset(state.phase, needsUserReset);
+  return true;
+}
+
+export function syncHostOverflowUserResetFromSession(
+  state: GoalRecoveryMachineState,
+  needsUserReset: boolean,
+): void {
+  state.phase = applyPersistedHostOverflowUserReset(state.phase, needsUserReset);
+}
+
+/** Session-level overflow: require a user-started goal turn even without an active goal. */
+export function requireHostOverflowUserReset(state: GoalRecoveryMachineState): boolean {
+  const persistHostOverflowCapReset = !recoveryPhaseNeedsUserStartTurn(state.phase);
+  state.phase = applyPersistedHostOverflowUserReset(state.phase, true);
+  return persistHostOverflowCapReset;
+}
+
+export function beginHostOverflowRecovery(state: GoalRecoveryMachineState): {
+  attention: string;
+  persistHostOverflowCapReset: boolean;
+} {
+  const persistHostOverflowCapReset = !recoveryPhaseNeedsUserStartTurn(state.phase);
+  state.phase = hostOverflowRecoveringNeedsUserStartPhase();
+  const attention = setRecoveryPendingAttention(state, HOST_OVERFLOW_RECOVERY_REASON);
+  return { attention, persistHostOverflowCapReset };
 }
 
 function incrementOverflowCompactionAttempts(state: GoalRecoveryMachineState): RecoveryAction {
