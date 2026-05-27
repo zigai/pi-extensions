@@ -37,6 +37,25 @@ test("non-retryable provider errors pause active goals immediately", async () =>
   );
 });
 
+test("terminal provider-limit 429 errors pause active goals immediately", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  harness.sentMessages.length = 0;
+
+  await emitPersistentAssistantError(harness, 0, "insufficient_quota 429");
+
+  assert.equal(harness.snapshot().goal?.status, "paused");
+  assert.equal(harness.sentMessages.length, 0);
+  assert.equal(
+    harness.footerStatuses.at(-1),
+    formatFooterStatus(
+      harness.snapshot().goal,
+      recoveryAttentionMessage("non-retryable provider error (insufficient_quota 429)"),
+    ),
+  );
+  assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
+});
+
 test("non-retryable provider error pause does not cancel host compaction", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");

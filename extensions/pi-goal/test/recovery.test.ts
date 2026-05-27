@@ -87,11 +87,30 @@ test("isAssistantContextOverflow detects silent stop and zero-output length over
 });
 
 test("isRetryableTransientError mirrors host retry classification", () => {
+  assert.equal(isRetryableTransientError("HTTP 429 too many requests"), true);
   assert.equal(isRetryableTransientError("HTTP 500 internal server error"), true);
   assert.equal(isRetryableTransientError("HTTP 502 bad gateway"), true);
+  assert.equal(isRetryableTransientError("HTTP 503 service unavailable"), true);
   assert.equal(isRetryableTransientError("websocket closed"), true);
   assert.equal(isRetryableTransientError("context_length_exceeded"), false);
   assert.equal(isRetryableTransientError("invalid api key"), false);
+});
+
+const terminalProviderLimitErrors = [
+  "insufficient_quota 429",
+  "available balance",
+  "quota exceeded",
+  "billing",
+  "GoUsageLimitError",
+  "FreeUsageLimitError",
+  "Monthly usage limit reached",
+  "out of budget",
+] as const;
+
+test("terminal provider-limit errors are not retryable transient errors", () => {
+  for (const errorMessage of terminalProviderLimitErrors) {
+    assert.equal(isRetryableTransientError(errorMessage), false, errorMessage);
+  }
 });
 
 test("failure signatures canonicalize context overflow regardless of volatile token counts", () => {
@@ -381,4 +400,18 @@ test("non-retryable provider errors pause immediately", () => {
   if (action.type === "pause") {
     assert.match(action.reason, /non-retryable provider error/);
   }
+});
+
+test("terminal provider-limit errors pause immediately instead of pending host retry", () => {
+  const state = createGoalRecoveryMachine();
+  const action = planRecoveryForAssistantError(
+    state,
+    { role: "assistant", stopReason: "error", errorMessage: "insufficient_quota 429" },
+  );
+
+  assert.equal(action.type, "pause");
+  if (action.type === "pause") {
+    assert.equal(action.reason, "non-retryable provider error (insufficient_quota 429)");
+  }
+  assert.equal(state.counters.transientAttempts, 0);
 });

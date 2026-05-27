@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Updates the local pi development baseline to `@earendil-works/*` `0.76.0` and refreshes the npm lockfile.
+- Aligns recovery retry classification with Pi 0.76.0 so terminal quota, billing, and provider-limit errors do not stay pending for host retries even when they include `429` wording.
+- Validates the cutover with the existing typecheck/test suite plus package metadata and dry-run pack checks.
+
 ## 0.1.15 - 2026-05-27
 
 - Refactors the goal runtime monolith into focused modules for clearer lifecycle ownership, event handling, and continuation orchestration.
