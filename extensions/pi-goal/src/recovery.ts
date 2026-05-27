@@ -70,14 +70,25 @@ export function isContextOverflowError(errorMessage: string | undefined): boolea
   );
 }
 
+function isNonRetryableProviderLimitError(errorMessage: string): boolean {
+  return /GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing/i.test(
+    errorMessage,
+  );
+}
+
 /**
- * Mirrors host AgentSession._isRetryableError() classification for transient provider failures.
+ * Mirrors Pi 0.76.0 host AgentSession._isRetryableError() classification for transient provider failures.
+ * Context overflow is not transient retryable because host compaction handles that path.
+ * Terminal quota, billing, and provider-limit errors are not retryable even when they contain 429 or rate-limit wording.
  */
 export function isRetryableTransientError(errorMessage: string | undefined): boolean {
   if (!errorMessage) {
     return false;
   }
   if (isContextOverflowError(errorMessage)) {
+    return false;
+  }
+  if (isNonRetryableProviderLimitError(errorMessage)) {
     return false;
   }
   return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
