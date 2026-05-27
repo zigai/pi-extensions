@@ -4,12 +4,8 @@ import { createSessionEventHandlers } from "./goal-runtime-session-handlers.js";
 import { createTurnEventHandlers } from "./goal-runtime-turn-handlers.js";
 import { createQueuedGoalWorkMessageIdResolver } from "./goal-runtime-event-utils.js";
 import type {
-  AgentHandlerDeps,
-  GoalRuntimeEventHandlerDeps,
+  GoalRuntimeEventContext,
   GoalRuntimeEventHandlers,
-  InputContextHandlerDeps,
-  SessionHandlerDeps,
-  TurnHandlerDeps,
 } from "./goal-runtime-event-handler-types.js";
 
 export type {
@@ -20,56 +16,16 @@ export type {
 } from "./goal-runtime-event-handler-types.js";
 
 export function createGoalRuntimeEventHandlers(
-  deps: GoalRuntimeEventHandlerDeps,
+  context: GoalRuntimeEventContext,
 ): GoalRuntimeEventHandlers {
   const queuedGoalWorkMessageIdForRuntime = createQueuedGoalWorkMessageIdResolver(
-    deps.continuation,
+    context.continuation,
   );
 
-  const staleQueuedWorkRuntime = {
-    clearActiveAccounting: deps.clearActiveAccounting,
-    status: deps.status,
-  };
-  const inputContextDeps: InputContextHandlerDeps = {
-    ...staleQueuedWorkRuntime,
-    runtimeState: deps.runtimeState,
-    stateController: deps.stateController,
-    continuation: deps.continuation,
-    recoveryRuntime: deps.recoveryRuntime,
-    resetErrorRecovery: deps.resetErrorRecovery,
-  };
-  const turnDeps: TurnHandlerDeps = {
-    ...staleQueuedWorkRuntime,
-    runtimeState: deps.runtimeState,
-    stateController: deps.stateController,
-    continuation: deps.continuation,
-    goalAccounting: deps.goalAccounting,
-    recoveryRuntime: deps.recoveryRuntime,
-  };
-  const agentDeps: AgentHandlerDeps = {
-    ...staleQueuedWorkRuntime,
-    runtimeState: deps.runtimeState,
-    stateController: deps.stateController,
-    continuation: deps.continuation,
-    goalAccounting: deps.goalAccounting,
-    recoveryRuntime: deps.recoveryRuntime,
-    resetErrorRecovery: deps.resetErrorRecovery,
-  };
-  const sessionDeps: SessionHandlerDeps = {
-    ...staleQueuedWorkRuntime,
-    pi: deps.pi,
-    runtimeState: deps.runtimeState,
-    stateController: deps.stateController,
-    continuation: deps.continuation,
-    goalAccounting: deps.goalAccounting,
-    recoveryRuntime: deps.recoveryRuntime,
-    resetErrorRecovery: deps.resetErrorRecovery,
-  };
-
   return {
-    ...createInputContextEventHandlers(inputContextDeps, queuedGoalWorkMessageIdForRuntime),
-    ...createTurnEventHandlers(turnDeps),
-    ...createAgentEventHandlers(agentDeps),
-    ...createSessionEventHandlers(sessionDeps),
+    ...createInputContextEventHandlers(context, queuedGoalWorkMessageIdForRuntime),
+    ...createTurnEventHandlers(context),
+    ...createAgentEventHandlers(context),
+    ...createSessionEventHandlers(context),
   };
 }

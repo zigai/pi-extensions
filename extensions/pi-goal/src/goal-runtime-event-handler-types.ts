@@ -79,7 +79,7 @@ export interface RecoveryRuntimePort {
   onUserInput: () => void;
 }
 
-export interface GoalRuntimeEventHandlerDeps {
+export interface GoalRuntimeEventContext {
   pi: ExtensionAPI;
   runtimeState: GoalRuntimeState;
   stateController: GoalStateController;
@@ -89,49 +89,6 @@ export interface GoalRuntimeEventHandlerDeps {
   status: GoalRuntimeStatusPort;
   clearActiveAccounting: () => void;
   resetErrorRecovery: () => void;
-}
-
-export interface StaleQueuedWorkRuntimePort {
-  clearActiveAccounting: () => void;
-  status: GoalRuntimeStatusPort;
-}
-
-export interface InputContextHandlerDeps extends StaleQueuedWorkRuntimePort {
-  runtimeState: GoalRuntimeState;
-  stateController: GoalStateController;
-  continuation: GoalRuntimeContinuationPort;
-  recoveryRuntime: RecoveryRuntimePort;
-  resetErrorRecovery: () => void;
-}
-
-export interface TurnHandlerDeps extends StaleQueuedWorkRuntimePort {
-  runtimeState: GoalRuntimeState;
-  stateController: GoalStateController;
-  continuation: GoalRuntimeContinuationPort;
-  goalAccounting: GoalAccountingPort;
-  recoveryRuntime: RecoveryRuntimePort;
-}
-
-export interface AgentHandlerDeps extends StaleQueuedWorkRuntimePort, RecoveryEventDeps {
-  runtimeState: GoalRuntimeState;
-  continuation: GoalRuntimeContinuationPort;
-  goalAccounting: GoalAccountingPort;
-  resetErrorRecovery: () => void;
-}
-
-export interface SessionHandlerDeps extends StaleQueuedWorkRuntimePort {
-  pi: ExtensionAPI;
-  runtimeState: GoalRuntimeState;
-  stateController: GoalStateController;
-  continuation: GoalRuntimeContinuationPort;
-  goalAccounting: GoalAccountingPort;
-  recoveryRuntime: RecoveryRuntimePort;
-  resetErrorRecovery: () => void;
-}
-
-export interface RecoveryEventDeps {
-  stateController: GoalStateController;
-  recoveryRuntime: RecoveryRuntimePort;
 }
 
 export type QueuedGoalWorkMessage = {

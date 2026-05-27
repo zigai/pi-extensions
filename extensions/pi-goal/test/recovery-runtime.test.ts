@@ -34,7 +34,7 @@ function createRecoveryTestRuntime(goal: ThreadGoal | null = activeGoal) {
     getGoal: () => goal,
     getRecoveryState: () => recoveryState,
     clearContinuationState: () => {},
-    pauseGoalForRecovery: (_ctx, _goal, reason) => {
+    pauseGoalForRecovery: (_ctx, reason) => {
       setRecoveryPausedAttention(recoveryState, reason);
     },
     refreshUi: () => {
@@ -155,7 +155,7 @@ test("recovery pause delegates reason without clearing continuation in recovery 
     clearContinuationState: () => {
       continuationCleared = true;
     },
-    pauseGoalForRecovery: (_ctx, _goal, reason) => {
+    pauseGoalForRecovery: (_ctx, reason) => {
       pauseReason = reason;
     },
     refreshUi: () => {

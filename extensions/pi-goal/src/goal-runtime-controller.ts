@@ -20,7 +20,7 @@ import {
   setRecoveryPausedAttention,
   type GoalStartTurnStrategy,
 } from "./recovery-machine.js";
-import { goalWithLiveUsage, updateGoalStatus } from "./state.js";
+import { goalWithLiveUsage } from "./state.js";
 import { registerGoalTools } from "./tools.js";
 import type { GoalEntrySource, GoalResult, ThreadGoal } from "./types.js";
 
@@ -102,13 +102,9 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     getGoal: () => stateController.getGoal(),
     getRecoveryState: () => runtimeState.recoveryState,
     clearContinuationState: continuation.clearContinuationState,
-    pauseGoalForRecovery(ctx, activeGoal, recoveryReason) {
-      const result = updateGoalStatus(activeGoal, "paused");
-      if (!result.ok || !result.goal) {
-        return;
-      }
+    pauseGoalForRecovery(ctx, recoveryReason) {
       stateController.applyGoalTransition(
-        { kind: "recovery_pause", nextGoal: result.goal, recoveryReason },
+        { kind: "recovery_pause", recoveryReason },
         ctx,
       );
     },

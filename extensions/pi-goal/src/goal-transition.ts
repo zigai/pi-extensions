@@ -1,4 +1,4 @@
-import { goalsEquivalent } from "./state.js";
+import { cloneGoal, goalsEquivalent, statusAfterBudgetLimit, unixSeconds } from "./state.js";
 import type { GoalEntrySource, GoalStatus, ThreadGoal } from "./types.js";
 
 export type GoalTransitionRequest =
@@ -8,16 +8,14 @@ export type GoalTransitionRequest =
       source: GoalEntrySource;
     }
   | { kind: "clear"; source: GoalEntrySource }
-  | { kind: "abort_pause"; nextGoal: ThreadGoal }
-  | { kind: "resume_active"; nextGoal: ThreadGoal }
+  | { kind: "abort_pause" }
+  | { kind: "resume_active" }
   | {
       kind: "recovery_pause";
-      nextGoal: ThreadGoal;
       recoveryReason: string;
     }
   | {
       kind: "recovery_shutdown_pause";
-      nextGoal: ThreadGoal;
       recoveryReason: string;
     }
   | {
@@ -135,18 +133,6 @@ function commandAfterPersistEffects(
   return effects;
 }
 
-const ABORT_PAUSE_SET_BEFORE_PERSIST: GoalTransitionEffect[] = [
-  { type: "clearContinuation" },
-  { type: "clearActiveAccounting" },
-  { type: "resetRecovery" },
-  { type: "clearBudgetWarning" },
-];
-
-const RESUME_ACTIVE_BEFORE_PERSIST: GoalTransitionEffect[] = [
-  { type: "clearContinuation" },
-  { type: "resetRecovery" },
-];
-
 const CLEAR_BEFORE_PERSIST: GoalTransitionEffect[] = [
   { type: "clearContinuation" },
   { type: "clearActiveAccounting" },
@@ -167,6 +153,19 @@ function requireCurrentGoal(
   if (!current) {
     throw transitionInvariantError(kind, "current goal is required");
   }
+}
+
+function requireStatus(current: ThreadGoal, expected: GoalStatus, kind: string): void {
+  if (current.status !== expected) {
+    throw transitionInvariantError(kind, `current status must be ${expected} (got ${current.status})`);
+  }
+}
+
+function deriveGoalWithStatus(current: ThreadGoal, status: GoalStatus): ThreadGoal {
+  const next = cloneGoal(current);
+  next.status = statusAfterBudgetLimit(status, next.usage.tokensUsed, next.tokenBudget);
+  next.updatedAt = unixSeconds();
+  return next;
 }
 
 function requireSameGoalId(current: ThreadGoal, nextGoal: ThreadGoal, kind: string): void {
@@ -196,21 +195,6 @@ function requireUnchangedCreatedAt(current: ThreadGoal, nextGoal: ThreadGoal, ki
   }
 }
 
-function requireUnchangedUsage(current: ThreadGoal, nextGoal: ThreadGoal, kind: string): void {
-  if (current.usage.tokensUsed !== nextGoal.usage.tokensUsed) {
-    throw transitionInvariantError(kind, "usage.tokensUsed must be unchanged");
-  }
-  if (current.usage.activeSeconds !== nextGoal.usage.activeSeconds) {
-    throw transitionInvariantError(kind, "usage.activeSeconds must be unchanged");
-  }
-}
-
-function requireNonRewindingUpdatedAt(current: ThreadGoal, nextGoal: ThreadGoal, kind: string): void {
-  if (nextGoal.updatedAt < current.updatedAt) {
-    throw transitionInvariantError(kind, "updatedAt must not decrease");
-  }
-}
-
 function requireRuntimeAccountingChange(
   current: ThreadGoal,
   nextGoal: ThreadGoal,
@@ -226,18 +210,6 @@ function requireRuntimeAccountingChange(
       "runtime accounting must increase usage or change status",
     );
   }
-}
-
-function requireStatusHelperImmutableFields(
-  current: ThreadGoal,
-  nextGoal: ThreadGoal,
-  kind: string,
-): void {
-  requireUnchangedObjective(current, nextGoal, kind);
-  requireUnchangedTokenBudget(current, nextGoal, kind);
-  requireUnchangedUsage(current, nextGoal, kind);
-  requireUnchangedCreatedAt(current, nextGoal, kind);
-  requireNonRewindingUpdatedAt(current, nextGoal, kind);
 }
 
 function requireNonDecreasingUsage(current: ThreadGoal, nextGoal: ThreadGoal, kind: string): void {
@@ -264,39 +236,48 @@ function requireBudgetLimitedUsageAtOrOverBudget(nextGoal: ThreadGoal, kind: str
   }
 }
 
-function validateActiveToPausedTransition(
-  kind: "abort_pause" | "recovery_pause" | "recovery_shutdown_pause",
-  current: ThreadGoal | null,
-  nextGoal: ThreadGoal,
-): void {
-  requireCurrentGoal(current, kind);
-  requireSameGoalId(current, nextGoal, kind);
-  if (current.status !== "active") {
-    throw transitionInvariantError(
-      kind,
-      `current status must be active (got ${current.status})`,
-    );
+function requireNonRewindingUpdatedAt(current: ThreadGoal, nextGoal: ThreadGoal, kind: string): void {
+  if (nextGoal.updatedAt < current.updatedAt) {
+    throw transitionInvariantError(kind, "updatedAt must not decrease");
   }
-  if (nextGoal.status !== "paused") {
-    throw transitionInvariantError(kind, `next status must be paused (got ${nextGoal.status})`);
-  }
-  requireStatusHelperImmutableFields(current, nextGoal, kind);
 }
 
-function validateResumeActive(current: ThreadGoal | null, nextGoal: ThreadGoal): void {
+function planDerivedActiveToPausedTransition(
+  kind: "abort_pause" | "recovery_pause" | "recovery_shutdown_pause",
+  current: ThreadGoal | null,
+  extraBefore: readonly GoalTransitionEffect[],
+): GoalTransitionPlan {
+  requireCurrentGoal(current, kind);
+  requireStatus(current, "active", kind);
+  const nextGoal = deriveGoalWithStatus(current, "paused");
+
+  return {
+    persist: "set",
+    nextGoal,
+    source: "runtime",
+    beforePersist: mergeEffects([...extraBefore], memoryEffectsFromGoalChange(current, nextGoal)),
+    afterPersist: [],
+  };
+}
+
+function planDerivedResumeActiveTransition(
+  current: ThreadGoal | null,
+): GoalTransitionPlan {
   const kind = "resume_active";
   requireCurrentGoal(current, kind);
-  requireSameGoalId(current, nextGoal, kind);
-  if (current.status !== "paused") {
-    throw transitionInvariantError(
-      kind,
-      `current status must be paused (got ${current.status})`,
-    );
-  }
-  if (nextGoal.status !== "active") {
-    throw transitionInvariantError(kind, `next status must be active (got ${nextGoal.status})`);
-  }
-  requireStatusHelperImmutableFields(current, nextGoal, kind);
+  requireStatus(current, "paused", kind);
+  const nextGoal = deriveGoalWithStatus(current, "active");
+
+  return {
+    persist: "set",
+    nextGoal,
+    source: "runtime",
+    beforePersist: mergeEffects(
+      [{ type: "clearContinuation" }, { type: "resetRecovery" }],
+      memoryEffectsFromGoalChange(current, nextGoal),
+    ),
+    afterPersist: [],
+  };
 }
 
 function validateRuntimeAccounting(current: ThreadGoal | null, nextGoal: ThreadGoal): void {
@@ -338,22 +319,6 @@ function validateRuntimeAccounting(current: ThreadGoal | null, nextGoal: ThreadG
   }
 }
 
-function planActiveToPausedTransition(
-  kind: "abort_pause" | "recovery_pause" | "recovery_shutdown_pause",
-  current: ThreadGoal | null,
-  nextGoal: ThreadGoal,
-  extraBefore: readonly GoalTransitionEffect[],
-): GoalTransitionPlan {
-  validateActiveToPausedTransition(kind, current, nextGoal);
-  return {
-    persist: "set",
-    nextGoal,
-    source: "runtime",
-    beforePersist: mergeEffects([...extraBefore], memoryEffectsFromGoalChange(current, nextGoal)),
-    afterPersist: [],
-  };
-}
-
 export function planGoalTransition(
   current: ThreadGoal | null,
   request: GoalTransitionRequest,
@@ -367,46 +332,43 @@ export function planGoalTransition(
         beforePersist: [...CLEAR_BEFORE_PERSIST],
         afterPersist: [{ type: "stopStatusRefresh" }],
       };
+
     case "abort_pause":
-      return planActiveToPausedTransition(
+      return planDerivedActiveToPausedTransition(
         "abort_pause",
         current,
-        request.nextGoal,
-        ABORT_PAUSE_SET_BEFORE_PERSIST,
+        [
+          { type: "clearContinuation" },
+          { type: "clearActiveAccounting" },
+          { type: "resetRecovery" },
+          { type: "clearBudgetWarning" },
+        ],
       );
+
     case "resume_active":
-      validateResumeActive(current, request.nextGoal);
-      return {
-        persist: "set",
-        nextGoal: request.nextGoal,
-        source: "runtime",
-        beforePersist: mergeEffects(
-          [...RESUME_ACTIVE_BEFORE_PERSIST],
-          memoryEffectsFromGoalChange(current, request.nextGoal),
-        ),
-        afterPersist: [],
-      };
+      return planDerivedResumeActiveTransition(current);
+
     case "recovery_pause":
-      return planActiveToPausedTransition(
+      return planDerivedActiveToPausedTransition(
         "recovery_pause",
         current,
-        request.nextGoal,
         [
           { type: "clearContinuation" },
           { type: "setRecoveryPausedAttention", reason: request.recoveryReason },
         ],
       );
+
     case "recovery_shutdown_pause":
-      return planActiveToPausedTransition(
+      return planDerivedActiveToPausedTransition(
         "recovery_shutdown_pause",
         current,
-        request.nextGoal,
         [
           { type: "clearContinuation" },
           { type: "clearHostOverflowRecovery" },
           { type: "setRecoveryPausedAttention", reason: request.recoveryReason },
         ],
       );
+
     case "runtime_accounting": {
       const { nextGoal } = request;
       validateRuntimeAccounting(current, nextGoal);
@@ -428,6 +390,7 @@ export function planGoalTransition(
         afterPersist: [],
       };
     }
+
     case "set": {
       const { nextGoal, source } = request;
       const wasPausedBefore = current?.status === "paused";
@@ -452,6 +415,7 @@ export function planGoalTransition(
         afterPersist,
       };
     }
+
     default: {
       const _exhaustive: never = request;
       throw new Error(`Unhandled goal transition request: ${String(_exhaustive)}`);

@@ -17,11 +17,7 @@ interface RecoveryRuntimeDeps {
   getGoal: () => ThreadGoal | null;
   getRecoveryState: () => GoalRecoveryMachineState;
   clearContinuationState: () => void;
-  pauseGoalForRecovery: (
-    ctx: ExtensionContext,
-    pausedGoal: ThreadGoal,
-    recoveryReason: string,
-  ) => void;
+  pauseGoalForRecovery: (ctx: ExtensionContext, recoveryReason: string) => void;
   refreshUi: (ctx: ExtensionContext) => void;
   maybeContinue: (ctx: ExtensionContext) => void;
 }
@@ -33,7 +29,7 @@ export function createGoalRecoveryRuntime(deps: RecoveryRuntimeDeps) {
       return;
     }
 
-    deps.pauseGoalForRecovery(ctx, goal, reason);
+    deps.pauseGoalForRecovery(ctx, reason);
   };
 
   const applyRecoveryAction = (action: RecoveryAction, ctx: ExtensionContext): void => {

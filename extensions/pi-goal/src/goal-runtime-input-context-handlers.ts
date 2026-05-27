@@ -12,13 +12,13 @@ import { isCommandResumeQueuedGoalMessage } from "./queued-goal-messages.js";
 import { applyStaleQueuedWorkEffects } from "./goal-runtime-event-utils.js";
 import type {
   ContextEventResult,
-  InputContextHandlerDeps,
+  GoalRuntimeEventContext,
   MessageStartEvent,
   QueuedGoalWorkMessageIdResolver,
 } from "./goal-runtime-event-handler-types.js";
 
 export function createInputContextEventHandlers(
-  deps: InputContextHandlerDeps,
+  deps: GoalRuntimeEventContext,
   queuedGoalWorkMessageIdForRuntime: QueuedGoalWorkMessageIdResolver,
 ) {
   const { runtimeState, stateController, continuation, recoveryRuntime, status, resetErrorRecovery } = deps;

@@ -1,5 +1,11 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import type {
+  GoalRuntimeContinuationPort,
+  GoalRuntimeEventContext,
+  QueuedGoalWorkMessage,
+  QueuedGoalWorkMessageIdResolver,
+} from "./goal-runtime-event-handler-types.js";
 import { extensionQueuedGoalWorkMessageIdForRuntime } from "./queued-goal-work.js";
 import {
   isAssistantContextOverflow,
@@ -8,26 +14,19 @@ import {
   type AssistantErrorMessage,
 } from "./recovery.js";
 import type { StaleQueuedWorkEffect, StaleQueuedWorkPlan } from "./stale-queued-work-guard.js";
-import type {
-  GoalRuntimeContinuationPort,
-  QueuedGoalWorkMessage,
-  QueuedGoalWorkMessageIdResolver,
-  RecoveryEventDeps,
-  StaleQueuedWorkRuntimePort,
-} from "./goal-runtime-event-handler-types.js";
 
 export function applyStaleQueuedWorkEffects(
   effects: readonly StaleQueuedWorkEffect[],
   ctx: ExtensionContext,
-  deps: StaleQueuedWorkRuntimePort,
+  context: GoalRuntimeEventContext,
 ): void {
   for (const effect of effects) {
     switch (effect.type) {
       case "clearAccounting":
-        deps.clearActiveAccounting();
+        context.clearActiveAccounting();
         break;
       case "refreshUi":
-        deps.status.refreshUi(ctx);
+        context.status.refreshUi(ctx);
         break;
       case "abort":
         ctx.abort();
@@ -43,9 +42,9 @@ export function applyStaleQueuedWorkEffects(
 export function runStaleQueuedWorkPlan(
   plan: StaleQueuedWorkPlan,
   ctx: ExtensionContext,
-  deps: StaleQueuedWorkRuntimePort,
+  context: GoalRuntimeEventContext,
 ): boolean {
-  applyStaleQueuedWorkEffects(plan.effects, ctx, deps);
+  applyStaleQueuedWorkEffects(plan.effects, ctx, context);
   return plan.skip;
 }
 
@@ -66,17 +65,17 @@ export function getContextWindow(ctx: ExtensionContext): number {
 export function recordAssistantContextOverflow(
   message: AssistantErrorMessage,
   ctx: ExtensionContext,
-  deps: RecoveryEventDeps,
+  context: GoalRuntimeEventContext,
 ): boolean {
   if (!isAssistantContextOverflow(message, getContextWindow(ctx))) {
     return false;
   }
 
-  deps.stateController.beginOverflowRecovery(ctx);
+  context.stateController.beginOverflowRecovery(ctx);
   if (isErrorAssistantMessage(message)) {
-    deps.recoveryRuntime.handlePersistentAssistantError(message, ctx);
+    context.recoveryRuntime.handlePersistentAssistantError(message, ctx);
   } else {
-    deps.recoveryRuntime.handleSilentContextOverflow(ctx);
+    context.recoveryRuntime.handleSilentContextOverflow(ctx);
   }
   return true;
 }
@@ -84,10 +83,10 @@ export function recordAssistantContextOverflow(
 export function handleAgentErrorMessage(
   message: AssistantErrorMessage,
   ctx: ExtensionContext,
-  deps: RecoveryEventDeps,
+  context: GoalRuntimeEventContext,
 ): void {
-  recordAssistantContextOverflow(message, ctx, deps);
+  recordAssistantContextOverflow(message, ctx, context);
   if (!isContextOverflowError(message.errorMessage)) {
-    deps.recoveryRuntime.handlePersistentAssistantError(message, ctx);
+    context.recoveryRuntime.handlePersistentAssistantError(message, ctx);
   }
 }

@@ -163,12 +163,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
       return;
     }
 
-    const result = updateGoalStatus(goal, "paused");
-    if (!result.ok || !result.goal) {
-      return;
-    }
-
-    applyGoalTransition({ kind: "abort_pause", nextGoal: result.goal }, ctx);
+    applyGoalTransition({ kind: "abort_pause" }, ctx);
   };
 
   const resumePausedGoal = (ctx: ExtensionContext): void => {
@@ -177,17 +172,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
       return;
     }
 
-    const result = updateGoalStatus(goal, "active");
-    if (!result.ok || !result.goal) {
-      return;
-    }
-
-    if (result.goal.status === "active") {
-      applyGoalTransition({ kind: "resume_active", nextGoal: result.goal }, ctx);
-      return;
-    }
-
-    applyGoalTransition({ kind: "set", nextGoal: result.goal, source: "runtime" }, ctx);
+    applyGoalTransition({ kind: "resume_active" }, ctx);
   };
 
   const completeGoal = (source: GoalEntrySource, ctx: ExtensionContext): GoalResult => {
