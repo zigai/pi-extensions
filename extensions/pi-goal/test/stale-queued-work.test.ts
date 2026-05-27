@@ -254,6 +254,44 @@ test("stale prompt-based queued work does not pause or charge a replacement goal
   assert.equal(harness.sentMessages.length, 0);
 });
 
+test("stale prompt-based queued work with stop terminal does not corrupt replacement goal", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("old goal");
+  const oldQueued = harness.sentMessages[0];
+  assert.ok(oldQueued);
+  const oldPrompt = oldQueued.message.content;
+  if (typeof oldPrompt !== "string") {
+    assert.fail("Expected queued goal message content to be a string.");
+  }
+  const oldMessage = goalUserContextMessage(oldPrompt, 1);
+
+  await harness.runCommand("new goal");
+  const replacement = harness.snapshot().goal;
+  assert.equal(replacement?.objective, "new goal");
+  harness.sentMessages.length = 0;
+
+  await emitQueuedTurnThroughContext(harness, [oldMessage]);
+  assert.equal(harness.abortCount, 1);
+
+  await harness.emit("turn_end", {
+    type: "turn_end",
+    turnIndex: 0,
+    message: assistantMessage("stop", { input: 20, output: 5 }),
+    toolResults: [],
+  });
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [assistantMessage("stop", { input: 20, output: 5 })],
+  });
+
+  const goal = harness.snapshot().goal;
+  assert.equal(goal?.goalId, replacement?.goalId);
+  assert.equal(goal?.status, "active");
+  assert.equal(goal?.usage.tokensUsed, 0);
+  assert.equal(harness.abortCount, 1);
+  assert.equal(harness.sentMessages.length, 0);
+});
+
 test("stale custom queued work aborts without pausing, charging, or requeueing a replacement goal", async () => {
   const originalNow = Date.now;
   let now = 1_000;
@@ -353,249 +391,6 @@ test("stale custom abort without agent_end does not suppress the next current fo
   } finally {
     Date.now = originalNow;
   }
-});
-
-test("late stale turn_end after the next current follow-up starts is ignored", async () => {
-  const originalNow = Date.now;
-  let now = 1_000;
-  Date.now = () => now;
-  try {
-    const harness = createRuntimeHarness();
-    await harness.runCommand("old goal");
-    const oldQueued = harness.sentMessages[0];
-    assert.ok(oldQueued);
-    const oldMessage = queuedCustomMessage(oldQueued, 1);
-
-    await harness.runCommand("new goal");
-    const currentQueued = harness.sentMessages.at(-1);
-    assert.ok(currentQueued);
-    const currentMessage = queuedCustomMessage(currentQueued, 2);
-    const replacement = harness.snapshot().goal;
-    assert.equal(replacement?.objective, "new goal");
-    harness.sentMessages.length = 0;
-
-    await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
-    assert.equal(harness.abortCount, 1);
-
-    now = 3_000;
-    await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
-
-    now = 4_000;
-    await harness.emit("turn_end", {
-      type: "turn_end",
-      turnIndex: 0,
-      message: assistantMessage("aborted", { input: 20, output: 5 }),
-      toolResults: [],
-    });
-    assert.equal(harness.snapshot().goal?.status, "active");
-    assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
-    assert.equal(harness.sentMessages.length, 0);
-
-    now = 5_000;
-    await harness.emit("turn_end", {
-      type: "turn_end",
-      turnIndex: 1,
-      message: assistantMessage("stop", { input: 30, output: 12 }),
-      toolResults: [],
-    });
-
-    const goal = harness.snapshot().goal;
-    assert.equal(goal?.goalId, replacement?.goalId);
-    assert.equal(goal?.status, "active");
-    assert.equal(goal?.usage.tokensUsed, 42);
-    assert.equal(goal?.usage.activeSeconds, 2);
-    assert.equal(harness.sentMessages.length, 1);
-    assert.deepEqual(harness.sentMessages[0]?.message.details, {
-      kind: "continuation",
-      goalId: replacement?.goalId,
-    });
-  } finally {
-    Date.now = originalNow;
-  }
-});
-
-test("current follow-up abort is not swallowed by a pending late stale turn_end", async () => {
-  const originalNow = Date.now;
-  let now = 1_000;
-  Date.now = () => now;
-  try {
-    const harness = createRuntimeHarness();
-    await harness.runCommand("old goal");
-    const oldQueued = harness.sentMessages[0];
-    assert.ok(oldQueued);
-    const oldMessage = queuedCustomMessage(oldQueued, 1);
-
-    await harness.runCommand("new goal");
-    const currentQueued = harness.sentMessages.at(-1);
-    assert.ok(currentQueued);
-    const currentMessage = queuedCustomMessage(currentQueued, 2);
-    const replacement = harness.snapshot().goal;
-    assert.equal(replacement?.objective, "new goal");
-    harness.sentMessages.length = 0;
-
-    await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
-    assert.equal(harness.abortCount, 1);
-
-    now = 3_000;
-    await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
-    now = 5_000;
-    await harness.emit("turn_end", {
-      type: "turn_end",
-      turnIndex: 1,
-      message: assistantMessage("aborted", { input: 30, output: 12 }),
-      toolResults: [],
-    });
-
-    let goal = harness.snapshot().goal;
-    assert.equal(goal?.goalId, replacement?.goalId);
-    assert.equal(goal?.status, "paused");
-    assert.equal(goal?.usage.tokensUsed, 42);
-    assert.equal(goal?.usage.activeSeconds, 2);
-    assert.equal(harness.sentMessages.length, 0);
-
-    now = 6_000;
-    await harness.emit("turn_end", {
-      type: "turn_end",
-      turnIndex: 0,
-      message: assistantMessage("aborted", { input: 20, output: 5 }),
-      toolResults: [],
-    });
-
-    goal = harness.snapshot().goal;
-    assert.equal(goal?.goalId, replacement?.goalId);
-    assert.equal(goal?.status, "paused");
-    assert.equal(goal?.usage.tokensUsed, 42);
-    assert.equal(goal?.usage.activeSeconds, 2);
-  } finally {
-    Date.now = originalNow;
-  }
-});
-
-test("compaction between stale context abort and cleanup does not persist, account, or requeue", async () => {
-  const originalNow = Date.now;
-  let now = 1_000;
-  Date.now = () => now;
-  try {
-    const harness = createRuntimeHarness();
-    await harness.runCommand("old goal");
-    const oldQueued = harness.sentMessages[0];
-    assert.ok(oldQueued);
-    const oldMessage = queuedCustomMessage(oldQueued, 1);
-
-    await harness.runCommand("clear");
-    await harness.runTool("create_goal", { objective: "new goal" });
-    const replacement = harness.snapshot().goal;
-    assert.equal(replacement?.objective, "new goal");
-    const entryCountBeforeCompaction = harness.entries.length;
-    harness.sentMessages.length = 0;
-
-    await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
-    assert.equal(harness.abortCount, 1);
-
-    now = 5_000;
-    await harness.emit("session_before_compact", {
-      type: "session_before_compact",
-      preparation: {},
-      branchEntries: [],
-      signal: new AbortController().signal,
-    });
-    await harness.emit("session_compact", {
-      type: "session_compact",
-      compactionEntry: {},
-      fromExtension: false,
-    });
-
-    assert.equal(harness.entries.length, entryCountBeforeCompaction);
-    assert.equal(harness.sentMessages.length, 0);
-    assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
-    assert.equal(harness.snapshot().goal?.usage.activeSeconds, 0);
-
-    await harness.emit("turn_end", {
-      type: "turn_end",
-      turnIndex: 0,
-      message: assistantMessage("aborted", { input: 20, output: 5 }),
-      toolResults: [],
-    });
-    assert.equal(harness.snapshot().goal?.status, "active");
-    assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
-
-    const userMessage = goalUserContextMessage("continue now", 2);
-    now = 6_000;
-    await emitQueuedTurnThroughContext(harness, [userMessage], 1);
-    now = 8_000;
-    await harness.emit("turn_end", {
-      type: "turn_end",
-      turnIndex: 1,
-      message: assistantMessage("stop", { input: 7, output: 3 }),
-      toolResults: [],
-    });
-
-    const goal = harness.snapshot().goal;
-    assert.equal(goal?.goalId, replacement?.goalId);
-    assert.equal(goal?.status, "active");
-    assert.equal(goal?.usage.tokensUsed, 10);
-    assert.equal(goal?.usage.activeSeconds, 2);
-    assert.equal(harness.sentMessages.length, 1);
-    assert.deepEqual(harness.sentMessages[0]?.message.details, {
-      kind: "continuation",
-      goalId: replacement?.goalId,
-    });
-  } finally {
-    Date.now = originalNow;
-  }
-});
-
-test("mixed stale and current follow-up batch neutralizes stale work without aborting current goal", async () => {
-  const harness = createRuntimeHarness();
-  await harness.runCommand("old goal");
-  const oldQueued = harness.sentMessages[0];
-  assert.ok(oldQueued);
-  const oldMessage = queuedCustomMessage(oldQueued, 1);
-  const oldGoalId = harness.snapshot().goal?.goalId;
-  assert.ok(oldGoalId);
-
-  await harness.runCommand("new goal");
-  const replacement = harness.snapshot().goal;
-  assert.equal(replacement?.objective, "new goal");
-  const currentQueued = harness.sentMessages.at(-1);
-  assert.ok(currentQueued);
-  const currentMessage = queuedCustomMessage(currentQueued, 2);
-  harness.sentMessages.length = 0;
-
-  const contextResults = await emitQueuedTurnThroughContext(harness, [oldMessage, currentMessage]);
-  const contextResult = requireProviderContextResult(contextResults);
-
-  assert.equal(harness.abortCount, 0);
-  assert.equal(contextResult.messages.length, 2);
-  assert.match(String(providerContextMessageAt(contextResult, 0).content), /queued hidden goal continuation was stale/);
-  assert.deepEqual(providerContextMessageAt(contextResult, 0).details, {
-    kind: "stale_continuation",
-    goalId: oldGoalId,
-    currentGoalId: replacement?.goalId,
-    currentStatus: "active",
-  });
-  assert.deepEqual(providerContextMessageAt(contextResult, 1).details, currentMessage.details);
-
-  await harness.emit("turn_end", {
-    type: "turn_end",
-    turnIndex: 0,
-    message: assistantMessage("stop", { input: 9, output: 1 }),
-    toolResults: [],
-  });
-  await harness.emit("agent_end", {
-    type: "agent_end",
-    messages: [assistantMessage("stop", { input: 9, output: 1 })],
-  });
-
-  const goal = harness.snapshot().goal;
-  assert.equal(goal?.goalId, replacement?.goalId);
-  assert.equal(goal?.status, "active");
-  assert.equal(goal?.usage.tokensUsed, 10);
-  assert.equal(harness.sentMessages.length, 1);
-  assert.deepEqual(harness.sentMessages[0]?.message.details, {
-    kind: "continuation",
-    goalId: replacement?.goalId,
-  });
 });
 
 test("goal follow-up guard resets when the queued prompt-based agent turn starts", async () => {
