@@ -17,6 +17,78 @@ function effectTypes(plan: { effects: Array<{ type: string }> }): string[] {
   return plan.effects.map((effect) => effect.type);
 }
 
+type GuardTransitionCase = {
+  label: string;
+  steps: Array<(guard: ReturnType<typeof createStaleQueuedWorkGuard>) => void>;
+  act: (guard: ReturnType<typeof createStaleQueuedWorkGuard>) => { skip: boolean; effects: string[] } | null;
+  lifecycle: string;
+  result: { skip: boolean; effects: string[] } | null;
+};
+
+const guardTransitionCases: GuardTransitionCase[] = [
+  {
+    label: "idle context abort is ignored",
+    steps: [],
+    act: (guard) => {
+      const plan = guard.planContextAbort(0);
+      return plan === null ? null : { skip: plan.skip, effects: effectTypes(plan) };
+    },
+    lifecycle: "idle",
+    result: null,
+  },
+  {
+    label: "stale-only observation aborts and blocks continuation",
+    steps: [(guard) => guard.noteStaleWorkStarted("goal-1")],
+    act: (guard) => {
+      const plan = guard.planContextAbort(1);
+      return plan === null ? null : { skip: plan.skip, effects: effectTypes(plan) };
+    },
+    lifecycle: "abortingTurn",
+    result: { skip: false, effects: ["clearAccounting", "abort", "refreshUi"] },
+  },
+  {
+    label: "mixed stale and runnable observation returns to pending cleanup",
+    steps: [
+      (guard) => guard.noteStaleWorkStarted("goal-1"),
+      (guard) => guard.planContextAbort(1),
+      (guard) => guard.planUserInputClearAbort(),
+      (guard) => guard.noteRunnableWorkStarted(),
+    ],
+    act: (guard) => {
+      const plan = guard.planContextAbort(2);
+      return plan === null ? null : { skip: plan.skip, effects: effectTypes(plan) };
+    },
+    lifecycle: "awaitingTerminalCleanup",
+    result: null,
+  },
+  {
+    label: "released stale turn_end consumes pending terminal cleanup",
+    steps: [
+      (guard) => guard.noteStaleWorkStarted("goal-1"),
+      (guard) => guard.planContextAbort(1),
+      (guard) => guard.planUserInputClearAbort(),
+    ],
+    act: (guard) => {
+      const plan = guard.planTurnEnd(1, abortedAssistant);
+      return { skip: plan.skip, effects: effectTypes(plan) };
+    },
+    lifecycle: "awaitingTerminalCleanup",
+    result: { skip: true, effects: ["refreshUi"] },
+  },
+];
+
+for (const testCase of guardTransitionCases) {
+  test(`stale queued-work reducer transition: ${testCase.label}`, () => {
+    const guard = createStaleQueuedWorkGuard();
+    for (const step of testCase.steps) {
+      step(guard);
+    }
+
+    assert.deepEqual(testCase.act(guard), testCase.result);
+    assert.equal(guard.lifecycleKind(), testCase.lifecycle);
+  });
+}
+
 test("idle -> observingTurn when stale work is noted", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("goal-1");
