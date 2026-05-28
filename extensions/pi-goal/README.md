@@ -43,6 +43,17 @@ npm install
 pi install .
 ```
 
+## Development
+
+Validate types and tests before committing or opening a PR:
+
+```sh
+npm run verify
+```
+
+Project agent notes and module map: [AGENTS.md](AGENTS.md).  
+Latest structural audit: [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md).
+
 ## User Commands
 
 ```text

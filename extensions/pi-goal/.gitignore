@@ -6,6 +6,7 @@ coverage/
 dist/
 .scratchpad.md
 .DS_Store
+.debug/
 
 # CueLoop local/runtime state (do not commit)
 .cueloop/
