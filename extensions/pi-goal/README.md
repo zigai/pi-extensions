@@ -21,7 +21,7 @@ pi install npm:pi-codex-goal
 Install a pinned npm version:
 
 ```sh
-pi install npm:pi-codex-goal@0.1.15
+pi install npm:pi-codex-goal@<version>
 ```
 
 Install from GitHub:
@@ -33,7 +33,7 @@ pi install https://github.com/fitchmultz/pi-codex-goal
 Install a pinned GitHub release:
 
 ```sh
-pi install https://github.com/fitchmultz/pi-codex-goal@v0.1.15
+pi install https://github.com/fitchmultz/pi-codex-goal@v<version>
 ```
 
 For local development from this repository:
@@ -42,6 +42,19 @@ For local development from this repository:
 npm install
 pi install .
 ```
+
+Compatibility note: this package is tested against the current pi release during each package update, and pi-bundled runtime packages are declared as optional wildcard peers. That keeps installs forward-open for future pi releases: npm peer ranges should not block users from trying a newer pi, though runtime behavior is only verified against the tested baseline until a follow-up package release confirms it.
+
+## Development
+
+Validate types and tests before committing or opening a PR:
+
+```sh
+npm run verify
+```
+
+Project agent notes and module map: [AGENTS.md](AGENTS.md).
+Latest structural audit: [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md).
 
 ## User Commands
 

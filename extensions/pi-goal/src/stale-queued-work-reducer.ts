@@ -1,4 +1,11 @@
 import {
+  ABORTING_TURN_EVENT_DEFAULTS,
+  AWAITING_TERMINAL_CLEANUP_EVENT_DEFAULTS,
+  IDLE_EVENT_DEFAULTS,
+  OBSERVING_TURN_EVENT_DEFAULTS,
+  type LifecycleEventDefaults,
+} from "./stale-queued-work-reducer-defaults.js";
+import {
   consumeAbortingAgentEnd,
   consumePendingStaleAgentEnd,
   dropActiveObligations,
@@ -215,73 +222,6 @@ function finishActiveAbortingLifecycle(
     : { kind: "idle" };
   return transition(nextState, skipClearAccountingRefreshPlan());
 }
-
-type EventDefaultAction = "emptyPlan" | "noPlan" | "handled";
-type LifecycleEventDefaults = Record<StaleQueuedWorkEvent["type"], EventDefaultAction>;
-
-const IDLE_EVENT_DEFAULTS = {
-  runnableWorkStarted: "handled",
-  staleWorkStarted: "handled",
-  contextAbort: "noPlan",
-  userInputClearAbort: "emptyPlan",
-  extensionContinuationClearAbort: "emptyPlan",
-  beforeAgentStartClearAbort: "emptyPlan",
-  turnStart: "emptyPlan",
-  toolExecutionEnd: "emptyPlan",
-  sessionBeforeCompact: "emptyPlan",
-  sessionCompact: "emptyPlan",
-  turnEnd: "emptyPlan",
-  agentEnd: "emptyPlan",
-  sessionShutdown: "emptyPlan",
-} as const satisfies LifecycleEventDefaults;
-
-const OBSERVING_TURN_EVENT_DEFAULTS = {
-  runnableWorkStarted: "handled",
-  staleWorkStarted: "handled",
-  contextAbort: "handled",
-  userInputClearAbort: "emptyPlan",
-  extensionContinuationClearAbort: "emptyPlan",
-  beforeAgentStartClearAbort: "emptyPlan",
-  turnStart: "handled",
-  toolExecutionEnd: "emptyPlan",
-  sessionBeforeCompact: "emptyPlan",
-  sessionCompact: "emptyPlan",
-  turnEnd: "handled",
-  agentEnd: "handled",
-  sessionShutdown: "handled",
-} as const satisfies LifecycleEventDefaults;
-
-const ABORTING_TURN_EVENT_DEFAULTS = {
-  runnableWorkStarted: "emptyPlan",
-  staleWorkStarted: "emptyPlan",
-  contextAbort: "handled",
-  userInputClearAbort: "handled",
-  extensionContinuationClearAbort: "handled",
-  beforeAgentStartClearAbort: "handled",
-  turnStart: "handled",
-  toolExecutionEnd: "handled",
-  sessionBeforeCompact: "handled",
-  sessionCompact: "handled",
-  turnEnd: "handled",
-  agentEnd: "handled",
-  sessionShutdown: "handled",
-} as const satisfies LifecycleEventDefaults;
-
-const AWAITING_TERMINAL_CLEANUP_EVENT_DEFAULTS = {
-  runnableWorkStarted: "handled",
-  staleWorkStarted: "handled",
-  contextAbort: "noPlan",
-  userInputClearAbort: "emptyPlan",
-  extensionContinuationClearAbort: "emptyPlan",
-  beforeAgentStartClearAbort: "emptyPlan",
-  turnStart: "emptyPlan",
-  toolExecutionEnd: "emptyPlan",
-  sessionBeforeCompact: "emptyPlan",
-  sessionCompact: "emptyPlan",
-  turnEnd: "handled",
-  agentEnd: "handled",
-  sessionShutdown: "handled",
-} as const satisfies LifecycleEventDefaults;
 
 function applyDefaultTransition(
   state: StaleQueuedWorkState,
