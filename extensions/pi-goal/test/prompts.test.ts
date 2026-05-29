@@ -58,6 +58,9 @@ test("continuation and budget-limit prompts reference exposed goal-completion to
   const continuation = continuationPrompt(created);
   const budget = budgetLimitPrompt(created);
 
+  assert.match(budget, /marked the goal as budgetLimited/);
+  assert.doesNotMatch(budget, /budget_limited/);
+
   for (const prompt of [continuation, budget]) {
     assert.match(prompt, /update_goal \(or the exposed namespaced equivalent, such as pi__update_goal\)/);
     assert.match(prompt, /pi__update_goal/);
