@@ -70,7 +70,7 @@ test("applyQueuedGoalProviderContextRewrites rewrites stale custom and user queu
   assert.match(String(userContentFromUnknown(userResult.messages[0]?.content)[0]?.text), /queued hidden goal continuation was stale/);
 });
 
-test("applyQueuedGoalProviderContextRewrites supersedes older custom continuations and refreshes the latest", () => {
+test("applyQueuedGoalProviderContextRewrites supersedes older custom continuations without refreshing the latest", () => {
   const older = goalCustomContextMessage({
     content: continuationPrompt(activeGoal),
     details: { kind: "continuation", goalId: activeGoal.goalId },
@@ -98,7 +98,7 @@ test("applyQueuedGoalProviderContextRewrites supersedes older custom continuatio
     kind: "superseded_continuation",
     goalId: activeGoal.goalId,
   });
-  assert.match(String(messages[1]?.content), /Tokens used: 0/);
+  assert.match(String(messages[1]?.content), /Tokens used: 99/);
 });
 
 test("applyQueuedGoalProviderContextRewrites marks stale continuations for completed goals", () => {
