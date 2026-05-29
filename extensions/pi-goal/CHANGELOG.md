@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+## 0.1.16 - 2026-05-28
+
 - Adds `docs/CODEBASE_AUDIT.md` with a 2026-05-28 structural health report and remediation record.
 - Adds project `AGENTS.md` and documents `npm run verify` in the README Development section.
 - Extracts stale queued-work reducer lifecycle default tables into `stale-queued-work-reducer-defaults.ts`.
 - Ignores local `.debug/` Cursor SDK event artifacts in `.gitignore`.
+- Updates the local pi development baseline to `@earendil-works/*` `0.77.0`, keeps pi runtime packages as optional wildcard peers, and leaves no pi/Node upper-bound metadata that would block future pi releases at install time.
 
 ## 0.1.15 - 2026-05-27
 
