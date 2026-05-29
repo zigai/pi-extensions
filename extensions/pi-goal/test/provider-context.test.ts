@@ -18,7 +18,7 @@ import {
   requireProviderContextResult,
 } from "./support/runtime-harness.js";
 
-test("provider context dedupes many active continuations to one refreshed prompt", async () => {
+test("provider context dedupes many active continuations without refreshing the latest prompt", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
   const goal = harness.snapshot().goal;
@@ -64,8 +64,8 @@ test("provider context dedupes many active continuations to one refreshed prompt
   assert.match(String(providerContextMessageAt(result, 1).content), /Superseded hidden goal continuation bookkeeping/);
 
   const latestContent = String(providerContextMessageAt(result, 2).content);
-  assert.match(latestContent, /Tokens used: 0/);
-  assert.match(latestContent, /Time spent pursuing goal: 0s/);
+  assert.match(latestContent, /Tokens used: 99/);
+  assert.match(latestContent, /Time spent pursuing goal: 42s/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
   assert.doesNotMatch(latestContent, /<untrusted_objective>/);
 });
@@ -125,7 +125,7 @@ test("active provider-context dedupe preserves historical user marker mixed with
   assert.match(String(userContentFromUnknown(providerContextMessageAt(result, 1).content)[0]?.text), /<untrusted_objective>/);
 
   const latestContent = String(providerContextMessageAt(result, 2).content);
-  assert.match(latestContent, /Tokens used: 0/);
+  assert.match(latestContent, /Tokens used: 99/);
   assert.doesNotMatch(latestContent, /<untrusted_objective>/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
 });
@@ -204,7 +204,7 @@ test("active goal provider-context dedupe preserves pasted marker input mixed wi
   assert.match(String(providerContextMessageAt(result, 0).content), /Superseded hidden goal continuation bookkeeping/);
 
   const latestContent = String(providerContextMessageAt(result, 2).content);
-  assert.match(latestContent, /Tokens used: 0/);
+  assert.match(latestContent, /Tokens used: 99/);
   assert.doesNotMatch(latestContent, /<untrusted_objective>/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
 });

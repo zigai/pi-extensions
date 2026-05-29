@@ -1,9 +1,4 @@
-import {
-  compactContinuationPrompt,
-  continuationGoalIdFromPrompt,
-  continuationPrompt,
-  supersededContinuationMessage,
-} from "./prompts.js";
+import { continuationGoalIdFromPrompt, supersededContinuationMessage } from "./prompts.js";
 import {
   isActiveGoalQueuedDetails,
   type QueuedGoalContextCarrier,
@@ -50,22 +45,11 @@ interface StaleQueuedGoalUserMessage extends QueuedGoalUserMessage {
   content: QueuedGoalTextPart[];
 }
 
-interface RefreshedActiveQueuedGoalCustomMessage extends QueuedGoalCustomMessage {
-  content: string;
-  display: false;
-}
-
-interface RefreshedActiveQueuedGoalUserMessage extends QueuedGoalUserMessage {
-  content: QueuedGoalTextPart[];
-}
-
 type RewrittenQueuedGoalWorkMessage =
   | SupersededQueuedGoalCustomMessage
   | SupersededQueuedGoalUserMessage
   | StaleQueuedGoalCustomMessage
-  | StaleQueuedGoalUserMessage
-  | RefreshedActiveQueuedGoalCustomMessage
-  | RefreshedActiveQueuedGoalUserMessage;
+  | StaleQueuedGoalUserMessage;
 
 type ProviderContextRewrite<TMessage extends QueuedGoalContextInput> =
   TMessage & RewrittenQueuedGoalWorkMessage;
@@ -164,20 +148,6 @@ function supersededContinuationContextMessage(
   };
 }
 
-function continuationPromptForProviderContext(
-  goal: ThreadGoal,
-  message: Pick<QueuedGoalWorkSourceMessage, "details">,
-): string {
-  if (isActiveGoalQueuedDetails(message.details)) {
-    const kind = message.details.kind;
-    if (kind === "command_start" || kind === "command_resume") {
-      return continuationPrompt(goal);
-    }
-  }
-
-  return compactContinuationPrompt(goal);
-}
-
 function dedupeActiveGoalContinuations<TMessage extends QueuedGoalContextInput>(
   messages: readonly TMessage[],
   goal: ThreadGoal,
@@ -220,43 +190,6 @@ function dedupeActiveGoalContinuations<TMessage extends QueuedGoalContextInput>(
     const rewritten = supersededContinuationContextMessage(source, activeGoalId);
     nextMessages[index] = mergeProviderContextMessage(message, rewritten);
     changed = true;
-  }
-
-  const latestMessage = nextMessages[latestIndex];
-  if (!latestMessage) {
-    return { messages: nextMessages, changed };
-  }
-  const latestCarrier = toQueuedGoalContextCarrier(latestMessage);
-  if (!latestCarrier) {
-    return { messages: nextMessages, changed };
-  }
-  const latestSource = toQueuedGoalWorkSource(latestCarrier);
-  if (!latestSource) {
-    return { messages: nextMessages, changed };
-  }
-
-  const refreshedContent = continuationPromptForProviderContext(goal, latestSource);
-  if (latestSource.role === "custom") {
-    if (latestMessage.content !== refreshedContent) {
-      const refreshed: RefreshedActiveQueuedGoalCustomMessage = {
-        ...latestSource,
-        content: refreshedContent,
-        display: false,
-      };
-      nextMessages[latestIndex] = mergeProviderContextMessage(latestMessage, refreshed);
-      changed = true;
-    }
-  } else {
-    const refreshedUserContent: QueuedGoalTextPart[] = [{ type: "text", text: refreshedContent }];
-    const currentContent = textContentFromMessageContent(latestMessage.content);
-    if (currentContent !== refreshedContent) {
-      const refreshed: RefreshedActiveQueuedGoalUserMessage = {
-        ...latestSource,
-        content: refreshedUserContent,
-      };
-      nextMessages[latestIndex] = mergeProviderContextMessage(latestMessage, refreshed);
-      changed = true;
-    }
   }
 
   return { messages: nextMessages, changed };

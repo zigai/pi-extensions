@@ -5,6 +5,7 @@
 - Aligns the budget-limit steering prompt with the public `budgetLimited` status spelling.
 - Documents that default-branch source installs may include unreleased changes beyond the latest npm/tagged release.
 - Adds a copy-pasteable interactive Cursor Composer 2.5 `/goal` smoke test and documents that `pi -p '/goal ...'` is not a reliable slash-command smoke path.
+- Stops refreshing the latest active hidden goal continuation during provider-context rewriting, preserving prompt-cache stability while still superseding older continuations.
 
 ## 0.1.16 - 2026-05-28
 
