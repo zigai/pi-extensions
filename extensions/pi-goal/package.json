@@ -8,6 +8,8 @@
   "main": "src/index.ts",
   "files": [
     "src",
+    "docs",
+    "AGENTS.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

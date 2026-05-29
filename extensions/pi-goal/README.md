@@ -21,7 +21,7 @@ pi install npm:pi-codex-goal
 Install a pinned npm version:
 
 ```sh
-pi install npm:pi-codex-goal@0.1.15
+pi install npm:pi-codex-goal@<version>
 ```
 
 Install from GitHub:
@@ -33,7 +33,7 @@ pi install https://github.com/fitchmultz/pi-codex-goal
 Install a pinned GitHub release:
 
 ```sh
-pi install https://github.com/fitchmultz/pi-codex-goal@v0.1.15
+pi install https://github.com/fitchmultz/pi-codex-goal@v<version>
 ```
 
 For local development from this repository:
@@ -53,7 +53,7 @@ Validate types and tests before committing or opening a PR:
 npm run verify
 ```
 
-Project agent notes and module map: [AGENTS.md](AGENTS.md).  
+Project agent notes and module map: [AGENTS.md](AGENTS.md).
 Latest structural audit: [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md).
 
 ## User Commands

@@ -1,7 +1,7 @@
 # Codebase Audit — pi-codex-goal
 
-**Date:** 2026-05-28  
-**Scope:** Full repository (`src/`, `test/`, package metadata, operability)  
+**Date:** 2026-05-28
+**Scope:** Full repository (`src/`, `test/`, package metadata, operability)
 **Baseline:** `0.1.15` on `main` after runtime refactor and 0.1.15 release audit remediation (`347b8bd`)
 
 ## Executive summary
@@ -90,7 +90,7 @@ Coverage is **integration-heavy** via `test/support/runtime-harness.ts` and scen
 | `src/*.ts` modules | 38 |
 | Largest modules (lines) | `stale-queued-work-reducer.ts` ~420, `state.ts` ~377, `queued-goal-work.ts` ~383 |
 | Test files | 24 |
-| Peer baseline | `@earendil-works/*` 0.76.0 |
+| Pi dev baseline | `@earendil-works/*` 0.77.0 |
 
 Dependency graph is acyclic: handlers → controller ports → state/persistence/recovery; stale-work subsystems do not import runtime handlers.
 
