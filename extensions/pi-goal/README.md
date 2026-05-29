@@ -45,6 +45,8 @@ pi install .
 
 Compatibility note: this package is tested against the current pi release during each package update, and pi-bundled runtime packages are declared as optional wildcard peers. That keeps installs forward-open for future pi releases: npm peer ranges should not block users from trying a newer pi, though runtime behavior is only verified against the tested baseline until a follow-up package release confirms it.
 
+Release note: npm installs and pinned GitHub tags are the reproducible release artifacts. Installing from the repository default branch can include unreleased changes that will ship in a future package release, even when `package.json` still identifies the latest published version.
+
 ## Development
 
 Validate types and tests before committing or opening a PR:
@@ -55,6 +57,44 @@ npm run verify
 
 Project agent notes and module map: [AGENTS.md](AGENTS.md).
 Latest structural audit: [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md).
+
+## Smoke test with Cursor Composer 2.5
+
+This smoke test exercises the interactive `/goal` command, hidden continuation, bridged goal tools, filesystem verification, and final `update_goal` completion.
+
+Prerequisites:
+
+- Pi can authenticate to Cursor, for example through a Cursor User API Key.
+- Cursor Composer 2.5 is available:
+
+```sh
+pi --list-models cursor 2>&1 | rg 'composer-2[.-]5'
+```
+
+Start pi from this repository:
+
+```sh
+rm -f /tmp/pi-codex-goal-slash-smoke.txt
+rm -rf /tmp/pi-codex-goal-slash-smoke-session
+pi --model cursor/composer-2-5 --cursor-no-fast \
+  --session-dir /tmp/pi-codex-goal-slash-smoke-session
+```
+
+Then paste this into the interactive TUI:
+
+```text
+/goal Create /tmp/pi-codex-goal-slash-smoke.txt containing PI_GOAL_SLASH_OK, verify the file content from the filesystem, inspect the current goal, and mark the goal complete only after verification. Final reply must include the verified file path, verified content, and final goal status.
+```
+
+Expected final evidence:
+
+```text
+Verified file path: /tmp/pi-codex-goal-slash-smoke.txt
+Verified content: PI_GOAL_SLASH_OK
+Final goal status: complete
+```
+
+`/goal` is an interactive editor command. Do not use `pi -p '/goal ...'` as a slash-command smoke path; print mode sends an initial model prompt and is not a reliable way to exercise this extension command. For headless automation, prompt the model to call the `create_goal`, `get_goal`, and `update_goal` tools instead of relying on slash-command parsing.
 
 ## User Commands
 
