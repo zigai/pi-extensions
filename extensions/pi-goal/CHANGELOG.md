@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.18 - 2026-05-29
+
+- Updates the local pi development baseline to `@earendil-works/*` `0.78.0` and refreshes the npm lockfile after reviewing the Pi `0.78.0` changelog.
+- Confirms the goal extension remains compatible with Pi `0.78.0` extension and package APIs; no runtime code changes were needed.
+
 ## 0.1.17 - 2026-05-29
 
 - Aligns the budget-limit steering prompt with the public `budgetLimited` status spelling.
