@@ -20,10 +20,11 @@
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "check": "npm run format:check && npm run lint"
+    "check": "npm run format:check && npm run lint && npm run typecheck",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.75.5",
+    "@earendil-works/pi-coding-agent": "^0.77.0",
     "@types/node": "^24.10.1",
     "oxfmt": "^0.44.0",
     "oxlint": "^1.59.0",
