@@ -87,26 +87,57 @@ function getPiInvocationParts(): string[] {
     return ["pi"];
 }
 
-function buildPiCommandParts(sessionFile: string | undefined, prompt: string): string[] {
+function currentModelArg(ctx: ExtensionCommandContext): string | undefined {
+    const model = ctx.model;
+    if (model === undefined) {
+        return undefined;
+    }
+
+    const provider = model.provider.trim();
+    const id = model.id.trim();
+    if (provider.length === 0 || id.length === 0) {
+        return undefined;
+    }
+
+    return `${provider}/${id}`;
+}
+
+function buildPiCommandParts(
+    sessionFile: string | undefined,
+    prompt: string,
+    modelArg: string | undefined,
+): string[] {
     const commandParts = [...getPiInvocationParts()];
+
+    if (modelArg !== undefined) {
+        commandParts.push("--model", modelArg);
+    }
 
     if (sessionFile !== undefined) {
         commandParts.push("--session", sessionFile);
     }
 
     if (prompt.length > 0) {
-        commandParts.push("--", prompt);
+        commandParts.push(prompt);
     }
 
     return commandParts;
 }
 
-function buildPiShellCommand(sessionFile: string | undefined, prompt: string): string {
-    return `exec ${buildPiCommandParts(sessionFile, prompt).map(shellQuote).join(" ")}`;
+function buildPiShellCommand(
+    sessionFile: string | undefined,
+    prompt: string,
+    modelArg: string | undefined,
+): string {
+    return `exec ${buildPiCommandParts(sessionFile, prompt, modelArg).map(shellQuote).join(" ")}`;
 }
 
-function buildPiStartupInput(sessionFile: string | undefined, prompt: string): string {
-    return `${buildPiShellCommand(sessionFile, prompt)}\n`;
+function buildPiStartupInput(
+    sessionFile: string | undefined,
+    prompt: string,
+    modelArg: string | undefined,
+): string {
+    return `${buildPiShellCommand(sessionFile, prompt, modelArg)}\n`;
 }
 
 function isTmux(): boolean {
@@ -296,6 +327,8 @@ async function launchForkedPi(
     prompt: string,
     launchName: string,
 ) {
+    const modelArg = currentModelArg(ctx);
+
     switch (target) {
         case "tmux-window":
             return pi.exec("tmux", [
@@ -304,7 +337,7 @@ async function launchForkedPi(
                 launchName,
                 "-c",
                 ctx.cwd,
-                buildPiShellCommand(sessionFile, prompt),
+                buildPiShellCommand(sessionFile, prompt, modelArg),
             ]);
         case "tmux-pane": {
             const tmuxArgs = ["split-window", "-h", "-c", ctx.cwd];
@@ -312,7 +345,7 @@ async function launchForkedPi(
             if (targetPane !== undefined && targetPane.length > 0) {
                 tmuxArgs.push("-t", targetPane);
             }
-            tmuxArgs.push(buildPiShellCommand(sessionFile, prompt));
+            tmuxArgs.push(buildPiShellCommand(sessionFile, prompt, modelArg));
             return pi.exec("tmux", tmuxArgs);
         }
         case "ghostty-split":
@@ -321,7 +354,7 @@ async function launchForkedPi(
                 GHOSTTY_SPLIT_SCRIPT,
                 "--",
                 ctx.cwd,
-                buildPiStartupInput(sessionFile, prompt),
+                buildPiStartupInput(sessionFile, prompt, modelArg),
             ]);
         case "ghostty-window":
             if (process.platform === "darwin") {
@@ -330,7 +363,7 @@ async function launchForkedPi(
                     GHOSTTY_WINDOW_SCRIPT,
                     "--",
                     ctx.cwd,
-                    buildPiStartupInput(sessionFile, prompt),
+                    buildPiStartupInput(sessionFile, prompt, modelArg),
                 ]);
             }
 
@@ -338,7 +371,7 @@ async function launchForkedPi(
                 "+new-window",
                 `--working-directory=${ctx.cwd}`,
                 "-e",
-                ...buildPiCommandParts(sessionFile, prompt),
+                ...buildPiCommandParts(sessionFile, prompt, modelArg),
             ]);
     }
 }
