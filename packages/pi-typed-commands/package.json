@@ -1,0 +1,71 @@
+{
+  "name": "pi-command-args",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed named slash-command arguments with live hints and TUI prompts for Pi extensions.",
+  "keywords": [
+    "commands",
+    "pi-extension",
+    "pi-package",
+    "slash-commands",
+    "typed-args"
+  ],
+  "homepage": "https://github.com/zigai/pi-command-args#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-command-args/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-command-args.git"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "oxlint -c ./.oxlintrc.json .",
+    "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@earendil-works/pi-tui": "^0.78.0",
+    "@types/node": "^24.10.1",
+    "oxfmt": "^0.44.0",
+    "oxlint": "^1.59.0",
+    "oxlint-tsgolint": "^0.23.0",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0 <27"
+  },
+  "packageManager": "npm@11.0.0",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
