@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 
 import { formatFooterStatus } from "../src/format.js";
 import {
@@ -43,41 +43,47 @@ test("turn_end provider errors defer recovery to agent_end without hidden contin
 });
 
 test("host overflow session compaction does not queue extension continuation before host retry", async () => {
-  const harness = createRuntimeHarness();
-  await harness.runCommand("ship it");
-  const queued = harness.sentMessages[0];
-  assert.ok(queued);
-  const queuedMessage = queuedCustomMessage(queued);
-  harness.sentMessages.length = 0;
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    const queued = harness.sentMessages[0];
+    assert.ok(queued);
+    const queuedMessage = queuedCustomMessage(queued);
+    harness.sentMessages.length = 0;
 
-  const errorMessage = assistantMessage("error", { input: 30, output: 12 }, "context_length_exceeded");
-  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("message_start", {
-    type: "message_start",
-    message: queuedMessage,
-  });
-  await harness.emit("turn_end", {
-    type: "turn_end",
-    turnIndex: 0,
-    message: errorMessage,
-    toolResults: [],
-  });
-  await harness.emit("agent_end", {
-    type: "agent_end",
-    messages: [errorMessage],
-  });
+    const errorMessage = assistantMessage("error", { input: 30, output: 12 }, "context_length_exceeded");
+    await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+    await harness.emit("message_start", {
+      type: "message_start",
+      message: queuedMessage,
+    });
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 0,
+      message: errorMessage,
+      toolResults: [],
+    });
+    await harness.emit("agent_end", {
+      type: "agent_end",
+      messages: [errorMessage],
+    });
 
-  assert.equal(harness.compactCalls.length, 0);
-  assert.equal(harness.sentMessages.length, 0);
+    assert.equal(harness.compactCalls.length, 0);
+    assert.equal(harness.sentMessages.length, 0);
 
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    summary: "compact summary",
-    tokensBefore: 100,
-  });
+    await harness.emit("session_compact", {
+      type: "session_compact",
+      summary: "compact summary",
+      tokensBefore: 100,
+    });
+    mock.timers.tick(1);
 
-  assert.equal(harness.snapshot().goal?.status, "active");
-  assert.equal(harness.sentMessages.length, 0);
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 0);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("host overflow retry success resumes goal continuation after clearing recovery flag", async () => {

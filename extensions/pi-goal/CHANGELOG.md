@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.20 - 2026-05-31
+
+- Defer active-goal continuations queued by `session_compact` until the compaction event has unwound, avoiding nested prompt/auto-compaction races in Pi’s compaction lifecycle.
+- Accelerate pending idle continuation retries after compaction so length-stop recovery resumes promptly once the host is idle.
+- Ignore stale compact usage snapshots during reconstruction so old runtime entries cannot rewind usage, reactivate completed goals, or downgrade budget-limited goals.
+- Expand regression coverage for reported long-session failures: host retry cancellation, duplicate `session_compact` coalescing, shutdown cancellation, host overflow suppression, and stale runtime usage entries.
+
 ## 0.1.19 - 2026-05-31
 
 - Add the `/create-goal` prompt template to the package and document it as the recommended way to create high-quality goals from plain tasks.

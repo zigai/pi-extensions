@@ -21,6 +21,7 @@ interface ContinuationSchedulerDeps {
 export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
   let continuationQueuedFor: string | null = null;
   let continuationScheduledFor: string | null = null;
+  let continuationScheduledDelayMs: number | null = null;
   let continuationTimer: ReturnType<typeof setTimeout> | null = null;
   let passthroughContinuationInput: { text: string; turnIndex: number | null } | null = null;
 
@@ -30,6 +31,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
       continuationTimer = null;
     }
     continuationScheduledFor = null;
+    continuationScheduledDelayMs = null;
   };
 
   const clearContinuationState = (): void => {
@@ -107,31 +109,51 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     );
   };
 
+  const canPlanContinuationFor = (goal: ThreadGoal | null): goal is ThreadGoal => {
+    return Boolean(
+      !deps.staleQueuedWorkGuard.isBlockingContinuation() &&
+        goal &&
+        goal.status === "active" &&
+        continuationQueuedFor !== goal.goalId &&
+        !hasPendingRecoveryAttention() &&
+        !recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase),
+    );
+  };
+
+  const scheduleContinuationCheck = (
+    goalId: string,
+    ctx: ExtensionContext,
+    delayMs: number,
+  ): void => {
+    if (continuationTimer && continuationScheduledFor === goalId) {
+      if (continuationScheduledDelayMs !== null && delayMs >= continuationScheduledDelayMs) {
+        return;
+      }
+      clearContinuationTimer();
+    } else if (continuationTimer) {
+      clearContinuationTimer();
+    }
+
+    continuationScheduledFor = goalId;
+    continuationScheduledDelayMs = delayMs;
+    continuationTimer = setTimeout(() => {
+      continuationTimer = null;
+      continuationScheduledFor = null;
+      continuationScheduledDelayMs = null;
+      maybeContinue(ctx);
+    }, delayMs);
+    continuationTimer.unref?.();
+  };
+
   const maybeContinue = (ctx: ExtensionContext): void => {
     const goal = deps.getGoal();
-    if (
-      deps.staleQueuedWorkGuard.isBlockingContinuation() ||
-      !goal ||
-      goal.status !== "active" ||
-      continuationQueuedFor === goal.goalId ||
-      hasPendingRecoveryAttention() ||
-      recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase)
-    ) {
+    if (!canPlanContinuationFor(goal)) {
       return;
     }
 
     const goalId = goal.goalId;
     if (!ctx.isIdle() || ctx.hasPendingMessages()) {
-      if (continuationScheduledFor === goalId) {
-        return;
-      }
-      continuationScheduledFor = goalId;
-      continuationTimer = setTimeout(() => {
-        continuationTimer = null;
-        continuationScheduledFor = null;
-        maybeContinue(ctx);
-      }, CONTINUATION_RETRY_MS);
-      continuationTimer.unref?.();
+      scheduleContinuationCheck(goalId, ctx, CONTINUATION_RETRY_MS);
       return;
     }
 
@@ -143,6 +165,14 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     sendContinuation(currentGoal);
   };
 
+  const maybeContinueAfterCurrentEvent = (ctx: ExtensionContext): void => {
+    const goal = deps.getGoal();
+    if (!canPlanContinuationFor(goal)) {
+      return;
+    }
+    scheduleContinuationCheck(goal.goalId, ctx, 0);
+  };
+
   return {
     bindPassthroughContinuationInputToTurn,
     clearContinuationState,
@@ -152,6 +182,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     continuationGoalIdFromRuntimePrompt,
     markContinuationQueued,
     maybeContinue,
+    maybeContinueAfterCurrentEvent,
     notePassthroughContinuationInput,
   };
 }

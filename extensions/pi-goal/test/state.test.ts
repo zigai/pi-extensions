@@ -12,6 +12,7 @@ import {
   hostOverflowCapResetEntry,
   reconstructGoal,
   reconstructHostOverflowCapNeedsUserReset,
+  runtimeUsageEntry,
   setEntry,
   updateGoalStatus,
 } from "../src/state.js";
@@ -40,6 +41,87 @@ test("reconstructGoal follows branch-local set and clear entries", () => {
   ];
 
   assert.deepEqual(reconstructGoal(branch), { goal: null, hasGoal: false });
+});
+
+test("reconstructGoal ignores orphaned and stale compact usage entries", () => {
+  const first = createGoal(null, "first").goal;
+  assert.ok(first);
+  const second = createGoal(updateGoalStatus(first, "complete").goal, "second").goal;
+  assert.ok(second);
+
+  const orphanedUsage = runtimeUsageEntry(
+    {
+      ...first,
+      usage: { tokensUsed: 5, activeSeconds: 7 },
+      updatedAt: first.updatedAt + 1,
+    },
+    first.updatedAt + 1,
+  );
+  const staleUsage = runtimeUsageEntry(
+    {
+      ...first,
+      usage: { tokensUsed: 99, activeSeconds: 99 },
+      updatedAt: first.updatedAt + 2,
+    },
+    first.updatedAt + 2,
+  );
+  const currentUsage = runtimeUsageEntry(
+    {
+      ...second,
+      usage: { tokensUsed: 11, activeSeconds: 13 },
+      updatedAt: second.updatedAt + 3,
+    },
+    second.updatedAt + 3,
+  );
+  const sameGoalStaleUsage = runtimeUsageEntry(
+    {
+      ...second,
+      usage: { tokensUsed: 1, activeSeconds: 1 },
+      updatedAt: second.updatedAt + 1,
+    },
+    second.updatedAt + 1,
+  );
+
+  const branch = [
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: orphanedUsage },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: setEntry(first, "tool", first.updatedAt) },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: clearEntry(first.goalId, "command", first.updatedAt + 1) },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: setEntry(second, "tool", second.updatedAt) },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: staleUsage },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: currentUsage },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: sameGoalStaleUsage },
+  ];
+
+  const reconstructed = reconstructGoal(branch).goal;
+  assert.ok(reconstructed);
+  assert.equal(reconstructed.goalId, second.goalId);
+  assert.equal(reconstructed.usage.tokensUsed, 11);
+  assert.equal(reconstructed.usage.activeSeconds, 13);
+});
+
+test("reconstructGoal ignores compact usage entries after terminal snapshots", () => {
+  const created = createGoal(null, "finish").goal;
+  assert.ok(created);
+  const completed = updateGoalStatus(created, "complete").goal;
+  assert.ok(completed);
+  const lateUsage = runtimeUsageEntry(
+    {
+      ...created,
+      usage: { tokensUsed: 50, activeSeconds: 50 },
+      updatedAt: completed.updatedAt + 1,
+    },
+    completed.updatedAt + 1,
+  );
+
+  const reconstructed = reconstructGoal([
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: setEntry(created, "tool", created.updatedAt) },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: setEntry(completed, "tool", completed.updatedAt) },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: lateUsage },
+  ]).goal;
+
+  assert.ok(reconstructed);
+  assert.equal(reconstructed.status, "complete");
+  assert.equal(reconstructed.usage.tokensUsed, completed.usage.tokensUsed);
 });
 
 test("reconstructHostOverflowCapNeedsUserReset follows branch-local reset markers", () => {

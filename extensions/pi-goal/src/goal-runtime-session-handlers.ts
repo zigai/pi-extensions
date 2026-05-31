@@ -80,7 +80,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       recoveryRuntime.onSessionCompact();
       status.refreshUi(ctx);
       if (!recoveryPhaseBlocksContinuation(runtimeState.recoveryState.phase)) {
-        continuation.maybeContinue(ctx);
+        continuation.maybeContinueAfterCurrentEvent(ctx);
       }
     }) satisfies ExtensionHandler<SessionCompactEvent>,
 

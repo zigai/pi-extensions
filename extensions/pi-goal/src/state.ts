@@ -197,6 +197,23 @@ export function isGoalStatus(status: unknown): status is GoalStatus {
   return status === "active" || status === "paused" || status === "budgetLimited" || status === "complete";
 }
 
+function canApplyRuntimeUsageEntry(goal: ThreadGoal | null, entry: Extract<GoalCustomEntry, { kind: "usage" }>): goal is ThreadGoal {
+  if (!goal || goal.goalId !== entry.goalId) {
+    return false;
+  }
+  if (!isRuntimeUsageGoalStatus(goal.status)) {
+    return false;
+  }
+  if (goal.status === "budgetLimited" && entry.status === "active") {
+    return false;
+  }
+  return (
+    entry.updatedAt >= goal.updatedAt &&
+    entry.usage.tokensUsed >= goal.usage.tokensUsed &&
+    entry.usage.activeSeconds >= goal.usage.activeSeconds
+  );
+}
+
 export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalSnapshot {
   let goal: ThreadGoal | null = null;
 
@@ -212,11 +229,10 @@ export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalSnapsh
     } else if (entry.data.kind === "set") {
       goal = cloneGoal(entry.data.goal);
     } else if (entry.data.kind === "usage") {
-      const currentGoal: ThreadGoal | null = goal;
-      if (!currentGoal || currentGoal.goalId !== entry.data.goalId) {
+      if (!canApplyRuntimeUsageEntry(goal, entry.data)) {
         continue;
       }
-      goal = cloneGoal(currentGoal);
+      goal = cloneGoal(goal);
       goal.status = entry.data.status;
       goal.usage = cloneUsage(entry.data.usage);
       goal.updatedAt = entry.data.updatedAt;

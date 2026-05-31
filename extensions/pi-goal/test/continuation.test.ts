@@ -444,42 +444,200 @@ test("extension user continuation accepted before compaction suppresses duplicat
   assert.equal(harness.sentMessages.length, 0);
 });
 
-test("session compaction queues continuation for active goals after length stops", async () => {
-  const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
-  await harness.runCommand("ship it");
-  const queued = harness.sentMessages[0];
-  assert.ok(queued);
-  const queuedMessage = queuedCustomMessage(queued);
-  harness.sentMessages.length = 0;
+test("session compaction queues continuation for active goals after the compaction event unwinds", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    const queued = harness.sentMessages[0];
+    assert.ok(queued);
+    const content = String(queued.message.content);
+    harness.sentMessages.length = 0;
 
-  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("message_start", {
-    type: "message_start",
-    message: queuedMessage,
-  });
-  await harness.emit("turn_end", {
-    type: "turn_end",
-    turnIndex: 0,
-    message: assistantMessage("length", { input: 30, output: 12 }),
-    toolResults: [],
-  });
-  assert.equal(harness.sentMessages.length, 0);
+    await harness.emit("before_agent_start", {
+      type: "before_agent_start",
+      prompt: content,
+      systemPrompt: "",
+      systemPromptOptions: {},
+    });
+    await harness.emit("session_compact", {
+      type: "session_compact",
+      summary: "compact summary",
+      tokensBefore: 100,
+    });
 
-  harness.setIdle(true);
-  harness.setPendingMessages(false);
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    summary: "compact summary",
-    tokensBefore: 100,
-  });
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 0);
 
-  const goal = harness.snapshot().goal;
-  assert.equal(goal?.status, "active");
-  assert.equal(harness.sentMessages.length, 1);
-  assert.deepEqual(harness.sentMessages[0]?.message.details, {
-    kind: "continuation",
-    goalId: goal?.goalId,
-  });
+    mock.timers.tick(1);
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: goal?.goalId,
+    });
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("session compaction accelerates an existing idle retry after length stops", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
+    await harness.runCommand("ship it");
+    const queued = harness.sentMessages[0];
+    assert.ok(queued);
+    const queuedMessage = queuedCustomMessage(queued);
+    harness.sentMessages.length = 0;
+
+    await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+    await harness.emit("message_start", {
+      type: "message_start",
+      message: queuedMessage,
+    });
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 0,
+      message: assistantMessage("length", { input: 30, output: 12 }),
+      toolResults: [],
+    });
+    assert.equal(harness.sentMessages.length, 0);
+
+    harness.setIdle(true);
+    harness.setPendingMessages(false);
+    await harness.emit("session_compact", {
+      type: "session_compact",
+      summary: "compact summary",
+      tokensBefore: 100,
+    });
+
+    mock.timers.tick(1);
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: goal?.goalId,
+    });
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("session compaction continuation is cancelled if a host retry starts before the deferred check", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    const queued = harness.sentMessages[0];
+    assert.ok(queued);
+    const content = String(queued.message.content);
+    harness.sentMessages.length = 0;
+
+    await harness.emit("before_agent_start", {
+      type: "before_agent_start",
+      prompt: content,
+      systemPrompt: "",
+      systemPromptOptions: {},
+    });
+    await harness.emit("session_compact", {
+      type: "session_compact",
+      summary: "compact summary",
+      tokensBefore: 100,
+    });
+    assert.equal(harness.sentMessages.length, 0);
+
+    await harness.emit("before_agent_start", {
+      type: "before_agent_start",
+      prompt: "host compact-and-retry prompt",
+      systemPrompt: "",
+      systemPromptOptions: {},
+    });
+    mock.timers.tick(1);
+    assert.equal(harness.sentMessages.length, 0);
+
+    await harness.emit("agent_end", {
+      type: "agent_end",
+      messages: [assistantMessage("stop", { input: 1, output: 1 })],
+    });
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: goal?.goalId,
+    });
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("repeated session_compact events before the deferred check queue at most one continuation", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    const queued = harness.sentMessages[0];
+    assert.ok(queued);
+    const content = String(queued.message.content);
+    harness.sentMessages.length = 0;
+
+    await harness.emit("before_agent_start", {
+      type: "before_agent_start",
+      prompt: content,
+      systemPrompt: "",
+      systemPromptOptions: {},
+    });
+    for (let index = 0; index < 3; index += 1) {
+      await harness.emit("session_compact", {
+        type: "session_compact",
+        summary: `compact summary ${index}`,
+        tokensBefore: 100 + index,
+      });
+    }
+
+    mock.timers.tick(1);
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: goal?.goalId,
+    });
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("session shutdown cancels deferred session_compact continuations", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    const queued = harness.sentMessages[0];
+    assert.ok(queued);
+    const content = String(queued.message.content);
+    harness.sentMessages.length = 0;
+
+    await harness.emit("before_agent_start", {
+      type: "before_agent_start",
+      prompt: content,
+      systemPrompt: "",
+      systemPromptOptions: {},
+    });
+    await harness.emit("session_compact", {
+      type: "session_compact",
+      summary: "compact summary",
+      tokensBefore: 100,
+    });
+    await harness.emit("session_shutdown", { type: "session_shutdown" });
+
+    mock.timers.tick(1);
+    assert.equal(harness.sentMessages.length, 0);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("assistant error turns do not immediately queue continuation", async () => {
