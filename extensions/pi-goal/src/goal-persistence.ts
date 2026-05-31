@@ -1,11 +1,30 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { RUNTIME_PERSIST_INTERVAL_MS } from "./runtime-config.js";
-import { clearEntry, cloneGoal, goalsEquivalent, setEntry } from "./state.js";
+import {
+  clearEntry,
+  cloneGoal,
+  goalsEquivalent,
+  isRuntimeUsageGoalStatus,
+  runtimeUsageEntry,
+  setEntry,
+} from "./state.js";
 import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type ThreadGoal } from "./types.js";
 
 interface GoalPersistenceDeps {
   pi: Pick<ExtensionAPI, "appendEntry">;
+}
+
+function canPersistRuntimeUsageEntry(goal: ThreadGoal, lastPersistedGoal: ThreadGoal | null): boolean {
+  return Boolean(
+    lastPersistedGoal &&
+      goal.goalId === lastPersistedGoal.goalId &&
+      goal.objective === lastPersistedGoal.objective &&
+      goal.tokenBudget === lastPersistedGoal.tokenBudget &&
+      goal.createdAt === lastPersistedGoal.createdAt &&
+      isRuntimeUsageGoalStatus(goal.status) &&
+      isRuntimeUsageGoalStatus(lastPersistedGoal.status),
+  );
 }
 
 export function createGoalPersistence(deps: GoalPersistenceDeps) {
@@ -32,7 +51,12 @@ export function createGoalPersistence(deps: GoalPersistenceDeps) {
       return false;
     }
 
-    deps.pi.appendEntry(CUSTOM_ENTRY_TYPE, setEntry(goal, source));
+    deps.pi.appendEntry(
+      CUSTOM_ENTRY_TYPE,
+      source === "runtime" && canPersistRuntimeUsageEntry(goal, lastPersistedGoal)
+        ? runtimeUsageEntry(goal)
+        : setEntry(goal, source),
+    );
     lastPersistedGoal = cloneGoal(goal);
     lastRuntimePersistAt = Date.now();
     return true;

@@ -98,6 +98,31 @@ test("varied retryable transient errors stay active without tripping signature-s
   assert.equal(harness.sentMessages.length, 0);
 });
 
+test("upstream request-buffer retry exhaustion stays active with pending recovery", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  harness.sentMessages.length = 0;
+
+  await emitPersistentAssistantError(
+    harness,
+    0,
+    "exceeded request buffer limit while retrying upstream",
+  );
+
+  assert.equal(harness.snapshot().goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 0);
+  assert.equal(
+    harness.footerStatuses.at(-1),
+    formatFooterStatus(
+      harness.snapshot().goal,
+      recoveryPendingAttentionMessage(
+        "provider error (exceeded request buffer limit while retrying upstream)",
+      ),
+    ),
+  );
+  assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
+});
+
 test("silent stop overflow suppresses continuation and shows overflow recovery attention", async () => {
   const harness = createRuntimeHarness({ contextWindow: 128_000 });
   await harness.runCommand("ship it");

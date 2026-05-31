@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.19 - 2026-05-31
+
+- Add the `/create-goal` prompt template to the package and document it as the recommended way to create high-quality goals from plain tasks.
+- Treat `exceeded request buffer limit while retrying upstream` as a retryable transient provider failure so active goals stay active with pending recovery instead of being paused.
+- Allow `/goal resume` to queue a user-start continuation when an already-active goal is waiting for post-overflow user-start recovery, avoiding misleading “Only paused goals can be resumed” dead ends.
+- Suppress duplicate hidden continuations while an extension-injected user continuation is passing through compaction, avoiding nested prompt errors like “Agent is already processing a prompt.”
+- Persist runtime-only usage updates as compact usage snapshot entries after the initial goal snapshot so long active sessions no longer append the full objective on every runtime flush.
+
 ## 0.1.18 - 2026-05-29
 
 - Updates the local pi development baseline to `@earendil-works/*` `0.78.0` and refreshes the npm lockfile after reviewing the Pi `0.78.0` changelog.

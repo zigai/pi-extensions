@@ -417,6 +417,33 @@ test("auto-queued continuations use the compact prompt", async () => {
   assert.match(content, /get_goal/);
 });
 
+test("extension user continuation accepted before compaction suppresses duplicate compaction continuation", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  const queued = harness.sentMessages[0];
+  assert.ok(queued);
+  const content = String(queued.message.content);
+  harness.sentMessages.length = 0;
+
+  const results = await harness.emit("input", {
+    type: "input",
+    text: content,
+    source: "extension",
+    streamingBehavior: "followUp",
+  });
+
+  assert.deepEqual(results, [{ action: "continue" }]);
+  await harness.emit("session_compact", {
+    type: "session_compact",
+    summary: "compact summary",
+    tokensBefore: 100,
+  });
+
+  const goal = harness.snapshot().goal;
+  assert.equal(goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 0);
+});
+
 test("session compaction queues continuation for active goals after length stops", async () => {
   const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
   await harness.runCommand("ship it");

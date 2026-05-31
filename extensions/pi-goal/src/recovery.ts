@@ -91,7 +91,7 @@ export function isRetryableTransientError(errorMessage: string | undefined): boo
   if (isNonRetryableProviderLimitError(errorMessage)) {
     return false;
   }
-  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
+  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|retrying upstream|request buffer limit|reset before headers|socket hang up|ended without|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
     errorMessage,
   );
 }
@@ -99,7 +99,7 @@ export function isRetryableTransientError(errorMessage: string | undefined): boo
 function normalizeTransientSignature(line: string): string {
   return line
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<id>")
-    .replace(/\breq[_-]?[a-z0-9-]+\b/gi, "req_<id>")
+    .replace(/\breq[_-][a-z0-9-]+\b/gi, "req_<id>")
     .replace(/\b\d{4,}\b/g, "<n>")
     .slice(0, 200);
 }

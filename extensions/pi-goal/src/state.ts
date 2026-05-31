@@ -8,6 +8,8 @@ import {
   type GoalResult,
   type GoalSnapshot,
   type GoalStatus,
+  type GoalUsage,
+  type RuntimeUsageGoalStatus,
   type SessionEntryLike,
   type ThreadGoal,
 } from "./types.js";
@@ -21,10 +23,14 @@ export function unixSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+export function cloneUsage(usage: GoalUsage): GoalUsage {
+  return { ...usage };
+}
+
 export function cloneGoal(goal: ThreadGoal): ThreadGoal {
   return {
     ...goal,
-    usage: { ...goal.usage },
+    usage: cloneUsage(goal.usage),
   };
 }
 
@@ -94,6 +100,22 @@ export function setEntry(goal: ThreadGoal, source: GoalEntrySource, at = unixSec
   };
 }
 
+export function runtimeUsageEntry(goal: ThreadGoal, at = unixSeconds()): GoalCustomEntry {
+  if (!isRuntimeUsageGoalStatus(goal.status)) {
+    throw new Error(`Cannot persist ${goal.status} goal as runtime usage entry.`);
+  }
+  return {
+    version: 1,
+    kind: "usage",
+    source: "runtime",
+    goalId: goal.goalId,
+    status: goal.status,
+    usage: cloneUsage(goal.usage),
+    updatedAt: goal.updatedAt,
+    at,
+  };
+}
+
 export function clearEntry(
   clearedGoalId: string | null,
   source: GoalEntrySource,
@@ -128,10 +150,31 @@ export function isGoalCustomEntry(data: unknown): data is GoalCustomEntry {
   if (entry.kind === "clear") {
     return entry.clearedGoalId === null || typeof entry.clearedGoalId === "string";
   }
+  if (entry.kind === "usage") {
+    return (
+      entry.source === "runtime" &&
+      typeof entry.goalId === "string" &&
+      isRuntimeUsageGoalStatus(entry.status) &&
+      isGoalUsage(entry.usage) &&
+      typeof entry.updatedAt === "number"
+    );
+  }
   if (entry.kind === "host_overflow_cap_reset") {
     return typeof entry.active === "boolean";
   }
   return entry.kind === "set" && isThreadGoal(entry.goal);
+}
+
+export function isGoalUsage(usage: unknown): usage is GoalUsage {
+  if (!usage || typeof usage !== "object") {
+    return false;
+  }
+  const candidate = usage as GoalUsage;
+  return typeof candidate.tokensUsed === "number" && typeof candidate.activeSeconds === "number";
+}
+
+export function isRuntimeUsageGoalStatus(status: unknown): status is RuntimeUsageGoalStatus {
+  return status === "active" || status === "budgetLimited";
 }
 
 export function isThreadGoal(goal: unknown): goal is ThreadGoal {
@@ -146,9 +189,7 @@ export function isThreadGoal(goal: unknown): goal is ThreadGoal {
     (candidate.tokenBudget === null || typeof candidate.tokenBudget === "number") &&
     typeof candidate.createdAt === "number" &&
     typeof candidate.updatedAt === "number" &&
-    candidate.usage !== undefined &&
-    typeof candidate.usage.tokensUsed === "number" &&
-    typeof candidate.usage.activeSeconds === "number"
+    isGoalUsage(candidate.usage)
   );
 }
 
@@ -170,6 +211,15 @@ export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalSnapsh
       goal = null;
     } else if (entry.data.kind === "set") {
       goal = cloneGoal(entry.data.goal);
+    } else if (entry.data.kind === "usage") {
+      const currentGoal: ThreadGoal | null = goal;
+      if (!currentGoal || currentGoal.goalId !== entry.data.goalId) {
+        continue;
+      }
+      goal = cloneGoal(currentGoal);
+      goal.status = entry.data.status;
+      goal.usage = cloneUsage(entry.data.usage);
+      goal.updatedAt = entry.data.updatedAt;
     }
   }
 

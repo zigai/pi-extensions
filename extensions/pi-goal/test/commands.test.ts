@@ -176,7 +176,7 @@ test("/goal pause rejects completed and paused goals", async () => {
   assert.equal(paused.ok, false);
 });
 
-test("/goal resume rejects completed and active goals", async () => {
+test("/goal resume rejects completed and ordinarily active goals", async () => {
   const harness = createHarness();
 
   await handleGoalCommand(harness.pi, harness.host, "ship the feature", harness.ctx);
@@ -195,6 +195,37 @@ test("/goal resume rejects completed and active goals", async () => {
   await handleGoalCommand(harness.pi, harness.host, "resume", harness.ctx);
   assert.equal(harness.goal?.status, "active");
   assert.match(harness.notifications.at(-1) ?? "", /Only paused goals can be resumed/);
+});
+
+test("/goal resume restarts an active goal waiting for user-start overflow recovery", async () => {
+  const harness = createHarness();
+  const host: CommandHost = {
+    getGoal: () => harness.goal,
+    setGoal(nextGoal: ThreadGoal) {
+      harness.setGoal(nextGoal);
+    },
+    clearGoal() {
+      harness.setGoal(null);
+    },
+    getGoalStartTurnStrategy: () => "userFollowUp",
+  };
+
+  await handleGoalCommand(harness.pi, host, "ship the feature", harness.ctx);
+  harness.sentUserMessages.length = 0;
+  assert.equal(harness.goal?.status, "active");
+
+  await handleGoalCommand(harness.pi, host, "resume", harness.ctx);
+
+  assert.equal(harness.goal?.status, "active");
+  assert.equal(harness.sentMessages.length, 0);
+  assert.equal(harness.sentUserMessages.length, 1);
+  assert.match(harness.notifications.at(-1) ?? "", /queued a continuation/);
+  const content = harness.sentUserMessages[0]?.content;
+  if (typeof content !== "string") {
+    assert.fail("Expected queued active resume content to be a string.");
+  }
+  assert.match(content, /<pi_goal_continuation goal_id="/);
+  assert.doesNotMatch(content, /<untrusted_objective>/);
 });
 
 test("/goal objective replaces a completed goal without confirmation", async () => {

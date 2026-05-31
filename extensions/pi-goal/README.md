@@ -47,6 +47,19 @@ Compatibility note: this package is tested against the current pi release during
 
 Release note: npm installs and pinned GitHub tags are the reproducible release artifacts. Installing from the repository default branch can include unreleased changes that will ship in a future package release, even when `package.json` still identifies the latest published version.
 
+## Best way to create goals
+
+Use the included `/create-goal` prompt template instead of writing a goal by hand. Agents write better goal completion contracts than humans do because they can expand a plain task into outcome, verification, constraints, iteration, audit, and blocked-stop requirements before calling the `create_goal` tool.
+
+```text
+/create-goal insert task and requirements here
+```
+
+The template follows the Codex goal-writing practices from:
+
+- <https://developers.openai.com/codex/use-cases/follow-goals>
+- <https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex>
+
 ## Development
 
 Validate types and tests before committing or opening a PR:
@@ -99,12 +112,15 @@ Final goal status: complete
 ## User Commands
 
 ```text
+/create-goal Build the requested feature and verify it end to end
 /goal
 /goal Build the requested feature and verify it end to end
 /goal pause
 /goal resume
 /goal clear
 ```
+
+`/create-goal <task>` is the recommended way to start a goal. It expands the task into a strict objective and asks the model to call the `create_goal` tool.
 
 `/goal` with no arguments reports the current objective, status, token budget, token usage, and elapsed active time. A plain `/goal <objective>` starts a new goal or replaces the current one after confirmation.
 

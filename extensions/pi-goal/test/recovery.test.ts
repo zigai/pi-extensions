@@ -92,6 +92,10 @@ test("isRetryableTransientError mirrors host retry classification", () => {
   assert.equal(isRetryableTransientError("HTTP 502 bad gateway"), true);
   assert.equal(isRetryableTransientError("HTTP 503 service unavailable"), true);
   assert.equal(isRetryableTransientError("websocket closed"), true);
+  assert.equal(
+    isRetryableTransientError("exceeded request buffer limit while retrying upstream"),
+    true,
+  );
   assert.equal(isRetryableTransientError("context_length_exceeded"), false);
   assert.equal(isRetryableTransientError("invalid api key"), false);
 });
@@ -123,6 +127,11 @@ test("failure signatures canonicalize context overflow regardless of volatile to
     CONTEXT_OVERFLOW_SIGNATURE,
   );
   assert.equal(failureSignature("first line\nsecond line"), "first line");
+  assert.equal(
+    failureSignature("exceeded request buffer limit while retrying upstream"),
+    "exceeded request buffer limit while retrying upstream",
+  );
+  assert.equal(failureSignature("HTTP 500 req_abc123 failed"), "HTTP 500 req_<id> failed");
   assert.equal(failureSignature(undefined), "unknown_error");
 });
 
@@ -366,7 +375,11 @@ test("retryable transient errors surface pending attention instead of pausing", 
   const state = createGoalRecoveryMachine();
   const action = planRecoveryForAssistantError(
     state,
-    { role: "assistant", stopReason: "error", errorMessage: "websocket closed" },
+    {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "exceeded request buffer limit while retrying upstream",
+    },
   );
   assert.equal(action.type, "pending");
   assert.equal(state.counters.transientAttempts, 1);

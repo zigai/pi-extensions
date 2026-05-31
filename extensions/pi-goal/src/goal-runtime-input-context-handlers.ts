@@ -50,11 +50,12 @@ export function createInputContextEventHandlers(
         ctx,
         deps,
       );
-      continuation.clearContinuationStateFor(continuationGoalId);
       if (stateController.isCurrentActiveGoalId(continuationGoalId)) {
+        continuation.markContinuationQueued(continuationGoalId);
         return { action: "continue" } as const;
       }
 
+      continuation.clearContinuationStateFor(continuationGoalId);
       status.refreshUi(ctx);
       return { action: "handled" } as const;
     }) satisfies ExtensionHandler<InputEvent, InputEventResult>,

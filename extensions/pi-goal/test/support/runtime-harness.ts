@@ -353,6 +353,21 @@ export function countGoalSetEntries(
   }).length;
 }
 
+export function countGoalUsageEntries(
+  entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]>,
+  goalId?: string,
+): number {
+  return entries.filter((entry) => {
+    return (
+      entry.type === "custom" &&
+      entry.customType === CUSTOM_ENTRY_TYPE &&
+      isGoalCustomEntry(entry.data) &&
+      entry.data.kind === "usage" &&
+      (goalId === undefined || entry.data.goalId === goalId)
+    );
+  }).length;
+}
+
 export async function emitToolExecutionEnd(harness: ReturnType<typeof createRuntimeHarness>): Promise<void> {
   await harness.emit("tool_execution_end", {
     type: "tool_execution_end",

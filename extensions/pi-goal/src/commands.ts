@@ -71,6 +71,16 @@ export async function handleGoalCommand(
 
   if (trimmed === "pause" || trimmed === "resume") {
     const current = host.getGoal();
+    if (
+      trimmed === "resume" &&
+      current?.status === "active" &&
+      host.getGoalStartTurnStrategy() === "userFollowUp"
+    ) {
+      queueGoalUserTurn(pi, current);
+      ctx.ui.notify("Goal already active; queued a continuation.");
+      return;
+    }
+
     const status = trimmed === "pause" ? "paused" : "active";
     const result = updateGoalStatus(current, status);
     if (!result.ok || !result.goal) {

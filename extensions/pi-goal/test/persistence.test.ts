@@ -2,11 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { __testHooks } from "../src/index.js";
-import { isGoalCustomEntry, reconstructGoal, createThreadGoal, setEntry } from "../src/state.js";
+import {
+  isGoalCustomEntry,
+  reconstructGoal,
+  createThreadGoal,
+  runtimeUsageEntry,
+  setEntry,
+} from "../src/state.js";
 import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
 import {
   assistantMessage,
   countGoalSetEntries,
+  countGoalUsageEntries,
   createRuntimeHarness,
   emitToolExecutionEnd,
 } from "./support/runtime-harness.js";
@@ -101,7 +108,8 @@ test("turn_end flushes coalesced runtime usage to session entries", async () => 
       toolResults: [],
     });
 
-    assert.equal(countGoalSetEntries(harness.entries, goalId), 2);
+    assert.equal(countGoalSetEntries(harness.entries, goalId), 1);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), 1);
     const goal = harness.snapshot().goal;
     assert.equal(goal?.usage.tokensUsed, 12);
     assert.equal(goal?.usage.activeSeconds, 5);
@@ -127,7 +135,8 @@ test("session_shutdown flushes pending runtime usage", async () => {
 
     await harness.emit("session_shutdown", { type: "session_shutdown" });
 
-    assert.equal(countGoalSetEntries(harness.entries, goalId), 2);
+    assert.equal(countGoalSetEntries(harness.entries, goalId), 1);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), 1);
     const goal = harness.snapshot().goal;
     assert.equal(goal?.usage.activeSeconds, 4);
   } finally {
@@ -152,7 +161,8 @@ test("runtime persistence interval flush appends one entry then coalesces until 
     now += __testHooks.runtimePersistIntervalMs + 1_000;
     await emitToolExecutionEnd(harness);
 
-    assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries + 1);
+    assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), 1);
     const afterIntervalFlush = harness.snapshot().goal;
     assert.equal(
       afterIntervalFlush?.usage.activeSeconds,
@@ -164,7 +174,8 @@ test("runtime persistence interval flush appends one entry then coalesces until 
       await emitToolExecutionEnd(harness);
     }
 
-    assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries + 1);
+    assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), 1);
 
     await harness.emit("turn_end", {
       type: "turn_end",
@@ -173,7 +184,8 @@ test("runtime persistence interval flush appends one entry then coalesces until 
       toolResults: [],
     });
 
-    assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries + 2);
+    assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), 2);
     const goal = harness.snapshot().goal;
     assert.equal(goal?.usage.tokensUsed, 12);
     assert.equal(
@@ -203,14 +215,13 @@ test("reconstructGoal uses the latest snapshot across dense legacy and coalesced
   const coalescedEntry = {
     type: "custom" as const,
     customType: CUSTOM_ENTRY_TYPE,
-    data: setEntry(
+    data: runtimeUsageEntry(
       {
         ...goal,
         usage: { tokensUsed: 99, activeSeconds: 42 },
         status: "active",
         updatedAt: goal.updatedAt + 100,
       },
-      "runtime",
       goal.updatedAt + 100,
     ),
   };
@@ -270,7 +281,9 @@ test("compaction with unchanged budgetLimited goal appends no new entry", async 
     const activeSecondsAtBudgetLimit = goal?.usage.activeSeconds ?? 0;
     const entryCountAfterBudgetLimit = harness.entries.length;
     const setEntriesAfterBudgetLimit = countGoalSetEntries(harness.entries, goalId);
-    assert.equal(setEntriesAfterBudgetLimit, 2);
+    const usageEntriesAfterBudgetLimit = countGoalUsageEntries(harness.entries, goalId);
+    assert.equal(setEntriesAfterBudgetLimit, 1);
+    assert.equal(usageEntriesAfterBudgetLimit, 1);
 
     now += 60_000;
 
@@ -289,6 +302,7 @@ test("compaction with unchanged budgetLimited goal appends no new entry", async 
     assert.equal(harness.entries.length, entryCountAfterBudgetLimit);
     assert.equal(harness.snapshot().goal?.status, "budgetLimited");
     assert.equal(countGoalSetEntries(harness.entries, goalId), setEntriesAfterBudgetLimit);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), usageEntriesAfterBudgetLimit);
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 11);
     assert.equal(harness.snapshot().goal?.usage.activeSeconds, activeSecondsAtBudgetLimit);
   } finally {
@@ -320,7 +334,9 @@ test("session_shutdown with unchanged budgetLimited goal appends no new entry", 
     const activeSecondsAtBudgetLimit = goal?.usage.activeSeconds ?? 0;
     const entryCountAfterBudgetLimit = harness.entries.length;
     const setEntriesAfterBudgetLimit = countGoalSetEntries(harness.entries, goalId);
-    assert.equal(setEntriesAfterBudgetLimit, 2);
+    const usageEntriesAfterBudgetLimit = countGoalUsageEntries(harness.entries, goalId);
+    assert.equal(setEntriesAfterBudgetLimit, 1);
+    assert.equal(usageEntriesAfterBudgetLimit, 1);
 
     now += 60_000;
 
@@ -329,6 +345,7 @@ test("session_shutdown with unchanged budgetLimited goal appends no new entry", 
     assert.equal(harness.entries.length, entryCountAfterBudgetLimit);
     assert.equal(harness.snapshot().goal?.status, "budgetLimited");
     assert.equal(countGoalSetEntries(harness.entries, goalId), setEntriesAfterBudgetLimit);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), usageEntriesAfterBudgetLimit);
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 11);
     assert.equal(harness.snapshot().goal?.usage.activeSeconds, activeSecondsAtBudgetLimit);
   } finally {
