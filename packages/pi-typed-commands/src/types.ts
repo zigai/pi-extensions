@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export type PrimitiveArgumentValue = string | number | boolean;
 export type ArgumentValue = PrimitiveArgumentValue | undefined;
@@ -78,7 +78,7 @@ export type RawCommandHandler = (
     ctx: ExtensionCommandContext,
 ) => Promise<void> | void;
 
-export type TypedCommandToggle = boolean | (() => boolean);
+export type TypedCommandToggle = boolean | ((ctx?: ExtensionContext) => boolean);
 
 export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     description: string;

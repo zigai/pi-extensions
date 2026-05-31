@@ -99,13 +99,29 @@ Common fields: `description`, `required`, `default`, `aliases`, and `placeholder
 
 There are two levels of opt-out:
 
-1. Disable the companion UX extension globally by not loading this package as a Pi package, or by starting Pi with:
+1. Disable all typed-args behavior globally in Pi settings:
 
-```sh
-PI_COMMAND_ARGS_UX=0 pi
+```json
+{
+  "piCommandArgs": {
+    "enabled": false
+  }
+}
 ```
 
-This disables the live one-line helper and `/typed-commands`, but libraries that import `registerTypedCommand()` can still use parsing/wizard behavior.
+This disables command arg completions, live hints, typed parsing, and auto-wizards for all commands using this package. If a command configured `fallbackHandler`, it receives Pi's raw argument string instead.
+
+To keep typed parsing/wizards but hide only the live one-line helper, use:
+
+```json
+{
+  "piCommandArgs": {
+    "uxEnabled": false
+  }
+}
+```
+
+Environment overrides are also supported: `PI_COMMAND_ARGS=0` disables everything and `PI_COMMAND_ARGS_UX=0` disables only the helper.
 
 2. Let a consuming extension disable typed args per command with `typedArgsEnabled` and `fallbackHandler`:
 
@@ -122,10 +138,6 @@ registerTypedCommand(pi, "deploy", {
 ```
 
 When `typedArgsEnabled` returns `false`, command arg completions, live hints, typed parsing, and auto-wizards are skipped for that command. The `fallbackHandler` receives Pi's raw argument string.
-
-## Companion Commands
-
-- `/typed-commands` lists enabled typed commands registered in the current Pi session.
 
 ## Notes
 

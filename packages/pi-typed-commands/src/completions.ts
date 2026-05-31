@@ -142,7 +142,7 @@ export function getTypedArgumentCompletions<
     command: RegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
 ): AutocompleteItem[] | null {
-    if (!isTypedCommandEnabled(command)) {
+    if (!isTypedCommandEnabled(command, undefined, process.cwd())) {
         return null;
     }
 
@@ -173,6 +173,7 @@ function commandLineContext(
     lines: string[],
     cursorLine: number,
     cursorCol: number,
+    cwd?: string,
 ): CommandLineContext | undefined {
     const line = lines[cursorLine];
     if (line === undefined) {
@@ -194,7 +195,7 @@ function commandLineContext(
     if (command === undefined) {
         return undefined;
     }
-    if (!isTypedCommandEnabled(command)) {
+    if (!isTypedCommandEnabled(command, undefined, cwd)) {
         return undefined;
     }
 
@@ -234,8 +235,9 @@ export function getTypedAutocompleteSuggestions(
     lines: string[],
     cursorLine: number,
     cursorCol: number,
+    cwd?: string,
 ): AutocompleteSuggestions | undefined {
-    const context = commandLineContext(lines, cursorLine, cursorCol);
+    const context = commandLineContext(lines, cursorLine, cursorCol, cwd);
     if (context === undefined) {
         return undefined;
     }

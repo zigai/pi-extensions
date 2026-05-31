@@ -1,3 +1,5 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getPiCommandArgsSettings } from "./settings.js";
 import type { ArgumentDefinitions, RegisteredTypedCommand, TypedCommandToggle } from "./types.js";
 
 type RegistryListener = () => void;
@@ -50,7 +52,10 @@ export function getTypedCommands(): RegisteredTypedCommand[] {
     );
 }
 
-export function isToggleEnabled(toggle: TypedCommandToggle | undefined): boolean {
+export function isToggleEnabled(
+    toggle: TypedCommandToggle | undefined,
+    ctx?: ExtensionContext,
+): boolean {
     if (toggle === undefined) {
         return true;
     }
@@ -58,7 +63,7 @@ export function isToggleEnabled(toggle: TypedCommandToggle | undefined): boolean
         return toggle;
     }
     try {
-        return toggle();
+        return toggle(ctx);
     } catch {
         return false;
     }
@@ -66,12 +71,13 @@ export function isToggleEnabled(toggle: TypedCommandToggle | undefined): boolean
 
 export function isTypedCommandEnabled<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
+    ctx?: ExtensionContext,
+    cwd?: string,
 ): boolean {
-    return isToggleEnabled(command.typedArgsEnabled);
-}
-
-export function getEnabledTypedCommands(): RegisteredTypedCommand[] {
-    return getTypedCommands().filter((command) => isTypedCommandEnabled(command));
+    if (!getPiCommandArgsSettings(cwd ?? ctx?.cwd).enabled) {
+        return false;
+    }
+    return isToggleEnabled(command.typedArgsEnabled, ctx);
 }
 
 export function onTypedCommandsChanged(listener: RegistryListener): () => void {

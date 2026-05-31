@@ -5,15 +5,15 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { getTypedArgumentCompletions, getTypedAutocompleteSuggestions } from "./completions.js";
+import { hasIssuesOfKind, parseTypedCommandArgs } from "./parser.js";
 import {
-    getEnabledTypedCommands,
     getTypedCommand,
     isToggleEnabled,
     isTypedCommandEnabled,
     onTypedCommandsChanged,
     registerTypedCommandMetadata,
 } from "./registry.js";
-import { hasIssuesOfKind, parseTypedCommandArgs } from "./parser.js";
+import { getPiCommandArgsSettings } from "./settings.js";
 import type {
     ArgumentDefinitions,
     InferArguments,
@@ -29,7 +29,6 @@ const WIDGET_KEY = "pi-command-args.helper";
 
 export type TypedCommandUxOptions = {
     enabled?: TypedCommandToggle;
-    registerListCommand?: boolean;
 };
 
 export type {
@@ -56,6 +55,7 @@ export type {
 export { formatCommandUsage, formatDetailedHelp, formatHelperLine } from "./usage.js";
 export { getTypedCommand, getTypedCommands } from "./registry.js";
 export { parseTypedCommandArgs } from "./parser.js";
+export { getPiCommandArgsSettings } from "./settings.js";
 
 function notifyIssues(ctx: ExtensionCommandContext, messages: string[]): void {
     if (messages.length === 0) {
@@ -150,7 +150,7 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             return getTypedArgumentCompletions(command, argumentPrefix);
         },
         handler: async (rawArgs, ctx) => {
-            if (!isTypedCommandEnabled(command)) {
+            if (!isTypedCommandEnabled(command, ctx, ctx.cwd)) {
                 if (command.fallbackHandler !== undefined) {
                     await command.fallbackHandler(rawArgs, ctx);
                     return;
@@ -171,7 +171,7 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     });
 }
 
-function helperLineForEditorText(editorText: string): string | undefined {
+function helperLineForEditorText(editorText: string, cwd: string): string | undefined {
     const firstLine = editorText.split("\n", 1)[0];
     if (firstLine === undefined) {
         return undefined;
@@ -191,7 +191,7 @@ function helperLineForEditorText(editorText: string): string | undefined {
     if (command === undefined) {
         return undefined;
     }
-    if (!isTypedCommandEnabled(command)) {
+    if (!isTypedCommandEnabled(command, undefined, cwd)) {
         return undefined;
     }
 
@@ -221,44 +221,10 @@ function setHelperWidget(ctx: ExtensionContext, text: string | undefined): void 
     );
 }
 
-function registerCompanionCommands(pi: ExtensionAPI): void {
-    pi.registerCommand("typed-commands", {
-        description: "List typed slash commands registered through pi-command-args",
-        handler: async (_args, ctx) => {
-            const commands = getEnabledTypedCommands();
-            if (commands.length === 0) {
-                ctx.ui.notify("No typed commands are registered.", "info");
-                return;
-            }
-
-            const items = commands.map((command) => `/${command.name} — ${command.description}`);
-            const selected = await ctx.ui.select("Typed commands", items);
-            if (selected === undefined) {
-                return;
-            }
-
-            const name = selected.split(" ", 1)[0]?.slice(1);
-            if (name === undefined) {
-                return;
-            }
-
-            const command = getTypedCommand(name);
-            if (command === undefined) {
-                return;
-            }
-
-            ctx.ui.notify(formatDetailedHelp(command), "info");
-        },
-    });
-}
-
 export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUxOptions): void {
     const resolvedOptions = options ?? {};
     if (!isToggleEnabled(resolvedOptions.enabled)) {
         return;
-    }
-    if (resolvedOptions.registerListCommand !== false) {
-        registerCompanionCommands(pi);
     }
 
     let cleanup: Array<() => void> = [];
@@ -285,9 +251,12 @@ export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUx
         if (!ctx.hasUI) {
             return;
         }
+        if (!getPiCommandArgsSettings(ctx.cwd).uxEnabled) {
+            return;
+        }
 
         const refresh = (): void => {
-            const helperLine = helperLineForEditorText(ctx.ui.getEditorText());
+            const helperLine = helperLineForEditorText(ctx.ui.getEditorText(), ctx.cwd);
             setHelperWidget(ctx, helperLine);
         };
 
@@ -305,7 +274,12 @@ export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUx
 
         ctx.ui.addAutocompleteProvider((current) => ({
             async getSuggestions(lines, cursorLine, cursorCol, options) {
-                const suggestions = getTypedAutocompleteSuggestions(lines, cursorLine, cursorCol);
+                const suggestions = getTypedAutocompleteSuggestions(
+                    lines,
+                    cursorLine,
+                    cursorCol,
+                    ctx.cwd,
+                );
                 if (suggestions !== undefined) {
                     return suggestions;
                 }
@@ -337,17 +311,6 @@ export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUx
     });
 }
 
-function environmentDisablesUx(): boolean {
-    const value = process.env.PI_COMMAND_ARGS_UX?.toLowerCase();
-    if (value === undefined) {
-        return false;
-    }
-    return ["0", "false", "no", "off"].includes(value);
-}
-
 export default function piCommandArgsExtension(pi: ExtensionAPI): void {
-    if (environmentDisablesUx()) {
-        return;
-    }
     installTypedCommandUx(pi);
 }
