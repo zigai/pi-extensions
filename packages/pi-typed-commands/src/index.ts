@@ -48,6 +48,7 @@ export type {
     RawCommandHandler,
     TypedCommandHandler,
     TypedCommandOptions,
+    TypedCommandRawSelector,
     TypedCommandToggle,
     WizardMode,
 } from "./types.js";
@@ -141,6 +142,9 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     if (options.fallbackHandler !== undefined) {
         command.fallbackHandler = options.fallbackHandler;
     }
+    if (options.shouldUseTypedArgs !== undefined) {
+        command.shouldUseTypedArgs = options.shouldUseTypedArgs;
+    }
 
     registerTypedCommandMetadata(command);
 
@@ -160,6 +164,16 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
                     "warning",
                 );
                 return;
+            }
+
+            if (
+                command.shouldUseTypedArgs !== undefined &&
+                !command.shouldUseTypedArgs(rawArgs, ctx)
+            ) {
+                if (command.fallbackHandler !== undefined) {
+                    await command.fallbackHandler(rawArgs, ctx);
+                    return;
+                }
             }
 
             const args = await resolveCommandArguments(command, rawArgs, ctx);

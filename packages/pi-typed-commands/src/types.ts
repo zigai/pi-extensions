@@ -80,12 +80,15 @@ export type RawCommandHandler = (
 
 export type TypedCommandToggle = boolean | ((ctx?: ExtensionContext) => boolean);
 
+export type TypedCommandRawSelector = (rawArgs: string, ctx: ExtensionCommandContext) => boolean;
+
 export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     description: string;
     args: TDefinitions;
     handler: TypedCommandHandler<TDefinitions>;
     fallbackHandler?: RawCommandHandler;
     typedArgsEnabled?: TypedCommandToggle;
+    shouldUseTypedArgs?: TypedCommandRawSelector;
     manualWizardToken?: string;
     helpToken?: string;
     openWizardWhenInvalid?: boolean;
@@ -100,6 +103,7 @@ export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = Ar
         handler: TypedCommandHandler<TDefinitions>;
         fallbackHandler?: RawCommandHandler;
         typedArgsEnabled: TypedCommandToggle;
+        shouldUseTypedArgs?: TypedCommandRawSelector;
         manualWizardToken: string;
         helpToken: string;
         openWizardWhenInvalid: boolean;

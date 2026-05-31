@@ -139,6 +139,8 @@ registerTypedCommand(pi, "deploy", {
 
 When `typedArgsEnabled` returns `false`, command arg completions, live hints, typed parsing, and auto-wizards are skipped for that command. The `fallbackHandler` receives Pi's raw argument string.
 
+For legacy-compatible migrations, a command can also set `shouldUseTypedArgs(rawArgs, ctx)`. When it returns `false`, the typed parser is skipped for that invocation and `fallbackHandler` receives the raw argument string.
+
 ## Notes
 
 Pi's native command API still receives a raw argument string. This package wraps `pi.registerCommand()`, parses and validates the raw args, generates completions, and opens Pi TUI prompts when needed.
