@@ -409,16 +409,36 @@ export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
         result.issues.push(issue("unterminated-quote", "Unterminated quote in arguments"));
     }
 
+    const tokens: string[] = [];
+    for (const token of tokenized.tokens) {
+        if (token === command.helpToken || token === "--help" || token === "-h") {
+            result.mode = "help";
+            continue;
+        }
+        if (token === command.manualWizardToken) {
+            if (result.mode !== "help") {
+                result.mode = "wizard";
+            }
+            continue;
+        }
+        tokens.push(token);
+    }
+
+    if (result.mode === "help") {
+        applyDefaults(result, command.args);
+        return result;
+    }
+
     const lookup = createArgumentLookup(command.args);
     let index = 0;
-    while (index < tokenized.tokens.length) {
-        const token = tokenized.tokens[index];
+    while (index < tokens.length) {
+        const token = tokens[index];
         if (token === undefined) {
             break;
         }
 
         if (isFlagToken(token)) {
-            index = parseFlagToken(tokenized.tokens, index, lookup, result);
+            index = parseFlagToken(tokens, index, lookup, result);
             continue;
         }
 

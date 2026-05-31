@@ -71,9 +71,13 @@ void describe("parseTypedCommandArgs", () => {
     void it("recognizes wizard and help tokens", () => {
         const wizard = parseTypedCommandArgs(command, "?");
         const help = parseTypedCommandArgs(command, "??");
+        const wizardWithArgs = parseTypedCommandArgs(command, "--env staging ?");
 
         assert.equal(wizard.mode, "wizard");
         assert.equal(help.mode, "help");
+        assert.equal(wizardWithArgs.mode, "wizard");
+        assert.deepEqual(wizardWithArgs.issues, []);
+        assert.equal(wizardWithArgs.values.env, "staging");
     });
 });
 
