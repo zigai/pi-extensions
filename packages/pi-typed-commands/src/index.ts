@@ -6,8 +6,10 @@ import type {
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { getTypedArgumentCompletions, getTypedAutocompleteSuggestions } from "./completions.js";
 import {
+    getEnabledTypedCommands,
     getTypedCommand,
-    getTypedCommands,
+    isToggleEnabled,
+    isTypedCommandEnabled,
     onTypedCommandsChanged,
     registerTypedCommandMetadata,
 } from "./registry.js";
@@ -17,12 +19,18 @@ import type {
     InferArguments,
     RegisteredTypedCommand,
     TypedCommandOptions,
+    TypedCommandToggle,
     WizardMode,
 } from "./types.js";
 import { formatDetailedHelp, formatHelperLine } from "./usage.js";
 import { openArgumentWizard } from "./wizard.js";
 
 const WIDGET_KEY = "pi-command-args.helper";
+
+export type TypedCommandUxOptions = {
+    enabled?: TypedCommandToggle;
+    registerListCommand?: boolean;
+};
 
 export type {
     ArgumentDefinition,
@@ -38,8 +46,10 @@ export type {
     PrimitiveArgumentValue,
     RegisteredTypedCommand,
     StringArgumentDefinition,
+    RawCommandHandler,
     TypedCommandHandler,
     TypedCommandOptions,
+    TypedCommandToggle,
     WizardMode,
 } from "./types.js";
 
@@ -121,11 +131,16 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
         description: options.description,
         args: options.args,
         handler: options.handler,
+        typedArgsEnabled: options.typedArgsEnabled ?? true,
         manualWizardToken: options.manualWizardToken ?? "?",
         helpToken: options.helpToken ?? "??",
         openWizardWhenInvalid: options.openWizardWhenInvalid ?? true,
         openWizardWhenMissingRequired: options.openWizardWhenMissingRequired ?? true,
     };
+
+    if (options.fallbackHandler !== undefined) {
+        command.fallbackHandler = options.fallbackHandler;
+    }
 
     registerTypedCommandMetadata(command);
 
@@ -135,6 +150,18 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             return getTypedArgumentCompletions(command, argumentPrefix);
         },
         handler: async (rawArgs, ctx) => {
+            if (!isTypedCommandEnabled(command)) {
+                if (command.fallbackHandler !== undefined) {
+                    await command.fallbackHandler(rawArgs, ctx);
+                    return;
+                }
+                ctx.ui.notify(
+                    `Typed args are disabled for /${name}, and no fallback handler is configured.`,
+                    "warning",
+                );
+                return;
+            }
+
             const args = await resolveCommandArguments(command, rawArgs, ctx);
             if (args === undefined) {
                 return;
@@ -162,6 +189,9 @@ function helperLineForEditorText(editorText: string): string | undefined {
 
     const command = getTypedCommand(commandName);
     if (command === undefined) {
+        return undefined;
+    }
+    if (!isTypedCommandEnabled(command)) {
         return undefined;
     }
 
@@ -195,7 +225,7 @@ function registerCompanionCommands(pi: ExtensionAPI): void {
     pi.registerCommand("typed-commands", {
         description: "List typed slash commands registered through pi-command-args",
         handler: async (_args, ctx) => {
-            const commands = getTypedCommands();
+            const commands = getEnabledTypedCommands();
             if (commands.length === 0) {
                 ctx.ui.notify("No typed commands are registered.", "info");
                 return;
@@ -222,8 +252,14 @@ function registerCompanionCommands(pi: ExtensionAPI): void {
     });
 }
 
-export function installTypedCommandUx(pi: ExtensionAPI): void {
-    registerCompanionCommands(pi);
+export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUxOptions): void {
+    const resolvedOptions = options ?? {};
+    if (!isToggleEnabled(resolvedOptions.enabled)) {
+        return;
+    }
+    if (resolvedOptions.registerListCommand !== false) {
+        registerCompanionCommands(pi);
+    }
 
     let cleanup: Array<() => void> = [];
     let refreshTimer: NodeJS.Timeout | undefined;
@@ -301,6 +337,17 @@ export function installTypedCommandUx(pi: ExtensionAPI): void {
     });
 }
 
+function environmentDisablesUx(): boolean {
+    const value = process.env.PI_COMMAND_ARGS_UX?.toLowerCase();
+    if (value === undefined) {
+        return false;
+    }
+    return ["0", "false", "no", "off"].includes(value);
+}
+
 export default function piCommandArgsExtension(pi: ExtensionAPI): void {
+    if (environmentDisablesUx()) {
+        return;
+    }
     installTypedCommandUx(pi);
 }

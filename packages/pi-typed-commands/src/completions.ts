@@ -1,6 +1,6 @@
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
 import { formatFlagName, normalizeFlagName } from "./names.js";
-import { getTypedCommand } from "./registry.js";
+import { getTypedCommand, isTypedCommandEnabled } from "./registry.js";
 import type { ArgumentDefinition, RegisteredTypedCommand } from "./types.js";
 
 type CommandLineContext = {
@@ -142,6 +142,10 @@ export function getTypedArgumentCompletions<
     command: RegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
 ): AutocompleteItem[] | null {
+    if (!isTypedCommandEnabled(command)) {
+        return null;
+    }
+
     const tokens = tokenizeLoose(argumentPrefix);
     const lastToken = tokens[tokens.length - 1];
     let query = "";
@@ -188,6 +192,9 @@ function commandLineContext(
 
     const command = getTypedCommand(commandName);
     if (command === undefined) {
+        return undefined;
+    }
+    if (!isTypedCommandEnabled(command)) {
         return undefined;
     }
 

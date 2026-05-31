@@ -55,6 +55,10 @@ export default function (pi: ExtensionAPI): void {
         description: "Preview without deploying",
       },
     },
+    typedArgsEnabled: () => process.env.MY_EXTENSION_TYPED_ARGS !== "0",
+    fallbackHandler: async (rawArgs, ctx) => {
+      ctx.ui.notify(`Typed args disabled; received raw args: ${rawArgs}`);
+    },
     handler: async (args, ctx) => {
       ctx.ui.notify(`Deploy ${args.ref} to ${args.env}; dryRun=${String(args.dryRun)}`);
     },
@@ -91,9 +95,37 @@ If a required argument is missing or an argument is invalid, the command opens t
 
 Common fields: `description`, `required`, `default`, `aliases`, and `placeholder`.
 
+## Disabling Typed-Args Features
+
+There are two levels of opt-out:
+
+1. Disable the companion UX extension globally by not loading this package as a Pi package, or by starting Pi with:
+
+```sh
+PI_COMMAND_ARGS_UX=0 pi
+```
+
+This disables the live one-line helper and `/typed-commands`, but libraries that import `registerTypedCommand()` can still use parsing/wizard behavior.
+
+2. Let a consuming extension disable typed args per command with `typedArgsEnabled` and `fallbackHandler`:
+
+```ts
+registerTypedCommand(pi, "deploy", {
+  description: "Deploy a ref",
+  args: {
+    /* ... */
+  },
+  typedArgsEnabled: () => userConfig.typedArgs !== false,
+  fallbackHandler: async (rawArgs, ctx) => runLegacyDeploy(rawArgs, ctx),
+  handler: async (typedArgs, ctx) => runTypedDeploy(typedArgs, ctx),
+});
+```
+
+When `typedArgsEnabled` returns `false`, command arg completions, live hints, typed parsing, and auto-wizards are skipped for that command. The `fallbackHandler` receives Pi's raw argument string.
+
 ## Companion Commands
 
-- `/typed-commands` lists typed commands registered in the current Pi session.
+- `/typed-commands` lists enabled typed commands registered in the current Pi session.
 
 ## Notes
 

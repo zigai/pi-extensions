@@ -31,6 +31,7 @@ const command: RegisteredTypedCommand = {
         },
     },
     handler: () => {},
+    typedArgsEnabled: true,
     manualWizardToken: "?",
     helpToken: "??",
     openWizardWhenInvalid: true,
@@ -92,5 +93,17 @@ void describe("getTypedAutocompleteSuggestions", () => {
             suggestions?.items.map((item) => item.label),
             ["--env"],
         );
+    });
+
+    void it("hides completions for disabled typed commands", () => {
+        registerTypedCommandMetadata({
+            ...command,
+            name: "disabled-deploy",
+            typedArgsEnabled: false,
+        });
+
+        const suggestions = getTypedAutocompleteSuggestions(["/disabled-deploy --e"], 0, 20);
+
+        assert.equal(suggestions, undefined);
     });
 });

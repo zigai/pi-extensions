@@ -73,10 +73,19 @@ export type TypedCommandHandler<TDefinitions extends ArgumentDefinitions> = (
     ctx: ExtensionCommandContext,
 ) => Promise<void> | void;
 
+export type RawCommandHandler = (
+    args: string,
+    ctx: ExtensionCommandContext,
+) => Promise<void> | void;
+
+export type TypedCommandToggle = boolean | (() => boolean);
+
 export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     description: string;
     args: TDefinitions;
     handler: TypedCommandHandler<TDefinitions>;
+    fallbackHandler?: RawCommandHandler;
+    typedArgsEnabled?: TypedCommandToggle;
     manualWizardToken?: string;
     helpToken?: string;
     openWizardWhenInvalid?: boolean;
@@ -89,6 +98,8 @@ export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = Ar
         description: string;
         args: TDefinitions;
         handler: TypedCommandHandler<TDefinitions>;
+        fallbackHandler?: RawCommandHandler;
+        typedArgsEnabled: TypedCommandToggle;
         manualWizardToken: string;
         helpToken: string;
         openWizardWhenInvalid: boolean;

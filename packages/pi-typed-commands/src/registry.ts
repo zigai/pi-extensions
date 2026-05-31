@@ -1,4 +1,4 @@
-import type { ArgumentDefinitions, RegisteredTypedCommand } from "./types.js";
+import type { ArgumentDefinitions, RegisteredTypedCommand, TypedCommandToggle } from "./types.js";
 
 type RegistryListener = () => void;
 
@@ -48,6 +48,30 @@ export function getTypedCommands(): RegisteredTypedCommand[] {
     return [...getTypedCommandRegistry().commands.values()].sort((a, b) =>
         a.name.localeCompare(b.name),
     );
+}
+
+export function isToggleEnabled(toggle: TypedCommandToggle | undefined): boolean {
+    if (toggle === undefined) {
+        return true;
+    }
+    if (typeof toggle === "boolean") {
+        return toggle;
+    }
+    try {
+        return toggle();
+    } catch {
+        return false;
+    }
+}
+
+export function isTypedCommandEnabled<TDefinitions extends ArgumentDefinitions>(
+    command: RegisteredTypedCommand<TDefinitions>,
+): boolean {
+    return isToggleEnabled(command.typedArgsEnabled);
+}
+
+export function getEnabledTypedCommands(): RegisteredTypedCommand[] {
+    return getTypedCommands().filter((command) => isTypedCommandEnabled(command));
 }
 
 export function onTypedCommandsChanged(listener: RegistryListener): () => void {
