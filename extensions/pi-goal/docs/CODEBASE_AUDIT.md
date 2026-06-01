@@ -78,7 +78,7 @@ Coverage is **integration-heavy** via `test/support/runtime-harness.ts` and scen
 
 ```text
 [🔵 Low] [Operability] .gitignore
-- Problem: Local `.debug/` (Cursor SDK event dumps) was not ignored.
+- Problem: Local `.debug/` runtime/debug artifacts were not ignored.
 - Impact: Risk of accidental commit of session debug artifacts.
 - Fix: Ignore `.debug/` (this PR).
 ```

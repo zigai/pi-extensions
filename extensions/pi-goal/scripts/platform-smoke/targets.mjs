@@ -1,0 +1,420 @@
+/** Target/suite runner for pi-codex-goal platform smoke. */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
+import { collectSecretValues, createSuiteDir, redactSecrets, scanArtifactTextFiles, scanForSecrets, writeCommand, writeExitCode, writeManifest, writeSummary } from "./artifacts.mjs";
+import { cleanupStaleTargetState, runOnLease, stopLease, warmupLease } from "./crabbox-runner.mjs";
+
+export function platformFor(targetName) {
+	return targetName === "windows-native" ? "powershell" : "posix";
+}
+
+function makeRunId() {
+	return `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function shellQuote(value) {
+	return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function psSingleQuote(value) {
+	return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function smokeModel(config) {
+	return process.env.PLATFORM_SMOKE_MODEL || config.defaultModel || "zai/glm-5.1";
+}
+
+function authEnvAllowList(config) {
+	const raw = process.env.PLATFORM_SMOKE_AUTH_ENV;
+	const names = raw ? raw.split(",") : (config.defaultAuthEnv ?? ["ZAI_API_KEY", "Z_AI_API_KEY"]);
+	return names.map((name) => String(name).trim()).filter(Boolean);
+}
+
+function sectionBase64(text, name) {
+	const raw = section(text, name).trim();
+	if (!raw) return "";
+	try {
+		return Buffer.from(raw, "base64").toString("utf8");
+	} catch {
+		return "";
+	}
+}
+
+function writeRedacted(path, text, secretValues) {
+	writeFileSync(path, redactSecrets(text ?? "", secretValues));
+}
+
+function jsonBlock(text, start, end) {
+	const startIndex = text.indexOf(start);
+	if (startIndex === -1) return "";
+	const contentStart = startIndex + start.length;
+	const endIndex = text.indexOf(end, contentStart);
+	return (endIndex === -1 ? text.slice(contentStart) : text.slice(contentStart, endIndex)).trim();
+}
+
+function section(text, name) {
+	const start = `--- ${name} START ---`;
+	const end = `--- ${name} END ---`;
+	const startIndex = text.indexOf(start);
+	if (startIndex === -1) return "";
+	const contentStart = startIndex + start.length;
+	const endIndex = text.indexOf(end, contentStart);
+	return (endIndex === -1 ? text.slice(contentStart) : text.slice(contentStart, endIndex)).replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+}
+
+function marker(text, name) {
+	return text.match(new RegExp(`^${name}=(.*)$`, "m"))?.[1]?.trim() ?? "";
+}
+
+function writeExtracts(suiteDir, stdout, secretValues = []) {
+	writeFileSync(resolve(suiteDir, "node-version.txt"), `${marker(stdout, "PLATFORM_NODE_VERSION")}\n`);
+	writeRedacted(resolve(suiteDir, "packed-tarball.txt"), `${marker(stdout, "PLATFORM_PACKED_TARBALL")}\n`, secretValues);
+	writeRedacted(resolve(suiteDir, "packed-node-install.stdout.txt"), section(stdout, "PACKED_NODE_INSTALL_STDOUT"), secretValues);
+	writeRedacted(resolve(suiteDir, "packed-node-install.stderr.txt"), section(stdout, "PACKED_NODE_INSTALL_STDERR"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-install.stdout.txt"), section(stdout, "PI_INSTALL_STDOUT"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-install.stderr.txt"), section(stdout, "PI_INSTALL_STDERR"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-list.stdout.txt"), section(stdout, "PI_LIST_STDOUT"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-list.stderr.txt"), section(stdout, "PI_LIST_STDERR"), secretValues);
+}
+
+function assertionsFromChecks(checks) {
+	const evaluated = checks.map((check) => {
+		let ok = false;
+		let error = check.error;
+		try {
+			ok = check.fn() === true;
+		} catch (err) {
+			error = err.message;
+		}
+		return { id: check.id, ok, ...(ok ? {} : { error: error ?? `${check.id} failed` }) };
+	});
+	return { ok: evaluated.every((check) => check.ok), checks: evaluated, writtenAt: new Date().toISOString() };
+}
+
+function writeAssertions(suiteDir, checks) {
+	const assertions = assertionsFromChecks(checks);
+	writeFileSync(resolve(suiteDir, "assertions.json"), JSON.stringify(assertions, null, 2));
+	if (!assertions.ok) {
+		writeFileSync(resolve(suiteDir, "failures.md"), [
+			`# Platform smoke failures`,
+			"",
+			...assertions.checks.filter((check) => !check.ok).map((check) => `- ${check.id}: ${check.error ?? "failed"}`),
+			"",
+			"Inspect command.txt, crabbox.stdout.txt, and crabbox.stderr.txt in this suite directory.",
+			"",
+		].join("\n"));
+	}
+	return assertions;
+}
+
+function finalizeSuite(suiteDir, checks, summary, expectedFiles) {
+	const assertions = writeAssertions(suiteDir, checks);
+	writeSummary(suiteDir, { ...summary, ok: assertions.ok });
+	const expected = assertions.ok ? expectedFiles : [...expectedFiles, "failures.md"];
+	const manifest = writeManifest(suiteDir, expected);
+	if (manifest.missing.length === 0) return { assertions, manifest };
+	const finalAssertions = writeAssertions(suiteDir, [
+		...checks,
+		{ id: "artifact-manifest-complete", fn: () => false, error: `missing required artifact(s): ${manifest.missing.join(", ")}` },
+	]);
+	writeSummary(suiteDir, { ...summary, ok: false });
+	return { assertions: finalAssertions, manifest: writeManifest(suiteDir, [...expectedFiles, "failures.md"]) };
+}
+
+export function createLeaseCleanupResult(config, targetName, leaseId, stopResult, staleCleanupResult = null) {
+	const suiteName = "lease-cleanup";
+	const runId = makeRunId();
+	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
+	const secretValues = collectSecretValues(authEnvAllowList(config));
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify({ targetName, platform: platformFor(targetName), runId, slug: `${config.packageName}-${targetName}` }, null, 2));
+	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, leaseId, modelCalls: 0 }, null, 2));
+	writeCommand(suiteDir, `crabbox stop ${targetName} --id ${leaseId}`);
+	writeExitCode(suiteDir, stopResult.code, stopResult.signal);
+	writeRedacted(resolve(suiteDir, "crabbox.stop.stdout.txt"), stopResult.stdout ?? "", secretValues);
+	writeRedacted(resolve(suiteDir, "crabbox.stop.stderr.txt"), stopResult.stderr ?? "", secretValues);
+	writeFileSync(resolve(suiteDir, "crabbox.stop.exit-code.txt"), `code=${stopResult.code}\nsignal=${stopResult.signal ?? "none"}\n`);
+	if (staleCleanupResult) {
+		writeRedacted(resolve(suiteDir, "crabbox.cleanup.stdout.txt"), staleCleanupResult.stdout ?? "", secretValues);
+		writeRedacted(resolve(suiteDir, "crabbox.cleanup.stderr.txt"), staleCleanupResult.stderr ?? "", secretValues);
+		writeFileSync(resolve(suiteDir, "crabbox.cleanup.exit-code.txt"), `code=${staleCleanupResult.code}\nsignal=${staleCleanupResult.signal ?? "none"}\n`);
+	}
+	const secretViolations = [
+		...scanForSecrets(`${stopResult.stdout ?? ""}\n${stopResult.stderr ?? ""}`, secretValues),
+		...scanArtifactTextFiles(suiteDir, secretValues).map((finding) => `${finding.file}: ${finding.violation}`),
+	];
+	const { assertions } = finalizeSuite(
+		suiteDir,
+		[
+			{ id: "lease-cleanup", fn: () => stopResult.code === 0, error: `Crabbox stop failed with exit ${stopResult.code}` },
+			{ id: "stale-cleanup", fn: () => !staleCleanupResult || staleCleanupResult.code === 0, error: `Crabbox cleanup failed with exit ${staleCleanupResult?.code}` },
+			{ id: "no-secret-artifacts", fn: () => secretViolations.length === 0, error: secretViolations.join(", ") },
+		],
+		{ target: targetName, suite: suiteName, exitCode: stopResult.code, signal: stopResult.signal, elapsedMs: 0 },
+		[
+			"summary.json", "artifact-manifest.json", "target.json", "suite.json", "command.txt", "exit-code.txt",
+			"crabbox.stop.stdout.txt", "crabbox.stop.stderr.txt", "crabbox.stop.exit-code.txt",
+			...(staleCleanupResult ? ["crabbox.cleanup.stdout.txt", "crabbox.cleanup.stderr.txt", "crabbox.cleanup.exit-code.txt"] : []),
+			"assertions.json",
+		],
+	);
+	return { ok: assertions.ok, suiteDir, assertions };
+}
+
+export function createLeaseCleanupFailureResult(config, targetName, leaseId, stopResult) {
+	return createLeaseCleanupResult(config, targetName, leaseId, stopResult);
+}
+
+export function buildGoalRuntimeSmokeCommand(config, targetName) {
+	const model = smokeModel(config);
+	const packageName = config.packageName ?? "pi-codex-goal";
+	if (platformFor(targetName) === "powershell") {
+		return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "node .\\scripts\\platform-smoke\\goal-runtime-smoke.mjs --model ${model.replace(/"/g, "`\"")} --package-name ${packageName.replace(/"/g, "`\"")}"`;
+	}
+	return `node scripts/platform-smoke/goal-runtime-smoke.mjs --model ${shellQuote(model)} --package-name ${shellQuote(packageName)}`;
+}
+
+export function buildPlatformBuildCommand(targetName, packageName = "pi-codex-goal", nodeValidationMajor = 24) {
+	if (platformFor(targetName) === "powershell") {
+		return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\platform-smoke\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}`;
+	}
+
+	const lines = [];
+	lines.push(`echo "Starting platform-build in $(pwd) at $(date -u +%Y-%m-%dT%H:%M:%SZ)"`);
+	lines.push(`RUN_ROOT=".platform-smoke-runs/platform-build-$(date -u +%Y%m%dT%H%M%SZ)-$$"`);
+	lines.push(`SOURCE_ROOT="$(pwd)"`);
+	lines.push(`PACK_DIR="$SOURCE_ROOT/$RUN_ROOT/pack"`);
+	lines.push(`TEST_WORKSPACE="$SOURCE_ROOT/$RUN_ROOT/test-workspace"`);
+	lines.push(`PI_PROJECT="$SOURCE_ROOT/$RUN_ROOT/pi-project"`);
+	lines.push(`mkdir -p "$PACK_DIR" "$TEST_WORKSPACE" "$PI_PROJECT"`);
+	lines.push(`echo "PLATFORM_RUN_ROOT=$RUN_ROOT"`);
+	lines.push(`NODE_VERSION=$(node --version)`);
+	lines.push(`NODE_MAJOR="${"${NODE_VERSION#v}"}"`);
+	lines.push(`NODE_MAJOR="${"${NODE_MAJOR%%.*}"}"`);
+	lines.push(`echo "PLATFORM_NODE_VERSION=$NODE_VERSION"`);
+	lines.push(`if [ "$NODE_MAJOR" -ge ${nodeValidationMajor} ]; then NODE_VERSION_EXIT=0; else NODE_VERSION_EXIT=1; fi`);
+	lines.push(`echo "PLATFORM_NODE_VERSION_EXIT=$NODE_VERSION_EXIT"`);
+	lines.push(`npm ci 2>&1`);
+	lines.push(`NPM_CI_EXIT=$?`);
+	lines.push(`echo "PLATFORM_NPM_CI_EXIT=$NPM_CI_EXIT"`);
+	lines.push(`npm run verify 2>&1`);
+	lines.push(`VERIFY_EXIT=$?`);
+	lines.push(`echo "PLATFORM_VERIFY_EXIT=$VERIFY_EXIT"`);
+	lines.push(`PACK_TARBALL=$(npm pack --silent --pack-destination "$PACK_DIR" 2>"$PACK_DIR/npm-pack.stderr.txt")`);
+	lines.push(`PACK_EXIT=$?`);
+	lines.push(`cat "$PACK_DIR/npm-pack.stderr.txt"`);
+	lines.push(`PACK_FILE="$PACK_DIR/$PACK_TARBALL"`);
+	lines.push(`echo "PLATFORM_NPM_PACK_EXIT=$PACK_EXIT"`);
+	lines.push(`echo "PLATFORM_PACKED_TARBALL=$PACK_FILE"`);
+	lines.push(`cp package.json README.md "$TEST_WORKSPACE"/ 2>"$PACK_DIR/fixture.stderr.txt"`);
+	lines.push(`FIXTURE_COPY_EXIT=$?`);
+	lines.push(`cp -R src prompts "$TEST_WORKSPACE"/ 2>>"$PACK_DIR/fixture.stderr.txt"`);
+	lines.push(`FIXTURE_TREE_EXIT=$?`);
+	lines.push(`if [ "$FIXTURE_COPY_EXIT" -eq 0 ] && [ "$FIXTURE_TREE_EXIT" -eq 0 ]; then FIXTURE_EXIT=0; else FIXTURE_EXIT=1; fi`);
+	lines.push(`echo "PLATFORM_FIXTURE_EXIT=$FIXTURE_EXIT"`);
+	lines.push(`cat "$PACK_DIR/fixture.stderr.txt"`);
+	lines.push(`PI_CLI="$SOURCE_ROOT/node_modules/.bin/pi"`);
+	lines.push(`if [ ! -x "$PI_CLI" ]; then PI_CLI="$(command -v pi || true)"; fi`);
+	lines.push(`echo "PLATFORM_PI_CLI=$PI_CLI"`);
+	lines.push(`if [ -n "$PACK_TARBALL" ] && [ -f "$PACK_FILE" ]; then (cd "$PI_PROJECT" && npm init -y >"$PACK_DIR/packed-node-install.stdout.txt" 2>"$PACK_DIR/packed-node-install.stderr.txt" && npm install --no-save "$PACK_FILE" >>"$PACK_DIR/packed-node-install.stdout.txt" 2>>"$PACK_DIR/packed-node-install.stderr.txt"); PACKED_NODE_INSTALL_EXIT=$?; else echo "missing tarball" >"$PACK_DIR/packed-node-install.stderr.txt"; PACKED_NODE_INSTALL_EXIT=1; fi`);
+	lines.push(`echo "PLATFORM_PACKED_NODE_INSTALL_EXIT=$PACKED_NODE_INSTALL_EXIT"`);
+	lines.push(`echo "--- PACKED_NODE_INSTALL_STDOUT START ---"; cat "$PACK_DIR/packed-node-install.stdout.txt" 2>/dev/null || true; echo "--- PACKED_NODE_INSTALL_STDOUT END ---"`);
+	lines.push(`echo "--- PACKED_NODE_INSTALL_STDERR START ---"; cat "$PACK_DIR/packed-node-install.stderr.txt" 2>/dev/null || true; echo "--- PACKED_NODE_INSTALL_STDERR END ---"`);
+	lines.push(`if [ "$PACKED_NODE_INSTALL_EXIT" -eq 0 ] && [ -n "$PI_CLI" ]; then (cd "$PI_PROJECT" && PI_OFFLINE=1 "$PI_CLI" install -l ./node_modules/${packageName} >"$PACK_DIR/pi-install.stdout.txt" 2>"$PACK_DIR/pi-install.stderr.txt"); PI_INSTALL_EXIT=$?; else echo "missing pi cli or packed install" >"$PACK_DIR/pi-install.stderr.txt"; PI_INSTALL_EXIT=1; fi`);
+	lines.push(`echo "PLATFORM_PI_INSTALL_EXIT=$PI_INSTALL_EXIT"`);
+	lines.push(`echo "--- PI_INSTALL_STDOUT START ---"; cat "$PACK_DIR/pi-install.stdout.txt" 2>/dev/null || true; echo "--- PI_INSTALL_STDOUT END ---"`);
+	lines.push(`echo "--- PI_INSTALL_STDERR START ---"; cat "$PACK_DIR/pi-install.stderr.txt" 2>/dev/null || true; echo "--- PI_INSTALL_STDERR END ---"`);
+	lines.push(`if [ -n "$PI_CLI" ]; then (cd "$PI_PROJECT" && PI_OFFLINE=1 "$PI_CLI" list >"$PACK_DIR/pi-list.stdout.txt" 2>"$PACK_DIR/pi-list.stderr.txt"); PI_LIST_EXIT=$?; else echo "missing pi cli" >"$PACK_DIR/pi-list.stderr.txt"; PI_LIST_EXIT=1; fi`);
+	lines.push(`echo "PLATFORM_PI_LIST_EXIT=$PI_LIST_EXIT"`);
+	lines.push(`echo "--- PI_LIST_STDOUT START ---"; cat "$PACK_DIR/pi-list.stdout.txt" 2>/dev/null || true; echo "--- PI_LIST_STDOUT END ---"`);
+	lines.push(`echo "--- PI_LIST_STDERR START ---"; cat "$PACK_DIR/pi-list.stderr.txt" 2>/dev/null || true; echo "--- PI_LIST_STDERR END ---"`);
+	lines.push(`if [ "$NODE_VERSION_EXIT" -ne 0 ] || [ "$NPM_CI_EXIT" -ne 0 ] || [ "$VERIFY_EXIT" -ne 0 ] || [ "$PACK_EXIT" -ne 0 ] || [ "$FIXTURE_EXIT" -ne 0 ] || [ "$PACKED_NODE_INSTALL_EXIT" -ne 0 ] || [ "$PI_INSTALL_EXIT" -ne 0 ] || [ "$PI_LIST_EXIT" -ne 0 ]; then echo "PLATFORM_BUILD_FAILED"; exit 1; fi`);
+	lines.push(`echo "PLATFORM_BUILD_OK"`);
+	return lines.join("\n");
+}
+
+async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSession) {
+	const runId = makeRunId();
+	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
+	const startedAt = Date.now();
+	const platform = platformFor(targetName);
+	const slug = `${config.packageName}-${targetName}`;
+	const command = buildGoalRuntimeSmokeCommand(config, targetName);
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify({ targetName, platform, runId, slug }, null, 2));
+	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, modelCalls: 1, model: smokeModel(config) }, null, 2));
+	writeCommand(suiteDir, command);
+
+	let lease = leaseSession;
+	const ownsLease = !lease;
+	if (!lease) lease = await warmupLease(targetName, slug);
+	if (!lease.ok) {
+		writeExitCode(suiteDir, lease.code, lease.signal);
+		writeFileSync(resolve(suiteDir, "crabbox.stdout.txt"), lease.stdout ?? "");
+		writeFileSync(resolve(suiteDir, "crabbox.stderr.txt"), lease.stderr ?? "");
+		const { assertions } = finalizeSuite(suiteDir, [{ id: "crabbox-warmup", fn: () => false, error: "Crabbox warmup failed" }], { target: targetName, suite: suiteName, elapsedMs: Date.now() - startedAt }, ["summary.json", "artifact-manifest.json", "target.json", "suite.json", "command.txt", "exit-code.txt", "crabbox.stdout.txt", "crabbox.stderr.txt", "assertions.json"]);
+		return { ok: false, suiteDir, assertions };
+	}
+
+	const allowEnv = authEnvAllowList(config);
+	const secretValues = collectSecretValues(allowEnv);
+	const result = await runOnLease(targetName, lease.leaseId, command, {
+		timeout: 600_000,
+		sync: leaseSession?.sync,
+		allowEnv,
+	});
+	const elapsedMs = Date.now() - startedAt;
+	writeRedacted(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout, secretValues);
+	writeRedacted(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr, secretValues);
+	writeFileSync(resolve(suiteDir, "crabbox.timing.json"), JSON.stringify({ elapsedMs, code: result.code, signal: result.signal }, null, 2));
+	writeExitCode(suiteDir, result.code, result.signal);
+
+	let stopResult;
+	if (ownsLease) {
+		stopResult = await stopLease(targetName, lease.leaseId);
+		writeRedacted(resolve(suiteDir, "crabbox.stop.stdout.txt"), stopResult.stdout, secretValues);
+		writeRedacted(resolve(suiteDir, "crabbox.stop.stderr.txt"), stopResult.stderr, secretValues);
+		writeFileSync(resolve(suiteDir, "crabbox.stop.exit-code.txt"), `code=${stopResult.code}\nsignal=${stopResult.signal ?? "none"}\n`);
+	}
+
+	const resultJsonText = jsonBlock(result.stdout, "PLATFORM_GOAL_RUNTIME_JSON_START", "PLATFORM_GOAL_RUNTIME_JSON_END");
+	let runtimeResult = {};
+	try { runtimeResult = JSON.parse(resultJsonText); } catch {}
+	writeRedacted(resolve(suiteDir, "goal-runtime-result.json"), resultJsonText ? `${resultJsonText}\n` : "{}\n", secretValues);
+	writeFileSync(resolve(suiteDir, "packed-tarball.txt"), `${runtimeResult.packedTarball ?? ""}\n`);
+	writeRedacted(resolve(suiteDir, "npm-pack.stdout.txt"), section(result.stdout, "NPM_PACK_STDOUT"), secretValues);
+	writeRedacted(resolve(suiteDir, "npm-pack.stderr.txt"), section(result.stdout, "NPM_PACK_STDERR"), secretValues);
+	writeRedacted(resolve(suiteDir, "packed-node-install.stdout.txt"), section(result.stdout, "PACKED_NODE_INSTALL_STDOUT"), secretValues);
+	writeRedacted(resolve(suiteDir, "packed-node-install.stderr.txt"), section(result.stdout, "PACKED_NODE_INSTALL_STDERR"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-install.stdout.txt"), section(result.stdout, "PI_INSTALL_STDOUT"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-install.stderr.txt"), section(result.stdout, "PI_INSTALL_STDERR"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-list.stdout.txt"), section(result.stdout, "PI_LIST_STDOUT"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-list.stderr.txt"), section(result.stdout, "PI_LIST_STDERR"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-run.stdout.txt"), section(result.stdout, "PI_RUN_STDOUT"), secretValues);
+	writeRedacted(resolve(suiteDir, "pi-run.stderr.txt"), section(result.stdout, "PI_RUN_STDERR"), secretValues);
+	writeRedacted(resolve(suiteDir, "session.jsonl"), sectionBase64(result.stdout, "SESSION_JSONL_B64"), secretValues);
+
+	const secretViolations = [
+		...scanForSecrets(`${result.stdout}\n${result.stderr}`, secretValues),
+		...scanArtifactTextFiles(suiteDir, secretValues).map((finding) => `${finding.file}: ${finding.violation}`),
+	];
+	const checks = [
+		{ id: "command-exit-zero", fn: () => result.code === 0, error: `exit ${result.code}` },
+		{ id: "runtime-marker", fn: () => result.stdout.includes("PLATFORM_GOAL_RUNTIME_OK=1") && result.stdout.includes("GOAL_RUNTIME_SMOKE_OK") },
+		{ id: "runtime-result-ok", fn: () => runtimeResult.ok === true },
+		{ id: "model-configured", fn: () => runtimeResult.model === smokeModel(config) },
+		{ id: "pi-run-exit-zero", fn: () => runtimeResult.checks?.piRun === true },
+		{ id: "final-marker", fn: () => runtimeResult.checks?.finalMarkerObserved === true },
+		{ id: "file-verified", fn: () => runtimeResult.checks?.fileVerified === true },
+		{ id: "goal-custom-entry-observed", fn: () => runtimeResult.checks?.customGoalObserved === true },
+		{ id: "goal-complete-observed", fn: () => runtimeResult.checks?.completeGoalObserved === true },
+		{ id: "pi-list-local-package", fn: () => runtimeResult.checks?.piList === true },
+		{ id: "session-jsonl", fn: () => readFileSync(resolve(suiteDir, "session.jsonl"), "utf8").includes("pi-codex-goal") },
+		{ id: "no-secret-artifacts", fn: () => secretViolations.length === 0, error: secretViolations.join(", ") },
+	];
+	if (stopResult) checks.push({ id: "lease-cleanup", fn: () => stopResult.code === 0, error: `stop exit ${stopResult.code}` });
+	const expectedFiles = [
+		"summary.json", "artifact-manifest.json", "target.json", "suite.json", "command.txt", "exit-code.txt", "crabbox.stdout.txt", "crabbox.stderr.txt", "crabbox.timing.json",
+		"goal-runtime-result.json", "packed-tarball.txt", "npm-pack.stdout.txt", "npm-pack.stderr.txt", "packed-node-install.stdout.txt", "packed-node-install.stderr.txt",
+		"pi-install.stdout.txt", "pi-install.stderr.txt", "pi-list.stdout.txt", "pi-list.stderr.txt", "pi-run.stdout.txt", "pi-run.stderr.txt", "session.jsonl", "assertions.json",
+	];
+	if (stopResult) expectedFiles.push("crabbox.stop.stdout.txt", "crabbox.stop.stderr.txt", "crabbox.stop.exit-code.txt");
+	const { assertions } = finalizeSuite(suiteDir, checks, { target: targetName, suite: suiteName, elapsedMs, exitCode: result.code, signal: result.signal, model: smokeModel(config) }, expectedFiles);
+	return { ok: assertions.ok, suiteDir, assertions };
+}
+
+export async function runTargetSuite(config, targetName, suiteName, leaseSession) {
+	if (suiteName === "goal-runtime-smoke") return await runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSession);
+	if (suiteName !== "platform-build") throw new Error(`unknown suite: ${suiteName}`);
+	const runId = makeRunId();
+	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
+	const startedAt = Date.now();
+	const platform = platformFor(targetName);
+	const slug = `${config.packageName}-${targetName}`;
+	const command = buildPlatformBuildCommand(targetName, config.packageName, config.nodeValidationMajor);
+	mkdirSync(dirname(suiteDir), { recursive: true });
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify({ targetName, platform, runId, slug }, null, 2));
+	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, modelCalls: 0 }, null, 2));
+	writeCommand(suiteDir, command);
+
+	let lease = leaseSession;
+	const ownsLease = !lease;
+	if (!lease) lease = await warmupLease(targetName, slug);
+	if (!lease.ok) {
+		writeExitCode(suiteDir, lease.code, lease.signal);
+		writeFileSync(resolve(suiteDir, "crabbox.stdout.txt"), lease.stdout ?? "");
+		writeFileSync(resolve(suiteDir, "crabbox.stderr.txt"), lease.stderr ?? "");
+		const { assertions } = finalizeSuite(suiteDir, [{ id: "crabbox-warmup", fn: () => false, error: "Crabbox warmup failed" }], { target: targetName, suite: suiteName, elapsedMs: Date.now() - startedAt }, ["summary.json", "artifact-manifest.json", "target.json", "suite.json", "command.txt", "exit-code.txt", "crabbox.stdout.txt", "crabbox.stderr.txt", "assertions.json"]);
+		return { ok: false, suiteDir, assertions };
+	}
+
+	const secretValues = collectSecretValues(authEnvAllowList(config));
+	const result = await runOnLease(targetName, lease.leaseId, command, { timeout: 900_000, sync: leaseSession?.sync });
+	const elapsedMs = Date.now() - startedAt;
+	writeRedacted(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout, secretValues);
+	writeRedacted(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr, secretValues);
+	writeFileSync(resolve(suiteDir, "crabbox.timing.json"), JSON.stringify({ elapsedMs, code: result.code, signal: result.signal }, null, 2));
+	writeExitCode(suiteDir, result.code, result.signal);
+	writeExtracts(suiteDir, result.stdout, secretValues);
+	let stopResult;
+	if (ownsLease) {
+		stopResult = await stopLease(targetName, lease.leaseId);
+		writeRedacted(resolve(suiteDir, "crabbox.stop.stdout.txt"), stopResult.stdout, secretValues);
+		writeRedacted(resolve(suiteDir, "crabbox.stop.stderr.txt"), stopResult.stderr, secretValues);
+		writeFileSync(resolve(suiteDir, "crabbox.stop.exit-code.txt"), `code=${stopResult.code}\nsignal=${stopResult.signal ?? "none"}\n`);
+	}
+
+	const stdout = result.stdout;
+	const listOutput = section(stdout, "PI_LIST_STDOUT");
+	const nodeMajor = Number(marker(stdout, "PLATFORM_NODE_VERSION").replace(/^v/, "").split(".")[0] ?? 0);
+	const secretViolations = [
+		...scanForSecrets(`${result.stdout}\n${result.stderr}`, secretValues),
+		...scanArtifactTextFiles(suiteDir, secretValues).map((finding) => `${finding.file}: ${finding.violation}`),
+	];
+	const checks = [
+		{ id: "command-exit-zero", fn: () => result.code === 0, error: `exit ${result.code}` },
+		{ id: "platform-marker", fn: () => stdout.includes("PLATFORM_BUILD_OK") },
+		{ id: "node-version", fn: () => nodeMajor >= (config.nodeValidationMajor ?? 24), error: `Node major ${nodeMajor}` },
+		{ id: "npm-ci", fn: () => /PLATFORM_NPM_CI_EXIT=0/.test(stdout) },
+		{ id: "npm-run-verify", fn: () => /PLATFORM_VERIFY_EXIT=0/.test(stdout) },
+		{ id: "npm-pack", fn: () => /PLATFORM_NPM_PACK_EXIT=0/.test(stdout) && marker(stdout, "PLATFORM_PACKED_TARBALL").length > 0 },
+		{ id: "packed-node-install", fn: () => /PLATFORM_PACKED_NODE_INSTALL_EXIT=0/.test(stdout) },
+		{ id: "pi-install-local-package", fn: () => /PLATFORM_PI_INSTALL_EXIT=0/.test(stdout) },
+		{ id: "pi-list-local-package", fn: () => /PLATFORM_PI_LIST_EXIT=0/.test(stdout) && listOutput.includes(config.packageName) },
+		{ id: "no-source-extension-shortcut", fn: () => !/\bpi\s+(?:-e|--extension)\s+\./.test(stdout) },
+		{ id: "no-secret-artifacts", fn: () => secretViolations.length === 0, error: secretViolations.join(", ") },
+	];
+	if (stopResult) checks.push({ id: "lease-cleanup", fn: () => stopResult.code === 0, error: `stop exit ${stopResult.code}` });
+	const expectedFiles = [
+		"summary.json", "artifact-manifest.json", "target.json", "suite.json", "command.txt", "exit-code.txt", "crabbox.stdout.txt", "crabbox.stderr.txt", "crabbox.timing.json",
+		"node-version.txt", "packed-tarball.txt", "packed-node-install.stdout.txt", "packed-node-install.stderr.txt", "pi-install.stdout.txt", "pi-install.stderr.txt", "pi-list.stdout.txt", "pi-list.stderr.txt", "assertions.json",
+	];
+	if (stopResult) expectedFiles.push("crabbox.stop.stdout.txt", "crabbox.stop.stderr.txt", "crabbox.stop.exit-code.txt");
+	const { assertions } = finalizeSuite(suiteDir, checks, { target: targetName, suite: suiteName, elapsedMs, exitCode: result.code, signal: result.signal }, expectedFiles);
+	return { ok: assertions.ok, suiteDir, assertions };
+}
+
+export async function runTargetSuites(config, targetName, suiteNames) {
+	const slug = `${config.packageName}-${targetName}`;
+	const lease = await warmupLease(targetName, slug);
+	if (!lease.ok) return { ok: false, results: [{ ok: false, error: lease.stderr || lease.stdout || "warmup failed" }] };
+	const results = [];
+	let stopResult;
+	let staleCleanupResult;
+	try {
+		let sync = true;
+		for (const suiteName of suiteNames) {
+			const result = await runTargetSuite(config, targetName, suiteName, { ...lease, sync });
+			results.push(result);
+			sync = false;
+			if (!result.ok) break;
+		}
+	} finally {
+		stopResult = await stopLease(targetName, lease.leaseId);
+		staleCleanupResult = await cleanupStaleTargetState(targetName);
+	}
+	if (stopResult) {
+		results.push(createLeaseCleanupResult(config, targetName, lease.leaseId, stopResult, staleCleanupResult));
+	}
+	return { ok: results.every((result) => result.ok), results };
+}

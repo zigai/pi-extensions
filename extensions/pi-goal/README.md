@@ -68,28 +68,34 @@ Validate types and tests before committing or opening a PR:
 npm run verify
 ```
 
+Cross-platform release-sensitive changes should also pass the local Crabbox platform smoke gate:
+
+```sh
+npm run check:platform-smoke
+npm run smoke:platform:all
+```
+
+`smoke:platform:all` runs the doctor before any target suite.
+
+That gate runs `npm run verify`, packs the package, installs the packed package into a clean pi project, checks `pi list`, and runs a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. The runtime smoke defaults to `zai/glm-5.1`; override it with `PLATFORM_SMOKE_MODEL` and configure forwarded auth env vars with `PLATFORM_SMOKE_AUTH_ENV`. Setup and artifact details: [docs/platform-smoke.md](docs/platform-smoke.md).
+
 Project agent notes and module map: [AGENTS.md](AGENTS.md).
 Latest structural audit: [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md).
 
-## Smoke test with Cursor Composer 2.5
+## Interactive smoke test
 
 This smoke test exercises the interactive `/goal` command, hidden continuation, bridged goal tools, filesystem verification, and final `update_goal` completion.
 
 Prerequisites:
 
-- Pi can authenticate to Cursor, for example through a Cursor User API Key.
-- Cursor Composer 2.5 is available:
-
-```sh
-pi --list-models cursor 2>&1 | rg 'composer-2[.-]5'
-```
+- Pi can authenticate to any capable model available in your local setup.
 
 Start pi from this repository:
 
 ```sh
 rm -f /tmp/pi-codex-goal-slash-smoke.txt
 rm -rf /tmp/pi-codex-goal-slash-smoke-session
-pi --model cursor/composer-2-5 --cursor-no-fast \
+pi --model <model-id> \
   --session-dir /tmp/pi-codex-goal-slash-smoke-session
 ```
 
@@ -136,7 +142,7 @@ This intentionally matches Codex TUI behavior: token budgets are set through the
 
 Completed goals are terminal for automatic transitions: pause, resume, and hidden continuations do not reopen them. To recover from premature completion, use `/goal <objective>` to replace the goal or `/goal clear` before starting again.
 
-In bridged MCP environments such as `pi-cursor-sdk`, pi may expose these tools under namespaced MCP names like `pi__get_goal`, `pi__create_goal`, and `pi__update_goal`. Prompt guidance tells models to call whichever goal-tool name is actually exposed in the current run, not display or transcript labels.
+In bridged MCP environments, pi may expose these tools under namespaced MCP names like `pi__get_goal`, `pi__create_goal`, and `pi__update_goal`. Prompt guidance tells models to call whichever goal-tool name is actually exposed in the current run, not display or transcript labels.
 
 ## Behavior
 
