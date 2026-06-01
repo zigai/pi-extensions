@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.21 - 2026-06-01
+
+- Add a Crabbox-backed release gate for macOS, Ubuntu Linux, and native Windows.
+- Prove releases through packed package install, `pi install`, `pi list`, and a real model-backed goal runtime smoke on every required platform.
+- Add `check:platform-smoke` to the normal verification path and make `smoke:platform:all` run doctor before any target suite.
+- Strengthen platform doctor checks for Crabbox providers, Windows Parallels template/snapshot readiness, repository hygiene, package contents, auth presence, artifact redaction, and lease cleanup evidence.
+
 ## 0.1.20 - 2026-05-31
 
 - Defer active-goal continuations queued by `session_compact` until the compaction event has unwound, avoiding nested prompt/auto-compaction races in Pi’s compaction lifecycle.
