@@ -4,9 +4,12 @@ npm-debug.log*
 *.tsbuildinfo
 coverage/
 dist/
+.artifacts/
+.platform-smoke-runs/
 .scratchpad.md
 .DS_Store
 .debug/
+.crabbox/
 
 # CueLoop local/runtime state (do not commit)
 .cueloop/

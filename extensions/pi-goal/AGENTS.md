@@ -8,7 +8,18 @@ Pi extension: Codex-style `/goal` command and `get_goal` / `create_goal` / `upda
 npm run verify
 ```
 
-Runs `tsc --noEmit` and the full Node test suite (`test/*.test.ts`).
+Runs `tsc --noEmit`, the platform-smoke harness checks, and the full Node test suite (`test/*.test.ts`).
+
+For release-sensitive changes, also use the local Crabbox platform gate documented in `docs/platform-smoke.md`:
+
+```sh
+npm run check:platform-smoke
+npm run smoke:platform:all
+```
+
+`smoke:platform:all` runs `smoke:platform:doctor` before any target suite starts.
+
+The required gate runs the full suite plus a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. The default smoke model is `zai/glm-5.1`; override with `PLATFORM_SMOKE_MODEL` when needed.
 
 ## Layout
 
