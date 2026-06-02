@@ -116,7 +116,15 @@ export function createRuntimeHarness(options: {
     },
     registerShortcut() {},
     registerTool(tool) {
-      tools.set(tool.name, (params) => tool.execute("tool-call", params as never, undefined, undefined, ctx));
+      tools.set(tool.name, (params) =>
+        tool.execute(
+          "tool-call",
+          params as Parameters<typeof tool.execute>[1],
+          undefined,
+          undefined,
+          ctx,
+        ),
+      );
     },
     sendMessage(message, options) {
       sentMessages.push({ message, options });

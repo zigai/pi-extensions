@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { createGoalPersistence } from "../src/goal-persistence.js";
 import { createGoalStateController } from "../src/goal-state-controller.js";
@@ -9,6 +9,7 @@ import {
   createGoalRecoveryMachine,
   recoveryPhaseNeedsUserStartTurn,
 } from "../src/recovery-machine.js";
+import type { StatusContext } from "../src/goal-runtime-status.js";
 import type { ThreadGoal } from "../src/types.js";
 
 const activeGoal: ThreadGoal = {
@@ -28,7 +29,7 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
     appendEntry(_type: string, data: unknown) {
       entries.push(data);
     },
-  } as unknown as Pick<ExtensionAPI, "appendEntry">;
+  } satisfies Pick<ExtensionAPI, "appendEntry">;
 
   const persistence = createGoalPersistence({ pi });
   if (goal) {
@@ -38,7 +39,7 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
   let refreshCount = 0;
   const ctx = {
     ui: { setStatus() {} },
-  } as unknown as ExtensionContext;
+  } satisfies StatusContext;
 
   const stateController = createGoalStateController({
     pi,

@@ -1,5 +1,3 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-
 import {
   onRecoverySessionCompact,
   onRecoverySuccessfulTurn,
@@ -13,17 +11,17 @@ import {
 import type { AssistantErrorMessage } from "./recovery.js";
 import type { ThreadGoal } from "./types.js";
 
-interface RecoveryRuntimeDeps {
+interface RecoveryRuntimeDeps<TContext> {
   getGoal: () => ThreadGoal | null;
   getRecoveryState: () => GoalRecoveryMachineState;
   clearContinuationState: () => void;
-  pauseGoalForRecovery: (ctx: ExtensionContext, recoveryReason: string) => void;
-  refreshUi: (ctx: ExtensionContext) => void;
-  maybeContinue: (ctx: ExtensionContext) => void;
+  pauseGoalForRecovery: (ctx: TContext, recoveryReason: string) => void;
+  refreshUi: (ctx: TContext) => void;
+  maybeContinue: (ctx: TContext) => void;
 }
 
-export function createGoalRecoveryRuntime(deps: RecoveryRuntimeDeps) {
-  const pauseForRecoveryAttention = (ctx: ExtensionContext, reason: string): void => {
+export function createGoalRecoveryRuntime<TContext>(deps: RecoveryRuntimeDeps<TContext>) {
+  const pauseForRecoveryAttention = (ctx: TContext, reason: string): void => {
     const goal = deps.getGoal();
     if (!goal || goal.status !== "active") {
       return;
@@ -32,7 +30,7 @@ export function createGoalRecoveryRuntime(deps: RecoveryRuntimeDeps) {
     deps.pauseGoalForRecovery(ctx, reason);
   };
 
-  const applyRecoveryAction = (action: RecoveryAction, ctx: ExtensionContext): void => {
+  const applyRecoveryAction = (action: RecoveryAction, ctx: TContext): void => {
     switch (action.type) {
       case "noop":
         return;
@@ -52,7 +50,7 @@ export function createGoalRecoveryRuntime(deps: RecoveryRuntimeDeps) {
     }
   };
 
-  const handlePersistentAssistantError = (message: AssistantErrorMessage, ctx: ExtensionContext): void => {
+  const handlePersistentAssistantError = (message: AssistantErrorMessage, ctx: TContext): void => {
     const goal = deps.getGoal();
     if (!goal || goal.status !== "active") {
       return;
@@ -61,7 +59,7 @@ export function createGoalRecoveryRuntime(deps: RecoveryRuntimeDeps) {
     applyRecoveryAction(planRecoveryForAssistantError(deps.getRecoveryState(), message), ctx);
   };
 
-  const handleSilentContextOverflow = (ctx: ExtensionContext): void => {
+  const handleSilentContextOverflow = (ctx: TContext): void => {
     const goal = deps.getGoal();
     if (!goal || goal.status !== "active") {
       return;
@@ -72,7 +70,7 @@ export function createGoalRecoveryRuntime(deps: RecoveryRuntimeDeps) {
 
   const finishSuccessfulAssistantTurn = (
     message: AssistantErrorMessage,
-    ctx: ExtensionContext,
+    ctx: TContext,
     options?: { continueGoal?: boolean },
   ): void => {
     if (onRecoverySuccessfulTurn(deps.getRecoveryState(), message)) {
