@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-
 import {
   createGoalRecoveryMachine,
   setRecoveryPausedAttention,
 } from "../src/recovery-machine.js";
+import type { StatusContext } from "../src/goal-runtime-status.js";
 import { createGoalRecoveryRuntime } from "../src/recovery-runtime.js";
 import { CONTEXT_OVERFLOW_SIGNATURE } from "../src/recovery.js";
 import type { ThreadGoal } from "../src/types.js";
@@ -28,9 +27,9 @@ function createRecoveryTestRuntime(goal: ThreadGoal | null = activeGoal) {
 
   const ctx = {
     ui: { setStatus() {} },
-  } as unknown as ExtensionContext;
+  } satisfies StatusContext;
 
-  const runtime = createGoalRecoveryRuntime({
+  const runtime = createGoalRecoveryRuntime<StatusContext>({
     getGoal: () => goal,
     getRecoveryState: () => recoveryState,
     clearContinuationState: () => {},
@@ -76,7 +75,7 @@ test("persistent provider errors plan pending attention without scheduling hidde
 
 test("persistent overflow errors do not invoke extension compaction hooks", () => {
   const harness = createRecoveryTestRuntime();
-  const ctx = harness.ctx as ExtensionContext & { compact?: () => void };
+  const ctx: StatusContext & { compact?: () => void } = harness.ctx;
   let compactCalls = 0;
   ctx.compact = () => {
     compactCalls += 1;
@@ -149,7 +148,7 @@ test("recovery pause delegates reason without clearing continuation in recovery 
   let refreshCount = 0;
   const recoveryState = createGoalRecoveryMachine();
 
-  const runtime = createGoalRecoveryRuntime({
+  const runtime = createGoalRecoveryRuntime<StatusContext>({
     getGoal: () => activeGoal,
     getRecoveryState: () => recoveryState,
     clearContinuationState: () => {
@@ -164,7 +163,7 @@ test("recovery pause delegates reason without clearing continuation in recovery 
     maybeContinue: () => {},
   });
 
-  const ctx = { ui: { setStatus() {} } } as unknown as ExtensionContext;
+  const ctx = { ui: { setStatus() {} } } satisfies StatusContext;
 
   runtime.handlePersistentAssistantError(
     { role: "assistant", stopReason: "error", errorMessage: "context_length_exceeded" },

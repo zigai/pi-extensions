@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.22 - 2026-06-02
+
+- Tighten test-only TypeScript casts around goal state and recovery runtime harnesses.
+- Make the recovery runtime generic over its context so tests can use the minimal status context they exercise.
+- Add a type-hygiene regression check for banned TypeScript escape hatches such as double assertions, `as any`, `as never`, `any` annotations, and suppression comments.
+
 ## 0.1.21 - 2026-06-01
 
 - Add a Crabbox-backed release gate for macOS, Ubuntu Linux, and native Windows.
