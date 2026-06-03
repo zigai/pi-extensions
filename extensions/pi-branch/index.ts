@@ -1,12 +1,13 @@
 /**
- * Pi Branch Out
+ * Pi Branch
  *
- * Adds `/branch-out` to fork the current Pi session into one or more parallel
+ * Adds `/branch` to fork the current Pi session into one or more parallel
  * Pi processes in tmux/Ghostty. Each child session starts from the current
  * committed branch state and diverges independently.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { registerTypedCommand } from "pi-command-args";
 import { randomUUID } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import * as path from "node:path";
@@ -54,6 +55,12 @@ type ParsedArgs = {
     count: number;
     mode: LaunchMode;
     prompt: string;
+};
+
+type BranchTypedArgs = {
+    count: number;
+    panes: boolean;
+    prompt?: string;
 };
 
 type SessionInfoEntry = {
@@ -185,6 +192,44 @@ function describeLaunchTarget(target: LaunchTarget): string {
     }
 }
 
+async function getCurrentTmuxWindowTarget(pi: ExtensionAPI): Promise<string | undefined> {
+    const targetPane = process.env.TMUX_PANE?.trim();
+    if (targetPane === undefined || targetPane.length === 0) {
+        return undefined;
+    }
+
+    try {
+        const result = await pi.exec("tmux", [
+            "display-message",
+            "-p",
+            "-t",
+            targetPane,
+            "#{window_id}",
+        ]);
+        if (result.code !== 0) {
+            return undefined;
+        }
+
+        const targetWindow = result.stdout?.trim();
+        if (targetWindow === undefined || targetWindow.length === 0) {
+            return undefined;
+        }
+
+        return targetWindow;
+    } catch {
+        return undefined;
+    }
+}
+
+function parseTmuxWindowId(stdout: string | undefined): string | undefined {
+    const output = stdout?.trim();
+    if (output === undefined || output.length === 0) {
+        return undefined;
+    }
+
+    return output.split(/\s+/)[0];
+}
+
 function formatExecFailure(result: { code: number; stdout?: string; stderr?: string }): string {
     const stderr = result.stderr?.trim();
     if (stderr !== undefined && stderr.length > 0) {
@@ -244,6 +289,42 @@ function parseArgs(args: string): ParsedArgs {
     }
 
     return { count, mode, prompt: tokens.slice(index).join(" ") };
+}
+
+function parseTypedArgs(args: BranchTypedArgs): ParsedArgs {
+    let mode: LaunchMode = "windows";
+    if (args.panes) {
+        mode = "panes";
+    }
+
+    return {
+        count: args.count,
+        mode,
+        prompt: args.prompt ?? "",
+    };
+}
+
+function shouldUseTypedBranchArgs(rawArgs: string): boolean {
+    const trimmed = rawArgs.trim();
+    if (trimmed.length === 0) {
+        return true;
+    }
+
+    const tokens = trimmed.split(/\s+/);
+    if (tokens.includes("?") || tokens.includes("??")) {
+        return true;
+    }
+
+    return tokens.some(
+        (token) =>
+            token === "--count" ||
+            token.startsWith("--count=") ||
+            token === "-c" ||
+            token.startsWith("-c=") ||
+            token === "--prompt" ||
+            token.startsWith("--prompt=") ||
+            token === "--no-panes",
+    );
 }
 
 function buildForkName(baseName: string, index: number): string {
@@ -326,19 +407,25 @@ async function launchForkedPi(
     sessionFile: string | undefined,
     prompt: string,
     launchName: string,
+    tmuxWindowTarget: string | undefined,
 ) {
     const modelArg = currentModelArg(ctx);
 
     switch (target) {
-        case "tmux-window":
-            return pi.exec("tmux", [
-                "new-window",
+        case "tmux-window": {
+            const tmuxArgs = ["new-window", "-a", "-P", "-F", "#{window_id}"];
+            if (tmuxWindowTarget !== undefined) {
+                tmuxArgs.push("-t", tmuxWindowTarget);
+            }
+            tmuxArgs.push(
                 "-n",
                 launchName,
                 "-c",
                 ctx.cwd,
                 buildPiShellCommand(sessionFile, prompt, modelArg),
-            ]);
+            );
+            return pi.exec("tmux", tmuxArgs);
+        }
         case "tmux-pane": {
             const tmuxArgs = ["split-window", "-h", "-c", ctx.cwd];
             const targetPane = process.env.TMUX_PANE?.trim();
@@ -382,7 +469,13 @@ async function launchOneFork(
     launchTargets: LaunchTarget[],
     prompt: string,
     launchName: string,
-): Promise<{ launchedVia?: LaunchTarget; sessionFile?: string; failures: string[] }> {
+    tmuxWindowTarget: string | undefined,
+): Promise<{
+    launchedVia?: LaunchTarget;
+    sessionFile?: string;
+    failures: string[];
+    tmuxWindowId?: string;
+}> {
     const forkedSessionFile = await createForkedSession(ctx, launchName);
     const failures: string[] = [];
 
@@ -395,9 +488,20 @@ async function launchOneFork(
                 forkedSessionFile,
                 prompt,
                 launchName,
+                tmuxWindowTarget,
             );
             if (result.code === 0) {
-                return { launchedVia: target, sessionFile: forkedSessionFile, failures };
+                let tmuxWindowId: string | undefined;
+                if (target === "tmux-window") {
+                    tmuxWindowId = parseTmuxWindowId(result.stdout);
+                }
+
+                return {
+                    launchedVia: target,
+                    sessionFile: forkedSessionFile,
+                    failures,
+                    tmuxWindowId,
+                };
             }
 
             failures.push(`${describeLaunchTarget(target)}: ${formatExecFailure(result)}`);
@@ -409,16 +513,15 @@ async function launchOneFork(
     return { sessionFile: forkedSessionFile, failures };
 }
 
-async function handleBranchOut(
+async function handleParsedBranch(
     pi: ExtensionAPI,
-    args: string,
+    parsed: ParsedArgs,
     ctx: ExtensionCommandContext,
 ): Promise<void> {
-    const parsed = parseArgs(args);
     const launchTargets = getLaunchTargets(parsed.mode);
     if (launchTargets.length === 0) {
         ctx.ui.notify(
-            "/branch-out is supported in tmux, Ghostty on macOS, or Ghostty on Linux.",
+            "/branch is supported in tmux, Ghostty on macOS, or Ghostty on Linux.",
             "warning",
         );
         return;
@@ -429,14 +532,28 @@ async function handleBranchOut(
     const successfulSessions: string[] = [];
     const failedReasons: string[] = [];
     let launchedVia: LaunchTarget | undefined;
+    let tmuxWindowTarget: string | undefined;
+    if (launchTargets.includes("tmux-window")) {
+        tmuxWindowTarget = await getCurrentTmuxWindowTarget(pi);
+    }
 
     for (let index = 0; index < parsed.count; index += 1) {
         const launchName = buildForkName(baseSessionName, index);
-        const result = await launchOneFork(pi, ctx, launchTargets, parsed.prompt, launchName);
+        const result = await launchOneFork(
+            pi,
+            ctx,
+            launchTargets,
+            parsed.prompt,
+            launchName,
+            tmuxWindowTarget,
+        );
         if (result.launchedVia !== undefined) {
             launchedVia = result.launchedVia;
             if (result.sessionFile !== undefined) {
                 successfulSessions.push(result.sessionFile);
+            }
+            if (result.tmuxWindowId !== undefined) {
+                tmuxWindowTarget = result.tmuxWindowId;
             }
         } else {
             const reason = result.failures.join("; ") || "no supported launcher available";
@@ -487,12 +604,44 @@ async function handleBranchOut(
     }
 }
 
+async function handleBranch(
+    pi: ExtensionAPI,
+    args: string,
+    ctx: ExtensionCommandContext,
+): Promise<void> {
+    await handleParsedBranch(pi, parseArgs(args), ctx);
+}
+
 export default function (pi: ExtensionAPI): void {
-    pi.registerCommand("branch-out", {
-        description:
-            "Fork this session into one or more parallel Pi processes. Usage: /branch-out [--panes] [count] [optional prompt]",
+    registerTypedCommand(pi, "branch", {
+        description: "Fork this session into one or more parallel Pi processes",
+        args: {
+            count: {
+                type: "number",
+                integer: true,
+                min: 1,
+                max: MAX_FORK_COUNT,
+                default: 1,
+                aliases: ["c"],
+                description: "Number of forks to create",
+            },
+            panes: {
+                type: "boolean",
+                default: false,
+                description: "Open tmux panes or Ghostty splits instead of windows",
+            },
+            prompt: {
+                type: "string",
+                description: "Optional initial prompt sent to each fork",
+                placeholder: "prompt",
+            },
+        },
+        shouldUseTypedArgs: shouldUseTypedBranchArgs,
+        fallbackHandler: async (args, ctx) => {
+            await handleBranch(pi, args, ctx);
+        },
         handler: async (args, ctx) => {
-            await handleBranchOut(pi, args, ctx);
+            await handleParsedBranch(pi, parseTypedArgs(args), ctx);
         },
     });
 }
