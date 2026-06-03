@@ -2,6 +2,23 @@
 
 Pi extension: Codex-style `/goal` command and `get_goal` / `create_goal` / `update_goal` tools. State lives in pi session custom entries.
 
+## Local pi install policy
+
+On this machine, the canonical active install is the global/user package pointing at this local checkout:
+
+```text
+../../Projects/AI/pi-codex-goal
+```
+
+Do not leave project-local installs of this package in this repo. In particular, avoid release verification commands such as:
+
+```sh
+pi install -l npm:pi-codex-goal
+pi install -l https://github.com/fitchmultz/pi-codex-goal@vX.Y.Z
+```
+
+Those write duplicate package entries under `.pi/` for the current project, causing `get_goal`, `create_goal`, and `update_goal` tool-registration conflicts with the global local-checkout install. For install-path release verification, use an isolated temp project/config directory or remove the project-local entries immediately after the check. If conflicts appear, inspect `pi list` and `.pi/settings.json`, then remove any project-local `pi-codex-goal` npm/GitHub installs so only the global local-checkout package remains active.
+
 ## Verify before finishing
 
 ```sh
