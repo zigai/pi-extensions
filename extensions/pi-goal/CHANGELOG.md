@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.24 - 2026-06-04
+
+- Update the local pi development baseline to `@earendil-works/*` `0.78.1` and refresh the npm lockfile after reviewing the Pi `0.78.1` changelog, extension docs, package docs, and current examples.
+- Add the new Pi extension context fields to the runtime test harness so tests stay aligned with Pi `0.78.1` `ctx.mode` and command `ctx.getSystemPromptOptions()` APIs.
+- Confirm the goal extension remains forward-open for pi installs through optional wildcard pi runtime peers; Pi `0.78.1` is documented as the tested suggested floor, not a hard install requirement.
+
 ## 0.1.23 - 2026-06-04
 
 - Add `/goal copy` to copy the current goal objective for active, paused, budget-limited, or completed goals.

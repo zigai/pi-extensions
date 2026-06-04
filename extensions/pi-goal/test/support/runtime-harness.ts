@@ -209,6 +209,7 @@ export function createRuntimeHarness(options: {
     fork: async () => ({ cancelled: false }),
     getContextUsage: () => undefined,
     getSystemPrompt: () => "",
+    getSystemPromptOptions: () => ({ cwd: ctx.cwd }),
     hasUI: true,
     compact(options) {
       const call: (typeof compactCalls)[number] = {};
@@ -239,6 +240,7 @@ export function createRuntimeHarness(options: {
     },
     hasPendingMessages: () => runtime.pendingMessages,
     isIdle: () => runtime.idle,
+    mode: "tui",
     model: undefined,
     modelRegistry: {} as ExtensionCommandContext["modelRegistry"],
     navigateTree: async () => ({ cancelled: false }),
