@@ -6,14 +6,15 @@ This setup reuses the portable Crabbox platform-testing lessons without copying 
 
 ## Required gate
 
-Run the cheap harness checks first, then the required full gate:
+Release-sensitive changes use a doctor-first gate:
 
 ```sh
 npm run check:platform-smoke
+npm run smoke:platform:doctor
 npm run smoke:platform:all
 ```
 
-`smoke:platform:all` runs `smoke:platform:doctor` before any target suite starts. Use `smoke:platform:doctor` directly when diagnosing local setup without spending model tokens.
+`smoke:platform:all` runs the same doctor before any target suite starts, so a full release run still fails before syncing targets or spending model tokens when local setup is not ready. Run `smoke:platform:doctor` directly when diagnosing setup.
 
 Per-target commands are for diagnosis:
 
@@ -33,7 +34,7 @@ npm run smoke:platform:windows-native
 
 ## Required environment
 
-Install Crabbox with Homebrew so `crabbox` is on `PATH`. Use `PLATFORM_SMOKE_CRABBOX=/path/to/crabbox` only when testing a non-default binary.
+Install Crabbox `0.26.0` or newer with Homebrew so `crabbox` is on `PATH`. Use `PLATFORM_SMOKE_CRABBOX=/path/to/crabbox` only when testing a non-default binary.
 
 ```sh
 PLATFORM_SMOKE_MAC_HOST=localhost
@@ -51,9 +52,11 @@ PLATFORM_SMOKE_MODEL="zai/glm-5.1"
 PLATFORM_SMOKE_AUTH_ENV="ZAI_API_KEY,Z_AI_API_KEY"
 ```
 
-Use `PLATFORM_SMOKE_MODEL` to run the real runtime smoke against another provider/model, and `PLATFORM_SMOKE_AUTH_ENV` to tell Crabbox which auth variables to forward to each target.
+`platform-smoke.config.mjs` owns the project defaults: required targets/suites, Crabbox minimum version, Ubuntu image, macOS work root, shared Parallels template/snapshot, Node validation major, default model, and explicit auth env names. Use `PLATFORM_SMOKE_*` variables only as local machine knobs or one-off overrides.
 
-The doctor fails when any required platform setup is missing. It verifies the Crabbox binary/version, `ssh`, `local-container`, and `parallels` provider availability, provider-specific readiness, Docker, macOS SSH, Windows source VM/snapshot state, artifact-root writability, forbidden source/package artifacts, and model auth presence. It also fails when the real runtime smoke suite is required and none of the configured model auth environment variables is present.
+Use `PLATFORM_SMOKE_MODEL` to run the real runtime smoke against another provider/model, and `PLATFORM_SMOKE_AUTH_ENV` to tell Crabbox which auth variables to forward to each target. Do not broad-allow secrets; forward only the named variables needed by `goal-runtime-smoke`.
+
+The doctor fails when any required platform setup is missing. It verifies the Crabbox binary/version, `ssh`, `local-container`, and `parallels` provider availability, provider-specific readiness, Docker, macOS SSH, Windows source VM/snapshot state, artifact-root writability, forbidden source/package artifacts, and model auth presence. It also fails when the real runtime smoke suite is required and none of the configured model auth environment variables is present. Doctor does not install missing target tools; reusable tool drift should be fixed in the local target image/template.
 
 For Windows, `pi-extension-windows-template` must be stopped and `crabbox-ready` must be a known-good power-off snapshot. Standalone doctor warms a disposable Crabbox clone when the stopped template has no live IP, then probes `node`, `npm`, `git`, `tar`, and SSH identity. The full `smoke:platform:all` gate skips that disposable doctor probe because the immediately following Windows target run validates the same SSH/tool path on the real test lease. If a reusable Windows tool is missing, update the template and refresh/promote `crabbox-ready`; do not add one-off installers to per-run smoke scripts.
 
@@ -115,15 +118,17 @@ failures.md            # only when assertions fail
 
 `goal-runtime-smoke` also writes `goal-runtime-result.json`, `pi-run.stdout.txt`, `pi-run.stderr.txt`, and `session.jsonl`.
 
-The suites record failures as artifacts before reporting failure so the host can inspect the real target evidence. Each target also writes a `lease-cleanup` artifact directory with `crabbox.stop.*` files; cleanup failure is a failing test result. Ubuntu and Windows runs also invoke Crabbox cleanup for stale direct-provider state after stopping the owned lease.
+The suites record failures as artifacts before reporting failure so the host can inspect the real target evidence. `target.json` records the Crabbox provider, target, work root, and image/template identifiers used for the run. Each target also writes a `lease-cleanup` artifact directory with `crabbox.stop.*` files; cleanup failure is a failing test result. Ubuntu and Windows runs also invoke Crabbox cleanup for stale provider-owned state after stopping the owned lease. Static macOS SSH cleanup remains host-owned because Crabbox can only remove its local claim there.
 
 ## Lessons carried forward
 
+- Treat Crabbox as the lease/sync/run layer; this repo owns the assertions that make a run meaningful.
 - Use Crabbox targets instead of a one-OS local script.
 - Keep platform-specific shell rendering explicit: POSIX for macOS/Ubuntu and PowerShell for native Windows.
 - Run the repository's existing validation command on every required target.
 - Test the packed package, not `pi -e .`.
 - Include a real model-backed pi run so release claims are not based on unit tests alone.
+- Keep project-specific defaults in `platform-smoke.config.mjs`; use environment variables only for local overrides.
 - Make doctor fail before expensive or long target runs, and enforce doctor-before-all in the release entrypoint.
 - Preserve artifacts on failure and use `assertions.json` as the pass/fail source of truth.
 - Record lease stop evidence for every target and fail cleanup problems.
@@ -133,6 +138,7 @@ The suites record failures as artifacts before reporting failure so the host can
 ## Source of truth
 
 - Config: [`platform-smoke.config.mjs`](../platform-smoke.config.mjs)
+- Sync exclusions: [`.crabboxignore`](../.crabboxignore)
 - CLI: [`scripts/platform-smoke.mjs`](../scripts/platform-smoke.mjs)
 - Target commands: [`scripts/platform-smoke/targets.mjs`](../scripts/platform-smoke/targets.mjs)
 - Windows suite body: [`scripts/platform-smoke/platform-build-windows.ps1`](../scripts/platform-smoke/platform-build-windows.ps1)

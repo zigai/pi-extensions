@@ -1,0 +1,13 @@
+node_modules/
+.pi/
+.artifacts/
+.platform-smoke-runs/
+.crabbox/
+.debug/
+dist/
+coverage/
+*.tgz
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
+.scratchpad.md

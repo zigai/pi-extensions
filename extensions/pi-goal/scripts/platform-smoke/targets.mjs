@@ -1,10 +1,10 @@
 /** Target/suite runner for pi-codex-goal platform smoke. */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 import { collectSecretValues, createSuiteDir, redactSecrets, scanArtifactTextFiles, scanForSecrets, writeCommand, writeExitCode, writeManifest, writeSummary } from "./artifacts.mjs";
-import { cleanupStaleTargetState, runOnLease, stopLease, warmupLease } from "./crabbox-runner.mjs";
+import { buildTargetBaseArgs, cleanupStaleTargetState, runOnLease, stopLease, warmupLease } from "./crabbox-runner.mjs";
 
 export function platformFor(targetName) {
 	return targetName === "windows-native" ? "powershell" : "posix";
@@ -68,6 +68,28 @@ function marker(text, name) {
 	return text.match(new RegExp(`^${name}=(.*)$`, "m"))?.[1]?.trim() ?? "";
 }
 
+function argValue(args, flag) {
+	const index = args.indexOf(flag);
+	return index === -1 ? null : args[index + 1] ?? null;
+}
+
+function targetMetadata(config, targetName, runId, slug) {
+	const baseArgs = buildTargetBaseArgs(targetName, config);
+	return {
+		targetName,
+		platform: platformFor(targetName),
+		runId,
+		slug,
+		provider: argValue(baseArgs, "--provider"),
+		crabboxTarget: argValue(baseArgs, "--target"),
+		workRoot: argValue(baseArgs, "--static-work-root") ?? argValue(baseArgs, "--parallels-work-root") ?? null,
+		windowsMode: argValue(baseArgs, "--windows-mode"),
+		ubuntuImage: argValue(baseArgs, "--local-container-image"),
+		windowsSourceVm: argValue(baseArgs, "--parallels-source"),
+		windowsSourceSnapshot: argValue(baseArgs, "--parallels-source-snapshot"),
+	};
+}
+
 function writeExtracts(suiteDir, stdout, secretValues = []) {
 	writeFileSync(resolve(suiteDir, "node-version.txt"), `${marker(stdout, "PLATFORM_NODE_VERSION")}\n`);
 	writeRedacted(resolve(suiteDir, "packed-tarball.txt"), `${marker(stdout, "PLATFORM_PACKED_TARBALL")}\n`, secretValues);
@@ -128,7 +150,7 @@ export function createLeaseCleanupResult(config, targetName, leaseId, stopResult
 	const runId = makeRunId();
 	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
 	const secretValues = collectSecretValues(authEnvAllowList(config));
-	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify({ targetName, platform: platformFor(targetName), runId, slug: `${config.packageName}-${targetName}` }, null, 2));
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetMetadata(config, targetName, runId, `${config.packageName}-${targetName}`), null, 2));
 	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, leaseId, modelCalls: 0 }, null, 2));
 	writeCommand(suiteDir, `crabbox stop ${targetName} --id ${leaseId}`);
 	writeExitCode(suiteDir, stopResult.code, stopResult.signal);
@@ -238,16 +260,15 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
 	const runId = makeRunId();
 	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
 	const startedAt = Date.now();
-	const platform = platformFor(targetName);
 	const slug = `${config.packageName}-${targetName}`;
 	const command = buildGoalRuntimeSmokeCommand(config, targetName);
-	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify({ targetName, platform, runId, slug }, null, 2));
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetMetadata(config, targetName, runId, slug), null, 2));
 	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, modelCalls: 1, model: smokeModel(config) }, null, 2));
 	writeCommand(suiteDir, command);
 
 	let lease = leaseSession;
 	const ownsLease = !lease;
-	if (!lease) lease = await warmupLease(targetName, slug);
+	if (!lease) lease = await warmupLease(targetName, slug, config);
 	if (!lease.ok) {
 		writeExitCode(suiteDir, lease.code, lease.signal);
 		writeFileSync(resolve(suiteDir, "crabbox.stdout.txt"), lease.stdout ?? "");
@@ -259,6 +280,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
 	const allowEnv = authEnvAllowList(config);
 	const secretValues = collectSecretValues(allowEnv);
 	const result = await runOnLease(targetName, lease.leaseId, command, {
+		config,
 		timeout: 600_000,
 		sync: leaseSession?.sync,
 		allowEnv,
@@ -271,7 +293,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
 
 	let stopResult;
 	if (ownsLease) {
-		stopResult = await stopLease(targetName, lease.leaseId);
+		stopResult = await stopLease(targetName, lease.leaseId, config);
 		writeRedacted(resolve(suiteDir, "crabbox.stop.stdout.txt"), stopResult.stdout, secretValues);
 		writeRedacted(resolve(suiteDir, "crabbox.stop.stderr.txt"), stopResult.stderr, secretValues);
 		writeFileSync(resolve(suiteDir, "crabbox.stop.exit-code.txt"), `code=${stopResult.code}\nsignal=${stopResult.signal ?? "none"}\n`);
@@ -329,17 +351,16 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 	const runId = makeRunId();
 	const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
 	const startedAt = Date.now();
-	const platform = platformFor(targetName);
 	const slug = `${config.packageName}-${targetName}`;
 	const command = buildPlatformBuildCommand(targetName, config.packageName, config.nodeValidationMajor);
 	mkdirSync(dirname(suiteDir), { recursive: true });
-	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify({ targetName, platform, runId, slug }, null, 2));
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetMetadata(config, targetName, runId, slug), null, 2));
 	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, modelCalls: 0 }, null, 2));
 	writeCommand(suiteDir, command);
 
 	let lease = leaseSession;
 	const ownsLease = !lease;
-	if (!lease) lease = await warmupLease(targetName, slug);
+	if (!lease) lease = await warmupLease(targetName, slug, config);
 	if (!lease.ok) {
 		writeExitCode(suiteDir, lease.code, lease.signal);
 		writeFileSync(resolve(suiteDir, "crabbox.stdout.txt"), lease.stdout ?? "");
@@ -349,7 +370,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 	}
 
 	const secretValues = collectSecretValues(authEnvAllowList(config));
-	const result = await runOnLease(targetName, lease.leaseId, command, { timeout: 900_000, sync: leaseSession?.sync });
+	const result = await runOnLease(targetName, lease.leaseId, command, { config, timeout: 900_000, sync: leaseSession?.sync });
 	const elapsedMs = Date.now() - startedAt;
 	writeRedacted(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout, secretValues);
 	writeRedacted(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr, secretValues);
@@ -358,7 +379,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 	writeExtracts(suiteDir, result.stdout, secretValues);
 	let stopResult;
 	if (ownsLease) {
-		stopResult = await stopLease(targetName, lease.leaseId);
+		stopResult = await stopLease(targetName, lease.leaseId, config);
 		writeRedacted(resolve(suiteDir, "crabbox.stop.stdout.txt"), stopResult.stdout, secretValues);
 		writeRedacted(resolve(suiteDir, "crabbox.stop.stderr.txt"), stopResult.stderr, secretValues);
 		writeFileSync(resolve(suiteDir, "crabbox.stop.exit-code.txt"), `code=${stopResult.code}\nsignal=${stopResult.signal ?? "none"}\n`);
@@ -396,7 +417,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 
 export async function runTargetSuites(config, targetName, suiteNames) {
 	const slug = `${config.packageName}-${targetName}`;
-	const lease = await warmupLease(targetName, slug);
+	const lease = await warmupLease(targetName, slug, config);
 	if (!lease.ok) return { ok: false, results: [{ ok: false, error: lease.stderr || lease.stdout || "warmup failed" }] };
 	const results = [];
 	let stopResult;
@@ -410,8 +431,8 @@ export async function runTargetSuites(config, targetName, suiteNames) {
 			if (!result.ok) break;
 		}
 	} finally {
-		stopResult = await stopLease(targetName, lease.leaseId);
-		staleCleanupResult = await cleanupStaleTargetState(targetName);
+		stopResult = await stopLease(targetName, lease.leaseId, config);
+		staleCleanupResult = await cleanupStaleTargetState(targetName, config);
 	}
 	if (stopResult) {
 		results.push(createLeaseCleanupResult(config, targetName, lease.leaseId, stopResult, staleCleanupResult));

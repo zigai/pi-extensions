@@ -13,6 +13,7 @@
     "AGENTS.md",
     "prompts",
     "platform-smoke.config.mjs",
+    ".crabboxignore",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

@@ -4,6 +4,8 @@ import { execFileSync, execSync } from "node:child_process";
 import { accessSync, constants, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { buildTargetBaseArgs } from "./crabbox-runner.mjs";
+
 function env(name) {
 	return process.env[name] ?? "";
 }
@@ -51,20 +53,8 @@ function parseLeaseId(output) {
 		?? null;
 }
 
-function windowsCrabboxBaseArgs(packageName) {
-	const vmName = env("PLATFORM_SMOKE_WINDOWS_VM") || "pi-extension-windows-template";
-	const snapshot = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || "crabbox-ready";
-	const user = env("PLATFORM_SMOKE_WINDOWS_USER") || env("USER");
-	const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || `C:\\crabbox\\${packageName}`;
-	return [
-		"--provider", "parallels",
-		"--target", "windows",
-		"--windows-mode", "normal",
-		"--parallels-source", vmName,
-		"--parallels-source-snapshot", snapshot,
-		"--parallels-user", user,
-		"--parallels-work-root", workRoot,
-	];
+function windowsCrabboxBaseArgs(config) {
+	return buildTargetBaseArgs("windows-native", config);
 }
 
 function crabbox(cbox, args, timeout = 300_000) {
@@ -87,9 +77,10 @@ function crabbox(cbox, args, timeout = 300_000) {
 	}
 }
 
-function disposableWindowsSshProbe(cbox, packageName) {
+function disposableWindowsSshProbe(cbox, config) {
+	const packageName = config?.packageName ?? "pi-codex-goal";
 	const slug = `${packageName}-doctor-windows`;
-	const baseArgs = windowsCrabboxBaseArgs(packageName);
+	const baseArgs = windowsCrabboxBaseArgs(config);
 	const warm = crabbox(cbox, ["warmup", ...baseArgs, "--slug", slug, "--keep", "--reclaim"], 300_000);
 	const leaseId = parseLeaseId(warm.stdout) ?? parseLeaseId(warm.stderr) ?? slug;
 	try {
@@ -272,12 +263,8 @@ export async function runDoctor(config, options = {}) {
 	console.log("\n── Crabbox providers ──");
 	if (cboxPath) {
 		checkRequiredProviders(cbox, failures);
-		const ubuntuImage = env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config?.ubuntuContainerImage || "cimg/node:24.16";
-		checkCrabboxProvider(cbox, ["--provider", "local-container", "--local-container-image", ubuntuImage], "ubuntu local-container", failures);
-		const macUser = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
-		const macHost = env("PLATFORM_SMOKE_MAC_HOST") || "localhost";
-		const macRoot = env("PLATFORM_SMOKE_MAC_WORK_ROOT") || `/Users/${macUser}/crabbox/${packageName}`;
-		checkCrabboxProvider(cbox, ["--provider", "ssh", "--target", "macos", "--static-host", macHost, "--static-user", macUser, "--static-port", "22", "--static-work-root", macRoot], "macOS ssh", failures);
+		checkCrabboxProvider(cbox, buildTargetBaseArgs("ubuntu", config), "ubuntu local-container", failures);
+		checkCrabboxProvider(cbox, buildTargetBaseArgs("macos", config), "macOS ssh", failures);
 	}
 
 	console.log("\n── Docker / Ubuntu ──");
@@ -287,7 +274,7 @@ export async function runDoctor(config, options = {}) {
 
 	console.log("\n── macOS SSH ──");
 	const sshUser = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
-	const sshHost = env("PLATFORM_SMOKE_MAC_HOST") || "localhost";
+	const sshHost = env("PLATFORM_SMOKE_MAC_HOST") || config?.macosStaticSsh?.host || "localhost";
 	const sshProbe = shell(`ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${sshUser}@${sshHost} 'node --version && npm --version && git --version'`);
 	if (sshProbe) ok(`SSH ${sshUser}@${sshHost}: ${sshProbe.split(/\r?\n/).join(" | ")}`);
 	else fail(`SSH probe failed for ${sshUser}@${sshHost}`, failures);
@@ -298,10 +285,11 @@ export async function runDoctor(config, options = {}) {
 			fail("prlctl not found", failures);
 		} else {
 			ok("prlctl found");
-			const vmName = env("PLATFORM_SMOKE_WINDOWS_VM") || "pi-extension-windows-template";
-			const snapshot = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || "crabbox-ready";
-			const user = env("PLATFORM_SMOKE_WINDOWS_USER") || env("USER");
-			const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || `C:\\crabbox\\${packageName}`;
+			const windows = config?.windowsParallels ?? {};
+			const vmName = env("PLATFORM_SMOKE_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
+			const snapshot = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
+			const user = env("PLATFORM_SMOKE_WINDOWS_USER") || windows.user || env("USER");
+			const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || windows.workRoot || `C:\\crabbox\\${packageName}`;
 			const list = shell("prlctl list -a --no-header 2>/dev/null");
 			if (!list) {
 				fail("prlctl list returned no VMs", failures);
@@ -330,7 +318,7 @@ export async function runDoctor(config, options = {}) {
 				} else {
 					fail(`snapshot ${snapshot} not found on ${vmName}`, failures);
 				}
-				checkCrabboxProvider(cbox, ["--provider", "parallels", "--target", "windows", "--windows-mode", "normal", "--parallels-source", vmName, "--parallels-source-snapshot", snapshot, "--parallels-user", user, "--parallels-work-root", workRoot], "windows parallels", failures);
+				checkCrabboxProvider(cbox, buildTargetBaseArgs("windows-native", { ...config, windowsParallels: { ...windows, sourceVm: vmName, snapshot, user, workRoot } }), "windows parallels", failures);
 				const ipLine = shell(`prlctl list -f --no-header "${vmName.replace(/"/g, "\\\"")}" 2>/dev/null`);
 				if (!ipLine) {
 					fail(`could not inspect Windows VM IP for ${vmName}`, failures);
@@ -346,7 +334,7 @@ export async function runDoctor(config, options = {}) {
 						warn(`template ${vmName} has no IP; skipping disposable Windows clone probe because a full target run is expected to validate SSH/tools`);
 					} else if (cboxPath && snapshotMatch && snapshotPowerOff) {
 						ok(`template ${vmName} has no IP; verifying Windows SSH/tools through a disposable Crabbox clone`);
-						const probe = disposableWindowsSshProbe(cbox, packageName);
+						const probe = disposableWindowsSshProbe(cbox, { ...config, windowsParallels: { ...windows, sourceVm: vmName, snapshot, user, workRoot } });
 						if (probe.ok) ok(`disposable Windows clone SSH/tool probe OK: ${probe.message}`);
 						else fail(probe.message, failures);
 					} else {

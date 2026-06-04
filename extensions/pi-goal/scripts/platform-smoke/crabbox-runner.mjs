@@ -10,16 +10,21 @@ export function crabboxBin() {
 	return process.env.PLATFORM_SMOKE_CRABBOX || "crabbox";
 }
 
-function packageSlug() {
-	return process.env.PLATFORM_SMOKE_PACKAGE_SLUG || "pi-codex-goal";
+function packageSlug(config = {}) {
+	return config.packageName || process.env.PLATFORM_SMOKE_PACKAGE_SLUG || "pi-codex-goal";
 }
 
-export function buildTargetBaseArgs(targetName) {
+function expandUser(value, user) {
+	return String(value).replace(/\$USER/g, user);
+}
+
+export function buildTargetBaseArgs(targetName, config = {}) {
 	switch (targetName) {
 		case "macos": {
 			const user = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
-			const host = env("PLATFORM_SMOKE_MAC_HOST") || "localhost";
-			const workRoot = env("PLATFORM_SMOKE_MAC_WORK_ROOT") || `/Users/${user}/crabbox/${packageSlug()}`;
+			const host = env("PLATFORM_SMOKE_MAC_HOST") || config.macosStaticSsh?.host || "localhost";
+			const configuredRoot = config.macosStaticSsh?.workRoot;
+			const workRoot = env("PLATFORM_SMOKE_MAC_WORK_ROOT") || (configuredRoot ? expandUser(configuredRoot, user) : `/Users/${user}/crabbox/${packageSlug(config)}`);
 			return [
 				"--provider", "ssh",
 				"--target", "macos",
@@ -30,7 +35,7 @@ export function buildTargetBaseArgs(targetName) {
 			];
 		}
 		case "ubuntu": {
-			const image = env("PLATFORM_SMOKE_UBUNTU_IMAGE") || "cimg/node:24.16";
+			const image = env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config.ubuntuContainerImage || "cimg/node:24.16";
 			return [
 				"--provider", "local-container",
 				"--target", "linux",
@@ -38,10 +43,11 @@ export function buildTargetBaseArgs(targetName) {
 			];
 		}
 		case "windows-native": {
-			const vm = env("PLATFORM_SMOKE_WINDOWS_VM") || "pi-extension-windows-template";
-			const snapshot = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || "crabbox-ready";
-			const user = env("PLATFORM_SMOKE_WINDOWS_USER") || env("USER");
-			const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || `C:\\crabbox\\${packageSlug()}`;
+			const windows = config.windowsParallels ?? {};
+			const vm = env("PLATFORM_SMOKE_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
+			const snapshot = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || windows.snapshot || "crabbox-ready";
+			const user = env("PLATFORM_SMOKE_WINDOWS_USER") || windows.user || env("USER");
+			const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || windows.workRoot || `C:\\crabbox\\${packageSlug(config)}`;
 			return [
 				"--provider", "parallels",
 				"--target", "windows",
@@ -102,8 +108,8 @@ export function execCrabbox(args, options = {}) {
 	});
 }
 
-export async function warmupLease(targetName, slug) {
-	const args = ["warmup", ...buildTargetBaseArgs(targetName), "--slug", slug, "--keep"];
+export async function warmupLease(targetName, slug, config = {}) {
+	const args = ["warmup", ...buildTargetBaseArgs(targetName, config), "--slug", slug, "--keep"];
 	console.log(`  [crabbox] ${args.join(" ")}`);
 	const result = await execCrabbox(args, { timeout: 300_000 });
 	return {
@@ -114,7 +120,7 @@ export async function warmupLease(targetName, slug) {
 }
 
 export async function runOnLease(targetName, leaseId, command, options = {}) {
-	const args = ["run", ...buildTargetBaseArgs(targetName), "--id", leaseId];
+	const args = ["run", ...buildTargetBaseArgs(targetName, options.config), "--id", leaseId];
 	for (const name of options.allowEnv ?? []) {
 		args.push("--allow-env", name);
 	}
@@ -125,15 +131,15 @@ export async function runOnLease(targetName, leaseId, command, options = {}) {
 	return execCrabbox(args, { timeout: options.timeout ?? 900_000 });
 }
 
-export async function stopLease(targetName, leaseId) {
-	const args = ["stop", ...buildTargetBaseArgs(targetName), "--id", leaseId];
+export async function stopLease(targetName, leaseId, config = {}) {
+	const args = ["stop", ...buildTargetBaseArgs(targetName, config), "--id", leaseId];
 	console.log(`  [crabbox] ${args.join(" ")}`);
 	return execCrabbox(args, { timeout: 90_000 });
 }
 
-export async function cleanupStaleTargetState(targetName) {
+export async function cleanupStaleTargetState(targetName, config = {}) {
 	if (targetName === "macos") return null;
-	const args = ["cleanup", ...buildTargetBaseArgs(targetName)];
+	const args = ["cleanup", ...buildTargetBaseArgs(targetName, config)];
 	console.log(`  [crabbox] ${args.join(" ")}`);
 	return execCrabbox(args, { timeout: 120_000 });
 }

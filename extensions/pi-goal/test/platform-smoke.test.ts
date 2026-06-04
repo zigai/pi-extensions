@@ -51,6 +51,7 @@ test("platform smoke config and package scripts require macOS, Ubuntu, and nativ
   };
   assert.ok(packageJson.files?.includes("scripts"));
   assert.ok(packageJson.files?.includes("platform-smoke.config.mjs"));
+  assert.ok(packageJson.files?.includes(".crabboxignore"));
   assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /node --check scripts\/platform-smoke\.mjs/);
   assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /test\/platform-smoke\.test\.ts/);
   assert.match(packageJson.scripts?.["verify"] ?? "", /check:platform-smoke/);
@@ -65,11 +66,23 @@ const result = {
   targets: config.requiredTargets,
   suites: config.requiredSuites,
   packageName: config.packageName,
+  crabboxMinVersion: config.requiredCrabbox.minVersion,
+  ubuntuImage: config.ubuntuContainerImage,
+  macosWorkRoot: config.macosStaticSsh.workRoot,
+  windowsVm: config.windowsParallels.sourceVm,
+  windowsSnapshot: config.windowsParallels.snapshot,
+  windowsWorkRoot: config.windowsParallels.workRoot,
 };
 console.log(JSON.stringify(result));
 if (result.packageName !== "pi-codex-goal") process.exit(1);
 if (result.suites.join(",") !== "platform-build,goal-runtime-smoke") process.exit(1);
 if (result.targets.join(",") !== "macos,ubuntu,windows-native") process.exit(1);
+if (result.crabboxMinVersion !== "0.26.0") process.exit(1);
+if (result.ubuntuImage !== "cimg/node:24.16") process.exit(1);
+if (result.macosWorkRoot !== "/Users/$USER/crabbox/pi-codex-goal") process.exit(1);
+if (result.windowsVm !== "pi-extension-windows-template") process.exit(1);
+if (result.windowsSnapshot !== "crabbox-ready") process.exit(1);
+if (result.windowsWorkRoot !== "C:\\crabbox\\pi-codex-goal") process.exit(1);
 `;
   const result = run(process.execPath, ["--input-type=module", "-e", code]);
   assert.equal(result.status, 0, result.stderr);
@@ -77,11 +90,21 @@ if (result.targets.join(",") !== "macos,ubuntu,windows-native") process.exit(1);
 
 test("platform-build command rendering uses POSIX and PowerShell without source-extension shortcuts", () => {
   const code = String.raw`
+import { buildTargetBaseArgs } from "./scripts/platform-smoke/crabbox-runner.mjs";
 import { buildGoalRuntimeSmokeCommand, buildPlatformBuildCommand, platformFor } from "./scripts/platform-smoke/targets.mjs";
 const posix = buildPlatformBuildCommand("ubuntu", "pi-codex-goal", 24);
 const macos = buildPlatformBuildCommand("macos", "pi-codex-goal", 24);
 const powershell = buildPlatformBuildCommand("windows-native", "pi-codex-goal", 24);
 const goalRuntime = buildGoalRuntimeSmokeCommand({ packageName: "pi-codex-goal", defaultModel: "zai/glm-5.1" }, "ubuntu");
+const customConfig = {
+  packageName: "custom-goal-package",
+  ubuntuContainerImage: "node:24-test",
+  macosStaticSsh: { host: "127.0.0.1", workRoot: "/Users/$USER/crabbox/custom-goal-package" },
+  windowsParallels: { sourceVm: "custom-template", snapshot: "custom-snapshot", user: "windows-user", workRoot: "C:\\crabbox\\custom-goal-package" },
+};
+const macArgs = buildTargetBaseArgs("macos", customConfig);
+const ubuntuArgs = buildTargetBaseArgs("ubuntu", customConfig);
+const windowsArgs = buildTargetBaseArgs("windows-native", customConfig);
 const result = {
   macosPlatform: platformFor("macos"),
   ubuntuPlatform: platformFor("ubuntu"),
@@ -95,6 +118,13 @@ const result = {
   powershellNoExtensionShortcut: !/\\bpi\\s+(?:-e|--extension)\\s+\\./.test(powershell),
   goalRuntimeHasDefaultModel: goalRuntime.includes("zai/glm-5.1"),
   goalRuntimeHasPackage: goalRuntime.includes("pi-codex-goal"),
+  macArgsUseConfigHost: macArgs.includes("127.0.0.1"),
+  macArgsUseConfigWorkRoot: macArgs.includes("/Users/" + process.env.USER + "/crabbox/custom-goal-package"),
+  ubuntuArgsUseConfigImage: ubuntuArgs.includes("node:24-test"),
+  windowsArgsUseConfigTemplate: windowsArgs.includes("custom-template"),
+  windowsArgsUseConfigSnapshot: windowsArgs.includes("custom-snapshot"),
+  windowsArgsUseConfigUser: windowsArgs.includes("windows-user"),
+  windowsArgsUseConfigWorkRoot: windowsArgs.includes("C:\\crabbox\\custom-goal-package"),
 };
 console.log(JSON.stringify(result));
 if (!Object.values(result).every(Boolean)) process.exit(1);
@@ -135,6 +165,7 @@ try {
     signal: null,
   });
   const assertions = JSON.parse(readFileSync(join(cleanup.suiteDir, "assertions.json"), "utf8"));
+  const cleanupTarget = JSON.parse(readFileSync(join(cleanup.suiteDir, "target.json"), "utf8"));
   const successManifest = JSON.parse(readFileSync(join(cleanupSuccess.suiteDir, "artifact-manifest.json"), "utf8"));
   const env = { ZAI_API_KEY: "zai-secret-value-1234567890" };
   const secrets = collectSecretValues(["ZAI_API_KEY"], env);
@@ -147,11 +178,12 @@ try {
     cleanupSuccessRecorded: successManifest.present.includes("crabbox.stop.stdout.txt") && successManifest.present.includes("crabbox.cleanup.stdout.txt"),
     assertionsOk: assertions.ok,
     leaseCleanupFailed: assertions.checks.some((check) => check.id === "lease-cleanup" && check.ok === false),
+    targetRecordsProvider: cleanupTarget.provider === "local-container" && cleanupTarget.crabboxTarget === "linux",
     secretDetected: scanForSecrets("token=" + env.ZAI_API_KEY, secrets).includes("raw forwarded secret value"),
     secretRedacted: !redacted.includes(env.ZAI_API_KEY) && redacted.includes("[REDACTED_SECRET]"),
   };
   console.log(JSON.stringify(result));
-  if (!result.manifestIncludesSelf || !result.missingRecorded || result.cleanupOk || !result.cleanupSuccessOk || !result.cleanupSuccessRecorded || result.assertionsOk || !result.leaseCleanupFailed || !result.secretDetected || !result.secretRedacted) process.exit(1);
+  if (!result.manifestIncludesSelf || !result.missingRecorded || result.cleanupOk || !result.cleanupSuccessOk || !result.cleanupSuccessRecorded || result.assertionsOk || !result.leaseCleanupFailed || !result.targetRecordsProvider || !result.secretDetected || !result.secretRedacted) process.exit(1);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
@@ -167,6 +199,7 @@ test("npm pack includes platform smoke docs and scripts", () => {
   const paths = new Set(packs[0]?.files.map((file) => file.path) ?? []);
   for (const path of [
     "docs/platform-smoke.md",
+    ".crabboxignore",
     "platform-smoke.config.mjs",
     "scripts/platform-smoke.mjs",
     "scripts/platform-smoke/artifacts.mjs",
