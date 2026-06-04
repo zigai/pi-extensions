@@ -353,6 +353,19 @@ test("session_shutdown with unchanged budgetLimited goal appends no new entry", 
   }
 });
 
+test("create_goal creates a new goal when explicit replacement is requested without an existing goal", async () => {
+  const harness = createRuntimeHarness();
+
+  const created = (await harness.runTool("create_goal", {
+    objective: "new objective",
+    replace_existing: true,
+  })) as { details: Record<string, unknown> };
+
+  assert.equal((created.details.goal as { objective?: string }).objective, "new objective");
+  assert.equal(harness.snapshot().goal?.objective, "new objective");
+  assert.equal(harness.snapshot().goal?.status, "active");
+});
+
 test("create_goal replaces a completed goal", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
@@ -366,6 +379,21 @@ test("create_goal replaces a completed goal", async () => {
   assert.equal((created.details.goal as { objective?: string }).objective, "next objective");
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.notEqual(harness.snapshot().goal?.goalId, completedGoalId);
+});
+
+test("create_goal can explicitly replace a non-complete goal", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  const originalGoalId = harness.snapshot().goal?.goalId;
+
+  const created = (await harness.runTool("create_goal", {
+    objective: "replacement",
+    replace_existing: true,
+  })) as { details: Record<string, unknown> };
+
+  assert.equal((created.details.goal as { objective?: string }).objective, "replacement");
+  assert.equal(harness.snapshot().goal?.status, "active");
+  assert.notEqual(harness.snapshot().goal?.goalId, originalGoalId);
 });
 
 test("failed create_goal throws so pi marks the tool result as an error", async () => {

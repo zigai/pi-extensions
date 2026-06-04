@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
+import { copyTextToClipboard, type ClipboardCopyResult } from "./clipboard.js";
 import { formatGoalSummary } from "./format.js";
 import type { GoalStartTurnStrategy } from "./recovery-machine.js";
 import { compactContinuationPrompt, continuationPrompt } from "./prompts.js";
@@ -13,7 +14,9 @@ export interface CommandHost {
   getGoalStartTurnStrategy(): GoalStartTurnStrategy;
 }
 
-const COMMANDS = ["pause", "resume", "clear"] as const;
+const COMMANDS = ["pause", "resume", "clear", "copy"] as const;
+
+type CopyText = (text: string) => Promise<ClipboardCopyResult>;
 
 export type GoalCommandPi = Pick<ExtensionAPI, "registerCommand" | "sendMessage" | "sendUserMessage">;
 
@@ -51,6 +54,7 @@ export async function handleGoalCommand(
   host: CommandHost,
   args: string,
   ctx: GoalCommandContext,
+  copyText: CopyText = copyTextToClipboard,
 ): Promise<void> {
   const trimmed = args.trim();
   if (trimmed.length === 0) {
@@ -66,6 +70,24 @@ export async function handleGoalCommand(
     }
     host.clearGoal("command", ctx);
     ctx.ui.notify("Goal cleared.");
+    return;
+  }
+
+  if (trimmed === "copy") {
+    const goal = host.getGoal();
+    if (!goal) {
+      ctx.ui.notify("No goal is set.", "warning");
+      return;
+    }
+    const result = await copyText(goal.objective);
+    if (!result.ok) {
+      ctx.ui.notify(
+        result.message ? `Could not copy goal objective: ${result.message}` : "Could not copy goal objective.",
+        "error",
+      );
+      return;
+    }
+    ctx.ui.notify("Goal objective copied.");
     return;
   }
 

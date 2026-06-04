@@ -55,7 +55,7 @@ Use `PLATFORM_SMOKE_MODEL` to run the real runtime smoke against another provide
 
 The doctor fails when any required platform setup is missing. It verifies the Crabbox binary/version, `ssh`, `local-container`, and `parallels` provider availability, provider-specific readiness, Docker, macOS SSH, Windows source VM/snapshot state, artifact-root writability, forbidden source/package artifacts, and model auth presence. It also fails when the real runtime smoke suite is required and none of the configured model auth environment variables is present.
 
-For Windows, `pi-extension-windows-template` must be stopped and `crabbox-ready` must be a known-good power-off snapshot. If a reusable Windows tool is missing, update the template and refresh/promote `crabbox-ready`; do not add one-off installers to per-run smoke scripts.
+For Windows, `pi-extension-windows-template` must be stopped and `crabbox-ready` must be a known-good power-off snapshot. Standalone doctor warms a disposable Crabbox clone when the stopped template has no live IP, then probes `node`, `npm`, `git`, `tar`, and SSH identity. The full `smoke:platform:all` gate skips that disposable doctor probe because the immediately following Windows target run validates the same SSH/tool path on the real test lease. If a reusable Windows tool is missing, update the template and refresh/promote `crabbox-ready`; do not add one-off installers to per-run smoke scripts.
 
 ## What the suites prove
 

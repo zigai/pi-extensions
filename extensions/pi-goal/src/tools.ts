@@ -3,7 +3,7 @@ import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 
 import { goalToolResponse, toToolText, type GoalToolResponse } from "./format.js";
-import { createGoal } from "./state.js";
+import { createGoal, replaceGoal } from "./state.js";
 import { TOOL_PROMPT_GUIDELINES } from "./prompts.js";
 import type { GoalEntrySource, GoalResult, ThreadGoal } from "./types.js";
 
@@ -17,6 +17,12 @@ const CreateGoalParams = Type.Object({
     Type.Integer({
       description: "Optional positive integer token budget.",
       minimum: 1,
+    }),
+  ),
+  replace_existing: Type.Optional(
+    Type.Boolean({
+      description:
+        "Replace an existing non-complete goal. Use only when the user explicitly asks to set a new goal over the current one.",
     }),
   ),
 });
@@ -67,11 +73,15 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
     label: "Create Goal",
     description: "Create a Codex-style long-running goal for this pi session.",
     promptSnippet:
-      "Create one goal with an objective and optional positive token budget. Fails when a non-complete goal already exists; replaces a completed goal.",
+      "Create one goal with an objective and optional positive token budget. Fails when a non-complete goal already exists unless replace_existing is true; replaces a completed goal.",
     promptGuidelines: TOOL_PROMPT_GUIDELINES,
     parameters: CreateGoalParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = createGoal(host.getGoal(), params.objective, params.token_budget ?? null);
+      const current = host.getGoal();
+      const shouldReplaceExisting = params.replace_existing === true && current !== null && current.status !== "complete";
+      const result = shouldReplaceExisting
+        ? replaceGoal(params.objective, params.token_budget ?? null)
+        : createGoal(current, params.objective, params.token_budget ?? null);
       if (!result.ok || !result.goal) {
         throwToolError(result.message);
       }

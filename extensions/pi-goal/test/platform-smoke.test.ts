@@ -36,6 +36,12 @@ test("platform smoke scripts have working syntax and help", () => {
   assert.match(help.stdout, /platform-build/);
   assert.match(help.stdout, /goal-runtime-smoke/);
   assert.match(help.stdout, /zai\/glm-5\.1/);
+  assert.match(help.stdout, /--skip-windows-disposable-probe/);
+
+  const doctor = readFileSync("scripts/platform-smoke/doctor.mjs", "utf8");
+  assert.match(doctor, /disposableWindowsSshProbe/);
+  assert.match(doctor, /skipWindowsDisposableProbe/);
+  assert.match(doctor, /disposable Windows clone SSH\/tool probe OK/);
 });
 
 test("platform smoke config and package scripts require macOS, Ubuntu, and native Windows", () => {
@@ -49,7 +55,7 @@ test("platform smoke config and package scripts require macOS, Ubuntu, and nativ
   assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /test\/platform-smoke\.test\.ts/);
   assert.match(packageJson.scripts?.["verify"] ?? "", /check:platform-smoke/);
   assert.equal(packageJson.scripts?.["smoke:platform:doctor"], "node scripts/platform-smoke.mjs doctor");
-  assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /smoke:platform:doctor/);
+  assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /doctor --skip-windows-disposable-probe/);
   assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /macos,ubuntu,windows-native/);
   assert.match(packageJson.scripts?.["smoke:platform:windows-native"] ?? "", /windows-native/);
 

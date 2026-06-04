@@ -39,6 +39,8 @@ Suites:
 Options:
   --target <names>           Comma-separated target names
   --suite <name>             Suite name; defaults to configured required suites
+  --skip-windows-disposable-probe
+                            Doctor: skip the disposable Windows clone probe when a full target run follows
   --help, -h                 Show this help
 
 Examples:
@@ -66,7 +68,7 @@ Environment:
 }
 
 function parseArgs(argv) {
-	const parsed = { command: null, target: null, suite: null, rest: [] };
+	const parsed = { command: null, target: null, suite: null, skipWindowsDisposableProbe: false, rest: [] };
 	for (let i = 2; i < argv.length; i += 1) {
 		const arg = argv[i];
 		if (arg === "--help" || arg === "-h") {
@@ -85,6 +87,10 @@ function parseArgs(argv) {
 		if (arg === "--suite" && argv[i + 1]) {
 			parsed.suite = argv[i + 1];
 			i += 1;
+			continue;
+		}
+		if (arg === "--skip-windows-disposable-probe") {
+			parsed.skipWindowsDisposableProbe = true;
 			continue;
 		}
 		parsed.rest.push(arg);
@@ -107,7 +113,7 @@ async function main() {
 
 	if (args.command === "doctor") {
 		const { runDoctor } = await import("./platform-smoke/doctor.mjs");
-		await runDoctor(config);
+		await runDoctor(config, { skipWindowsDisposableProbe: args.skipWindowsDisposableProbe });
 		return;
 	}
 

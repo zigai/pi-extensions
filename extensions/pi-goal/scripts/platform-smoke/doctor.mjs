@@ -45,6 +45,70 @@ function commandPath(name) {
 	return silent("which", [name]);
 }
 
+function parseLeaseId(output) {
+	return output.match(/\bleased\s+(\S+)/)?.[1]
+		?? output.match(/\blease=(\S+)/)?.[1]
+		?? null;
+}
+
+function windowsCrabboxBaseArgs(packageName) {
+	const vmName = env("PLATFORM_SMOKE_WINDOWS_VM") || "pi-extension-windows-template";
+	const snapshot = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || "crabbox-ready";
+	const user = env("PLATFORM_SMOKE_WINDOWS_USER") || env("USER");
+	const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || `C:\\crabbox\\${packageName}`;
+	return [
+		"--provider", "parallels",
+		"--target", "windows",
+		"--windows-mode", "normal",
+		"--parallels-source", vmName,
+		"--parallels-source-snapshot", snapshot,
+		"--parallels-user", user,
+		"--parallels-work-root", workRoot,
+	];
+}
+
+function crabbox(cbox, args, timeout = 300_000) {
+	try {
+		return {
+			ok: true,
+			stdout: execFileSync(cbox, args, {
+				timeout,
+				stdio: "pipe",
+				env: { ...process.env, CRABBOX_SYNC_GIT_SEED: "false" },
+			}).toString(),
+			stderr: "",
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			stdout: error.stdout?.toString?.() ?? "",
+			stderr: error.stderr?.toString?.() ?? error.message,
+		};
+	}
+}
+
+function disposableWindowsSshProbe(cbox, packageName) {
+	const slug = `${packageName}-doctor-windows`;
+	const baseArgs = windowsCrabboxBaseArgs(packageName);
+	const warm = crabbox(cbox, ["warmup", ...baseArgs, "--slug", slug, "--keep", "--reclaim"], 300_000);
+	const leaseId = parseLeaseId(warm.stdout) ?? parseLeaseId(warm.stderr) ?? slug;
+	try {
+		if (!warm.ok) return { ok: false, message: `disposable Windows warmup failed: ${(warm.stderr || warm.stdout).slice(-500)}` };
+		const probeCommand = "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command 'Get-Command node,npm,git,tar -ErrorAction Stop | Out-Null; node --version; npm --version; git --version; tar --version | Select-Object -First 1; whoami'";
+		const run = crabbox(cbox, ["run", ...baseArgs, "--id", leaseId, "--no-sync", "--shell", probeCommand], 120_000);
+		if (!run.ok) return { ok: false, message: `disposable Windows probe failed: ${(run.stderr || run.stdout).slice(-500)}` };
+		const lines = run.stdout.trim().split(/\r?\n/).slice(-5);
+		if (!/^v\d+\./.test(lines[0] ?? "")) return { ok: false, message: `disposable Windows node probe missing or invalid: ${lines.join(" | ")}` };
+		if (!/^\d+\.\d+\./.test(lines[1] ?? "")) return { ok: false, message: `disposable Windows npm probe missing or invalid: ${lines.join(" | ")}` };
+		if (!/^git version/i.test(lines[2] ?? "")) return { ok: false, message: `disposable Windows git probe missing or invalid: ${lines.join(" | ")}` };
+		if (!/tar/i.test(lines[3] ?? "")) return { ok: false, message: `disposable Windows tar probe missing or invalid: ${lines.join(" | ")}` };
+		if (!(lines[4] ?? "").trim()) return { ok: false, message: `disposable Windows whoami probe missing: ${lines.join(" | ")}` };
+		return { ok: true, message: lines.join(" | ") };
+	} finally {
+		crabbox(cbox, ["stop", ...baseArgs, "--id", leaseId], 60_000);
+	}
+}
+
 function parseVersion(version) {
 	const match = String(version).match(/\d+(?:\.\d+){0,2}/);
 	return match ? match[0].split(".").map((part) => Number(part)) : null;
@@ -139,8 +203,9 @@ function checkCrabboxProvider(cbox, args, label, failures) {
 	}
 }
 
-export async function runDoctor(config) {
+export async function runDoctor(config, options = {}) {
 	const failures = { count: 0 };
+	const skipWindowsDisposableProbe = options.skipWindowsDisposableProbe === true;
 	const packageName = config?.packageName ?? "pi-codex-goal";
 	const artifactRoot = config?.artifactRoot ?? ".artifacts/platform-smoke";
 	const nodeMajor = config?.nodeValidationMajor ?? 24;
@@ -255,15 +320,39 @@ export async function runDoctor(config) {
 				} catch {
 					// Fall through to the failure below.
 				}
+				let snapshotPowerOff = false;
 				if (snapshotMatch) {
 					ok(`snapshot ${snapshot} found`);
 					const snapshotState = snapshotMatch[1]?.state ?? "unknown";
-					if (snapshotState === "poweroff") ok(`snapshot ${snapshot} state is poweroff`);
+					snapshotPowerOff = snapshotState === "poweroff";
+					if (snapshotPowerOff) ok(`snapshot ${snapshot} state is poweroff`);
 					else fail(`snapshot ${snapshot} must be poweroff; current snapshot state: ${snapshotState}`, failures);
 				} else {
 					fail(`snapshot ${snapshot} not found on ${vmName}`, failures);
 				}
 				checkCrabboxProvider(cbox, ["--provider", "parallels", "--target", "windows", "--windows-mode", "normal", "--parallels-source", vmName, "--parallels-source-snapshot", snapshot, "--parallels-user", user, "--parallels-work-root", workRoot], "windows parallels", failures);
+				const ipLine = shell(`prlctl list -f --no-header "${vmName.replace(/"/g, "\\\"")}" 2>/dev/null`);
+				if (!ipLine) {
+					fail(`could not inspect Windows VM IP for ${vmName}`, failures);
+				} else {
+					const parts = ipLine.trim().split(/\s+/);
+					const ip = parts.length >= 3 ? parts[2] : null;
+					if (ip && ip !== "-") {
+						ok(`Windows template IP: ${ip}`);
+						const portCheck = shell(`nc -z -w 3 ${ip} 22 2>/dev/null && echo open || echo closed`);
+						if (portCheck?.includes("open")) ok(`SSH open on ${ip}:22`);
+						else fail(`SSH not open on ${ip}:22 — enable OpenSSH Server in the Windows template VM`, failures);
+					} else if (skipWindowsDisposableProbe) {
+						warn(`template ${vmName} has no IP; skipping disposable Windows clone probe because a full target run is expected to validate SSH/tools`);
+					} else if (cboxPath && snapshotMatch && snapshotPowerOff) {
+						ok(`template ${vmName} has no IP; verifying Windows SSH/tools through a disposable Crabbox clone`);
+						const probe = disposableWindowsSshProbe(cbox, packageName);
+						if (probe.ok) ok(`disposable Windows clone SSH/tool probe OK: ${probe.message}`);
+						else fail(probe.message, failures);
+					} else {
+						fail(`Windows SSH probe could not run because ${vmName} has no IP and no verified poweroff snapshot was available`, failures);
+					}
+				}
 			}
 		}
 	} else {

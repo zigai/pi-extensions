@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.23 - 2026-06-04
+
+- Add `/goal copy` to copy the current goal objective for active, paused, budget-limited, or completed goals.
+- Allow explicit `create_goal` replacement of non-complete goals and teach `/create-goal` to use it so users do not have to clear existing goals first.
+- Strengthen Windows doctor readiness with a disposable Crabbox clone SSH/tool probe when the stopped Parallels template has no live IP, while skipping that extra disposable probe during the full platform-smoke gate so the real Windows test lease is opened only once.
+
 ## 0.1.22 - 2026-06-02
 
 - Tighten test-only TypeScript casts around goal state and recovery runtime harnesses.

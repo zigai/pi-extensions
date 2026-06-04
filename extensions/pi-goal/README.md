@@ -123,24 +123,25 @@ Final goal status: complete
 /goal Build the requested feature and verify it end to end
 /goal pause
 /goal resume
+/goal copy
 /goal clear
 ```
 
-`/create-goal <task>` is the recommended way to start a goal. It expands the task into a strict objective and asks the model to call the `create_goal` tool.
+`/create-goal <task>` is the recommended way to start a goal. It expands the task into a strict objective and asks the model to call the `create_goal` tool with explicit replacement enabled, so you do not need to run `/goal clear` before setting a new goal.
 
-`/goal` with no arguments reports the current objective, status, token budget, token usage, and elapsed active time. A plain `/goal <objective>` starts a new goal or replaces the current one after confirmation.
+`/goal` with no arguments reports the current objective, status, token budget, token usage, and elapsed active time. A plain `/goal <objective>` starts a new goal or replaces the current one after confirmation. `/goal copy` copies the current goal objective to the system clipboard, including active, paused, budget-limited, and completed goals.
 
 This intentionally matches Codex TUI behavior: token budgets are set through the model tool rather than parsed from `/goal --tokens`. This package keeps its objective size limit at 8000 Unicode characters.
 
 ## Model Tools
 
-`create_goal` starts a goal with an objective and optional positive token budget. It fails if a non-complete goal already exists. After a goal is complete, `create_goal` replaces it with a new active goal.
+`create_goal` starts a goal with an objective and optional positive token budget. It fails if a non-complete goal already exists unless `replace_existing: true` is provided. After a goal is complete, `create_goal` replaces it with a new active goal.
 
 `get_goal` returns the current goal state and usage.
 
 `update_goal` only accepts `status: "complete"`, matching Codex's model-side contract. Calling it on an already-complete goal is idempotent and does not append duplicate session entries. The extension reports final token and elapsed-time usage before marking the goal complete.
 
-Completed goals are terminal for automatic transitions: pause, resume, and hidden continuations do not reopen them. To recover from premature completion, use `/goal <objective>` to replace the goal or `/goal clear` before starting again.
+Completed goals are terminal for automatic transitions: pause, resume, and hidden continuations do not reopen them. To recover from premature completion, use `/goal <objective>` to replace the goal, call `create_goal` with `replace_existing: true`, or `/goal clear` before starting again.
 
 In bridged MCP environments, pi may expose these tools under namespaced MCP names like `pi__get_goal`, `pi__create_goal`, and `pi__update_goal`. Prompt guidance tells models to call whichever goal-tool name is actually exposed in the current run, not display or transcript labels.
 
@@ -155,7 +156,7 @@ While a goal is active, the extension:
 - recovers from provider assistant errors without immediate hidden continuation loops: context-window overflow triggers automatic compaction and then resumes the active goal, transient errors use bounded backoff retries, and repeated unrecoverable failures pause with a clear `/goal resume` path
 - prompts on session resume before reactivating a paused goal, and resumes explicitly with `/goal resume` (only from paused)
 - rejects `/goal pause` unless the goal is active and `/goal resume` unless the goal is paused
-- treats completed goals as terminal for automatic transitions while allowing `/goal <objective>` to replace them without extra friction
+- treats completed goals as terminal for automatic transitions while allowing `/goal <objective>` and explicit `create_goal` replacement to replace goals without extra friction
 - marks the goal `budgetLimited` when a positive token budget is reached
 - sends hidden steering messages when budget is reached or when the agent is idle but the goal is still active
 - compacts repeated hidden goal continuations before provider context so only the latest active continuation stays runnable, older ones become short bookkeeping markers, and auto-queued continuations use a compact prompt after `/goal` start or resume

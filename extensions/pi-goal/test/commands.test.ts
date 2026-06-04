@@ -99,6 +99,51 @@ test("/goal objective creates the goal and starts a hidden follow-up turn", asyn
   assert.deepEqual(sentMessage.options, { triggerTurn: true, deliverAs: "followUp" });
 });
 
+test("/goal copy copies the current goal objective", async () => {
+  const harness = createHarness();
+  const copied: string[] = [];
+
+  await handleGoalCommand(harness.pi, harness.host, "ship the feature", harness.ctx);
+  await handleGoalCommand(harness.pi, harness.host, "copy", harness.ctx, async (text) => {
+    copied.push(text);
+    return { ok: true };
+  });
+
+  assert.deepEqual(copied, ["ship the feature"]);
+  assert.equal(harness.notifications.at(-1), "Goal objective copied.");
+});
+
+test("/goal copy works for completed goals", async () => {
+  const harness = createHarness();
+  const copied: string[] = [];
+
+  await handleGoalCommand(harness.pi, harness.host, "ship the feature", harness.ctx);
+  const completed = updateGoalStatus(harness.goal, "complete").goal;
+  assert.ok(completed);
+  harness.setGoal(completed);
+
+  await handleGoalCommand(harness.pi, harness.host, "copy", harness.ctx, async (text) => {
+    copied.push(text);
+    return { ok: true };
+  });
+
+  assert.deepEqual(copied, ["ship the feature"]);
+  assert.equal(harness.goal?.status, "complete");
+  assert.equal(harness.notifications.at(-1), "Goal objective copied.");
+});
+
+test("/goal copy reports missing clipboard support", async () => {
+  const harness = createHarness();
+
+  await handleGoalCommand(harness.pi, harness.host, "ship the feature", harness.ctx);
+  await handleGoalCommand(harness.pi, harness.host, "copy", harness.ctx, async () => ({
+    ok: false,
+    message: "clipboard unavailable",
+  }));
+
+  assert.match(harness.notifications.at(-1) ?? "", /Could not copy goal objective: clipboard unavailable/);
+});
+
 test("/goal resume sends a user continuation turn", async () => {
   const harness = createHarness();
 
