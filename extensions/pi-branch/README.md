@@ -1,6 +1,6 @@
 # Pi Branch
 
-Pi extension for branching the current session into parallel tmux or Ghostty panes.
+This Pi extension branches the current session into parallel tmux or Ghostty panes.
 
 ## Install
 
