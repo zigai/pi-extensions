@@ -1,6 +1,6 @@
 # Pi Command Args
 
-Typed named slash-command arguments with live hints and TUI prompts for Pi extensions.
+This Pi extension adds typed named slash-command arguments with live hints and TUI prompts.
 
 ## Install
 
