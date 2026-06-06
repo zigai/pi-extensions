@@ -6,10 +6,18 @@
   "keywords": [
     "branch",
     "fork",
+    "pi",
+    "pi-coding-agent",
     "pi-extension",
     "pi-package",
     "session"
   ],
+  "homepage": "https://github.com/zigai/pi-branch#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-branch/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zigai/pi-branch.git"
