@@ -5,6 +5,8 @@
   "description": "Typed named slash-command arguments with live hints and TUI prompts for Pi extensions.",
   "keywords": [
     "commands",
+    "pi",
+    "pi-coding-agent",
     "pi-extension",
     "pi-package",
     "slash-commands",
@@ -14,6 +16,8 @@
   "bugs": {
     "url": "https://github.com/zigai/pi-command-args/issues"
   },
+  "license": "MIT",
+  "author": "zigai",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zigai/pi-command-args.git"
