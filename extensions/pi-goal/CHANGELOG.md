@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a fast interactive `/goal` smoke path and tmux CSI-u Enter automation guidance to the README and platform smoke docs.
+- Strengthen the model-backed platform runtime smoke so it requires built-in `read` tool verification before goal completion.
+
 ## 0.1.25 - 2026-06-08
 
 - Update the local pi development baseline to `@earendil-works/*` `0.79.0` and refresh the npm lockfile after reviewing the Pi `0.79.0` changelog, extension docs, package docs, SDK/RPC docs, and current project-trust examples.

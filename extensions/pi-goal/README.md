@@ -82,9 +82,9 @@ That gate runs `npm run verify`, packs the package, installs the packed package 
 Project agent notes and module map: [AGENTS.md](AGENTS.md).
 Latest structural audit: [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md).
 
-## Interactive smoke test
+## Interactive smoke tests
 
-This smoke test exercises the interactive `/goal` command, hidden continuation, bridged goal tools, filesystem verification, and final `update_goal` completion.
+These smoke tests exercise the interactive `/goal` command, hidden continuation, bridged goal tools, filesystem verification, and final `update_goal` completion.
 
 Prerequisites:
 
@@ -93,13 +93,31 @@ Prerequisites:
 Start pi from this repository:
 
 ```sh
-rm -f /tmp/pi-codex-goal-slash-smoke.txt
+rm -f /tmp/pi-codex-goal-fast.txt /tmp/pi-codex-goal-slash-smoke.txt
 rm -rf /tmp/pi-codex-goal-slash-smoke-session
 pi --model <model-id> \
   --session-dir /tmp/pi-codex-goal-slash-smoke-session
 ```
 
-Then paste this into the interactive TUI:
+### Fast manual smoke
+
+Paste this first when you want the shortest interactive confidence check. This intentionally uses shell `cat`; use the full smoke or platform smoke when you need built-in `read` tool coverage:
+
+```text
+/goal Create /tmp/pi-codex-goal-fast.txt containing PI_GOAL_FAST_OK; verify with cat; mark complete; report final status.
+```
+
+Expected final evidence:
+
+```text
+Verified file path: /tmp/pi-codex-goal-fast.txt
+Verified content: PI_GOAL_FAST_OK
+Final goal status: complete
+```
+
+### Full manual smoke
+
+Paste this when you want the fuller end-to-end path:
 
 ```text
 /goal Create /tmp/pi-codex-goal-slash-smoke.txt containing PI_GOAL_SLASH_OK, verify the file content from the filesystem, inspect the current goal, and mark the goal complete only after verification. Final reply must include the verified file path, verified content, and final goal status.
@@ -114,6 +132,15 @@ Final goal status: complete
 ```
 
 `/goal` is an interactive editor command. Do not use `pi -p '/goal ...'` as a slash-command smoke path; print mode sends an initial model prompt and is not a reliable way to exercise this extension command. For headless automation, prompt the model to call the `create_goal`, `get_goal`, and `update_goal` tools instead of relying on slash-command parsing.
+
+For tmux-driven interactive smoke automation, send the prompt as literal text and submit with CSI-u Enter (`ESC [ 13 u`). Normal `tmux send-keys Enter` works in many setups, but CSI-u is the robust scripted submit path through Pi's TUI key parser. This fast example intentionally uses shell `cat`; change the prompt to require the built-in `read` tool when that path is under test:
+
+```sh
+tmux send-keys -t "$TMUX_SESSION" -l '/goal Create /tmp/pi-codex-goal-fast.txt containing PI_GOAL_FAST_OK; verify with cat; mark complete; report final status.'
+tmux send-keys -t "$TMUX_SESSION" -l $'\033[13u'
+```
+
+If an interactive run appears stuck on `Working...` after a built-in `read` tool result, capture the session JSONL and TUI pane before retrying. A healthy read-verification path includes a `toolName: "read"` tool result, an `update_goal` tool result with `status: "complete"`, and a final assistant message. The package's model-backed platform smoke now asserts that the built-in `read` tool was used; if only the TUI path stalls, treat it as a Pi host/tool-resume repro rather than changing goal continuation logic without more evidence.
 
 ## User Commands
 

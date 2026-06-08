@@ -96,6 +96,53 @@ function latestPackedTarball(packDir, packageName) {
 	return files.at(-1) ?? "";
 }
 
+function textContent(content) {
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter((part) => part?.type === "text" && typeof part.text === "string")
+		.map((part) => part.text)
+		.join("\n");
+}
+
+function observedSuccessfulReadTool(sessionJsonl, expectedPath, expectedContent) {
+	const readCallIds = new Set();
+	let successfulReadResult = false;
+
+	for (const line of sessionJsonl.split(/\r?\n/)) {
+		if (!line.trim()) continue;
+		let entry;
+		try { entry = JSON.parse(line); } catch { continue; }
+		const message = entry?.message;
+		if (!message || typeof message !== "object") continue;
+
+		if (message.role === "assistant" && Array.isArray(message.content)) {
+			for (const part of message.content) {
+				if (
+					part?.type === "toolCall" &&
+					part.name === "read" &&
+					part.arguments?.path === expectedPath &&
+					typeof part.id === "string"
+				) {
+					readCallIds.add(part.id);
+				}
+			}
+			continue;
+		}
+
+		if (
+			message.role === "toolResult" &&
+			message.toolName === "read" &&
+			message.isError === false &&
+			readCallIds.has(message.toolCallId) &&
+			textContent(message.content).trim() === expectedContent
+		) {
+			successfulReadResult = true;
+		}
+	}
+
+	return successfulReadResult;
+}
+
 const args = parseArgs(process.argv);
 const sourceRoot = process.cwd();
 const runId = `goal-runtime-smoke-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${process.pid}`;
@@ -138,7 +185,7 @@ Do not use slash commands. Use the available goal tools and filesystem tools.
 Required steps:
 1. Call create_goal with an objective that requires creating ${smokeFile} containing ${expectedContent}, verifying the file content from the filesystem, inspecting the current goal, and marking it complete only after verification.
 2. Create ${smokeFile} with exactly ${expectedContent}.
-3. Verify the file content by reading it from the filesystem.
+3. Verify the file content by reading it from the filesystem with the built-in read tool, not with shell cat/type.
 4. Call get_goal and confirm the goal is active before completion.
 5. Call update_goal with status complete only after the file content is verified.
 6. Call get_goal again and confirm the final status is complete.
@@ -155,6 +202,7 @@ try { sessionJsonl = readFileSync(sessionJsonlPath, "utf8"); } catch {}
 const finalMarkerObserved = piRun.stdout.includes(`GOAL_RUNTIME_SMOKE_OK status=complete file=${expectedContent}`);
 const customGoalObserved = sessionJsonl.includes("pi-codex-goal");
 const completeGoalObserved = sessionJsonl.includes('"status":"complete"') || sessionJsonl.includes('"status": "complete"');
+const readToolObserved = observedSuccessfulReadTool(sessionJsonl, smokeFile, expectedContent);
 const fileVerified = fileContent === expectedContent;
 const ok = pack.status === 0
 	&& npmInit.status === 0
@@ -165,6 +213,7 @@ const ok = pack.status === 0
 	&& finalMarkerObserved
 	&& customGoalObserved
 	&& completeGoalObserved
+	&& readToolObserved
 	&& fileVerified;
 
 const result = {
@@ -188,6 +237,7 @@ const result = {
 		finalMarkerObserved,
 		customGoalObserved,
 		completeGoalObserved,
+		readToolObserved,
 		fileVerified,
 	},
 	commands: commands.map((command) => ({ name: command.name, command: command.command, cwd: command.cwd, status: command.status, signal: command.signal })),

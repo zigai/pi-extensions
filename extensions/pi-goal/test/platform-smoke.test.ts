@@ -35,6 +35,8 @@ test("platform smoke scripts have working syntax and help", () => {
   assert.match(goalRuntimeScript, /"install", "-l", installPath, "--approve"/);
   assert.match(goalRuntimeScript, /"list", "--approve"/);
   assert.match(goalRuntimeScript, /"--approve", "--model"/);
+  assert.match(goalRuntimeScript, /built-in read tool/);
+  assert.match(goalRuntimeScript, /readToolObserved/);
 
   const help = run(process.execPath, ["scripts/platform-smoke.mjs", "--help"]);
   assert.equal(help.status, 0);
@@ -128,6 +130,8 @@ const result = {
   powershellNoExtensionShortcut: !/\\bpi\\s+(?:-e|--extension)\\s+\\./.test(powershell),
   goalRuntimeHasDefaultModel: goalRuntime.includes("zai/glm-5.1"),
   goalRuntimeHasPackage: goalRuntime.includes("pi-codex-goal"),
+  goalRuntimeAssertsReadTool: readFileSync("scripts/platform-smoke/goal-runtime-smoke.mjs", "utf8").includes("readToolObserved"),
+  goalRuntimeTargetChecksReadTool: readFileSync("scripts/platform-smoke/targets.mjs", "utf8").includes("read-tool-observed"),
   macArgsUseConfigHost: macArgs.includes("127.0.0.1"),
   macArgsUseConfigWorkRoot: macArgs.includes("/Users/" + process.env.USER + "/crabbox/custom-goal-package"),
   ubuntuArgsUseConfigImage: ubuntuArgs.includes("node:24-test"),

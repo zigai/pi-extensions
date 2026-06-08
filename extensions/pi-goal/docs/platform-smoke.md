@@ -80,9 +80,9 @@ Each required target runs `platform-build` and `goal-runtime-smoke`.
 
 1. Re-pack and install the package into a clean target-local pi project.
 2. Run real `pi --approve --model <model> -p <prompt>` against that packed install so non-interactive Pi 0.79+ loads the isolated project-local package settings.
-3. Prompt the model to call the actual goal tools, create and verify a marker file, call `update_goal`, and confirm completion.
+3. Prompt the model to call the actual goal tools, create a marker file, verify it with the built-in `read` tool, call `update_goal`, and confirm completion.
 4. Capture pi stdout/stderr and session JSONL.
-5. Assert the final marker, verified file, `pi-codex-goal` custom entries, and complete goal status.
+5. Assert the final marker, verified file, `pi-codex-goal` custom entries, built-in `read` tool evidence, and complete goal status.
 
 ## Artifact contract
 
@@ -118,6 +118,15 @@ failures.md            # only when assertions fail
 
 `goal-runtime-smoke` also writes `goal-runtime-result.json`, `pi-run.stdout.txt`, `pi-run.stderr.txt`, and `session.jsonl`.
 
+Interactive `/goal` smoke checks are manual by default. If you automate them through tmux, send the prompt as literal text and submit with CSI-u Enter (`ESC [ 13 u`). This fast example intentionally uses shell `cat`; change the prompt to require the built-in `read` tool when that path is under test:
+
+```sh
+tmux send-keys -t "$TMUX_SESSION" -l '/goal Create /tmp/pi-codex-goal-fast.txt containing PI_GOAL_FAST_OK; verify with cat; mark complete; report final status.'
+tmux send-keys -t "$TMUX_SESSION" -l $'\033[13u'
+```
+
+Normal `tmux send-keys Enter` works in many environments, but CSI-u Enter is the robust scripted path through Pi's TUI key parser.
+
 The suites record failures as artifacts before reporting failure so the host can inspect the real target evidence. `target.json` records the Crabbox provider, target, work root, and image/template identifiers used for the run. Each target also writes a `lease-cleanup` artifact directory with `crabbox.stop.*` files; cleanup failure is a failing test result. Ubuntu and Windows runs also invoke Crabbox cleanup for stale provider-owned state after stopping the owned lease. Static macOS SSH cleanup remains host-owned because Crabbox can only remove its local claim there.
 
 ## Lessons carried forward
@@ -129,6 +138,7 @@ The suites record failures as artifacts before reporting failure so the host can
 - Test the packed package, not `pi -e .`.
 - Pass `--approve` for isolated project-local package smoke commands and non-interactive runtime smokes; Pi 0.79+ otherwise skips project-local settings and packages when no saved trust decision exists.
 - Include a real model-backed pi run so release claims are not based on unit tests alone.
+- Assert built-in `read` evidence in the model-backed runtime smoke so post-tool goal completion stays covered.
 - Keep project-specific defaults in `platform-smoke.config.mjs`; use environment variables only for local overrides.
 - Make doctor fail before expensive or long target runs, and enforce doctor-before-all in the release entrypoint.
 - Preserve artifacts on failure and use `assertions.json` as the pass/fail source of truth.

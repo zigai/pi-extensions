@@ -330,6 +330,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
 		{ id: "file-verified", fn: () => runtimeResult.checks?.fileVerified === true },
 		{ id: "goal-custom-entry-observed", fn: () => runtimeResult.checks?.customGoalObserved === true },
 		{ id: "goal-complete-observed", fn: () => runtimeResult.checks?.completeGoalObserved === true },
+		{ id: "read-tool-observed", fn: () => runtimeResult.checks?.readToolObserved === true },
 		{ id: "pi-list-local-package", fn: () => runtimeResult.checks?.piList === true },
 		{ id: "session-jsonl", fn: () => readFileSync(resolve(suiteDir, "session.jsonl"), "utf8").includes("pi-codex-goal") },
 		{ id: "no-secret-artifacts", fn: () => secretViolations.length === 0, error: secretViolations.join(", ") },
