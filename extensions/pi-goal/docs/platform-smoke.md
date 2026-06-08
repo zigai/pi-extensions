@@ -72,14 +72,14 @@ Each required target runs `platform-build` and `goal-runtime-smoke`.
 4. Run `npm pack`.
 5. Create a clean target-local pi project.
 6. Install the packed tarball into that project with `npm install --no-save`.
-7. Run `pi install -l ./node_modules/pi-codex-goal` from the clean project.
-8. Run `pi list` and assert `pi-codex-goal` is registered from the packed install.
+7. Run `pi install -l ./node_modules/pi-codex-goal --approve` from the clean project so Pi 0.79+ can read and write project-local package settings for this isolated command.
+8. Run `pi list --approve` and assert `pi-codex-goal` is registered from the packed install.
 9. Assert the smoke never used the source shortcut `pi -e .` or `pi --extension .`.
 
 ### `goal-runtime-smoke`
 
 1. Re-pack and install the package into a clean target-local pi project.
-2. Run real `pi --model <model> -p <prompt>` against that packed install.
+2. Run real `pi --approve --model <model> -p <prompt>` against that packed install so non-interactive Pi 0.79+ loads the isolated project-local package settings.
 3. Prompt the model to call the actual goal tools, create and verify a marker file, call `update_goal`, and confirm completion.
 4. Capture pi stdout/stderr and session JSONL.
 5. Assert the final marker, verified file, `pi-codex-goal` custom entries, and complete goal status.
@@ -127,6 +127,7 @@ The suites record failures as artifacts before reporting failure so the host can
 - Keep platform-specific shell rendering explicit: POSIX for macOS/Ubuntu and PowerShell for native Windows.
 - Run the repository's existing validation command on every required target.
 - Test the packed package, not `pi -e .`.
+- Pass `--approve` for isolated project-local package smoke commands and non-interactive runtime smokes; Pi 0.79+ otherwise skips project-local settings and packages when no saved trust decision exists.
 - Include a real model-backed pi run so release claims are not based on unit tests alone.
 - Keep project-specific defaults in `platform-smoke.config.mjs`; use environment variables only for local overrides.
 - Make doctor fail before expensive or long target runs, and enforce doctor-before-all in the release entrypoint.

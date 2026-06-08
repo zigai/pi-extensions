@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.25 - 2026-06-08
+
+- Update the local pi development baseline to `@earendil-works/*` `0.79.0` and refresh the npm lockfile after reviewing the Pi `0.79.0` changelog, extension docs, package docs, SDK/RPC docs, and current project-trust examples.
+- Make release smoke commands explicit about Pi `0.79.0` project trust by passing `--approve` for isolated project-local package install, list, and non-interactive runtime smoke paths.
+- Update platform-smoke regression checks and docs so future release gates catch missing trust approval flags before packed package validation runs.
+
 ## 0.1.24 - 2026-06-04
 
 - Update the local pi development baseline to `@earendil-works/*` `0.78.1` and refresh the npm lockfile after reviewing the Pi `0.78.1` changelog, extension docs, package docs, and current examples.

@@ -127,9 +127,9 @@ commands.push({ name: "npm-init", ...npmInit });
 const npmInstall = run(npm, ["install", "--no-save", packedTarball], { cwd: piProject });
 commands.push({ name: "npm-install-packed", ...npmInstall });
 const installPath = `.${process.platform === "win32" ? "\\" : "/"}node_modules${process.platform === "win32" ? "\\" : "/"}${args.packageName}`;
-const piInstall = run(piCommand, [...piPrefixArgs, "install", "-l", installPath], { cwd: piProject, env: piEnv });
+const piInstall = run(piCommand, [...piPrefixArgs, "install", "-l", installPath, "--approve"], { cwd: piProject, env: piEnv });
 commands.push({ name: "pi-install", ...piInstall });
-const piList = run(piCommand, [...piPrefixArgs, "list"], { cwd: piProject, env: piEnv });
+const piList = run(piCommand, [...piPrefixArgs, "list", "--approve"], { cwd: piProject, env: piEnv });
 commands.push({ name: "pi-list", ...piList });
 
 const expectedContent = "PI_CODEX_GOAL_RUNTIME_OK";
@@ -144,7 +144,7 @@ Required steps:
 6. Call get_goal again and confirm the final status is complete.
 Final answer exactly: GOAL_RUNTIME_SMOKE_OK status=complete file=${expectedContent}`;
 
-const piRun = run(piCommand, [...piPrefixArgs, "--model", args.model, "--session-dir", sessionDir, "--no-context-files", "-p", prompt], { cwd: piProject, env: piEnv });
+const piRun = run(piCommand, [...piPrefixArgs, "--approve", "--model", args.model, "--session-dir", sessionDir, "--no-context-files", "-p", prompt], { cwd: piProject, env: piEnv });
 commands.push({ name: "pi-run", ...piRun });
 
 let fileContent = "";

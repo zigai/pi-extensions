@@ -28,6 +28,13 @@ test("platform smoke scripts have working syntax and help", () => {
   assert.match(powershellScript, /param\(/);
   assert.match(powershellScript, /npm run verify/);
   assert.match(powershellScript, /pi-list\.stdout\.txt/);
+  assert.match(powershellScript, /install -l .*--approve/);
+  assert.match(powershellScript, /list --approve/);
+
+  const goalRuntimeScript = readFileSync("scripts/platform-smoke/goal-runtime-smoke.mjs", "utf8");
+  assert.match(goalRuntimeScript, /"install", "-l", installPath, "--approve"/);
+  assert.match(goalRuntimeScript, /"list", "--approve"/);
+  assert.match(goalRuntimeScript, /"--approve", "--model"/);
 
   const help = run(process.execPath, ["scripts/platform-smoke.mjs", "--help"]);
   assert.equal(help.status, 0);
@@ -90,6 +97,7 @@ if (result.windowsWorkRoot !== "C:\\crabbox\\pi-codex-goal") process.exit(1);
 
 test("platform-build command rendering uses POSIX and PowerShell without source-extension shortcuts", () => {
   const code = String.raw`
+import { readFileSync } from "node:fs";
 import { buildTargetBaseArgs } from "./scripts/platform-smoke/crabbox-runner.mjs";
 import { buildGoalRuntimeSmokeCommand, buildPlatformBuildCommand, platformFor } from "./scripts/platform-smoke/targets.mjs";
 const posix = buildPlatformBuildCommand("ubuntu", "pi-codex-goal", 24);
@@ -110,11 +118,13 @@ const result = {
   ubuntuPlatform: platformFor("ubuntu"),
   windowsPlatform: platformFor("windows-native"),
   posixHasVerify: posix.includes("npm run verify"),
-  posixHasPackedInstall: posix.includes("install -l ./node_modules/pi-codex-goal"),
+  posixHasPackedInstall: posix.includes("install -l ./node_modules/pi-codex-goal --approve"),
+  posixHasTrustedList: posix.includes("list --approve"),
   posixNoExtensionShortcut: !/\\bpi\\s+(?:-e|--extension)\\s+\\./.test(posix),
   macosHasVerify: macos.includes("npm run verify"),
   powershellUsesScript: powershell.includes("platform-build-windows.ps1"),
   powershellHasPackage: powershell.includes("pi-codex-goal"),
+  powershellScriptHasApprove: readFileSync("scripts/platform-smoke/platform-build-windows.ps1", "utf8").includes("--approve"),
   powershellNoExtensionShortcut: !/\\bpi\\s+(?:-e|--extension)\\s+\\./.test(powershell),
   goalRuntimeHasDefaultModel: goalRuntime.includes("zai/glm-5.1"),
   goalRuntimeHasPackage: goalRuntime.includes("pi-codex-goal"),

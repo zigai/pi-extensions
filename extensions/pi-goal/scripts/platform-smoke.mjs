@@ -33,7 +33,7 @@ Targets:
   macos, ubuntu, windows-native
 
 Suites:
-  platform-build             npm ci, npm run verify, npm pack, packed pi install, pi list
+  platform-build             npm ci, npm run verify, npm pack, packed pi install/list with project trust approval
   goal-runtime-smoke         real model run through packed pi-codex-goal install
 
 Options:

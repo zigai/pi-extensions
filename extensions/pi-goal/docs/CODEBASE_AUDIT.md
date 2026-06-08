@@ -90,7 +90,7 @@ Coverage is **integration-heavy** via `test/support/runtime-harness.ts` and scen
 | `src/*.ts` modules | 38 |
 | Largest modules (lines) | `stale-queued-work-reducer.ts` ~420, `state.ts` ~377, `queued-goal-work.ts` ~383 |
 | Test files | 24 |
-| Pi dev baseline | `@earendil-works/*` 0.78.1 |
+| Pi dev baseline | `@earendil-works/*` 0.79.0 |
 
 Dependency graph is acyclic: handlers → controller ports → state/persistence/recovery; stale-work subsystems do not import runtime handlers.
 

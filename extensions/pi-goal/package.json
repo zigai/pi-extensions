@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-goal",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "Codex-style goal tracking and continuation for pi.",
   "type": "module",
   "author": "Mitch Fultz (https://github.com/fitchmultz)",
@@ -71,8 +71,8 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.78.1",
-    "@earendil-works/pi-coding-agent": "0.78.1",
+    "@earendil-works/pi-ai": "0.79.0",
+    "@earendil-works/pi-coding-agent": "0.79.0",
     "@types/node": "^25.9.1",
     "tsx": "^4.22.3",
     "typebox": "1.1.39",
