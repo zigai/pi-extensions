@@ -42,14 +42,39 @@ export function getTypedCommandRegistry(): TypedCommandRegistry {
  *
  * @internal `registerTypedCommand` calls this automatically.
  */
+function notifyRegistryListeners(registry: TypedCommandRegistry): void {
+    for (const listener of registry.listeners) {
+        listener();
+    }
+}
+
 export function registerTypedCommandMetadata<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
 ): void {
     const registry = getTypedCommandRegistry();
     registry.commands.set(command.name, command as RegisteredTypedCommand);
-    for (const listener of registry.listeners) {
-        listener();
+    notifyRegistryListeners(registry);
+}
+
+/** Store typed skill metadata under its `skill:<name>` invocation. */
+export function registerTypedSkillMetadata(command: RegisteredTypedCommand): void {
+    const registry = getTypedCommandRegistry();
+    registry.commands.set(command.name, command);
+    notifyRegistryListeners(registry);
+}
+
+/** Replace all typed skill records while preserving extension-registered typed commands. */
+export function replaceTypedSkillMetadata(commands: RegisteredTypedCommand[]): void {
+    const registry = getTypedCommandRegistry();
+    for (const [name, command] of registry.commands) {
+        if ((command as { source?: unknown }).source === "skill" || name.startsWith("skill:")) {
+            registry.commands.delete(name);
+        }
     }
+    for (const command of commands) {
+        registry.commands.set(command.name, command);
+    }
+    notifyRegistryListeners(registry);
 }
 
 /** Look up a registered typed command by slash command name, without the leading `/`. */

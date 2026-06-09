@@ -12,6 +12,7 @@ import {
     isTypedCommandEnabled,
     onTypedCommandsChanged,
     registerTypedCommandMetadata,
+    replaceTypedSkillMetadata,
 } from "./registry.js";
 import { getPiTypedCommandsSettings } from "./settings.js";
 import type {
@@ -25,12 +26,24 @@ import type {
 } from "./types.js";
 import { formatDetailedHelp, formatHelperLineParts } from "./usage.js";
 import { openArgumentForm } from "./form.js";
+import {
+    isTypedSkillCommand,
+    readTypedSkillMetadata,
+    renderTypedSkillInvocation,
+    skillPathFromCommand,
+    typedSkillCommandFromMetadata,
+} from "./skills.js";
 
 const WIDGET_KEY = "pi-typed-commands.helper";
 
 type EditorTypedCommandInvocation = {
     command: RegisteredTypedCommand;
     rawArgs: string;
+};
+
+type SkillParseResult = {
+    parsed: ReturnType<typeof parseTypedCommandArgs>;
+    additionalInput: string;
 };
 
 const DEFAULT_FORM_SYMBOLS: Required<TypedCommandFormSymbols> = {
@@ -81,6 +94,11 @@ export { formatCommandUsage, formatDetailedHelp, formatHelperLine } from "./usag
 export { getTypedCommand, getTypedCommands } from "./registry.js";
 export { parseTypedCommandArgs } from "./parser.js";
 export { getPiTypedCommandsSettings } from "./settings.js";
+export {
+    normalizeSkillArguments,
+    parseSkillMarkdown,
+    renderTypedSkillInvocation,
+} from "./skills.js";
 
 function notifyIssues(ctx: ExtensionCommandContext, messages: string[]): void {
     if (messages.length === 0) {
@@ -286,15 +304,103 @@ function helperCommandForEditorText(
     return command;
 }
 
-async function openEditorCommandForm(ctx: ExtensionContext): Promise<void> {
+function parseSkillArguments(command: RegisteredTypedCommand, rawArgs: string): SkillParseResult {
+    const parsed = parseTypedCommandArgs(command, rawArgs);
+    const additionalTokens: string[] = [];
+    parsed.issues = parsed.issues.filter((issue) => {
+        if (issue.kind !== "unexpected-positional") {
+            return true;
+        }
+        if (issue.token !== undefined) {
+            additionalTokens.push(issue.token);
+        }
+        return false;
+    });
+    return {
+        parsed,
+        additionalInput: additionalTokens.join(" "),
+    };
+}
+
+async function renderTypedSkillInput(
+    command: RegisteredTypedCommand,
+    rawArgs: string,
+    ctx: ExtensionCommandContext,
+    formMode: FormMode,
+): Promise<string | undefined> {
+    if (!isTypedSkillCommand(command)) {
+        return undefined;
+    }
+
+    const { parsed, additionalInput } = parseSkillArguments(command, rawArgs);
+    if (parsed.mode === "help") {
+        ctx.ui.notify(formatDetailedHelp(command), "info");
+        return undefined;
+    }
+
+    const issueMessages = parsed.issues.map((item) => item.message);
+    let values = parsed.values;
+
+    let openForm = shouldOpenForm(command, issueMessages);
+    const hasMissingRequired = hasIssuesOfKind(parsed, ["missing-required"]);
+    if (hasMissingRequired && command.openFormWhenMissingRequired) {
+        openForm = true;
+    }
+
+    if (openForm) {
+        if (!ctx.hasUI) {
+            notifyIssues(ctx, issueMessages);
+            return undefined;
+        }
+        const collected = await openArgumentForm(command, parsed, formMode, ctx);
+        if (collected === undefined) {
+            return undefined;
+        }
+        values = collected;
+    } else if (issueMessages.length > 0) {
+        notifyIssues(ctx, issueMessages);
+        return undefined;
+    }
+
+    return renderTypedSkillInvocation({
+        skill: command.skill,
+        values,
+        additionalInput,
+    });
+}
+
+async function transformTypedSkillInput(
+    text: string,
+    ctx: ExtensionCommandContext,
+    formMode: FormMode = "missing",
+): Promise<string | undefined> {
+    const invocation = commandInvocationForEditorText(text, ctx.cwd, ctx);
+    if (invocation === undefined || !isTypedSkillCommand(invocation.command)) {
+        return undefined;
+    }
+    return renderTypedSkillInput(invocation.command, invocation.rawArgs, ctx, formMode);
+}
+
+async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
     const invocation = commandInvocationForEditorText(ctx.ui.getEditorText(), ctx.cwd, ctx);
     if (invocation === undefined) {
         return;
     }
 
     const { command, rawArgs } = invocation;
+    const commandCtx = ctx as ExtensionCommandContext;
+
+    if (isTypedSkillCommand(command)) {
+        const transformed = await renderTypedSkillInput(command, rawArgs, commandCtx, "all");
+        if (transformed === undefined) {
+            return;
+        }
+        ctx.ui.setEditorText("");
+        pi.sendUserMessage(transformed);
+        return;
+    }
+
     if (command.shouldUseTypedArgs !== undefined) {
-        const commandCtx = ctx as ExtensionCommandContext;
         if (!command.shouldUseTypedArgs(rawArgs, commandCtx)) {
             if (command.fallbackHandler !== undefined) {
                 ctx.ui.setEditorText("");
@@ -310,7 +416,6 @@ async function openEditorCommandForm(ctx: ExtensionContext): Promise<void> {
         return;
     }
 
-    const commandCtx = ctx as ExtensionCommandContext;
     const args = await openArgumentForm(command, parsed, "all", commandCtx);
     if (args === undefined) {
         return;
@@ -318,6 +423,25 @@ async function openEditorCommandForm(ctx: ExtensionContext): Promise<void> {
 
     ctx.ui.setEditorText("");
     await command.handler(args as never, commandCtx);
+}
+
+function refreshTypedSkills(pi: ExtensionAPI): void {
+    const commands: RegisteredTypedCommand[] = [];
+    for (const command of pi.getCommands()) {
+        const skillPath = skillPathFromCommand(command);
+        if (skillPath === undefined) {
+            continue;
+        }
+        try {
+            const metadata = readTypedSkillMetadata(skillPath);
+            if (metadata !== undefined) {
+                commands.push(typedSkillCommandFromMetadata(metadata));
+            }
+        } catch {
+            // Skill validation belongs to Pi's skill loader; typed metadata failures are ignored.
+        }
+    }
+    replaceTypedSkillMetadata(commands);
 }
 
 function setHelperWidget(ctx: ExtensionContext, command: RegisteredTypedCommand | undefined): void {
@@ -361,6 +485,8 @@ class TypedCommandUxSession {
     private cleanup: Array<() => void> = [];
     private refreshTimer: NodeJS.Timeout | undefined;
     private openingForm = false;
+
+    constructor(private readonly pi: ExtensionAPI) {}
 
     start(ctx: ExtensionContext): void {
         this.stop();
@@ -433,7 +559,7 @@ class TypedCommandUxSession {
         }
 
         this.openingForm = true;
-        void openEditorCommandForm(ctx).finally(() => {
+        void openEditorCommandForm(this.pi, ctx).finally(() => {
             this.openingForm = false;
             this.scheduleRefresh(ctx);
         });
@@ -477,14 +603,26 @@ export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUx
         return;
     }
 
-    const session = new TypedCommandUxSession();
+    const session = new TypedCommandUxSession(pi);
 
     pi.on("session_start", async (_event, ctx) => {
+        refreshTypedSkills(pi);
         session.start(ctx);
     });
 
-    pi.on("input", (_event, ctx) => {
+    pi.on("input", async (event, ctx) => {
         session.clearWidget(ctx);
+        const transformed = await transformTypedSkillInput(
+            event.text,
+            ctx as ExtensionCommandContext,
+        );
+        if (transformed !== undefined) {
+            if (event.images !== undefined) {
+                return { action: "transform", text: transformed, images: event.images } as const;
+            }
+            return { action: "transform", text: transformed } as const;
+        }
+        return { action: "continue" } as const;
     });
 
     pi.on("session_shutdown", async (_event, ctx) => {
