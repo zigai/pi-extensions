@@ -13,7 +13,7 @@ import {
     onTypedCommandsChanged,
     registerTypedCommandMetadata,
 } from "./registry.js";
-import { getPiCommandArgsSettings } from "./settings.js";
+import { getPiTypedCommandsSettings } from "./settings.js";
 import type {
     ArgumentDefinitions,
     InferArguments,
@@ -26,7 +26,7 @@ import type {
 import { formatDetailedHelp, formatHelperLineParts } from "./usage.js";
 import { openArgumentForm } from "./form.js";
 
-const WIDGET_KEY = "pi-command-args.helper";
+const WIDGET_KEY = "pi-typed-commands.helper";
 
 type EditorTypedCommandInvocation = {
     command: RegisteredTypedCommand;
@@ -80,7 +80,7 @@ export type {
 export { formatCommandUsage, formatDetailedHelp, formatHelperLine } from "./usage.js";
 export { getTypedCommand, getTypedCommands } from "./registry.js";
 export { parseTypedCommandArgs } from "./parser.js";
-export { getPiCommandArgsSettings } from "./settings.js";
+export { getPiTypedCommandsSettings } from "./settings.js";
 
 function notifyIssues(ctx: ExtensionCommandContext, messages: string[]): void {
     if (messages.length === 0) {
@@ -146,7 +146,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
 /**
  * Register a Pi slash command with typed named arguments.
  *
- * The command is still registered with Pi's raw command system, but pi-command-args parses,
+ * The command is still registered with Pi's raw command system, but pi-typed-commands parses,
  * validates, defaults, completes, and optionally prompts for arguments before calling `handler`.
  */
 export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
@@ -331,7 +331,7 @@ function setHelperWidget(ctx: ExtensionContext, command: RegisteredTypedCommand 
         (_tui, theme) => ({
             render(width: number): string[] {
                 const content = formatHelperLineParts(command, {
-                    showTypes: getPiCommandArgsSettings(ctx.cwd).uxShowTypes,
+                    showTypes: getPiTypedCommandsSettings(ctx.cwd).uxShowTypes,
                 })
                     .map((part) => {
                         if (part.kind === "command") {
@@ -367,7 +367,7 @@ class TypedCommandUxSession {
         if (!ctx.hasUI) {
             return;
         }
-        if (!getPiCommandArgsSettings(ctx.cwd).uxEnabled) {
+        if (!getPiTypedCommandsSettings(ctx.cwd).uxEnabled) {
             return;
         }
 
@@ -469,7 +469,7 @@ class TypedCommandUxSession {
  * Install the live editor helper, typed autocomplete bridge, and Tab-to-form shortcut.
  *
  * This is installed automatically by the default extension export. Extension authors usually only
- * call it directly when composing pi-command-args into a custom extension entrypoint.
+ * call it directly when composing pi-typed-commands into a custom extension entrypoint.
  */
 export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUxOptions): void {
     const resolvedOptions = options ?? {};
@@ -494,9 +494,9 @@ export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUx
 }
 
 function installWidgetShowcaseCommand(pi: ExtensionAPI): void {
-    registerTypedCommand(pi, "command-args-demo", {
-        description: "Showcase every pi-command-args dense-form widget",
-        formTitle: "Command Args Demo",
+    registerTypedCommand(pi, "typed-commands-demo", {
+        description: "Showcase every pi-typed-commands dense-form widget",
+        formTitle: "Typed Commands Demo",
         args: {
             text: {
                 type: "string",
@@ -584,7 +584,7 @@ function installWidgetShowcaseCommand(pi: ExtensionAPI): void {
 }
 
 /** Pi extension entrypoint that installs the demo command and typed-args UX. */
-export default function piCommandArgsExtension(pi: ExtensionAPI): void {
+export default function piTypedCommandsExtension(pi: ExtensionAPI): void {
     installWidgetShowcaseCommand(pi);
     installTypedCommandUx(pi);
 }

@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getPiCommandArgsSettings } from "./settings.js";
+import { getPiTypedCommandsSettings } from "./settings.js";
 import type { ArgumentDefinitions, RegisteredTypedCommand, TypedCommandToggle } from "./types.js";
 
 type RegistryListener = () => void;
@@ -9,7 +9,7 @@ type TypedCommandRegistry = {
     listeners: Set<RegistryListener>;
 };
 
-const REGISTRY_KEY = Symbol.for("pi-command-args.registry");
+const REGISTRY_KEY = Symbol.for("pi-typed-commands.registry");
 
 type GlobalWithRegistry = typeof globalThis & {
     [REGISTRY_KEY]?: TypedCommandRegistry;
@@ -96,7 +96,7 @@ export function isTypedCommandEnabled<TDefinitions extends ArgumentDefinitions>(
     ctx?: ExtensionContext,
     cwd?: string,
 ): boolean {
-    if (!getPiCommandArgsSettings(cwd ?? ctx?.cwd).enabled) {
+    if (!getPiTypedCommandsSettings(cwd ?? ctx?.cwd).enabled) {
         return false;
     }
     return isToggleEnabled(command.typedArgsEnabled, ctx);

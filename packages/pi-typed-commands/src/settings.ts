@@ -2,8 +2,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Resolved pi-command-args settings after defaults, files, and environment overrides. */
-export type PiCommandArgsSettings = {
+/** Resolved pi-typed-commands settings after defaults, files, and environment overrides. */
+export type PiTypedCommandsSettings = {
     /** Whether typed parsing, completions, forms, and helper UX are enabled. */
     enabled: boolean;
     /** Whether the live helper, typed autocomplete bridge, and Tab-to-form UX are enabled. */
@@ -13,7 +13,7 @@ export type PiCommandArgsSettings = {
 };
 
 type RawSettings = {
-    piCommandArgs?: {
+    piTypedCommands?: {
         enabled?: boolean;
         uxEnabled?: boolean;
         uxShowTypes?: boolean;
@@ -75,9 +75,9 @@ function parseSettings(path: string): CachedSettings {
         const raw = JSON.parse(readFileSync(path, "utf8")) as RawSettings;
         const settings: CachedSettings = {
             mtimeMs: stat.mtimeMs,
-            enabled: raw.piCommandArgs?.enabled,
-            uxEnabled: raw.piCommandArgs?.uxEnabled,
-            uxShowTypes: raw.piCommandArgs?.uxShowTypes,
+            enabled: raw.piTypedCommands?.enabled,
+            uxEnabled: raw.piTypedCommands?.uxEnabled,
+            uxShowTypes: raw.piTypedCommands?.uxShowTypes,
         };
         cache.set(path, settings);
         return settings;
@@ -94,10 +94,10 @@ function parseSettings(path: string): CachedSettings {
 }
 
 function applySettings(
-    current: PiCommandArgsSettings,
+    current: PiTypedCommandsSettings,
     next: CachedSettings,
-): PiCommandArgsSettings {
-    const merged: PiCommandArgsSettings = { ...current };
+): PiTypedCommandsSettings {
+    const merged: PiTypedCommandsSettings = { ...current };
     if (next.enabled !== undefined) {
         merged.enabled = next.enabled;
     }
@@ -111,12 +111,12 @@ function applySettings(
 }
 
 /**
- * Resolve pi-command-args settings for a working directory.
+ * Resolve pi-typed-commands settings for a working directory.
  *
  * Precedence is defaults, agent settings, project settings, then environment variables.
  */
-export function getPiCommandArgsSettings(cwd = process.cwd()): PiCommandArgsSettings {
-    let settings: PiCommandArgsSettings = {
+export function getPiTypedCommandsSettings(cwd = process.cwd()): PiTypedCommandsSettings {
+    let settings: PiTypedCommandsSettings = {
         enabled: true,
         uxEnabled: true,
         uxShowTypes: false,
@@ -125,17 +125,17 @@ export function getPiCommandArgsSettings(cwd = process.cwd()): PiCommandArgsSett
     settings = applySettings(settings, parseSettings(agentSettingsPath()));
     settings = applySettings(settings, parseSettings(projectSettingsPath(cwd)));
 
-    const envEnabled = readEnvBoolean("PI_COMMAND_ARGS");
+    const envEnabled = readEnvBoolean("PI_TYPED_COMMANDS");
     if (envEnabled !== undefined) {
         settings.enabled = envEnabled;
     }
 
-    const envUxEnabled = readEnvBoolean("PI_COMMAND_ARGS_UX");
+    const envUxEnabled = readEnvBoolean("PI_TYPED_COMMANDS_UX");
     if (envUxEnabled !== undefined) {
         settings.uxEnabled = envUxEnabled;
     }
 
-    const envUxShowTypes = readEnvBoolean("PI_COMMAND_ARGS_UX_SHOW_TYPES");
+    const envUxShowTypes = readEnvBoolean("PI_TYPED_COMMANDS_UX_SHOW_TYPES");
     if (envUxShowTypes !== undefined) {
         settings.uxShowTypes = envUxShowTypes;
     }

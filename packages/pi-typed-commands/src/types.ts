@@ -3,7 +3,7 @@ import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/
 /**
  * Built-in dense-form widget names for typed command arguments.
  *
- * Omit `ui.widget` to let pi-command-args choose a widget from the argument type.
+ * Omit `ui.widget` to let pi-typed-commands choose a widget from the argument type.
  */
 export type ArgumentWidget =
     | "text"
