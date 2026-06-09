@@ -194,9 +194,6 @@ export type TypedCommandRawSelector = (rawArgs: string, ctx: ExtensionCommandCon
 /** Dense-form title, or a callback that derives one from the command context. */
 export type TypedCommandFormTitle = string | ((ctx: ExtensionCommandContext) => string);
 
-/** @deprecated Use TypedCommandFormTitle. */
-export type TypedCommandWizardTitle = TypedCommandFormTitle;
-
 /** Glyphs used for checkbox and radio widgets in the dense form. */
 export type TypedCommandFormSymbols = {
     selectedCheckbox?: string;
@@ -216,26 +213,14 @@ export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     typedArgsEnabled?: TypedCommandToggle;
     /** Return `false` to bypass typed parsing for a specific raw invocation. */
     shouldUseTypedArgs?: TypedCommandRawSelector;
-    /** Token that opens the full argument form, defaults to `?`. */
-    manualFormToken?: string;
-    /** @deprecated Use manualFormToken. */
-    manualWizardToken?: string;
-    /** Token that shows detailed help, defaults to `??`; `--help` and `-h` also work. */
-    helpToken?: string;
     /** Title shown at the top of the dense argument form. */
     formTitle?: TypedCommandFormTitle;
-    /** @deprecated Use formTitle. */
-    wizardTitle?: TypedCommandWizardTitle;
     /** Override checkbox and radio glyphs in the dense form. */
     formSymbols?: TypedCommandFormSymbols;
     /** Open the argument form automatically when provided arguments are invalid. */
     openFormWhenInvalid?: boolean;
-    /** @deprecated Use openFormWhenInvalid. */
-    openWizardWhenInvalid?: boolean;
     /** Open the argument form automatically when required arguments are missing. */
     openFormWhenMissingRequired?: boolean;
-    /** @deprecated Use openFormWhenMissingRequired. */
-    openWizardWhenMissingRequired?: boolean;
 };
 
 /** Normalized command metadata stored in the typed command registry. */
@@ -244,17 +229,9 @@ export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = Ar
         /** Slash command name without the leading `/`. */
         name: string;
         typedArgsEnabled: TypedCommandToggle;
-        manualFormToken: string;
-        /** @deprecated Use manualFormToken. */
-        manualWizardToken: string;
-        helpToken: string;
         formSymbols: Required<TypedCommandFormSymbols>;
         openFormWhenInvalid: boolean;
-        /** @deprecated Use openFormWhenInvalid. */
-        openWizardWhenInvalid: boolean;
         openFormWhenMissingRequired: boolean;
-        /** @deprecated Use openFormWhenMissingRequired. */
-        openWizardWhenMissingRequired: boolean;
     };
 
 export type ParseIssueKind =
@@ -280,12 +257,9 @@ export type ParsedCommandArguments = {
     /** Argument names explicitly provided by the user. */
     provided: Set<string>;
     issues: ParseIssue[];
-    /** Requested action: run handler, open form, or show help. */
-    mode: "run" | "form" | "wizard" | "help";
+    /** Requested action: run handler or show help. */
+    mode: "run" | "help";
 };
 
 /** Which fields the argument form should show. */
 export type FormMode = "missing" | "all";
-
-/** @deprecated Use FormMode. */
-export type WizardMode = FormMode;

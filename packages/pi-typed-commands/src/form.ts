@@ -946,7 +946,7 @@ function resolveFormTitle<TDefinitions extends Record<string, ArgumentDefinition
     command: RegisteredTypedCommand<TDefinitions>,
     ctx: ExtensionCommandContext,
 ): string {
-    const title = command.formTitle ?? command.wizardTitle;
+    const title = command.formTitle;
     if (typeof title === "function") {
         return title(ctx);
     }

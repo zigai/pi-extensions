@@ -28,6 +28,10 @@ type ParsedFlagToken = {
     isNoFlag?: boolean;
 };
 
+function isHelpToken(token: string): boolean {
+    return token === "--help" || token === "-h";
+}
+
 function tokenize(input: string): TokenizeResult {
     const tokens: string[] = [];
     let current = "";
@@ -151,13 +155,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
 
     parse(): ParsedCommandArguments {
         const trimmed = this.rawArgs.trim();
-        if (trimmed === this.command.manualFormToken) {
-            this.result.mode = "form";
-            this.applyDefaults();
-            return this.result;
-        }
-
-        if (trimmed === this.command.helpToken || trimmed === "--help" || trimmed === "-h") {
+        if (isHelpToken(trimmed)) {
             this.result.mode = "help";
             this.applyDefaults();
             return this.result;
@@ -186,14 +184,8 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
 
         this.tokens = [];
         for (const token of tokenized.tokens) {
-            if (token === this.command.helpToken || token === "--help" || token === "-h") {
+            if (isHelpToken(token)) {
                 this.result.mode = "help";
-                continue;
-            }
-            if (token === this.command.manualFormToken) {
-                if (this.result.mode !== "help") {
-                    this.result.mode = "form";
-                }
                 continue;
             }
             this.tokens.push(token);
@@ -386,7 +378,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
  * Parse a raw Pi slash-command argument string for a registered typed command.
  *
  * The result contains parsed values, applied defaults, provided argument names, issues, and the
- * requested mode (`run`, `form`, or `help`). This function does not open UI or call handlers.
+ * requested mode (`run` or `help`). This function does not open UI or call handlers.
  */
 export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,

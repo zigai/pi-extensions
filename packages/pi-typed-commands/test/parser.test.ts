@@ -40,9 +40,6 @@ const command: RegisteredTypedCommand = {
     },
     handler: () => {},
     typedArgsEnabled: true,
-    manualFormToken: "?",
-    manualWizardToken: "?",
-    helpToken: "??",
     formSymbols: {
         selectedCheckbox: "■",
         unselectedCheckbox: "□",
@@ -50,9 +47,7 @@ const command: RegisteredTypedCommand = {
         unselectedRadio: "○",
     },
     openFormWhenInvalid: true,
-    openWizardWhenInvalid: true,
     openFormWhenMissingRequired: true,
-    openWizardWhenMissingRequired: true,
 };
 
 const branchCommand: RegisteredTypedCommand = {
@@ -132,16 +127,12 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.base, "main");
     });
 
-    void it("recognizes form and help tokens", () => {
-        const form = parseTypedCommandArgs(command, "?");
-        const help = parseTypedCommandArgs(command, "??");
-        const formWithArgs = parseTypedCommandArgs(command, "--env staging ?");
+    void it("recognizes --help and -h", () => {
+        const longHelp = parseTypedCommandArgs(command, "--help");
+        const shortHelp = parseTypedCommandArgs(command, "-h");
 
-        assert.equal(form.mode, "form");
-        assert.equal(help.mode, "help");
-        assert.equal(formWithArgs.mode, "form");
-        assert.deepEqual(formWithArgs.issues, []);
-        assert.equal(formWithArgs.values.env, "staging");
+        assert.equal(longHelp.mode, "help");
+        assert.equal(shortHelp.mode, "help");
     });
 });
 

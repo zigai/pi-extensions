@@ -188,7 +188,6 @@ export function formatDetailedHelp<TDefinitions extends Record<string, ArgumentD
         }
     }
 
-    lines.push("", `Use /${command.name} ${command.manualFormToken} to open the argument form.`);
     return lines.join("\n");
 }
 

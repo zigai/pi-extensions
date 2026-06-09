@@ -74,9 +74,7 @@ export type {
     TypedCommandRawSelector,
     TypedCommandToggle,
     TypedCommandFormTitle,
-    TypedCommandWizardTitle,
     FormMode,
-    WizardMode,
 } from "./types.js";
 
 export { formatCommandUsage, formatDetailedHelp, formatHelperLine } from "./usage.js";
@@ -94,11 +92,7 @@ function notifyIssues(ctx: ExtensionCommandContext, messages: string[]): void {
 function shouldOpenForm<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     parsedIssues: string[],
-    parsedMode: "run" | "form" | "wizard" | "help",
 ): boolean {
-    if (parsedMode === "form" || parsedMode === "wizard") {
-        return true;
-    }
     if (parsedIssues.length === 0) {
         return false;
     }
@@ -117,15 +111,16 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     }
 
     const issueMessages = parsed.issues.map((item) => item.message);
-    let formMode: FormMode = "missing";
-    if (parsed.mode === "form" || parsed.mode === "wizard") {
-        formMode = "all";
-    }
+    const formMode: FormMode = "missing";
 
-    let openForm = shouldOpenForm(command, issueMessages, parsed.mode);
+    let openForm = shouldOpenForm(command, issueMessages);
     const hasMissingRequired = hasIssuesOfKind(parsed, ["missing-required"]);
     if (hasMissingRequired && command.openFormWhenMissingRequired) {
         openForm = true;
+    }
+    const hasStructuralIssues = parsed.issues.some((item) => item.name === undefined);
+    if (hasStructuralIssues) {
+        openForm = false;
     }
 
     if (openForm) {
@@ -159,12 +154,9 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     name: string,
     options: TypedCommandOptions<TDefinitions>,
 ): void {
-    const manualFormToken = options.manualFormToken ?? options.manualWizardToken ?? "?";
-    const openFormWhenInvalid =
-        options.openFormWhenInvalid ?? options.openWizardWhenInvalid ?? true;
-    const openFormWhenMissingRequired =
-        options.openFormWhenMissingRequired ?? options.openWizardWhenMissingRequired ?? true;
-    const formTitle = options.formTitle ?? options.wizardTitle;
+    const openFormWhenInvalid = options.openFormWhenInvalid ?? true;
+    const openFormWhenMissingRequired = options.openFormWhenMissingRequired ?? true;
+    const formTitle = options.formTitle;
 
     const command: RegisteredTypedCommand<TDefinitions> = {
         name,
@@ -172,19 +164,13 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
         args: options.args,
         handler: options.handler,
         typedArgsEnabled: options.typedArgsEnabled ?? true,
-        manualFormToken,
-        manualWizardToken: manualFormToken,
-        helpToken: options.helpToken ?? "??",
         formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...options.formSymbols },
         openFormWhenInvalid,
-        openWizardWhenInvalid: openFormWhenInvalid,
         openFormWhenMissingRequired,
-        openWizardWhenMissingRequired: openFormWhenMissingRequired,
     };
 
     if (formTitle !== undefined) {
         command.formTitle = formTitle;
-        command.wizardTitle = formTitle;
     }
     if (options.fallbackHandler !== undefined) {
         command.fallbackHandler = options.fallbackHandler;
