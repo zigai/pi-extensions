@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getTypedAutocompleteSuggestions } from "../src/completions.js";
-import { parseTypedCommandArgs, type RegisteredTypedCommand } from "../src/index.js";
+import {
+    formatCommandUsage,
+    parseTypedCommandArgs,
+    type RegisteredTypedCommand,
+} from "../src/index.js";
 import { registerTypedCommandMetadata } from "../src/registry.js";
 
 const command: RegisteredTypedCommand = {
@@ -29,13 +33,56 @@ const command: RegisteredTypedCommand = {
             min: 1,
             max: 5,
         },
+        tags: {
+            type: "multi-enum",
+            values: ["api", "web", "worker"],
+        },
     },
     handler: () => {},
     typedArgsEnabled: true,
+    manualFormToken: "?",
     manualWizardToken: "?",
     helpToken: "??",
+    formSymbols: {
+        selectedCheckbox: "■",
+        unselectedCheckbox: "□",
+        selectedRadio: "●",
+        unselectedRadio: "○",
+    },
+    openFormWhenInvalid: true,
     openWizardWhenInvalid: true,
+    openFormWhenMissingRequired: true,
     openWizardWhenMissingRequired: true,
+};
+
+const branchCommand: RegisteredTypedCommand = {
+    ...command,
+    name: "branch",
+    description: "Manage branches",
+    args: {
+        action: {
+            type: "enum",
+            values: ["create", "delete", "rename"],
+            required: true,
+            positional: 0,
+            description: "Branch action",
+        },
+        name: {
+            type: "string",
+            required: true,
+            positional: 1,
+            description: "Branch name",
+        },
+        base: {
+            type: "string",
+            placeholder: "branch",
+            description: "Source branch",
+        },
+        checkout: {
+            type: "boolean",
+            description: "Check out after create",
+        },
+    },
 };
 
 void describe("parseTypedCommandArgs", () => {
@@ -69,16 +116,48 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.dryRun, false);
     });
 
-    void it("recognizes wizard and help tokens", () => {
-        const wizard = parseTypedCommandArgs(command, "?");
-        const help = parseTypedCommandArgs(command, "??");
-        const wizardWithArgs = parseTypedCommandArgs(command, "--env staging ?");
+    void it("parses multi-enum comma lists and repeated flags", () => {
+        const parsed = parseTypedCommandArgs(command, "--env dev --tags api,web --tags worker");
 
-        assert.equal(wizard.mode, "wizard");
+        assert.deepEqual(parsed.issues, []);
+        assert.deepEqual(parsed.values.tags, ["api", "web", "worker"]);
+    });
+
+    void it("parses positional args before named flags", () => {
+        const parsed = parseTypedCommandArgs(branchCommand, "create feature/foo --base main");
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.action, "create");
+        assert.equal(parsed.values.name, "feature/foo");
+        assert.equal(parsed.values.base, "main");
+    });
+
+    void it("recognizes form and help tokens", () => {
+        const form = parseTypedCommandArgs(command, "?");
+        const help = parseTypedCommandArgs(command, "??");
+        const formWithArgs = parseTypedCommandArgs(command, "--env staging ?");
+
+        assert.equal(form.mode, "form");
         assert.equal(help.mode, "help");
-        assert.equal(wizardWithArgs.mode, "wizard");
-        assert.deepEqual(wizardWithArgs.issues, []);
-        assert.equal(wizardWithArgs.values.env, "staging");
+        assert.equal(formWithArgs.mode, "form");
+        assert.deepEqual(formWithArgs.issues, []);
+        assert.equal(formWithArgs.values.env, "staging");
+    });
+});
+
+void describe("formatCommandUsage", () => {
+    void it("renders positional args before flags", () => {
+        assert.equal(
+            formatCommandUsage(branchCommand),
+            "/branch action:create | delete | rename name [--base=branch] [--checkout]",
+        );
+    });
+
+    void it("can render explicit types", () => {
+        assert.equal(
+            formatCommandUsage(branchCommand, { showTypes: true }),
+            "/branch action:create | delete | rename name:string [--base=string] [--checkout]",
+        );
     });
 });
 
