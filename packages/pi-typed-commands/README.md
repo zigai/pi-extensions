@@ -1,6 +1,6 @@
 # Pi Command Args
 
-This Pi extension adds typed named slash-command arguments with live hints and TUI prompts.
+This Pi extension adds typed named slash-command arguments with live hints and TUI argument forms.
 
 ## Install
 
@@ -73,12 +73,11 @@ Fast path:
 /deploy staging --ref main --dry-run
 ```
 
-Manual TUI prompt flow:
+Manual argument form flow:
 
 ```text
 /deploy<Tab>
 /deploy --env staging<Tab>
-/deploy ?
 ```
 
 When the editor contains a completed typed command, pressing Tab opens the dense form and pre-fills it from any arguments already present.
@@ -86,10 +85,11 @@ When the editor contains a completed typed command, pressing Tab opens the dense
 Detailed help:
 
 ```text
-/deploy ??
+/deploy --help
+/deploy -h
 ```
 
-If a required argument is missing or an argument is invalid, the command opens the TUI prompt flow automatically when UI is available.
+If a required argument is missing or an argument is invalid, the command opens the argument form automatically when UI is available.
 
 ## Supported Arg Types
 
@@ -155,7 +155,7 @@ count: {
 }
 ```
 
-Run `/command-args-demo ?` to open a showcase form containing every supported widget.
+Run `/command-args-demo<Tab>` to open a showcase form containing every supported widget.
 
 ## Disabling Typed-Args Features
 
@@ -217,4 +217,4 @@ For legacy-compatible migrations, a command can also set `shouldUseTypedArgs(raw
 
 ## Notes
 
-Pi's native command API still receives a raw argument string. This package wraps `pi.registerCommand()`, parses and validates the raw args, generates completions, and opens Pi TUI prompts when needed.
+Pi's native command API still receives a raw argument string. This package wraps `pi.registerCommand()`, parses and validates the raw args, generates completions, and opens Pi TUI argument forms when needed.
