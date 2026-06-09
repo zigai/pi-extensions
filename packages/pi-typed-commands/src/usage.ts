@@ -1,43 +1,97 @@
-import { formatFlagName } from "./names.js";
+import { formatFlagName, toKebabCase } from "./names.js";
+import {
+    argumentTypeHint,
+    argumentValueHint,
+    formatArgumentDefault,
+    isPositionalArgument,
+    orderedCommandArgumentEntries,
+} from "./schema.js";
 import type { ArgumentDefinition, RegisteredTypedCommand } from "./types.js";
 
-function valueHint(definition: ArgumentDefinition): string {
-    if (definition.type === "string") {
-        if (definition.placeholder !== undefined) {
-            return definition.placeholder;
-        }
-        return "string";
-    }
+/** Style category for one segment of a typed command usage line. */
+export type CommandUsagePartKind = "label" | "command" | "positional" | "flag" | "detail" | "muted";
 
-    if (definition.type === "number") {
-        if (definition.integer === true) {
-            return "integer";
-        }
-        return "number";
-    }
+/** One renderable segment of a typed command usage line. */
+export type CommandUsagePart = {
+    kind: CommandUsagePartKind;
+    text: string;
+};
 
-    if (definition.type === "boolean") {
-        return "boolean";
-    }
+type UsageFormatOptions = {
+    showTypes?: boolean;
+};
 
-    return definition.values.join("|");
+function positionalHint(
+    name: string,
+    definition: ArgumentDefinition,
+    options: UsageFormatOptions,
+): string {
+    const label = toKebabCase(name);
+    if (definition.type === "enum") {
+        return `${label}:${definition.values.join(" | ")}`;
+    }
+    if (definition.type === "multi-enum") {
+        return `${label}:${definition.values.join(" | ")}`;
+    }
+    if (options.showTypes === true && definition.type !== "boolean") {
+        return `${label}:${argumentTypeHint(definition)}`;
+    }
+    return label;
 }
 
-function formatDefault(definition: ArgumentDefinition): string {
-    if (definition.default === undefined) {
+function flagValueHint(
+    name: string,
+    definition: ArgumentDefinition,
+    options: UsageFormatOptions,
+): string {
+    if (options.showTypes === true) {
+        if (definition.type === "enum") {
+            return definition.values.join(" | ");
+        }
+        if (definition.type === "multi-enum") {
+            return definition.values.join(" | ");
+        }
+        return argumentTypeHint(definition);
+    }
+    if (definition.default !== undefined) {
         return "";
     }
-    return `=${String(definition.default)}`;
+    return definition.placeholder ?? toKebabCase(name);
 }
 
-function formatArgumentUsage(name: string, definition: ArgumentDefinition): string {
+function formatPositionalUsage(
+    name: string,
+    definition: ArgumentDefinition,
+    options: UsageFormatOptions,
+): string {
+    const text = `${positionalHint(name, definition, options)}${formatArgumentDefault(definition)}`;
+    if (definition.required === true) {
+        return text;
+    }
+    return `[${text}]`;
+}
+
+function formatArgumentUsage(
+    name: string,
+    definition: ArgumentDefinition,
+    options: UsageFormatOptions = {},
+): string {
+    if (isPositionalArgument(definition)) {
+        return formatPositionalUsage(name, definition, options);
+    }
+
     const flag = formatFlagName(name);
     let text: string;
 
     if (definition.type === "boolean") {
         text = flag;
     } else {
-        text = `${flag} <${valueHint(definition)}${formatDefault(definition)}>`;
+        const hint = flagValueHint(name, definition, options);
+        if (hint.length === 0) {
+            text = `${flag}${formatArgumentDefault(definition)}`;
+        } else {
+            text = `${flag}=${hint}${formatArgumentDefault(definition)}`;
+        }
     }
 
     if (definition.required === true) {
@@ -47,11 +101,13 @@ function formatArgumentUsage(name: string, definition: ArgumentDefinition): stri
     return `[${text}]`;
 }
 
+/** Format a compact usage string such as `/deploy env [--ref=main]`. */
 export function formatCommandUsage<TDefinitions extends Record<string, ArgumentDefinition>>(
     command: RegisteredTypedCommand<TDefinitions>,
+    options: UsageFormatOptions = {},
 ): string {
-    const parts = Object.entries(command.args).map(([name, definition]) =>
-        formatArgumentUsage(name, definition),
+    const parts = orderedCommandArgumentEntries(command).map(([name, definition]) =>
+        formatArgumentUsage(name, definition, options),
     );
     if (parts.length === 0) {
         return `/${command.name}`;
@@ -59,13 +115,38 @@ export function formatCommandUsage<TDefinitions extends Record<string, ArgumentD
     return `/${command.name} ${parts.join(" ")}`;
 }
 
+/** Format the one-line editor helper text shown below the Pi editor. */
 export function formatHelperLine<TDefinitions extends Record<string, ArgumentDefinition>>(
     command: RegisteredTypedCommand<TDefinitions>,
+    options: UsageFormatOptions = {},
 ): string {
-    const usage = formatCommandUsage(command);
-    return `${usage}  ·  ${command.manualWizardToken} opens form`;
+    return `usage: ${formatCommandUsage(command, options)}`;
 }
 
+/** Format the editor helper as styled text segments for TUI rendering. */
+export function formatHelperLineParts<TDefinitions extends Record<string, ArgumentDefinition>>(
+    command: RegisteredTypedCommand<TDefinitions>,
+    options: UsageFormatOptions = {},
+): CommandUsagePart[] {
+    const parts: CommandUsagePart[] = [
+        { kind: "muted", text: "usage: " },
+        { kind: "command", text: `/${command.name}` },
+    ];
+
+    for (const [name, definition] of orderedCommandArgumentEntries(command)) {
+        parts.push({ kind: "muted", text: " " });
+        const text = formatArgumentUsage(name, definition, options);
+        let kind: CommandUsagePartKind = "flag";
+        if (isPositionalArgument(definition)) {
+            kind = "positional";
+        }
+        parts.push({ kind, text });
+    }
+
+    return parts;
+}
+
+/** Format detailed multi-line help for a registered typed command. */
 export function formatDetailedHelp<TDefinitions extends Record<string, ArgumentDefinition>>(
     command: RegisteredTypedCommand<TDefinitions>,
 ): string {
@@ -78,15 +159,22 @@ export function formatDetailedHelp<TDefinitions extends Record<string, ArgumentD
         `  ${formatCommandUsage(command)}`,
     ];
 
-    const entries = Object.entries(command.args);
+    const entries = orderedCommandArgumentEntries(command);
     if (entries.length > 0) {
         lines.push("", "Arguments:");
         for (const [name, definition] of entries) {
             let label = `  ${formatFlagName(name)}`;
-            if (definition.aliases !== undefined && definition.aliases.length > 0) {
+            if (isPositionalArgument(definition)) {
+                label = `  ${toKebabCase(name)}`;
+            }
+            if (
+                !isPositionalArgument(definition) &&
+                definition.aliases !== undefined &&
+                definition.aliases.length > 0
+            ) {
                 label += ` (${definition.aliases.join(", ")})`;
             }
-            label += `: ${valueHint(definition)}`;
+            label += `: ${argumentValueHint(definition, name)}`;
             if (definition.required === true) {
                 label += ", required";
             }
@@ -100,10 +188,11 @@ export function formatDetailedHelp<TDefinitions extends Record<string, ArgumentD
         }
     }
 
-    lines.push("", `Use /${command.name} ${command.manualWizardToken} to open the argument form.`);
+    lines.push("", `Use /${command.name} ${command.manualFormToken} to open the argument form.`);
     return lines.join("\n");
 }
 
+/** Format issue messages as a bullet list for Pi notifications. */
 export function formatIssues(messages: string[]): string {
     return messages.map((message) => `• ${message}`).join("\n");
 }

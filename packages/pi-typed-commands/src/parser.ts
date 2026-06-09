@@ -1,8 +1,17 @@
-import { formatFlagName, normalizeFlagName, toKebabCase } from "./names.js";
+import { formatFlagName } from "./names.js";
+import {
+    applyArgumentDefaults,
+    booleanFromString,
+    coerceArgumentValue,
+    createArgumentLookup,
+    createParseIssue,
+    findArgumentName,
+    positionalArgumentEntries,
+    type ArgumentLookup,
+} from "./schema.js";
 import type {
     ArgumentDefinition,
     ArgumentDefinitions,
-    ArgumentValue,
     ParsedCommandArguments,
     ParseIssue,
     RegisteredTypedCommand,
@@ -13,9 +22,10 @@ type TokenizeResult = {
     unterminatedQuote: boolean;
 };
 
-type ArgumentLookup = {
-    byFlag: Map<string, string>;
-    definitions: ArgumentDefinitions;
+type ParsedFlagToken = {
+    flag: string;
+    inlineValue?: string;
+    isNoFlag?: boolean;
 };
 
 function tokenize(input: string): TokenizeResult {
@@ -75,26 +85,6 @@ function tokenize(input: string): TokenizeResult {
     };
 }
 
-function createArgumentLookup(definitions: ArgumentDefinitions): ArgumentLookup {
-    const byFlag = new Map<string, string>();
-
-    for (const [name, definition] of Object.entries(definitions)) {
-        byFlag.set(normalizeFlagName(name), name);
-        byFlag.set(toKebabCase(name), name);
-        if (definition.aliases !== undefined) {
-            for (const alias of definition.aliases) {
-                byFlag.set(normalizeFlagName(alias), name);
-            }
-        }
-    }
-
-    return { byFlag, definitions };
-}
-
-function findArgumentName(lookup: ArgumentLookup, flag: string): string | undefined {
-    return lookup.byFlag.get(normalizeFlagName(flag));
-}
-
 function isFlagToken(token: string): boolean {
     if (token === "-") {
         return false;
@@ -103,142 +93,6 @@ function isFlagToken(token: string): boolean {
         return false;
     }
     return token.startsWith("-");
-}
-
-function booleanFromString(value: string): boolean | undefined {
-    const normalized = value.toLowerCase();
-    if (["1", "true", "yes", "y", "on"].includes(normalized)) {
-        return true;
-    }
-    if (["0", "false", "no", "n", "off"].includes(normalized)) {
-        return false;
-    }
-    return undefined;
-}
-
-function issue(
-    kind: ParseIssue["kind"],
-    message: string,
-    name?: string,
-    token?: string,
-): ParseIssue {
-    const result: ParseIssue = { kind, message };
-    if (name !== undefined) {
-        result.name = name;
-    }
-    if (token !== undefined) {
-        result.token = token;
-    }
-    return result;
-}
-
-function coerceValue(
-    definition: ArgumentDefinition,
-    raw: string,
-    name: string,
-): { value?: ArgumentValue; issue?: ParseIssue } {
-    if (definition.type === "string") {
-        return { value: raw };
-    }
-
-    if (definition.type === "boolean") {
-        const parsed = booleanFromString(raw);
-        if (parsed === undefined) {
-            return {
-                issue: issue(
-                    "invalid-value",
-                    `${formatFlagName(name)} expects a boolean value`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        return { value: parsed };
-    }
-
-    if (definition.type === "number") {
-        const parsed = Number(raw);
-        if (!Number.isFinite(parsed)) {
-            return {
-                issue: issue(
-                    "invalid-value",
-                    `${formatFlagName(name)} expects a number`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        if (definition.integer === true && !Number.isInteger(parsed)) {
-            return {
-                issue: issue(
-                    "invalid-value",
-                    `${formatFlagName(name)} expects an integer`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        if (definition.min !== undefined && parsed < definition.min) {
-            return {
-                issue: issue(
-                    "invalid-value",
-                    `${formatFlagName(name)} must be at least ${definition.min}`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        if (definition.max !== undefined && parsed > definition.max) {
-            return {
-                issue: issue(
-                    "invalid-value",
-                    `${formatFlagName(name)} must be at most ${definition.max}`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        return { value: parsed };
-    }
-
-    if (!definition.values.includes(raw)) {
-        return {
-            issue: issue(
-                "invalid-value",
-                `${formatFlagName(name)} must be one of: ${definition.values.join(", ")}`,
-                name,
-                raw,
-            ),
-        };
-    }
-
-    return { value: raw };
-}
-
-function applyDefaults(result: ParsedCommandArguments, definitions: ArgumentDefinitions): void {
-    for (const [name, definition] of Object.entries(definitions)) {
-        if (result.values[name] !== undefined) {
-            continue;
-        }
-        if (definition.default !== undefined) {
-            result.values[name] = definition.default;
-        }
-    }
-}
-
-function addMissingRequiredIssues(
-    result: ParsedCommandArguments,
-    definitions: ArgumentDefinitions,
-): void {
-    for (const [name, definition] of Object.entries(definitions)) {
-        if (definition.required !== true) {
-            continue;
-        }
-        if (result.values[name] !== undefined) {
-            continue;
-        }
-        result.issues.push(issue("missing-required", `${formatFlagName(name)} is required`, name));
-    }
 }
 
 function parseLongFlag(token: string): { flag: string; inlineValue?: string; isNoFlag: boolean } {
@@ -276,188 +130,272 @@ function parseShortFlag(token: string): { flag: string; inlineValue?: string } {
     };
 }
 
-function setBooleanValue(
-    result: ParsedCommandArguments,
-    definition: ArgumentDefinition,
-    name: string,
-    value: boolean,
-    isNoFlag: boolean,
-): boolean {
-    if (definition.type !== "boolean") {
-        if (isNoFlag) {
-            result.issues.push(
-                issue("invalid-value", `${formatFlagName(name)} is not a boolean flag`, name),
-            );
-            return false;
-        }
-        return false;
-    }
-
-    result.values[name] = value;
-    result.provided.add(name);
-    return true;
-}
-
-function consumeFlagValue(
-    result: ParsedCommandArguments,
-    definition: ArgumentDefinition,
-    name: string,
-    rawValue: string,
-): void {
-    const coerced = coerceValue(definition, rawValue, name);
-    if (coerced.issue !== undefined) {
-        result.issues.push(coerced.issue);
-        return;
-    }
-    result.values[name] = coerced.value;
-    result.provided.add(name);
-}
-
-function parseFlagToken(
-    tokens: string[],
-    index: number,
-    lookup: ArgumentLookup,
-    result: ParsedCommandArguments,
-): number {
-    const token = tokens[index];
-    if (token === undefined) {
-        return index + 1;
-    }
-
-    let parsed: { flag: string; inlineValue?: string; isNoFlag?: boolean };
-    if (token.startsWith("--")) {
-        parsed = parseLongFlag(token);
-    } else {
-        parsed = parseShortFlag(token);
-    }
-
-    const name = findArgumentName(lookup, parsed.flag);
-    if (name === undefined) {
-        result.issues.push(
-            issue("unknown-argument", `Unknown argument ${token}`, undefined, token),
-        );
-        return index + 1;
-    }
-
-    const definition = lookup.definitions[name];
-    if (definition === undefined) {
-        result.issues.push(issue("unknown-argument", `Unknown argument ${token}`, name, token));
-        return index + 1;
-    }
-
-    if (parsed.isNoFlag === true) {
-        setBooleanValue(result, definition, name, false, true);
-        return index + 1;
-    }
-
-    if (parsed.inlineValue !== undefined) {
-        consumeFlagValue(result, definition, name, parsed.inlineValue);
-        return index + 1;
-    }
-
-    if (definition.type === "boolean") {
-        const nextToken = tokens[index + 1];
-        if (nextToken !== undefined && !isFlagToken(nextToken)) {
-            const parsedBoolean = booleanFromString(nextToken);
-            if (parsedBoolean !== undefined) {
-                consumeFlagValue(result, definition, name, nextToken);
-                return index + 2;
-            }
-        }
-        setBooleanValue(result, definition, name, true, false);
-        return index + 1;
-    }
-
-    const valueToken = tokens[index + 1];
-    if (valueToken === undefined || isFlagToken(valueToken)) {
-        result.issues.push(
-            issue("missing-value", `${formatFlagName(name)} needs a value`, name, token),
-        );
-        return index + 1;
-    }
-
-    consumeFlagValue(result, definition, name, valueToken);
-    return index + 2;
-}
-
-export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
-    rawArgs: string,
-): ParsedCommandArguments {
-    const trimmed = rawArgs.trim();
-    const result: ParsedCommandArguments = {
+class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
+    private readonly command: RegisteredTypedCommand<TDefinitions>;
+    private readonly rawArgs: string;
+    private readonly result: ParsedCommandArguments = {
         values: {},
         provided: new Set<string>(),
         issues: [],
         mode: "run",
     };
+    private lookup: ArgumentLookup | undefined;
+    private tokens: string[] = [];
+    private index = 0;
+    private positionalIndex = 0;
 
-    if (trimmed === command.manualWizardToken) {
-        result.mode = "wizard";
-        applyDefaults(result, command.args);
-        return result;
+    constructor(command: RegisteredTypedCommand<TDefinitions>, rawArgs: string) {
+        this.command = command;
+        this.rawArgs = rawArgs;
     }
 
-    if (trimmed === command.helpToken || trimmed === "--help" || trimmed === "-h") {
-        result.mode = "help";
-        applyDefaults(result, command.args);
-        return result;
-    }
-
-    const tokenized = tokenize(rawArgs);
-    if (tokenized.unterminatedQuote) {
-        result.issues.push(issue("unterminated-quote", "Unterminated quote in arguments"));
-    }
-
-    const tokens: string[] = [];
-    for (const token of tokenized.tokens) {
-        if (token === command.helpToken || token === "--help" || token === "-h") {
-            result.mode = "help";
-            continue;
+    parse(): ParsedCommandArguments {
+        const trimmed = this.rawArgs.trim();
+        if (trimmed === this.command.manualFormToken) {
+            this.result.mode = "form";
+            this.applyDefaults();
+            return this.result;
         }
-        if (token === command.manualWizardToken) {
-            if (result.mode !== "help") {
-                result.mode = "wizard";
+
+        if (trimmed === this.command.helpToken || trimmed === "--help" || trimmed === "-h") {
+            this.result.mode = "help";
+            this.applyDefaults();
+            return this.result;
+        }
+
+        this.prepareTokens();
+        if (this.result.mode === "help") {
+            this.applyDefaults();
+            return this.result;
+        }
+
+        this.lookup = createArgumentLookup(this.command.args);
+        this.consumeTokens();
+        this.applyDefaults();
+        this.addMissingRequiredIssues();
+        return this.result;
+    }
+
+    private prepareTokens(): void {
+        const tokenized = tokenize(this.rawArgs);
+        if (tokenized.unterminatedQuote) {
+            this.result.issues.push(
+                createParseIssue("unterminated-quote", "Unterminated quote in arguments"),
+            );
+        }
+
+        this.tokens = [];
+        for (const token of tokenized.tokens) {
+            if (token === this.command.helpToken || token === "--help" || token === "-h") {
+                this.result.mode = "help";
+                continue;
             }
-            continue;
+            if (token === this.command.manualFormToken) {
+                if (this.result.mode !== "help") {
+                    this.result.mode = "form";
+                }
+                continue;
+            }
+            this.tokens.push(token);
         }
-        tokens.push(token);
     }
 
-    if (result.mode === "help") {
-        applyDefaults(result, command.args);
-        return result;
+    private consumeTokens(): void {
+        while (this.index < this.tokens.length) {
+            const token = this.tokens[this.index];
+            if (token === undefined) {
+                break;
+            }
+
+            if (isFlagToken(token)) {
+                this.consumeFlagToken(token);
+                continue;
+            }
+
+            this.consumePositionalValue(token);
+            this.index += 1;
+        }
     }
 
-    const lookup = createArgumentLookup(command.args);
-    let index = 0;
-    while (index < tokens.length) {
-        const token = tokens[index];
-        if (token === undefined) {
-            break;
+    private consumeFlagToken(token: string): void {
+        const lookup = this.requireLookup();
+        let parsed: ParsedFlagToken;
+        if (token.startsWith("--")) {
+            parsed = parseLongFlag(token);
+        } else {
+            parsed = parseShortFlag(token);
+        }
+        const name = findArgumentName(lookup, parsed.flag);
+        if (name === undefined) {
+            this.result.issues.push(
+                createParseIssue("unknown-argument", `Unknown argument ${token}`, undefined, token),
+            );
+            this.index += 1;
+            return;
         }
 
-        if (isFlagToken(token)) {
-            index = parseFlagToken(tokens, index, lookup, result);
-            continue;
+        const definition = lookup.definitions[name];
+        if (definition === undefined) {
+            this.result.issues.push(
+                createParseIssue("unknown-argument", `Unknown argument ${token}`, name, token),
+            );
+            this.index += 1;
+            return;
         }
 
-        result.issues.push(
-            issue(
-                "unexpected-positional",
-                `Unexpected positional argument ${token}`,
-                undefined,
-                token,
-            ),
-        );
-        index += 1;
+        if (parsed.isNoFlag === true) {
+            this.setBooleanValue(definition, name, false, true);
+            this.index += 1;
+            return;
+        }
+
+        if (parsed.inlineValue !== undefined) {
+            this.consumeFlagValue(definition, name, parsed.inlineValue);
+            this.index += 1;
+            return;
+        }
+
+        if (definition.type === "boolean") {
+            this.consumeBooleanFlagValue(definition, name);
+            return;
+        }
+
+        const valueToken = this.tokens[this.index + 1];
+        if (valueToken === undefined || isFlagToken(valueToken)) {
+            this.result.issues.push(
+                createParseIssue(
+                    "missing-value",
+                    `${formatFlagName(name)} needs a value`,
+                    name,
+                    token,
+                ),
+            );
+            this.index += 1;
+            return;
+        }
+
+        this.consumeFlagValue(definition, name, valueToken);
+        this.index += 2;
     }
 
-    applyDefaults(result, command.args);
-    addMissingRequiredIssues(result, command.args);
-    return result;
+    private consumeBooleanFlagValue(definition: ArgumentDefinition, name: string): void {
+        const nextToken = this.tokens[this.index + 1];
+        if (nextToken !== undefined && !isFlagToken(nextToken)) {
+            const parsedBoolean = booleanFromString(nextToken);
+            if (parsedBoolean !== undefined) {
+                this.consumeFlagValue(definition, name, nextToken);
+                this.index += 2;
+                return;
+            }
+        }
+        this.setBooleanValue(definition, name, true, false);
+        this.index += 1;
+    }
+
+    private setBooleanValue(
+        definition: ArgumentDefinition,
+        name: string,
+        value: boolean,
+        isNoFlag: boolean,
+    ): boolean {
+        if (definition.type !== "boolean") {
+            if (isNoFlag) {
+                this.result.issues.push(
+                    createParseIssue(
+                        "invalid-value",
+                        `${formatFlagName(name)} is not a boolean flag`,
+                        name,
+                    ),
+                );
+                return false;
+            }
+            return false;
+        }
+
+        this.result.values[name] = value;
+        this.result.provided.add(name);
+        return true;
+    }
+
+    private consumeFlagValue(definition: ArgumentDefinition, name: string, rawValue: string): void {
+        const coerced = coerceArgumentValue(definition, rawValue, name);
+        if (!coerced.ok) {
+            this.result.issues.push(coerced.issue);
+            return;
+        }
+        if (definition.type === "multi-enum" && Array.isArray(coerced.value)) {
+            let current: string[] = [];
+            if (Array.isArray(this.result.values[name])) {
+                current = this.result.values[name];
+            }
+            this.result.values[name] = [...current, ...coerced.value];
+            this.result.provided.add(name);
+            return;
+        }
+
+        this.result.values[name] = coerced.value;
+        this.result.provided.add(name);
+    }
+
+    private consumePositionalValue(token: string): void {
+        const entry = positionalArgumentEntries(this.command.args)[this.positionalIndex];
+        if (entry === undefined) {
+            this.result.issues.push(
+                createParseIssue(
+                    "unexpected-positional",
+                    `Unexpected positional argument ${token}`,
+                    undefined,
+                    token,
+                ),
+            );
+            return;
+        }
+
+        const [name, definition] = entry;
+        this.consumeFlagValue(definition, name, token);
+        this.positionalIndex += 1;
+    }
+
+    private applyDefaults(): void {
+        this.result.values = applyArgumentDefaults(this.command.args, this.result.values);
+    }
+
+    private addMissingRequiredIssues(): void {
+        for (const [name, definition] of Object.entries(this.command.args)) {
+            if (definition.required !== true) {
+                continue;
+            }
+            if (this.result.values[name] !== undefined) {
+                continue;
+            }
+            this.result.issues.push(
+                createParseIssue("missing-required", `${formatFlagName(name)} is required`, name),
+            );
+        }
+    }
+
+    private requireLookup(): ArgumentLookup {
+        if (this.lookup === undefined) {
+            throw new Error("Argument lookup has not been initialized");
+        }
+        return this.lookup;
+    }
 }
 
+/**
+ * Parse a raw Pi slash-command argument string for a registered typed command.
+ *
+ * The result contains parsed values, applied defaults, provided argument names, issues, and the
+ * requested mode (`run`, `form`, or `help`). This function does not open UI or call handlers.
+ */
+export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
+    command: RegisteredTypedCommand<TDefinitions>,
+    rawArgs: string,
+): ParsedCommandArguments {
+    return new ArgumentParser(command, rawArgs).parse();
+}
+
+/** Return whether a parsed command result contains at least one issue of the given kinds. */
 export function hasIssuesOfKind(
     parsed: ParsedCommandArguments,
     kinds: ParseIssue["kind"][],

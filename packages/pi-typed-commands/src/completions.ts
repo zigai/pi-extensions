@@ -1,6 +1,13 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
-import { formatFlagName, normalizeFlagName } from "./names.js";
+import { formatFlagName } from "./names.js";
 import { getTypedCommand, isTypedCommandEnabled } from "./registry.js";
+import {
+    completionValuesForArgument,
+    createArgumentLookup,
+    findArgumentName,
+    isPositionalArgument,
+} from "./schema.js";
 import type { ArgumentDefinition, RegisteredTypedCommand } from "./types.js";
 
 type CommandLineContext = {
@@ -18,26 +25,11 @@ function tokenizeLoose(input: string): string[] {
     return trimmed.split(/\s+/);
 }
 
-function buildFlagLookup<TDefinitions extends Record<string, ArgumentDefinition>>(
-    command: RegisteredTypedCommand<TDefinitions>,
-): Map<string, string> {
-    const lookup = new Map<string, string>();
-    for (const [name, definition] of Object.entries(command.args)) {
-        lookup.set(normalizeFlagName(name), name);
-        if (definition.aliases !== undefined) {
-            for (const alias of definition.aliases) {
-                lookup.set(normalizeFlagName(alias), name);
-            }
-        }
-    }
-    return lookup;
-}
-
 function providedArgumentNames<TDefinitions extends Record<string, ArgumentDefinition>>(
     command: RegisteredTypedCommand<TDefinitions>,
     tokens: string[],
 ): Set<string> {
-    const lookup = buildFlagLookup(command);
+    const lookup = createArgumentLookup(command.args);
     const provided = new Set<string>();
 
     for (const token of tokens) {
@@ -54,7 +46,7 @@ function providedArgumentNames<TDefinitions extends Record<string, ArgumentDefin
             flag = `--${flag.slice(5)}`;
         }
 
-        const name = lookup.get(normalizeFlagName(flag));
+        const name = findArgumentName(lookup, flag);
         if (name !== undefined) {
             provided.add(name);
         }
@@ -79,18 +71,7 @@ function flagItem(name: string, definition: ArgumentDefinition): AutocompleteIte
 }
 
 function argumentValueItems(definition: ArgumentDefinition, query: string): AutocompleteItem[] {
-    if (definition.type === "boolean") {
-        return [
-            { value: "true", label: "true" },
-            { value: "false", label: "false" },
-        ].filter((item) => item.value.startsWith(query));
-    }
-
-    if (definition.type !== "enum") {
-        return [];
-    }
-
-    return definition.values
+    return completionValuesForArgument(definition)
         .filter((value) => value.startsWith(query))
         .map((value) => {
             const item: AutocompleteItem = { value, label: value };
@@ -114,8 +95,8 @@ function valueCompletionForPreviousFlag(
         return undefined;
     }
 
-    const lookup = buildFlagLookup(context.command);
-    const name = lookup.get(normalizeFlagName(context.previousToken));
+    const lookup = createArgumentLookup(context.command.args);
+    const name = findArgumentName(lookup, context.previousToken);
     if (name === undefined) {
         return undefined;
     }
@@ -159,7 +140,7 @@ export function getTypedArgumentCompletions<
 
     const provided = providedArgumentNames(command, tokens);
     const items = Object.entries(command.args)
-        .filter(([name]) => !provided.has(name))
+        .filter(([name, definition]) => !provided.has(name) && !isPositionalArgument(definition))
         .map(([name, definition]) => flagItem(name, definition))
         .filter((item) => item.value.startsWith(query) || item.label.startsWith(query));
 
@@ -174,6 +155,7 @@ function commandLineContext(
     cursorLine: number,
     cursorCol: number,
     cwd?: string,
+    ctx?: ExtensionContext,
 ): CommandLineContext | undefined {
     const line = lines[cursorLine];
     if (line === undefined) {
@@ -195,7 +177,7 @@ function commandLineContext(
     if (command === undefined) {
         return undefined;
     }
-    if (!isTypedCommandEnabled(command, undefined, cwd)) {
+    if (!isTypedCommandEnabled(command, ctx, cwd)) {
         return undefined;
     }
 
@@ -236,8 +218,9 @@ export function getTypedAutocompleteSuggestions(
     cursorLine: number,
     cursorCol: number,
     cwd?: string,
+    ctx?: ExtensionContext,
 ): AutocompleteSuggestions | undefined {
-    const context = commandLineContext(lines, cursorLine, cursorCol, cwd);
+    const context = commandLineContext(lines, cursorLine, cursorCol, cwd, ctx);
     if (context === undefined) {
         return undefined;
     }
@@ -253,7 +236,7 @@ export function getTypedAutocompleteSuggestions(
     const tokens = tokenizeLoose(context.argsBeforeCursor);
     const provided = providedArgumentNames(context.command, tokens);
     const flagItems = Object.entries(context.command.args)
-        .filter(([name]) => !provided.has(name))
+        .filter(([name, definition]) => !provided.has(name) && !isPositionalArgument(definition))
         .map(([name, definition]) => flagItem(name, definition))
         .filter(
             (item) =>
