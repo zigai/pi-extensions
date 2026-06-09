@@ -1,6 +1,6 @@
 # Pi Typed Commands
 
-This Pi extension adds typed named slash-command arguments with live hints and TUI argument forms.
+This Pi extension adds typed named slash-command and Agent Skill arguments with live hints and TUI argument forms.
 
 ## Install
 
@@ -20,8 +20,9 @@ For private/local startup without GitHub auth, reference the local clone from `~
 
 `pi-typed-commands` is both:
 
-- a small library for extension authors to register typed named args; and
-- a companion Pi extension that shows a one-line helper while typing typed commands.
+- a small library for extension authors to register typed named args;
+- a companion Pi extension that shows a one-line helper while typing typed commands; and
+- a typed argument layer for Agent Skills that opt in with `metadata.arguments`.
 
 The companion extension watches the editor and shows a compact hint for registered typed commands:
 
@@ -156,6 +157,53 @@ count: {
 ```
 
 Run `/typed-commands-demo<Tab>` to open a showcase form containing every supported widget.
+
+## Typed Agent Skills
+
+Skills can opt in by adding typed argument metadata to `SKILL.md` frontmatter under `metadata.arguments`:
+
+```yaml
+---
+name: fix-ruff-errors
+description: Fix Ruff lint errors in Python projects.
+metadata:
+  form_title: Fix Ruff errors
+  arguments:
+    path:
+      type: string
+      positional: 0
+      default: "."
+      description: File or directory to check
+    fix:
+      type: boolean
+      default: true
+      description: Apply safe fixes
+    rules:
+      type: multi_enum
+      values: ["E", "F", "I", "UP"]
+      description: Ruff rule families
+---
+
+Run Ruff against `{args.path}`.
+Safe fixes enabled: `{args.fix}`.
+Rules: `{args.rules}`.
+```
+
+Invoke typed skills through Pi's normal skill command syntax:
+
+```text
+/skill:fix-ruff-errors src --no-fix --rules E,F
+```
+
+The extension discovers skill commands from Pi, reads each `SKILL.md`, and gives typed skills the same helper text, flag completions, enum completions, required-argument validation, and Tab-to-form flow as typed slash commands.
+
+Skill metadata uses the same argument fields as commands. In YAML, use `multi_enum`; it is normalized to the internal `multi-enum` type. Nested metadata objects are flattened into nested argument paths, so `config.path` can be referenced as `{args.config.path}` and completed as `--config-path`.
+
+Required/default behavior is the same as slash commands: defaults are applied before required checks, so an argument with `default` is never missing at runtime. Without a default, set `required: true` to require a value; omit it or set `required: false` to make the argument optional.
+
+Skill bodies can interpolate typed values with `{args.name}` placeholders. Nested placeholders such as `{args.config.path}` are supported. Arrays render as comma-separated text in placeholders. Missing optional values render as an empty string. No filter or pipe syntax is supported.
+
+If a typed skill does not contain any `{args.*}` placeholders, the extension appends an `ARGUMENTS` YAML block to the rendered skill prompt. Any extra freeform text that was not consumed by typed positional args is preserved in an `ADDITIONAL_INPUT` block.
 
 ## Disabling Typed-Args Features
 
