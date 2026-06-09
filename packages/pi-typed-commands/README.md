@@ -1,24 +1,24 @@
-# Pi Command Args
+# Pi Typed Commands
 
 This Pi extension adds typed named slash-command arguments with live hints and TUI argument forms.
 
 ## Install
 
 ```sh
-pi install git:github.com/zigai/pi-command-args
+pi install git:github.com/zigai/pi-typed-commands
 ```
 
 For private/local startup without GitHub auth, reference the local clone from `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "packages": ["/home/zigai/Projects/pi-command-args"]
+  "packages": ["/home/zigai/Projects/pi-typed-commands"]
 }
 ```
 
 ## What It Adds
 
-`pi-command-args` is both:
+`pi-typed-commands` is both:
 
 - a small library for extension authors to register typed named args; and
 - a companion Pi extension that shows a one-line helper while typing typed commands.
@@ -32,7 +32,7 @@ usage: /branch action:create | delete | rename name [--base=branch] [--checkout]
 ## Usage In Extensions
 
 ```ts
-import { registerTypedCommand } from "pi-command-args";
+import { registerTypedCommand } from "pi-typed-commands";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI): void {
@@ -155,7 +155,7 @@ count: {
 }
 ```
 
-Run `/command-args-demo<Tab>` to open a showcase form containing every supported widget.
+Run `/typed-commands-demo<Tab>` to open a showcase form containing every supported widget.
 
 ## Disabling Typed-Args Features
 
@@ -165,7 +165,7 @@ There are two levels of opt-out:
 
 ```json
 {
-  "piCommandArgs": {
+  "piTypedCommands": {
     "enabled": false
   }
 }
@@ -177,7 +177,7 @@ To keep typed parsing/forms but hide only the live one-line helper, use:
 
 ```json
 {
-  "piCommandArgs": {
+  "piTypedCommands": {
     "uxEnabled": false
   }
 }
@@ -187,7 +187,7 @@ The inline helper hides primitive types by default for compactness. To show them
 
 ```json
 {
-  "piCommandArgs": {
+  "piTypedCommands": {
     "uxShowTypes": true
   }
 }
@@ -195,7 +195,7 @@ The inline helper hides primitive types by default for compactness. To show them
 
 For example, `prompt` becomes `prompt:string`, and `[count=1]` becomes `[count:int=1]`.
 
-Environment overrides are also supported: `PI_COMMAND_ARGS=0` disables everything, `PI_COMMAND_ARGS_UX=0` disables only the helper, and `PI_COMMAND_ARGS_UX_SHOW_TYPES=1` shows inline helper types.
+Environment overrides are also supported: `PI_TYPED_COMMANDS=0` disables everything, `PI_TYPED_COMMANDS_UX=0` disables only the helper, and `PI_TYPED_COMMANDS_UX_SHOW_TYPES=1` shows inline helper types.
 
 2. Let a consuming extension disable typed args per command with `typedArgsEnabled` and `fallbackHandler`:
 
