@@ -7,7 +7,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { registerTypedCommand } from "pi-command-args";
+import { registerTypedCommand } from "pi-typed-commands";
 import { randomUUID } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import * as path from "node:path";
@@ -615,6 +615,7 @@ async function handleBranch(
 export default function (pi: ExtensionAPI): void {
     registerTypedCommand(pi, "branch", {
         description: "Fork this session into one or more parallel Pi processes",
+        formTitle: "Branch session",
         args: {
             count: {
                 type: "number",
@@ -622,7 +623,7 @@ export default function (pi: ExtensionAPI): void {
                 min: 1,
                 max: MAX_FORK_COUNT,
                 default: 1,
-                aliases: ["c"],
+                positional: 0,
                 description: "Number of forks to create",
             },
             panes: {
@@ -634,6 +635,11 @@ export default function (pi: ExtensionAPI): void {
                 type: "string",
                 description: "Optional initial prompt sent to each fork",
                 placeholder: "prompt",
+                positional: 1,
+                ui: {
+                    widget: "textarea",
+                    rows: 5,
+                },
             },
         },
         shouldUseTypedArgs: shouldUseTypedBranchArgs,

@@ -32,10 +32,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "pi-command-args": "file:../pi-command-args"
+    "pi-typed-commands": "file:../pi-typed-commands"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.79.0",
     "@types/node": "^24.10.1",
     "oxfmt": "^0.44.0",
     "oxlint": "^1.59.0",
