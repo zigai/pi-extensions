@@ -41,6 +41,9 @@
     "typecheck": "tsc --noEmit",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm test"
   },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.79.0",
     "@earendil-works/pi-tui": "^0.79.0",
