@@ -240,6 +240,7 @@ export function createRuntimeHarness(options: {
     },
     hasPendingMessages: () => runtime.pendingMessages,
     isIdle: () => runtime.idle,
+    isProjectTrusted: () => true,
     mode: "tui",
     model: undefined,
     modelRegistry: {} as ExtensionCommandContext["modelRegistry"],
