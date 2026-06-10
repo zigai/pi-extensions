@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 
 import { formatFooterStatus } from "../src/format.js";
 import {
@@ -13,6 +13,7 @@ import {
   emitHostSessionCompact,
   emitPersistentAssistantError,
   emitSilentContextOverflow,
+  flushContinuationScheduler,
 } from "./support/runtime-harness.js";
 
 test("non-retryable provider errors pause active goals immediately", async () => {
@@ -186,6 +187,61 @@ test("zero-output length overflow suppresses continuation and shows overflow rec
     harness.footerStatuses.at(-1),
     formatFooterStatus(goal, recoveryPendingAttentionMessage(HOST_OVERFLOW_RECOVERY_REASON)),
   );
+});
+
+test("host overflow compaction falls back to goal continuation when host retry never starts", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    harness.sentMessages.length = 0;
+
+    await emitPersistentAssistantError(
+      harness,
+      0,
+      'Codex error: {"error":{"code":"context_length_exceeded"}}',
+    );
+    await emitHostSessionCompact(harness);
+
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 0);
+
+    flushContinuationScheduler();
+
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: goal?.goalId,
+    });
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("host overflow compaction fallback does not duplicate a host retry turn", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    harness.sentMessages.length = 0;
+
+    await emitPersistentAssistantError(
+      harness,
+      0,
+      'Codex error: {"error":{"code":"context_length_exceeded"}}',
+    );
+    await emitHostSessionCompact(harness);
+    await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
+
+    flushContinuationScheduler();
+
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 0);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("threshold session_compact after transient provider error preserves pending attention", async () => {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.1.26 - 2026-06-10
+
+- Resume active goals after host context-overflow auto-compaction when Pi compacts successfully but no host retry turn starts, avoiding sessions that only continue again after `/reload`.
+- Add regression coverage for the host-overflow post-compaction fallback and for avoiding duplicate continuations when the host retry turn does start.
+- Update the documented Pi release baseline to `@earendil-works/*` `0.79.1`.
 - Add a fast interactive `/goal` smoke path and tmux CSI-u Enter automation guidance to the README and platform smoke docs.
 - Strengthen the model-backed platform runtime smoke so it requires built-in `read` tool verification before goal completion.
 

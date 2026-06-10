@@ -43,7 +43,7 @@ npm install
 pi install .
 ```
 
-Compatibility note: this package is tested against the current pi release during each package update. The 0.1.25 release was verified against Pi 0.79.0, which is the suggested minimum baseline for this package version. Pi-bundled runtime packages remain optional wildcard peers, so npm peer ranges do not hard-block users from trying newer pi releases; runtime behavior is only verified against the tested baseline until a follow-up package release confirms it.
+Compatibility note: this package is tested against the current pi release during each package update. The 0.1.26 release was verified against Pi 0.79.1, which is the suggested minimum baseline for this package version. Pi-bundled runtime packages remain optional wildcard peers, so npm peer ranges do not hard-block users from trying newer pi releases; runtime behavior is only verified against the tested baseline until a follow-up package release confirms it.
 
 Release note: npm installs and pinned GitHub tags are the reproducible release artifacts. Installing from the repository default branch can include unreleased changes that will ship in a future package release, even when `package.json` still identifies the latest published version.
 

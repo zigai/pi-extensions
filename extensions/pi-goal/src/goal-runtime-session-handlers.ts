@@ -9,10 +9,14 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { compactContinuationPrompt } from "./prompts.js";
-import { recoveryPhaseBlocksContinuation } from "./recovery-machine.js";
+import {
+  clearActiveHostOverflowRecovery,
+  recoveryPhaseBlocksContinuation,
+} from "./recovery-machine.js";
 import { isRecoveryPendingAttention, reasonFromRecoveryPendingAttention } from "./recovery.js";
 import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
 import type { GoalRuntimeSessionHandlerContext } from "./goal-runtime-event-handler-types.js";
+import { CONTINUATION_RETRY_MS } from "./runtime-config.js";
 
 export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContext) {
   const {
@@ -26,8 +30,49 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
     resetErrorRecovery,
   } = deps;
 
+  let hostOverflowPostCompactFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearHostOverflowPostCompactFallback = (): void => {
+    if (!hostOverflowPostCompactFallbackTimer) {
+      return;
+    }
+    clearTimeout(hostOverflowPostCompactFallbackTimer);
+    hostOverflowPostCompactFallbackTimer = null;
+  };
+
+  const scheduleHostOverflowPostCompactFallback = (ctx: ExtensionContext): void => {
+    clearHostOverflowPostCompactFallback();
+    if (!recoveryPhaseBlocksContinuation(runtimeState.recoveryState.phase)) {
+      return;
+    }
+
+    const scheduledTurnIndex = runtimeState.currentTurnIndex;
+    hostOverflowPostCompactFallbackTimer = setTimeout(() => {
+      hostOverflowPostCompactFallbackTimer = null;
+      const goal = stateController.getGoal();
+      if (!goal || goal.status !== "active") {
+        return;
+      }
+      if (runtimeState.currentTurnIndex !== scheduledTurnIndex) {
+        return;
+      }
+      if (!recoveryPhaseBlocksContinuation(runtimeState.recoveryState.phase)) {
+        return;
+      }
+      if (!ctx.isIdle() || ctx.hasPendingMessages()) {
+        return;
+      }
+
+      clearActiveHostOverflowRecovery(runtimeState.recoveryState);
+      status.refreshUi(ctx);
+      continuation.maybeContinue(ctx);
+    }, CONTINUATION_RETRY_MS);
+    hostOverflowPostCompactFallbackTimer.unref?.();
+  };
+
   return {
     onSessionStart: (async (event, ctx) => {
+      clearHostOverflowPostCompactFallback();
       stateController.reloadFromSession(ctx);
       goalAccounting.beginAccounting();
       const goal = stateController.getGoal();
@@ -51,6 +96,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
     }) satisfies ExtensionHandler<SessionStartEvent>,
 
     onSessionTree: (async (_event, ctx) => {
+      clearHostOverflowPostCompactFallback();
       stateController.reloadFromSession(ctx);
       goalAccounting.beginAccounting();
       continuation.maybeContinue(ctx);
@@ -77,14 +123,20 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       }
 
       stateController.flushGoalPersistence("runtime");
+      const wasRecoveringFromHostOverflow = recoveryPhaseBlocksContinuation(
+        runtimeState.recoveryState.phase,
+      );
       recoveryRuntime.onSessionCompact();
       status.refreshUi(ctx);
       if (!recoveryPhaseBlocksContinuation(runtimeState.recoveryState.phase)) {
         continuation.maybeContinueAfterCurrentEvent(ctx);
+      } else if (wasRecoveringFromHostOverflow) {
+        scheduleHostOverflowPostCompactFallback(ctx);
       }
     }) satisfies ExtensionHandler<SessionCompactEvent>,
 
     onSessionShutdown: (async (_event, ctx) => {
+      clearHostOverflowPostCompactFallback();
       continuation.clearPassthroughContinuationInput();
       applyStaleQueuedWorkEffects(runtimeState.staleQueuedWorkGuard.planSessionShutdown().effects, ctx, deps);
 

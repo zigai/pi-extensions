@@ -125,7 +125,7 @@ export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectCon
 
 export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectContext {
   pi: Pick<ExtensionAPI, "sendUserMessage">;
-  runtimeState: Pick<GoalRuntimeState, "recoveryState" | "staleQueuedWorkGuard">;
+  runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "recoveryState" | "staleQueuedWorkGuard">;
   stateController: Pick<
     GoalStateController,
     "applyGoalTransition" | "flushGoalPersistence" | "getGoal" | "reloadFromSession" | "resumePausedGoal"
