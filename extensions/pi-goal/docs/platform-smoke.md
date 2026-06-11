@@ -129,7 +129,7 @@ tmux send-keys -t "$TMUX_SESSION" -l $'\033[13u'
 
 Normal `tmux send-keys Enter` works in many environments, but CSI-u Enter is the robust scripted path through Pi's TUI key parser.
 
-The suites record failures as artifacts before reporting failure so the host can inspect the real target evidence. `target.json` records the Crabbox provider, target, work root, and image/template identifiers used for the run. Each target also writes a `lease-cleanup` artifact directory with `crabbox.stop.*` files; cleanup failure is a failing test result. Ubuntu and Windows runs also invoke Crabbox cleanup for stale provider-owned state after stopping the owned lease. Static macOS SSH cleanup remains host-owned because Crabbox can only remove its local claim there.
+The suites record failures as artifacts before reporting failure so the host can inspect the real target evidence. If a multi-suite target run fails before any suite starts, it writes a `warmup-failure` artifact directory with Crabbox stdout/stderr, timing, exit-code, and assertion evidence. `target.json` records the Crabbox provider, target, work root, and image/template identifiers used for the run. Each target also writes a `lease-cleanup` artifact directory with `crabbox.stop.*` files; cleanup failure is a failing test result. Ubuntu and Windows runs also invoke Crabbox cleanup for stale provider-owned state after stopping the owned lease. Static macOS SSH cleanup remains host-owned because Crabbox can only remove its local claim there.
 
 ## Lessons carried forward
 

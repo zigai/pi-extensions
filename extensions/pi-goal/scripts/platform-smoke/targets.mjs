@@ -145,6 +145,36 @@ function finalizeSuite(suiteDir, checks, summary, expectedFiles) {
 	return { assertions: finalAssertions, manifest: writeManifest(suiteDir, [...expectedFiles, "failures.md"]) };
 }
 
+export function createWarmupFailureResult(config, targetName, suiteName, lease, startedAt = Date.now(), existing = {}) {
+	const runId = existing.runId ?? makeRunId();
+	const slug = `${config.packageName}-${targetName}`;
+	const suiteDir = existing.suiteDir ?? createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
+	const secretValues = collectSecretValues(authEnvAllowList(config));
+	const command = existing.command ?? `crabbox warmup ${buildTargetBaseArgs(targetName, config).join(" ")} --slug ${slug} --keep`;
+	const elapsedMs = Date.now() - startedAt;
+	writeFileSync(resolve(suiteDir, "target.json"), JSON.stringify(targetMetadata(config, targetName, runId, slug), null, 2));
+	writeFileSync(resolve(suiteDir, "suite.json"), JSON.stringify({ suiteName, phase: "warmup", modelCalls: 0 }, null, 2));
+	writeCommand(suiteDir, command);
+	writeExitCode(suiteDir, lease.code, lease.signal);
+	writeRedacted(resolve(suiteDir, "crabbox.stdout.txt"), lease.stdout ?? "", secretValues);
+	writeRedacted(resolve(suiteDir, "crabbox.stderr.txt"), lease.stderr ?? "", secretValues);
+	writeFileSync(resolve(suiteDir, "crabbox.timing.json"), JSON.stringify({ elapsedMs, code: lease.code, signal: lease.signal }, null, 2));
+	const secretViolations = [
+		...scanForSecrets(`${lease.stdout ?? ""}\n${lease.stderr ?? ""}`, secretValues),
+		...scanArtifactTextFiles(suiteDir, secretValues).map((finding) => `${finding.file}: ${finding.violation}`),
+	];
+	const { assertions } = finalizeSuite(
+		suiteDir,
+		[
+			{ id: "crabbox-warmup", fn: () => false, error: "Crabbox warmup failed; inspect redacted crabbox stdout/stderr artifacts" },
+			{ id: "no-secret-artifacts", fn: () => secretViolations.length === 0, error: secretViolations.join(", ") },
+		],
+		{ target: targetName, suite: suiteName, elapsedMs, exitCode: lease.code, signal: lease.signal },
+		["summary.json", "artifact-manifest.json", "target.json", "suite.json", "command.txt", "exit-code.txt", "crabbox.stdout.txt", "crabbox.stderr.txt", "crabbox.timing.json", "assertions.json"],
+	);
+	return { ok: false, suiteDir, assertions };
+}
+
 export function createLeaseCleanupResult(config, targetName, leaseId, stopResult, staleCleanupResult = null) {
 	const suiteName = "lease-cleanup";
 	const runId = makeRunId();
@@ -270,11 +300,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
 	const ownsLease = !lease;
 	if (!lease) lease = await warmupLease(targetName, slug, config);
 	if (!lease.ok) {
-		writeExitCode(suiteDir, lease.code, lease.signal);
-		writeFileSync(resolve(suiteDir, "crabbox.stdout.txt"), lease.stdout ?? "");
-		writeFileSync(resolve(suiteDir, "crabbox.stderr.txt"), lease.stderr ?? "");
-		const { assertions } = finalizeSuite(suiteDir, [{ id: "crabbox-warmup", fn: () => false, error: "Crabbox warmup failed" }], { target: targetName, suite: suiteName, elapsedMs: Date.now() - startedAt }, ["summary.json", "artifact-manifest.json", "target.json", "suite.json", "command.txt", "exit-code.txt", "crabbox.stdout.txt", "crabbox.stderr.txt", "assertions.json"]);
-		return { ok: false, suiteDir, assertions };
+		return createWarmupFailureResult(config, targetName, suiteName, lease, startedAt, { runId, suiteDir, command });
 	}
 
 	const allowEnv = authEnvAllowList(config);
@@ -363,11 +389,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 	const ownsLease = !lease;
 	if (!lease) lease = await warmupLease(targetName, slug, config);
 	if (!lease.ok) {
-		writeExitCode(suiteDir, lease.code, lease.signal);
-		writeFileSync(resolve(suiteDir, "crabbox.stdout.txt"), lease.stdout ?? "");
-		writeFileSync(resolve(suiteDir, "crabbox.stderr.txt"), lease.stderr ?? "");
-		const { assertions } = finalizeSuite(suiteDir, [{ id: "crabbox-warmup", fn: () => false, error: "Crabbox warmup failed" }], { target: targetName, suite: suiteName, elapsedMs: Date.now() - startedAt }, ["summary.json", "artifact-manifest.json", "target.json", "suite.json", "command.txt", "exit-code.txt", "crabbox.stdout.txt", "crabbox.stderr.txt", "assertions.json"]);
-		return { ok: false, suiteDir, assertions };
+		return createWarmupFailureResult(config, targetName, suiteName, lease, startedAt, { runId, suiteDir, command });
 	}
 
 	const secretValues = collectSecretValues(authEnvAllowList(config));
@@ -418,8 +440,9 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
 
 export async function runTargetSuites(config, targetName, suiteNames) {
 	const slug = `${config.packageName}-${targetName}`;
+	const startedAt = Date.now();
 	const lease = await warmupLease(targetName, slug, config);
-	if (!lease.ok) return { ok: false, results: [{ ok: false, error: lease.stderr || lease.stdout || "warmup failed" }] };
+	if (!lease.ok) return { ok: false, results: [createWarmupFailureResult(config, targetName, "warmup-failure", lease, startedAt)] };
 	const results = [];
 	let stopResult;
 	let staleCleanupResult;

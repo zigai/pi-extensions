@@ -188,11 +188,11 @@ if (!Object.values(result).every(Boolean)) process.exit(1);
 
 test("artifact manifests and lease cleanup failures are enforced", () => {
   const code = String.raw`
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectSecretValues, redactSecrets, scanForSecrets, writeManifest } from "./scripts/platform-smoke/artifacts.mjs";
-import { createLeaseCleanupFailureResult, createLeaseCleanupResult } from "./scripts/platform-smoke/targets.mjs";
+import { createLeaseCleanupFailureResult, createLeaseCleanupResult, createWarmupFailureResult, runTargetSuites } from "./scripts/platform-smoke/targets.mjs";
 
 const root = mkdtempSync(join(tmpdir(), "pi-codex-goal-platform-smoke-test-"));
 try {
@@ -217,9 +217,40 @@ try {
     code: 0,
     signal: null,
   });
+  const warmupSecret = "warmup-secret-value-1234567890";
+  process.env.ZAI_API_KEY = warmupSecret;
+  const warmupFailure = createWarmupFailureResult({ artifactRoot: root, packageName: "pi-codex-goal" }, "ubuntu", "warmup-failure", {
+    stdout: "",
+    stderr: "warmup failed " + warmupSecret,
+    code: 1,
+    signal: null,
+  });
   const assertions = JSON.parse(readFileSync(join(cleanup.suiteDir, "assertions.json"), "utf8"));
   const cleanupTarget = JSON.parse(readFileSync(join(cleanup.suiteDir, "target.json"), "utf8"));
   const successManifest = JSON.parse(readFileSync(join(cleanupSuccess.suiteDir, "artifact-manifest.json"), "utf8"));
+  const warmupManifest = JSON.parse(readFileSync(join(warmupFailure.suiteDir, "artifact-manifest.json"), "utf8"));
+  const warmupAssertionsText = readFileSync(join(warmupFailure.suiteDir, "assertions.json"), "utf8");
+  const warmupFailuresText = readFileSync(join(warmupFailure.suiteDir, "failures.md"), "utf8");
+  const warmupStderrText = readFileSync(join(warmupFailure.suiteDir, "crabbox.stderr.txt"), "utf8");
+  const warmupAssertions = JSON.parse(warmupAssertionsText);
+  const fakeCrabboxJs = join(root, "fake-crabbox.js");
+  writeFileSync(fakeCrabboxJs, "process.stderr.write(" + JSON.stringify("warmup failed " + warmupSecret + "\n") + "); process.exit(1);\n");
+  const fakeCrabboxBin = process.platform === "win32" ? join(root, "fake-crabbox.cmd") : join(root, "fake-crabbox");
+  if (process.platform === "win32") {
+    writeFileSync(fakeCrabboxBin, "@echo off\r\n\"" + process.execPath + "\" \"%~dp0fake-crabbox.js\" %*\r\n");
+  } else {
+    writeFileSync(fakeCrabboxBin, "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " " + JSON.stringify(fakeCrabboxJs) + " \"$@\"\n");
+    chmodSync(fakeCrabboxBin, 0o755);
+  }
+  const originalCrabbox = process.env.PLATFORM_SMOKE_CRABBOX;
+  process.env.PLATFORM_SMOKE_CRABBOX = fakeCrabboxBin;
+  const multiWarmupFailure = await runTargetSuites({ artifactRoot: root, packageName: "pi-codex-goal", defaultAuthEnv: ["ZAI_API_KEY"], ubuntuContainerImage: "fake-node-24" }, "ubuntu", ["platform-build", "goal-runtime-smoke"]);
+  if (originalCrabbox === undefined) delete process.env.PLATFORM_SMOKE_CRABBOX;
+  else process.env.PLATFORM_SMOKE_CRABBOX = originalCrabbox;
+  const multiWarmup = multiWarmupFailure.results[0];
+  const multiWarmupAssertionsText = readFileSync(join(multiWarmup.suiteDir, "assertions.json"), "utf8");
+  const multiWarmupFailuresText = readFileSync(join(multiWarmup.suiteDir, "failures.md"), "utf8");
+  const multiWarmupStderrText = readFileSync(join(multiWarmup.suiteDir, "crabbox.stderr.txt"), "utf8");
   const env = { ZAI_API_KEY: "zai-secret-value-1234567890" };
   const secrets = collectSecretValues(["ZAI_API_KEY"], env);
   const redacted = redactSecrets("token=" + env.ZAI_API_KEY, secrets);
@@ -229,6 +260,12 @@ try {
     cleanupOk: cleanup.ok,
     cleanupSuccessOk: cleanupSuccess.ok,
     cleanupSuccessRecorded: successManifest.present.includes("crabbox.stop.stdout.txt") && successManifest.present.includes("crabbox.cleanup.stdout.txt"),
+    warmupOk: warmupFailure.ok,
+    warmupFailureRecorded: warmupManifest.present.includes("crabbox.stderr.txt") && warmupManifest.present.includes("crabbox.timing.json"),
+    warmupAssertionFailed: warmupAssertions.checks.some((check) => check.id === "crabbox-warmup" && check.ok === false),
+    warmupSecretRedacted: !warmupStderrText.includes(warmupSecret) && warmupStderrText.includes("[REDACTED_SECRET]") && !warmupAssertionsText.includes(warmupSecret) && !warmupFailuresText.includes(warmupSecret),
+    multiWarmupFailure: multiWarmupFailure.ok === false && multiWarmup.suiteDir.includes("warmup-failure"),
+    multiWarmupSecretRedacted: !multiWarmupStderrText.includes(warmupSecret) && multiWarmupStderrText.includes("[REDACTED_SECRET]") && !multiWarmupAssertionsText.includes(warmupSecret) && !multiWarmupFailuresText.includes(warmupSecret),
     assertionsOk: assertions.ok,
     leaseCleanupFailed: assertions.checks.some((check) => check.id === "lease-cleanup" && check.ok === false),
     targetRecordsProvider: cleanupTarget.provider === "local-container" && cleanupTarget.crabboxTarget === "linux",
@@ -236,7 +273,7 @@ try {
     secretRedacted: !redacted.includes(env.ZAI_API_KEY) && redacted.includes("[REDACTED_SECRET]"),
   };
   console.log(JSON.stringify(result));
-  if (!result.manifestIncludesSelf || !result.missingRecorded || result.cleanupOk || !result.cleanupSuccessOk || !result.cleanupSuccessRecorded || result.assertionsOk || !result.leaseCleanupFailed || !result.targetRecordsProvider || !result.secretDetected || !result.secretRedacted) process.exit(1);
+  if (!result.manifestIncludesSelf || !result.missingRecorded || result.cleanupOk || !result.cleanupSuccessOk || !result.cleanupSuccessRecorded || result.warmupOk || !result.warmupFailureRecorded || !result.warmupAssertionFailed || !result.warmupSecretRedacted || !result.multiWarmupFailure || !result.multiWarmupSecretRedacted || result.assertionsOk || !result.leaseCleanupFailed || !result.targetRecordsProvider || !result.secretDetected || !result.secretRedacted) process.exit(1);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
