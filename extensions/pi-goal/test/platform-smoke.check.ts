@@ -52,6 +52,14 @@ test("platform smoke scripts have working syntax and help", () => {
   assert.match(doctor, /disposableWindowsSshProbe/);
   assert.match(doctor, /skipWindowsDisposableProbe/);
   assert.match(doctor, /disposable Windows clone SSH\/tool probe OK/);
+
+  const readme = readFileSync("README.md", "utf8");
+  const platformDocs = readFileSync("docs/platform-smoke.md", "utf8");
+  for (const text of [readme, platformDocs]) {
+    assert.match(text, /manual interactive `\/goal` evidence/);
+    assert.match(text, /session JSONL contains the `\/goal` command path/);
+    assert.match(text, /`update_goal` completion/);
+  }
 });
 
 test("platform smoke config and package scripts require macOS, Ubuntu, and native Windows", () => {

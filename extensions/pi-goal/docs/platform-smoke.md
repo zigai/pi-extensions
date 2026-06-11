@@ -120,7 +120,9 @@ failures.md            # only when assertions fail
 
 `goal-runtime-smoke` also writes `goal-runtime-result.json`, `pi-run.stdout.txt`, `pi-run.stderr.txt`, and `session.jsonl`.
 
-Interactive `/goal` smoke checks are manual by default. If you automate them through tmux, send the prompt as literal text and submit with CSI-u Enter (`ESC [ 13 u`). This fast example intentionally uses shell `cat`; change the prompt to require the built-in `read` tool when that path is under test:
+Interactive `/goal` smoke checks are manual by default and are release evidence, not a replacement for `goal-runtime-smoke`. Record manual interactive `/goal` evidence for release-sensitive changes that touch slash-command parsing, TUI submission, goal command behavior, hidden continuation, or post-tool completion. The evidence record must include the prompt submitted, model, session directory, final assistant evidence, and confirmation that the session JSONL contains the `/goal` command path, file verification, and `update_goal` completion.
+
+If you automate them through tmux, send the prompt as literal text and submit with CSI-u Enter (`ESC [ 13 u`). This fast example intentionally uses shell `cat`; change the prompt to require the built-in `read` tool when that path is under test:
 
 ```sh
 tmux send-keys -t "$TMUX_SESSION" -l '/goal Create /tmp/pi-codex-goal-fast.txt containing PI_GOAL_FAST_OK; verify with cat; mark complete; report final status.'

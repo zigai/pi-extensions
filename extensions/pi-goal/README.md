@@ -86,6 +86,8 @@ Current structural audit and remediation record: [docs/CODEBASE_AUDIT.md](docs/C
 
 These smoke tests exercise the interactive `/goal` command, hidden continuation, bridged goal tools, filesystem verification, and final `update_goal` completion.
 
+Release-sensitive changes that touch slash-command parsing, TUI submission, goal command behavior, hidden continuation, or post-tool completion must record manual interactive `/goal` evidence before release. The model-backed platform smoke covers goal tools through non-interactive `pi -p`; it intentionally does not prove the real TUI slash-command submit path. Required evidence is: command used, model, session directory, final assistant evidence, and confirmation that the session JSONL contains the `/goal` command path, file verification, and `update_goal` completion.
+
 Prerequisites:
 
 - Pi can authenticate to any capable model available in your local setup.
