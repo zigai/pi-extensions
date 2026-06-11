@@ -45,7 +45,7 @@
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check:platform-smoke": "node --check scripts/platform-smoke.mjs && node --check scripts/platform-smoke/artifacts.mjs && node --check scripts/platform-smoke/crabbox-runner.mjs && node --check scripts/platform-smoke/doctor.mjs && node --check scripts/platform-smoke/goal-runtime-smoke.mjs && node --check scripts/platform-smoke/targets.mjs && node --import tsx --test test/platform-smoke.test.ts",
+    "check:platform-smoke": "node --check scripts/platform-smoke.mjs && node --check scripts/platform-smoke/artifacts.mjs && node --check scripts/platform-smoke/crabbox-runner.mjs && node --check scripts/platform-smoke/doctor.mjs && node --check scripts/platform-smoke/goal-runtime-smoke.mjs && node --check scripts/platform-smoke/targets.mjs && node --import tsx --test test/platform-smoke.check.ts",
     "verify": "npm run typecheck && npm run check:platform-smoke && npm test",
     "smoke:platform": "node scripts/platform-smoke.mjs",
     "smoke:platform:doctor": "node scripts/platform-smoke.mjs doctor",

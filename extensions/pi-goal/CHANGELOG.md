@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Nothing yet.
+- Refresh the structural audit to the current 0.1.26 baseline and align README/AGENTS audit links.
+- Avoid duplicate platform-smoke test execution during `npm run verify` by moving the platform-smoke assertion file under the `check:platform-smoke` script only.
+- Narrow runtime event registration typing to the event-handler interface.
 
 ## 0.1.26 - 2026-06-10
 

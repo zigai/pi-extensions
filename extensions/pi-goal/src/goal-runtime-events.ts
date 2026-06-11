@@ -1,10 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import type { GoalRuntimeController } from "./goal-runtime-controller.js";
+import type { GoalRuntimeEventHandlers } from "./goal-runtime-event-handler-types.js";
 
 export function registerGoalRuntimeEvents(
   pi: ExtensionAPI,
-  controller: GoalRuntimeController,
+  controller: GoalRuntimeEventHandlers,
 ): void {
   pi.on("input", (event, ctx) => controller.onInput(event, ctx));
   pi.on("context", (event, ctx) => controller.onContext(event, ctx));

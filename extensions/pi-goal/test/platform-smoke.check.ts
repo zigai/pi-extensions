@@ -62,7 +62,7 @@ test("platform smoke config and package scripts require macOS, Ubuntu, and nativ
   assert.ok(packageJson.files?.includes("platform-smoke.config.mjs"));
   assert.ok(packageJson.files?.includes(".crabboxignore"));
   assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /node --check scripts\/platform-smoke\.mjs/);
-  assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /test\/platform-smoke\.test\.ts/);
+  assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /test\/platform-smoke\.check\.ts/);
   assert.match(packageJson.scripts?.["verify"] ?? "", /check:platform-smoke/);
   assert.equal(packageJson.scripts?.["smoke:platform:doctor"], "node scripts/platform-smoke.mjs doctor");
   assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /doctor --skip-windows-disposable-probe/);

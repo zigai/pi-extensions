@@ -1,125 +1,104 @@
 # Codebase Audit — pi-codex-goal
 
-**Date:** 2026-05-28
-**Scope:** Full repository (`src/`, `test/`, package metadata, operability)
-**Baseline:** `0.1.15` on `main` after runtime refactor and 0.1.15 release audit remediation (`347b8bd`)
+**Date:** 2026-06-10
+**Scope:** Full repository (`src/`, `test/`, package metadata, docs, platform-smoke operability)
+**Baseline:** `0.1.26` on the local checkout after platform-smoke/read-tool smoke hardening
+**Local gate:** `npm run verify`
 
 ## Executive summary
 
-The package is in **good structural health**. Core behavior is split across focused runtime modules (controller, event handlers, transitions, recovery, stale queued-work state machine, persistence). TypeScript is strict, the test suite is broad (284 tests), and `npm run verify` passes.
+The package is in **good structural health**. Core behavior is split across focused runtime modules: controller wiring, event handlers, state transitions, recovery, stale queued-work cleanup, persistence, prompt generation, and platform-smoke tooling. TypeScript remains strict, the package keeps pi runtime dependencies optional wildcard peers, and the local gate is broad.
 
-This audit found **no critical or high-severity structural defects**. Remaining items were operability/documentation gaps and one maintainability split (stale queued-work default transition tables). Those are addressed on branch `chore/post-0.1.15-codebase-audit`.
+No critical or high-severity structural defects were found in the 2026-06-10 audit. The meaningful findings were source-of-truth drift in this audit document, duplicated local execution of the platform-smoke test file, and a low-risk type-only event-registration back edge. Those findings were decomposed into CueLoop tasks and remediated in the queue-drain pass.
 
-## Scope
+## Coverage map
 
-| Area | Examined |
-|------|----------|
-| Entry | `src/index.ts` → `goal-runtime-controller.ts` |
-| Commands / tools | `commands.ts`, `tools.ts` |
-| Domain state | `state.ts`, `types.ts`, `goal-persistence.ts` |
-| Runtime lifecycle | `goal-runtime-*`, `goal-state-controller.ts`, `goal-transition*.ts` |
-| Continuation / queue | `continuation-scheduler.ts`, `queued-goal-*.ts`, `prompts.ts` |
-| Stale work FSM | `stale-queued-work-*.ts` |
-| Recovery | `recovery*.ts` |
-| Tests | 24 files under `test/`, harness in `test/support/` |
-| Config | `package.json`, `tsconfig.json`, `.gitignore` |
+| Area | Status | Evidence |
+|------|--------|----------|
+| Entry/package metadata | Inspected | `package.json`, `src/index.ts`, `README.md`, `AGENTS.md` |
+| Commands/tools | Inspected | `src/commands.ts`, `src/tools.ts`, prompt template metadata |
+| Domain/persistence | Inspected | `src/state.ts`, `src/types.ts`, `src/goal-persistence.ts` |
+| Runtime lifecycle | Inspected | `goal-runtime-*`, `goal-state-controller.ts`, `goal-transition*.ts` |
+| Continuation/queued work | Inspected | `continuation-scheduler.ts`, `queued-goal-*.ts`, `stale-queued-work-*` |
+| Recovery | Inspected | `recovery*.ts`, recovery tests |
+| Tests/local CI | Inspected and run | `npm run verify` passed with 307 tests before remediation; after remediation, platform-smoke checks are owned by `check:platform-smoke` and 302 tests remain under `npm test` |
+| Platform smoke | Inspected, local syntax/unit gate run | `scripts/platform-smoke*`, `platform-smoke.config.mjs`, `docs/platform-smoke.md`; full Crabbox `smoke:platform:all` not run in this audit |
+| Security/performance | Sampled only | Secret redaction/artifact checks inspected; no dedicated threat model or profiling performed |
 
-## Findings by category
+## Current architecture
 
-### Architecture and boundaries
+| Area | Modules |
+|------|---------|
+| Wiring | `src/index.ts`, `goal-runtime-controller.ts`, `goal-runtime-events.ts` |
+| User/model API | `commands.ts`, `tools.ts`, `prompts.ts`, `format.ts` |
+| Domain | `state.ts`, `types.ts`, `goal-persistence.ts` |
+| Runtime lifecycle | `goal-runtime-*-handlers.ts`, `goal-runtime-state.ts`, `goal-runtime-status.ts` |
+| Transitions | `goal-transition.ts`, `goal-transition-effects.ts`, `goal-state-controller.ts` |
+| Continuations | `continuation-scheduler.ts`, `queued-goal-work.ts`, `queued-goal-messages.ts` |
+| Stale queued-work cleanup | `stale-queued-work-*.ts` |
+| Recovery | `recovery.ts`, `recovery-machine.ts`, `recovery-runtime.ts`, `recovery-phase.ts`, `recovery-adapters.ts` |
+| Platform smoke | `scripts/platform-smoke.mjs`, `scripts/platform-smoke/*`, `platform-smoke.config.mjs` |
+
+## Findings by priority
 
 ```text
-[🔵 Low] [Architecture] src/state.ts (~377 lines)
-- Problem: Combines validation, mutations, session reconstruction, and equivalence helpers in one module.
-- Impact: Slightly higher cognitive load when changing persistence vs. command semantics.
-- Blast radius: All goal CRUD, persistence replay, and tool handlers.
-- Fix: Acceptable for now; split only if reconstruction or validation grows further. No behavior change required.
+[🟡 Medium] [Documentation/source of truth] docs/CODEBASE_AUDIT.md
+- Problem: The previous active audit still described the 0.1.15 baseline and 284-test suite while README called it the latest structural audit.
+- Evidence: package.json version 0.1.26; README linked this file as latest; npm run verify passed 307 tests in the audit session.
+- Impact: Refactor/release planning could rely on stale coverage and architecture notes.
+- Blast radius: Contributor handoff docs, release confidence, future queue planning.
+- Fix: Replaced this file with a current 0.1.26 audit baseline and explicit gaps.
 ```
 
 ```text
-[🔵 Low] [Architecture] src/stale-queued-work-reducer.ts (~420 lines after defaults extraction)
-- Problem: Reducer mixed lifecycle default tables with transition logic (pre-audit).
-- Impact: Harder to scan exceptional transitions vs. table-driven defaults.
-- Blast radius: Stale continuation abort/cleanup across all runtime paths.
-- Fix: Extracted `stale-queued-work-reducer-defaults.ts` (this PR).
-```
-
-**Positive patterns (evidence):**
-
-- `goal-runtime-event-handlers.ts` composes four handler modules with narrowed `goal-runtime-event-handler-types.ts` ports.
-- `goal-transition.ts` plans transitions; `goal-transition-effects.ts` applies side effects once.
-- `stale-queued-work-reducer.ts` uses per-lifecycle default tables and explicit handlers for non-default events.
-
-### Complexity and maintainability
-
-No `TODO`/`FIXME`, no `any`, no `@ts-expect-error`, no `eslint-disable` in `src/`. Exhaustive `switch`/`never` guards are used consistently in reducers and effect applicators.
-
-### Testing and verification
-
-| Signal | Value |
-|--------|-------|
-| Tests | 284 passing (`npm test`) |
-| Typecheck | Strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` |
-| Local gate | `npm run verify` |
-
-Coverage is **integration-heavy** via `test/support/runtime-harness.ts` and scenario tests — appropriate for an extension that wires pi session events. Dedicated unit tests exist for transitions, stale queued-work reducer tables, recovery classification, and persistence coalescing.
-
-**Gap (acceptable):** No isolated unit file for `continuation-scheduler.ts` or `goal-runtime-status.ts`; behavior is covered by `test/continuation.test.ts` and footer/command scenarios.
-
-### Configuration and operability
-
-```text
-[🟡 Medium] [Operability] README.md (pre-audit)
-- Problem: No documented local verification command for contributors/agents.
-- Impact: Harder to discover the canonical CI-equivalent check.
-- Blast radius: Contributors, agent sessions, release prep.
-- Fix: Development section + project `AGENTS.md` (this PR).
+[🔵 Low] [Verification] package.json
+- Problem: test/platform-smoke.test.ts was executed once by check:platform-smoke and again by npm test during npm run verify.
+- Evidence: package.json check:platform-smoke explicitly ran the platform-smoke test file; npm test globbed test/*.test.ts.
+- Impact: Wasted local CI time and unclear ownership of platform-smoke assertions.
+- Blast radius: Local CI and release prep.
+- Fix: Platform-smoke assertions now live in test/platform-smoke.check.ts and are run only by check:platform-smoke.
 ```
 
 ```text
-[🔵 Low] [Operability] .gitignore
-- Problem: Local `.debug/` runtime/debug artifacts were not ignored.
-- Impact: Risk of accidental commit of session debug artifacts.
-- Fix: Ignore `.debug/` (this PR).
+[🔵 Low] [Architecture] src/goal-runtime-events.ts
+- Problem: Event registration imported the full GoalRuntimeController type, creating a type-only back edge to the controller.
+- Evidence: goal-runtime-controller.ts imports registerGoalRuntimeEvents; the registrar only needs event handler methods.
+- Impact: Minor boundary leak and misleading dependency graph.
+- Blast radius: Runtime wiring readability.
+- Fix: registerGoalRuntimeEvents now accepts GoalRuntimeEventHandlers from the event handler type module.
 ```
 
-## Metrics / notable patterns
+## Systemic patterns
 
-| Metric | Value |
-|--------|-------|
-| `src/*.ts` modules | 38 |
-| Largest modules (lines) | `stale-queued-work-reducer.ts` ~420, `state.ts` ~377, `queued-goal-work.ts` ~383 |
-| Test files | 24 |
-| Pi dev baseline | `@earendil-works/*` 0.79.1 |
-
-Dependency graph is acyclic: handlers → controller ports → state/persistence/recovery; stale-work subsystems do not import runtime handlers.
+- **Good:** Runtime side effects are mediated through transition planning and effect handlers, which keeps state mutation and persistence decisions explicit.
+- **Good:** Stale queued-work and recovery behavior is tested heavily against delayed terminal events, context aborts, provider errors, compaction, and shutdown.
+- **Good:** Platform-smoke tooling validates packed-package install/list behavior and model-backed runtime behavior, not just source-tree shortcuts.
+- **Watch:** Source-of-truth docs must be refreshed when release-sensitive platform/runtime changes land; otherwise README/AGENTS links can point to stale confidence claims.
 
 ## Remediation roadmap
 
-### Quick wins (done on audit branch)
+### Completed in the queue-drain pass
 
-- [x] Extract stale queued-work reducer default tables
-- [x] Document `npm run verify` in README and `AGENTS.md`
-- [x] Ignore `.debug/` in `.gitignore`
-- [x] Publish this audit in `docs/CODEBASE_AUDIT.md`
+- [x] Refresh this audit to the `0.1.26` baseline.
+- [x] Keep README/AGENTS audit links aligned with the current-vs-historical source of truth.
+- [x] Remove duplicate platform-smoke test execution from `npm run verify`.
+- [x] Narrow the event registrar type dependency to `GoalRuntimeEventHandlers`.
 
-### Short-term (optional, not blocking)
+### Ongoing release-sensitive gate
 
-- Add a one-line “Contributing” link from README to `docs/CODEBASE_AUDIT.md` if the doc grows follow-up sections.
+- Run `npm run verify` before ending ordinary development work.
+- Run the local Crabbox platform gate for release-sensitive changes:
+  - `npm run check:platform-smoke`
+  - `npm run smoke:platform:all`
 
-### Deeper refactors (only if scope expands)
+## Validation evidence
 
-- Split `state.ts` into `goal-domain.ts` + `goal-session-reconstruction.ts` if either half exceeds ~250 lines or gains new concerns.
+- `npm run verify` passed before remediation with 307 tests.
+- `npm run verify` passed after remediation: `check:platform-smoke` ran 5 platform-smoke checks once, and `npm test` ran 302 regular tests.
+- `npm pack --dry-run --json` showed the package includes source, docs, platform-smoke scripts/config, prompts, and excludes local artifact directories.
 
-## Assumptions and open questions
+## Assumptions, gaps, and blocked checks
 
-- **Security:** Out of scope; no secrets in repo; objectives are XML-escaped in hidden prompts (`prompts.ts`).
-- **CI:** No GitHub Actions in-repo by project convention; local `npm run verify` is the gate.
-- **Performance:** Not profiled; hot paths are event-driven with coalesced persistence — no obvious anti-patterns for an extension.
-
-## Definition of done (audit)
-
-- [x] Main subsystems and entrypoints examined
-- [x] Findings prioritized with file evidence
-- [x] Structural risks separated from style noise
-- [x] Practical remediation roadmap with follow-up items executed on branch
+- Full Crabbox `npm run smoke:platform:all` was not run during the audit; use it for release-sensitive changes.
+- Security review was limited to structural inspection of artifact/secret hygiene and package contents; no dedicated threat model was performed.
+- Performance was not profiled; event-driven paths and persistence coalescing did not show obvious structural performance risks.

@@ -50,4 +50,4 @@ The required gate runs the full suite plus a real model-backed goal-tool smoke o
 | Recovery | `recovery*.ts` |
 | Domain | `state.ts`, `types.ts`, `goal-persistence.ts` |
 
-Structural audit: `docs/CODEBASE_AUDIT.md`.
+Current structural audit and remediation record: `docs/CODEBASE_AUDIT.md`.
