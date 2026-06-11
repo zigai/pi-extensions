@@ -30,7 +30,7 @@ No critical or high-severity structural defects were found in the 2026-06-10 aud
 | Area | Modules |
 |------|---------|
 | Wiring | `src/index.ts`, `goal-runtime-controller.ts`, `goal-runtime-events.ts` |
-| User/model API | `commands.ts`, `tools.ts`, `prompts.ts`, `format.ts` |
+| User/model API | `commands.ts`, `tools.ts`, `prompts.ts`, `format.ts`, `prompts/create-goal.md` |
 | Domain | `state.ts`, `types.ts`, `goal-persistence.ts` |
 | Runtime lifecycle | `goal-runtime-*-handlers.ts`, `goal-runtime-state.ts`, `goal-runtime-status.ts` |
 | Transitions | `goal-transition.ts`, `goal-transition-effects.ts`, `goal-state-controller.ts` |

@@ -36,12 +36,14 @@ Install a pinned GitHub release:
 pi install https://github.com/fitchmultz/pi-codex-goal@v<version>
 ```
 
-For local development from this repository:
+For local development from this repository, install the checkout only in one Pi config scope at a time:
 
 ```sh
 npm install
 pi install .
 ```
+
+On this maintainer machine, the active install is a global/user package that already points at this checkout; do not also leave a project-local install under this repository's `.pi/` settings. Duplicate local and global installs both try to register `get_goal`, `create_goal`, and `update_goal`, which causes tool-registration conflicts. For install-path release checks, use an isolated temp project/config directory or remove the project-local entry immediately after the check.
 
 Compatibility note: this package is tested against the current pi release during each package update. The current source tree targets Pi 0.79.1 on Node 24 for the next package release. The latest published `0.1.26` npm artifact remains the reproducible source of truth for that published version's metadata. Pi-bundled runtime packages remain optional wildcard peers, so npm peer ranges do not hard-block users from trying newer pi releases; runtime behavior is only verified against the tested baseline until a follow-up package release confirms it.
 
@@ -183,8 +185,8 @@ While a goal is active, the extension:
 - coalesces runtime goal custom-entry writes so unchanged status and usage are not appended on every tool completion; live footer usage stays current, and meaningful usage is flushed at turn boundaries, shutdown, compaction, budget crossings, and bounded intervals during long tool-heavy runs
 - pauses when an active assistant turn is aborted, such as when you press Esc
 - recovers from provider assistant errors without immediate hidden continuation loops: context-window overflow triggers automatic compaction and then resumes the active goal, transient errors use bounded backoff retries, and repeated unrecoverable failures pause with a clear `/goal resume` path
-- prompts on session resume before reactivating a paused goal, and resumes explicitly with `/goal resume` (only from paused)
-- rejects `/goal pause` unless the goal is active and `/goal resume` unless the goal is paused
+- prompts on session resume before reactivating a paused goal, and resumes explicitly with `/goal resume` from paused goals
+- rejects `/goal pause` unless the goal is active and rejects `/goal resume` unless the goal is paused, except when an active goal is waiting for a user-start recovery turn after host overflow recovery; in that recovery state, `/goal resume` sends the required user follow-up instead of changing goal status
 - treats completed goals as terminal for automatic transitions while allowing `/goal <objective>` and explicit `create_goal` replacement to replace goals without extra friction
 - marks the goal `budgetLimited` when a positive token budget is reached
 - sends hidden steering messages when budget is reached or when the agent is idle but the goal is still active
