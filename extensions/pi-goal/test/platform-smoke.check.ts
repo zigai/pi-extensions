@@ -56,9 +56,11 @@ test("platform smoke scripts have working syntax and help", () => {
 
 test("platform smoke config and package scripts require macOS, Ubuntu, and native Windows", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    engines?: Record<string, string>;
     files?: string[];
     scripts?: Record<string, string>;
   };
+  assert.equal(packageJson.engines?.node, ">=24.0.0");
   assert.ok(packageJson.files?.includes("scripts"));
   assert.ok(packageJson.files?.includes("platform-smoke.config.mjs"));
   assert.ok(packageJson.files?.includes(".crabboxignore"));

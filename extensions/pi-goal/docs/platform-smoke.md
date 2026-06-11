@@ -34,7 +34,7 @@ npm run smoke:platform:windows-native
 
 ## Required environment
 
-Install Crabbox `0.26.0` or newer with Homebrew so `crabbox` is on `PATH`. Use `PLATFORM_SMOKE_CRABBOX=/path/to/crabbox` only when testing a non-default binary.
+Install Crabbox `0.26.0` or newer with Homebrew so `crabbox` is on `PATH`. Use `PLATFORM_SMOKE_CRABBOX=/path/to/crabbox` only when testing a non-default binary. The supported package runtime floor is Node 24, matching the local and Crabbox platform validation baseline.
 
 ```sh
 PLATFORM_SMOKE_MAC_HOST=localhost
@@ -68,7 +68,7 @@ Each required target runs `platform-build` and `goal-runtime-smoke`.
 
 ### `platform-build`
 
-1. Verify Node major version is at least the configured validation baseline.
+1. Verify Node major version is at least the configured Node 24 validation baseline.
 2. Run `npm ci` in the synced checkout.
 3. Run `npm run verify`, the repo's local CI command.
 4. Run `npm pack`.
