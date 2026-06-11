@@ -32,10 +32,10 @@ export function createGoalPersistence(deps: GoalPersistenceDeps) {
   let lastPersistedGoal: ThreadGoal | null = null;
   let lastRuntimePersistAt: number | null = null;
 
-  const getGoal = (): ThreadGoal | null => goal;
+  const getGoal = (): ThreadGoal | null => (goal ? cloneGoal(goal) : null);
 
   const setGoalSnapshot = (nextGoal: ThreadGoal | null): void => {
-    goal = nextGoal;
+    goal = nextGoal ? cloneGoal(nextGoal) : null;
   };
 
   const syncPersistedSnapshot = (snapshot: ThreadGoal | null): void => {

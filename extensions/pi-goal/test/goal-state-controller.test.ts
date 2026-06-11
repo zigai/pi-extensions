@@ -64,6 +64,7 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
     ctx,
     stateController,
     entries,
+    persistence,
     get refreshCount() {
       return refreshCount;
     },
@@ -72,6 +73,36 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
     },
   };
 }
+
+test("goal snapshots are cloned at persistence and controller boundaries", () => {
+  const sourceGoal: ThreadGoal = {
+    ...activeGoal,
+    goalId: "clone-boundary",
+    usage: { tokensUsed: 1, activeSeconds: 2 },
+  };
+  const harness = createStateControllerTestHarness(sourceGoal);
+
+  sourceGoal.objective = "mutated source";
+  sourceGoal.usage.tokensUsed = 999;
+
+  const firstRead = harness.stateController.getGoal();
+  assert.ok(firstRead);
+  assert.equal(firstRead.objective, "ship it");
+  assert.equal(firstRead.usage.tokensUsed, 1);
+
+  firstRead.objective = "mutated read";
+  firstRead.usage.tokensUsed = 123;
+
+  const secondRead = harness.stateController.getGoal();
+  assert.ok(secondRead);
+  assert.equal(secondRead.objective, "ship it");
+  assert.equal(secondRead.usage.tokensUsed, 1);
+
+  const directRead = harness.persistence.getGoal();
+  assert.ok(directRead);
+  directRead.usage.activeSeconds = 456;
+  assert.equal(harness.persistence.getGoal()?.usage.activeSeconds, 2);
+});
 
 test("beginOverflowRecovery without an active goal records user reset only", () => {
   const harness = createStateControllerTestHarness(null);
