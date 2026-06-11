@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { forbiddenArtifactMessage, localForbiddenProjectArtifacts } from "./platform-smoke/hygiene.mjs";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "..");
@@ -118,6 +120,11 @@ async function main() {
 	}
 
 	if (args.command === "run") {
+		const localForbidden = localForbiddenProjectArtifacts();
+		if (localForbidden.length > 0) {
+			throw new Error(`${forbiddenArtifactMessage(localForbidden)}. Remove them before platform sync or run smoke:platform:doctor for full setup checks.`);
+		}
+
 		const { runTargetSuite, runTargetSuites } = await import("./platform-smoke/targets.mjs");
 		const targets = args.target ? args.target.split(",").map((name) => name.trim()).filter(Boolean) : config.requiredTargets;
 		const suites = args.suite ? [args.suite] : config.requiredSuites;

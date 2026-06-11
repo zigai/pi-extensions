@@ -1,5 +1,7 @@
 node_modules/
 .pi/
+.env
+.env.*
 .artifacts/
 .platform-smoke-runs/
 .crabbox/

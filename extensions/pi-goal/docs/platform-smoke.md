@@ -16,7 +16,7 @@ npm run smoke:platform:all
 
 `smoke:platform:all` runs the same doctor before any target suite starts, so a full release run still fails before syncing targets or spending model tokens when local setup is not ready. Run `smoke:platform:doctor` directly when diagnosing setup.
 
-Per-target commands are for diagnosis:
+Per-target commands are for diagnosis. They run a lightweight local artifact preflight before Crabbox sync, but they do not replace the full doctor readiness check:
 
 ```sh
 npm run smoke:platform:macos
@@ -57,6 +57,8 @@ PLATFORM_SMOKE_AUTH_ENV="ZAI_API_KEY,Z_AI_API_KEY"
 Use `PLATFORM_SMOKE_MODEL` to run the real runtime smoke against another provider/model, and `PLATFORM_SMOKE_AUTH_ENV` to tell Crabbox which auth variables to forward to each target. Do not broad-allow secrets; forward only the named variables needed by `goal-runtime-smoke`.
 
 The doctor fails when any required platform setup is missing. It verifies the Crabbox binary/version, `ssh`, `local-container`, and `parallels` provider availability, provider-specific readiness, Docker, macOS SSH, Windows source VM/snapshot state, artifact-root writability, forbidden source/package artifacts, and model auth presence. It also fails when the real runtime smoke suite is required and none of the configured model auth environment variables is present. Doctor does not install missing target tools; reusable tool drift should be fixed in the local target image/template.
+
+Local `.env` / `.env.*` files and packed `.tgz` artifacts are forbidden at the repository top level. They are ignored by both Git and Crabbox sync, and the platform-smoke `run` command rejects them before target sync so diagnostic per-target runs cannot forward local secrets accidentally.
 
 For Windows, `pi-extension-windows-template` must be stopped and `crabbox-ready` must be a known-good power-off snapshot. Standalone doctor warms a disposable Crabbox clone when the stopped template has no live IP, then probes `node`, `npm`, `git`, `tar`, and SSH identity. The full `smoke:platform:all` gate skips that disposable doctor probe because the immediately following Windows target run validates the same SSH/tool path on the real test lease. If a reusable Windows tool is missing, update the template and refresh/promote `crabbox-ready`; do not add one-off installers to per-run smoke scripts.
 

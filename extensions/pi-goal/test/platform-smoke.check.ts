@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
@@ -18,6 +18,7 @@ test("platform smoke scripts have working syntax and help", () => {
     "scripts/platform-smoke/crabbox-runner.mjs",
     "scripts/platform-smoke/doctor.mjs",
     "scripts/platform-smoke/goal-runtime-smoke.mjs",
+    "scripts/platform-smoke/hygiene.mjs",
     "scripts/platform-smoke/targets.mjs",
   ]) {
     assert.equal(run(process.execPath, ["--check", path]).status, 0, path);
@@ -62,6 +63,7 @@ test("platform smoke config and package scripts require macOS, Ubuntu, and nativ
   assert.ok(packageJson.files?.includes("platform-smoke.config.mjs"));
   assert.ok(packageJson.files?.includes(".crabboxignore"));
   assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /node --check scripts\/platform-smoke\.mjs/);
+  assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /scripts\/platform-smoke\/hygiene\.mjs/);
   assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /test\/platform-smoke\.check\.ts/);
   assert.match(packageJson.scripts?.["verify"] ?? "", /check:platform-smoke/);
   assert.equal(packageJson.scripts?.["smoke:platform:doctor"], "node scripts/platform-smoke.mjs doctor");
@@ -95,6 +97,41 @@ if (result.windowsWorkRoot !== "C:\\crabbox\\pi-codex-goal") process.exit(1);
 `;
   const result = run(process.execPath, ["--input-type=module", "-e", code]);
   assert.equal(result.status, 0, result.stderr);
+});
+
+test("platform smoke hygiene rejects local secret and package artifacts before sync", () => {
+  const gitignore = readFileSync(".gitignore", "utf8");
+  const crabboxignore = readFileSync(".crabboxignore", "utf8");
+  assert.match(gitignore, /^\.env$/m);
+  assert.match(gitignore, /^\.env\.\*$/m);
+  assert.match(crabboxignore, /^\.env$/m);
+  assert.match(crabboxignore, /^\.env\.\*$/m);
+
+  const code = String.raw`
+import { forbiddenArtifactMessage, isForbiddenLocalArtifactPath, isForbiddenProjectPath, localForbiddenProjectArtifacts } from "./scripts/platform-smoke/hygiene.mjs";
+const localArtifacts = localForbiddenProjectArtifacts();
+const result = {
+  env: isForbiddenProjectPath(".env") && isForbiddenLocalArtifactPath(".env"),
+  envLocal: isForbiddenProjectPath("subdir/.env.local") && isForbiddenLocalArtifactPath("subdir/.env.local"),
+  tarball: isForbiddenProjectPath("pi-codex-goal-0.1.26.tgz") && isForbiddenLocalArtifactPath("pi-codex-goal-0.1.26.tgz"),
+  artifacts: isForbiddenProjectPath(".artifacts/platform-smoke/out.txt") && !isForbiddenLocalArtifactPath(".artifacts/platform-smoke/out.txt"),
+  source: !isForbiddenProjectPath("src/index.ts"),
+  message: forbiddenArtifactMessage(["./.env.local"]).includes("./.env.local"),
+  localScan: localArtifacts.includes("./.env.platform-smoke-test") && !localArtifacts.includes("./.artifacts"),
+};
+if (!Object.values(result).every(Boolean)) process.exit(1);
+`;
+  writeFileSync(".env.platform-smoke-test", "test-only");
+  try {
+    const result = run(process.execPath, ["--input-type=module", "-e", code]);
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+  } finally {
+    unlinkSync(".env.platform-smoke-test");
+  }
+
+  const cli = readFileSync("scripts/platform-smoke.mjs", "utf8");
+  assert.match(cli, /localForbiddenProjectArtifacts/);
+  assert.match(cli, /Remove them before platform sync/);
 });
 
 test("platform-build command rendering uses POSIX and PowerShell without source-extension shortcuts", () => {

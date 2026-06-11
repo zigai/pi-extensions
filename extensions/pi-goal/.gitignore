@@ -1,5 +1,7 @@
 node_modules/
 .pi/
+.env
+.env.*
 npm-debug.log*
 *.tsbuildinfo
 coverage/

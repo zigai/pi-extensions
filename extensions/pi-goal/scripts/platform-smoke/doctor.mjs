@@ -5,6 +5,12 @@ import { accessSync, constants, mkdirSync, writeFileSync, unlinkSync } from "nod
 import { resolve } from "node:path";
 
 import { buildTargetBaseArgs } from "./crabbox-runner.mjs";
+import {
+	forbiddenArtifactMessage,
+	isForbiddenProjectPath,
+	localForbiddenProjectArtifacts,
+	trackedForbiddenProjectPaths,
+} from "./hygiene.mjs";
 
 function env(name) {
 	return process.env[name] ?? "";
@@ -118,14 +124,6 @@ function versionAtLeast(actual, minimum) {
 	return true;
 }
 
-function isForbiddenProjectPath(path) {
-	return /(^|\/)\.env(?:\..*)?$/.test(path)
-		|| /(^|\/)[^/]+\.tgz$/.test(path)
-		|| /(^|\/)\.artifacts(?:\/|$)/.test(path)
-		|| /(^|\/)\.crabbox(?:\/|$)/.test(path)
-		|| /(^|\/)\.debug(?:\/|$)/.test(path);
-}
-
 function npmPackFiles() {
 	const output = silent("npm", ["pack", "--dry-run", "--json"]);
 	if (!output) return null;
@@ -138,15 +136,13 @@ function npmPackFiles() {
 }
 
 function checkForbiddenProjectFiles(failures) {
-	const tracked = shell("git ls-files")?.split(/\r?\n/).filter(Boolean) ?? [];
-	const trackedForbidden = tracked.filter(isForbiddenProjectPath);
+	const trackedForbidden = trackedForbiddenProjectPaths();
 	if (trackedForbidden.length === 0) ok("tracked source files exclude forbidden local artifacts");
 	else fail(`forbidden tracked source path(s): ${trackedForbidden.join(", ")}`, failures);
 
-	const localForbidden = shell("find . -maxdepth 2 \\( -name '.env' -o -name '.env.*' -o -name '*.tgz' \\) -not -path './node_modules/*' 2>/dev/null")
-		?.split(/\r?\n/).filter(Boolean) ?? [];
+	const localForbidden = localForbiddenProjectArtifacts();
 	if (localForbidden.length === 0) ok("no local .env or package tarball artifacts at repo top level");
-	else fail(`forbidden local artifact(s): ${localForbidden.join(", ")}`, failures);
+	else fail(forbiddenArtifactMessage(localForbidden), failures);
 
 	const packFiles = npmPackFiles();
 	if (!packFiles) {
