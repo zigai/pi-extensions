@@ -16,10 +16,12 @@ import {
   isRetryableTransientError,
   isSuccessfulAssistantTurn,
   MAX_CONTEXT_COMPACTION_RETRIES,
-  recoveryPausedAttentionMessage,
-  recoveryPendingAttentionMessage,
+  createRecoveryPausedAttention,
+  createRecoveryPendingAttention,
+  isRecoveryPendingAttention,
   type AssistantErrorMessage,
   type ErrorRecoveryCounters,
+  type RecoveryAttention,
 } from "./recovery.js";
 
 export type { GoalStartTurnStrategy, RecoveryPhase } from "./recovery-phase.js";
@@ -36,7 +38,7 @@ export type RecoveryAction =
 
 export interface GoalRecoveryMachineState {
   counters: ErrorRecoveryCounters;
-  attention: string | null;
+  attention: RecoveryAttention | null;
   phase: RecoveryPhase;
 }
 
@@ -75,7 +77,8 @@ export function onRecoverySuccessfulTurn(
 }
 
 export function onRecoverySessionCompact(state: GoalRecoveryMachineState): void {
-  if (state.attention === recoveryPendingAttentionMessage(HOST_OVERFLOW_RECOVERY_REASON)) {
+  const attention = state.attention;
+  if (isRecoveryPendingAttention(attention) && attention.reason === HOST_OVERFLOW_RECOVERY_REASON) {
     state.attention = null;
   }
 
@@ -87,16 +90,16 @@ export function onRecoverySessionCompact(state: GoalRecoveryMachineState): void 
   }
 }
 
-export function setRecoveryPendingAttention(state: GoalRecoveryMachineState, reason: string): string {
-  const message = recoveryPendingAttentionMessage(reason);
-  state.attention = message;
-  return message;
+export function setRecoveryPendingAttention(state: GoalRecoveryMachineState, reason: string): RecoveryAttention {
+  const attention = createRecoveryPendingAttention(reason);
+  state.attention = attention;
+  return attention;
 }
 
-export function setRecoveryPausedAttention(state: GoalRecoveryMachineState, reason: string): string {
-  const message = recoveryPausedAttentionMessage(reason);
-  state.attention = message;
-  return message;
+export function setRecoveryPausedAttention(state: GoalRecoveryMachineState, reason: string): RecoveryAttention {
+  const attention = createRecoveryPausedAttention(reason);
+  state.attention = attention;
+  return attention;
 }
 
 export function clearActiveHostOverflowRecovery(state: GoalRecoveryMachineState): void {
@@ -129,7 +132,7 @@ export function requireHostOverflowUserReset(state: GoalRecoveryMachineState): b
 }
 
 export function beginHostOverflowRecovery(state: GoalRecoveryMachineState): {
-  attention: string;
+  attention: RecoveryAttention;
   persistHostOverflowCapReset: boolean;
 } {
   const persistHostOverflowCapReset = !recoveryPhaseNeedsUserStartTurn(state.phase);

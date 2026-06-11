@@ -69,8 +69,10 @@ test("persistent provider errors plan pending attention without scheduling hidde
 
   assert.equal(harness.continueCount, 0);
   assert.equal(harness.recoveryState.counters.transientAttempts, 1);
-  assert.match(harness.recoveryState.attention ?? "", /Goal recovery pending/);
-  assert.doesNotMatch(harness.recoveryState.attention ?? "", /\/goal resume/);
+  assert.deepEqual(harness.recoveryState.attention, {
+    kind: "pending",
+    reason: "provider error (websocket closed)",
+  });
 });
 
 test("persistent overflow errors do not invoke extension compaction hooks", () => {
@@ -130,7 +132,10 @@ test("overflow compaction attempts survive intervening transient errors before p
   );
   assert.equal(harness.recoveryState.counters.compactionAttempts, 1);
   assert.equal(harness.continueCount, 0);
-  assert.match(harness.recoveryState.attention ?? "", /Goal recovery pending/);
+  assert.deepEqual(harness.recoveryState.attention, {
+    kind: "pending",
+    reason: "provider error (websocket closed)",
+  });
 
   harness.runtime.handlePersistentAssistantError(
     { role: "assistant", stopReason: "error", errorMessage: "context_length_exceeded" },
@@ -139,7 +144,10 @@ test("overflow compaction attempts survive intervening transient errors before p
 
   assert.equal(harness.continueCount, 0);
   assert.equal(harness.recoveryState.counters.compactionAttempts, 2);
-  assert.match(harness.recoveryState.attention ?? "", /\/goal resume/);
+  assert.deepEqual(harness.recoveryState.attention, {
+    kind: "paused",
+    reason: "context window recovery failed after repeated compaction attempts",
+  });
 });
 
 test("recovery pause delegates reason without clearing continuation in recovery runtime", () => {
@@ -194,7 +202,10 @@ test("session compact after pending transient error preserves attention without 
 
   assert.equal(harness.continueCount, 0);
   assert.equal(harness.recoveryState.counters.transientAttempts, 1);
-  assert.match(harness.recoveryState.attention ?? "", /Goal recovery pending/);
+  assert.deepEqual(harness.recoveryState.attention, {
+    kind: "pending",
+    reason: "provider error (websocket closed)",
+  });
 });
 test("successful non-toolUse turns reset recovery counters and continue the goal", () => {
   const harness = createRecoveryTestRuntime();

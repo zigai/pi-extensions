@@ -128,21 +128,43 @@ export function countersForFailureSignature(
   };
 }
 
+export type RecoveryAttention =
+  | { kind: "pending"; reason: string }
+  | { kind: "paused"; reason: string };
+
+export function createRecoveryPendingAttention(reason: string): RecoveryAttention {
+  return { kind: "pending", reason };
+}
+
+export function createRecoveryPausedAttention(reason: string): RecoveryAttention {
+  return { kind: "paused", reason };
+}
+
 export function recoveryPendingAttentionMessage(reason: string): string {
   return `Goal recovery pending (${reason}); ${RECOVERY_PENDING_ATTENTION_SUFFIX}`;
 }
 
-export function isRecoveryPendingAttention(attention: string | null): boolean {
-  return attention?.startsWith("Goal recovery pending (") ?? false;
-}
-
-export function reasonFromRecoveryPendingAttention(attention: string): string | null {
-  const match = /^Goal recovery pending \((.+)\); /.exec(attention);
-  return match?.[1] ?? null;
-}
-
 export function recoveryPausedAttentionMessage(reason: string): string {
   return `Goal needs attention (${reason}). Use /goal resume to continue.`;
+}
+
+export function formatRecoveryAttention(attention: RecoveryAttention | null): string | null {
+  if (!attention) {
+    return null;
+  }
+  return attention.kind === "pending"
+    ? recoveryPendingAttentionMessage(attention.reason)
+    : recoveryPausedAttentionMessage(attention.reason);
+}
+
+export function isRecoveryPendingAttention(
+  attention: RecoveryAttention | null,
+): attention is Extract<RecoveryAttention, { kind: "pending" }> {
+  return attention?.kind === "pending";
+}
+
+export function reasonFromRecoveryPendingAttention(attention: RecoveryAttention | null): string | null {
+  return attention?.kind === "pending" ? attention.reason : null;
 }
 
 /** Paused goals use /goal resume guidance in footer attention copy. */

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { pendingRecoveryShutdownReason } from "../src/goal-runtime-session-handlers.js";
+import { createRecoveryPausedAttention, createRecoveryPendingAttention } from "../src/recovery.js";
+import { createThreadGoal } from "../src/state.js";
 import {
   createRuntimeHarness,
   emitPersistentAssistantError,
@@ -16,6 +19,25 @@ import {
 test("pending overflow shutdown persists paused goal with valid resume guidance", async () => {
   const harness = await givenPendingOverflowRecovery();
   await emitPendingRecoveryShutdown(harness, "overflow");
+});
+
+test("pending recovery shutdown reason preserves regex-hostile structured reason", () => {
+  const reason = "provider error (odd ) text); includes /goal resume and newline\nsecond line";
+  const activeGoal = createThreadGoal("ship it");
+  assert.equal(
+    pendingRecoveryShutdownReason({
+      recoveryState: { attention: createRecoveryPendingAttention(reason) },
+      getGoal: () => activeGoal,
+    }),
+    reason,
+  );
+  assert.equal(
+    pendingRecoveryShutdownReason({
+      recoveryState: { attention: createRecoveryPausedAttention(reason) },
+      getGoal: () => activeGoal,
+    }),
+    null,
+  );
 });
 
 test("pending transient shutdown persists paused goal with valid resume guidance", async () => {

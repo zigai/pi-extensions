@@ -10,6 +10,7 @@ import {
   isAssistantContextOverflow,
   isContextOverflowError,
   isErrorAssistantMessage,
+  createRecoveryPendingAttention,
   isRetryableTransientError,
   isRecoveryPendingAttention,
   isSuccessfulAssistantTurn,
@@ -135,13 +136,19 @@ test("failure signatures canonicalize context overflow regardless of volatile to
   assert.equal(failureSignature(undefined), "unknown_error");
 });
 
-test("recovery pending attention helpers round-trip the reason", () => {
-  const reason = "provider error (websocket closed)";
-  const attention = recoveryPendingAttentionMessage(reason);
+test("recovery pending attention helpers round-trip structured reasons", () => {
+  const reason = "provider error (weird ) parens; slash /goal resume text)";
+  const attention = createRecoveryPendingAttention(reason);
   assert.equal(isRecoveryPendingAttention(attention), true);
   assert.equal(reasonFromRecoveryPendingAttention(attention), reason);
-  assert.equal(isRecoveryPendingAttention(recoveryAttentionMessage(reason)), false);
-  assert.equal(reasonFromRecoveryPendingAttention("Goal paused"), null);
+  assert.equal(
+    recoveryPendingAttentionMessage(attention.reason),
+    `Goal recovery pending (${reason}); wait for host retry/compaction or send a new user message if it does not recover.`,
+  );
+  assert.equal(isRecoveryPendingAttention({ kind: "paused", reason }), false);
+  assert.equal(isRecoveryPendingAttention(null), false);
+  assert.equal(reasonFromRecoveryPendingAttention(null), null);
+  assert.equal(recoveryAttentionMessage(reason), `Goal needs attention (${reason}). Use /goal resume to continue.`);
 });
 
 test("changing context overflow messages share one recovery signature and reach the host cap", () => {
@@ -262,9 +269,12 @@ test("createErrorRecoveryCounters starts empty", () => {
 test("beginHostOverflowRecovery surfaces pending attention without pausing", () => {
   const state = createGoalRecoveryMachine();
   const result = beginHostOverflowRecovery(state);
-  assert.equal(result.attention, recoveryPendingAttentionMessage(HOST_OVERFLOW_RECOVERY_REASON));
+  assert.deepEqual(result.attention, {
+    kind: "pending",
+    reason: HOST_OVERFLOW_RECOVERY_REASON,
+  });
   assert.equal(result.persistHostOverflowCapReset, true);
-  assert.doesNotMatch(state.attention ?? "", /\/goal resume/);
+  assert.deepEqual(state.attention, result.attention);
   assert.equal(state.phase.kind, "hostOverflowRecoveringNeedsUserStart");
   assert.equal(recoveryPhaseBlocksContinuation(state.phase), true);
   assert.equal(recoveryPhaseNeedsUserStartTurn(state.phase), true);
@@ -338,7 +348,10 @@ test("recovery session compact preserves non-overflow pending attention and coun
 
   assert.equal(state.counters.transientAttempts, 1);
   assert.equal(state.counters.signature, "websocket closed");
-  assert.equal(state.attention, recoveryPendingAttentionMessage("provider error (websocket closed)"));
+  assert.deepEqual(state.attention, {
+    kind: "pending",
+    reason: "provider error (websocket closed)",
+  });
 });
 
 test("recovery plans pause after compaction cap even when compaction attempts are already exhausted", () => {

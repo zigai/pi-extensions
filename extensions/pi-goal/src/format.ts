@@ -1,3 +1,4 @@
+import { formatRecoveryAttention, type RecoveryAttention } from "./recovery.js";
 import type { GoalStatus, ThreadGoal } from "./types.js";
 
 const COMPACT_TOKEN_UNITS = [
@@ -127,7 +128,7 @@ function compactBudgetUsage(goal: ThreadGoal): string {
   return `${formatCompactTokenValue(goal.usage.tokensUsed)} / ${formatCompactTokenValue(goal.tokenBudget)}`;
 }
 
-export function formatFooterStatus(goal: ThreadGoal | null, recoveryAttention: string | null = null): string | undefined {
+export function formatFooterStatus(goal: ThreadGoal | null, recoveryAttention: RecoveryAttention | null = null): string | undefined {
   if (!goal) {
     return undefined;
   }
@@ -139,8 +140,9 @@ export function formatFooterStatus(goal: ThreadGoal | null, recoveryAttention: s
     return "Goal abandoned";
   }
 
-  if (recoveryAttention) {
-    return recoveryAttention;
+  const recoveryAttentionMessage = formatRecoveryAttention(recoveryAttention);
+  if (recoveryAttentionMessage) {
+    return recoveryAttentionMessage;
   }
 
   if (goal.status === "active") {

@@ -16,7 +16,9 @@ import {
 import { isRecoveryPendingAttention, reasonFromRecoveryPendingAttention } from "./recovery.js";
 import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
 import type { GoalRuntimeSessionHandlerContext } from "./goal-runtime-event-handler-types.js";
+import type { GoalRecoveryMachineState } from "./recovery-machine.js";
 import { CONTINUATION_RETRY_MS } from "./runtime-config.js";
+import type { ThreadGoal } from "./types.js";
 
 export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContext) {
   const {
@@ -153,11 +155,27 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
   };
 }
 
+interface PendingRecoveryShutdownContext {
+  recoveryState: Pick<GoalRecoveryMachineState, "attention">;
+  getGoal: () => ThreadGoal | null;
+}
+
+export function pendingRecoveryShutdownReason({
+  recoveryState,
+  getGoal,
+}: PendingRecoveryShutdownContext): string | null {
+  const goal = getGoal();
+  if (goal?.status !== "active" || !isRecoveryPendingAttention(recoveryState.attention)) {
+    return null;
+  }
+  return reasonFromRecoveryPendingAttention(recoveryState.attention);
+}
+
 function hasPendingRecoveryAttention({ runtimeState, stateController }: GoalRuntimeSessionHandlerContext): boolean {
-  const goal = stateController.getGoal();
-  return Boolean(
-    goal?.status === "active" && isRecoveryPendingAttention(runtimeState.recoveryState.attention),
-  );
+  return pendingRecoveryShutdownReason({
+    recoveryState: runtimeState.recoveryState,
+    getGoal: stateController.getGoal,
+  }) !== null;
 }
 
 function pauseForPendingRecoveryShutdown(
@@ -165,12 +183,10 @@ function pauseForPendingRecoveryShutdown(
   deps: GoalRuntimeSessionHandlerContext,
 ): void {
   const { runtimeState, stateController } = deps;
-  const goal = stateController.getGoal();
-  if (!goal || goal.status !== "active" || !runtimeState.recoveryState.attention) {
-    return;
-  }
-
-  const reason = reasonFromRecoveryPendingAttention(runtimeState.recoveryState.attention);
+  const reason = pendingRecoveryShutdownReason({
+    recoveryState: runtimeState.recoveryState,
+    getGoal: stateController.getGoal,
+  });
   if (!reason) {
     return;
   }

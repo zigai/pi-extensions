@@ -137,7 +137,10 @@ test("beginOverflowRecovery with an active goal records pending attention and du
 
   harness.stateController.beginOverflowRecovery(harness.ctx);
   assert.equal(harness.recoveryState.phase.kind, "hostOverflowRecoveringNeedsUserStart");
-  assert.match(harness.recoveryState.attention ?? "", /Goal recovery pending/);
+  assert.deepEqual(harness.recoveryState.attention, {
+    kind: "pending",
+    reason: "recovering from context overflow",
+  });
   assert.equal(harness.refreshCount, 1);
   assert.equal(harness.entries.length, 1);
   const entry = harness.entries[0] as { kind?: string; active?: boolean };

@@ -3,9 +3,9 @@ import { mock, test } from "node:test";
 
 import { formatFooterStatus } from "../src/format.js";
 import {
+  createRecoveryPausedAttention,
+  createRecoveryPendingAttention,
   HOST_OVERFLOW_RECOVERY_REASON,
-  recoveryAttentionMessage,
-  recoveryPendingAttentionMessage,
 } from "../src/recovery.js";
 import {
   assistantMessage,
@@ -214,7 +214,7 @@ test("overflow after compaction and intervening transient error pauses with reco
     harness.footerStatuses.at(-1),
     formatFooterStatus(
       { ...goal, status: "paused" },
-      recoveryAttentionMessage("context window recovery failed after repeated compaction attempts"),
+      createRecoveryPausedAttention("context window recovery failed after repeated compaction attempts"),
     ),
   );
 });
@@ -249,7 +249,7 @@ test("transient errors surface pending attention without pausing before host ret
     harness.footerStatuses.at(-1),
     formatFooterStatus(
       harness.snapshot().goal,
-      recoveryPendingAttentionMessage("provider error (websocket closed)"),
+      createRecoveryPendingAttention("provider error (websocket closed)"),
     ),
   );
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
@@ -337,7 +337,7 @@ test("exhausted context overflow retries show recoverable attention in footer", 
     harness.footerStatuses.at(-1),
     formatFooterStatus(
       { ...goal, status: "paused" },
-      recoveryAttentionMessage("context window recovery failed after repeated compaction attempts"),
+      createRecoveryPausedAttention("context window recovery failed after repeated compaction attempts"),
     ),
   );
 });
@@ -407,7 +407,7 @@ test("first overflow error shows recoverable attention while host recovery is pe
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(
     harness.footerStatuses.at(-1),
-    formatFooterStatus(goal, recoveryPendingAttentionMessage(HOST_OVERFLOW_RECOVERY_REASON)),
+    formatFooterStatus(goal, createRecoveryPendingAttention(HOST_OVERFLOW_RECOVERY_REASON)),
   );
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
 });
@@ -425,7 +425,7 @@ test("overflow without session_compact stays active with pending overflow attent
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(
     harness.footerStatuses.at(-1),
-    formatFooterStatus(goal, recoveryPendingAttentionMessage(HOST_OVERFLOW_RECOVERY_REASON)),
+    formatFooterStatus(goal, createRecoveryPendingAttention(HOST_OVERFLOW_RECOVERY_REASON)),
   );
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
 });

@@ -3,9 +3,9 @@ import { mock, test } from "node:test";
 
 import { formatFooterStatus } from "../src/format.js";
 import {
+  createRecoveryPausedAttention,
+  createRecoveryPendingAttention,
   HOST_OVERFLOW_RECOVERY_REASON,
-  recoveryAttentionMessage,
-  recoveryPendingAttentionMessage,
 } from "../src/recovery.js";
 import {
   assistantMessage,
@@ -33,7 +33,7 @@ test("non-retryable provider errors pause active goals immediately", async () =>
     harness.footerStatuses.at(-1),
     formatFooterStatus(
       harness.snapshot().goal,
-      recoveryAttentionMessage("non-retryable provider error (invalid tool call state: malformed function arguments)"),
+      createRecoveryPausedAttention("non-retryable provider error (invalid tool call state: malformed function arguments)"),
     ),
   );
 });
@@ -51,7 +51,7 @@ test("terminal provider-limit 429 errors pause active goals immediately", async 
     harness.footerStatuses.at(-1),
     formatFooterStatus(
       harness.snapshot().goal,
-      recoveryAttentionMessage("non-retryable provider error (insufficient_quota 429)"),
+      createRecoveryPausedAttention("non-retryable provider error (insufficient_quota 429)"),
     ),
   );
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
@@ -116,7 +116,7 @@ test("upstream request-buffer retry exhaustion stays active with pending recover
     harness.footerStatuses.at(-1),
     formatFooterStatus(
       harness.snapshot().goal,
-      recoveryPendingAttentionMessage(
+      createRecoveryPendingAttention(
         "provider error (exceeded request buffer limit while retrying upstream)",
       ),
     ),
@@ -153,7 +153,7 @@ test("silent stop overflow suppresses continuation and shows overflow recovery a
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(
     harness.footerStatuses.at(-1),
-    formatFooterStatus(goal, recoveryPendingAttentionMessage(HOST_OVERFLOW_RECOVERY_REASON)),
+    formatFooterStatus(goal, createRecoveryPendingAttention(HOST_OVERFLOW_RECOVERY_REASON)),
   );
 });
 
@@ -185,7 +185,7 @@ test("zero-output length overflow suppresses continuation and shows overflow rec
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(
     harness.footerStatuses.at(-1),
-    formatFooterStatus(goal, recoveryPendingAttentionMessage(HOST_OVERFLOW_RECOVERY_REASON)),
+    formatFooterStatus(goal, createRecoveryPendingAttention(HOST_OVERFLOW_RECOVERY_REASON)),
   );
 });
 
@@ -268,7 +268,7 @@ test("threshold session_compact after transient provider error preserves pending
     harness.footerStatuses.at(-1),
     formatFooterStatus(
       harness.snapshot().goal,
-      recoveryPendingAttentionMessage("provider error (websocket closed)"),
+      createRecoveryPendingAttention("provider error (websocket closed)"),
     ),
   );
 });
