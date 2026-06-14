@@ -36,7 +36,7 @@ npm run smoke:platform:all
 
 `smoke:platform:all` runs `smoke:platform:doctor` before any target suite starts.
 
-The required gate runs the full suite plus a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. The default smoke model is `zai/glm-5.1`; override with `PLATFORM_SMOKE_MODEL` when needed.
+The required gate runs the full suite plus a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. The default smoke model is `zai/glm-5.2`; override with `PLATFORM_SMOKE_MODEL` when needed.
 
 ## Layout
 

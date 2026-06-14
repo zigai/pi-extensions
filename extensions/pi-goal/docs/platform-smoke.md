@@ -48,7 +48,7 @@ PLATFORM_SMOKE_WINDOWS_USER="<windows-ssh-user>"
 PLATFORM_SMOKE_WINDOWS_WORK_ROOT="C:\\crabbox\\pi-codex-goal"
 
 # Real runtime smoke defaults.
-PLATFORM_SMOKE_MODEL="zai/glm-5.1"
+PLATFORM_SMOKE_MODEL="zai/glm-5.2"
 PLATFORM_SMOKE_AUTH_ENV="ZAI_API_KEY,Z_AI_API_KEY"
 ```
 

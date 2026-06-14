@@ -7,7 +7,7 @@ export default {
 	artifactRoot: ".artifacts/platform-smoke",
 	requiredTargets: ["macos", "ubuntu", "windows-native"],
 	requiredSuites: ["platform-build", "goal-runtime-smoke"],
-	defaultModel: "zai/glm-5.1",
+	defaultModel: "zai/glm-5.2",
 	defaultAuthEnv: ["ZAI_API_KEY", "Z_AI_API_KEY"],
 	requiredCrabbox: {
 		install: "Homebrew package or PLATFORM_SMOKE_CRABBOX override",

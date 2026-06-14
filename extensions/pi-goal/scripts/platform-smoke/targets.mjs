@@ -23,7 +23,7 @@ function psSingleQuote(value) {
 }
 
 function smokeModel(config) {
-	return process.env.PLATFORM_SMOKE_MODEL || config.defaultModel || "zai/glm-5.1";
+	return process.env.PLATFORM_SMOKE_MODEL || config.defaultModel || "zai/glm-5.2";
 }
 
 function authEnvAllowList(config) {

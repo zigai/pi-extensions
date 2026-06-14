@@ -79,7 +79,7 @@ npm run smoke:platform:all
 
 `smoke:platform:all` runs the doctor before any target suite.
 
-That gate runs `npm run verify`, packs the package, installs the packed package into a clean pi project, checks `pi list`, and runs a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. Pi 0.79+ project trust is handled explicitly with `--approve` inside the isolated smoke projects so project-local package settings and the packed extension load in non-interactive runs. The runtime smoke defaults to `zai/glm-5.1`; override it with `PLATFORM_SMOKE_MODEL` and configure forwarded auth env vars with `PLATFORM_SMOKE_AUTH_ENV`. Setup and artifact details: [docs/platform-smoke.md](docs/platform-smoke.md).
+That gate runs `npm run verify`, packs the package, installs the packed package into a clean pi project, checks `pi list`, and runs a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. Pi 0.79+ project trust is handled explicitly with `--approve` inside the isolated smoke projects so project-local package settings and the packed extension load in non-interactive runs. The runtime smoke defaults to `zai/glm-5.2`; override it with `PLATFORM_SMOKE_MODEL` and configure forwarded auth env vars with `PLATFORM_SMOKE_AUTH_ENV`. Setup and artifact details: [docs/platform-smoke.md](docs/platform-smoke.md).
 
 Project agent notes and module map: [AGENTS.md](AGENTS.md).
 Current structural audit and remediation record: [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md).

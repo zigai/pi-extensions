@@ -64,7 +64,7 @@ Environment:
   PLATFORM_SMOKE_WINDOWS_SNAPSHOT     Parallels snapshot name
   PLATFORM_SMOKE_WINDOWS_USER         Windows SSH user
   PLATFORM_SMOKE_WINDOWS_WORK_ROOT    Windows work root, for example C:\\crabbox\\pi-codex-goal
-  PLATFORM_SMOKE_MODEL                Model for real runtime smoke; default zai/glm-5.1
+  PLATFORM_SMOKE_MODEL                Model for real runtime smoke; default zai/glm-5.2
   PLATFORM_SMOKE_AUTH_ENV             Comma-separated auth env names to forward; default ZAI_API_KEY,Z_AI_API_KEY
 `);
 }

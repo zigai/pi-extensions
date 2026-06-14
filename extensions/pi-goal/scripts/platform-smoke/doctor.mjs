@@ -233,7 +233,7 @@ export async function runDoctor(config, options = {}) {
 	}
 
 	console.log("\n── Model smoke configuration ──");
-	const model = process.env.PLATFORM_SMOKE_MODEL || config?.defaultModel || "zai/glm-5.1";
+	const model = process.env.PLATFORM_SMOKE_MODEL || config?.defaultModel || "zai/glm-5.2";
 	const authEnv = (process.env.PLATFORM_SMOKE_AUTH_ENV
 		? process.env.PLATFORM_SMOKE_AUTH_ENV.split(",")
 		: (config?.defaultAuthEnv ?? ["ZAI_API_KEY", "Z_AI_API_KEY"])

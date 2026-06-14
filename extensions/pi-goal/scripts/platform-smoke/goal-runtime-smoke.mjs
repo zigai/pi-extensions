@@ -5,7 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 function parseArgs(argv) {
-	const args = { model: "zai/glm-5.1", packageName: "pi-codex-goal" };
+	const args = { model: "zai/glm-5.2", packageName: "pi-codex-goal" };
 	for (let i = 2; i < argv.length; i += 1) {
 		const arg = argv[i];
 		if (arg === "--help" || arg === "-h") {

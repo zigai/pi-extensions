@@ -152,7 +152,7 @@ import { buildGoalRuntimeSmokeCommand, buildPlatformBuildCommand, platformFor } 
 const posix = buildPlatformBuildCommand("ubuntu", "pi-codex-goal", 24);
 const macos = buildPlatformBuildCommand("macos", "pi-codex-goal", 24);
 const powershell = buildPlatformBuildCommand("windows-native", "pi-codex-goal", 24);
-const goalRuntime = buildGoalRuntimeSmokeCommand({ packageName: "pi-codex-goal", defaultModel: "zai/glm-5.1" }, "ubuntu");
+const goalRuntime = buildGoalRuntimeSmokeCommand({ packageName: "pi-codex-goal", defaultModel: "zai/glm-5.2" }, "ubuntu");
 const customConfig = {
   packageName: "custom-goal-package",
   ubuntuContainerImage: "node:24-test",
@@ -175,7 +175,7 @@ const result = {
   powershellHasPackage: powershell.includes("pi-codex-goal"),
   powershellScriptHasApprove: readFileSync("scripts/platform-smoke/platform-build-windows.ps1", "utf8").includes("--approve"),
   powershellNoExtensionShortcut: !/\\bpi\\s+(?:-e|--extension)\\s+\\./.test(powershell),
-  goalRuntimeHasDefaultModel: goalRuntime.includes("zai/glm-5.1"),
+  goalRuntimeHasDefaultModel: goalRuntime.includes("zai/glm-5.2"),
   goalRuntimeHasPackage: goalRuntime.includes("pi-codex-goal"),
   goalRuntimeAssertsReadTool: readFileSync("scripts/platform-smoke/goal-runtime-smoke.mjs", "utf8").includes("readToolObserved"),
   goalRuntimeTargetChecksReadTool: readFileSync("scripts/platform-smoke/targets.mjs", "utf8").includes("read-tool-observed"),
