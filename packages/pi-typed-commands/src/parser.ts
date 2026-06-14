@@ -18,8 +18,11 @@ import type {
     RegisteredTypedCommand,
 } from "./types.js";
 
+/** Token stream produced from a raw typed-argument string. */
 export type TokenizeResult = {
+    /** Parsed tokens with quotes removed and escapes resolved. */
     tokens: string[];
+    /** Whether the input ended before a quoted string was closed. */
     unterminatedQuote: boolean;
 };
 
@@ -33,6 +36,7 @@ function isHelpToken(token: string): boolean {
     return token === "--help" || token === "-h";
 }
 
+/** Tokenize typed-command arguments using the same quote and escape rules as the parser. */
 export function tokenizeTypedArgumentString(input: string): TokenizeResult {
     const tokens: string[] = [];
     let current = "";

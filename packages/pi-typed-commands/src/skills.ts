@@ -39,6 +39,7 @@ const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
 export type RawSkillArgumentDefinition = Record<string, unknown>;
 export type RawSkillArguments = Record<string, unknown>;
 
+/** Parsed subset of `SKILL.md` frontmatter used by typed skill support. */
 export type SkillFrontmatter = {
     name?: string;
     description?: string;
@@ -47,6 +48,7 @@ export type SkillFrontmatter = {
     metadata?: Record<string, unknown>;
 };
 
+/** Normalized metadata for a skill that declares typed arguments. */
 export type TypedSkillMetadata = {
     name: string;
     description: string;
@@ -57,22 +59,28 @@ export type TypedSkillMetadata = {
     formTitle?: string;
 };
 
+/** Schema diagnostics for a skill whose typed arguments could not be registered. */
 export type TypedSkillDiagnostics = {
     name: string;
     filePath: string;
     messages: string[];
 };
 
+/** Result of normalizing raw skill YAML into command argument definitions. */
 export type SkillArgumentNormalizationResult = {
+    /** Successfully normalized argument definitions keyed by argument path. */
     args: ArgumentDefinitions;
+    /** Non-fatal authoring errors that should be shown before using the typed skill. */
     warnings: string[];
 };
 
+/** Result of reading typed metadata from one `SKILL.md` file. */
 export type ReadTypedSkillMetadataResult = {
     metadata?: TypedSkillMetadata;
     diagnostics?: TypedSkillDiagnostics;
 };
 
+/** Inputs for rendering a typed skill invocation into the prompt sent to the model. */
 export type RenderTypedSkillInvocationOptions = {
     skill: Pick<TypedSkillMetadata, "name" | "filePath" | "baseDir" | "body">;
     values: Record<string, ArgumentValue>;
@@ -560,6 +568,12 @@ function validateArgumentNames(args: ArgumentDefinitions, warnings: string[]): v
     }
 }
 
+/**
+ * Normalize a skill frontmatter `arguments` object into typed command argument definitions.
+ *
+ * Invalid entries are skipped and described in `warnings` so callers can surface a single
+ * descriptive schema error for the skill.
+ */
 export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNormalizationResult {
     const warnings: string[] = [];
     const args: ArgumentDefinitions = {};
@@ -578,6 +592,7 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
     return { args, warnings };
 }
 
+/** Parse a `SKILL.md` document into frontmatter fields and trimmed Markdown body. */
 export function parseSkillMarkdown(content: string): {
     frontmatter: SkillFrontmatter;
     body: string;
@@ -624,6 +639,7 @@ function typedSkillDiagnostics(
     return { name, filePath, messages };
 }
 
+/** Read and validate typed skill metadata from a `SKILL.md` file. */
 export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMetadataResult {
     const content = readFileSync(filePath, "utf8");
     const { frontmatter, body } = parseSkillMarkdown(content);
@@ -665,11 +681,13 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
     return { metadata };
 }
 
+/** Read typed skill metadata, returning `undefined` when absent or invalid. */
 export function readTypedSkillMetadata(filePath: string): TypedSkillMetadata | undefined {
     const result = readTypedSkillMetadataResult(filePath);
     return result.metadata;
 }
 
+/** Format typed skill schema diagnostics for display in Pi notifications. */
 export function formatTypedSkillDiagnostics(diagnostics: TypedSkillDiagnostics): string {
     return [
         `/skill:${diagnostics.name} has invalid typed arguments in:`,
@@ -679,6 +697,7 @@ export function formatTypedSkillDiagnostics(diagnostics: TypedSkillDiagnostics):
     ].join("\n");
 }
 
+/** Adapt typed skill metadata into the internal typed command representation. */
 export function typedSkillCommandFromMetadata(
     skill: TypedSkillMetadata,
 ): RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
@@ -705,12 +724,14 @@ export function typedSkillCommandFromMetadata(
     return command;
 }
 
+/** Return whether a registered typed command represents a typed skill invocation. */
 export function isTypedSkillCommand(
     command: RegisteredTypedCommand,
 ): command is RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
     return (command as { source?: unknown }).source === "skill";
 }
 
+/** Extract the `SKILL.md` path from a Pi skill command record. */
 export function skillPathFromCommand(command: SlashCommandInfo): string | undefined {
     if (command.source !== "skill") {
         return undefined;
@@ -760,6 +781,7 @@ function setNestedValue(target: Record<string, unknown>, path: string[], value: 
     }
 }
 
+/** Expand dotted argument names such as `config.path` into nested objects. */
 export function expandArgumentObject(
     values: Record<string, ArgumentValue>,
 ): Record<string, unknown> {
@@ -796,6 +818,12 @@ function escapeXmlAttribute(value: string): string {
     return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 }
 
+/**
+ * Render typed skill values into skill instructions.
+ *
+ * Placeholders such as `{args.path}` are replaced inline. If the skill body has no placeholders,
+ * values are appended as an `ARGUMENTS` YAML block instead.
+ */
 export function renderTypedSkillInvocation(options: RenderTypedSkillInvocationOptions): string {
     const { skill, values } = options;
     let usedPlaceholders = false;

@@ -20,8 +20,13 @@ export type ArgumentWidget =
     | "confirm"
     | "custom";
 
+/** Scalar value produced by string, number, boolean, and enum arguments. */
 export type PrimitiveArgumentValue = string | number | boolean;
+
+/** Selected values produced by a `multi-enum` argument. */
 export type MultiArgumentValue = string[];
+
+/** Any concrete value a parsed argument can produce before optional `undefined` is added. */
 export type ConcreteArgumentValue = PrimitiveArgumentValue | MultiArgumentValue;
 
 /** Parsed, defaulted, or form-collected argument value; `undefined` means unset. */
@@ -29,6 +34,7 @@ export type ArgumentValue = ConcreteArgumentValue | undefined;
 
 /** Theme helpers passed to custom dense-form widget renderers. */
 export type ArgumentWidgetTheme = {
+    /** Render text with terminal bold styling. */
     bold(text: string): string;
     /** Render text with a named Pi TUI colour such as `accent`, `muted`, or `warning`. */
     fg(color: string, text: string): string;
@@ -36,11 +42,17 @@ export type ArgumentWidgetTheme = {
 
 /** Context passed to a custom dense-form widget renderer. */
 export type ArgumentWidgetRenderContext = {
+    /** Argument key from the command's `args` map. */
     name: string;
+    /** Normalized argument definition for this field. */
     definition: ArgumentDefinition;
+    /** Current field value. */
     value: ArgumentValue;
+    /** Whether this field currently has focus in the dense form. */
     selected: boolean;
+    /** Available display width for the value cell. */
     width: number;
+    /** Theme helpers matching the active Pi TUI theme. */
     theme: ArgumentWidgetTheme;
     /** Format an argument value the same way built-in widgets do. */
     formatValue(value: ArgumentValue): string;
@@ -48,11 +60,15 @@ export type ArgumentWidgetRenderContext = {
 
 /** Context passed to a custom dense-form widget input handler. */
 export type ArgumentWidgetInputContext = {
+    /** Argument key from the command's `args` map. */
     name: string;
+    /** Normalized argument definition for this field. */
     definition: ArgumentDefinition;
+    /** Current field value before the input is applied. */
     value: ArgumentValue;
     /** Raw terminal input sequence. */
     data: string;
+    /** Update this field's value from the custom handler. */
     setValue(value: ArgumentValue): void;
 };
 
@@ -71,18 +87,23 @@ export type CustomArgumentWidget = {
 
 /** Dense-form presentation options for a single argument. */
 export type ArgumentUi = {
+    /** Widget override. Omit to choose a widget from the argument type. */
     widget?: ArgumentWidget;
     /** Preferred row count for multiline widgets such as `textarea` and `command`. */
     rows?: number;
     /** Optional field title for future renderers; currently the argument name is shown. */
     title?: string;
+    /** Function-backed renderer/input hooks for TypeScript command definitions. */
     custom?: CustomArgumentWidget;
 };
 
 /** Shared fields accepted by every argument definition. */
 export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
+    /** Text shown in detailed help, completions, and forms. */
     description?: string;
+    /** Require a value after parsing and defaults are applied. */
     required?: boolean;
+    /** Value used when the user leaves the argument unset. */
     default?: TValue;
     /** Value hint shown in usage text and forms. */
     placeholder?: string;
@@ -95,6 +116,7 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
     ui?: ArgumentUi;
 };
 
+/** Text argument definition, optionally constrained by length or regular expression. */
 export type StringArgumentDefinition = BaseArgumentDefinition<string> & {
     type: "string";
     /** Minimum string length, inclusive. */
@@ -121,6 +143,7 @@ export type BooleanArgumentDefinition = BaseArgumentDefinition<boolean> & {
     type: "boolean";
 };
 
+/** Single-choice string argument constrained to a fixed set of values. */
 export type EnumArgumentDefinition<TValues extends readonly string[] = readonly string[]> =
     BaseArgumentDefinition<TValues[number]> & {
         type: "enum";
@@ -140,6 +163,7 @@ export type MultiEnumArgumentDefinition<TValues extends readonly string[] = read
         maxItems?: number;
     };
 
+/** Any supported typed argument definition. */
 export type ArgumentDefinition =
     | StringArgumentDefinition
     | NumberArgumentDefinition
@@ -147,6 +171,7 @@ export type ArgumentDefinition =
     | EnumArgumentDefinition
     | MultiEnumArgumentDefinition;
 
+/** Map from argument name to definition for a typed command or skill. */
 export type ArgumentDefinitions = Record<string, ArgumentDefinition>;
 
 type HasDefault<TDefinition> = TDefinition extends { default: ConcreteArgumentValue }
@@ -204,16 +229,23 @@ export type TypedCommandFormTitle = string | ((ctx: ExtensionCommandContext) => 
 
 /** Glyphs used for checkbox and radio widgets in the dense form. */
 export type TypedCommandFormSymbols = {
+    /** Marker used for selected checkbox and multiselect values. */
     selectedCheckbox?: string;
+    /** Marker used for unselected checkbox and multiselect values. */
     unselectedCheckbox?: string;
+    /** Marker used for the selected radio option. */
     selectedRadio?: string;
+    /** Marker used for unselected radio options. */
     unselectedRadio?: string;
 };
 
 /** Options passed to `registerTypedCommand`. */
 export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
+    /** One-line command description used by Pi command listings and detailed help. */
     description: string;
+    /** Argument definitions used for parsing, validation, completions, usage, and forms. */
     args: TDefinitions;
+    /** Handler invoked with typed values when parsing and validation succeed. */
     handler: TypedCommandHandler<TDefinitions>;
     /** Optional raw fallback handler used when typed args are disabled or bypassed. */
     fallbackHandler?: RawCommandHandler;
@@ -242,6 +274,7 @@ export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = Ar
         openFormWhenMissingRequired: boolean;
     };
 
+/** Machine-readable kind for a parser or validation issue. */
 export type ParseIssueKind =
     | "invalid-value"
     | "missing-required"
@@ -252,9 +285,13 @@ export type ParseIssueKind =
 
 /** One parser validation or syntax issue. */
 export type ParseIssue = {
+    /** Stable issue category for programmatic handling. */
     kind: ParseIssueKind;
+    /** Human-readable error message suitable for UI display. */
     message: string;
+    /** Argument name when the issue can be attributed to a definition. */
     name?: string;
+    /** Raw token that caused a syntax-level issue, when available. */
     token?: string;
 };
 
@@ -264,6 +301,7 @@ export type ParsedCommandArguments = {
     values: Record<string, ArgumentValue>;
     /** Argument names explicitly provided by the user. */
     provided: Set<string>;
+    /** Syntax, coercion, and validation issues found while parsing. */
     issues: ParseIssue[];
     /** Requested action: run handler or show help. */
     mode: "run" | "help";
