@@ -29,6 +29,7 @@ Typed named-argument examples:
 /branch --count 3
 /branch --panes --count 3
 /branch --prompt "investigate the failing tests"
+/branch --keep-open
 /branch --panes --count 3 --prompt "investigate separate approaches"
 /branch ?
 /branch ??
@@ -36,22 +37,12 @@ Typed named-argument examples:
 
 `/branch ?` opens the typed-argument prompt flow when `pi-typed-commands` is enabled. `/branch ??` shows command help. The typed args are:
 
-- `--count <1-10>` (`-c`) — number of forks to create; default `1`.
+- `--count <1-10>` — number of forks to create; default `1`.
 - `--panes` / `--no-panes` — open tmux panes or Ghostty splits instead of windows.
+- `--keep-open` / `--no-keep-open` — keep the terminal shell open after Pi exits.
 - `--prompt <text>` — optional initial prompt sent to each fork.
 
-Legacy positional examples are still supported through the fallback parser:
-
-```text
-/branch investigate the failing tests
-/branch 3
-/branch 3 investigate separate approaches
-/branch --panes 3 investigate separate approaches
-```
-
-A leading positive integer, after any legacy flags, is treated as the number of forks to create. Everything after that integer is sent as the optional initial prompt to each fork. The fork count is capped at 10.
-
-When running inside tmux, each fork opens in a new tmux window/tab immediately after the current tmux window by default. Pass `--panes`, `--pane`, or `-p` to open right-hand tmux panes instead. New tmux windows reuse the current Pi session name when available and append a concise index, such as `My task 1`. Forked Pi processes preserve the current model when Pi exposes it to the extension context.
+When running inside tmux, each fork opens in a new tmux window/tab immediately after the current tmux window by default. Pass `--panes` to open right-hand tmux panes instead. By default, the tmux window or pane closes when the forked Pi process exits. Pass `--keep-open` to run Pi without `exec` and drop back to a shell after Pi exits. New tmux windows reuse the current Pi session name when available and append a concise index, such as `My task 1`. Forked Pi processes preserve the current model when Pi exposes it to the extension context.
 
 On macOS Ghostty, forks open in Ghostty windows by default and Ghostty splits with `--panes`. On Linux Ghostty, forks open in new Ghostty windows.
 
