@@ -55,11 +55,13 @@ type ParsedArgs = {
     count: number;
     mode: LaunchMode;
     prompt: string;
+    keepOpen: boolean;
 };
 
 type BranchTypedArgs = {
     count: number;
     panes: boolean;
+    keepOpen: boolean;
     prompt?: string;
 };
 
@@ -135,16 +137,23 @@ function buildPiShellCommand(
     sessionFile: string | undefined,
     prompt: string,
     modelArg: string | undefined,
+    keepOpen: boolean,
 ): string {
-    return `exec ${buildPiCommandParts(sessionFile, prompt, modelArg).map(shellQuote).join(" ")}`;
+    const piCommand = buildPiCommandParts(sessionFile, prompt, modelArg).map(shellQuote).join(" ");
+    if (!keepOpen) {
+        return `exec ${piCommand}`;
+    }
+
+    return `${piCommand}; exec "\${SHELL:-/bin/sh}"`;
 }
 
 function buildPiStartupInput(
     sessionFile: string | undefined,
     prompt: string,
     modelArg: string | undefined,
+    keepOpen: boolean,
 ): string {
-    return `${buildPiShellCommand(sessionFile, prompt, modelArg)}\n`;
+    return `${buildPiShellCommand(sessionFile, prompt, modelArg, keepOpen)}\n`;
 }
 
 function isTmux(): boolean {
@@ -252,45 +261,6 @@ function formatUnknownError(error: unknown): string {
     return String(error);
 }
 
-function parseArgs(args: string): ParsedArgs {
-    const trimmed = args.trim();
-    if (trimmed.length === 0) {
-        return { count: 1, mode: "windows", prompt: "" };
-    }
-
-    const tokens = trimmed.split(/\s+/);
-    let mode: LaunchMode = "windows";
-    let index = 0;
-
-    while (index < tokens.length) {
-        const token = tokens[index];
-        if (token === "--panes" || token === "--pane" || token === "-p") {
-            mode = "panes";
-            index += 1;
-        } else if (token === "--windows" || token === "--tabs" || token === "-w") {
-            mode = "windows";
-            index += 1;
-        } else {
-            break;
-        }
-    }
-
-    let count = 1;
-    const countToken = tokens[index];
-    if (countToken !== undefined && /^\d+$/.test(countToken)) {
-        const parsedCount = Number.parseInt(countToken, 10);
-        if (Number.isSafeInteger(parsedCount) && parsedCount >= 1) {
-            count = parsedCount;
-            if (count > MAX_FORK_COUNT) {
-                count = MAX_FORK_COUNT;
-            }
-            index += 1;
-        }
-    }
-
-    return { count, mode, prompt: tokens.slice(index).join(" ") };
-}
-
 function parseTypedArgs(args: BranchTypedArgs): ParsedArgs {
     let mode: LaunchMode = "windows";
     if (args.panes) {
@@ -301,30 +271,8 @@ function parseTypedArgs(args: BranchTypedArgs): ParsedArgs {
         count: args.count,
         mode,
         prompt: args.prompt ?? "",
+        keepOpen: args.keepOpen,
     };
-}
-
-function shouldUseTypedBranchArgs(rawArgs: string): boolean {
-    const trimmed = rawArgs.trim();
-    if (trimmed.length === 0) {
-        return true;
-    }
-
-    const tokens = trimmed.split(/\s+/);
-    if (tokens.includes("?") || tokens.includes("??")) {
-        return true;
-    }
-
-    return tokens.some(
-        (token) =>
-            token === "--count" ||
-            token.startsWith("--count=") ||
-            token === "-c" ||
-            token.startsWith("-c=") ||
-            token === "--prompt" ||
-            token.startsWith("--prompt=") ||
-            token === "--no-panes",
-    );
 }
 
 function buildForkName(baseName: string, index: number): string {
@@ -406,6 +354,7 @@ async function launchForkedPi(
     ctx: ExtensionCommandContext,
     sessionFile: string | undefined,
     prompt: string,
+    keepOpen: boolean,
     launchName: string,
     tmuxWindowTarget: string | undefined,
 ) {
@@ -422,7 +371,7 @@ async function launchForkedPi(
                 launchName,
                 "-c",
                 ctx.cwd,
-                buildPiShellCommand(sessionFile, prompt, modelArg),
+                buildPiShellCommand(sessionFile, prompt, modelArg, keepOpen),
             );
             return pi.exec("tmux", tmuxArgs);
         }
@@ -432,7 +381,7 @@ async function launchForkedPi(
             if (targetPane !== undefined && targetPane.length > 0) {
                 tmuxArgs.push("-t", targetPane);
             }
-            tmuxArgs.push(buildPiShellCommand(sessionFile, prompt, modelArg));
+            tmuxArgs.push(buildPiShellCommand(sessionFile, prompt, modelArg, keepOpen));
             return pi.exec("tmux", tmuxArgs);
         }
         case "ghostty-split":
@@ -441,7 +390,7 @@ async function launchForkedPi(
                 GHOSTTY_SPLIT_SCRIPT,
                 "--",
                 ctx.cwd,
-                buildPiStartupInput(sessionFile, prompt, modelArg),
+                buildPiStartupInput(sessionFile, prompt, modelArg, keepOpen),
             ]);
         case "ghostty-window":
             if (process.platform === "darwin") {
@@ -450,7 +399,18 @@ async function launchForkedPi(
                     GHOSTTY_WINDOW_SCRIPT,
                     "--",
                     ctx.cwd,
-                    buildPiStartupInput(sessionFile, prompt, modelArg),
+                    buildPiStartupInput(sessionFile, prompt, modelArg, keepOpen),
+                ]);
+            }
+
+            if (keepOpen) {
+                return pi.exec("ghostty", [
+                    "+new-window",
+                    `--working-directory=${ctx.cwd}`,
+                    "-e",
+                    "/bin/sh",
+                    "-c",
+                    buildPiShellCommand(sessionFile, prompt, modelArg, keepOpen),
                 ]);
             }
 
@@ -468,6 +428,7 @@ async function launchOneFork(
     ctx: ExtensionCommandContext,
     launchTargets: LaunchTarget[],
     prompt: string,
+    keepOpen: boolean,
     launchName: string,
     tmuxWindowTarget: string | undefined,
 ): Promise<{
@@ -487,6 +448,7 @@ async function launchOneFork(
                 ctx,
                 forkedSessionFile,
                 prompt,
+                keepOpen,
                 launchName,
                 tmuxWindowTarget,
             );
@@ -544,6 +506,7 @@ async function handleParsedBranch(
             ctx,
             launchTargets,
             parsed.prompt,
+            parsed.keepOpen,
             launchName,
             tmuxWindowTarget,
         );
@@ -574,6 +537,11 @@ async function handleParsedBranch(
         promptSuffix = " and sent prompt";
     }
 
+    let keepOpenSuffix = "";
+    if (parsed.keepOpen) {
+        keepOpenSuffix = "; shell stays open after Pi exits";
+    }
+
     let targetDescription = "the selected launcher";
     if (launchedVia !== undefined) {
         targetDescription = describeLaunchTarget(launchedVia);
@@ -585,7 +553,7 @@ async function handleParsedBranch(
     }
 
     ctx.ui.notify(
-        `Opened ${successfulSessions.length} ${forkWord} in ${targetDescription}${promptSuffix}.`,
+        `Opened ${successfulSessions.length} ${forkWord} in ${targetDescription}${promptSuffix}${keepOpenSuffix}.`,
         "info",
     );
 
@@ -604,14 +572,6 @@ async function handleParsedBranch(
     }
 }
 
-async function handleBranch(
-    pi: ExtensionAPI,
-    args: string,
-    ctx: ExtensionCommandContext,
-): Promise<void> {
-    await handleParsedBranch(pi, parseArgs(args), ctx);
-}
-
 export default function (pi: ExtensionAPI): void {
     registerTypedCommand(pi, "branch", {
         description: "Fork this session into one or more parallel Pi processes",
@@ -623,7 +583,6 @@ export default function (pi: ExtensionAPI): void {
                 min: 1,
                 max: MAX_FORK_COUNT,
                 default: 1,
-                positional: 0,
                 description: "Number of forks to create",
             },
             panes: {
@@ -631,20 +590,20 @@ export default function (pi: ExtensionAPI): void {
                 default: false,
                 description: "Open tmux panes or Ghostty splits instead of windows",
             },
+            keepOpen: {
+                type: "boolean",
+                default: false,
+                description: "Keep the terminal shell open after Pi exits",
+            },
             prompt: {
                 type: "string",
                 description: "Optional initial prompt sent to each fork",
                 placeholder: "prompt",
-                positional: 1,
                 ui: {
                     widget: "textarea",
                     rows: 5,
                 },
             },
-        },
-        shouldUseTypedArgs: shouldUseTypedBranchArgs,
-        fallbackHandler: async (args, ctx) => {
-            await handleBranch(pi, args, ctx);
         },
         handler: async (args, ctx) => {
             await handleParsedBranch(pi, parseTypedArgs(args), ctx);
