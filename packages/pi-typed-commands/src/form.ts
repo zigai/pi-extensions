@@ -232,6 +232,11 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
         }
 
         if (definition.type === "string") {
+            const validation = validateArgumentValue(name, definition, input);
+            if (!validation.ok) {
+                this.ctx.ui.notify(validation.message, "error");
+                return this.promptStringLike(name, definition);
+            }
             this.state[name] = input;
             return true;
         }
@@ -270,13 +275,10 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
     private finalIssues(): string[] {
         const messages: string[] = [];
         for (const [name, definition] of Object.entries(this.command.args)) {
-            if (definition.required !== true) {
-                continue;
+            const validation = validateArgumentValue(name, definition, this.state[name]);
+            if (!validation.ok) {
+                messages.push(validation.message);
             }
-            if (this.state[name] !== undefined) {
-                continue;
-            }
-            messages.push(`${formatFlagName(name)} is required`);
         }
         return messages;
     }

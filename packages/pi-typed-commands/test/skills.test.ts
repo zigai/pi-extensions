@@ -33,6 +33,7 @@ void describe("normalizeSkillArguments", () => {
                 type: "multi_enum",
                 values: ["E", "F"],
                 required: false,
+                min_items: 1,
             },
             config: {
                 output_path: {
@@ -49,6 +50,7 @@ void describe("normalizeSkillArguments", () => {
         assert.equal(result.args.fix?.default, true);
         assert.equal(result.args.rules?.type, "multi-enum");
         assert.deepEqual(result.args.rules?.values, ["E", "F"]);
+        assert.equal(result.args.rules?.minItems, 1);
         assert.equal(result.args["config.output_path"]?.type, "string");
         assert.equal(result.args["config.output_path"]?.required, true);
     });
@@ -57,11 +59,10 @@ void describe("normalizeSkillArguments", () => {
         const parsed = parseSkillMarkdown(`---
 name: demo
 description: Demo skill
-metadata:
-  form_title: Demo Form
-  arguments:
-    path:
-      type: string
+form_title: Demo Form
+arguments:
+  path:
+    type: string
 ---
 
 Use {args.path}.
@@ -69,8 +70,51 @@ Use {args.path}.
 
         assert.equal(parsed.frontmatter.name, "demo");
         assert.equal(parsed.frontmatter.description, "Demo skill");
-        assert.deepEqual(parsed.frontmatter.metadata?.arguments, { path: { type: "string" } });
+        assert.equal(parsed.frontmatter.formTitle, "Demo Form");
+        assert.deepEqual(parsed.frontmatter.arguments, { path: { type: "string" } });
         assert.equal(parsed.body, "Use {args.path}.");
+    });
+
+    void it("reports invalid skill argument metadata", () => {
+        const result = normalizeSkillArguments({
+            no_cache: {
+                type: "boolean",
+            },
+            count: {
+                type: "number",
+                integer: true,
+                min: 1,
+                default: 0.5,
+            },
+            config: {
+                path: {
+                    type: "string",
+                },
+            },
+            config_path: {
+                type: "string",
+            },
+            branch: {
+                type: "string",
+                pattern: "[",
+            },
+            old: {
+                type: "string",
+                aliases: ["o"],
+            },
+        });
+
+        assert.match(result.warnings.join("\n"), /no_cache: argument flags may not start with no-/);
+        assert.match(result.warnings.join("\n"), /count\.default --count expects an integer/);
+        assert.match(
+            result.warnings.join("\n"),
+            /config_path: flag --config-path collides with config\.path/,
+        );
+        assert.match(
+            result.warnings.join("\n"),
+            /branch\.pattern must be a valid regular expression/,
+        );
+        assert.match(result.warnings.join("\n"), /old\.aliases is not supported/);
     });
 });
 

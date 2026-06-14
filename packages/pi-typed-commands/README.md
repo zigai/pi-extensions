@@ -22,7 +22,7 @@ For private/local startup without GitHub auth, reference the local clone from `~
 
 - a small library for extension authors to register typed named args;
 - a companion Pi extension that shows a one-line helper while typing typed commands; and
-- a typed argument layer for Agent Skills that opt in with `metadata.arguments`.
+- a typed argument layer for Agent Skills that opt in with top-level `arguments` frontmatter.
 
 The companion extension watches the editor and shows a compact hint for registered typed commands:
 
@@ -94,13 +94,13 @@ If a required argument is missing or an argument is invalid, the command opens t
 
 ## Supported Arg Types
 
-- `string`
+- `string` with optional `minLength`, `maxLength`, and `pattern`
 - `number` with optional `integer`, `min`, and `max`
 - `boolean` with `--flag`, `--flag true`, and `--no-flag`
 - `enum` with typed string values
-- `multi-enum` with comma-separated or repeated flags, such as `--tag api,web --tag worker`
+- `multi-enum` with comma-separated or repeated flags, such as `--tag api,web --tag worker`, and optional `minItems` / `maxItems`
 
-Common fields: `description`, `required`, `default`, `aliases`, `placeholder`, `positional`, and `ui`. Set `positional: true` or a numeric order such as `positional: 0` to parse a CLI-style positional arg before named `--flags`.
+Common fields: `description`, `required`, `default`, `placeholder`, `positional`, and `ui`. Set `positional: true` or a numeric order such as `positional: 0` to parse a CLI-style positional arg before named `--flags`.
 
 ## Form Widgets
 
@@ -160,28 +160,28 @@ Run `/typed-commands-demo<Tab>` to open a showcase form containing every support
 
 ## Typed Agent Skills
 
-Skills can opt in by adding typed argument metadata to `SKILL.md` frontmatter under `metadata.arguments`:
+Skills can opt in by adding typed argument metadata to `SKILL.md` frontmatter under top-level `arguments`:
 
 ```yaml
 ---
 name: fix-ruff-errors
 description: Fix Ruff lint errors in Python projects.
-metadata:
-  form_title: Fix Ruff errors
-  arguments:
-    path:
-      type: string
-      positional: 0
-      default: "."
-      description: File or directory to check
-    fix:
-      type: boolean
-      default: true
-      description: Apply safe fixes
-    rules:
-      type: multi_enum
-      values: ["E", "F", "I", "UP"]
-      description: Ruff rule families
+form_title: Fix Ruff errors
+arguments:
+  path:
+    type: string
+    positional: 0
+    default: "."
+    description: File or directory to check
+  fix:
+    type: boolean
+    default: true
+    description: Apply safe fixes
+  rules:
+    type: multi_enum
+    values: ["E", "F", "I", "UP"]
+    min_items: 1
+    description: Ruff rule families
 ---
 
 Run Ruff against `{args.path}`.
@@ -197,9 +197,9 @@ Invoke typed skills through Pi's normal skill command syntax:
 
 The extension discovers skill commands from Pi, reads each `SKILL.md`, and gives typed skills the same helper text, flag completions, enum completions, required-argument validation, and Tab-to-form flow as typed slash commands.
 
-Skill metadata uses the same argument fields as commands. In YAML, use `multi_enum`; it is normalized to the internal `multi-enum` type. Nested metadata objects are flattened into nested argument paths, so `config.path` can be referenced as `{args.config.path}` and completed as `--config-path`.
+Skill metadata uses the same serializable argument fields as commands. In YAML, use `multi_enum`, `min_length`, `max_length`, `min_items`, and `max_items`; they are normalized to the internal `multi-enum`, `minLength`, `maxLength`, `minItems`, and `maxItems` fields. Nested metadata objects are flattened into nested argument paths, so `config.path` can be referenced as `{args.config.path}` and completed as `--config-path`. A JSON Schema for the top-level `arguments` field is available at `schemas/skill-arguments.schema.json`.
 
-Required/default behavior is the same as slash commands: defaults are applied before required checks, so an argument with `default` is never missing at runtime. Without a default, set `required: true` to require a value; omit it or set `required: false` to make the argument optional.
+Required/default behavior is the same as slash commands: defaults are applied before required checks, so an argument with `default` is never missing at runtime. Without a default, set `required: true` to require a value; omit it or set `required: false` to make the argument optional. Defaults are validated against type-specific constraints. Invalid skill argument schemas produce a descriptive error when the skill is invoked.
 
 Skill bodies can interpolate typed values with `{args.name}` placeholders. Nested placeholders such as `{args.config.path}` are supported. Arrays render as comma-separated text in placeholders. Missing optional values render as an empty string. No filter or pipe syntax is supported.
 

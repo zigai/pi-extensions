@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zigai/pi-typed-commands/schemas/skill-arguments.schema.json",
+  "title": "Pi Typed Skill Arguments",
+  "description": "Schema for the top-level `arguments` field in SKILL.md frontmatter used by pi-typed-commands.",
+  "type": "object",
+  "additionalProperties": {
+    "$ref": "#/$defs/argumentOrNamespace"
+  },
+  "$defs": {
+    "argumentOrNamespace": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/argument"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/argumentOrNamespace"
+          }
+        }
+      ]
+    },
+    "shared": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "positional": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer",
+              "minimum": 0
+            }
+          ]
+        },
+        "ui": {
+          "$ref": "#/$defs/ui"
+        }
+      },
+      "not": {
+        "required": ["aliases"]
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "widget": {
+          "enum": [
+            "text",
+            "textarea",
+            "number",
+            "toggle",
+            "select",
+            "radio",
+            "multiselect",
+            "path",
+            "command",
+            "readonly",
+            "computed",
+            "confirm"
+          ]
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "stringArgument": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/shared"
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "string"
+            },
+            "description": true,
+            "required": true,
+            "default": {
+              "type": "string"
+            },
+            "placeholder": true,
+            "positional": true,
+            "ui": true,
+            "min_length": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_length": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "pattern": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "numberArgument": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/shared"
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "number"
+            },
+            "description": true,
+            "required": true,
+            "default": {
+              "type": "number"
+            },
+            "placeholder": true,
+            "positional": true,
+            "ui": true,
+            "integer": {
+              "type": "boolean"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            }
+          }
+        }
+      ]
+    },
+    "booleanArgument": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/shared"
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "boolean"
+            },
+            "description": true,
+            "required": true,
+            "default": {
+              "type": "boolean"
+            },
+            "placeholder": true,
+            "positional": true,
+            "ui": true
+          }
+        }
+      ]
+    },
+    "enumArgument": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/shared"
+        },
+        {
+          "type": "object",
+          "required": ["type", "values"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "enum"
+            },
+            "description": true,
+            "required": true,
+            "default": {
+              "type": "string"
+            },
+            "placeholder": true,
+            "positional": true,
+            "ui": true,
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          }
+        }
+      ]
+    },
+    "multiEnumArgument": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/shared"
+        },
+        {
+          "type": "object",
+          "required": ["type", "values"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": ["multi_enum", "multi-enum"]
+            },
+            "description": true,
+            "required": true,
+            "default": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "placeholder": true,
+            "positional": true,
+            "ui": true,
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "min_items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "argument": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/stringArgument"
+        },
+        {
+          "$ref": "#/$defs/numberArgument"
+        },
+        {
+          "$ref": "#/$defs/booleanArgument"
+        },
+        {
+          "$ref": "#/$defs/enumArgument"
+        },
+        {
+          "$ref": "#/$defs/multiEnumArgument"
+        }
+      ]
+    }
+  }
+}

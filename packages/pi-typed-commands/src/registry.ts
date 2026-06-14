@@ -1,11 +1,13 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getPiTypedCommandsSettings } from "./settings.js";
+import type { TypedSkillDiagnostics } from "./skills.js";
 import type { ArgumentDefinitions, RegisteredTypedCommand, TypedCommandToggle } from "./types.js";
 
 type RegistryListener = () => void;
 
 type TypedCommandRegistry = {
     commands: Map<string, RegisteredTypedCommand>;
+    skillDiagnostics: Map<string, TypedSkillDiagnostics>;
     listeners: Set<RegistryListener>;
 };
 
@@ -18,6 +20,7 @@ type GlobalWithRegistry = typeof globalThis & {
 function createRegistry(): TypedCommandRegistry {
     return {
         commands: new Map<string, RegisteredTypedCommand>(),
+        skillDiagnostics: new Map<string, TypedSkillDiagnostics>(),
         listeners: new Set<RegistryListener>(),
     };
 }
@@ -64,15 +67,22 @@ export function registerTypedSkillMetadata(command: RegisteredTypedCommand): voi
 }
 
 /** Replace all typed skill records while preserving extension-registered typed commands. */
-export function replaceTypedSkillMetadata(commands: RegisteredTypedCommand[]): void {
+export function replaceTypedSkillMetadata(
+    commands: RegisteredTypedCommand[],
+    diagnostics: TypedSkillDiagnostics[] = [],
+): void {
     const registry = getTypedCommandRegistry();
     for (const [name, command] of registry.commands) {
         if ((command as { source?: unknown }).source === "skill" || name.startsWith("skill:")) {
             registry.commands.delete(name);
         }
     }
+    registry.skillDiagnostics.clear();
     for (const command of commands) {
         registry.commands.set(command.name, command);
+    }
+    for (const diagnostic of diagnostics) {
+        registry.skillDiagnostics.set(`skill:${diagnostic.name}`, diagnostic);
     }
     notifyRegistryListeners(registry);
 }
@@ -80,6 +90,11 @@ export function replaceTypedSkillMetadata(commands: RegisteredTypedCommand[]): v
 /** Look up a registered typed command by slash command name, without the leading `/`. */
 export function getTypedCommand(name: string): RegisteredTypedCommand | undefined {
     return getTypedCommandRegistry().commands.get(name);
+}
+
+/** Look up typed skill metadata diagnostics by slash command name, without the leading `/`. */
+export function getTypedSkillDiagnostics(name: string): TypedSkillDiagnostics | undefined {
+    return getTypedCommandRegistry().skillDiagnostics.get(name);
 }
 
 /** Return all registered typed commands sorted by command name. */

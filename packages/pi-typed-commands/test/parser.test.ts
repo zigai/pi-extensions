@@ -118,6 +118,46 @@ void describe("parseTypedCommandArgs", () => {
         assert.deepEqual(parsed.values.tags, ["api", "web", "worker"]);
     });
 
+    void it("accepts negative numeric flag values", () => {
+        const parsed = parseTypedCommandArgs(command, "--env dev --count -1");
+
+        assert.equal(parsed.values.count, undefined);
+        assert.equal(parsed.issues[0]?.message, "--count must be at least 1");
+    });
+
+    void it("supports -- as an end-of-options marker", () => {
+        const parsed = parseTypedCommandArgs(branchCommand, "create -- --literal-branch");
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.action, "create");
+        assert.equal(parsed.values.name, "--literal-branch");
+    });
+
+    void it("does not treat --help after -- as help mode", () => {
+        const parsed = parseTypedCommandArgs(branchCommand, "create -- --help");
+
+        assert.equal(parsed.mode, "run");
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.name, "--help");
+    });
+
+    void it("parses negative positional numbers when a number positional is expected", () => {
+        const numericCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                offset: {
+                    type: "number",
+                    positional: 0,
+                    min: -5,
+                },
+            },
+        };
+        const parsed = parseTypedCommandArgs(numericCommand, "-1");
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.offset, -1);
+    });
+
     void it("parses positional args before named flags", () => {
         const parsed = parseTypedCommandArgs(branchCommand, "create feature/foo --base main");
 
@@ -162,6 +202,41 @@ void describe("getTypedAutocompleteSuggestions", () => {
         assert.deepEqual(
             suggestions?.items.map((item) => item.label),
             ["--env"],
+        );
+    });
+
+    void it("completes inline enum values", () => {
+        registerTypedCommandMetadata(command);
+
+        const suggestions = getTypedAutocompleteSuggestions(["/deploy --env=d"], 0, 15);
+
+        assert.equal(suggestions?.prefix, "--env=d");
+        assert.deepEqual(
+            suggestions?.items.map((item) => item.value),
+            ["--env=dev"],
+        );
+    });
+
+    void it("keeps repeatable multi-enum flags available", () => {
+        registerTypedCommandMetadata(command);
+
+        const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags api "], 0, 19);
+
+        assert.equal(
+            suggestions?.items.some((item) => item.label === "--tags"),
+            true,
+        );
+    });
+
+    void it("completes multi-enum values", () => {
+        registerTypedCommandMetadata(command);
+
+        const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags w"], 0, 16);
+
+        assert.equal(suggestions?.prefix, "w");
+        assert.deepEqual(
+            suggestions?.items.map((item) => item.value),
+            ["web", "worker"],
         );
     });
 

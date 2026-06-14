@@ -84,8 +84,6 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
     description?: string;
     required?: boolean;
     default?: TValue;
-    /** Additional flag names accepted by the parser, such as `"f"` for `-f`. */
-    aliases?: readonly string[];
     /** Value hint shown in usage text and forms. */
     placeholder?: string;
     /**
@@ -99,6 +97,12 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
 
 export type StringArgumentDefinition = BaseArgumentDefinition<string> & {
     type: "string";
+    /** Minimum string length, inclusive. */
+    minLength?: number;
+    /** Maximum string length, inclusive. */
+    maxLength?: number;
+    /** Regular expression constraint. Strings must match the pattern. */
+    pattern?: string | RegExp;
 };
 
 /** Numeric argument definition, optionally constrained to integers or a range. */
@@ -130,6 +134,10 @@ export type MultiEnumArgumentDefinition<TValues extends readonly string[] = read
         type: "multi-enum";
         /** Allowed string values. Use `as const` to preserve literal inference. */
         values: TValues;
+        /** Minimum selected item count, inclusive. */
+        minItems?: number;
+        /** Maximum selected item count, inclusive. */
+        maxItems?: number;
     };
 
 export type ArgumentDefinition =

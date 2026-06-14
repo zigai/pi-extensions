@@ -22,10 +22,11 @@ const definitions: ArgumentDefinitions = {
         type: "string",
         required: true,
         positional: 1,
+        minLength: 1,
+        pattern: "^[a-zA-Z0-9/_-]+$",
     },
     dryRun: {
         type: "boolean",
-        aliases: ["d"],
     },
     count: {
         type: "number",
@@ -44,11 +45,10 @@ void describe("typed command schema", () => {
         );
     });
 
-    void it("centralizes flag aliases and positional exclusion", () => {
+    void it("centralizes flag lookup and positional exclusion", () => {
         const lookup = createArgumentLookup(definitions);
 
         assert.equal(findArgumentName(lookup, "--dry-run"), "dryRun");
-        assert.equal(findArgumentName(lookup, "-d"), "dryRun");
         assert.equal(findArgumentName(lookup, "--action"), undefined);
     });
 
@@ -66,6 +66,17 @@ void describe("typed command schema", () => {
             ok: false,
             message: "--count expects an integer",
         });
+        assert.deepEqual(validateArgumentValue("branchName", definitions.branchName!, ""), {
+            ok: false,
+            message: "--branch-name must be at least 1 characters",
+        });
+        assert.deepEqual(
+            validateArgumentValue("branchName", definitions.branchName!, "bad branch"),
+            {
+                ok: false,
+                message: "--branch-name must match pattern ^[a-zA-Z0-9/_-]+$",
+            },
+        );
     });
 
     void it("applies defaults and derives display hints", () => {

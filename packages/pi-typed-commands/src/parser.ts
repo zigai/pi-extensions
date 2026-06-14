@@ -7,6 +7,7 @@ import {
     createParseIssue,
     findArgumentName,
     positionalArgumentEntries,
+    validateArgumentValue,
     type ArgumentLookup,
 } from "./schema.js";
 import type {
@@ -17,7 +18,7 @@ import type {
     RegisteredTypedCommand,
 } from "./types.js";
 
-type TokenizeResult = {
+export type TokenizeResult = {
     tokens: string[];
     unterminatedQuote: boolean;
 };
@@ -32,7 +33,7 @@ function isHelpToken(token: string): boolean {
     return token === "--help" || token === "-h";
 }
 
-function tokenize(input: string): TokenizeResult {
+export function tokenizeTypedArgumentString(input: string): TokenizeResult {
     const tokens: string[] = [];
     let current = "";
     let quote: string | undefined;
@@ -134,6 +135,20 @@ function parseShortFlag(token: string): { flag: string; inlineValue?: string } {
     };
 }
 
+function isNumericToken(token: string): boolean {
+    if (token.trim().length === 0) {
+        return false;
+    }
+    return Number.isFinite(Number(token));
+}
+
+function tokenCanBeValueForDefinition(token: string, definition: ArgumentDefinition): boolean {
+    if (!isFlagToken(token)) {
+        return true;
+    }
+    return definition.type === "number" && isNumericToken(token);
+}
+
 class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     private readonly command: RegisteredTypedCommand<TDefinitions>;
     private readonly rawArgs: string;
@@ -147,6 +162,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     private tokens: string[] = [];
     private index = 0;
     private positionalIndex = 0;
+    private optionsEnded = false;
 
     constructor(command: RegisteredTypedCommand<TDefinitions>, rawArgs: string) {
         this.command = command;
@@ -170,12 +186,12 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         this.lookup = createArgumentLookup(this.command.args);
         this.consumeTokens();
         this.applyDefaults();
-        this.addMissingRequiredIssues();
+        this.addValidationIssues();
         return this.result;
     }
 
     private prepareTokens(): void {
-        const tokenized = tokenize(this.rawArgs);
+        const tokenized = tokenizeTypedArgumentString(this.rawArgs);
         if (tokenized.unterminatedQuote) {
             this.result.issues.push(
                 createParseIssue("unterminated-quote", "Unterminated quote in arguments"),
@@ -183,8 +199,14 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         }
 
         this.tokens = [];
+        let optionsEnded = false;
         for (const token of tokenized.tokens) {
-            if (isHelpToken(token)) {
+            if (!optionsEnded && token === "--") {
+                optionsEnded = true;
+                this.tokens.push(token);
+                continue;
+            }
+            if (!optionsEnded && isHelpToken(token)) {
                 this.result.mode = "help";
                 continue;
             }
@@ -199,7 +221,21 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
                 break;
             }
 
-            if (isFlagToken(token)) {
+            if (!this.optionsEnded && token === "--") {
+                this.optionsEnded = true;
+                this.index += 1;
+                continue;
+            }
+
+            if (!this.optionsEnded && isFlagToken(token)) {
+                const positional = positionalArgumentEntries(this.command.args)[
+                    this.positionalIndex
+                ];
+                if (positional?.[1].type === "number" && isNumericToken(token)) {
+                    this.consumePositionalValue(token);
+                    this.index += 1;
+                    continue;
+                }
                 this.consumeFlagToken(token);
                 continue;
             }
@@ -253,7 +289,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         }
 
         const valueToken = this.tokens[this.index + 1];
-        if (valueToken === undefined || isFlagToken(valueToken)) {
+        if (valueToken === undefined || !tokenCanBeValueForDefinition(valueToken, definition)) {
             this.result.issues.push(
                 createParseIssue(
                     "missing-value",
@@ -352,17 +388,18 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         this.result.values = applyArgumentDefaults(this.command.args, this.result.values);
     }
 
-    private addMissingRequiredIssues(): void {
+    private addValidationIssues(): void {
         for (const [name, definition] of Object.entries(this.command.args)) {
-            if (definition.required !== true) {
+            const value = this.result.values[name];
+            const validation = validateArgumentValue(name, definition, value);
+            if (validation.ok) {
                 continue;
             }
-            if (this.result.values[name] !== undefined) {
-                continue;
+            let kind: ParseIssue["kind"] = "invalid-value";
+            if (definition.required === true && value === undefined) {
+                kind = "missing-required";
             }
-            this.result.issues.push(
-                createParseIssue("missing-required", `${formatFlagName(name)} is required`, name),
-            );
+            this.result.issues.push(createParseIssue(kind, validation.message, name));
         }
     }
 

@@ -8,6 +8,7 @@ import { getTypedArgumentCompletions, getTypedAutocompleteSuggestions } from "./
 import { hasIssuesOfKind, parseTypedCommandArgs } from "./parser.js";
 import {
     getTypedCommand,
+    getTypedSkillDiagnostics,
     isToggleEnabled,
     isTypedCommandEnabled,
     onTypedCommandsChanged,
@@ -27,8 +28,9 @@ import type {
 import { formatDetailedHelp, formatHelperLineParts } from "./usage.js";
 import { openArgumentForm } from "./form.js";
 import {
+    formatTypedSkillDiagnostics,
     isTypedSkillCommand,
-    readTypedSkillMetadata,
+    readTypedSkillMetadataResult,
     renderTypedSkillInvocation,
     skillPathFromCommand,
     typedSkillCommandFromMetadata,
@@ -236,18 +238,22 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     });
 }
 
-function commandInvocationForEditorText(
-    editorText: string,
-    cwd: string,
-    ctx?: ExtensionContext,
-): EditorTypedCommandInvocation | undefined {
+function slashCommandMatch(editorText: string): RegExpExecArray | undefined {
     const firstLine = editorText.split("\n", 1)[0];
     if (firstLine === undefined) {
         return undefined;
     }
 
-    const match = /^\/(\S+)(?:\s+(.*))?$/.exec(firstLine);
-    if (match === null) {
+    return /^\/(\S+)(?:\s+(.*))?$/.exec(firstLine) ?? undefined;
+}
+
+function commandInvocationForEditorText(
+    editorText: string,
+    cwd: string,
+    ctx?: ExtensionContext,
+): EditorTypedCommandInvocation | undefined {
+    const match = slashCommandMatch(editorText);
+    if (match === undefined) {
         return undefined;
     }
 
@@ -268,6 +274,20 @@ function commandInvocationForEditorText(
         command,
         rawArgs: match[2] ?? "",
     };
+}
+
+function notifySkillDiagnosticsForText(text: string, ctx: ExtensionCommandContext): boolean {
+    const match = slashCommandMatch(text);
+    const commandName = match?.[1];
+    if (commandName === undefined) {
+        return false;
+    }
+    const diagnostics = getTypedSkillDiagnostics(commandName);
+    if (diagnostics === undefined) {
+        return false;
+    }
+    ctx.ui.notify(formatTypedSkillDiagnostics(diagnostics), "error");
+    return true;
 }
 
 function helperCommandForEditorText(
@@ -427,21 +447,33 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
 
 function refreshTypedSkills(pi: ExtensionAPI): void {
     const commands: RegisteredTypedCommand[] = [];
+    const diagnostics = [];
     for (const command of pi.getCommands()) {
         const skillPath = skillPathFromCommand(command);
         if (skillPath === undefined) {
             continue;
         }
         try {
-            const metadata = readTypedSkillMetadata(skillPath);
-            if (metadata !== undefined) {
-                commands.push(typedSkillCommandFromMetadata(metadata));
+            const result = readTypedSkillMetadataResult(skillPath);
+            if (result.metadata !== undefined) {
+                commands.push(typedSkillCommandFromMetadata(result.metadata));
             }
-        } catch {
-            // Skill validation belongs to Pi's skill loader; typed metadata failures are ignored.
+            if (result.diagnostics !== undefined) {
+                diagnostics.push(result.diagnostics);
+            }
+        } catch (error) {
+            let message = String(error);
+            if (error instanceof Error) {
+                message = error.message;
+            }
+            diagnostics.push({
+                name: command.name.replace(/^skill:/, ""),
+                filePath: skillPath,
+                messages: [`failed to read typed arguments: ${message}`],
+            });
         }
     }
-    replaceTypedSkillMetadata(commands);
+    replaceTypedSkillMetadata(commands, diagnostics);
 }
 
 function setHelperWidget(ctx: ExtensionContext, command: RegisteredTypedCommand | undefined): void {
@@ -612,10 +644,11 @@ export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUx
 
     pi.on("input", async (event, ctx) => {
         session.clearWidget(ctx);
-        const transformed = await transformTypedSkillInput(
-            event.text,
-            ctx as ExtensionCommandContext,
-        );
+        const commandCtx = ctx as ExtensionCommandContext;
+        if (notifySkillDiagnosticsForText(event.text, commandCtx)) {
+            return { action: "handled" } as const;
+        }
+        const transformed = await transformTypedSkillInput(event.text, commandCtx);
         if (transformed !== undefined) {
             if (event.images !== undefined) {
                 return { action: "transform", text: transformed, images: event.images } as const;

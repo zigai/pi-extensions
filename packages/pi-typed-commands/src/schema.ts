@@ -100,11 +100,6 @@ export function createArgumentLookup(definitions: ArgumentDefinitions): Argument
         }
         byFlag.set(normalizeFlagName(name), name);
         byFlag.set(toKebabCase(name), name);
-        if (definition.aliases !== undefined) {
-            for (const alias of definition.aliases) {
-                byFlag.set(normalizeFlagName(alias), name);
-            }
-        }
     }
 
     return { byFlag, definitions };
@@ -261,10 +256,44 @@ export function validateArgumentValue(
     }
 
     if (definition.type === "string") {
-        if (typeof value === "string") {
-            return { ok: true };
+        if (typeof value !== "string") {
+            return { ok: false, message: `${formatFlagName(name)} expects text` };
         }
-        return { ok: false, message: `${formatFlagName(name)} expects text` };
+        if (definition.minLength !== undefined && value.length < definition.minLength) {
+            return {
+                ok: false,
+                message: `${formatFlagName(name)} must be at least ${definition.minLength} characters`,
+            };
+        }
+        if (definition.maxLength !== undefined && value.length > definition.maxLength) {
+            return {
+                ok: false,
+                message: `${formatFlagName(name)} must be at most ${definition.maxLength} characters`,
+            };
+        }
+        if (definition.pattern !== undefined) {
+            let pattern: RegExp;
+            try {
+                if (typeof definition.pattern === "string") {
+                    pattern = new RegExp(definition.pattern);
+                } else {
+                    pattern = definition.pattern;
+                }
+            } catch {
+                return {
+                    ok: false,
+                    message: `${formatFlagName(name)} has an invalid pattern`,
+                };
+            }
+            pattern.lastIndex = 0;
+            if (!pattern.test(value)) {
+                return {
+                    ok: false,
+                    message: `${formatFlagName(name)} must match pattern ${String(definition.pattern)}`,
+                };
+            }
+        }
+        return { ok: true };
     }
 
     if (definition.type === "boolean") {
@@ -285,13 +314,25 @@ export function validateArgumentValue(
     }
 
     if (definition.type === "multi-enum") {
-        if (Array.isArray(value) && value.every((item) => definition.values.includes(item))) {
-            return { ok: true };
+        if (!Array.isArray(value) || !value.every((item) => definition.values.includes(item))) {
+            return {
+                ok: false,
+                message: `${formatFlagName(name)} must use values from: ${definition.values.join(", ")}`,
+            };
         }
-        return {
-            ok: false,
-            message: `${formatFlagName(name)} must use values from: ${definition.values.join(", ")}`,
-        };
+        if (definition.minItems !== undefined && value.length < definition.minItems) {
+            return {
+                ok: false,
+                message: `${formatFlagName(name)} must include at least ${definition.minItems} item(s)`,
+            };
+        }
+        if (definition.maxItems !== undefined && value.length > definition.maxItems) {
+            return {
+                ok: false,
+                message: `${formatFlagName(name)} must include at most ${definition.maxItems} item(s)`,
+            };
+        }
+        return { ok: true };
     }
 
     if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -337,7 +378,7 @@ export function completionValuesForArgument(definition: ArgumentDefinition): str
     if (definition.type === "boolean") {
         return ["true", "false"];
     }
-    if (definition.type === "enum") {
+    if (definition.type === "enum" || definition.type === "multi-enum") {
         return [...definition.values];
     }
     return [];

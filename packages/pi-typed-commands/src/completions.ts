@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
 import { formatFlagName } from "./names.js";
+import { tokenizeTypedArgumentString } from "./parser.js";
 import { getTypedCommand, isTypedCommandEnabled } from "./registry.js";
 import {
     completionValuesForArgument,
@@ -18,11 +19,7 @@ type CommandLineContext = {
 };
 
 function tokenizeLoose(input: string): string[] {
-    const trimmed = input.trim();
-    if (trimmed.length === 0) {
-        return [];
-    }
-    return trimmed.split(/\s+/);
+    return tokenizeTypedArgumentString(input).tokens;
 }
 
 function providedArgumentNames<TDefinitions extends Record<string, ArgumentDefinition>>(
@@ -82,6 +79,47 @@ function argumentValueItems(definition: ArgumentDefinition, query: string): Auto
         });
 }
 
+function inlineFlagValueCompletion(context: CommandLineContext): AutocompleteItem[] | undefined {
+    if (!context.currentPrefix.startsWith("-")) {
+        return undefined;
+    }
+
+    const equalsIndex = context.currentPrefix.indexOf("=");
+    if (equalsIndex < 0) {
+        return undefined;
+    }
+
+    const flagToken = context.currentPrefix.slice(0, equalsIndex);
+    const rawQuery = context.currentPrefix.slice(equalsIndex + 1);
+    const commaIndex = rawQuery.lastIndexOf(",");
+    let query = rawQuery;
+    let valuePrefix = "";
+    if (commaIndex >= 0) {
+        query = rawQuery.slice(commaIndex + 1);
+        valuePrefix = rawQuery.slice(0, commaIndex + 1);
+    }
+
+    const lookup = createArgumentLookup(context.command.args);
+    const name = findArgumentName(lookup, flagToken);
+    if (name === undefined) {
+        return undefined;
+    }
+
+    const definition = context.command.args[name];
+    if (definition === undefined || definition.type === "boolean") {
+        return undefined;
+    }
+
+    const items = argumentValueItems(definition, query).map((item) => ({
+        ...item,
+        value: `${flagToken}=${valuePrefix}${item.value}`,
+    }));
+    if (items.length === 0) {
+        return undefined;
+    }
+    return items;
+}
+
 function valueCompletionForPreviousFlag(
     context: CommandLineContext,
 ): AutocompleteItem[] | undefined {
@@ -117,6 +155,17 @@ function valueCompletionForPreviousFlag(
     return items;
 }
 
+function shouldSuggestFlag(
+    name: string,
+    definition: ArgumentDefinition,
+    provided: Set<string>,
+): boolean {
+    if (isPositionalArgument(definition)) {
+        return false;
+    }
+    return !provided.has(name) || definition.type === "multi-enum";
+}
+
 export function getTypedArgumentCompletions<
     TDefinitions extends Record<string, ArgumentDefinition>,
 >(
@@ -140,7 +189,7 @@ export function getTypedArgumentCompletions<
 
     const provided = providedArgumentNames(command, tokens);
     const items = Object.entries(command.args)
-        .filter(([name, definition]) => !provided.has(name) && !isPositionalArgument(definition))
+        .filter(([name, definition]) => shouldSuggestFlag(name, definition, provided))
         .map(([name, definition]) => flagItem(name, definition))
         .filter((item) => item.value.startsWith(query) || item.label.startsWith(query));
 
@@ -225,6 +274,14 @@ export function getTypedAutocompleteSuggestions(
         return undefined;
     }
 
+    const inlineValueItems = inlineFlagValueCompletion(context);
+    if (inlineValueItems !== undefined) {
+        return {
+            items: inlineValueItems,
+            prefix: context.currentPrefix,
+        };
+    }
+
     const valueItems = valueCompletionForPreviousFlag(context);
     if (valueItems !== undefined) {
         return {
@@ -236,7 +293,7 @@ export function getTypedAutocompleteSuggestions(
     const tokens = tokenizeLoose(context.argsBeforeCursor);
     const provided = providedArgumentNames(context.command, tokens);
     const flagItems = Object.entries(context.command.args)
-        .filter(([name, definition]) => !provided.has(name) && !isPositionalArgument(definition))
+        .filter(([name, definition]) => shouldSuggestFlag(name, definition, provided))
         .map(([name, definition]) => flagItem(name, definition))
         .filter(
             (item) =>

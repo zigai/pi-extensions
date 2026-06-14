@@ -167,13 +167,6 @@ export function formatDetailedHelp<TDefinitions extends Record<string, ArgumentD
             if (isPositionalArgument(definition)) {
                 label = `  ${toKebabCase(name)}`;
             }
-            if (
-                !isPositionalArgument(definition) &&
-                definition.aliases !== undefined &&
-                definition.aliases.length > 0
-            ) {
-                label += ` (${definition.aliases.join(", ")})`;
-            }
             label += `: ${argumentValueHint(definition, name)}`;
             if (definition.required === true) {
                 label += ", required";
