@@ -45,7 +45,7 @@ test("platform smoke scripts have working syntax and help", () => {
   assert.match(help.stdout, /PLATFORM_SMOKE_CRABBOX/);
   assert.match(help.stdout, /platform-build/);
   assert.match(help.stdout, /goal-runtime-smoke/);
-  assert.match(help.stdout, /zai\/glm-5\.1/);
+  assert.match(help.stdout, /zai\/glm-5\.2/);
   assert.match(help.stdout, /--skip-windows-disposable-probe/);
 
   const doctor = readFileSync("scripts/platform-smoke/doctor.mjs", "utf8");

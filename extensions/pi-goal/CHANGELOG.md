@@ -2,10 +2,17 @@
 
 ## Unreleased
 
+## 0.1.27 - 2026-06-15
+
 - Raise the source-tree package Node engine floor to Node 24 so package metadata matches the platform-smoke validation baseline for the next release.
 - Refresh the structural audit to the current 0.1.26 baseline and align README/AGENTS audit links.
 - Avoid duplicate platform-smoke test execution during `npm run verify` by moving the platform-smoke assertion file under the `check:platform-smoke` script only.
 - Narrow runtime event registration typing to the event-handler interface.
+- Update the local pi development baseline to `@earendil-works/*` `0.79.4` and refresh the platform-smoke model baseline to `zai/glm-5.2`.
+
+### Validation
+
+- Ran `npm run verify` under pi `0.79.4`.
 
 ## 0.1.26 - 2026-06-10
 
