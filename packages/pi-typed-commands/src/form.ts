@@ -378,6 +378,14 @@ function createEditorTheme(theme: FormTheme): TextEditorTheme {
     };
 }
 
+function setInputValueAtEnd(input: Input, value: string): void {
+    input.setValue(value);
+    // pi-tui Input#setValue preserves the previous cursor, so seeding a default value from
+    // an empty field would leave the cursor before the text. The component does not expose a
+    // cursor setter, but the cursor is TypeScript-private rather than a runtime private field.
+    (input as unknown as { cursor: number }).cursor = value.length;
+}
+
 class ArgumentFormComponent implements Component, Focusable {
     private selectedIndex = 0;
     private input = new Input();
@@ -891,7 +899,7 @@ class ArgumentFormComponent implements Component, Focusable {
     private syncInputFromState(): void {
         const field = this.selectedField();
         if (!isTextWidget(field.definition)) {
-            this.input.setValue("");
+            setInputValueAtEnd(this.input, "");
             this.editor.setText("");
             return;
         }
@@ -903,10 +911,10 @@ class ArgumentFormComponent implements Component, Focusable {
         }
         if (isTextareaWidget(field.definition)) {
             this.editor.setText(text);
-            this.input.setValue("");
+            setInputValueAtEnd(this.input, "");
             return;
         }
-        this.input.setValue(text);
+        setInputValueAtEnd(this.input, text);
         this.editor.setText("");
     }
 
