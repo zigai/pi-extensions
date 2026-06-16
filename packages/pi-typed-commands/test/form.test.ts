@@ -33,6 +33,131 @@ type TestFormComponent = Component & {
 };
 
 void describe("dense argument form", () => {
+    void it("shows field names instead of CLI flags in validation messages", async () => {
+        const definitions = {
+            count: { type: "number", integer: true, max: 3, default: 1 },
+        } satisfies ArgumentDefinitions;
+
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "example",
+            description: "Example command",
+            args: definitions,
+            handler() {},
+            typedArgsEnabled: true,
+            formSymbols: symbols,
+            openFormWhenInvalid: true,
+            openFormWhenMissingRequired: true,
+        };
+
+        const parsed: ParsedCommandArguments = {
+            values: { count: 1 },
+            provided: new Set(["count"]),
+            issues: [
+                {
+                    kind: "invalid-value",
+                    message: "--count must be at most 3",
+                    name: "count",
+                    token: "4",
+                },
+            ],
+            mode: "run",
+        };
+
+        let renderedLines: string[] = [];
+        const ctx = {
+            mode: "tui",
+            ui: {
+                notify() {},
+                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                    const component = (await factory(
+                        tui,
+                        theme as never,
+                        {} as never,
+                        () => {},
+                    )) as TestFormComponent;
+
+                    component.focused = true;
+                    renderedLines = component.render(80);
+                    return undefined;
+                },
+            },
+        } as unknown as ExtensionCommandContext;
+
+        await openArgumentForm(command, parsed, "missing", ctx);
+
+        assert.ok(
+            renderedLines.some((line) => line.includes("count must be at most 3")),
+            `expected field-name issue, got ${JSON.stringify(renderedLines)}`,
+        );
+        assert.ok(
+            !renderedLines.some((line) => line.includes("--count must be at most 3")),
+            `expected no CLI-flag issue, got ${JSON.stringify(renderedLines)}`,
+        );
+    });
+
+    void it("rejects non-number characters in number fields", async () => {
+        const definitions = {
+            count: { type: "number", integer: true, default: 1 },
+        } satisfies ArgumentDefinitions;
+
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "example",
+            description: "Example command",
+            args: definitions,
+            handler() {},
+            typedArgsEnabled: true,
+            formSymbols: symbols,
+            openFormWhenInvalid: true,
+            openFormWhenMissingRequired: true,
+        };
+
+        const parsed: ParsedCommandArguments = {
+            values: { count: 1 },
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+
+        let countLine = "";
+        const ctx = {
+            mode: "tui",
+            ui: {
+                notify() {},
+                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                    let result: unknown;
+                    const component = (await factory(
+                        tui,
+                        theme as never,
+                        {} as never,
+                        (next: unknown) => {
+                            result = next;
+                        },
+                    )) as TestFormComponent;
+
+                    component.focused = true;
+                    component.handleInput("a");
+                    component.handleInput("2b3");
+                    countLine = component.render(80).find((line) => line.includes("count")) ?? "";
+                    component.handleInput("\r");
+
+                    return result;
+                },
+            },
+        } as unknown as ExtensionCommandContext;
+
+        const result = await openArgumentForm(command, parsed, "all", ctx);
+
+        assert.ok(
+            countLine.includes("123"),
+            `expected accepted digits only, got ${JSON.stringify(countLine)}`,
+        );
+        assert.ok(
+            !countLine.includes("a") && !countLine.includes("b"),
+            `expected rejected letters, got ${JSON.stringify(countLine)}`,
+        );
+        assert.equal(result?.count, 123);
+    });
+
     void it("moves the cursor to the end when tabbing into a defaulted number field", async () => {
         const definitions = {
             label: { type: "string" },

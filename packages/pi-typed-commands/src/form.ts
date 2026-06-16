@@ -1,6 +1,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
     CURSOR_MARKER,
+    decodeKittyPrintable,
     Editor,
     Input,
     matchesKey,
@@ -23,6 +24,7 @@ import type {
     ArgumentDefinition,
     ArgumentValue,
     ParsedCommandArguments,
+    ParseIssue,
     RegisteredTypedCommand,
     TypedCommandFormSymbols,
     FormMode,
@@ -54,11 +56,24 @@ type FormField = {
     issueMessages: string[];
 };
 
+type InputCursorState = {
+    cursor?: unknown;
+};
+
 const LEFT_PADDING = 1;
 const FIELD_GAP = 1;
 const MIN_VALUE_WIDTH = 12;
 const MAX_VALUE_WIDTH = 32;
 const NAME_WIDTH = 12;
+const FORM_MESSAGE_OPTIONS = { nameStyle: "field" } as const;
+
+function formatFormIssueMessage(issue: ParseIssue): string {
+    if (issue.name === undefined) {
+        return issue.message;
+    }
+
+    return issue.message.replaceAll(formatFlagName(issue.name), toKebabCase(issue.name));
+}
 
 function issuesByName(parsed: ParsedCommandArguments): Map<string, string[]> {
     const issues = new Map<string, string[]>();
@@ -67,7 +82,7 @@ function issuesByName(parsed: ParsedCommandArguments): Map<string, string[]> {
             continue;
         }
         const current = issues.get(item.name) ?? [];
-        current.push(item.message);
+        current.push(formatFormIssueMessage(item));
         issues.set(item.name, current);
     }
     return issues;
@@ -105,6 +120,91 @@ function currentValueText(value: ArgumentValue): string {
     return String(value);
 }
 
+function inputCursor(input: Input): number {
+    const cursor = (input as unknown as InputCursorState).cursor;
+    if (typeof cursor === "number") {
+        return cursor;
+    }
+    return input.getValue().length;
+}
+
+function setInputCursor(input: Input, cursor: number): void {
+    const boundedCursor = Math.max(0, Math.min(cursor, input.getValue().length));
+    (input as unknown as { cursor: number }).cursor = boundedCursor;
+}
+
+function numberAllowsNegative(definition: ArgumentDefinition): boolean {
+    return definition.type === "number" && (definition.min === undefined || definition.min < 0);
+}
+
+function numberInputPrefixIsValid(definition: ArgumentDefinition, value: string): boolean {
+    if (definition.type !== "number") {
+        return true;
+    }
+    if (value.length === 0) {
+        return true;
+    }
+
+    let signPattern = "\\+?";
+    if (numberAllowsNegative(definition)) {
+        signPattern = "[+-]?";
+    }
+    if (definition.integer === true) {
+        return new RegExp(`^${signPattern}\\d*$`).test(value);
+    }
+    return new RegExp(`^${signPattern}(?:\\d+|\\d*\\.\\d*)?$`).test(value);
+}
+
+function printableInputText(data: string): string | undefined {
+    const kittyPrintable = decodeKittyPrintable(data);
+    if (kittyPrintable !== undefined) {
+        return kittyPrintable;
+    }
+
+    let hasControlChars = false;
+    for (const char of data) {
+        const code = char.charCodeAt(0);
+        if (code < 32 || code === 0x7f || (code >= 0x80 && code <= 0x9f)) {
+            hasControlChars = true;
+            break;
+        }
+    }
+    if (hasControlChars) {
+        return undefined;
+    }
+    return data;
+}
+
+function filterNumberInputData(
+    definition: ArgumentDefinition,
+    value: string,
+    cursor: number,
+    data: string,
+): string | undefined {
+    if (definition.type !== "number") {
+        return data;
+    }
+
+    const printable = printableInputText(data);
+    if (printable === undefined) {
+        return undefined;
+    }
+
+    let nextValue = value;
+    let nextCursor = cursor;
+    let accepted = "";
+    for (const char of printable) {
+        const candidate = nextValue.slice(0, nextCursor) + char + nextValue.slice(nextCursor);
+        if (!numberInputPrefixIsValid(definition, candidate)) {
+            continue;
+        }
+        accepted += char;
+        nextValue = candidate;
+        nextCursor += char.length;
+    }
+    return accepted;
+}
+
 class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinition>> {
     private readonly command: RegisteredTypedCommand<TDefinitions>;
     private readonly parsed: ParsedCommandArguments;
@@ -128,7 +228,7 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
     async run(): Promise<Record<string, ArgumentValue> | undefined> {
         if (this.parsed.issues.length > 0) {
             this.ctx.ui.notify(
-                formatIssues(this.parsed.issues.map((item) => item.message)),
+                formatIssues(this.parsed.issues.map(formatFormIssueMessage)),
                 "warning",
             );
         }
@@ -232,7 +332,7 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
         }
 
         if (definition.type === "string") {
-            const validation = validateArgumentValue(name, definition, input);
+            const validation = validateArgumentValue(name, definition, input, FORM_MESSAGE_OPTIONS);
             if (!validation.ok) {
                 this.ctx.ui.notify(validation.message, "error");
                 return this.promptStringLike(name, definition);
@@ -241,7 +341,7 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
             return true;
         }
 
-        const numberValue = coerceArgumentValue(definition, input, name);
+        const numberValue = coerceArgumentValue(definition, input, name, FORM_MESSAGE_OPTIONS);
         if (!numberValue.ok) {
             this.ctx.ui.notify(numberValue.issue.message, "error");
             return this.promptStringLike(name, definition);
@@ -265,7 +365,7 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
             return true;
         }
         if (definition.required === true) {
-            this.ctx.ui.notify(`${formatFlagName(name)} is required`, "error");
+            this.ctx.ui.notify(`${toKebabCase(name)} is required`, "error");
             return this.promptStringLike(name, definition);
         }
         this.state[name] = undefined;
@@ -275,7 +375,12 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
     private finalIssues(): string[] {
         const messages: string[] = [];
         for (const [name, definition] of Object.entries(this.command.args)) {
-            const validation = validateArgumentValue(name, definition, this.state[name]);
+            const validation = validateArgumentValue(
+                name,
+                definition,
+                this.state[name],
+                FORM_MESSAGE_OPTIONS,
+            );
             if (!validation.ok) {
                 messages.push(validation.message);
             }
@@ -509,9 +614,39 @@ class ArgumentFormComponent implements Component, Focusable {
         }
 
         if (isTextWidget(field.definition)) {
+            this.handleTextInput(field, data);
+        }
+    }
+
+    private handleTextInput(field: FormField, data: string): void {
+        if (field.definition.type !== "number") {
             this.input.handleInput(data);
             this.commitInput(false);
+            return;
         }
+
+        const previousValue = this.input.getValue();
+        const previousCursor = inputCursor(this.input);
+        const filteredData = filterNumberInputData(
+            field.definition,
+            previousValue,
+            previousCursor,
+            data,
+        );
+        if (filteredData !== undefined) {
+            if (filteredData.length > 0) {
+                this.input.handleInput(filteredData);
+            }
+            this.commitInput(false);
+            return;
+        }
+
+        this.input.handleInput(data);
+        if (!numberInputPrefixIsValid(field.definition, this.input.getValue())) {
+            this.input.setValue(previousValue);
+            setInputCursor(this.input, previousCursor);
+        }
+        this.commitInput(false);
     }
 
     render(width: number): string[] {
@@ -806,6 +941,7 @@ class ArgumentFormComponent implements Component, Focusable {
             field.name,
             field.definition,
             this.state[field.name],
+            FORM_MESSAGE_OPTIONS,
         );
         if (!validation.ok) {
             return validation.message;
@@ -850,7 +986,12 @@ class ArgumentFormComponent implements Component, Focusable {
             rawValue = this.editor.getText();
         }
         const value = normalizeTextArgumentInput(field.definition, rawValue);
-        const validation = validateArgumentValue(field.name, field.definition, value);
+        const validation = validateArgumentValue(
+            field.name,
+            field.definition,
+            value,
+            FORM_MESSAGE_OPTIONS,
+        );
         if (!validation.ok) {
             if (validation.message !== undefined) {
                 this.localIssues.set(field.name, validation.message);
@@ -929,6 +1070,7 @@ class ArgumentFormComponent implements Component, Focusable {
                 field.name,
                 field.definition,
                 this.state[field.name],
+                FORM_MESSAGE_OPTIONS,
             );
             if (validation.ok) {
                 continue;
