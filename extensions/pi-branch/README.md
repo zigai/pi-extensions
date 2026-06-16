@@ -37,7 +37,7 @@ Typed named-argument examples:
 
 `/branch ?` opens the typed-argument prompt flow when `pi-typed-commands` is enabled. `/branch ??` shows command help. The typed args are:
 
-- `--count <1-10>` — number of forks to create; default `1`.
+- `--count <1-100>` — number of forks to create; default `1`.
 - `--panes` / `--no-panes` — open tmux panes or Ghostty splits instead of windows.
 - `--keep-open` / `--no-keep-open` — keep the terminal shell open after Pi exits.
 - `--prompt <text>` — optional initial prompt sent to each fork.

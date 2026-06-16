@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import * as path from "node:path";
 
-const MAX_FORK_COUNT = 10;
+const MAX_FORK_COUNT = 100;
 
 const GHOSTTY_SPLIT_SCRIPT = `on run argv
 	set targetCwd to item 1 of argv
