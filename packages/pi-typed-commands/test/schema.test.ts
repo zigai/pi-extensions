@@ -77,6 +77,15 @@ void describe("typed command schema", () => {
                 message: "--branch-name must match pattern ^[a-zA-Z0-9/_-]+$",
             },
         );
+        assert.deepEqual(
+            validateArgumentValue("branchName", definitions.branchName!, "", {
+                nameStyle: "field",
+            }),
+            {
+                ok: false,
+                message: "branch-name must be at least 1 characters",
+            },
+        );
     });
 
     void it("applies defaults and derives display hints", () => {

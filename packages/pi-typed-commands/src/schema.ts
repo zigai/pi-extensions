@@ -18,6 +18,17 @@ export type CoercedArgumentValue =
 
 export type ArgumentValueValidation = { ok: true } | { ok: false; message: string };
 
+export type ArgumentMessageOptions = {
+    nameStyle?: "flag" | "field";
+};
+
+function formatArgumentMessageName(name: string, options?: ArgumentMessageOptions): string {
+    if (options?.nameStyle === "field") {
+        return toKebabCase(name);
+    }
+    return formatFlagName(name);
+}
+
 export function createParseIssue(
     kind: ParseIssue["kind"],
     message: string,
@@ -137,7 +148,10 @@ export function coerceArgumentValue(
     definition: ArgumentDefinition,
     raw: string,
     name: string,
+    options?: ArgumentMessageOptions,
 ): CoercedArgumentValue {
+    const displayName = formatArgumentMessageName(name, options);
+
     if (definition.type === "string") {
         return { ok: true, value: raw };
     }
@@ -149,7 +163,7 @@ export function coerceArgumentValue(
                 ok: false,
                 issue: createParseIssue(
                     "invalid-value",
-                    `${formatFlagName(name)} expects a boolean value`,
+                    `${displayName} expects a boolean value`,
                     name,
                     raw,
                 ),
@@ -165,7 +179,7 @@ export function coerceArgumentValue(
                 ok: false,
                 issue: createParseIssue(
                     "invalid-value",
-                    `${formatFlagName(name)} expects a number`,
+                    `${displayName} expects a number`,
                     name,
                     raw,
                 ),
@@ -176,7 +190,7 @@ export function coerceArgumentValue(
                 ok: false,
                 issue: createParseIssue(
                     "invalid-value",
-                    `${formatFlagName(name)} expects an integer`,
+                    `${displayName} expects an integer`,
                     name,
                     raw,
                 ),
@@ -187,7 +201,7 @@ export function coerceArgumentValue(
                 ok: false,
                 issue: createParseIssue(
                     "invalid-value",
-                    `${formatFlagName(name)} must be at least ${definition.min}`,
+                    `${displayName} must be at least ${definition.min}`,
                     name,
                     raw,
                 ),
@@ -198,7 +212,7 @@ export function coerceArgumentValue(
                 ok: false,
                 issue: createParseIssue(
                     "invalid-value",
-                    `${formatFlagName(name)} must be at most ${definition.max}`,
+                    `${displayName} must be at most ${definition.max}`,
                     name,
                     raw,
                 ),
@@ -218,7 +232,7 @@ export function coerceArgumentValue(
                 ok: false,
                 issue: createParseIssue(
                     "invalid-value",
-                    `${formatFlagName(name)} must use values from: ${definition.values.join(", ")}`,
+                    `${displayName} must use values from: ${definition.values.join(", ")}`,
                     name,
                     invalid,
                 ),
@@ -232,7 +246,7 @@ export function coerceArgumentValue(
             ok: false,
             issue: createParseIssue(
                 "invalid-value",
-                `${formatFlagName(name)} must be one of: ${definition.values.join(", ")}`,
+                `${displayName} must be one of: ${definition.values.join(", ")}`,
                 name,
                 raw,
             ),
@@ -246,9 +260,12 @@ export function validateArgumentValue(
     name: string,
     definition: ArgumentDefinition,
     value: ArgumentValue,
+    options?: ArgumentMessageOptions,
 ): ArgumentValueValidation {
+    const displayName = formatArgumentMessageName(name, options);
+
     if (definition.required === true && value === undefined) {
-        return { ok: false, message: `${formatFlagName(name)} is required` };
+        return { ok: false, message: `${displayName} is required` };
     }
 
     if (value === undefined) {
@@ -257,18 +274,18 @@ export function validateArgumentValue(
 
     if (definition.type === "string") {
         if (typeof value !== "string") {
-            return { ok: false, message: `${formatFlagName(name)} expects text` };
+            return { ok: false, message: `${displayName} expects text` };
         }
         if (definition.minLength !== undefined && value.length < definition.minLength) {
             return {
                 ok: false,
-                message: `${formatFlagName(name)} must be at least ${definition.minLength} characters`,
+                message: `${displayName} must be at least ${definition.minLength} characters`,
             };
         }
         if (definition.maxLength !== undefined && value.length > definition.maxLength) {
             return {
                 ok: false,
-                message: `${formatFlagName(name)} must be at most ${definition.maxLength} characters`,
+                message: `${displayName} must be at most ${definition.maxLength} characters`,
             };
         }
         if (definition.pattern !== undefined) {
@@ -282,14 +299,14 @@ export function validateArgumentValue(
             } catch {
                 return {
                     ok: false,
-                    message: `${formatFlagName(name)} has an invalid pattern`,
+                    message: `${displayName} has an invalid pattern`,
                 };
             }
             pattern.lastIndex = 0;
             if (!pattern.test(value)) {
                 return {
                     ok: false,
-                    message: `${formatFlagName(name)} must match pattern ${String(definition.pattern)}`,
+                    message: `${displayName} must match pattern ${String(definition.pattern)}`,
                 };
             }
         }
@@ -300,7 +317,7 @@ export function validateArgumentValue(
         if (typeof value === "boolean") {
             return { ok: true };
         }
-        return { ok: false, message: `${formatFlagName(name)} expects true or false` };
+        return { ok: false, message: `${displayName} expects true or false` };
     }
 
     if (definition.type === "enum") {
@@ -309,7 +326,7 @@ export function validateArgumentValue(
         }
         return {
             ok: false,
-            message: `${formatFlagName(name)} must be one of: ${definition.values.join(", ")}`,
+            message: `${displayName} must be one of: ${definition.values.join(", ")}`,
         };
     }
 
@@ -317,35 +334,35 @@ export function validateArgumentValue(
         if (!Array.isArray(value) || !value.every((item) => definition.values.includes(item))) {
             return {
                 ok: false,
-                message: `${formatFlagName(name)} must use values from: ${definition.values.join(", ")}`,
+                message: `${displayName} must use values from: ${definition.values.join(", ")}`,
             };
         }
         if (definition.minItems !== undefined && value.length < definition.minItems) {
             return {
                 ok: false,
-                message: `${formatFlagName(name)} must include at least ${definition.minItems} item(s)`,
+                message: `${displayName} must include at least ${definition.minItems} item(s)`,
             };
         }
         if (definition.maxItems !== undefined && value.length > definition.maxItems) {
             return {
                 ok: false,
-                message: `${formatFlagName(name)} must include at most ${definition.maxItems} item(s)`,
+                message: `${displayName} must include at most ${definition.maxItems} item(s)`,
             };
         }
         return { ok: true };
     }
 
     if (typeof value !== "number" || !Number.isFinite(value)) {
-        return { ok: false, message: `${formatFlagName(name)} expects a number` };
+        return { ok: false, message: `${displayName} expects a number` };
     }
     if (definition.integer === true && !Number.isInteger(value)) {
-        return { ok: false, message: `${formatFlagName(name)} expects an integer` };
+        return { ok: false, message: `${displayName} expects an integer` };
     }
     if (definition.min !== undefined && value < definition.min) {
-        return { ok: false, message: `${formatFlagName(name)} must be at least ${definition.min}` };
+        return { ok: false, message: `${displayName} must be at least ${definition.min}` };
     }
     if (definition.max !== undefined && value > definition.max) {
-        return { ok: false, message: `${formatFlagName(name)} must be at most ${definition.max}` };
+        return { ok: false, message: `${displayName} must be at most ${definition.max}` };
     }
     return { ok: true };
 }
