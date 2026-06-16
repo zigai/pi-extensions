@@ -564,6 +564,10 @@ class TypedCommandUxSession {
     }
 
     private refresh(ctx: ExtensionContext): void {
+        if (this.openingForm) {
+            setHelperWidget(ctx, undefined);
+            return;
+        }
         const helperCommand = helperCommandForEditorText(ctx.ui.getEditorText(), ctx.cwd, ctx);
         setHelperWidget(ctx, helperCommand);
     }
@@ -579,18 +583,21 @@ class TypedCommandUxSession {
         data: string,
         ctx: ExtensionContext,
     ): { consume: true } | undefined {
-        this.scheduleRefresh(ctx);
-        if (!matchesKey(data, "tab")) {
+        if (this.openingForm) {
+            setHelperWidget(ctx, undefined);
             return undefined;
         }
-        if (this.openingForm) {
-            return { consume: true };
+        if (!matchesKey(data, "tab")) {
+            this.scheduleRefresh(ctx);
+            return undefined;
         }
         if (commandInvocationForEditorText(ctx.ui.getEditorText(), ctx.cwd, ctx) === undefined) {
+            this.scheduleRefresh(ctx);
             return undefined;
         }
 
         this.openingForm = true;
+        this.clearWidget(ctx);
         void openEditorCommandForm(this.pi, ctx).finally(() => {
             this.openingForm = false;
             this.scheduleRefresh(ctx);
