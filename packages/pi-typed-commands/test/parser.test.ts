@@ -174,6 +174,42 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(longHelp.mode, "help");
         assert.equal(shortHelp.mode, "help");
     });
+
+    void it("parses quoted and escaped values", () => {
+        const parsed = parseTypedCommandArgs(
+            command,
+            '--env dev --ref "feature with spaces" --tags api\\,web',
+        );
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.ref, "feature with spaces");
+        assert.deepEqual(parsed.values.tags, ["api", "web"]);
+    });
+
+    void it("reports unterminated quotes without discarding parsed values", () => {
+        const parsed = parseTypedCommandArgs(command, '--env dev --ref "feature');
+
+        assert.equal(parsed.values.env, "dev");
+        assert.equal(parsed.values.ref, "feature");
+        assert.equal(parsed.issues[0]?.kind, "unterminated-quote");
+    });
+
+    void it("parses inline flag values and explicit booleans", () => {
+        const parsed = parseTypedCommandArgs(command, "--env=prod --dry-run=false");
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.env, "prod");
+        assert.equal(parsed.values.dryRun, false);
+    });
+
+    void it("reports unknown flags, missing values, and invalid no-flags", () => {
+        const parsed = parseTypedCommandArgs(command, "--unknown --ref --no-ref");
+
+        assert.deepEqual(
+            parsed.issues.map((issue) => issue.kind),
+            ["unknown-argument", "missing-value", "invalid-value", "missing-required"],
+        );
+    });
 });
 
 void describe("formatCommandUsage", () => {
