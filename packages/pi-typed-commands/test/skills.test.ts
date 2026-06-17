@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseTypedCommandArgs, type RegisteredTypedCommand } from "../src/index.js";
 import {
+    expandArgumentObject,
     normalizeSkillArguments,
     parseSkillMarkdown,
     renderTypedSkillInvocation,
@@ -116,6 +117,28 @@ Use {args.path}.
         );
         assert.match(result.warnings.join("\n"), /old\.aliases is not supported/);
     });
+
+    void it("rejects prototype-reserved skill argument path segments", () => {
+        const raw = JSON.parse(`{
+            "__proto__": { "type": "string" },
+            "config": {
+                "prototype": { "type": "string" },
+                "nested": { "__proto__": { "type": "string" } }
+            },
+            "constructor": { "type": "string" }
+        }`) as Record<string, unknown>;
+
+        const result = normalizeSkillArguments(raw);
+        const warnings = result.warnings.join("\n");
+
+        assert.match(warnings, /__proto__: argument path segment __proto__ is reserved/);
+        assert.match(warnings, /config\.prototype: argument path segment prototype is reserved/);
+        assert.match(
+            warnings,
+            /config\.nested\.__proto__: argument path segment __proto__ is reserved/,
+        );
+        assert.match(warnings, /constructor: argument path segment constructor is reserved/);
+    });
 });
 
 void describe("typed skill required/default behavior", () => {
@@ -195,6 +218,19 @@ void describe("renderTypedSkillInvocation", () => {
         assert.match(rendered, /rules:\n  - E\n  - F/);
         assert.match(rendered, /config:\n  output_path: report\.txt/);
         assert.match(rendered, /ADDITIONAL_INPUT:\nonly report risky fixes/);
+    });
+
+    void it("does not pollute object prototypes when expanding dotted argument paths", () => {
+        const expanded = expandArgumentObject({
+            "__proto__.polluted": "yes",
+            "config.path": "report.txt",
+        });
+        const protoSection = expanded["__proto__"];
+
+        assert.equal(({} as { polluted?: string }).polluted, undefined);
+        assert.equal(Object.hasOwn(expanded, "__proto__"), true);
+        assert.equal(typeof protoSection, "object");
+        assert.equal((protoSection as Record<string, unknown>).polluted, "yes");
     });
 
     void it("creates a typed skill command from metadata", () => {
