@@ -202,6 +202,38 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.dryRun, false);
     });
 
+    void it("rejects empty inline number values instead of coercing them to zero", () => {
+        const parsed = parseTypedCommandArgs(command, "--env dev --count=");
+
+        assert.equal(parsed.values.count, undefined);
+        assert.deepEqual(
+            parsed.issues.map((issue) => [issue.kind, issue.name, issue.message]),
+            [["invalid-value", "count", "--count expects a number"]],
+        );
+    });
+
+    void it("clones multi-enum defaults for each parse result", () => {
+        const defaultedCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                tags: {
+                    type: "multi-enum",
+                    values: ["api", "web"],
+                    default: ["api"],
+                },
+            },
+        };
+
+        const first = parseTypedCommandArgs(defaultedCommand, "");
+        assert.ok(Array.isArray(first.values.tags));
+        first.values.tags.push("web");
+
+        const second = parseTypedCommandArgs(defaultedCommand, "");
+
+        assert.deepEqual(second.values.tags, ["api"]);
+        assert.deepEqual(defaultedCommand.args.tags?.default, ["api"]);
+    });
+
     void it("reports unknown flags, missing values, and invalid no-flags", () => {
         const parsed = parseTypedCommandArgs(command, "--unknown --ref --no-ref");
 

@@ -186,6 +186,9 @@ export function findArgumentName(lookup: ArgumentLookup, flag: string): string |
 
 export function applyArgumentDefault(definition: ArgumentDefinition): ArgumentValue {
     if (definition.default !== undefined) {
+        if (Array.isArray(definition.default)) {
+            return [...definition.default];
+        }
         return definition.default;
     }
     return undefined;
@@ -237,6 +240,17 @@ export function coerceArgumentValue(
     }
 
     if (definition.type === "number") {
+        if (raw.trim().length === 0) {
+            return {
+                ok: false,
+                issue: createParseIssue(
+                    "invalid-value",
+                    `${displayName} expects a number`,
+                    name,
+                    raw,
+                ),
+            };
+        }
         const parsed = Number(raw);
         if (!Number.isFinite(parsed)) {
             return {
