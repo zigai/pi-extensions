@@ -218,3 +218,60 @@ void describe("dense argument form", () => {
         assert.equal(result?.count, 16);
     });
 });
+
+void describe("sequential argument form", () => {
+    void it("prompts for multi-enum values outside TUI mode", async () => {
+        const definitions = {
+            tags: {
+                type: "multi-enum",
+                values: ["api", "web", "worker"],
+                required: true,
+                minItems: 2,
+            },
+        } satisfies ArgumentDefinitions;
+
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "example",
+            description: "Example command",
+            args: definitions,
+            handler() {},
+            typedArgsEnabled: true,
+            formSymbols: symbols,
+            openFormWhenInvalid: true,
+            openFormWhenMissingRequired: true,
+        };
+
+        const parsed: ParsedCommandArguments = {
+            values: {},
+            provided: new Set(),
+            issues: [
+                {
+                    kind: "missing-required",
+                    message: "--tags is required",
+                    name: "tags",
+                },
+            ],
+            mode: "run",
+        };
+        const prompts: string[] = [];
+        const notifications: string[] = [];
+        const ctx = {
+            mode: "rpc",
+            ui: {
+                notify(message: string) {
+                    notifications.push(message);
+                },
+                input(title: string) {
+                    prompts.push(title);
+                    return Promise.resolve("api,worker");
+                },
+            },
+        } as unknown as ExtensionCommandContext;
+
+        const result = await openArgumentForm(command, parsed, "missing", ctx);
+
+        assert.deepEqual(result?.tags, ["api", "worker"]);
+        assert.deepEqual(prompts, ["Set --tags (current: )"]);
+        assert.deepEqual(notifications, ["• tags is required"]);
+    });
+});

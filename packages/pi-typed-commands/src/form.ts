@@ -262,6 +262,10 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
         if (!completed) {
             return false;
         }
+        completed = await this.promptMultiEnum(name, definition);
+        if (!completed) {
+            return false;
+        }
         return this.promptStringLike(name, definition);
     }
 
@@ -313,6 +317,48 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
         return true;
     }
 
+    private async promptMultiEnum(name: string, definition: ArgumentDefinition): Promise<boolean> {
+        if (definition.type !== "multi-enum") {
+            return true;
+        }
+
+        const current = this.state[name];
+        let placeholder = definition.placeholder ?? currentValueText(current);
+        if (placeholder.length === 0) {
+            placeholder = definition.values.join(",");
+        }
+
+        const title = `Set ${formatFlagName(name)} (current: ${currentValueText(current)})`;
+        const input = await this.ctx.ui.input(title, placeholder);
+        if (input === undefined) {
+            return false;
+        }
+
+        if (input.trim().length === 0) {
+            return this.applyEmptyMultiEnumInput(name, definition, current);
+        }
+
+        const coerced = coerceArgumentValue(definition, input, name, FORM_MESSAGE_OPTIONS);
+        if (!coerced.ok) {
+            this.ctx.ui.notify(coerced.issue.message, "error");
+            return this.promptMultiEnum(name, definition);
+        }
+
+        const validation = validateArgumentValue(
+            name,
+            definition,
+            coerced.value,
+            FORM_MESSAGE_OPTIONS,
+        );
+        if (!validation.ok) {
+            this.ctx.ui.notify(validation.message, "error");
+            return this.promptMultiEnum(name, definition);
+        }
+
+        this.state[name] = coerced.value;
+        return true;
+    }
+
     private async promptStringLike(name: string, definition: ArgumentDefinition): Promise<boolean> {
         if (definition.type !== "string" && definition.type !== "number") {
             return true;
@@ -348,6 +394,27 @@ class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinit
         }
 
         this.state[name] = numberValue.value;
+        return true;
+    }
+
+    private async applyEmptyMultiEnumInput(
+        name: string,
+        definition: ArgumentDefinition,
+        current: ArgumentValue,
+    ): Promise<boolean> {
+        if (current !== undefined) {
+            return true;
+        }
+        const defaultValue = applyArgumentDefault(definition);
+        if (defaultValue !== undefined) {
+            this.state[name] = defaultValue;
+            return true;
+        }
+        if (definition.required === true) {
+            this.ctx.ui.notify(`${toKebabCase(name)} is required`, "error");
+            return this.promptMultiEnum(name, definition);
+        }
+        this.state[name] = undefined;
         return true;
     }
 
