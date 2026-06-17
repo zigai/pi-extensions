@@ -21,6 +21,11 @@ import type {
 const FRONTMATTER_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)([\s\S]*)$/;
 const PLACEHOLDER_PATTERN = /\{args\.([A-Za-z0-9_.-]+)\}/g;
 const ARGUMENT_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+const PROTOTYPE_POLLUTION_SEGMENTS: ReadonlySet<string> = new Set([
+    "__proto__",
+    "constructor",
+    "prototype",
+]);
 const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "text",
     "textarea",
@@ -96,6 +101,10 @@ function optionalString(value: unknown): string | undefined {
         return value;
     }
     return undefined;
+}
+
+function createSafeRecord(): Record<string, unknown> {
+    return Object.create(null) as Record<string, unknown>;
 }
 
 function optionalBoolean(value: unknown): boolean | undefined {
@@ -533,6 +542,15 @@ function flattenRawArguments(
     return entries;
 }
 
+function reservedArgumentNameSegment(name: string): string | undefined {
+    for (const segment of name.split(".")) {
+        if (PROTOTYPE_POLLUTION_SEGMENTS.has(segment)) {
+            return segment;
+        }
+    }
+    return undefined;
+}
+
 function validateArgumentNames(args: ArgumentDefinitions, warnings: string[]): void {
     const names = Object.keys(args);
     const flags = new Map<string, string>();
@@ -542,6 +560,11 @@ function validateArgumentNames(args: ArgumentDefinitions, warnings: string[]): v
             warnings.push(
                 `${name}: argument names may only contain letters, numbers, dots, underscores, and hyphens`,
             );
+        }
+
+        const reservedSegment = reservedArgumentNameSegment(name);
+        if (reservedSegment !== undefined) {
+            warnings.push(`${name}: argument path segment ${reservedSegment} is reserved`);
         }
 
         for (const other of names) {
@@ -576,7 +599,7 @@ function validateArgumentNames(args: ArgumentDefinitions, warnings: string[]): v
  */
 export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNormalizationResult {
     const warnings: string[] = [];
-    const args: ArgumentDefinitions = {};
+    const args = createSafeRecord() as ArgumentDefinitions;
     if (!isRecord(rawArguments)) {
         return { args, warnings: ["arguments must be an object"] };
     }
@@ -771,7 +794,7 @@ function setNestedValue(target: Record<string, unknown>, path: string[], value: 
             current = existing;
             continue;
         }
-        const next: Record<string, unknown> = {};
+        const next = createSafeRecord();
         current[segment] = next;
         current = next;
     }
@@ -785,7 +808,7 @@ function setNestedValue(target: Record<string, unknown>, path: string[], value: 
 export function expandArgumentObject(
     values: Record<string, ArgumentValue>,
 ): Record<string, unknown> {
-    const expanded: Record<string, unknown> = {};
+    const expanded = createSafeRecord();
     for (const [name, value] of Object.entries(values)) {
         if (name.includes(".")) {
             setNestedValue(expanded, name.split("."), value);
