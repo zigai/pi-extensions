@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { parseTypedCommandArgs, type RegisteredTypedCommand } from "../src/index.js";
 import {
     expandArgumentObject,
     normalizeSkillArguments,
     parseSkillMarkdown,
+    readTypedSkillMetadataResult,
     renderTypedSkillInvocation,
     typedSkillCommandFromMetadata,
     type TypedSkillMetadata,
@@ -138,6 +142,65 @@ Use {args.path}.
             /config\.nested\.__proto__: argument path segment __proto__ is reserved/,
         );
         assert.match(warnings, /constructor: argument path segment constructor is reserved/);
+    });
+});
+
+void describe("readTypedSkillMetadataResult", () => {
+    void it("reads top-level arguments from a real SKILL.md file", () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-"));
+        const skillPath = join(dir, "SKILL.md");
+        writeFileSync(
+            skillPath,
+            `---
+name: demo
+registration: should be ignored
+description: Demo skill
+form_title: Demo Form
+arguments:
+  path:
+    type: string
+    required: true
+---
+
+Use {args.path}.
+`,
+        );
+
+        const result = readTypedSkillMetadataResult(skillPath);
+
+        assert.equal(result.diagnostics, undefined);
+        assert.equal(result.metadata?.name, "demo");
+        assert.equal(result.metadata?.formTitle, "Demo Form");
+        assert.equal(result.metadata?.args.path?.type, "string");
+        assert.equal(result.metadata?.args.path?.required, true);
+        assert.equal(result.metadata?.body, "Use {args.path}.");
+    });
+
+    void it("keeps metadata.arguments as a compatibility fallback", () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-"));
+        const skillPath = join(dir, "SKILL.md");
+        writeFileSync(
+            skillPath,
+            `---
+name: legacy-demo
+description: Legacy demo skill
+metadata:
+  arguments:
+    fix:
+      type: boolean
+      default: true
+---
+
+Follow the workflow.
+`,
+        );
+
+        const result = readTypedSkillMetadataResult(skillPath);
+
+        assert.equal(result.diagnostics, undefined);
+        assert.equal(result.metadata?.name, "legacy-demo");
+        assert.equal(result.metadata?.args.fix?.type, "boolean");
+        assert.equal(result.metadata?.args.fix?.default, true);
     });
 });
 
