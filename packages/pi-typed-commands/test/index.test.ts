@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { installTypedCommandUx, registerTypedCommand } from "../src/index.js";
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
@@ -62,6 +67,49 @@ void describe("typed invocation policy", () => {
                 [unknownArgument, missingRequired],
             ),
             "notify",
+        );
+    });
+});
+
+void describe("registerTypedCommand", () => {
+    void it("rejects colliding and reserved TypeScript argument flags", () => {
+        const pi = { registerCommand() {} } as unknown as ExtensionAPI;
+
+        assert.throws(
+            () =>
+                registerTypedCommand(pi, "bad", {
+                    description: "Bad command",
+                    args: {
+                        fooBar: { type: "string" },
+                        "foo-bar": { type: "string" },
+                    },
+                    handler() {},
+                }),
+            /foo-bar: flag --foo-bar collides with fooBar/,
+        );
+
+        assert.throws(
+            () =>
+                registerTypedCommand(pi, "bad-no", {
+                    description: "Bad command",
+                    args: {
+                        noCache: { type: "boolean" },
+                    },
+                    handler() {},
+                }),
+            /noCache: argument flags may not start with no-/,
+        );
+
+        assert.throws(
+            () =>
+                registerTypedCommand(pi, "bad-help", {
+                    description: "Bad command",
+                    args: {
+                        help: { type: "boolean" },
+                    },
+                    handler() {},
+                }),
+            /help: argument flag --help is reserved/,
         );
     });
 });

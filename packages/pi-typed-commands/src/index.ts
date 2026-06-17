@@ -6,6 +6,7 @@ import type {
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { getTypedArgumentCompletions, getTypedAutocompleteSuggestions } from "./completions.js";
 import { parseTypedCommandArgs } from "./parser.js";
+import { validateArgumentDefinitions } from "./schema.js";
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
@@ -170,6 +171,13 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     name: string,
     options: TypedCommandOptions<TDefinitions>,
 ): void {
+    const argumentDiagnostics = validateArgumentDefinitions(options.args);
+    if (argumentDiagnostics.length > 0) {
+        throw new Error(
+            [`Invalid typed arguments for /${name}:`, ...argumentDiagnostics].join("\n"),
+        );
+    }
+
     const openFormWhenInvalid = options.openFormWhenInvalid ?? true;
     const openFormWhenMissingRequired = options.openFormWhenMissingRequired ?? true;
     const formTitle = options.formTitle;
