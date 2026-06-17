@@ -134,3 +134,82 @@ void describe("slash command text parsing", () => {
         assert.equal(parseSlashCommandText("please run skill:demo"), undefined);
     });
 });
+
+type ExtensionEventHandler = (event: unknown, ctx: unknown) => unknown;
+
+function firstHandler(
+    handlers: Map<string, ExtensionEventHandler[]>,
+    name: string,
+): ExtensionEventHandler {
+    const handler = handlers.get(name)?.[0];
+    if (handler === undefined) {
+        throw new Error(`missing ${name} handler`);
+    }
+    return handler;
+}
+
+void describe("typed skill input transform", () => {
+    void it("preserves dash-prefixed freeform text as additional input", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-input-"));
+        const skillPath = join(dir, "SKILL.md");
+        writeFileSync(
+            skillPath,
+            `---
+name: demo
+description: Demo skill
+arguments:
+  path:
+    type: string
+    positional: 0
+    required: true
+---
+
+Use {args.path}.
+`,
+        );
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [
+                    {
+                        name: "skill:demo",
+                        description: "Demo skill",
+                        source: "skill",
+                        sourceInfo: {
+                            path: skillPath,
+                            source: "test",
+                            scope: "temporary",
+                            origin: "top-level",
+                        },
+                    },
+                ];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: dir,
+            hasUI: false,
+            mode: "print",
+            ui: {
+                notify() {},
+                setWidget() {},
+            },
+        };
+
+        installTypedCommandUx(pi);
+        await firstHandler(handlers, "session_start")({}, ctx);
+        const result = await firstHandler(handlers, "input")(
+            { text: '/skill:demo src --literal "two words"' },
+            ctx,
+        );
+        const transformed = result as { action?: string; text?: string };
+
+        assert.equal(transformed.action, "transform");
+        assert.match(String(transformed.text), /Use src\./);
+        assert.match(String(transformed.text), /ADDITIONAL_INPUT:\n--literal two words/);
+    });
+});

@@ -333,12 +333,13 @@ function parseSkillArguments(
     const parsed = parseTypedCommandArgs(command, rawArgs);
     const additionalTokens: string[] = [];
     parsed.issues = parsed.issues.filter((issue) => {
-        if (issue.kind !== "unexpected-positional") {
+        const canPreserveAsAdditionalInput =
+            issue.kind === "unexpected-positional" ||
+            (issue.kind === "unknown-argument" && issue.name === undefined);
+        if (!canPreserveAsAdditionalInput || issue.token === undefined) {
             return true;
         }
-        if (issue.token !== undefined) {
-            additionalTokens.push(issue.token);
-        }
+        additionalTokens.push(issue.token);
         return false;
     });
     return {
