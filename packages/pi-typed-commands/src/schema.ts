@@ -7,6 +7,13 @@ import type {
     RegisteredTypedCommand,
 } from "./types.js";
 
+const ARGUMENT_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+const RESERVED_ARGUMENT_NAME_SEGMENTS: ReadonlySet<string> = new Set([
+    "__proto__",
+    "constructor",
+    "prototype",
+]);
+
 export type ArgumentLookup = {
     byFlag: Map<string, string>;
     definitions: ArgumentDefinitions;
@@ -100,6 +107,63 @@ export function positionalArgumentEntries(
     return orderedArgumentEntries(definitions).filter(([, definition]) =>
         isPositionalArgument(definition),
     );
+}
+
+function reservedArgumentNameSegment(name: string): string | undefined {
+    for (const segment of name.split(".")) {
+        if (RESERVED_ARGUMENT_NAME_SEGMENTS.has(segment)) {
+            return segment;
+        }
+    }
+    return undefined;
+}
+
+/** Validate argument names and derived CLI flags for typed commands and skills. */
+export function validateArgumentDefinitions(definitions: ArgumentDefinitions): string[] {
+    const warnings: string[] = [];
+    const names = Object.keys(definitions);
+    const flags = new Map<string, string>();
+
+    for (const name of names) {
+        if (!ARGUMENT_NAME_PATTERN.test(name)) {
+            warnings.push(
+                `${name}: argument names may only contain letters, numbers, dots, underscores, and hyphens`,
+            );
+        }
+
+        const reservedSegment = reservedArgumentNameSegment(name);
+        if (reservedSegment !== undefined) {
+            warnings.push(`${name}: argument path segment ${reservedSegment} is reserved`);
+        }
+
+        for (const other of names) {
+            if (name !== other && other.startsWith(`${name}.`)) {
+                warnings.push(`${name}: cannot define both ${name} and nested argument ${other}`);
+                break;
+            }
+        }
+
+        const definition = definitions[name];
+        if (definition === undefined || isPositionalArgument(definition)) {
+            continue;
+        }
+
+        const flag = toKebabCase(name);
+        if (flag === "help") {
+            warnings.push(`${name}: argument flag --help is reserved for generated help`);
+        }
+        if (flag.startsWith("no-")) {
+            warnings.push(`${name}: argument flags may not start with no-`);
+        }
+        const existing = flags.get(flag);
+        if (existing !== undefined && existing !== name) {
+            warnings.push(`${name}: flag --${flag} collides with ${existing}`);
+            continue;
+        }
+        flags.set(flag, name);
+    }
+
+    return warnings;
 }
 
 export function createArgumentLookup(definitions: ArgumentDefinitions): ArgumentLookup {

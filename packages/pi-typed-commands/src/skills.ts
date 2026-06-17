@@ -2,8 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import YAML from "yaml";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
-import { toKebabCase } from "./names.js";
-import { isPositionalArgument, validateArgumentValue } from "./schema.js";
+import { validateArgumentDefinitions, validateArgumentValue } from "./schema.js";
 import type {
     ArgumentDefinition,
     ArgumentDefinitions,
@@ -20,12 +19,6 @@ import type {
 
 const FRONTMATTER_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)([\s\S]*)$/;
 const PLACEHOLDER_PATTERN = /\{args\.([A-Za-z0-9_.-]+)\}/g;
-const ARGUMENT_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
-const PROTOTYPE_POLLUTION_SEGMENTS: ReadonlySet<string> = new Set([
-    "__proto__",
-    "constructor",
-    "prototype",
-]);
 const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "text",
     "textarea",
@@ -542,55 +535,6 @@ function flattenRawArguments(
     return entries;
 }
 
-function reservedArgumentNameSegment(name: string): string | undefined {
-    for (const segment of name.split(".")) {
-        if (PROTOTYPE_POLLUTION_SEGMENTS.has(segment)) {
-            return segment;
-        }
-    }
-    return undefined;
-}
-
-function validateArgumentNames(args: ArgumentDefinitions, warnings: string[]): void {
-    const names = Object.keys(args);
-    const flags = new Map<string, string>();
-
-    for (const name of names) {
-        if (!ARGUMENT_NAME_PATTERN.test(name)) {
-            warnings.push(
-                `${name}: argument names may only contain letters, numbers, dots, underscores, and hyphens`,
-            );
-        }
-
-        const reservedSegment = reservedArgumentNameSegment(name);
-        if (reservedSegment !== undefined) {
-            warnings.push(`${name}: argument path segment ${reservedSegment} is reserved`);
-        }
-
-        for (const other of names) {
-            if (name !== other && other.startsWith(`${name}.`)) {
-                warnings.push(`${name}: cannot define both ${name} and nested argument ${other}`);
-                break;
-            }
-        }
-
-        const definition = args[name];
-        if (definition === undefined || isPositionalArgument(definition)) {
-            continue;
-        }
-        const flag = toKebabCase(name);
-        if (flag.startsWith("no-")) {
-            warnings.push(`${name}: argument flags may not start with no-`);
-        }
-        const existing = flags.get(flag);
-        if (existing !== undefined && existing !== name) {
-            warnings.push(`${name}: flag --${flag} collides with ${existing}`);
-            continue;
-        }
-        flags.set(flag, name);
-    }
-}
-
 /**
  * Normalize a skill frontmatter `arguments` object into typed command argument definitions.
  *
@@ -611,7 +555,7 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
         }
     }
 
-    validateArgumentNames(args, warnings);
+    warnings.push(...validateArgumentDefinitions(args));
     return { args, warnings };
 }
 
