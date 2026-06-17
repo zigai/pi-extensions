@@ -4,10 +4,26 @@
   "title": "Pi Typed Skill Arguments",
   "description": "Schema for the top-level `arguments` field in SKILL.md frontmatter used by pi-typed-commands.",
   "type": "object",
+  "propertyNames": {
+    "$ref": "#/$defs/argumentName"
+  },
   "additionalProperties": {
     "$ref": "#/$defs/argumentOrNamespace"
   },
   "$defs": {
+    "argumentName": {
+      "type": "string",
+      "allOf": [
+        {
+          "pattern": "^[A-Za-z0-9_.-]+$"
+        },
+        {
+          "not": {
+            "pattern": "(^|\\.)(__proto__|constructor|prototype)(\\.|$)"
+          }
+        }
+      ]
+    },
     "argumentOrNamespace": {
       "oneOf": [
         {
@@ -15,6 +31,9 @@
         },
         {
           "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/argumentName"
+          },
           "additionalProperties": {
             "$ref": "#/$defs/argumentOrNamespace"
           }
