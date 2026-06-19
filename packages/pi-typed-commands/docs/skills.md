@@ -1,0 +1,94 @@
+# Typed Agent Skills
+
+Pi Typed Commands can read typed argument metadata from Agent Skill `SKILL.md` frontmatter. This lets a skill use the same parser, validation, completions, and form model as extension commands.
+
+## Frontmatter shape
+
+Use a top-level `arguments` object:
+
+```yaml
+---
+name: fix-ruff-errors
+description: Fix Ruff lint errors in Python projects.
+form_title: Fix Ruff errors
+arguments:
+  path:
+    type: string
+    position: 0
+    default: "."
+    description: File or directory to check
+  fix:
+    type: boolean
+    default: true
+    description: Apply safe fixes
+  rules:
+    type: multi_enum
+    values: ["E", "F", "I", "UP"]
+    description: Ruff rule families
+---
+
+Run Ruff against `{args.path}`.
+Safe fixes enabled: `{args.fix}`.
+Rules: `{args.rules}`.
+```
+
+The legacy `metadata.arguments` location remains accepted as a compatibility fallback, but top-level `arguments` is preferred.
+
+## YAML field names
+
+Skill YAML uses serializable names for fields that are camelCase in TypeScript:
+
+| YAML         | TypeScript   |
+| ------------ | ------------ |
+| `multi_enum` | `multi-enum` |
+| `min_length` | `minLength`  |
+| `max_length` | `maxLength`  |
+| `min_items`  | `minItems`   |
+| `max_items`  | `maxItems`   |
+
+## Placeholders
+
+Skill bodies can reference typed values with `{args.name}` placeholders. Nested paths are supported for dotted argument names.
+
+```md
+Use `{args.path}` and rules `{args.rules}`.
+```
+
+Unknown placeholders are reported as diagnostics when the skill metadata is loaded.
+
+## Rendering safety
+
+Typed skill values are rendered as JSON data literals. Values that look like Markdown fences, XML tags, or prompt structure are treated as data instead of instructions.
+
+When a skill body does not reference all provided values, the renderer appends an `ARGUMENTS_JSON` block. Additional freeform user input is appended as `ADDITIONAL_INPUT_JSON`.
+
+## Diagnostics
+
+Skill normalization returns structured diagnostics:
+
+```ts
+const result = readTypedSkillMetadataResult("/path/to/SKILL.md");
+
+if (result.diagnostics !== undefined) {
+  result.diagnostics.diagnostics;
+  result.diagnostics.messages; // compatibility fallback
+}
+```
+
+Diagnostics include a code, message, path, and severity. The compatibility `warnings`/`messages` arrays remain available for older callers.
+
+## JSON Schema
+
+The JSON Schema for skill arguments is exported as a package subpath and stored in the repository:
+
+```ts
+import schema from "pi-typed-commands/schema";
+```
+
+Repository path:
+
+```text
+schemas/skill-arguments.schema.json
+```
+
+The schema mirrors the compiler rules for serializable skill definitions, including required/default exclusivity, enum uniqueness, valid widgets, and positional constraints.
