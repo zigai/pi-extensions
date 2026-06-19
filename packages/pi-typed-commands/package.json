@@ -2,7 +2,7 @@
   "name": "pi-typed-commands",
   "version": "0.1.0",
   "private": true,
-  "description": "Typed named slash-command arguments with live hints and TUI prompts for Pi extensions.",
+  "description": "Library for typed Pi extension slash-command arguments, completions, help, and forms.",
   "keywords": [
     "commands",
     "pi",
@@ -25,6 +25,7 @@
   "files": [
     "src",
     "schemas",
+    "docs",
     "README.md",
     "LICENSE"
   ],
@@ -48,6 +49,7 @@
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
+    "@earendil-works/pi-tui": "^0.79.7",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
@@ -61,8 +63,8 @@
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-coding-agent": "^0.79.7",
+    "@earendil-works/pi-tui": "^0.79.7"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
@@ -75,10 +77,5 @@
   "engines": {
     "node": ">=22.19.0 <27"
   },
-  "packageManager": "npm@11.0.0",
-  "pi": {
-    "extensions": [
-      "./src/index.ts"
-    ]
-  }
+  "packageManager": "npm@11.0.0"
 }
