@@ -22,33 +22,36 @@ For local development, add the clone to `~/.pi/agent/settings.json`:
 
 ```ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerTypedCommand } from "pi-typed-commands";
+import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands";
+
+const deploy = defineTypedCommand({
+  name: "deploy",
+  description: "Deploy a ref",
+  args: {
+    env: {
+      type: "enum",
+      values: ["dev", "staging", "prod"],
+      positional: 0,
+      required: true,
+      description: "Target environment",
+    },
+    ref: {
+      type: "string",
+      default: "main",
+      description: "Git ref",
+    },
+    dryRun: {
+      type: "boolean",
+      description: "Preview only",
+    },
+  },
+  async run({ env, ref, dryRun }, ctx) {
+    ctx.ui.notify(`Deploy ${ref} to ${env}; dryRun=${String(dryRun)}`);
+  },
+});
 
 export default function (pi: ExtensionAPI): void {
-  registerTypedCommand(pi, "deploy", {
-    description: "Deploy a ref",
-    args: {
-      env: {
-        type: "enum",
-        values: ["dev", "staging", "prod"] as const,
-        positional: 0,
-        required: true,
-        description: "Target environment",
-      },
-      ref: {
-        type: "string",
-        default: "main",
-        description: "Git ref",
-      },
-      dryRun: {
-        type: "boolean",
-        description: "Preview only",
-      },
-    },
-    handler: async ({ env, ref, dryRun }, ctx) => {
-      ctx.ui.notify(`Deploy ${ref} to ${env}; dryRun=${String(dryRun)}`);
-    },
-  });
+  registerTypedCommand(pi, deploy);
 }
 ```
 
@@ -64,17 +67,33 @@ Use it like a normal slash command:
 
 ### Argument Types
 
-| Type | Notes |
-| --- | --- |
-| `string` | Optional `minLength`, `maxLength`, `pattern` |
-| `number` | Optional `integer`, `min`, `max` |
-| `boolean` | Supports `--flag`, `--flag true`, and `--no-flag` |
-| `enum` | One value from `values`; use a single-value enum for fixed literals |
+| Type         | Notes                                                                |
+| ------------ | -------------------------------------------------------------------- |
+| `string`     | Optional `minLength`, `maxLength`, `pattern`                         |
+| `number`     | Optional `integer`, `min`, `max`                                     |
+| `boolean`    | Supports `--flag`, `--flag true`, and `--no-flag`                    |
+| `enum`       | One value from `values`; use a single-value enum for fixed literals  |
 | `multi-enum` | Comma-separated or repeated flags, e.g. `--tag api,web --tag worker` |
 
-Common fields: `description`, `required`, `default`, `placeholder`, `positional`, and `ui`.
+Common fields: `description`, `required`, `default`, `flag`, `aliases`, `placeholder`, `position`, `positional`, and `ui`.
 
-Set `positional: true` or `positional: 0` to consume positional values before named flags.
+Set `position: 0` to consume positional values before named flags. Legacy `positional: true` and `positional: 0` are still supported. `required: true` means the caller must provide the value, so it cannot be combined with `default`.
+
+### Command Definitions
+
+`defineTypedCommand()` compiles and freezes the schema, keeps enum literals inferred without `as const`, and exposes pure helpers:
+
+```ts
+const parsed = deploy.parse("staging --dry-run");
+const usage = deploy.formatUsage();
+const help = deploy.formatHelp();
+```
+
+`registerTypedCommand(pi, deploy)` returns a disposable registration handle for wrapper-owned metadata. The legacy overload remains available:
+
+```ts
+registerTypedCommand(pi, "deploy", { description, args, handler });
+```
 
 ### Forms
 
