@@ -1,69 +1,8 @@
 # Configuration and Package Notes
 
-Pi Typed Commands is a library for Pi extensions. Runtime behavior can be controlled globally, per project, or per command.
+Pi Typed Commands is a library for Pi extensions and typed skills. When a command or skill uses this library, typed parsing, completions, editor hints, and argument forms are always active.
 
-## Settings
-
-Disable typed arguments globally:
-
-```json
-{
-  "piTypedCommands": {
-    "enabled": false
-  }
-}
-```
-
-Hide only the live helper/autocomplete UX:
-
-```json
-{
-  "piTypedCommands": {
-    "uxEnabled": false
-  }
-}
-```
-
-Show primitive types in the helper line:
-
-```json
-{
-  "piTypedCommands": {
-    "uxShowTypes": true
-  }
-}
-```
-
-Settings are read from Pi settings locations and can be overridden by environment variables.
-
-## Environment overrides
-
-| Variable                            | Effect                               |
-| ----------------------------------- | ------------------------------------ |
-| `PI_TYPED_COMMANDS=0`               | Disable typed command behavior.      |
-| `PI_TYPED_COMMANDS_UX=0`            | Disable helper/autocomplete UX only. |
-| `PI_TYPED_COMMANDS_UX_SHOW_TYPES=1` | Show primitive types in helper text. |
-
-## Per-command migration controls
-
-Use these options when moving an existing raw-argument command to typed arguments:
-
-```ts
-registerTypedCommand(pi, "legacy", {
-  description: "Legacy-compatible command",
-  args: { path: { type: "string" } },
-  typedArgsEnabled: true,
-  shouldUseTypedArgs(rawArgs, ctx) {
-    return !rawArgs.startsWith("--legacy-mode");
-  },
-  fallbackHandler(rawArgs, ctx) {
-    // Existing raw parser.
-  },
-  handler(args, ctx) {
-    // New typed path.
-  },
-});
-```
+There are no environment variables, Pi settings, command options, or callbacks that disable or bypass those features.
 
 ## Package contract
 

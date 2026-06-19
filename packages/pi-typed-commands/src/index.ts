@@ -16,20 +16,16 @@ import { parseTypedCommandArgs, serializeTypedCommandArgs, toTypedParseResult } 
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
-    decideTypedCommandPreflight,
     parseSlashCommandText,
 } from "./invocation.js";
 import {
     getTypedCommand,
     getTypedSkillDiagnostics,
-    isToggleEnabled,
-    isTypedCommandEnabled,
     onTypedCommandsChanged,
     registerTypedCommandMetadata,
     replaceTypedSkillMetadata,
     unregisterTypedCommandMetadata,
 } from "./registry.js";
-import { getPiTypedCommandsSettings } from "./settings.js";
 import type {
     ArgumentDefinitions,
     ArgumentValue,
@@ -43,7 +39,6 @@ import type {
     TypedCommandHandle,
     TypedCommandOptions,
     TypedCommandRefinement,
-    TypedCommandToggle,
     TypedParseResult,
     FormMode,
 } from "./types.js";
@@ -82,12 +77,6 @@ const DEFAULT_FORM_SYMBOLS: Required<TypedCommandFormSymbols> = {
     unselectedRadio: "○",
 };
 
-/** Options for installing the live typed-args editor helper. */
-export type TypedCommandUxOptions = {
-    /** Enable or disable the live helper and Tab-to-form UX. Defaults to enabled. */
-    enabled?: TypedCommandToggle;
-};
-
 export type {
     ArgumentDefinition,
     ArgumentDefinitions,
@@ -122,12 +111,10 @@ export type {
     PrimitiveArgumentValue,
     RegisteredTypedCommand,
     StringArgumentDefinition,
-    RawCommandHandler,
     TypedCommandDefinition,
     TypedCommandHandler,
     TypedCommandHandle,
     TypedCommandOptions,
-    TypedCommandRawSelector,
     TypedCompletionContext,
     TypedCompletionItem,
     TypedCompletionProvider,
@@ -135,7 +122,6 @@ export type {
     TypedCommandRefinement,
     TypedCommandRefinementContext,
     TypedCommandRefinementIssue,
-    TypedCommandToggle,
     TypedCommandFormSymbols,
     TypedCommandFormTitle,
     TypedParseResult,
@@ -164,7 +150,6 @@ export {
     serializeTypedCommandArgs,
     toTypedParseResult,
 } from "./parser.js";
-export { getPiTypedCommandsSettings } from "./settings.js";
 export {
     normalizeSkillArguments,
     parseSkillMarkdown,
@@ -202,13 +187,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
 
     const issueMessages = parsed.issues.map((item) => item.message);
     const formMode: FormMode = "missing";
-    const issueAction = decideArgumentIssueAction(
-        {
-            openFormWhenInvalid: command.openFormWhenInvalid,
-            openFormWhenMissingRequired: command.openFormWhenMissingRequired,
-        },
-        parsed.issues,
-    );
+    const issueAction = decideArgumentIssueAction(parsed.issues);
 
     if (issueAction === "open-form") {
         if (!ctx.hasUI) {
@@ -321,10 +300,7 @@ function registeredCommandForDefinition<TDefinitions extends ArgumentDefinitions
         args: compiled.command.args as TDefinitions,
         compiled: compiled.command,
         target: { kind: "extension", run: () => {} },
-        typedArgsEnabled: true,
         formSymbols: DEFAULT_FORM_SYMBOLS,
-        openFormWhenInvalid: true,
-        openFormWhenMissingRequired: true,
     };
     const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
     if (refine !== undefined) {
@@ -401,10 +377,7 @@ function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
         compiled: compiled.command,
         handler: maybeWrapGroupedHandler(options.args, options.handler),
         target: { kind: "extension", run: maybeWrapGroupedHandler(options.args, options.handler) },
-        typedArgsEnabled: options.typedArgsEnabled ?? true,
         formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...options.formSymbols },
-        openFormWhenInvalid: options.openFormWhenInvalid ?? true,
-        openFormWhenMissingRequired: options.openFormWhenMissingRequired ?? true,
         source: "extension",
     };
 
@@ -414,12 +387,6 @@ function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
     }
     if (options.formTitle !== undefined) {
         command.formTitle = options.formTitle;
-    }
-    if (options.fallbackHandler !== undefined) {
-        command.fallbackHandler = options.fallbackHandler;
-    }
-    if (options.shouldUseTypedArgs !== undefined) {
-        command.shouldUseTypedArgs = options.shouldUseTypedArgs;
     }
     return command;
 }
@@ -439,26 +406,11 @@ function commandOptionsFromDefinition<TDefinitions extends ArgumentDefinitions>(
     if (definition.refine !== undefined) {
         options.refine = definition.refine;
     }
-    if (definition.fallbackHandler !== undefined) {
-        options.fallbackHandler = definition.fallbackHandler;
-    }
-    if (definition.typedArgsEnabled !== undefined) {
-        options.typedArgsEnabled = definition.typedArgsEnabled;
-    }
-    if (definition.shouldUseTypedArgs !== undefined) {
-        options.shouldUseTypedArgs = definition.shouldUseTypedArgs;
-    }
     if (definition.formTitle !== undefined) {
         options.formTitle = definition.formTitle;
     }
     if (definition.formSymbols !== undefined) {
         options.formSymbols = definition.formSymbols;
-    }
-    if (definition.openFormWhenInvalid !== undefined) {
-        options.openFormWhenInvalid = definition.openFormWhenInvalid;
-    }
-    if (definition.openFormWhenMissingRequired !== undefined) {
-        options.openFormWhenMissingRequired = definition.openFormWhenMissingRequired;
     }
     return options;
 }
@@ -538,41 +490,6 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             return getTypedArgumentCompletions(command, argumentPrefix);
         },
         handler: async (rawArgs, ctx) => {
-            const typedCommandEnabled = isTypedCommandEnabled(command, ctx, ctx.cwd);
-            let shouldUseTypedArgs = true;
-            if (typedCommandEnabled && command.shouldUseTypedArgs !== undefined) {
-                shouldUseTypedArgs = command.shouldUseTypedArgs(rawArgs, ctx);
-            }
-
-            const preflight = decideTypedCommandPreflight({
-                typedCommandEnabled,
-                shouldUseTypedArgs,
-                hasFallback: command.fallbackHandler !== undefined,
-            });
-
-            if (preflight.action === "fallback") {
-                const fallbackHandler = command.fallbackHandler;
-                if (fallbackHandler !== undefined) {
-                    await fallbackHandler(rawArgs, ctx);
-                }
-                return;
-            }
-
-            if (preflight.action === "stop") {
-                if (preflight.reason === "disabled") {
-                    ctx.ui.notify(
-                        `Typed args are disabled for /${name}, and no fallback handler is configured.`,
-                        "warning",
-                    );
-                    return;
-                }
-                ctx.ui.notify(
-                    `Typed args were skipped for /${name}, and no fallback handler is configured.`,
-                    "warning",
-                );
-                return;
-            }
-
             const args = await resolveCommandArguments(command, rawArgs, ctx);
             if (args === undefined) {
                 return;
@@ -619,8 +536,6 @@ function slashCommandMatch(editorText: string): ReturnType<typeof parseSlashComm
 
 function commandInvocationForEditorText(
     editorText: string,
-    cwd: string,
-    ctx?: ExtensionContext,
 ): EditorTypedCommandInvocation | undefined {
     const match = slashCommandMatch(editorText);
     if (match === undefined) {
@@ -629,9 +544,6 @@ function commandInvocationForEditorText(
 
     const command = getTypedCommand(match.commandName);
     if (command === undefined) {
-        return undefined;
-    }
-    if (!isTypedCommandEnabled(command, ctx, cwd)) {
         return undefined;
     }
 
@@ -643,10 +555,6 @@ function commandInvocationForEditorText(
 }
 
 function notifySkillDiagnosticsForText(text: string, ctx: ExtensionCommandContext): boolean {
-    if (!getPiTypedCommandsSettings(ctx.cwd).enabled) {
-        return false;
-    }
-
     const match = slashCommandMatch(text);
     if (match === undefined) {
         return false;
@@ -659,17 +567,13 @@ function notifySkillDiagnosticsForText(text: string, ctx: ExtensionCommandContex
     return true;
 }
 
-function helperCommandForEditorText(
-    editorText: string,
-    cwd: string,
-    ctx?: ExtensionContext,
-): RegisteredTypedCommand | undefined {
+function helperCommandForEditorText(editorText: string): RegisteredTypedCommand | undefined {
     const match = slashCommandMatch(editorText);
     if (match === undefined) {
         return undefined;
     }
 
-    const invocation = commandInvocationForEditorText(editorText, cwd, ctx);
+    const invocation = commandInvocationForEditorText(editorText);
     if (invocation === undefined) {
         return undefined;
     }
@@ -725,13 +629,7 @@ async function renderTypedSkillInput(
 
     const issueMessages = parsed.issues.map((item) => item.message);
     let values = parsed.values;
-    const issueAction = decideArgumentIssueAction(
-        {
-            openFormWhenInvalid: command.openFormWhenInvalid,
-            openFormWhenMissingRequired: command.openFormWhenMissingRequired,
-        },
-        parsed.issues,
-    );
+    const issueAction = decideArgumentIssueAction(parsed.issues);
 
     if (issueAction === "open-form") {
         if (!ctx.hasUI) {
@@ -760,7 +658,7 @@ async function transformTypedSkillInput(
     ctx: ExtensionCommandContext,
     formMode: FormMode = "missing",
 ): Promise<TypedSkillInputResult | undefined> {
-    const invocation = commandInvocationForEditorText(text, ctx.cwd, ctx);
+    const invocation = commandInvocationForEditorText(text);
     if (invocation === undefined || !isTypedSkillCommand(invocation.command)) {
         return undefined;
     }
@@ -779,7 +677,7 @@ async function transformTypedSkillInput(
 }
 
 async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
-    const invocation = commandInvocationForEditorText(ctx.ui.getEditorText(), ctx.cwd, ctx);
+    const invocation = commandInvocationForEditorText(ctx.ui.getEditorText());
     if (invocation === undefined) {
         return;
     }
@@ -800,27 +698,6 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
         }
         ctx.ui.setEditorText("");
         pi.sendUserMessage(transformed);
-        return;
-    }
-
-    let shouldUseTypedArgs = true;
-    if (command.shouldUseTypedArgs !== undefined) {
-        shouldUseTypedArgs = command.shouldUseTypedArgs(rawArgs, commandCtx);
-    }
-    const preflight = decideTypedCommandPreflight({
-        typedCommandEnabled: true,
-        shouldUseTypedArgs,
-        hasFallback: command.fallbackHandler !== undefined,
-    });
-    if (preflight.action === "fallback") {
-        const fallbackHandler = command.fallbackHandler;
-        if (fallbackHandler !== undefined) {
-            ctx.ui.setEditorText("");
-            await fallbackHandler(rawArgs, commandCtx);
-        }
-        return;
-    }
-    if (preflight.action === "stop") {
         return;
     }
 
@@ -899,9 +776,7 @@ function setHelperWidget(ctx: ExtensionContext, command: RegisteredTypedCommand 
         WIDGET_KEY,
         (_tui, theme) => ({
             render(width: number): string[] {
-                const content = formatHelperLineParts(command, {
-                    showTypes: getPiTypedCommandsSettings(ctx.cwd).uxShowTypes,
-                })
+                const content = formatHelperLineParts(command)
                     .map((part) => {
                         if (part.kind === "command") {
                             return theme.fg("accent", part.text);
@@ -938,10 +813,6 @@ class TypedCommandUxSession {
         if (!ctx.hasUI) {
             return;
         }
-        if (!getPiTypedCommandsSettings(ctx.cwd).uxEnabled) {
-            return;
-        }
-
         const refresh = (): void => {
             this.refresh(ctx);
         };
@@ -981,7 +852,7 @@ class TypedCommandUxSession {
             setHelperWidget(ctx, undefined);
             return;
         }
-        const helperCommand = helperCommandForEditorText(ctx.ui.getEditorText(), ctx.cwd, ctx);
+        const helperCommand = helperCommandForEditorText(ctx.ui.getEditorText());
         setHelperWidget(ctx, helperCommand);
     }
 
@@ -1004,7 +875,7 @@ class TypedCommandUxSession {
             this.scheduleRefresh(ctx);
             return undefined;
         }
-        if (commandInvocationForEditorText(ctx.ui.getEditorText(), ctx.cwd, ctx) === undefined) {
+        if (commandInvocationForEditorText(ctx.ui.getEditorText()) === undefined) {
             this.scheduleRefresh(ctx);
             return undefined;
         }
@@ -1049,12 +920,7 @@ class TypedCommandUxSession {
  * This is installed automatically by the default extension export. Extension authors usually only
  * call it directly when composing pi-typed-commands into a custom extension entrypoint.
  */
-export function installTypedCommandUx(pi: ExtensionAPI, options?: TypedCommandUxOptions): void {
-    const resolvedOptions = options ?? {};
-    if (!isToggleEnabled(resolvedOptions.enabled)) {
-        return;
-    }
-
+export function installTypedCommandUx(pi: ExtensionAPI): void {
     const session = new TypedCommandUxSession(pi);
 
     pi.on("session_start", async (_event, ctx) => {

@@ -779,15 +779,12 @@ export function typedSkillCommandFromMetadata(
                 return renderTypedSkillInvocation(options);
             },
         },
-        typedArgsEnabled: true,
         formSymbols: {
             selectedCheckbox: "■",
             unselectedCheckbox: "□",
             selectedRadio: "●",
             unselectedRadio: "○",
         },
-        openFormWhenInvalid: true,
-        openFormWhenMissingRequired: true,
         source: "skill",
         skill,
     };

@@ -300,18 +300,6 @@ export type InvocationTarget<TDefinitions extends ArgumentDefinitions> =
           render(args: InferArguments<TDefinitions>, additionalInput?: string): string;
       };
 
-/** Handler called with Pi's raw argument string when typed parsing is disabled or bypassed. */
-export type RawCommandHandler = (
-    args: string,
-    ctx: ExtensionCommandContext,
-) => Promise<void> | void;
-
-/** Boolean or callback used to enable typed args globally, for UX, or per command. */
-export type TypedCommandToggle = boolean | ((ctx?: ExtensionContext) => boolean);
-
-/** Decide per invocation whether raw args should be parsed as typed args. */
-export type TypedCommandRawSelector = (rawArgs: string, ctx: ExtensionCommandContext) => boolean;
-
 /** Dense-form title, or a callback that derives one from the command context. */
 export type TypedCommandFormTitle = string | ((ctx: ExtensionCommandContext) => string);
 
@@ -358,20 +346,10 @@ export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     handler: TypedCommandHandler<TDefinitions>;
     /** Cross-field validation invoked after individual arguments are parsed and validated. */
     refine?: TypedCommandRefinement<TDefinitions>;
-    /** Optional raw fallback handler used when typed args are disabled or bypassed. */
-    fallbackHandler?: RawCommandHandler;
-    /** Enable or disable typed parsing, completions, forms, and helper UX for this command. */
-    typedArgsEnabled?: TypedCommandToggle;
-    /** Return `false` to bypass typed parsing for a specific raw invocation. */
-    shouldUseTypedArgs?: TypedCommandRawSelector;
     /** Title shown at the top of the dense argument form. */
     formTitle?: TypedCommandFormTitle;
     /** Override checkbox and radio glyphs in the dense form. */
     formSymbols?: TypedCommandFormSymbols;
-    /** Open the argument form automatically when provided arguments are invalid. */
-    openFormWhenInvalid?: boolean;
-    /** Open the argument form automatically when required arguments are missing. */
-    openFormWhenMissingRequired?: boolean;
 };
 
 /**
@@ -395,10 +373,7 @@ export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = Ar
         registrationId?: symbol;
         /** Runtime owner identity used for extension reload cleanup. */
         ownerId?: symbol;
-        typedArgsEnabled: TypedCommandToggle;
         formSymbols: Required<TypedCommandFormSymbols>;
-        openFormWhenInvalid: boolean;
-        openFormWhenMissingRequired: boolean;
         /** Source adapter that owns this metadata. */
         source?: "extension" | "skill";
     };

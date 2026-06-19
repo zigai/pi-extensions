@@ -1,24 +1,6 @@
 import type { ParseIssue } from "./types.js";
 
-export type TypedCommandPreflightReason = "disabled" | "bypassed";
-
-export type TypedCommandPreflightDecision =
-    | { action: "typed" }
-    | { action: "fallback"; reason: TypedCommandPreflightReason }
-    | { action: "stop"; reason: TypedCommandPreflightReason };
-
-export type TypedCommandPreflightOptions = {
-    typedCommandEnabled: boolean;
-    shouldUseTypedArgs: boolean;
-    hasFallback: boolean;
-};
-
 export type ArgumentIssueAction = "ok" | "open-form" | "notify";
-
-export type ArgumentIssuePolicy = {
-    openFormWhenInvalid: boolean;
-    openFormWhenMissingRequired: boolean;
-};
 
 export type ParsedSlashCommandText = {
     commandName: string;
@@ -26,55 +8,19 @@ export type ParsedSlashCommandText = {
     trailingBody: string;
 };
 
-/** Decide whether a command invocation should use typed parsing, raw fallback, or stop early. */
-export function decideTypedCommandPreflight(
-    options: TypedCommandPreflightOptions,
-): TypedCommandPreflightDecision {
-    if (!options.typedCommandEnabled) {
-        if (options.hasFallback) {
-            return { action: "fallback", reason: "disabled" };
-        }
-        return { action: "stop", reason: "disabled" };
-    }
-
-    if (!options.shouldUseTypedArgs) {
-        if (options.hasFallback) {
-            return { action: "fallback", reason: "bypassed" };
-        }
-        return { action: "stop", reason: "bypassed" };
-    }
-
-    return { action: "typed" };
-}
-
 /** Decide whether parser/validation issues should notify directly or open the argument form. */
-export function decideArgumentIssueAction(
-    policy: ArgumentIssuePolicy,
-    issues: ParseIssue[],
-): ArgumentIssueAction {
+export function decideArgumentIssueAction(issues: ParseIssue[]): ArgumentIssueAction {
     if (issues.length === 0) {
         return "ok";
     }
 
-    let openForm = policy.openFormWhenInvalid;
-    let hasStructuralIssue = false;
     for (const issue of issues) {
-        if (issue.kind === "missing-required" && policy.openFormWhenMissingRequired) {
-            openForm = true;
-        }
         if (issue.name === undefined) {
-            hasStructuralIssue = true;
+            return "notify";
         }
     }
 
-    if (hasStructuralIssue) {
-        openForm = false;
-    }
-
-    if (openForm) {
-        return "open-form";
-    }
-    return "notify";
+    return "open-form";
 }
 
 /** Parse a slash-command input while preserving any body text after the first line. */

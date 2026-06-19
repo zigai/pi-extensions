@@ -15,7 +15,6 @@ import {
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
-    decideTypedCommandPreflight,
     parseSlashCommandText,
 } from "../src/invocation.js";
 import {
@@ -26,29 +25,7 @@ import {
 } from "../src/registry.js";
 import type { ParseIssue } from "../src/types.js";
 
-void describe("typed invocation policy", () => {
-    void it("falls back when typed args are disabled and a fallback exists", () => {
-        assert.deepEqual(
-            decideTypedCommandPreflight({
-                typedCommandEnabled: false,
-                shouldUseTypedArgs: true,
-                hasFallback: true,
-            }),
-            { action: "fallback", reason: "disabled" },
-        );
-    });
-
-    void it("stops instead of typed parsing when typed args are bypassed without a fallback", () => {
-        assert.deepEqual(
-            decideTypedCommandPreflight({
-                typedCommandEnabled: true,
-                shouldUseTypedArgs: false,
-                hasFallback: false,
-            }),
-            { action: "stop", reason: "bypassed" },
-        );
-    });
-
+void describe("argument issue policy", () => {
     void it("opens forms for named validation issues but not structural parse issues", () => {
         const missingRequired: ParseIssue = {
             kind: "missing-required",
@@ -61,26 +38,8 @@ void describe("typed invocation policy", () => {
             message: "Unknown argument --bad",
         };
 
-        assert.equal(
-            decideArgumentIssueAction(
-                {
-                    openFormWhenInvalid: true,
-                    openFormWhenMissingRequired: true,
-                },
-                [missingRequired],
-            ),
-            "open-form",
-        );
-        assert.equal(
-            decideArgumentIssueAction(
-                {
-                    openFormWhenInvalid: true,
-                    openFormWhenMissingRequired: true,
-                },
-                [unknownArgument, missingRequired],
-            ),
-            "notify",
-        );
+        assert.equal(decideArgumentIssueAction([missingRequired]), "open-form");
+        assert.equal(decideArgumentIssueAction([unknownArgument, missingRequired]), "notify");
     });
 });
 
@@ -267,15 +226,12 @@ void describe("registerTypedCommand", () => {
             description: "Extension command",
             args: {},
             handler() {},
-            typedArgsEnabled: true,
             formSymbols: {
                 selectedCheckbox: "■",
                 unselectedCheckbox: "□",
                 selectedRadio: "●",
                 unselectedRadio: "○",
             },
-            openFormWhenInvalid: true,
-            openFormWhenMissingRequired: true,
             source: "extension" as const,
         };
 

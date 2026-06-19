@@ -46,15 +46,12 @@ const command: RegisteredTypedCommand = {
         },
     },
     handler: () => {},
-    typedArgsEnabled: true,
     formSymbols: {
         selectedCheckbox: "■",
         unselectedCheckbox: "□",
         selectedRadio: "●",
         unselectedRadio: "○",
     },
-    openFormWhenInvalid: true,
-    openFormWhenMissingRequired: true,
 };
 
 const branchCommand: RegisteredTypedCommand = {
@@ -651,17 +648,5 @@ void describe("getTypedAutocompleteSuggestions", () => {
             suggestions?.items.map((item) => item.value),
             ["web", "worker"],
         );
-    });
-
-    void it("hides completions for disabled typed commands", () => {
-        registerTypedCommandMetadata({
-            ...command,
-            name: "disabled-deploy",
-            typedArgsEnabled: false,
-        });
-
-        const suggestions = getTypedAutocompleteSuggestions(["/disabled-deploy --e"], 0, 20);
-
-        assert.equal(suggestions, undefined);
     });
 });

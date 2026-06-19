@@ -43,10 +43,7 @@ void describe("dense argument form", () => {
             description: "Example command",
             args: definitions,
             handler() {},
-            typedArgsEnabled: true,
             formSymbols: symbols,
-            openFormWhenInvalid: true,
-            openFormWhenMissingRequired: true,
         };
 
         const parsed: ParsedCommandArguments = {
@@ -105,10 +102,7 @@ void describe("dense argument form", () => {
             description: "Example command",
             args: definitions,
             handler() {},
-            typedArgsEnabled: true,
             formSymbols: symbols,
-            openFormWhenInvalid: true,
-            openFormWhenMissingRequired: true,
         };
 
         const parsed: ParsedCommandArguments = {
@@ -179,10 +173,7 @@ void describe("dense argument form", () => {
             description: "Example command",
             args: definitions,
             handler() {},
-            typedArgsEnabled: true,
             formSymbols: symbols,
-            openFormWhenInvalid: true,
-            openFormWhenMissingRequired: true,
         };
         const parsed: ParsedCommandArguments = {
             values: { source: "api" },
@@ -235,10 +226,7 @@ void describe("dense argument form", () => {
             description: "Example command",
             args: definitions,
             handler() {},
-            typedArgsEnabled: true,
             formSymbols: symbols,
-            openFormWhenInvalid: true,
-            openFormWhenMissingRequired: true,
         };
         const parsed: ParsedCommandArguments = {
             values: { source: "api" },
@@ -284,10 +272,7 @@ void describe("dense argument form", () => {
             description: "Example command",
             args: definitions,
             handler() {},
-            typedArgsEnabled: true,
             formSymbols: symbols,
-            openFormWhenInvalid: true,
-            openFormWhenMissingRequired: true,
         };
 
         const parsed: ParsedCommandArguments = {
@@ -350,10 +335,7 @@ void describe("sequential argument form", () => {
             description: "Example command",
             args: definitions,
             handler() {},
-            typedArgsEnabled: true,
             formSymbols: symbols,
-            openFormWhenInvalid: true,
-            openFormWhenMissingRequired: true,
         };
 
         const parsed: ParsedCommandArguments = {

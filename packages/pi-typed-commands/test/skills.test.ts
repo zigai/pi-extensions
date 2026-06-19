@@ -267,10 +267,7 @@ void describe("typed skill required/default behavior", () => {
                 },
             },
             handler: () => {},
-            typedArgsEnabled: true,
             formSymbols,
-            openFormWhenInvalid: true,
-            openFormWhenMissingRequired: true,
         };
 
         const parsed = parseTypedCommandArgs(command, "");

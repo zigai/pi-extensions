@@ -8,7 +8,7 @@ import {
     quoteSerializedValue,
     type Token,
 } from "./parser.js";
-import { getTypedCommand, getTypedCommands, isTypedCommandEnabled } from "./registry.js";
+import { getTypedCommand, getTypedCommands } from "./registry.js";
 import {
     completionValuesForArgument,
     createArgumentLookup,
@@ -466,10 +466,6 @@ export function getTypedArgumentCompletions<
     command: RegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
 ): MaybePromise<AutocompleteItem[] | null> {
-    if (!isTypedCommandEnabled(command, undefined, process.cwd())) {
-        return null;
-    }
-
     const tokens = tokenizeLoose(argumentPrefix);
     const lastToken = tokens[tokens.length - 1];
     let query = "";
@@ -561,9 +557,6 @@ function commandLineContext(
 
     const command = getTypedCommand(commandName);
     if (command === undefined) {
-        return undefined;
-    }
-    if (!isTypedCommandEnabled(command, ctx, cwd)) {
         return undefined;
     }
 

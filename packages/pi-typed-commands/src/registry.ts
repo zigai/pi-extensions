@@ -1,7 +1,5 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getPiTypedCommandsSettings } from "./settings.js";
 import type { TypedSkillDiagnostics } from "./skills.js";
-import type { ArgumentDefinitions, RegisteredTypedCommand, TypedCommandToggle } from "./types.js";
+import type { ArgumentDefinitions, RegisteredTypedCommand } from "./types.js";
 
 type RegistryListener = () => void;
 
@@ -186,44 +184,6 @@ export function getTypedCommands(): RegisteredTypedCommand[] {
     return [...getTypedCommandRegistry().commands.values()].sort((a, b) =>
         (a.invocationName ?? a.name).localeCompare(b.invocationName ?? b.name),
     );
-}
-
-/**
- * Resolve a typed command toggle, treating thrown errors as disabled.
- *
- * @internal Exposed for package internals and advanced integrations.
- */
-export function isToggleEnabled(
-    toggle: TypedCommandToggle | undefined,
-    ctx?: ExtensionContext,
-): boolean {
-    if (toggle === undefined) {
-        return true;
-    }
-    if (typeof toggle === "boolean") {
-        return toggle;
-    }
-    try {
-        return toggle(ctx);
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Resolve global settings and per-command toggle state for a registered typed command.
- *
- * @internal Exposed for package internals and advanced integrations.
- */
-export function isTypedCommandEnabled<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
-    ctx?: ExtensionContext,
-    cwd?: string,
-): boolean {
-    if (!getPiTypedCommandsSettings(cwd ?? ctx?.cwd).enabled) {
-        return false;
-    }
-    return isToggleEnabled(command.typedArgsEnabled, ctx);
 }
 
 /**
