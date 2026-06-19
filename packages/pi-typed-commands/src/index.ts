@@ -4,9 +4,15 @@ import type {
     ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import {
+    expandGroupedArgumentValues,
+    flattenGroupedArgumentDefinitions,
+    flattenGroupedArgumentValues,
+    hasArgumentGroups,
+} from "./arguments.js";
 import { getTypedArgumentCompletions, getTypedAutocompleteSuggestions } from "./completions.js";
-import { compileTypedCommandDefinition } from "./compiler.js";
-import { parseTypedCommandArgs, toTypedParseResult } from "./parser.js";
+import { cloneAndFreezeDefinitions, compileTypedCommandDefinition } from "./compiler.js";
+import { parseTypedCommandArgs, serializeTypedCommandArgs, toTypedParseResult } from "./parser.js";
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
@@ -26,14 +32,19 @@ import {
 import { getPiTypedCommandsSettings } from "./settings.js";
 import type {
     ArgumentDefinitions,
+    ArgumentValue,
     DefinedTypedCommand,
     InferArguments,
+    ParsedCommandArguments,
     RegisteredTypedCommand,
     TypedCommandDefinition,
+    TypedCommandHandler,
     TypedCommandFormSymbols,
     TypedCommandHandle,
     TypedCommandOptions,
+    TypedCommandRefinement,
     TypedCommandToggle,
+    TypedParseResult,
     FormMode,
 } from "./types.js";
 import { formatCommandUsage, formatDetailedHelp, formatHelperLineParts } from "./usage.js";
@@ -45,6 +56,8 @@ import {
     renderTypedSkillInvocation,
     skillPathFromCommand,
     typedSkillCommandFromMetadata,
+    type SkillArgumentDiagnostic,
+    type TypedSkillDiagnostics,
 } from "./skills.js";
 
 const WIDGET_KEY = "pi-typed-commands.helper";
@@ -78,6 +91,7 @@ export type TypedCommandUxOptions = {
 export type {
     ArgumentDefinition,
     ArgumentDefinitions,
+    ArgumentOccurrencePolicy,
     ArgumentValue,
     ArgumentUi,
     ArgumentWidget,
@@ -86,17 +100,25 @@ export type {
     ArgumentWidgetTheme,
     CustomArgumentWidget,
     BooleanArgumentDefinition,
+    ArgumentDescription,
+    ArgumentGroupDefinition,
     CompileResult,
+    CompiledArgument,
     CompiledCommand,
+    DecodeResult,
     DefinedTypedCommand,
     DefinitionDiagnostic,
+    FieldEditor,
     EnumArgumentDefinition,
     InferArguments,
+    InvocationTarget,
+    MaybePromise,
     MultiEnumArgumentDefinition,
     NumberArgumentDefinition,
     ParsedCommandArguments,
     ParseIssue,
     ParseIssueKind,
+    RawArgumentOccurrence,
     PrimitiveArgumentValue,
     RegisteredTypedCommand,
     StringArgumentDefinition,
@@ -106,6 +128,10 @@ export type {
     TypedCommandHandle,
     TypedCommandOptions,
     TypedCommandRawSelector,
+    TypedCompletionContext,
+    TypedCompletionItem,
+    TypedCompletionProvider,
+    TypedCompletionReplacementRange,
     TypedCommandRefinement,
     TypedCommandRefinementContext,
     TypedCommandRefinementIssue,
@@ -116,15 +142,44 @@ export type {
     FormMode,
 } from "./types.js";
 
+export {
+    booleanArgument,
+    enumArgument,
+    expandGroupedArgumentValues,
+    flattenGroupedArgumentDefinitions,
+    flattenGroupedArgumentValues,
+    group,
+    hasArgumentGroups,
+    isArgumentGroupDefinition,
+    multiEnumArgument,
+    numberArgument,
+    stringArgument,
+} from "./arguments.js";
 export { compileTypedCommandDefinition } from "./compiler.js";
 export { formatCommandUsage, formatDetailedHelp, formatHelperLine } from "./usage.js";
 export { getTypedCommand, getTypedCommands } from "./registry.js";
-export { lexTypedArgumentString, parseTypedCommandArgs, toTypedParseResult } from "./parser.js";
+export {
+    lexTypedArgumentString,
+    parseTypedCommandArgs,
+    serializeTypedCommandArgs,
+    toTypedParseResult,
+} from "./parser.js";
 export { getPiTypedCommandsSettings } from "./settings.js";
 export {
     normalizeSkillArguments,
     parseSkillMarkdown,
     renderTypedSkillInvocation,
+} from "./skills.js";
+export type {
+    RawSkillArgumentDefinition,
+    RawSkillArguments,
+    ReadTypedSkillMetadataResult,
+    RenderTypedSkillInvocationOptions,
+    SkillArgumentDiagnostic,
+    SkillArgumentNormalizationResult,
+    SkillFrontmatter,
+    TypedSkillDiagnostics,
+    TypedSkillMetadata,
 } from "./skills.js";
 
 function notifyIssues(ctx: ExtensionCommandContext, messages: string[]): void {
@@ -179,24 +234,101 @@ function definitionError(name: string, diagnostics: readonly string[]): Error {
     return new Error([`Invalid typed arguments for /${name}:`, ...diagnostics].join("\n"));
 }
 
+function maybeExpandGroupedValues<TDefinitions extends ArgumentDefinitions>(
+    values: Readonly<Record<string, ArgumentValue>>,
+    definitions: TDefinitions,
+): Record<string, unknown> {
+    if (!hasArgumentGroups(definitions)) {
+        return { ...values };
+    }
+    return expandGroupedArgumentValues(values, definitions);
+}
+
+function maybeFlattenGroupedValues<TDefinitions extends ArgumentDefinitions>(
+    values: Readonly<Record<string, unknown>>,
+    definitions: TDefinitions,
+): Record<string, ArgumentValue> {
+    if (!hasArgumentGroups(definitions)) {
+        return { ...(values as Record<string, ArgumentValue>) };
+    }
+    return flattenGroupedArgumentValues(values, definitions);
+}
+
+function maybeWrapGroupedRefinement<TDefinitions extends ArgumentDefinitions>(
+    definitions: TDefinitions,
+    refine: TypedCommandRefinement<TDefinitions> | undefined,
+): TypedCommandRefinement<TDefinitions> | undefined {
+    if (refine === undefined || !hasArgumentGroups(definitions)) {
+        return refine;
+    }
+    return (args, context) => refine(maybeExpandGroupedValues(args, definitions) as never, context);
+}
+
+function maybeWrapGroupedHandler<TDefinitions extends ArgumentDefinitions>(
+    definitions: TDefinitions,
+    handler: TypedCommandHandler<TDefinitions>,
+): TypedCommandHandler<TDefinitions> {
+    if (!hasArgumentGroups(definitions)) {
+        return handler;
+    }
+    return (args, ctx) => handler(maybeExpandGroupedValues(args, definitions) as never, ctx);
+}
+
+function typedParseResultForDefinition<TDefinitions extends ArgumentDefinitions>(
+    parsed: ParsedCommandArguments,
+    definitions: TDefinitions,
+): TypedParseResult<TDefinitions> {
+    const result = toTypedParseResult<TDefinitions>(parsed);
+    if (!hasArgumentGroups(definitions)) {
+        return result;
+    }
+    if (result.status === "success") {
+        return {
+            ...result,
+            value: maybeExpandGroupedValues(
+                result.value,
+                definitions,
+            ) as InferArguments<TDefinitions>,
+        };
+    }
+    if (result.status === "error") {
+        return {
+            ...result,
+            partial: maybeExpandGroupedValues(result.partial, definitions) as Partial<
+                InferArguments<TDefinitions>
+            >,
+        };
+    }
+    return result;
+}
+
 function registeredCommandForDefinition<TDefinitions extends ArgumentDefinitions>(
     definition: Pick<
         TypedCommandDefinition<TDefinitions>,
         "name" | "description" | "args" | "refine"
     >,
 ): RegisteredTypedCommand<TDefinitions> {
+    const compiled = compileTypedCommandDefinition(definition);
+    if (!compiled.ok) {
+        throw definitionError(
+            definition.name,
+            compiled.diagnostics.map((diagnostic) => diagnostic.message),
+        );
+    }
     const command: RegisteredTypedCommand<TDefinitions> = {
         name: definition.name,
         description: definition.description,
-        args: definition.args,
-        handler: () => {},
+        args: compiled.command.args as TDefinitions,
+        compiled: compiled.command,
+        target: { kind: "extension", run: () => {} },
         typedArgsEnabled: true,
         formSymbols: DEFAULT_FORM_SYMBOLS,
         openFormWhenInvalid: true,
         openFormWhenMissingRequired: true,
     };
-    if (definition.refine !== undefined) {
-        command.refine = definition.refine;
+    const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
+    if (refine !== undefined) {
+        command.refine = refine;
     }
     return command;
 }
@@ -215,13 +347,25 @@ export function defineTypedCommand<const TDefinitions extends ArgumentDefinition
 
     const normalizedDefinition = {
         ...definition,
-        args: compiled.command.args as TDefinitions,
+        args: cloneAndFreezeDefinitions(definition.args) as TDefinitions,
     } as TypedCommandDefinition<TDefinitions>;
     const command = registeredCommandForDefinition(normalizedDefinition);
     const defined = {
         ...normalizedDefinition,
         parse(rawArgs: string) {
-            return toTypedParseResult<TDefinitions>(parseTypedCommandArgs(command, rawArgs));
+            return typedParseResultForDefinition(
+                parseTypedCommandArgs(command, rawArgs),
+                normalizedDefinition.args,
+            );
+        },
+        serialize(values: Partial<InferArguments<TDefinitions>>) {
+            return serializeTypedCommandArgs(
+                command,
+                maybeFlattenGroupedValues(
+                    values as Record<string, unknown>,
+                    normalizedDefinition.args,
+                ),
+            );
         },
         formatUsage() {
             return formatCommandUsage(command);
@@ -237,10 +381,11 @@ function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
     name: string,
     options: TypedCommandOptions<TDefinitions>,
 ): RegisteredTypedCommand<TDefinitions> {
+    const runtimeArgs = flattenGroupedArgumentDefinitions(options.args) as TDefinitions;
     const compiled = compileTypedCommandDefinition({
         name,
         description: options.description,
-        args: options.args,
+        args: runtimeArgs,
     });
     if (!compiled.ok) {
         throw definitionError(
@@ -253,7 +398,9 @@ function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
         name,
         description: options.description,
         args: compiled.command.args as TDefinitions,
-        handler: options.handler,
+        compiled: compiled.command,
+        handler: maybeWrapGroupedHandler(options.args, options.handler),
+        target: { kind: "extension", run: maybeWrapGroupedHandler(options.args, options.handler) },
         typedArgsEnabled: options.typedArgsEnabled ?? true,
         formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...options.formSymbols },
         openFormWhenInvalid: options.openFormWhenInvalid ?? true,
@@ -261,8 +408,9 @@ function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
         source: "extension",
     };
 
-    if (options.refine !== undefined) {
-        command.refine = options.refine;
+    const refine = maybeWrapGroupedRefinement(options.args, options.refine);
+    if (refine !== undefined) {
+        command.refine = refine;
     }
     if (options.formTitle !== undefined) {
         command.formTitle = options.formTitle;
@@ -326,6 +474,9 @@ function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
         invocationName,
         parse(rawArgs: string) {
             return definition.parse(rawArgs);
+        },
+        serialize(values: Partial<InferArguments<TDefinitions>>) {
+            return definition.serialize(values);
         },
         formatUsage() {
             return definition.formatUsage();
@@ -426,14 +577,32 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             if (args === undefined) {
                 return;
             }
-            await command.handler(args, ctx);
+            let handler = command.handler;
+            if (handler === undefined && command.target?.kind === "extension") {
+                handler = command.target.run;
+            }
+            if (handler === undefined) {
+                ctx.ui.notify(
+                    `Typed command /${name} does not have an extension handler.`,
+                    "error",
+                );
+                return;
+            }
+            await handler(args, ctx);
         },
     }) as unknown;
 
-    registerTypedCommandMetadata(command);
-    let invocationName = name;
+    let piInvocationName: string | undefined;
     if (typeof maybeInvocationName === "string") {
-        invocationName = maybeInvocationName;
+        piInvocationName = maybeInvocationName;
+    }
+    let invocationName: string;
+    if (piInvocationName === undefined) {
+        invocationName = registerTypedCommandMetadata(command);
+    } else {
+        invocationName = registerTypedCommandMetadata(command, {
+            invocationName: piInvocationName,
+        });
     }
     let definition: DefinedTypedCommand<TDefinitions>;
     if (definitionMode) {
@@ -666,13 +835,25 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
         return;
     }
 
+    let handler = command.handler;
+    if (handler === undefined && command.target?.kind === "extension") {
+        handler = command.target.run;
+    }
+    if (handler === undefined) {
+        ctx.ui.notify(
+            `Typed command /${command.name} does not have an extension handler.`,
+            "error",
+        );
+        return;
+    }
+
     ctx.ui.setEditorText("");
-    await command.handler(args as never, commandCtx);
+    await handler(args as never, commandCtx);
 }
 
 function refreshTypedSkills(pi: ExtensionAPI): void {
     const commands: RegisteredTypedCommand[] = [];
-    const diagnostics = [];
+    const diagnostics: TypedSkillDiagnostics[] = [];
     for (const command of pi.getCommands()) {
         const skillPath = skillPathFromCommand(command);
         if (skillPath === undefined) {
@@ -691,10 +872,17 @@ function refreshTypedSkills(pi: ExtensionAPI): void {
             if (error instanceof Error) {
                 message = error.message;
             }
+            const diagnostic: SkillArgumentDiagnostic = {
+                code: "skill.arguments.read_failed",
+                message: `failed to read typed arguments: ${message}`,
+                path: [],
+                severity: "error",
+            };
             diagnostics.push({
                 name: command.name.replace(/^skill:/, ""),
                 filePath: skillPath,
-                messages: [`failed to read typed arguments: ${message}`],
+                messages: [diagnostic.message],
+                diagnostics: [diagnostic],
             });
         }
     }

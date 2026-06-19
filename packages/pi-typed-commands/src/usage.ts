@@ -110,10 +110,11 @@ export function formatCommandUsage<TDefinitions extends Record<string, ArgumentD
     const parts = orderedCommandArgumentEntries(command).map(([name, definition]) =>
         formatArgumentUsage(name, definition, options),
     );
+    const commandName = command.invocationName ?? command.name;
     if (parts.length === 0) {
-        return `/${command.name}`;
+        return `/${commandName}`;
     }
-    return `/${command.name} ${parts.join(" ")}`;
+    return `/${commandName} ${parts.join(" ")}`;
 }
 
 /** Format the one-line editor helper text shown below the Pi editor. */
@@ -131,7 +132,7 @@ export function formatHelperLineParts<TDefinitions extends Record<string, Argume
 ): CommandUsagePart[] {
     const parts: CommandUsagePart[] = [
         { kind: "muted", text: "usage: " },
-        { kind: "command", text: `/${command.name}` },
+        { kind: "command", text: `/${command.invocationName ?? command.name}` },
     ];
 
     for (const [name, definition] of orderedCommandArgumentEntries(command)) {
@@ -152,7 +153,7 @@ export function formatDetailedHelp<TDefinitions extends Record<string, ArgumentD
     command: RegisteredTypedCommand<TDefinitions>,
 ): string {
     const lines = [
-        `/${command.name}`,
+        `/${command.invocationName ?? command.name}`,
         "",
         command.description,
         "",

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { compileTypedCommandDefinition } from "../src/compiler.js";
 import {
     applyArgumentDefaults,
     argumentValueHint,
@@ -95,6 +96,27 @@ void describe("typed command schema", () => {
         assert.equal(argumentValueHint(definitions.action!, "action"), "create|delete");
     });
 
+    void it("compiles arguments into immutable behavior objects", () => {
+        const compiled = compileTypedCommandDefinition({
+            name: "deploy",
+            description: "Deploy",
+            args: definitions,
+        });
+
+        assert.equal(compiled.ok, true);
+        if (compiled.ok) {
+            const action = compiled.command.argumentByName.get("action");
+            assert.equal(action?.describe().position, 0);
+            assert.deepEqual(action?.serialize("create"), ["--action=create"]);
+            assert.deepEqual(action?.decode([{ source: "positional", raw: "delete" }]), {
+                ok: true,
+                value: "delete",
+            });
+            assert.equal("set" in compiled.command.argumentByName, false);
+            assert.equal("set" in compiled.command.flagToName, false);
+        }
+    });
+
     void it("validates schema constraints before registration", () => {
         const warnings = validateArgumentDefinitions({
             range: { type: "number", min: 10, max: 1 },
@@ -105,7 +127,10 @@ void describe("typed command schema", () => {
             first: { type: "string", positional: 0 },
             second: { type: "string", required: true, positional: 1 },
             duplicatePosition: { type: "string", positional: 1 },
+            badTitle: { type: "string", title: 123 as never },
             badRows: { type: "string", ui: { rows: 0 } },
+            restBeforeOther: { type: "string", position: 2, rest: true },
+            afterRest: { type: "string", position: 3 },
         });
         const text = warnings.join("\n");
 
@@ -121,6 +146,11 @@ void describe("typed command schema", () => {
             /second: required positional arguments may not follow optional positional argument first/,
         );
         assert.match(text, /duplicatePosition\.positional duplicates position 1 from second/);
+        assert.match(text, /badTitle\.title must be a string/);
         assert.match(text, /badRows\.ui\.rows must be a positive integer/);
+        assert.match(
+            text,
+            /afterRest: positional arguments may not follow rest argument restBeforeOther/,
+        );
     });
 });

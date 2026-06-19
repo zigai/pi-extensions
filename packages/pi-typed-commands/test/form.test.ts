@@ -158,6 +158,121 @@ void describe("dense argument form", () => {
         assert.equal(result?.count, 123);
     });
 
+    void it("uses field titles and whole-form values for custom widgets", async () => {
+        const definitions: ArgumentDefinitions = {
+            source: { type: "string", default: "api" },
+            output: {
+                type: "string",
+                title: "Output path",
+                ui: {
+                    custom: {
+                        renderValue(ctx) {
+                            return `source=${String(ctx.values.source)}`;
+                        },
+                    },
+                },
+            },
+        };
+
+        const command: RegisteredTypedCommand = {
+            name: "example",
+            description: "Example command",
+            args: definitions,
+            handler() {},
+            typedArgsEnabled: true,
+            formSymbols: symbols,
+            openFormWhenInvalid: true,
+            openFormWhenMissingRequired: true,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: { source: "api" },
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+
+        let renderedLines: string[] = [];
+        const ctx = {
+            mode: "tui",
+            ui: {
+                notify() {},
+                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                    const component = (await factory(
+                        tui,
+                        theme as never,
+                        {} as never,
+                        () => {},
+                    )) as TestFormComponent;
+
+                    component.focused = true;
+                    component.handleInput("\t");
+                    renderedLines = component.render(80);
+                    return undefined;
+                },
+            },
+        } as unknown as ExtensionCommandContext;
+
+        await openArgumentForm(command, parsed, "all", ctx);
+
+        assert.ok(renderedLines.some((line) => line.includes("Output path")));
+        assert.ok(renderedLines.some((line) => line.includes("source=api")));
+    });
+
+    void it("computes read-only field values", async () => {
+        const definitions: ArgumentDefinitions = {
+            source: { type: "string", default: "api" },
+            output: {
+                type: "string",
+                ui: {
+                    compute(values) {
+                        return `${String(values.source)}.txt`;
+                    },
+                },
+            },
+        };
+        const command: RegisteredTypedCommand = {
+            name: "example",
+            description: "Example command",
+            args: definitions,
+            handler() {},
+            typedArgsEnabled: true,
+            formSymbols: symbols,
+            openFormWhenInvalid: true,
+            openFormWhenMissingRequired: true,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: { source: "api" },
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+        const ctx = {
+            mode: "tui",
+            ui: {
+                notify() {},
+                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                    let result: unknown;
+                    const component = (await factory(
+                        tui,
+                        theme as never,
+                        {} as never,
+                        (next: unknown) => {
+                            result = next;
+                        },
+                    )) as TestFormComponent;
+
+                    component.focused = true;
+                    component.handleInput("\r");
+                    return result;
+                },
+            },
+        } as unknown as ExtensionCommandContext;
+
+        const result = await openArgumentForm(command, parsed, "all", ctx);
+
+        assert.equal(result?.output, "api.txt");
+    });
+
     void it("moves the cursor to the end when tabbing into a defaulted number field", async () => {
         const definitions = {
             label: { type: "string" },

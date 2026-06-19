@@ -1,5 +1,23 @@
+export {
+    booleanArgument,
+    enumArgument,
+    expandGroupedArgumentValues,
+    flattenGroupedArgumentDefinitions,
+    flattenGroupedArgumentValues,
+    group,
+    hasArgumentGroups,
+    isArgumentGroupDefinition,
+    multiEnumArgument,
+    numberArgument,
+    stringArgument,
+} from "../arguments.js";
 export { compileTypedCommandDefinition } from "../compiler.js";
-export { lexTypedArgumentString, parseTypedCommandArgs, toTypedParseResult } from "../parser.js";
+export {
+    lexTypedArgumentString,
+    parseTypedCommandArgs,
+    serializeTypedCommandArgs,
+    toTypedParseResult,
+} from "../parser.js";
 export {
     applyArgumentDefault,
     applyArgumentDefaults,
@@ -13,16 +31,29 @@ export { formatCommandUsage, formatDetailedHelp, formatHelperLine } from "../usa
 export type {
     ArgumentDefinition,
     ArgumentDefinitions,
+    ArgumentDescription,
+    ArgumentGroupDefinition,
+    ArgumentOccurrencePolicy,
     ArgumentValue,
     CompileResult,
+    CompiledArgument,
     CompiledCommand,
+    DecodeResult,
     DefinedTypedCommand,
     DefinitionDiagnostic,
+    FieldEditor,
     InferArguments,
+    InvocationTarget,
     ParsedCommandArguments,
     ParseIssue,
     ParseIssueKind,
+    RawArgumentOccurrence,
+    MaybePromise,
     TypedCommandDefinition,
     TypedCommandRefinement,
+    TypedCompletionContext,
+    TypedCompletionItem,
+    TypedCompletionProvider,
+    TypedCompletionReplacementRange,
     TypedParseResult,
 } from "../types.js";

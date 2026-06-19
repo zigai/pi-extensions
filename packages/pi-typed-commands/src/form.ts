@@ -20,11 +20,17 @@ import {
     selectableArgumentValues,
     validateArgumentValue,
 } from "./schema.js";
+import {
+    createHeadlessFormModel,
+    formatFormIssueMessage,
+    shouldPromptArgument,
+    type FormField,
+    type FormState,
+} from "./pi-tui/form-model.js";
 import type {
     ArgumentDefinition,
     ArgumentValue,
     ParsedCommandArguments,
-    ParseIssue,
     RegisteredTypedCommand,
     TypedCommandFormSymbols,
     FormMode,
@@ -32,8 +38,6 @@ import type {
 import { formatIssues } from "./usage.js";
 
 const UNSET_OPTION = "";
-
-type FormState = Record<string, ArgumentValue>;
 
 type FormTheme = {
     bold(text: string): string;
@@ -50,12 +54,6 @@ type FormResult = {
     state: FormState;
 };
 
-type FormField = {
-    name: string;
-    definition: ArgumentDefinition;
-    issueMessages: string[];
-};
-
 type InputCursorState = {
     cursor?: unknown;
 };
@@ -66,52 +64,6 @@ const MIN_VALUE_WIDTH = 12;
 const MAX_VALUE_WIDTH = 32;
 const NAME_WIDTH = 12;
 const FORM_MESSAGE_OPTIONS = { nameStyle: "field" } as const;
-
-function formatFormIssueMessage(issue: ParseIssue): string {
-    if (issue.name === undefined) {
-        return issue.message;
-    }
-
-    return issue.message.replaceAll(formatFlagName(issue.name), toKebabCase(issue.name));
-}
-
-function issuesByName(parsed: ParsedCommandArguments): Map<string, string[]> {
-    const issues = new Map<string, string[]>();
-    for (const item of parsed.issues) {
-        if (item.name === undefined) {
-            continue;
-        }
-        const current = issues.get(item.name) ?? [];
-        current.push(formatFormIssueMessage(item));
-        issues.set(item.name, current);
-    }
-    return issues;
-}
-
-function issueNames(parsed: ParsedCommandArguments): Set<string> {
-    return new Set(issuesByName(parsed).keys());
-}
-
-function shouldPromptArgument(
-    name: string,
-    definition: ArgumentDefinition,
-    mode: FormMode,
-    parsed: ParsedCommandArguments,
-): boolean {
-    if (mode === "all") {
-        return true;
-    }
-
-    if (issueNames(parsed).has(name)) {
-        return true;
-    }
-
-    if (definition.required === true && parsed.values[name] === undefined) {
-        return true;
-    }
-
-    return false;
-}
 
 function currentValueText(value: ArgumentValue): string {
     if (value === undefined) {
@@ -487,9 +439,28 @@ function isExpandedOptionsWidget(definition: ArgumentDefinition): boolean {
     return widget === "radio" || widget === "multiselect";
 }
 
-function isReadOnlyWidget(definition: ArgumentDefinition): boolean {
+function evaluateFormBoolean(
+    option: boolean | ((values: Readonly<FormState>) => boolean) | undefined,
+    state: FormState,
+): boolean {
+    if (typeof option === "function") {
+        return option({ ...state });
+    }
+    return option === true;
+}
+
+function isHiddenField(definition: ArgumentDefinition, state: FormState): boolean {
+    return evaluateFormBoolean(definition.ui?.hidden, state);
+}
+
+function isReadOnlyWidget(definition: ArgumentDefinition, state: FormState): boolean {
     const widget = widgetFor(definition);
-    return widget === "readonly" || widget === "computed";
+    return (
+        widget === "readonly" ||
+        widget === "computed" ||
+        definition.ui?.compute !== undefined ||
+        evaluateFormBoolean(definition.ui?.readOnly, state)
+    );
 }
 
 function formatValue(value: ArgumentValue): string {
@@ -557,10 +528,7 @@ function createEditorTheme(theme: FormTheme): TextEditorTheme {
 
 function setInputValueAtEnd(input: Input, value: string): void {
     input.setValue(value);
-    // pi-tui Input#setValue preserves the previous cursor, so seeding a default value from
-    // an empty field would leave the cursor before the text. The component does not expose a
-    // cursor setter, but the cursor is TypeScript-private rather than a runtime private field.
-    (input as unknown as { cursor: number }).cursor = value.length;
+    setInputCursor(input, value.length);
 }
 
 class ArgumentFormComponent implements Component, Focusable {
@@ -649,10 +617,11 @@ class ArgumentFormComponent implements Component, Focusable {
         }
 
         const field = this.selectedField();
+        this.applyComputedValues();
         if (this.handleCustomInput(field, data)) {
             return;
         }
-        if (isReadOnlyWidget(field.definition)) {
+        if (isReadOnlyWidget(field.definition, this.state)) {
             return;
         }
 
@@ -725,6 +694,7 @@ class ArgumentFormComponent implements Component, Focusable {
     }
 
     render(width: number): string[] {
+        this.applyComputedValues();
         const valueWidth = calculateValueWidth(width);
         const lines: string[] = [];
         lines.push(this.renderHeader(width));
@@ -759,10 +729,15 @@ class ArgumentFormComponent implements Component, Focusable {
         if (field === undefined) {
             return [""];
         }
+        if (isHiddenField(field.definition, this.state)) {
+            return [];
+        }
 
         const selected = index === this.selectedIndex;
         const marker = this.fieldMarker(selected);
-        const name = paddedCell(toKebabCase(field.name), NAME_WIDTH);
+        const title =
+            field.definition.title ?? field.definition.ui?.title ?? toKebabCase(field.name);
+        const name = paddedCell(title, NAME_WIDTH);
         const prefix = " ".repeat(LEFT_PADDING) + marker + " ";
 
         if (isExpandedOptionsWidget(field.definition)) {
@@ -845,6 +820,7 @@ class ArgumentFormComponent implements Component, Focusable {
             name: field.name,
             definition: field.definition,
             value: this.state[field.name],
+            values: { ...this.state },
             selected,
             width,
             theme: this.theme,
@@ -863,10 +839,17 @@ class ArgumentFormComponent implements Component, Focusable {
             name: field.name,
             definition: field.definition,
             value: this.state[field.name],
+            values: { ...this.state },
             data,
             setValue: (value) => {
                 this.state[field.name] = value;
                 this.localIssues.delete(field.name);
+            },
+            setValues: (values) => {
+                for (const [name, value] of Object.entries(values)) {
+                    this.state[name] = value;
+                    this.localIssues.delete(name);
+                }
             },
         });
         return result === true;
@@ -986,6 +969,16 @@ class ArgumentFormComponent implements Component, Focusable {
             return text;
         });
         return parts;
+    }
+
+    private applyComputedValues(): void {
+        for (const field of this.fields) {
+            const compute = field.definition.ui?.compute;
+            if (compute !== undefined) {
+                this.state[field.name] = compute({ ...this.state });
+                this.localIssues.delete(field.name);
+            }
+        }
     }
 
     private renderSelectedInput(width: number): string {
@@ -1135,6 +1128,7 @@ class ArgumentFormComponent implements Component, Focusable {
     }
 
     private submit(): void {
+        this.applyComputedValues();
         if (!this.commitInput(true)) {
             return;
         }
@@ -1189,27 +1183,10 @@ async function openDenseArgumentForm<TDefinitions extends Record<string, Argumen
     mode: FormMode,
     ctx: ExtensionCommandContext,
 ): Promise<Record<string, ArgumentValue> | undefined> {
-    const state: FormState = { ...parsed.values };
-    const namedIssues = issuesByName(parsed);
-    const fields: FormField[] = [];
-
-    let initialSelection = -1;
-    for (const [name, definition] of Object.entries(command.args)) {
-        if (initialSelection < 0 && shouldPromptArgument(name, definition, mode, parsed)) {
-            initialSelection = fields.length;
-        }
-        fields.push({
-            name,
-            definition,
-            issueMessages: namedIssues.get(name) ?? [],
-        });
-    }
+    const { state, fields, initialSelection } = createHeadlessFormModel(command.args, parsed, mode);
 
     if (fields.length === 0) {
         return state;
-    }
-    if (initialSelection < 0) {
-        initialSelection = 0;
     }
 
     const result = await ctx.ui.custom<FormResult | undefined>(

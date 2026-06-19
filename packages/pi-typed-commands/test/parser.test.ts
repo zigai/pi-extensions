@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
     getTypedArgumentCompletions,
@@ -7,6 +10,7 @@ import {
 import {
     formatCommandUsage,
     parseTypedCommandArgs,
+    serializeTypedCommandArgs,
     type RegisteredTypedCommand,
 } from "../src/index.js";
 import { registerTypedCommandMetadata } from "../src/registry.js";
@@ -189,6 +193,22 @@ void describe("parseTypedCommandArgs", () => {
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.action, "create");
         assert.equal(parsed.values.name, "feature/foo");
+    });
+
+    void it("consumes rest positional string arguments", () => {
+        const restCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                title: { type: "string", required: true, position: 0 },
+                body: { type: "string", position: 1, rest: true },
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(restCommand, "note this is the body --literal");
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.title, "note");
+        assert.equal(parsed.values.body, "this is the body --literal");
     });
 
     void it("recognizes --help and -h", () => {
@@ -378,6 +398,48 @@ void describe("parseTypedCommandArgs", () => {
             [["invalid-value", "start", "start must not exceed end"]],
         );
     });
+
+    void it("makes duplicate occurrence behavior explicit", () => {
+        const defaultDuplicate = parseTypedCommandArgs(command, "--env dev --env prod");
+        const lastWinsCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                env: { type: "enum", values: ["dev", "prod"], occurrence: "last" },
+            },
+        };
+        const lastWins = parseTypedCommandArgs(lastWinsCommand, "--env dev --env prod");
+
+        assert.equal(defaultDuplicate.issues[0]?.kind, "duplicate-argument");
+        assert.deepEqual(lastWins.issues, []);
+        assert.equal(lastWins.values.env, "prod");
+    });
+
+    void it("serializes values into parseable command arguments", () => {
+        const pathCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                env: { type: "enum", values: ["dev", "prod"], required: true, position: 0 },
+                ref: { type: "string" },
+                dryRun: { type: "boolean" },
+                tags: { type: "multi-enum", values: ["api", "web"] },
+            },
+        };
+
+        const raw = serializeTypedCommandArgs(pathCommand, {
+            env: "prod",
+            ref: "feature with spaces",
+            dryRun: false,
+            tags: ["api", "web"],
+        });
+        const parsed = parseTypedCommandArgs(pathCommand, raw);
+
+        assert.equal(raw, 'prod --ref="feature with spaces" --no-dry-run --tags=api,web');
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.env, "prod");
+        assert.equal(parsed.values.ref, "feature with spaces");
+        assert.equal(parsed.values.dryRun, false);
+        assert.deepEqual(parsed.values.tags, ["api", "web"]);
+    });
 });
 
 void describe("formatCommandUsage", () => {
@@ -421,8 +483,8 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("completes values through Pi's command completion entry point", () => {
-        const suggestions = getTypedArgumentCompletions(command, "--env d");
+    void it("completes values through Pi's command completion entry point", async () => {
+        const suggestions = await getTypedArgumentCompletions(command, "--env d");
 
         assert.deepEqual(
             suggestions?.map((item) => item.value),
@@ -430,11 +492,142 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("stops completing flags after the end-of-options marker", () => {
+    void it("quotes completed values when insertion would need shell quoting", async () => {
+        const refCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                ref: {
+                    type: "string",
+                    complete: (query) =>
+                        ["feature branch", "-dash"]
+                            .filter((value) => value.startsWith(query))
+                            .map((value) => ({ value })),
+                },
+            },
+        };
+
+        const spaced = await getTypedArgumentCompletions(refCommand, "--ref feature");
+        const dashed = await getTypedArgumentCompletions(refCommand, "--ref -");
+
+        assert.deepEqual(
+            spaced?.map((item) => item.value),
+            ['"feature branch"'],
+        );
+        assert.deepEqual(
+            dashed?.map((item) => item.value),
+            ['"-dash"'],
+        );
+    });
+
+    void it("honors provider-supplied replacement text", async () => {
+        const refCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                ref: {
+                    type: "string",
+                    complete: () => [
+                        {
+                            value: "feature branch",
+                            replacement: '"feature branch"',
+                            replaceRange: { start: 6, end: 13 },
+                        },
+                    ],
+                },
+            },
+        };
+
+        const suggestions = await getTypedArgumentCompletions(refCommand, "--ref feature");
+
+        assert.deepEqual(
+            suggestions?.map((item) => item.value),
+            ['"feature branch"'],
+        );
+    });
+
+    void it("completes positional values", async () => {
+        registerTypedCommandMetadata(branchCommand);
+
+        const directSuggestions = await getTypedArgumentCompletions(branchCommand, "c");
+        const editorSuggestions = getTypedAutocompleteSuggestions(["/branch d"], 0, 9);
+
+        assert.deepEqual(
+            directSuggestions?.map((item) => item.value),
+            ["create"],
+        );
+        assert.deepEqual(
+            editorSuggestions?.items.map((item) => item.value),
+            ["delete"],
+        );
+    });
+
+    void it("stops completing flags after the end-of-options marker", async () => {
         registerTypedCommandMetadata(command);
 
-        assert.equal(getTypedArgumentCompletions(command, "-- --e"), null);
+        assert.equal(await getTypedArgumentCompletions(command, "-- --e"), null);
         assert.equal(getTypedAutocompleteSuggestions(["/deploy -- --e"], 0, 14), undefined);
+    });
+
+    void it("supports async value completion providers", async () => {
+        const asyncCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                ref: {
+                    type: "string",
+                    complete: async (query) =>
+                        ["main", "feature/login"]
+                            .filter((value) => value.startsWith(query))
+                            .map((value) => ({ value })),
+                },
+            },
+        };
+
+        const suggestions = await getTypedArgumentCompletions(asyncCommand, "--ref f");
+
+        assert.deepEqual(
+            suggestions?.map((item) => item.value),
+            ["feature/login"],
+        );
+    });
+
+    void it("completes command widget values from typed commands", async () => {
+        registerTypedCommandMetadata(command);
+        const commandArgument: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                next: { type: "string", ui: { widget: "command" } },
+            },
+        };
+
+        const suggestions = await getTypedArgumentCompletions(commandArgument, "--next /de");
+
+        assert.deepEqual(
+            suggestions?.map((item) => item.value),
+            ["/deploy"],
+        );
+    });
+
+    void it("completes path widget values from the cwd", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-path-complete-"));
+        mkdirSync(join(dir, "src"));
+        writeFileSync(join(dir, "README.md"), "demo");
+        const pathCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                target: { type: "string", ui: { widget: "path" } },
+            },
+        };
+        const previous = process.cwd();
+        process.chdir(dir);
+        try {
+            const suggestions = await getTypedArgumentCompletions(pathCommand, "--target s");
+
+            assert.deepEqual(
+                suggestions?.map((item) => item.value),
+                ["src/"],
+            );
+        } finally {
+            process.chdir(previous);
+        }
     });
 
     void it("keeps repeatable multi-enum flags available", () => {

@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { defineTypedCommand, installTypedCommandUx, registerTypedCommand } from "../src/index.js";
+import {
+    defineTypedCommand,
+    group,
+    installTypedCommandUx,
+    numberArgument,
+    registerTypedCommand,
+    stringArgument,
+} from "../src/index.js";
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
@@ -157,7 +164,9 @@ void describe("registerTypedCommand", () => {
             },
         } as unknown as ExtensionAPI;
 
+        const serialized = deploy.serialize({ env: "dev", ref: "feature branch" });
         const parsed = deploy.parse("--env dev");
+        assert.equal(serialized, '--env=dev --ref="feature branch"');
         assert.equal(parsed.status, "success");
         if (parsed.status === "success") {
             assert.equal(parsed.value.env, "dev");
@@ -171,6 +180,33 @@ void describe("registerTypedCommand", () => {
         handle.dispose();
         handle.dispose();
         assert.equal(getTypedCommand("typed-deploy-test"), undefined);
+    });
+
+    void it("parses and serializes grouped arguments as nested handler values", () => {
+        const command = defineTypedCommand({
+            name: "database-test",
+            description: "Database test",
+            args: {
+                database: group({
+                    host: stringArgument({ required: true }),
+                    port: numberArgument(),
+                }),
+            },
+            refine(args) {
+                assert.equal(args.database?.host, "localhost");
+                return [];
+            },
+            run() {},
+        });
+
+        const parsed = command.parse("--database-host localhost --database-port 5432");
+        const serialized = command.serialize({ database: { host: "localhost", port: 5432 } });
+
+        assert.equal(parsed.status, "success");
+        if (parsed.status === "success") {
+            assert.deepEqual(parsed.value.database, { host: "localhost", port: 5432 });
+        }
+        assert.equal(serialized, "--database-host=localhost --database-port=5432");
     });
 
     void it("keeps registered command schemas immutable after caller mutation", () => {
@@ -192,6 +228,37 @@ void describe("registerTypedCommand", () => {
 
         assert.equal(parsed.status, "error");
         handle.dispose();
+    });
+
+    void it("registers duplicate command metadata under invocation suffixes", () => {
+        const first = defineTypedCommand({
+            name: "duplicate-demo-test",
+            description: "First",
+            args: {},
+            run() {},
+        });
+        const second = defineTypedCommand({
+            name: "duplicate-demo-test",
+            description: "Second",
+            args: {},
+            run() {},
+        });
+        const pi = {
+            registerCommand() {},
+        } as unknown as ExtensionAPI;
+
+        const firstHandle = registerTypedCommand(pi, first);
+        const secondHandle = registerTypedCommand(pi, second);
+
+        assert.equal(firstHandle.invocationName, "duplicate-demo-test");
+        assert.equal(secondHandle.invocationName, "duplicate-demo-test:1");
+        assert.equal(getTypedCommand("duplicate-demo-test")?.invocationName, "duplicate-demo-test");
+        assert.equal(
+            getTypedCommand("duplicate-demo-test:1")?.invocationName,
+            "duplicate-demo-test:1",
+        );
+        firstHandle.dispose();
+        secondHandle.dispose();
     });
 
     void it("does not delete extension-owned skill-prefixed commands during skill refresh", () => {

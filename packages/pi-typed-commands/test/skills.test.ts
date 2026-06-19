@@ -28,6 +28,7 @@ void describe("normalizeSkillArguments", () => {
                 type: "string",
                 positional: 0,
                 default: ".",
+                title: "Target path",
                 description: "Target path",
             },
             fix: {
@@ -43,6 +44,7 @@ void describe("normalizeSkillArguments", () => {
                 values: ["E", "F"],
                 required: false,
                 min_items: 1,
+                occurrence: "append",
             },
             config: {
                 output_path: {
@@ -53,14 +55,17 @@ void describe("normalizeSkillArguments", () => {
         });
 
         assert.deepEqual(result.warnings, []);
+        assert.deepEqual(result.diagnostics, []);
         assert.equal(result.args.path?.type, "string");
         assert.equal(result.args.path?.default, ".");
+        assert.equal(result.args.path?.title, "Target path");
         assert.equal(result.args.fix?.type, "boolean");
         assert.equal(result.args.fix?.default, true);
         assert.equal(result.args.target?.position, 1);
         assert.equal(result.args.rules?.type, "multi-enum");
         assert.deepEqual(result.args.rules?.values, ["E", "F"]);
         assert.equal(result.args.rules?.minItems, 1);
+        assert.equal(result.args.rules?.occurrence, "append");
         assert.equal(result.args["config.output_path"]?.type, "string");
         assert.equal(result.args["config.output_path"]?.required, true);
     });
@@ -116,6 +121,10 @@ Use {args.path}.
 
         assert.match(result.warnings.join("\n"), /no_cache: argument flags may not start with no-/);
         assert.match(result.warnings.join("\n"), /count\.default --count expects an integer/);
+        assert.ok(result.diagnostics.every((diagnostic) => diagnostic.severity === "error"));
+        assert.ok(
+            result.diagnostics.some((diagnostic) => diagnostic.message.includes("old.aliases")),
+        );
         assert.match(
             result.warnings.join("\n"),
             /config_path: flag --config-path collides with config\.path/,
@@ -231,6 +240,11 @@ Use {args.missing} and {args.path}.
         assert.equal(result.metadata, undefined);
         assert.match(
             result.diagnostics?.messages.join("\n") ?? "",
+            /body: unknown argument placeholder \{args\.missing\}/,
+        );
+        assert.match(
+            result.diagnostics?.diagnostics.map((diagnostic) => diagnostic.message).join("\n") ??
+                "",
             /body: unknown argument placeholder \{args\.missing\}/,
         );
     });
@@ -365,6 +379,8 @@ void describe("renderTypedSkillInvocation", () => {
 
         assert.equal(command.name, "skill:fix-ruff-errors");
         assert.equal(command.source, "skill");
+        assert.equal(command.handler, undefined);
+        assert.equal(command.target?.kind, "skill");
         assert.equal(command.skill.filePath, skill.filePath);
     });
 });

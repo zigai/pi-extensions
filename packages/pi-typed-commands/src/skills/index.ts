@@ -15,6 +15,7 @@ export type {
     RawSkillArguments,
     ReadTypedSkillMetadataResult,
     RenderTypedSkillInvocationOptions,
+    SkillArgumentDiagnostic,
     SkillArgumentNormalizationResult,
     SkillFrontmatter,
     TypedSkillDiagnostics,

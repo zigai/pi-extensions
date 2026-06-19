@@ -1,21 +1,40 @@
+import { readdir } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
-import { lexTypedArgumentString, type Token } from "./parser.js";
-import { getTypedCommand, isTypedCommandEnabled } from "./registry.js";
+import {
+    lexTypedArgumentString,
+    parseTypedCommandArgs,
+    quoteSerializedValue,
+    type Token,
+} from "./parser.js";
+import { getTypedCommand, getTypedCommands, isTypedCommandEnabled } from "./registry.js";
 import {
     completionValuesForArgument,
     createArgumentLookup,
     findArgumentName,
     formatArgumentFlagName,
     isPositionalArgument,
+    positionalArgumentEntries,
 } from "./schema.js";
-import type { ArgumentDefinition, RegisteredTypedCommand } from "./types.js";
+import type {
+    ArgumentDefinition,
+    MaybePromise,
+    RegisteredTypedCommand,
+    TypedCompletionContext,
+} from "./types.js";
 
 type CommandLineContext = {
     command: RegisteredTypedCommand;
     argsBeforeCursor: string;
     currentPrefix: string;
+    cwd?: string;
+    ctx?: ExtensionContext;
     previousToken?: Token;
+};
+
+type ValueCompletionItem = AutocompleteItem & {
+    replacementReady?: boolean;
 };
 
 function tokenizeLoose(input: string): Token[] {
@@ -57,6 +76,22 @@ function providedArgumentNames<TDefinitions extends Record<string, ArgumentDefin
     return provided;
 }
 
+function completionInsertionValue(value: string): string {
+    return quoteSerializedValue(value, value.startsWith("-"));
+}
+
+function mapValueItemsForInsertion(items: ValueCompletionItem[]): AutocompleteItem[] {
+    return items.map((item) => {
+        if (item.replacementReady === true) {
+            return item;
+        }
+        return {
+            ...item,
+            value: completionInsertionValue(item.value),
+        };
+    });
+}
+
 function flagItem(name: string, definition: ArgumentDefinition): AutocompleteItem {
     let value = `${formatArgumentFlagName(name, definition)} `;
     if (definition.type === "boolean") {
@@ -72,7 +107,14 @@ function flagItem(name: string, definition: ArgumentDefinition): AutocompleteIte
     };
 }
 
-function argumentValueItems(definition: ArgumentDefinition, query: string): AutocompleteItem[] {
+function isPromiseLike<T>(value: MaybePromise<T> | undefined): value is Promise<T> {
+    return value !== undefined && typeof (value as { then?: unknown }).then === "function";
+}
+
+function staticArgumentValueItems(
+    definition: ArgumentDefinition,
+    query: string,
+): ValueCompletionItem[] {
     return completionValuesForArgument(definition)
         .filter((value) => value.startsWith(query))
         .map((value) => {
@@ -84,7 +126,128 @@ function argumentValueItems(definition: ArgumentDefinition, query: string): Auto
         });
 }
 
-function inlineFlagValueCompletion(context: CommandLineContext): AutocompleteItem[] | undefined {
+function completionContext(context: CommandLineContext): TypedCompletionContext {
+    const parsed = parseTypedCommandArgs(context.command, context.argsBeforeCursor);
+    const result: TypedCompletionContext = {
+        values: parsed.values,
+        provided: parsed.provided,
+    };
+    if (context.cwd !== undefined) {
+        result.cwd = context.cwd;
+    }
+    if (context.ctx !== undefined) {
+        result.ctx = context.ctx;
+    }
+    return result;
+}
+
+function commandCompletionItems(query: string): AutocompleteItem[] {
+    return getTypedCommands()
+        .map((command) => `/${command.invocationName ?? command.name}`)
+        .filter((value) => value.startsWith(query))
+        .map((value) => ({ value, label: value, description: "typed command" }));
+}
+
+async function pathCompletionItems(query: string, cwd?: string): Promise<AutocompleteItem[]> {
+    const root = cwd ?? process.cwd();
+    let raw = query;
+    if (raw.length === 0) {
+        raw = ".";
+    }
+    let directoryPart = dirname(raw);
+    let filePrefix = basename(raw);
+    if (raw.endsWith("/")) {
+        directoryPart = raw;
+        filePrefix = "";
+    }
+    let lookupDirectory = join(root, directoryPart);
+    if (isAbsolute(directoryPart)) {
+        lookupDirectory = directoryPart;
+    }
+    let valuePrefix = "";
+    if (raw.endsWith("/")) {
+        valuePrefix = raw;
+    } else if (directoryPart !== ".") {
+        valuePrefix = `${directoryPart}/`;
+    }
+
+    try {
+        const entries = await readdir(lookupDirectory, { withFileTypes: true });
+        return entries
+            .filter((entry) => entry.name.startsWith(filePrefix))
+            .sort((left, right) => left.name.localeCompare(right.name))
+            .map((entry) => {
+                let value = `${valuePrefix}${entry.name}`;
+                if (entry.isDirectory()) {
+                    value += "/";
+                }
+                let label = entry.name;
+                let description = "file";
+                if (entry.isDirectory()) {
+                    label = `${entry.name}/`;
+                    description = "directory";
+                }
+                return {
+                    value,
+                    label,
+                    description,
+                };
+            });
+    } catch {
+        return [];
+    }
+}
+
+function argumentValueItems(
+    definition: ArgumentDefinition,
+    query: string,
+    context: CommandLineContext,
+): MaybePromise<ValueCompletionItem[]> {
+    if (definition.complete === undefined) {
+        if (definition.ui?.widget === "path") {
+            return pathCompletionItems(query, context.cwd);
+        }
+        if (definition.ui?.widget === "command") {
+            return commandCompletionItems(query);
+        }
+        return staticArgumentValueItems(definition, query);
+    }
+    const completed = definition.complete(query, completionContext(context));
+    const mapItems = (
+        items: readonly {
+            value: string;
+            label?: string;
+            description?: string;
+            replacement?: string;
+        }[],
+    ): ValueCompletionItem[] =>
+        items.map((item) => {
+            const mapped: ValueCompletionItem = {
+                value: item.replacement ?? item.value,
+                label: item.label ?? item.value,
+                replacementReady: item.replacement !== undefined,
+            };
+            if (item.description !== undefined) {
+                mapped.description = item.description;
+            }
+            return mapped;
+        });
+    if (isPromiseLike(completed)) {
+        return completed.then(mapItems);
+    }
+    return mapItems(completed);
+}
+
+function syncItems<T>(items: MaybePromise<T> | undefined): T | undefined {
+    if (items === undefined || isPromiseLike(items)) {
+        return undefined;
+    }
+    return items;
+}
+
+function inlineFlagValueCompletion(
+    context: CommandLineContext,
+): MaybePromise<AutocompleteItem[] | undefined> {
     if (!context.currentPrefix.startsWith("-")) {
         return undefined;
     }
@@ -118,19 +281,26 @@ function inlineFlagValueCompletion(context: CommandLineContext): AutocompleteIte
         return undefined;
     }
 
-    const items = argumentValueItems(definition, query).map((item) => ({
-        ...item,
-        value: `${flagToken}=${valuePrefix}${item.value}`,
-    }));
-    if (items.length === 0) {
-        return undefined;
+    const mapItems = (items: AutocompleteItem[]): AutocompleteItem[] | undefined => {
+        const mapped = items.map((item) => ({
+            ...item,
+            value: `${flagToken}=${valuePrefix}${completionInsertionValue(item.value)}`,
+        }));
+        if (mapped.length === 0) {
+            return undefined;
+        }
+        return mapped;
+    };
+    const items = argumentValueItems(definition, query, context);
+    if (isPromiseLike(items)) {
+        return items.then(mapItems);
     }
-    return items;
+    return mapItems(items);
 }
 
 function valueCompletionForPreviousFlag(
     context: CommandLineContext,
-): AutocompleteItem[] | undefined {
+): MaybePromise<AutocompleteItem[] | undefined> {
     if (context.previousToken === undefined) {
         return undefined;
     }
@@ -156,11 +326,127 @@ function valueCompletionForPreviousFlag(
         return undefined;
     }
 
-    const items = argumentValueItems(definition, context.currentPrefix);
-    if (items.length === 0) {
+    const mapItems = (items: AutocompleteItem[]): AutocompleteItem[] | undefined => {
+        if (items.length === 0) {
+            return undefined;
+        }
+        return mapValueItemsForInsertion(items);
+    };
+    const items = argumentValueItems(definition, context.currentPrefix, context);
+    if (isPromiseLike(items)) {
+        return items.then(mapItems);
+    }
+    return mapItems(items);
+}
+
+function hasEndOfOptions(tokens: Token[]): boolean {
+    return tokens.some((token) => token.quote === undefined && token.value === "--");
+}
+
+function flagDefinitionForToken(
+    command: RegisteredTypedCommand,
+    token: Token | undefined,
+): ArgumentDefinition | undefined {
+    if (token === undefined || token.quote !== undefined || !token.value.startsWith("-")) {
         return undefined;
     }
-    return items;
+    let flagToken = token.value;
+    if (flagToken.includes("=")) {
+        flagToken = flagToken.slice(0, flagToken.indexOf("="));
+    }
+    const lookup = createArgumentLookup(command.args);
+    const name = findArgumentName(lookup, flagToken);
+    if (name === undefined) {
+        return undefined;
+    }
+    return command.args[name];
+}
+
+function currentTokenIsFlagValue(context: CommandLineContext): boolean {
+    const previousDefinition = flagDefinitionForToken(context.command, context.previousToken);
+    return (
+        previousDefinition !== undefined &&
+        previousDefinition.type !== "boolean" &&
+        context.previousToken?.value.includes("=") !== true
+    );
+}
+
+function nextPositionalValueCompletion(
+    context: CommandLineContext,
+    tokens: Token[],
+): MaybePromise<AutocompleteItem[] | undefined> {
+    if (currentTokenIsFlagValue(context)) {
+        return undefined;
+    }
+    const optionsEnded = hasEndOfOptions(tokens);
+    if (!optionsEnded && context.currentPrefix.startsWith("-")) {
+        return undefined;
+    }
+
+    const positionalEntries = positionalArgumentEntries(context.command.args);
+    if (positionalEntries.length === 0) {
+        return undefined;
+    }
+
+    let completedTokenCount = tokens.length - 1;
+    if (context.argsBeforeCursor.endsWith(" ")) {
+        completedTokenCount = tokens.length;
+    }
+    let positionalIndex = 0;
+    let skipNextValue = false;
+    let afterEndOfOptions = false;
+
+    for (let index = 0; index < completedTokenCount; index += 1) {
+        const token = tokens[index];
+        if (token === undefined) {
+            continue;
+        }
+        if (skipNextValue) {
+            skipNextValue = false;
+            continue;
+        }
+        if (!afterEndOfOptions && token.quote === undefined && token.value === "--") {
+            afterEndOfOptions = true;
+            continue;
+        }
+        let flagDefinition: ArgumentDefinition | undefined;
+        if (!afterEndOfOptions) {
+            flagDefinition = flagDefinitionForToken(context.command, token);
+        }
+        if (flagDefinition !== undefined) {
+            if (flagDefinition.type !== "boolean" && !token.value.includes("=")) {
+                skipNextValue = true;
+            }
+            continue;
+        }
+
+        const currentEntry = positionalEntries[positionalIndex];
+        if (currentEntry?.[1].rest !== true) {
+            positionalIndex += 1;
+        }
+    }
+
+    const entry = positionalEntries[positionalIndex];
+    if (entry === undefined) {
+        return undefined;
+    }
+
+    const [, definition] = entry;
+    let query = context.currentPrefix;
+    if (context.argsBeforeCursor.endsWith(" ")) {
+        query = "";
+    }
+    const mapItems = (items: AutocompleteItem[]): AutocompleteItem[] | undefined => {
+        if (items.length === 0) {
+            return undefined;
+        }
+        return mapValueItemsForInsertion(items);
+    };
+    const items = argumentValueItems(definition, query, context);
+    if (isPromiseLike(items)) {
+        return items.then(mapItems);
+    }
+    return mapItems(items);
 }
 
 function shouldSuggestFlag(
@@ -174,16 +460,12 @@ function shouldSuggestFlag(
     return !provided.has(name) || definition.type === "multi-enum";
 }
 
-function hasEndOfOptions(tokens: Token[]): boolean {
-    return tokens.some((token) => token.quote === undefined && token.value === "--");
-}
-
 export function getTypedArgumentCompletions<
     TDefinitions extends Record<string, ArgumentDefinition>,
 >(
     command: RegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
-): AutocompleteItem[] | null {
+): MaybePromise<AutocompleteItem[] | null> {
     if (!isTypedCommandEnabled(command, undefined, process.cwd())) {
         return null;
     }
@@ -199,9 +481,7 @@ export function getTypedArgumentCompletions<
         query = "";
     }
 
-    if (hasEndOfOptions(tokens)) {
-        return null;
-    }
+    const optionsEnded = hasEndOfOptions(tokens);
 
     let previousToken = tokens[tokens.length - 2];
     if (argumentPrefix.endsWith(" ")) {
@@ -211,18 +491,37 @@ export function getTypedArgumentCompletions<
         command: command as RegisteredTypedCommand,
         argsBeforeCursor: argumentPrefix,
         currentPrefix: query,
+        cwd: process.cwd(),
     };
     if (previousToken !== undefined) {
         context.previousToken = previousToken;
     }
 
     const inlineValueItems = inlineFlagValueCompletion(context);
+    if (isPromiseLike(inlineValueItems)) {
+        return inlineValueItems.then((items) => items ?? null);
+    }
     if (inlineValueItems !== undefined) {
         return inlineValueItems;
     }
     const valueItems = valueCompletionForPreviousFlag(context);
+    if (isPromiseLike(valueItems)) {
+        return valueItems.then((items) => items ?? null);
+    }
     if (valueItems !== undefined) {
         return valueItems;
+    }
+
+    const positionalItems = nextPositionalValueCompletion(context, tokens);
+    if (isPromiseLike(positionalItems)) {
+        return positionalItems.then((items) => items ?? null);
+    }
+    if (positionalItems !== undefined) {
+        return positionalItems;
+    }
+
+    if (optionsEnded) {
+        return null;
     }
 
     const provided = providedArgumentNames(command, tokens);
@@ -294,6 +593,12 @@ function commandLineContext(
         argsBeforeCursor,
         currentPrefix,
     };
+    if (cwd !== undefined) {
+        context.cwd = cwd;
+    }
+    if (ctx !== undefined) {
+        context.ctx = ctx;
+    }
     if (previousToken !== undefined) {
         context.previousToken = previousToken;
     }
@@ -313,11 +618,9 @@ export function getTypedAutocompleteSuggestions(
     }
 
     const tokens = tokenizeLoose(context.argsBeforeCursor);
-    if (hasEndOfOptions(tokens)) {
-        return undefined;
-    }
+    const optionsEnded = hasEndOfOptions(tokens);
 
-    const inlineValueItems = inlineFlagValueCompletion(context);
+    const inlineValueItems = syncItems(inlineFlagValueCompletion(context));
     if (inlineValueItems !== undefined) {
         return {
             items: inlineValueItems,
@@ -325,12 +628,24 @@ export function getTypedAutocompleteSuggestions(
         };
     }
 
-    const valueItems = valueCompletionForPreviousFlag(context);
+    const valueItems = syncItems(valueCompletionForPreviousFlag(context));
     if (valueItems !== undefined) {
         return {
             items: valueItems,
             prefix: context.currentPrefix,
         };
+    }
+
+    const positionalItems = syncItems(nextPositionalValueCompletion(context, tokens));
+    if (positionalItems !== undefined) {
+        return {
+            items: positionalItems,
+            prefix: context.currentPrefix,
+        };
+    }
+
+    if (optionsEnded) {
+        return undefined;
     }
 
     const provided = providedArgumentNames(context.command, tokens);

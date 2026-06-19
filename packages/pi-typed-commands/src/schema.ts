@@ -1,3 +1,4 @@
+import { flattenGroupedArgumentDefinitions } from "./arguments.js";
 import { formatFlagName, normalizeFlagName, toKebabCase } from "./names.js";
 import type {
     ArgumentDefinition,
@@ -97,7 +98,8 @@ export function formatArgumentFlagName(name: string, definition: ArgumentDefinit
 export function orderedArgumentEntries(
     definitions: ArgumentDefinitions,
 ): Array<[string, ArgumentDefinition]> {
-    return Object.entries(definitions)
+    const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
+    return Object.entries(flatDefinitions)
         .map(([name, definition], index) => ({ name, definition, index }))
         .sort((left, right) => {
             const leftIsPositional = isPositionalArgument(left.definition);
@@ -245,6 +247,19 @@ function validateTypeSpecificRules(
     definition: ArgumentDefinition,
     warnings: string[],
 ): void {
+    if (definition.title !== undefined && typeof definition.title !== "string") {
+        warnings.push(`${name}.title must be a string`);
+    }
+    if (
+        definition.occurrence !== undefined &&
+        !["error", "first", "last", "append"].includes(definition.occurrence)
+    ) {
+        warnings.push(`${name}.occurrence must be one of: error, first, last, append`);
+    }
+    if (definition.occurrence === "append" && definition.type !== "multi-enum") {
+        warnings.push(`${name}.occurrence append is only valid for multi-enum arguments`);
+    }
+
     if (definition.required === true && definition.default !== undefined) {
         warnings.push(`${name}: required arguments may not define a default`);
     }
@@ -255,6 +270,14 @@ function validateTypeSpecificRules(
         }
         if (definition.positional !== undefined && definition.positional !== false) {
             warnings.push(`${name}: use either position or positional, not both`);
+        }
+    }
+    if (definition.rest === true) {
+        if (!isPositionalArgument(definition)) {
+            warnings.push(`${name}.rest requires a positional argument`);
+        }
+        if (definition.type !== "string" && definition.type !== "multi-enum") {
+            warnings.push(`${name}.rest is only valid for string or multi-enum arguments`);
         }
     }
     if (definition.positional !== undefined && definition.positional !== false) {
@@ -344,8 +367,9 @@ function validateTypeSpecificRules(
 }
 
 function validatePositionals(definitions: ArgumentDefinitions, warnings: string[]): void {
+    const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
     const positions = new Map<number, string>();
-    for (const [name, definition] of Object.entries(definitions)) {
+    for (const [name, definition] of Object.entries(flatDefinitions)) {
         let position = definition.position;
         let label = "position";
         if (position === undefined && typeof definition.positional === "number") {
@@ -364,7 +388,16 @@ function validatePositionals(definitions: ArgumentDefinitions, warnings: string[
     }
 
     let optionalBeforeRequired: string | undefined;
+    let restArgument: string | undefined;
     for (const [name, definition] of positionalArgumentEntries(definitions)) {
+        if (restArgument !== undefined) {
+            warnings.push(
+                `${name}: positional arguments may not follow rest argument ${restArgument}`,
+            );
+        }
+        if (definition.rest === true) {
+            restArgument = name;
+        }
         const required = definition.required === true && definition.default === undefined;
         if (!required) {
             optionalBeforeRequired = name;
@@ -380,8 +413,9 @@ function validatePositionals(definitions: ArgumentDefinitions, warnings: string[
 
 /** Validate argument names, flags, defaults, constraints, UI metadata, and positional layout. */
 export function validateArgumentDefinitions(definitions: ArgumentDefinitions): string[] {
+    const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
     const warnings: string[] = [];
-    const names = Object.keys(definitions);
+    const names = Object.keys(flatDefinitions);
     const flags = new Map<string, string>();
 
     for (const name of names) {
@@ -403,7 +437,7 @@ export function validateArgumentDefinitions(definitions: ArgumentDefinitions): s
             }
         }
 
-        const definition = definitions[name];
+        const definition = flatDefinitions[name];
         if (definition === undefined) {
             continue;
         }
@@ -419,14 +453,15 @@ export function validateArgumentDefinitions(definitions: ArgumentDefinitions): s
         }
     }
 
-    validatePositionals(definitions, warnings);
+    validatePositionals(flatDefinitions, warnings);
     return warnings;
 }
 
 export function createArgumentLookup(definitions: ArgumentDefinitions): ArgumentLookup {
+    const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
     const byFlag = new Map<string, string>();
 
-    for (const [name, definition] of Object.entries(definitions)) {
+    for (const [name, definition] of Object.entries(flatDefinitions)) {
         if (isPositionalArgument(definition)) {
             continue;
         }
@@ -435,7 +470,7 @@ export function createArgumentLookup(definitions: ArgumentDefinitions): Argument
         }
     }
 
-    return { byFlag, definitions };
+    return { byFlag, definitions: flatDefinitions };
 }
 
 export function findArgumentName(lookup: ArgumentLookup, flag: string): string | undefined {

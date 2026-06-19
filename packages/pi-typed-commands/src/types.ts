@@ -26,6 +26,8 @@ export type PrimitiveArgumentValue = string | number | boolean;
 /** Selected values produced by a `multi-enum` argument. */
 export type MultiArgumentValue = string[];
 
+export const ARGUMENT_GROUP: unique symbol = Symbol.for("pi-typed-commands.argument-group");
+
 /** Any concrete value a parsed argument can produce before optional `undefined` is added. */
 export type ConcreteArgumentValue = PrimitiveArgumentValue | MultiArgumentValue;
 
@@ -48,6 +50,8 @@ export type ArgumentWidgetRenderContext = {
     definition: ArgumentDefinition;
     /** Current field value. */
     value: ArgumentValue;
+    /** Read-only snapshot of the whole form's current values. */
+    values: Readonly<Record<string, ArgumentValue>>;
     /** Whether this field currently has focus in the dense form. */
     selected: boolean;
     /** Available display width for the value cell. */
@@ -66,10 +70,14 @@ export type ArgumentWidgetInputContext = {
     definition: ArgumentDefinition;
     /** Current field value before the input is applied. */
     value: ArgumentValue;
+    /** Read-only snapshot of the whole form's current values. */
+    values: Readonly<Record<string, ArgumentValue>>;
     /** Raw terminal input sequence. */
     data: string;
     /** Update this field's value from the custom handler. */
     setValue(value: ArgumentValue): void;
+    /** Update one or more form values from the custom handler. */
+    setValues(values: Readonly<Record<string, ArgumentValue>>): void;
 };
 
 /** Renderer and input hooks for a `custom` dense-form widget. */
@@ -91,13 +99,56 @@ export type ArgumentUi = {
     widget?: ArgumentWidget;
     /** Preferred row count for multiline widgets such as `textarea` and `command`. */
     rows?: number;
-    /** Optional field title for future renderers; currently the argument name is shown. */
+    /** Optional field title shown by form renderers. */
     title?: string;
+    /** Whether this field should be immutable in forms. */
+    readOnly?: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean);
+    /** Whether this field should be hidden in forms. */
+    hidden?: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean);
+    /** Compute this field's form value from the current whole-form state. */
+    compute?: (values: Readonly<Record<string, ArgumentValue>>) => ArgumentValue;
     /** Function-backed renderer/input hooks for TypeScript command definitions. */
     custom?: CustomArgumentWidget;
 };
 
 /** Shared fields accepted by every argument definition. */
+export type ArgumentOccurrencePolicy = "error" | "first" | "last" | "append";
+
+export type TypedCompletionReplacementRange = {
+    start: number;
+    end: number;
+};
+
+export type TypedCompletionItem = {
+    /** Candidate value before adapter-specific quoting or prefix replacement. */
+    value: string;
+    label?: string;
+    description?: string;
+    /** Optional text to insert instead of `value` when the provider already computed quoting. */
+    replacement?: string;
+    /** Optional source span, relative to the raw argument string, that `replacement` should cover. */
+    replaceRange?: TypedCompletionReplacementRange;
+};
+
+export type TypedCompletionContext<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
+    {
+        values: Partial<InferArguments<TDefinitions>>;
+        provided: ReadonlySet<keyof TDefinitions & string>;
+        cwd?: string;
+        /** Pi extension context when completions run from the Pi adapter. */
+        ctx?: ExtensionContext;
+        signal?: AbortSignal;
+    };
+
+export type MaybePromise<T> = T | Promise<T>;
+
+export type TypedCompletionProvider<
+    TDefinitions extends ArgumentDefinitions = ArgumentDefinitions,
+> = (
+    query: string,
+    context: TypedCompletionContext<TDefinitions>,
+) => MaybePromise<readonly TypedCompletionItem[]>;
+
 export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
     /** Text shown in detailed help, completions, and forms. */
     description?: string;
@@ -109,14 +160,22 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
     flag?: string;
     /** Additional CLI flag aliases without leading dashes. */
     aliases?: readonly string[];
+    /** Human-readable field title shown in forms and help; defaults to the argument key. */
+    title?: string;
     /** Value hint shown in usage text and forms. */
     placeholder?: string;
+    /** How repeated occurrences of this argument are handled. Defaults to error for scalars and append for multi-enum. */
+    occurrence?: ArgumentOccurrencePolicy;
+    /** Optional completion provider for this argument's values. */
+    complete?: TypedCompletionProvider;
     /** Explicit positional index. Prefer this over legacy `positional: number`. */
     position?: number;
+    /** Consume all remaining positional tokens into this positional argument. */
+    rest?: boolean;
     /**
      * Parse this argument positionally instead of as a named flag.
      *
-     * Use `true` for declaration order or a number for explicit positional order.
+     * @deprecated Prefer explicit `position` for stable CLI contracts.
      */
     positional?: boolean | number;
     ui?: ArgumentUi;
@@ -177,6 +236,16 @@ export type ArgumentDefinition =
     | EnumArgumentDefinition
     | MultiEnumArgumentDefinition;
 
+/** Explicit grouping marker produced by `group()` for nested handler values. */
+export type ArgumentGroupDefinition<
+    TDefinitions extends ArgumentDefinitions = ArgumentDefinitions,
+> = {
+    readonly [ARGUMENT_GROUP]: TDefinitions;
+    readonly args: TDefinitions;
+    readonly title?: string;
+    readonly description?: string;
+};
+
 /** Map from argument name to definition for a typed command or skill. */
 export type ArgumentDefinitions = Record<string, ArgumentDefinition>;
 
@@ -204,8 +273,11 @@ type MaybeOptional<TDefinition, TValue> =
           ? TValue
           : TValue | undefined;
 
-/** Infer the handler value type for one argument definition. */
-export type InferArgumentValue<TDefinition> = MaybeOptional<TDefinition, BaseValue<TDefinition>>;
+/** Infer the handler value type for one argument definition or group definition. */
+export type InferArgumentValue<TDefinition> =
+    TDefinition extends ArgumentGroupDefinition<infer TGroup>
+        ? InferArguments<TGroup>
+        : MaybeOptional<TDefinition, BaseValue<TDefinition>>;
 
 /** Infer the typed handler argument object for a command's `args` definition map. */
 export type InferArguments<TDefinitions extends ArgumentDefinitions> = {
@@ -217,6 +289,16 @@ export type TypedCommandHandler<TDefinitions extends ArgumentDefinitions> = (
     args: InferArguments<TDefinitions>,
     ctx: ExtensionCommandContext,
 ) => Promise<void> | void;
+
+export type InvocationTarget<TDefinitions extends ArgumentDefinitions> =
+    | {
+          kind: "extension";
+          run: TypedCommandHandler<TDefinitions>;
+      }
+    | {
+          kind: "skill";
+          render(args: InferArguments<TDefinitions>, additionalInput?: string): string;
+      };
 
 /** Handler called with Pi's raw argument string when typed parsing is disabled or bypassed. */
 export type RawCommandHandler = (
@@ -292,11 +374,27 @@ export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     openFormWhenMissingRequired?: boolean;
 };
 
-/** Normalized command metadata stored in the typed command registry. */
+/**
+ * Normalized command metadata stored in the typed command registry.
+ *
+ * @deprecated Prefer `DefinedTypedCommand` and `TypedCommandHandle` in public code.
+ */
 export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
-    TypedCommandOptions<TDefinitions> & {
-        /** Slash command name without the leading `/`. */
+    Omit<TypedCommandOptions<TDefinitions>, "handler"> & {
+        /** Local slash command name without the leading `/`. */
         name: string;
+        /** Handler for extension-backed commands. Skill-backed commands use `target.kind === "skill"`. */
+        handler?: TypedCommandHandler<TDefinitions>;
+        /** Discriminated runtime target for extension commands and typed skills. */
+        target?: InvocationTarget<TDefinitions>;
+        /** Immutable compiled command schema. */
+        compiled?: CompiledCommand<TDefinitions>;
+        /** Concrete invocation name assigned by Pi or the registry, including duplicate suffixes. */
+        invocationName?: string;
+        /** Unique wrapper registration identity. */
+        registrationId?: symbol;
+        /** Runtime owner identity used for extension reload cleanup. */
+        ownerId?: symbol;
         typedArgsEnabled: TypedCommandToggle;
         formSymbols: Required<TypedCommandFormSymbols>;
         openFormWhenInvalid: boolean;
@@ -323,6 +421,7 @@ export type DefinedTypedCommand<TDefinitions extends ArgumentDefinitions> = Read
     TypedCommandDefinition<TDefinitions>
 > & {
     parse(rawArgs: string): TypedParseResult<TDefinitions>;
+    serialize(values: Partial<InferArguments<TDefinitions>>): string;
     formatUsage(): string;
     formatHelp(): string;
 };
@@ -339,11 +438,59 @@ export type CompileResult<TDefinitions extends ArgumentDefinitions> =
     | { ok: true; command: CompiledCommand<TDefinitions> }
     | { ok: false; diagnostics: readonly DefinitionDiagnostic[] };
 
+export type RawArgumentOccurrence = {
+    raw?: string;
+    token?: string;
+    source: "flag" | "positional";
+    negated?: boolean;
+};
+
+export type DecodeResult =
+    | { ok: true; value: ArgumentValue }
+    | { ok: false; issues: readonly ParseIssue[]; value?: ArgumentValue };
+
+export type ArgumentDescription = {
+    key: string;
+    type: ArgumentDefinition["type"];
+    flag?: string;
+    aliases: readonly string[];
+    position?: number;
+    required: boolean;
+    defaultValue?: ArgumentValue;
+    title?: string;
+    description?: string;
+};
+
+export type FieldEditor<TValue = ArgumentValue> = {
+    kind: "text" | "textarea" | "number" | "toggle" | "select" | "multiselect" | "custom";
+    parse(input: string): TValue;
+    format(value: TValue): string;
+};
+
+export type CompiledArgument<TValue extends ArgumentValue = ArgumentValue> = {
+    readonly key: string;
+    readonly definition: ArgumentDefinition;
+    readonly flag?: string;
+    readonly aliases: readonly string[];
+    readonly position?: number;
+    decode(occurrences: readonly RawArgumentOccurrence[]): DecodeResult;
+    validate(value: TValue | undefined): readonly ParseIssue[];
+    serialize(value: TValue): readonly string[];
+    describe(): ArgumentDescription;
+    complete?(
+        query: string,
+        context: TypedCompletionContext,
+    ): MaybePromise<readonly TypedCompletionItem[]>;
+    editor?: FieldEditor<TValue>;
+};
+
 /** Immutable internal representation consumed by parsing, formatting, completion, forms, and Pi. */
 export type CompiledCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> = {
     readonly name: string;
     readonly description: string;
     readonly args: Readonly<TDefinitions>;
+    readonly arguments: readonly CompiledArgument[];
+    readonly argumentByName: ReadonlyMap<string, CompiledArgument>;
     readonly argumentOrder: readonly (keyof TDefinitions & string)[];
     readonly positionalOrder: readonly (keyof TDefinitions & string)[];
     readonly flagToName: ReadonlyMap<string, keyof TDefinitions & string>;
@@ -354,6 +501,7 @@ export type TypedCommandHandle<TDefinitions extends ArgumentDefinitions> = {
     readonly definition: DefinedTypedCommand<TDefinitions>;
     readonly invocationName: string;
     parse(rawArgs: string): TypedParseResult<TDefinitions>;
+    serialize(values: Partial<InferArguments<TDefinitions>>): string;
     formatUsage(): string;
     formatHelp(): string;
     /** Remove wrapper-owned metadata and listeners. Safe to call more than once. */
@@ -365,6 +513,7 @@ export type ParseIssueKind =
     | "invalid-value"
     | "missing-required"
     | "missing-value"
+    | "duplicate-argument"
     | "unknown-argument"
     | "unexpected-positional"
     | "unterminated-quote";
@@ -381,7 +530,11 @@ export type ParseIssue = {
     token?: string;
 };
 
-/** Result returned by `parseTypedCommandArgs`. */
+/**
+ * Result returned by the legacy parser adapter.
+ *
+ * @deprecated Prefer `TypedParseResult` from `defineTypedCommand().parse()`.
+ */
 export type ParsedCommandArguments = {
     /** Parsed values plus defaults that could be applied without prompting. */
     values: Record<string, ArgumentValue>;

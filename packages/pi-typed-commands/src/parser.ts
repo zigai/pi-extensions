@@ -1,3 +1,4 @@
+import { flattenGroupedArgumentDefinitions } from "./arguments.js";
 import {
     applyArgumentDefault,
     booleanFromString,
@@ -6,6 +7,8 @@ import {
     createParseIssue,
     findArgumentName,
     formatArgumentFlagName,
+    isPositionalArgument,
+    orderedArgumentEntries,
     positionalArgumentEntries,
     validateArgumentValue,
     type ArgumentLookup,
@@ -17,7 +20,7 @@ import type {
     InferArguments,
     ParsedCommandArguments,
     ParseIssue,
-    RegisteredTypedCommand,
+    TypedCommandRefinement,
     TypedParseResult,
 } from "./types.js";
 
@@ -54,6 +57,18 @@ type ParsedFlagToken = {
     flag: string;
     inlineValue?: string;
     isNoFlag?: boolean;
+};
+
+type ParsableTypedCommand<TDefinitions extends ArgumentDefinitions> = {
+    args: TDefinitions;
+    compiled?: {
+        readonly arguments: readonly {
+            readonly key: string;
+            serialize(value: ArgumentValue): readonly string[];
+            readonly definition: ArgumentDefinition;
+        }[];
+    };
+    refine?: TypedCommandRefinement<TDefinitions>;
 };
 
 function isHelpTokenValue(value: string): boolean {
@@ -190,7 +205,7 @@ export function tokenizeTypedArgumentString(input: string): TokenizeResult {
 }
 
 function isFlagToken(token: Token): boolean {
-    if (token.quote !== undefined) {
+    if (token.quote !== undefined && !token.raw.startsWith("-")) {
         return false;
     }
     if (token.value === "-") {
@@ -259,7 +274,7 @@ function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
 }
 
 class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
-    private readonly command: RegisteredTypedCommand<TDefinitions>;
+    private readonly command: ParsableTypedCommand<TDefinitions>;
     private readonly rawArgs: string;
     private readonly result: ParsedCommandArguments = {
         values: {},
@@ -270,11 +285,12 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     };
     private lookup: ArgumentLookup | undefined;
     private tokens: Token[] = [];
+    private readonly valueOccurrences = new Map<string, number>();
     private index = 0;
     private positionalIndex = 0;
     private optionsEnded = false;
 
-    constructor(command: RegisteredTypedCommand<TDefinitions>, rawArgs: string) {
+    constructor(command: ParsableTypedCommand<TDefinitions>, rawArgs: string) {
         this.command = command;
         this.rawArgs = rawArgs;
     }
@@ -335,7 +351,10 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
                 const positional = positionalArgumentEntries(this.command.args)[
                     this.positionalIndex
                 ];
-                if (positional?.[1].type === "number" && isNumericToken(token)) {
+                if (
+                    positional?.[1].rest === true ||
+                    (positional?.[1].type === "number" && isNumericToken(token))
+                ) {
                     this.consumePositionalValue(token);
                     this.index += 1;
                     continue;
@@ -453,6 +472,65 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         this.result.sources?.set(name, "explicit");
     }
 
+    private occurrencePolicy(
+        definition: ArgumentDefinition,
+    ): "error" | "first" | "last" | "append" {
+        if (definition.occurrence !== undefined) {
+            return definition.occurrence;
+        }
+        if (definition.type === "multi-enum") {
+            return "append";
+        }
+        return "error";
+    }
+
+    private duplicateValueIssue(name: string, definition: ArgumentDefinition): void {
+        this.result.issues.push(
+            createParseIssue(
+                "duplicate-argument",
+                `${formatArgumentFlagName(name, definition)} was provided more than once`,
+                name,
+            ),
+        );
+    }
+
+    private setArgumentValue(
+        definition: ArgumentDefinition,
+        name: string,
+        value: ArgumentValue,
+    ): void {
+        const occurrences = this.valueOccurrences.get(name) ?? 0;
+        const policy = this.occurrencePolicy(definition);
+        this.valueOccurrences.set(name, occurrences + 1);
+
+        if (occurrences > 0) {
+            if (policy === "error") {
+                this.duplicateValueIssue(name, definition);
+                return;
+            }
+            if (policy === "first") {
+                return;
+            }
+        }
+
+        if (definition.type === "multi-enum" && Array.isArray(value) && policy === "append") {
+            let current: string[] = [];
+            if (Array.isArray(this.result.values[name])) {
+                current = this.result.values[name];
+            }
+            const next = [...current];
+            for (const item of value) {
+                if (!next.includes(item)) {
+                    next.push(item);
+                }
+            }
+            this.result.values[name] = next;
+            return;
+        }
+
+        this.result.values[name] = value;
+    }
+
     private setBooleanValue(
         definition: ArgumentDefinition,
         name: string,
@@ -474,7 +552,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             return false;
         }
 
-        this.result.values[name] = value;
+        this.setArgumentValue(definition, name, value);
         return true;
     }
 
@@ -490,22 +568,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             this.result.issues.push(coerced.issue);
             return;
         }
-        if (definition.type === "multi-enum" && Array.isArray(coerced.value)) {
-            let current: string[] = [];
-            if (Array.isArray(this.result.values[name])) {
-                current = this.result.values[name];
-            }
-            const next = [...current];
-            for (const value of coerced.value) {
-                if (!next.includes(value)) {
-                    next.push(value);
-                }
-            }
-            this.result.values[name] = next;
-            return;
-        }
-
-        this.result.values[name] = coerced.value;
+        this.setArgumentValue(definition, name, coerced.value);
         if (rawToken.length === 0) {
             this.result.sources?.set(name, "explicit");
         }
@@ -526,12 +589,26 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         }
 
         const [name, definition] = entry;
+        if (definition.rest === true && definition.type === "string") {
+            this.markProvided(name);
+            const current = this.result.values[name];
+            if (typeof current === "string" && current.length > 0) {
+                this.result.values[name] = `${current} ${token.value}`;
+            } else {
+                this.result.values[name] = token.value;
+            }
+            return;
+        }
+
         this.consumeFlagValue(definition, name, token.value, token.raw);
-        this.positionalIndex += 1;
+        if (definition.rest !== true) {
+            this.positionalIndex += 1;
+        }
     }
 
     private applyDefaults(): void {
-        for (const [name, definition] of Object.entries(this.command.args)) {
+        const definitions = flattenGroupedArgumentDefinitions(this.command.args);
+        for (const [name, definition] of Object.entries(definitions)) {
             if (this.result.values[name] !== undefined || this.result.provided.has(name)) {
                 continue;
             }
@@ -546,7 +623,8 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     }
 
     private addValidationIssues(): void {
-        for (const [name, definition] of Object.entries(this.command.args)) {
+        const definitions = flattenGroupedArgumentDefinitions(this.command.args);
+        for (const [name, definition] of Object.entries(definitions)) {
             const value = this.result.values[name];
             const validation = validateArgumentValue(name, definition, value);
             if (validation.ok) {
@@ -595,8 +673,82 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
  * The result contains parsed values, applied defaults, provided argument names, issues, and the
  * requested mode (`run` or `help`). This function does not open UI or call handlers.
  */
+export function quoteSerializedValue(value: string, force = false): string {
+    if (
+        !force &&
+        value.length > 0 &&
+        !/\s|["'\\]/.test(value) &&
+        value !== "--" &&
+        !isHelpTokenValue(value)
+    ) {
+        return value;
+    }
+    return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function serializeOneValue(
+    definition: ArgumentDefinition,
+    name: string,
+    value: ArgumentValue,
+    positional: boolean,
+): string[] {
+    if (value === undefined) {
+        return [];
+    }
+
+    if (positional) {
+        return [quoteSerializedValue(String(value), String(value).startsWith("-"))];
+    }
+
+    const flag = formatArgumentFlagName(name, definition);
+    if (definition.type === "boolean") {
+        if (value === true) {
+            return [flag];
+        }
+        if (value === false) {
+            return [`--no-${flag.slice(2)}`];
+        }
+        return [];
+    }
+
+    if (definition.type === "multi-enum" && Array.isArray(value)) {
+        if (value.length === 0) {
+            return [];
+        }
+        return [`${flag}=${quoteSerializedValue(value.join(","))}`];
+    }
+
+    return [`${flag}=${quoteSerializedValue(String(value))}`];
+}
+
+export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
+    command: Pick<ParsableTypedCommand<TDefinitions>, "args" | "compiled">,
+    values: Partial<InferArguments<TDefinitions>> | Record<string, ArgumentValue>,
+): string {
+    const parts: string[] = [];
+    if (command.compiled !== undefined) {
+        for (const argument of command.compiled.arguments) {
+            const value = (values as Record<string, ArgumentValue>)[argument.key];
+            if (isPositionalArgument(argument.definition)) {
+                if (value !== undefined) {
+                    parts.push(quoteSerializedValue(String(value), String(value).startsWith("-")));
+                }
+            } else {
+                parts.push(...argument.serialize(value));
+            }
+        }
+        return parts.join(" ");
+    }
+
+    for (const [name, definition] of orderedArgumentEntries(command.args)) {
+        const value = (values as Record<string, ArgumentValue>)[name];
+        parts.push(...serializeOneValue(definition, name, value, isPositionalArgument(definition)));
+    }
+    return parts.join(" ");
+}
+
 export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
+    command: ParsableTypedCommand<TDefinitions>,
     rawArgs: string,
 ): ParsedCommandArguments {
     return new ArgumentParser(command, rawArgs).parse();

@@ -5,14 +5,25 @@ import type { ArgumentDefinitions, RegisteredTypedCommand, TypedCommandToggle } 
 
 type RegistryListener = () => void;
 
+type RegistrationRecord = {
+    id: symbol;
+    ownerId: symbol;
+    source: "extension" | "skill";
+    localName: string;
+    invocationName: string;
+    command: RegisteredTypedCommand;
+};
+
 type TypedCommandRegistry = {
     version: 1;
     commands: Map<string, RegisteredTypedCommand>;
+    records: Map<symbol, RegistrationRecord>;
     skillDiagnostics: Map<string, TypedSkillDiagnostics>;
     listeners: Set<RegistryListener>;
 };
 
 const REGISTRY_KEY = Symbol.for("pi-typed-commands.registry.v1");
+const DEFAULT_OWNER_ID = Symbol.for("pi-typed-commands.owner.default");
 
 type GlobalWithRegistry = typeof globalThis & {
     [REGISTRY_KEY]?: TypedCommandRegistry;
@@ -22,6 +33,7 @@ function createRegistry(): TypedCommandRegistry {
     return {
         version: 1,
         commands: new Map<string, RegisteredTypedCommand>(),
+        records: new Map<symbol, RegistrationRecord>(),
         skillDiagnostics: new Map<string, TypedSkillDiagnostics>(),
         listeners: new Set<RegistryListener>(),
     };
@@ -42,23 +54,75 @@ export function getTypedCommandRegistry(): TypedCommandRegistry {
     return registry;
 }
 
-/**
- * Store normalized typed command metadata and notify registry listeners.
- *
- * @internal `registerTypedCommand` calls this automatically.
- */
 function notifyRegistryListeners(registry: TypedCommandRegistry): void {
     for (const listener of registry.listeners) {
         listener();
     }
 }
 
+function nextInvocationName(registry: TypedCommandRegistry, localName: string): string {
+    if (!registry.commands.has(localName)) {
+        return localName;
+    }
+
+    let suffix = 1;
+    while (registry.commands.has(`${localName}:${suffix}`)) {
+        suffix += 1;
+    }
+    return `${localName}:${suffix}`;
+}
+
+function removeExistingRecord(
+    registry: TypedCommandRegistry,
+    command: RegisteredTypedCommand,
+): void {
+    const id = command.registrationId;
+    if (id === undefined) {
+        return;
+    }
+    const record = registry.records.get(id);
+    if (record === undefined) {
+        return;
+    }
+    if (registry.commands.get(record.invocationName) === command) {
+        registry.commands.delete(record.invocationName);
+    }
+    registry.records.delete(id);
+}
+
+export type RegisterTypedCommandMetadataOptions = {
+    invocationName?: string;
+    ownerId?: symbol;
+    id?: symbol;
+};
+
 export function registerTypedCommandMetadata<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
-): void {
+    options: RegisterTypedCommandMetadataOptions = {},
+): string {
     const registry = getTypedCommandRegistry();
-    registry.commands.set(command.name, command as RegisteredTypedCommand);
+    removeExistingRecord(registry, command as RegisteredTypedCommand);
+
+    const id = options.id ?? Symbol(command.name);
+    const ownerId = options.ownerId ?? DEFAULT_OWNER_ID;
+    const invocationName = options.invocationName ?? nextInvocationName(registry, command.name);
+    const source = command.source ?? "extension";
+
+    command.registrationId = id;
+    command.ownerId = ownerId;
+    command.invocationName = invocationName;
+
+    registry.records.set(id, {
+        id,
+        ownerId,
+        source,
+        localName: command.name,
+        invocationName,
+        command: command as RegisteredTypedCommand,
+    });
+    registry.commands.set(invocationName, command as RegisteredTypedCommand);
     notifyRegistryListeners(registry);
+    return invocationName;
 }
 
 /** Remove wrapper-owned metadata for a command if the same record is still registered. */
@@ -66,18 +130,20 @@ export function unregisterTypedCommandMetadata<TDefinitions extends ArgumentDefi
     command: RegisteredTypedCommand<TDefinitions>,
 ): void {
     const registry = getTypedCommandRegistry();
-    if (registry.commands.get(command.name) !== command) {
+    const invocationName = command.invocationName ?? command.name;
+    if (registry.commands.get(invocationName) !== command) {
         return;
     }
-    registry.commands.delete(command.name);
+    registry.commands.delete(invocationName);
+    if (command.registrationId !== undefined) {
+        registry.records.delete(command.registrationId);
+    }
     notifyRegistryListeners(registry);
 }
 
 /** Store typed skill metadata under its `skill:<name>` invocation. */
 export function registerTypedSkillMetadata(command: RegisteredTypedCommand): void {
-    const registry = getTypedCommandRegistry();
-    registry.commands.set(command.name, command);
-    notifyRegistryListeners(registry);
+    registerTypedCommandMetadata(command, { invocationName: command.name });
 }
 
 /** Replace all typed skill records while preserving extension-registered typed commands. */
@@ -86,14 +152,18 @@ export function replaceTypedSkillMetadata(
     diagnostics: TypedSkillDiagnostics[] = [],
 ): void {
     const registry = getTypedCommandRegistry();
-    for (const [name, command] of registry.commands) {
-        if ((command as { source?: unknown }).source === "skill") {
-            registry.commands.delete(name);
+    const records = Array.from(registry.records.values());
+    for (const record of records) {
+        if (record.source === "skill") {
+            registry.records.delete(record.id);
+            if (registry.commands.get(record.invocationName) === record.command) {
+                registry.commands.delete(record.invocationName);
+            }
         }
     }
     registry.skillDiagnostics.clear();
     for (const command of commands) {
-        registry.commands.set(command.name, command);
+        registerTypedCommandMetadata(command, { invocationName: command.name });
     }
     for (const diagnostic of diagnostics) {
         registry.skillDiagnostics.set(`skill:${diagnostic.name}`, diagnostic);
@@ -111,10 +181,10 @@ export function getTypedSkillDiagnostics(name: string): TypedSkillDiagnostics | 
     return getTypedCommandRegistry().skillDiagnostics.get(name);
 }
 
-/** Return all registered typed commands sorted by command name. */
+/** Return all registered typed commands sorted by invocation name. */
 export function getTypedCommands(): RegisteredTypedCommand[] {
     return [...getTypedCommandRegistry().commands.values()].sort((a, b) =>
-        a.name.localeCompare(b.name),
+        (a.invocationName ?? a.name).localeCompare(b.invocationName ?? b.name),
     );
 }
 

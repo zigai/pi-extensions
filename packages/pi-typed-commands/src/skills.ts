@@ -58,10 +58,19 @@ export type TypedSkillMetadata = {
     formTitle?: string;
 };
 
+export type SkillArgumentDiagnostic = {
+    code: string;
+    message: string;
+    path: readonly (string | number)[];
+    severity: "error" | "warning";
+};
+
 /** Schema diagnostics for a skill whose typed arguments could not be registered. */
 export type TypedSkillDiagnostics = {
     name: string;
     filePath: string;
+    diagnostics: readonly SkillArgumentDiagnostic[];
+    /** @deprecated Prefer structured `diagnostics`. */
     messages: string[];
 };
 
@@ -69,7 +78,9 @@ export type TypedSkillDiagnostics = {
 export type SkillArgumentNormalizationResult = {
     /** Successfully normalized argument definitions keyed by argument path. */
     args: ArgumentDefinitions;
-    /** Non-fatal authoring errors that should be shown before using the typed skill. */
+    /** Structured authoring diagnostics that should be shown before using the typed skill. */
+    diagnostics: readonly SkillArgumentDiagnostic[];
+    /** @deprecated Prefer structured `diagnostics`. */
     warnings: string[];
 };
 
@@ -289,8 +300,22 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
 ): TDefinition {
     const target = definition as Record<string, unknown>;
     assignOptionalString(target, "description", raw, "description", name, warnings);
+    assignOptionalString(target, "title", raw, "title", name, warnings);
     assignOptionalBoolean(target, "required", raw, "required", name, warnings);
     assignOptionalString(target, "placeholder", raw, "placeholder", name, warnings);
+    if (Object.hasOwn(raw, "occurrence")) {
+        const occurrence = optionalString(raw.occurrence);
+        if (
+            occurrence !== "error" &&
+            occurrence !== "first" &&
+            occurrence !== "last" &&
+            occurrence !== "append"
+        ) {
+            warnings.push(`${name}.occurrence must be one of: error, first, last, append`);
+        } else {
+            definition.occurrence = occurrence;
+        }
+    }
 
     if (Object.hasOwn(raw, "aliases")) {
         warnings.push(`${name}.aliases is not supported`);
@@ -304,6 +329,8 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
             definition.position = position;
         }
     }
+
+    assignOptionalBoolean(target, "rest", raw, "rest", name, warnings);
 
     if (Object.hasOwn(raw, "positional")) {
         const positional = optionalPositional(raw.positional);
@@ -521,6 +548,35 @@ function normalizeOneArgument(
     return definition;
 }
 
+function diagnosticPathFromMessage(message: string): readonly (string | number)[] {
+    const match = /^([^:\s]+)(?:[.:][^:\s]+)?/.exec(message);
+    if (match?.[1] !== undefined) {
+        return [match[1]];
+    }
+    return [];
+}
+
+function skillArgumentDiagnostic(message: string): SkillArgumentDiagnostic {
+    return {
+        code: "skill.argument.invalid",
+        message,
+        path: diagnosticPathFromMessage(message),
+        severity: "error",
+    };
+}
+
+function skillArgumentDiagnostics(messages: string[]): SkillArgumentDiagnostic[] {
+    return messages.map(skillArgumentDiagnostic);
+}
+
+function typedSkillDiagnostics(
+    name: string,
+    filePath: string,
+    messages: string[],
+): TypedSkillDiagnostics {
+    return { name, filePath, messages, diagnostics: skillArgumentDiagnostics(messages) };
+}
+
 function flattenRawArguments(
     rawArguments: RawSkillArguments,
     warnings: string[],
@@ -548,14 +604,15 @@ function flattenRawArguments(
 /**
  * Normalize a skill frontmatter `arguments` object into typed command argument definitions.
  *
- * Invalid entries are skipped and described in `warnings` so callers can surface a single
- * descriptive schema error for the skill.
+ * Invalid entries are skipped and described in structured diagnostics so callers can surface a
+ * single descriptive schema error for the skill.
  */
 export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNormalizationResult {
     const warnings: string[] = [];
     const args = createSafeRecord() as ArgumentDefinitions;
     if (!isRecord(rawArguments)) {
-        return { args, warnings: ["arguments must be an object"] };
+        const messages = ["arguments must be an object"];
+        return { args, warnings: messages, diagnostics: skillArgumentDiagnostics(messages) };
     }
 
     for (const [name, raw] of flattenRawArguments(rawArguments, warnings)) {
@@ -566,7 +623,7 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
     }
 
     warnings.push(...validateArgumentDefinitions(args));
-    return { args, warnings };
+    return { args, warnings, diagnostics: skillArgumentDiagnostics(warnings) };
 }
 
 /** Parse a `SKILL.md` document into frontmatter fields and trimmed Markdown body. */
@@ -606,14 +663,6 @@ export function parseSkillMarkdown(content: string): {
         frontmatter.metadata = parsed.metadata;
     }
     return { frontmatter, body };
-}
-
-function typedSkillDiagnostics(
-    name: string,
-    filePath: string,
-    messages: string[],
-): TypedSkillDiagnostics {
-    return { name, filePath, messages };
 }
 
 function validateSkillPlaceholders(body: string, args: ArgumentDefinitions): string[] {
@@ -704,7 +753,7 @@ export function formatTypedSkillDiagnostics(diagnostics: TypedSkillDiagnostics):
         `/skill:${diagnostics.name} has invalid typed arguments in:`,
         diagnostics.filePath,
         "",
-        ...diagnostics.messages.map((message) => `• ${message}`),
+        ...diagnostics.diagnostics.map((diagnostic) => `• ${diagnostic.message}`),
     ].join("\n");
 }
 
@@ -716,7 +765,20 @@ export function typedSkillCommandFromMetadata(
         name: `skill:${skill.name}`,
         description: skill.description,
         args: skill.args,
-        handler: () => {},
+        target: {
+            kind: "skill",
+            render: (args, additionalInput) => {
+                const options: RenderTypedSkillInvocationOptions = {
+                    skill,
+                    values: args,
+                };
+                if (additionalInput !== undefined) {
+                    options.additionalInput = additionalInput;
+                }
+                // eslint-disable-next-line no-use-before-define
+                return renderTypedSkillInvocation(options);
+            },
+        },
         typedArgsEnabled: true,
         formSymbols: {
             selectedCheckbox: "■",

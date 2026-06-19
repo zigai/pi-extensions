@@ -46,15 +46,24 @@
         "description": {
           "type": "string"
         },
+        "title": {
+          "type": "string"
+        },
         "required": {
           "type": "boolean"
         },
         "placeholder": {
           "type": "string"
         },
+        "occurrence": {
+          "enum": ["error", "first", "last", "append"]
+        },
         "position": {
           "type": "integer",
           "minimum": 0
+        },
+        "rest": {
+          "type": "boolean"
         },
         "positional": {
           "oneOf": [
@@ -132,12 +141,17 @@
               "const": "string"
             },
             "description": true,
+            "title": true,
             "required": true,
             "default": {
               "type": "string"
             },
             "placeholder": true,
+            "occurrence": {
+              "enum": ["error", "first", "last"]
+            },
             "position": true,
+            "rest": true,
             "positional": true,
             "ui": true,
             "min_length": {
@@ -169,12 +183,19 @@
               "const": "number"
             },
             "description": true,
+            "title": true,
             "required": true,
             "default": {
               "type": "number"
             },
             "placeholder": true,
+            "occurrence": {
+              "enum": ["error", "first", "last"]
+            },
             "position": true,
+            "rest": {
+              "const": false
+            },
             "positional": true,
             "ui": true,
             "integer": {
@@ -204,12 +225,19 @@
               "const": "boolean"
             },
             "description": true,
+            "title": true,
             "required": true,
             "default": {
               "type": "boolean"
             },
             "placeholder": true,
+            "occurrence": {
+              "enum": ["error", "first", "last"]
+            },
             "position": true,
+            "rest": {
+              "const": false
+            },
             "positional": true,
             "ui": true
           }
@@ -230,18 +258,26 @@
               "const": "enum"
             },
             "description": true,
+            "title": true,
             "required": true,
             "default": {
               "type": "string"
             },
             "placeholder": true,
+            "occurrence": {
+              "enum": ["error", "first", "last"]
+            },
             "position": true,
+            "rest": {
+              "const": false
+            },
             "positional": true,
             "ui": true,
             "values": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "minItems": 1,
               "uniqueItems": true
@@ -264,22 +300,27 @@
               "enum": ["multi_enum", "multi-enum"]
             },
             "description": true,
+            "title": true,
             "required": true,
             "default": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "uniqueItems": true
             },
             "placeholder": true,
+            "occurrence": true,
             "position": true,
+            "rest": true,
             "positional": true,
             "ui": true,
             "values": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "minItems": 1,
               "uniqueItems": true
