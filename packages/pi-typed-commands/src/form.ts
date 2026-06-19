@@ -1210,6 +1210,11 @@ async function openDenseArgumentForm<TDefinitions extends Record<string, Argumen
     return result.state;
 }
 
+/**
+ * Prompt for typed command arguments using the dense TUI form when available, otherwise sequential prompts.
+ *
+ * Returns collected argument values, or `undefined` when the user cancels or no UI value is submitted.
+ */
 export async function openArgumentForm<TDefinitions extends Record<string, ArgumentDefinition>>(
     command: RegisteredTypedCommand<TDefinitions>,
     parsed: ParsedCommandArguments,

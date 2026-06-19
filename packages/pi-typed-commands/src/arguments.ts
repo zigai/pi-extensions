@@ -11,6 +11,7 @@ import {
     type StringArgumentDefinition,
 } from "./types.js";
 
+/** Create a string argument definition while preserving literal option types for inference. */
 export function stringArgument<const TOptions extends Omit<StringArgumentDefinition, "type">>(
     options: TOptions,
 ): StringArgumentDefinition & TOptions;
@@ -21,6 +22,7 @@ export function stringArgument(
     return { type: "string", ...options };
 }
 
+/** Create a number argument definition while preserving literal option types for inference. */
 export function numberArgument<const TOptions extends Omit<NumberArgumentDefinition, "type">>(
     options: TOptions,
 ): NumberArgumentDefinition & TOptions;
@@ -31,6 +33,7 @@ export function numberArgument(
     return { type: "number", ...options };
 }
 
+/** Create a boolean flag definition while preserving literal option types for inference. */
 export function booleanArgument<const TOptions extends Omit<BooleanArgumentDefinition, "type">>(
     options: TOptions,
 ): BooleanArgumentDefinition & TOptions;
@@ -41,6 +44,7 @@ export function booleanArgument(
     return { type: "boolean", ...options };
 }
 
+/** Create an enum definition whose readonly values are reflected in handler value types. */
 export function enumArgument<
     const TValues extends readonly string[],
     const TOptions extends Omit<EnumArgumentDefinition<TValues>, "type" | "values">,
@@ -55,6 +59,7 @@ export function enumArgument<const TValues extends readonly string[]>(
     return { type: "enum", values, ...options };
 }
 
+/** Create a multi-enum definition whose readonly values are reflected in selected value types. */
 export function multiEnumArgument<
     const TValues extends readonly string[],
     const TOptions extends Omit<MultiEnumArgumentDefinition<TValues>, "type" | "values">,
@@ -85,12 +90,14 @@ export function group<const TDefinitions extends ArgumentDefinitions>(
     } as unknown as ArgumentDefinition & ArgumentGroupDefinition<TDefinitions>;
 }
 
+/** Return whether an unknown value is a grouped definition produced by `group()`. */
 export function isArgumentGroupDefinition(
     definition: unknown,
 ): definition is ArgumentGroupDefinition {
     return isRecord(definition) && ARGUMENT_GROUP in definition && isRecord(definition.args);
 }
 
+/** Return whether an argument definition map contains at least one grouped definition. */
 export function hasArgumentGroups(definitions: ArgumentDefinitions): boolean {
     return Object.values(definitions).some(isArgumentGroupDefinition);
 }
@@ -102,6 +109,7 @@ function groupedKey(prefix: string, name: string): string {
     return `${prefix}.${name}`;
 }
 
+/** Flatten grouped definitions into parser-facing dotted argument names such as `database.host`. */
 export function flattenGroupedArgumentDefinitions(
     definitions: ArgumentDefinitions,
     prefix = "",
@@ -118,6 +126,7 @@ export function flattenGroupedArgumentDefinitions(
     return flattened;
 }
 
+/** Flatten nested handler values into dotted parser/serializer values using the definition tree. */
 export function flattenGroupedArgumentValues(
     values: Readonly<Record<string, unknown>>,
     definitions: ArgumentDefinitions,
@@ -141,6 +150,7 @@ export function flattenGroupedArgumentValues(
     return flattened;
 }
 
+/** Expand dotted parser values back into nested handler values using the definition tree. */
 export function expandGroupedArgumentValues(
     values: Readonly<Record<string, ArgumentValue>>,
     definitions: ArgumentDefinitions,

@@ -35,7 +35,10 @@ const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "confirm",
 ]);
 
+/** Untrusted YAML object for one typed skill argument before normalization. */
 export type RawSkillArgumentDefinition = Record<string, unknown>;
+
+/** Untrusted YAML `arguments` map from a skill frontmatter block. */
 export type RawSkillArguments = Record<string, unknown>;
 
 /** Parsed subset of `SKILL.md` frontmatter used by typed skill support. */
@@ -58,6 +61,7 @@ export type TypedSkillMetadata = {
     formTitle?: string;
 };
 
+/** Structured diagnostic produced while normalizing typed skill frontmatter. */
 export type SkillArgumentDiagnostic = {
     code: string;
     message: string;

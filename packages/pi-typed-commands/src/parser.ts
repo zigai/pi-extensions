@@ -48,6 +48,7 @@ export type TokenizeResult = {
     unterminatedQuote: boolean;
 };
 
+/** Lossless tokenization result used by completions and diagnostics that need source spans. */
 export type LexResult = {
     tokens: Token[];
     unterminatedQuote: boolean;
@@ -667,12 +668,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     }
 }
 
-/**
- * Parse a raw Pi slash-command argument string for a registered typed command.
- *
- * The result contains parsed values, applied defaults, provided argument names, issues, and the
- * requested mode (`run` or `help`). This function does not open UI or call handlers.
- */
+/** Quote one serialized CLI value when it would otherwise be split or parsed as syntax. */
 export function quoteSerializedValue(value: string, force = false): string {
     if (
         !force &&
@@ -721,6 +717,7 @@ function serializeOneValue(
     return [`${flag}=${quoteSerializedValue(String(value))}`];
 }
 
+/** Serialize typed argument values into a raw string that `parseTypedCommandArgs` can read. */
 export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     command: Pick<ParsableTypedCommand<TDefinitions>, "args" | "compiled">,
     values: Partial<InferArguments<TDefinitions>> | Record<string, ArgumentValue>,
@@ -747,6 +744,12 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
     return parts.join(" ");
 }
 
+/**
+ * Parse raw slash-command arguments without opening UI or invoking handlers.
+ *
+ * The returned legacy shape preserves partial values, defaults, provided argument names, syntax and
+ * validation issues, and whether the user requested generated help.
+ */
 export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     command: ParsableTypedCommand<TDefinitions>,
     rawArgs: string,
@@ -754,6 +757,7 @@ export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     return new ArgumentParser(command, rawArgs).parse();
 }
 
+/** Convert a legacy parser result into the discriminated result returned by defined commands. */
 export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
     parsed: ParsedCommandArguments,
 ): TypedParseResult<TDefinitions> {

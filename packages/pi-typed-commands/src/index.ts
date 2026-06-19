@@ -446,6 +446,12 @@ function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
     });
 }
 
+/**
+ * Register a Pi slash command with typed named arguments.
+ *
+ * The command is still registered with Pi's raw command system, but pi-typed-commands parses,
+ * validates, defaults, completes, and optionally prompts for arguments before calling `handler`.
+ */
 export function registerTypedCommand<const TDefinitions extends ArgumentDefinitions>(
     pi: ExtensionAPI,
     definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
@@ -455,12 +461,6 @@ export function registerTypedCommand<const TDefinitions extends ArgumentDefiniti
     name: string,
     options: TypedCommandOptions<TDefinitions>,
 ): TypedCommandHandle<TDefinitions>;
-/**
- * Register a Pi slash command with typed named arguments.
- *
- * The command is still registered with Pi's raw command system, but pi-typed-commands parses,
- * validates, defaults, completes, and optionally prompts for arguments before calling `handler`.
- */
 export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     pi: ExtensionAPI,
     nameOrDefinition:

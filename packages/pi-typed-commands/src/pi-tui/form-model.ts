@@ -7,20 +7,24 @@ import type {
     ParseIssue,
 } from "../types.js";
 
+/** Mutable value map owned by an argument form while the user edits fields. */
 export type FormState = Record<string, ArgumentValue>;
 
+/** One rendered form field paired with validation messages already rewritten for form labels. */
 export type FormField = {
     name: string;
     definition: ArgumentDefinition;
     issueMessages: string[];
 };
 
+/** Framework-independent form model shared by dense TUI and tests. */
 export type HeadlessFormModel = {
     state: FormState;
     fields: FormField[];
     initialSelection: number;
 };
 
+/** Rewrite parser issue text from CLI flag wording to form field wording when possible. */
 export function formatFormIssueMessage(issue: ParseIssue): string {
     if (issue.name === undefined) {
         return issue.message;
@@ -29,6 +33,7 @@ export function formatFormIssueMessage(issue: ParseIssue): string {
     return issue.message.replaceAll(formatFlagName(issue.name), toKebabCase(issue.name));
 }
 
+/** Group parser issues by argument name, dropping issues that are not attributable to one field. */
 export function issuesByName(parsed: ParsedCommandArguments): Map<string, string[]> {
     const issues = new Map<string, string[]>();
     for (const item of parsed.issues) {
@@ -42,10 +47,12 @@ export function issuesByName(parsed: ParsedCommandArguments): Map<string, string
     return issues;
 }
 
+/** Return the argument names that currently have field-level parse or validation issues. */
 export function issueNames(parsed: ParsedCommandArguments): Set<string> {
     return new Set(issuesByName(parsed).keys());
 }
 
+/** Decide whether a field should be shown in missing-only mode. */
 export function shouldPromptArgument(
     name: string,
     definition: ArgumentDefinition,
@@ -67,6 +74,7 @@ export function shouldPromptArgument(
     return false;
 }
 
+/** Build initial form state, ordered fields, and first selected field from parser output. */
 export function createHeadlessFormModel(
     definitions: Record<string, ArgumentDefinition>,
     parsed: ParsedCommandArguments,

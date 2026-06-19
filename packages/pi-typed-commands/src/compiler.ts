@@ -42,6 +42,7 @@ function freezeValue<T>(value: T): T {
     return Object.freeze(value);
 }
 
+/** Deep-clone and freeze argument definitions so later caller mutation cannot affect compiled commands. */
 export function cloneAndFreezeDefinitions<TDefinitions extends ArgumentDefinitions>(
     definitions: TDefinitions,
 ): Readonly<TDefinitions> {
@@ -106,6 +107,7 @@ class ImmutableReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
     }
 }
 
+/** Compile and validate a command definition into immutable parser/completion metadata. */
 export function compileTypedCommandDefinition<const TDefinitions extends ArgumentDefinitions>(
     definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
 ): CompileResult<TDefinitions> {
@@ -145,6 +147,7 @@ export function compileTypedCommandDefinition<const TDefinitions extends Argumen
     return { ok: true, command };
 }
 
+/** Compile a command definition or throw a startup-style error containing all diagnostics. */
 export function assertCompiles<const TDefinitions extends ArgumentDefinitions>(
     definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
 ): CompiledCommand<TDefinitions> {

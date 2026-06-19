@@ -460,6 +460,11 @@ function shouldSuggestFlag(
     return !provided.has(name) || definition.type === "multi-enum";
 }
 
+/**
+ * Compute completions for Pi's command-level completion hook.
+ *
+ * Returns `null` when typed completions have no suggestion so Pi can continue its normal behavior.
+ */
 export function getTypedArgumentCompletions<
     TDefinitions extends Record<string, ArgumentDefinition>,
 >(
@@ -598,6 +603,11 @@ function commandLineContext(
     return context;
 }
 
+/**
+ * Compute editor autocomplete suggestions for the slash command under the cursor.
+ *
+ * Returns `undefined` when the current editor state is not handled by typed-command UX.
+ */
 export function getTypedAutocompleteSuggestions(
     lines: string[],
     cursorLine: number,

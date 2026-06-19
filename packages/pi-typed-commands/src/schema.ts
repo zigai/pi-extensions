@@ -15,17 +15,21 @@ const RESERVED_ARGUMENT_NAME_SEGMENTS: ReadonlySet<string> = new Set([
     "prototype",
 ]);
 
+/** Parser lookup for non-positional flags, keyed by canonical flag name without leading dashes. */
 export type ArgumentLookup = {
     byFlag: Map<string, string>;
     definitions: ArgumentDefinitions;
 };
 
+/** Result of turning one raw CLI token into a typed argument value. */
 export type CoercedArgumentValue =
     | { ok: true; value: ArgumentValue }
     | { ok: false; issue: ParseIssue };
 
+/** Validation result for an already-coerced, defaulted, or form-collected value. */
 export type ArgumentValueValidation = { ok: true } | { ok: false; message: string };
 
+/** Presentation options for human-readable argument error messages. */
 export type ArgumentMessageOptions = {
     nameStyle?: "flag" | "field";
 };
@@ -45,6 +49,7 @@ function formatArgumentMessageName(
     return formatFlagName(name);
 }
 
+/** Create a parse issue while omitting absent optional fields from the result object. */
 export function createParseIssue(
     kind: ParseIssue["kind"],
     message: string,
@@ -61,6 +66,7 @@ export function createParseIssue(
     return result;
 }
 
+/** Parse the boolean spellings accepted by CLI values, such as `yes`, `no`, `on`, and `off`. */
 export function booleanFromString(value: string): boolean | undefined {
     const normalized = value.toLowerCase();
     if (["1", "true", "yes", "y", "on"].includes(normalized)) {
@@ -72,6 +78,7 @@ export function booleanFromString(value: string): boolean | undefined {
     return undefined;
 }
 
+/** Return whether a definition uses modern `position` or legacy `positional` placement. */
 export function isPositionalArgument(definition: ArgumentDefinition): boolean {
     if (definition.position !== undefined) {
         return true;
@@ -79,10 +86,12 @@ export function isPositionalArgument(definition: ArgumentDefinition): boolean {
     return definition.positional !== undefined && definition.positional !== false;
 }
 
+/** Return the canonical no-leading-dash flag name for an argument definition. */
 export function argumentFlagName(name: string, definition: ArgumentDefinition): string {
     return normalizeFlagName(definition.flag ?? name);
 }
 
+/** Return the canonical primary flag and all aliases for an argument definition. */
 export function argumentFlagNames(name: string, definition: ArgumentDefinition): string[] {
     const names = [argumentFlagName(name, definition)];
     for (const alias of definition.aliases ?? []) {
@@ -91,10 +100,12 @@ export function argumentFlagNames(name: string, definition: ArgumentDefinition):
     return names;
 }
 
+/** Format an argument definition's primary flag with leading `--`. */
 export function formatArgumentFlagName(name: string, definition: ArgumentDefinition): string {
     return `--${argumentFlagName(name, definition)}`;
 }
 
+/** Order flattened arguments as the parser and help output see them: positionals first, then flags. */
 export function orderedArgumentEntries(
     definitions: ArgumentDefinitions,
 ): Array<[string, ArgumentDefinition]> {
@@ -128,12 +139,14 @@ export function orderedArgumentEntries(
         .map((entry) => [entry.name, entry.definition]);
 }
 
+/** Return a registered command's arguments in parser/help order. */
 export function orderedCommandArgumentEntries<
     TDefinitions extends Record<string, ArgumentDefinition>,
 >(command: RegisteredTypedCommand<TDefinitions>): Array<[string, ArgumentDefinition]> {
     return orderedArgumentEntries(command.args);
 }
 
+/** Return only positional arguments after applying the same flattening and ordering rules. */
 export function positionalArgumentEntries(
     definitions: ArgumentDefinitions,
 ): Array<[string, ArgumentDefinition]> {
@@ -411,7 +424,11 @@ function validatePositionals(definitions: ArgumentDefinitions, warnings: string[
     }
 }
 
-/** Validate argument names, flags, defaults, constraints, UI metadata, and positional layout. */
+/**
+ * Validate argument names, flags, defaults, constraints, UI metadata, and positional layout.
+ *
+ * The function does not throw; returned strings are user-facing diagnostics.
+ */
 export function validateArgumentDefinitions(definitions: ArgumentDefinitions): string[] {
     const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
     const warnings: string[] = [];
@@ -457,6 +474,7 @@ export function validateArgumentDefinitions(definitions: ArgumentDefinitions): s
     return warnings;
 }
 
+/** Build the flag lookup used by the parser; positional arguments are intentionally excluded. */
 export function createArgumentLookup(definitions: ArgumentDefinitions): ArgumentLookup {
     const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
     const byFlag = new Map<string, string>();
@@ -473,10 +491,12 @@ export function createArgumentLookup(definitions: ArgumentDefinitions): Argument
     return { byFlag, definitions: flatDefinitions };
 }
 
+/** Resolve a raw or normalized flag spelling to the owning argument name. */
 export function findArgumentName(lookup: ArgumentLookup, flag: string): string | undefined {
     return lookup.byFlag.get(normalizeFlagName(flag));
 }
 
+/** Return an argument default, cloning array defaults so parses cannot share mutable selections. */
 export function applyArgumentDefault(definition: ArgumentDefinition): ArgumentValue {
     if (definition.default !== undefined) {
         if (Array.isArray(definition.default)) {
@@ -487,6 +507,7 @@ export function applyArgumentDefault(definition: ArgumentDefinition): ArgumentVa
     return undefined;
 }
 
+/** Apply missing defaults to a shallow copy of parsed values without mutating the caller's object. */
 export function applyArgumentDefaults(
     definitions: ArgumentDefinitions,
     values: Record<string, ArgumentValue>,
@@ -504,6 +525,12 @@ export function applyArgumentDefaults(
     return next;
 }
 
+/**
+ * Parse one raw CLI/form token into an argument value.
+ *
+ * This handles token-level coercion and value membership; call `validateArgumentValue` afterward
+ * for required checks, string constraints, and collection-size constraints.
+ */
 export function coerceArgumentValue(
     definition: ArgumentDefinition,
     raw: string,
@@ -627,6 +654,7 @@ export function coerceArgumentValue(
     return { ok: true, value: raw };
 }
 
+/** Validate a parsed, defaulted, or form-collected argument value against its full definition. */
 export function validateArgumentValue(
     name: string,
     definition: ArgumentDefinition,
@@ -738,6 +766,7 @@ export function validateArgumentValue(
     return { ok: true };
 }
 
+/** Return finite values suitable for select/radio/toggle form controls. */
 export function selectableArgumentValues(definition: ArgumentDefinition): ArgumentValue[] {
     if (definition.type === "boolean") {
         const values: ArgumentValue[] = [true, false];
@@ -762,6 +791,7 @@ export function selectableArgumentValues(definition: ArgumentDefinition): Argume
     return [];
 }
 
+/** Return built-in static completion candidates for booleans and enum-like arguments. */
 export function completionValuesForArgument(definition: ArgumentDefinition): string[] {
     if (definition.type === "boolean") {
         return ["true", "false"];
@@ -772,6 +802,7 @@ export function completionValuesForArgument(definition: ArgumentDefinition): str
     return [];
 }
 
+/** Convert freeform form input into an argument value; blank input falls back to the default/unset value. */
 export function normalizeTextArgumentInput(
     definition: ArgumentDefinition,
     input: string,
@@ -789,6 +820,7 @@ export function normalizeTextArgumentInput(
     return undefined;
 }
 
+/** Return the compact type label shown in generated usage/help text. */
 export function argumentTypeHint(definition: ArgumentDefinition): string {
     if (definition.type === "number" && definition.integer === true) {
         return "int";
@@ -796,6 +828,7 @@ export function argumentTypeHint(definition: ArgumentDefinition): string {
     return definition.type;
 }
 
+/** Return the placeholder/value hint shown for an argument in usage, help, and forms. */
 export function argumentValueHint(definition: ArgumentDefinition, name?: string): string {
     if (definition.placeholder !== undefined) {
         return definition.placeholder;
@@ -823,6 +856,7 @@ export function argumentValueHint(definition: ArgumentDefinition, name?: string)
     return definition.values.join("|");
 }
 
+/** Format an argument default as the suffix used in compact generated usage text. */
 export function formatArgumentDefault(definition: ArgumentDefinition): string {
     if (definition.default === undefined) {
         return "";
