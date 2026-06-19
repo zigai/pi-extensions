@@ -109,7 +109,7 @@ export function parseSlashCommandText(text: string): ParsedSlashCommandText | un
     };
 }
 
-/** Combine parser leftovers and body text into the typed-skill ADDITIONAL_INPUT payload. */
+/** Combine parser leftovers and body text into the typed-skill additional-input payload. */
 export function combineSkillAdditionalInput(
     parsedAdditionalInput: string,
     trailingBody: string,
