@@ -6,12 +6,13 @@ import type { ArgumentDefinitions, RegisteredTypedCommand, TypedCommandToggle } 
 type RegistryListener = () => void;
 
 type TypedCommandRegistry = {
+    version: 1;
     commands: Map<string, RegisteredTypedCommand>;
     skillDiagnostics: Map<string, TypedSkillDiagnostics>;
     listeners: Set<RegistryListener>;
 };
 
-const REGISTRY_KEY = Symbol.for("pi-typed-commands.registry");
+const REGISTRY_KEY = Symbol.for("pi-typed-commands.registry.v1");
 
 type GlobalWithRegistry = typeof globalThis & {
     [REGISTRY_KEY]?: TypedCommandRegistry;
@@ -19,6 +20,7 @@ type GlobalWithRegistry = typeof globalThis & {
 
 function createRegistry(): TypedCommandRegistry {
     return {
+        version: 1,
         commands: new Map<string, RegisteredTypedCommand>(),
         skillDiagnostics: new Map<string, TypedSkillDiagnostics>(),
         listeners: new Set<RegistryListener>(),
@@ -59,6 +61,18 @@ export function registerTypedCommandMetadata<TDefinitions extends ArgumentDefini
     notifyRegistryListeners(registry);
 }
 
+/** Remove wrapper-owned metadata for a command if the same record is still registered. */
+export function unregisterTypedCommandMetadata<TDefinitions extends ArgumentDefinitions>(
+    command: RegisteredTypedCommand<TDefinitions>,
+): void {
+    const registry = getTypedCommandRegistry();
+    if (registry.commands.get(command.name) !== command) {
+        return;
+    }
+    registry.commands.delete(command.name);
+    notifyRegistryListeners(registry);
+}
+
 /** Store typed skill metadata under its `skill:<name>` invocation. */
 export function registerTypedSkillMetadata(command: RegisteredTypedCommand): void {
     const registry = getTypedCommandRegistry();
@@ -73,7 +87,7 @@ export function replaceTypedSkillMetadata(
 ): void {
     const registry = getTypedCommandRegistry();
     for (const [name, command] of registry.commands) {
-        if ((command as { source?: unknown }).source === "skill" || name.startsWith("skill:")) {
+        if ((command as { source?: unknown }).source === "skill") {
             registry.commands.delete(name);
         }
     }

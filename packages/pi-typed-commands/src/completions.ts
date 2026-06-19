@@ -1,12 +1,12 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
-import { formatFlagName } from "./names.js";
-import { tokenizeTypedArgumentString } from "./parser.js";
+import { lexTypedArgumentString, type Token } from "./parser.js";
 import { getTypedCommand, isTypedCommandEnabled } from "./registry.js";
 import {
     completionValuesForArgument,
     createArgumentLookup,
     findArgumentName,
+    formatArgumentFlagName,
     isPositionalArgument,
 } from "./schema.js";
 import type { ArgumentDefinition, RegisteredTypedCommand } from "./types.js";
@@ -15,26 +15,31 @@ type CommandLineContext = {
     command: RegisteredTypedCommand;
     argsBeforeCursor: string;
     currentPrefix: string;
-    previousToken?: string;
+    previousToken?: Token;
 };
 
-function tokenizeLoose(input: string): string[] {
-    return tokenizeTypedArgumentString(input).tokens;
+function tokenizeLoose(input: string): Token[] {
+    return lexTypedArgumentString(input).tokens;
 }
 
 function providedArgumentNames<TDefinitions extends Record<string, ArgumentDefinition>>(
     command: RegisteredTypedCommand<TDefinitions>,
-    tokens: string[],
+    tokens: Token[],
 ): Set<string> {
     const lookup = createArgumentLookup(command.args);
     const provided = new Set<string>();
+    let optionsEnded = false;
 
     for (const token of tokens) {
-        if (!token.startsWith("-")) {
+        if (token.quote === undefined && token.value === "--") {
+            optionsEnded = true;
+            continue;
+        }
+        if (optionsEnded || token.quote !== undefined || !token.value.startsWith("-")) {
             continue;
         }
 
-        let flag = token;
+        let flag = token.value;
         const equalsIndex = flag.indexOf("=");
         if (equalsIndex >= 0) {
             flag = flag.slice(0, equalsIndex);
@@ -53,16 +58,16 @@ function providedArgumentNames<TDefinitions extends Record<string, ArgumentDefin
 }
 
 function flagItem(name: string, definition: ArgumentDefinition): AutocompleteItem {
-    let value = `${formatFlagName(name)} `;
+    let value = `${formatArgumentFlagName(name, definition)} `;
     if (definition.type === "boolean") {
-        value = formatFlagName(name);
+        value = formatArgumentFlagName(name, definition);
     }
 
     const description = definition.description ?? definition.type;
 
     return {
         value,
-        label: formatFlagName(name),
+        label: formatArgumentFlagName(name, definition),
         description,
     };
 }
@@ -109,6 +114,9 @@ function inlineFlagValueCompletion(context: CommandLineContext): AutocompleteIte
     if (definition === undefined || definition.type === "boolean") {
         return undefined;
     }
+    if (definition.type !== "multi-enum" && commaIndex >= 0) {
+        return undefined;
+    }
 
     const items = argumentValueItems(definition, query).map((item) => ({
         ...item,
@@ -126,15 +134,15 @@ function valueCompletionForPreviousFlag(
     if (context.previousToken === undefined) {
         return undefined;
     }
-    if (!context.previousToken.startsWith("-")) {
+    if (context.previousToken.quote !== undefined || !context.previousToken.value.startsWith("-")) {
         return undefined;
     }
-    if (context.previousToken.includes("=")) {
+    if (context.previousToken.value.includes("=")) {
         return undefined;
     }
 
     const lookup = createArgumentLookup(context.command.args);
-    const name = findArgumentName(lookup, context.previousToken);
+    const name = findArgumentName(lookup, context.previousToken.value);
     if (name === undefined) {
         return undefined;
     }
@@ -166,6 +174,10 @@ function shouldSuggestFlag(
     return !provided.has(name) || definition.type === "multi-enum";
 }
 
+function hasEndOfOptions(tokens: Token[]): boolean {
+    return tokens.some((token) => token.quote === undefined && token.value === "--");
+}
+
 export function getTypedArgumentCompletions<
     TDefinitions extends Record<string, ArgumentDefinition>,
 >(
@@ -180,11 +192,37 @@ export function getTypedArgumentCompletions<
     const lastToken = tokens[tokens.length - 1];
     let query = "";
     if (lastToken !== undefined) {
-        query = lastToken;
+        query = lastToken.value;
     }
 
     if (argumentPrefix.endsWith(" ")) {
         query = "";
+    }
+
+    if (hasEndOfOptions(tokens)) {
+        return null;
+    }
+
+    let previousToken = tokens[tokens.length - 2];
+    if (argumentPrefix.endsWith(" ")) {
+        previousToken = tokens[tokens.length - 1];
+    }
+    const context: CommandLineContext = {
+        command: command as RegisteredTypedCommand,
+        argsBeforeCursor: argumentPrefix,
+        currentPrefix: query,
+    };
+    if (previousToken !== undefined) {
+        context.previousToken = previousToken;
+    }
+
+    const inlineValueItems = inlineFlagValueCompletion(context);
+    if (inlineValueItems !== undefined) {
+        return inlineValueItems;
+    }
+    const valueItems = valueCompletionForPreviousFlag(context);
+    if (valueItems !== undefined) {
+        return valueItems;
     }
 
     const provided = providedArgumentNames(command, tokens);
@@ -240,11 +278,11 @@ function commandLineContext(
     if (!argsBeforeCursor.endsWith(" ")) {
         const lastToken = tokens[tokens.length - 1];
         if (lastToken !== undefined) {
-            currentPrefix = lastToken;
+            currentPrefix = lastToken.value;
         }
     }
 
-    let previousToken: string | undefined;
+    let previousToken: Token | undefined;
     if (argsBeforeCursor.endsWith(" ")) {
         previousToken = tokens[tokens.length - 1];
     } else {
@@ -274,6 +312,11 @@ export function getTypedAutocompleteSuggestions(
         return undefined;
     }
 
+    const tokens = tokenizeLoose(context.argsBeforeCursor);
+    if (hasEndOfOptions(tokens)) {
+        return undefined;
+    }
+
     const inlineValueItems = inlineFlagValueCompletion(context);
     if (inlineValueItems !== undefined) {
         return {
@@ -290,7 +333,6 @@ export function getTypedAutocompleteSuggestions(
         };
     }
 
-    const tokens = tokenizeLoose(context.argsBeforeCursor);
     const provided = providedArgumentNames(context.command, tokens);
     const flagItems = Object.entries(context.command.args)
         .filter(([name, definition]) => shouldSuggestFlag(name, definition, provided))

@@ -5,8 +5,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { getTypedArgumentCompletions, getTypedAutocompleteSuggestions } from "./completions.js";
-import { parseTypedCommandArgs } from "./parser.js";
-import { validateArgumentDefinitions } from "./schema.js";
+import { compileTypedCommandDefinition } from "./compiler.js";
+import { parseTypedCommandArgs, toTypedParseResult } from "./parser.js";
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
@@ -21,18 +21,22 @@ import {
     onTypedCommandsChanged,
     registerTypedCommandMetadata,
     replaceTypedSkillMetadata,
+    unregisterTypedCommandMetadata,
 } from "./registry.js";
 import { getPiTypedCommandsSettings } from "./settings.js";
 import type {
     ArgumentDefinitions,
+    DefinedTypedCommand,
     InferArguments,
     RegisteredTypedCommand,
+    TypedCommandDefinition,
     TypedCommandFormSymbols,
+    TypedCommandHandle,
     TypedCommandOptions,
     TypedCommandToggle,
     FormMode,
 } from "./types.js";
-import { formatDetailedHelp, formatHelperLineParts } from "./usage.js";
+import { formatCommandUsage, formatDetailedHelp, formatHelperLineParts } from "./usage.js";
 import { openArgumentForm } from "./form.js";
 import {
     formatTypedSkillDiagnostics,
@@ -82,6 +86,10 @@ export type {
     ArgumentWidgetTheme,
     CustomArgumentWidget,
     BooleanArgumentDefinition,
+    CompileResult,
+    CompiledCommand,
+    DefinedTypedCommand,
+    DefinitionDiagnostic,
     EnumArgumentDefinition,
     InferArguments,
     MultiEnumArgumentDefinition,
@@ -93,18 +101,25 @@ export type {
     RegisteredTypedCommand,
     StringArgumentDefinition,
     RawCommandHandler,
+    TypedCommandDefinition,
     TypedCommandHandler,
-    TypedCommandFormSymbols,
+    TypedCommandHandle,
     TypedCommandOptions,
     TypedCommandRawSelector,
+    TypedCommandRefinement,
+    TypedCommandRefinementContext,
+    TypedCommandRefinementIssue,
     TypedCommandToggle,
+    TypedCommandFormSymbols,
     TypedCommandFormTitle,
+    TypedParseResult,
     FormMode,
 } from "./types.js";
 
+export { compileTypedCommandDefinition } from "./compiler.js";
 export { formatCommandUsage, formatDetailedHelp, formatHelperLine } from "./usage.js";
 export { getTypedCommand, getTypedCommands } from "./registry.js";
-export { parseTypedCommandArgs } from "./parser.js";
+export { lexTypedArgumentString, parseTypedCommandArgs, toTypedParseResult } from "./parser.js";
 export { getPiTypedCommandsSettings } from "./settings.js";
 export {
     normalizeSkillArguments,
@@ -160,6 +175,183 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     return parsed.values as InferArguments<TDefinitions>;
 }
 
+function definitionError(name: string, diagnostics: readonly string[]): Error {
+    return new Error([`Invalid typed arguments for /${name}:`, ...diagnostics].join("\n"));
+}
+
+function registeredCommandForDefinition<TDefinitions extends ArgumentDefinitions>(
+    definition: Pick<
+        TypedCommandDefinition<TDefinitions>,
+        "name" | "description" | "args" | "refine"
+    >,
+): RegisteredTypedCommand<TDefinitions> {
+    const command: RegisteredTypedCommand<TDefinitions> = {
+        name: definition.name,
+        description: definition.description,
+        args: definition.args,
+        handler: () => {},
+        typedArgsEnabled: true,
+        formSymbols: DEFAULT_FORM_SYMBOLS,
+        openFormWhenInvalid: true,
+        openFormWhenMissingRequired: true,
+    };
+    if (definition.refine !== undefined) {
+        command.refine = definition.refine;
+    }
+    return command;
+}
+
+/** Define a typed command once, preserving literal argument inference and exposing pure helpers. */
+export function defineTypedCommand<const TDefinitions extends ArgumentDefinitions>(
+    definition: TypedCommandDefinition<TDefinitions>,
+): DefinedTypedCommand<TDefinitions> {
+    const compiled = compileTypedCommandDefinition(definition);
+    if (!compiled.ok) {
+        throw definitionError(
+            definition.name,
+            compiled.diagnostics.map((diagnostic) => diagnostic.message),
+        );
+    }
+
+    const normalizedDefinition = {
+        ...definition,
+        args: compiled.command.args as TDefinitions,
+    } as TypedCommandDefinition<TDefinitions>;
+    const command = registeredCommandForDefinition(normalizedDefinition);
+    const defined = {
+        ...normalizedDefinition,
+        parse(rawArgs: string) {
+            return toTypedParseResult<TDefinitions>(parseTypedCommandArgs(command, rawArgs));
+        },
+        formatUsage() {
+            return formatCommandUsage(command);
+        },
+        formatHelp() {
+            return formatDetailedHelp(command);
+        },
+    };
+    return Object.freeze(defined) as DefinedTypedCommand<TDefinitions>;
+}
+
+function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
+    name: string,
+    options: TypedCommandOptions<TDefinitions>,
+): RegisteredTypedCommand<TDefinitions> {
+    const compiled = compileTypedCommandDefinition({
+        name,
+        description: options.description,
+        args: options.args,
+    });
+    if (!compiled.ok) {
+        throw definitionError(
+            name,
+            compiled.diagnostics.map((diagnostic) => diagnostic.message),
+        );
+    }
+
+    const command: RegisteredTypedCommand<TDefinitions> = {
+        name,
+        description: options.description,
+        args: compiled.command.args as TDefinitions,
+        handler: options.handler,
+        typedArgsEnabled: options.typedArgsEnabled ?? true,
+        formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...options.formSymbols },
+        openFormWhenInvalid: options.openFormWhenInvalid ?? true,
+        openFormWhenMissingRequired: options.openFormWhenMissingRequired ?? true,
+        source: "extension",
+    };
+
+    if (options.refine !== undefined) {
+        command.refine = options.refine;
+    }
+    if (options.formTitle !== undefined) {
+        command.formTitle = options.formTitle;
+    }
+    if (options.fallbackHandler !== undefined) {
+        command.fallbackHandler = options.fallbackHandler;
+    }
+    if (options.shouldUseTypedArgs !== undefined) {
+        command.shouldUseTypedArgs = options.shouldUseTypedArgs;
+    }
+    return command;
+}
+
+function commandOptionsFromDefinition<TDefinitions extends ArgumentDefinitions>(
+    definition: TypedCommandDefinition<TDefinitions>,
+): TypedCommandOptions<TDefinitions> {
+    const handler = definition.handler ?? definition.run;
+    if (handler === undefined) {
+        throw new Error(`Typed command /${definition.name} must define a handler or run function`);
+    }
+    const options: TypedCommandOptions<TDefinitions> = {
+        description: definition.description,
+        args: definition.args,
+        handler,
+    };
+    if (definition.refine !== undefined) {
+        options.refine = definition.refine;
+    }
+    if (definition.fallbackHandler !== undefined) {
+        options.fallbackHandler = definition.fallbackHandler;
+    }
+    if (definition.typedArgsEnabled !== undefined) {
+        options.typedArgsEnabled = definition.typedArgsEnabled;
+    }
+    if (definition.shouldUseTypedArgs !== undefined) {
+        options.shouldUseTypedArgs = definition.shouldUseTypedArgs;
+    }
+    if (definition.formTitle !== undefined) {
+        options.formTitle = definition.formTitle;
+    }
+    if (definition.formSymbols !== undefined) {
+        options.formSymbols = definition.formSymbols;
+    }
+    if (definition.openFormWhenInvalid !== undefined) {
+        options.openFormWhenInvalid = definition.openFormWhenInvalid;
+    }
+    if (definition.openFormWhenMissingRequired !== undefined) {
+        options.openFormWhenMissingRequired = definition.openFormWhenMissingRequired;
+    }
+    return options;
+}
+
+function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
+    definition: DefinedTypedCommand<TDefinitions>,
+    command: RegisteredTypedCommand<TDefinitions>,
+    invocationName: string,
+): TypedCommandHandle<TDefinitions> {
+    let disposed = false;
+    return Object.freeze({
+        definition,
+        invocationName,
+        parse(rawArgs: string) {
+            return definition.parse(rawArgs);
+        },
+        formatUsage() {
+            return definition.formatUsage();
+        },
+        formatHelp() {
+            return definition.formatHelp();
+        },
+        dispose() {
+            if (disposed) {
+                return;
+            }
+            disposed = true;
+            unregisterTypedCommandMetadata(command);
+        },
+    });
+}
+
+export function registerTypedCommand<const TDefinitions extends ArgumentDefinitions>(
+    pi: ExtensionAPI,
+    definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
+): TypedCommandHandle<TDefinitions>;
+export function registerTypedCommand<const TDefinitions extends ArgumentDefinitions>(
+    pi: ExtensionAPI,
+    name: string,
+    options: TypedCommandOptions<TDefinitions>,
+): TypedCommandHandle<TDefinitions>;
 /**
  * Register a Pi slash command with typed named arguments.
  *
@@ -168,45 +360,29 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
  */
 export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     pi: ExtensionAPI,
-    name: string,
-    options: TypedCommandOptions<TDefinitions>,
-): void {
-    const argumentDiagnostics = validateArgumentDefinitions(options.args);
-    if (argumentDiagnostics.length > 0) {
-        throw new Error(
-            [`Invalid typed arguments for /${name}:`, ...argumentDiagnostics].join("\n"),
-        );
+    nameOrDefinition:
+        | string
+        | TypedCommandDefinition<TDefinitions>
+        | DefinedTypedCommand<TDefinitions>,
+    options?: TypedCommandOptions<TDefinitions>,
+): TypedCommandHandle<TDefinitions> {
+    const definitionMode = typeof nameOrDefinition !== "string";
+    let name: string;
+    let commandOptions: TypedCommandOptions<TDefinitions> | undefined;
+    if (definitionMode) {
+        name = nameOrDefinition.name;
+        commandOptions = commandOptionsFromDefinition(nameOrDefinition);
+    } else {
+        name = nameOrDefinition;
+        commandOptions = options;
+    }
+    if (commandOptions === undefined) {
+        throw new Error(`Typed command /${name} is missing options`);
     }
 
-    const openFormWhenInvalid = options.openFormWhenInvalid ?? true;
-    const openFormWhenMissingRequired = options.openFormWhenMissingRequired ?? true;
-    const formTitle = options.formTitle;
-
-    const command: RegisteredTypedCommand<TDefinitions> = {
-        name,
-        description: options.description,
-        args: options.args,
-        handler: options.handler,
-        typedArgsEnabled: options.typedArgsEnabled ?? true,
-        formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...options.formSymbols },
-        openFormWhenInvalid,
-        openFormWhenMissingRequired,
-    };
-
-    if (formTitle !== undefined) {
-        command.formTitle = formTitle;
-    }
-    if (options.fallbackHandler !== undefined) {
-        command.fallbackHandler = options.fallbackHandler;
-    }
-    if (options.shouldUseTypedArgs !== undefined) {
-        command.shouldUseTypedArgs = options.shouldUseTypedArgs;
-    }
-
-    registerTypedCommandMetadata(command);
-
-    pi.registerCommand(name, {
-        description: options.description,
+    const command = normalizeRegisteredCommand(name, commandOptions);
+    const maybeInvocationName = pi.registerCommand(name, {
+        description: command.description,
         getArgumentCompletions(argumentPrefix) {
             return getTypedArgumentCompletions(command, argumentPrefix);
         },
@@ -252,7 +428,20 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             }
             await command.handler(args, ctx);
         },
-    });
+    }) as unknown;
+
+    registerTypedCommandMetadata(command);
+    let invocationName = name;
+    if (typeof maybeInvocationName === "string") {
+        invocationName = maybeInvocationName;
+    }
+    let definition: DefinedTypedCommand<TDefinitions>;
+    if (definitionMode) {
+        definition = defineTypedCommand({ ...nameOrDefinition, args: command.args });
+    } else {
+        definition = defineTypedCommand({ name, ...commandOptions, args: command.args });
+    }
+    return createCommandHandle(definition, command, invocationName);
 }
 
 function slashCommandMatch(editorText: string): ReturnType<typeof parseSlashCommandText> {

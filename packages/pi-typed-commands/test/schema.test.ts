@@ -7,6 +7,7 @@ import {
     createArgumentLookup,
     findArgumentName,
     orderedArgumentEntries,
+    validateArgumentDefinitions,
     validateArgumentValue,
 } from "../src/schema.js";
 import type { ArgumentDefinitions } from "../src/types.js";
@@ -92,5 +93,34 @@ void describe("typed command schema", () => {
         assert.deepEqual(applyArgumentDefaults(definitions, {}), { count: 1 });
         assert.equal(argumentValueHint(definitions.branchName!, "branchName"), "branch-name");
         assert.equal(argumentValueHint(definitions.action!, "action"), "create|delete");
+    });
+
+    void it("validates schema constraints before registration", () => {
+        const warnings = validateArgumentDefinitions({
+            range: { type: "number", min: 10, max: 1 },
+            text: { type: "string", minLength: 5, maxLength: 2, pattern: "[" },
+            choice: { type: "enum", values: ["dev", "dev", ""] },
+            many: { type: "multi-enum", values: ["a"], minItems: 3, maxItems: 1 },
+            defaulted: { type: "string", required: true, default: "main" },
+            first: { type: "string", positional: 0 },
+            second: { type: "string", required: true, positional: 1 },
+            duplicatePosition: { type: "string", positional: 1 },
+            badRows: { type: "string", ui: { rows: 0 } },
+        });
+        const text = warnings.join("\n");
+
+        assert.match(text, /range\.min must be less than or equal to max/);
+        assert.match(text, /text\.minLength must be less than or equal to maxLength/);
+        assert.match(text, /text\.pattern must be a valid regular expression/);
+        assert.match(text, /choice\.values contains duplicate value dev/);
+        assert.match(text, /choice\.values may not contain empty strings/);
+        assert.match(text, /many\.minItems must be less than or equal to maxItems/);
+        assert.match(text, /defaulted: required arguments may not define a default/);
+        assert.match(
+            text,
+            /second: required positional arguments may not follow optional positional argument first/,
+        );
+        assert.match(text, /duplicatePosition\.positional duplicates position 1 from second/);
+        assert.match(text, /badRows\.ui\.rows must be a positive integer/);
     });
 });

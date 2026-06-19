@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import YAML from "yaml";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
+import { compileTypedCommandDefinition } from "./compiler.js";
 import { validateArgumentDefinitions, validateArgumentValue } from "./schema.js";
 import type {
     ArgumentDefinition,
@@ -293,6 +294,15 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
 
     if (Object.hasOwn(raw, "aliases")) {
         warnings.push(`${name}.aliases is not supported`);
+    }
+
+    if (Object.hasOwn(raw, "position")) {
+        const position = optionalNonNegativeInteger(raw.position);
+        if (position === undefined) {
+            warnings.push(`${name}.position must be a non-negative integer`);
+        } else {
+            definition.position = position;
+        }
     }
 
     if (Object.hasOwn(raw, "positional")) {
@@ -606,6 +616,24 @@ function typedSkillDiagnostics(
     return { name, filePath, messages };
 }
 
+function validateSkillPlaceholders(body: string, args: ArgumentDefinitions): string[] {
+    const warnings: string[] = [];
+    const names = Object.keys(args);
+    PLACEHOLDER_PATTERN.lastIndex = 0;
+    for (const match of body.matchAll(PLACEHOLDER_PATTERN)) {
+        const path = match[1];
+        if (path === undefined) {
+            continue;
+        }
+        const valid =
+            Object.hasOwn(args, path) || names.some((name) => name.startsWith(`${path}.`));
+        if (!valid) {
+            warnings.push(`body: unknown argument placeholder {args.${path}}`);
+        }
+    }
+    return warnings;
+}
+
 /** Read and validate typed skill metadata from a `SKILL.md` file. */
 export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMetadataResult {
     const content = readFileSync(filePath, "utf8");
@@ -620,6 +648,7 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
     }
 
     const { args, warnings } = normalizeSkillArguments(rawArguments);
+    warnings.push(...validateSkillPlaceholders(body, args));
     if (warnings.length > 0) {
         return {
             diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, warnings),
@@ -633,6 +662,21 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
         };
     }
 
+    const compiled = compileTypedCommandDefinition({
+        name: `skill:${frontmatter.name}`,
+        description: frontmatter.description,
+        args,
+    });
+    if (!compiled.ok) {
+        return {
+            diagnostics: typedSkillDiagnostics(
+                frontmatter.name,
+                filePath,
+                compiled.diagnostics.map((diagnostic) => diagnostic.message),
+            ),
+        };
+    }
+
     const formTitle = frontmatter.formTitle ?? optionalString(frontmatter.metadata?.form_title);
     const metadata: TypedSkillMetadata = {
         name: frontmatter.name,
@@ -640,7 +684,7 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
         filePath,
         baseDir: dirname(filePath),
         body,
-        args,
+        args: compiled.command.args as ArgumentDefinitions,
     };
     if (formTitle !== undefined) {
         metadata.formTitle = formTitle;

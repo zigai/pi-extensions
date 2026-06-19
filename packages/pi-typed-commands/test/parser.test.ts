@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getTypedAutocompleteSuggestions } from "../src/completions.js";
+import {
+    getTypedArgumentCompletions,
+    getTypedAutocompleteSuggestions,
+} from "../src/completions.js";
 import {
     formatCommandUsage,
     parseTypedCommandArgs,
@@ -167,6 +170,27 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.base, "main");
     });
 
+    void it("supports the explicit position field for positional args", () => {
+        const positionedCommand: RegisteredTypedCommand = {
+            ...branchCommand,
+            args: {
+                name: { type: "string", required: true, position: 1 },
+                action: {
+                    type: "enum",
+                    values: ["create", "delete"],
+                    required: true,
+                    position: 0,
+                },
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(positionedCommand, "create feature/foo");
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.action, "create");
+        assert.equal(parsed.values.name, "feature/foo");
+    });
+
     void it("recognizes --help and -h", () => {
         const longHelp = parseTypedCommandArgs(command, "--help");
         const shortHelp = parseTypedCommandArgs(command, "-h");
@@ -242,6 +266,118 @@ void describe("parseTypedCommandArgs", () => {
             ["unknown-argument", "missing-value", "invalid-value", "missing-required"],
         );
     });
+
+    void it("preserves Windows paths and empty quoted strings", () => {
+        const pathCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                path: { type: "string", required: true, positional: 0 },
+                label: { type: "string", positional: 1 },
+            },
+        };
+
+        const windowsPath = parseTypedCommandArgs(pathCommand, String.raw`C:\Users\me\file.txt ""`);
+
+        assert.deepEqual(windowsPath.issues, []);
+        assert.equal(windowsPath.values.path, String.raw`C:\Users\me\file.txt`);
+        assert.equal(windowsPath.values.label, "");
+    });
+
+    void it("treats quoted help as a literal value", () => {
+        const pathCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                path: { type: "string", required: true, positional: 0 },
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(pathCommand, '"--help"');
+
+        assert.equal(parsed.mode, "run");
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.path, "--help");
+    });
+
+    void it("marks invalid provided values without duplicating required diagnostics", () => {
+        const requiredNumberCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                count: { type: "number", required: true },
+                defaulted: { type: "number", default: 1 },
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(
+            requiredNumberCommand,
+            "--count nope --defaulted nope",
+        );
+
+        assert.equal(parsed.provided.has("count"), true);
+        assert.equal(parsed.values.defaulted, undefined);
+        assert.deepEqual(
+            parsed.issues.map((issue) => [issue.kind, issue.name, issue.message]),
+            [
+                ["invalid-value", "count", "--count expects a number"],
+                ["invalid-value", "defaulted", "--defaulted expects a number"],
+            ],
+        );
+    });
+
+    void it("rejects inline values on no-boolean flags", () => {
+        const parsed = parseTypedCommandArgs(command, "--env dev --no-dry-run=true");
+
+        assert.equal(parsed.values.dryRun, undefined);
+        assert.deepEqual(
+            parsed.issues.map((issue) => [issue.kind, issue.name]),
+            [["invalid-value", "dryRun"]],
+        );
+    });
+
+    void it("supports explicit flag names and aliases", () => {
+        const databaseCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                databaseHost: {
+                    type: "string",
+                    flag: "db-host",
+                    aliases: ["database-host"],
+                    required: true,
+                },
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(databaseCommand, "--database-host localhost");
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.databaseHost, "localhost");
+    });
+
+    void it("runs command-level cross-field validation", () => {
+        const rangeCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                start: { type: "number", required: true },
+                end: { type: "number", required: true },
+            },
+            refine(args) {
+                if (
+                    typeof args.start === "number" &&
+                    typeof args.end === "number" &&
+                    args.start > args.end
+                ) {
+                    return [{ message: "start must not exceed end", path: ["start"] }];
+                }
+                return [];
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(rangeCommand, "--start 10 --end 5");
+
+        assert.deepEqual(
+            parsed.issues.map((issue) => [issue.kind, issue.name, issue.message]),
+            [["invalid-value", "start", "start must not exceed end"]],
+        );
+    });
 });
 
 void describe("formatCommandUsage", () => {
@@ -283,6 +419,22 @@ void describe("getTypedAutocompleteSuggestions", () => {
             suggestions?.items.map((item) => item.value),
             ["--env=dev"],
         );
+    });
+
+    void it("completes values through Pi's command completion entry point", () => {
+        const suggestions = getTypedArgumentCompletions(command, "--env d");
+
+        assert.deepEqual(
+            suggestions?.map((item) => item.value),
+            ["dev"],
+        );
+    });
+
+    void it("stops completing flags after the end-of-options marker", () => {
+        registerTypedCommandMetadata(command);
+
+        assert.equal(getTypedArgumentCompletions(command, "-- --e"), null);
+        assert.equal(getTypedAutocompleteSuggestions(["/deploy -- --e"], 0, 14), undefined);
     });
 
     void it("keeps repeatable multi-enum flags available", () => {

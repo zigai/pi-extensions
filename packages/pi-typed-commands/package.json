@@ -31,7 +31,12 @@
   "type": "module",
   "main": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./core": "./src/core/index.ts",
+    "./pi": "./src/pi/index.ts",
+    "./skills": "./src/skills/index.ts",
+    "./pi-tui": "./src/pi-tui/index.ts",
+    "./schema": "./schemas/skill-arguments.schema.json"
   },
   "scripts": {
     "lint": "oxlint -c ./.oxlintrc.json .",

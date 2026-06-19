@@ -487,6 +487,11 @@ function isExpandedOptionsWidget(definition: ArgumentDefinition): boolean {
     return widget === "radio" || widget === "multiselect";
 }
 
+function isReadOnlyWidget(definition: ArgumentDefinition): boolean {
+    const widget = widgetFor(definition);
+    return widget === "readonly" || widget === "computed";
+}
+
 function formatValue(value: ArgumentValue): string {
     if (value === undefined) {
         return UNSET_OPTION;
@@ -645,6 +650,9 @@ class ArgumentFormComponent implements Component, Focusable {
 
         const field = this.selectedField();
         if (this.handleCustomInput(field, data)) {
+            return;
+        }
+        if (isReadOnlyWidget(field.definition)) {
             return;
         }
 

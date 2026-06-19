@@ -34,6 +34,10 @@ void describe("normalizeSkillArguments", () => {
                 type: "boolean",
                 default: true,
             },
+            target: {
+                type: "string",
+                position: 1,
+            },
             rules: {
                 type: "multi_enum",
                 values: ["E", "F"],
@@ -53,6 +57,7 @@ void describe("normalizeSkillArguments", () => {
         assert.equal(result.args.path?.default, ".");
         assert.equal(result.args.fix?.type, "boolean");
         assert.equal(result.args.fix?.default, true);
+        assert.equal(result.args.target?.position, 1);
         assert.equal(result.args.rules?.type, "multi-enum");
         assert.deepEqual(result.args.rules?.values, ["E", "F"]);
         assert.equal(result.args.rules?.minItems, 1);
@@ -201,6 +206,33 @@ Follow the workflow.
         assert.equal(result.metadata?.name, "legacy-demo");
         assert.equal(result.metadata?.args.fix?.type, "boolean");
         assert.equal(result.metadata?.args.fix?.default, true);
+    });
+
+    void it("reports unknown typed placeholders while loading skills", () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-"));
+        const skillPath = join(dir, "SKILL.md");
+        writeFileSync(
+            skillPath,
+            `---
+name: demo
+registration: should be ignored
+description: Demo skill
+arguments:
+  path:
+    type: string
+---
+
+Use {args.missing} and {args.path}.
+`,
+        );
+
+        const result = readTypedSkillMetadataResult(skillPath);
+
+        assert.equal(result.metadata, undefined);
+        assert.match(
+            result.diagnostics?.messages.join("\n") ?? "",
+            /body: unknown argument placeholder \{args\.missing\}/,
+        );
     });
 });
 

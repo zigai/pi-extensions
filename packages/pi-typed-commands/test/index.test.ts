@@ -4,13 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { installTypedCommandUx, registerTypedCommand } from "../src/index.js";
+import { defineTypedCommand, installTypedCommandUx, registerTypedCommand } from "../src/index.js";
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
     decideTypedCommandPreflight,
     parseSlashCommandText,
 } from "../src/invocation.js";
+import {
+    getTypedCommand,
+    registerTypedCommandMetadata,
+    replaceTypedSkillMetadata,
+    unregisterTypedCommandMetadata,
+} from "../src/registry.js";
 import type { ParseIssue } from "../src/types.js";
 
 void describe("typed invocation policy", () => {
@@ -111,6 +117,106 @@ void describe("registerTypedCommand", () => {
                 }),
             /help: argument flag --help is reserved/,
         );
+    });
+
+    void it("publishes metadata only after Pi registration succeeds", () => {
+        const pi = {
+            registerCommand() {
+                throw new Error("boom");
+            },
+        } as unknown as ExtensionAPI;
+
+        assert.throws(
+            () =>
+                registerTypedCommand(pi, "atomic-failure", {
+                    description: "Should not publish",
+                    args: { path: { type: "string" } },
+                    handler() {},
+                }),
+            /boom/,
+        );
+        assert.equal(getTypedCommand("atomic-failure"), undefined);
+    });
+
+    void it("defines commands with typed parse helpers and disposable registration handles", () => {
+        const deploy = defineTypedCommand({
+            name: "typed-deploy-test",
+            description: "Deploy a ref",
+            args: {
+                env: { type: "enum", values: ["dev", "prod"], required: true },
+                ref: { type: "string", default: "main" },
+            },
+            run(args) {
+                assert.ok(args.env === "dev" || args.env === "prod");
+            },
+        });
+        const registered = new Map<string, unknown>();
+        const pi = {
+            registerCommand(name: string, options: unknown) {
+                registered.set(name, options);
+            },
+        } as unknown as ExtensionAPI;
+
+        const parsed = deploy.parse("--env dev");
+        assert.equal(parsed.status, "success");
+        if (parsed.status === "success") {
+            assert.equal(parsed.value.env, "dev");
+            assert.equal(parsed.value.ref, "main");
+            assert.equal(parsed.sources.get("ref"), "default");
+        }
+
+        const handle = registerTypedCommand(pi, deploy);
+        assert.equal(registered.has("typed-deploy-test"), true);
+        assert.equal(getTypedCommand("typed-deploy-test")?.name, "typed-deploy-test");
+        handle.dispose();
+        handle.dispose();
+        assert.equal(getTypedCommand("typed-deploy-test"), undefined);
+    });
+
+    void it("keeps registered command schemas immutable after caller mutation", () => {
+        const args = {
+            env: { type: "enum" as const, values: ["dev", "prod"], required: true },
+        };
+        const pi = {
+            registerCommand() {},
+        } as unknown as ExtensionAPI;
+
+        const handle = registerTypedCommand(pi, "immutable-deploy-test", {
+            description: "Deploy",
+            args,
+            handler() {},
+        });
+        args.env.values.push("qa");
+
+        const parsed = handle.parse("--env qa");
+
+        assert.equal(parsed.status, "error");
+        handle.dispose();
+    });
+
+    void it("does not delete extension-owned skill-prefixed commands during skill refresh", () => {
+        const command = {
+            name: "skill:extension-owned-test",
+            description: "Extension command",
+            args: {},
+            handler() {},
+            typedArgsEnabled: true,
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+            openFormWhenInvalid: true,
+            openFormWhenMissingRequired: true,
+            source: "extension" as const,
+        };
+
+        registerTypedCommandMetadata(command);
+        replaceTypedSkillMetadata([]);
+
+        assert.equal(getTypedCommand("skill:extension-owned-test"), command);
+        unregisterTypedCommandMetadata(command);
     });
 });
 

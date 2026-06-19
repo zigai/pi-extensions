@@ -52,6 +52,10 @@
         "placeholder": {
           "type": "string"
         },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
         "positional": {
           "oneOf": [
             {
@@ -67,9 +71,23 @@
           "$ref": "#/$defs/ui"
         }
       },
-      "not": {
-        "required": ["aliases"]
-      }
+      "allOf": [
+        {
+          "not": {
+            "required": ["aliases"]
+          }
+        },
+        {
+          "not": {
+            "required": ["required", "default"],
+            "properties": {
+              "required": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
     },
     "ui": {
       "type": "object",
@@ -119,6 +137,7 @@
               "type": "string"
             },
             "placeholder": true,
+            "position": true,
             "positional": true,
             "ui": true,
             "min_length": {
@@ -155,6 +174,7 @@
               "type": "number"
             },
             "placeholder": true,
+            "position": true,
             "positional": true,
             "ui": true,
             "integer": {
@@ -189,6 +209,7 @@
               "type": "boolean"
             },
             "placeholder": true,
+            "position": true,
             "positional": true,
             "ui": true
           }
@@ -214,6 +235,7 @@
               "type": "string"
             },
             "placeholder": true,
+            "position": true,
             "positional": true,
             "ui": true,
             "values": {
@@ -221,7 +243,8 @@
               "items": {
                 "type": "string"
               },
-              "minItems": 1
+              "minItems": 1,
+              "uniqueItems": true
             }
           }
         }
@@ -246,9 +269,11 @@
               "type": "array",
               "items": {
                 "type": "string"
-              }
+              },
+              "uniqueItems": true
             },
             "placeholder": true,
+            "position": true,
             "positional": true,
             "ui": true,
             "values": {
@@ -256,7 +281,8 @@
               "items": {
                 "type": "string"
               },
-              "minItems": 1
+              "minItems": 1,
+              "uniqueItems": true
             },
             "min_items": {
               "type": "integer",

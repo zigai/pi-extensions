@@ -1,8 +1,9 @@
-import { formatFlagName, toKebabCase } from "./names.js";
+import { toKebabCase } from "./names.js";
 import {
     argumentTypeHint,
     argumentValueHint,
     formatArgumentDefault,
+    formatArgumentFlagName,
     isPositionalArgument,
     orderedCommandArgumentEntries,
 } from "./schema.js";
@@ -80,7 +81,7 @@ function formatArgumentUsage(
         return formatPositionalUsage(name, definition, options);
     }
 
-    const flag = formatFlagName(name);
+    const flag = formatArgumentFlagName(name, definition);
     let text: string;
 
     if (definition.type === "boolean") {
@@ -163,7 +164,7 @@ export function formatDetailedHelp<TDefinitions extends Record<string, ArgumentD
     if (entries.length > 0) {
         lines.push("", "Arguments:");
         for (const [name, definition] of entries) {
-            let label = `  ${formatFlagName(name)}`;
+            let label = `  ${formatArgumentFlagName(name, definition)}`;
             if (isPositionalArgument(definition)) {
                 label = `  ${toKebabCase(name)}`;
             }

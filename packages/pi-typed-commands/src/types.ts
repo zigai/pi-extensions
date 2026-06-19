@@ -101,12 +101,18 @@ export type ArgumentUi = {
 export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
     /** Text shown in detailed help, completions, and forms. */
     description?: string;
-    /** Require a value after parsing and defaults are applied. */
+    /** Require the caller to explicitly provide a value. Mutually exclusive with `default`. */
     required?: boolean;
-    /** Value used when the user leaves the argument unset. */
+    /** Value used when the user leaves the argument unset. Mutually exclusive with `required`. */
     default?: TValue;
+    /** Explicit CLI flag name without leading dashes. Defaults to the kebab-cased object key. */
+    flag?: string;
+    /** Additional CLI flag aliases without leading dashes. */
+    aliases?: readonly string[];
     /** Value hint shown in usage text and forms. */
     placeholder?: string;
+    /** Explicit positional index. Prefer this over legacy `positional: number`. */
+    position?: number;
     /**
      * Parse this argument positionally instead of as a named flag.
      *
@@ -240,6 +246,27 @@ export type TypedCommandFormSymbols = {
 };
 
 /** Options passed to `registerTypedCommand`. */
+export type TypedCommandRefinementIssue = {
+    /** Stable issue code for command-level validation. */
+    code?: string;
+    /** Human-readable message suitable for UI display. */
+    message: string;
+    /** Argument path most directly responsible for the issue. */
+    path?: readonly string[];
+    /** Other argument paths involved in the issue. */
+    relatedPaths?: readonly (readonly string[])[];
+};
+
+export type TypedCommandRefinementContext<TDefinitions extends ArgumentDefinitions> = {
+    provided: ReadonlySet<keyof TDefinitions & string>;
+};
+
+/** Command-level cross-field validation. */
+export type TypedCommandRefinement<TDefinitions extends ArgumentDefinitions> = (
+    args: Partial<InferArguments<TDefinitions>>,
+    context: TypedCommandRefinementContext<TDefinitions>,
+) => readonly TypedCommandRefinementIssue[];
+
 export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     /** One-line command description used by Pi command listings and detailed help. */
     description: string;
@@ -247,6 +274,8 @@ export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     args: TDefinitions;
     /** Handler invoked with typed values when parsing and validation succeed. */
     handler: TypedCommandHandler<TDefinitions>;
+    /** Cross-field validation invoked after individual arguments are parsed and validated. */
+    refine?: TypedCommandRefinement<TDefinitions>;
     /** Optional raw fallback handler used when typed args are disabled or bypassed. */
     fallbackHandler?: RawCommandHandler;
     /** Enable or disable typed parsing, completions, forms, and helper UX for this command. */
@@ -272,7 +301,64 @@ export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = Ar
         formSymbols: Required<TypedCommandFormSymbols>;
         openFormWhenInvalid: boolean;
         openFormWhenMissingRequired: boolean;
+        /** Source adapter that owns this metadata. */
+        source?: "extension" | "skill";
     };
+
+/** Declaration-only object created by `defineTypedCommand`. */
+export type TypedCommandDefinition<TDefinitions extends ArgumentDefinitions> = Omit<
+    TypedCommandOptions<TDefinitions>,
+    "handler"
+> & {
+    /** Slash command name without the leading `/`. */
+    name: string;
+    /** Preferred handler spelling for declaration-style commands. */
+    run?: TypedCommandHandler<TDefinitions>;
+    /** Backward-compatible handler spelling. */
+    handler?: TypedCommandHandler<TDefinitions>;
+};
+
+/** A command definition with convenience pure-core methods attached. */
+export type DefinedTypedCommand<TDefinitions extends ArgumentDefinitions> = Readonly<
+    TypedCommandDefinition<TDefinitions>
+> & {
+    parse(rawArgs: string): TypedParseResult<TDefinitions>;
+    formatUsage(): string;
+    formatHelp(): string;
+};
+
+/** Stable diagnostic produced while compiling a command definition. */
+export type DefinitionDiagnostic = {
+    code: string;
+    message: string;
+    path: readonly (string | number)[];
+    severity: "error" | "warning";
+};
+
+export type CompileResult<TDefinitions extends ArgumentDefinitions> =
+    | { ok: true; command: CompiledCommand<TDefinitions> }
+    | { ok: false; diagnostics: readonly DefinitionDiagnostic[] };
+
+/** Immutable internal representation consumed by parsing, formatting, completion, forms, and Pi. */
+export type CompiledCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> = {
+    readonly name: string;
+    readonly description: string;
+    readonly args: Readonly<TDefinitions>;
+    readonly argumentOrder: readonly (keyof TDefinitions & string)[];
+    readonly positionalOrder: readonly (keyof TDefinitions & string)[];
+    readonly flagToName: ReadonlyMap<string, keyof TDefinitions & string>;
+    readonly diagnostics: readonly DefinitionDiagnostic[];
+};
+
+export type TypedCommandHandle<TDefinitions extends ArgumentDefinitions> = {
+    readonly definition: DefinedTypedCommand<TDefinitions>;
+    readonly invocationName: string;
+    parse(rawArgs: string): TypedParseResult<TDefinitions>;
+    formatUsage(): string;
+    formatHelp(): string;
+    /** Remove wrapper-owned metadata and listeners. Safe to call more than once. */
+    dispose(): void;
+};
 
 /** Machine-readable kind for a parser or validation issue. */
 export type ParseIssueKind =
@@ -299,13 +385,30 @@ export type ParseIssue = {
 export type ParsedCommandArguments = {
     /** Parsed values plus defaults that could be applied without prompting. */
     values: Record<string, ArgumentValue>;
-    /** Argument names explicitly provided by the user. */
+    /** Argument names explicitly provided by the user, even when their value failed to parse. */
     provided: Set<string>;
+    /** Value provenance when it is available. */
+    sources?: Map<string, "explicit" | "default">;
     /** Syntax, coercion, and validation issues found while parsing. */
     issues: ParseIssue[];
     /** Requested action: run handler or show help. */
     mode: "run" | "help";
 };
+
+export type TypedParseResult<TDefinitions extends ArgumentDefinitions> =
+    | {
+          status: "success";
+          value: InferArguments<TDefinitions>;
+          provided: ReadonlySet<keyof TDefinitions & string>;
+          sources: ReadonlyMap<keyof TDefinitions & string, "explicit" | "default">;
+      }
+    | { status: "help" }
+    | {
+          status: "error";
+          issues: readonly ParseIssue[];
+          partial: Partial<InferArguments<TDefinitions>>;
+          provided: ReadonlySet<keyof TDefinitions & string>;
+      };
 
 /** Which fields the argument form should show. */
 export type FormMode = "missing" | "all";

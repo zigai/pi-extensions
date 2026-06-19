@@ -29,9 +29,17 @@ export type ArgumentMessageOptions = {
     nameStyle?: "flag" | "field";
 };
 
-function formatArgumentMessageName(name: string, options?: ArgumentMessageOptions): string {
+function formatArgumentMessageName(
+    name: string,
+    definition?: ArgumentDefinition,
+    options?: ArgumentMessageOptions,
+): string {
     if (options?.nameStyle === "field") {
         return toKebabCase(name);
+    }
+    if (definition !== undefined) {
+        // eslint-disable-next-line no-use-before-define
+        return formatArgumentFlagName(name, definition);
     }
     return formatFlagName(name);
 }
@@ -64,7 +72,26 @@ export function booleanFromString(value: string): boolean | undefined {
 }
 
 export function isPositionalArgument(definition: ArgumentDefinition): boolean {
+    if (definition.position !== undefined) {
+        return true;
+    }
     return definition.positional !== undefined && definition.positional !== false;
+}
+
+export function argumentFlagName(name: string, definition: ArgumentDefinition): string {
+    return normalizeFlagName(definition.flag ?? name);
+}
+
+export function argumentFlagNames(name: string, definition: ArgumentDefinition): string[] {
+    const names = [argumentFlagName(name, definition)];
+    for (const alias of definition.aliases ?? []) {
+        names.push(normalizeFlagName(alias));
+    }
+    return names;
+}
+
+export function formatArgumentFlagName(name: string, definition: ArgumentDefinition): string {
+    return `--${argumentFlagName(name, definition)}`;
 }
 
 export function orderedArgumentEntries(
@@ -83,11 +110,15 @@ export function orderedArgumentEntries(
             }
 
             let leftPosition = left.index;
-            if (typeof left.definition.positional === "number") {
+            if (typeof left.definition.position === "number") {
+                leftPosition = left.definition.position;
+            } else if (typeof left.definition.positional === "number") {
                 leftPosition = left.definition.positional;
             }
             let rightPosition = right.index;
-            if (typeof right.definition.positional === "number") {
+            if (typeof right.definition.position === "number") {
+                rightPosition = right.definition.position;
+            } else if (typeof right.definition.positional === "number") {
                 rightPosition = right.definition.positional;
             }
             return leftPosition - rightPosition;
@@ -118,7 +149,236 @@ function reservedArgumentNameSegment(name: string): string | undefined {
     return undefined;
 }
 
-/** Validate argument names and derived CLI flags for typed commands and skills. */
+const FLAG_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
+const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
+    "text",
+    "textarea",
+    "number",
+    "toggle",
+    "select",
+    "radio",
+    "multiselect",
+    "path",
+    "command",
+    "readonly",
+    "computed",
+    "confirm",
+    "custom",
+]);
+
+function isNonNegativeInteger(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function validateFlagName(
+    owner: string,
+    flag: string,
+    flags: Map<string, string>,
+    warnings: string[],
+): void {
+    if (!FLAG_NAME_PATTERN.test(flag)) {
+        warnings.push(`${owner}: flag --${flag} must contain only letters, numbers, and hyphens`);
+        return;
+    }
+    if (flag === "help") {
+        warnings.push(`${owner}: argument flag --help is reserved for generated help`);
+    }
+    if (flag.startsWith("no-")) {
+        warnings.push(`${owner}: argument flags may not start with no-`);
+    }
+    const existing = flags.get(flag);
+    if (existing === owner) {
+        warnings.push(`${owner}: flag --${flag} is defined more than once`);
+        return;
+    }
+    if (existing !== undefined) {
+        warnings.push(`${owner}: flag --${flag} collides with ${existing}`);
+        return;
+    }
+    flags.set(flag, owner);
+}
+
+function validateDefault(name: string, definition: ArgumentDefinition, warnings: string[]): void {
+    if (definition.default === undefined) {
+        return;
+    }
+    // eslint-disable-next-line no-use-before-define
+    const validation = validateArgumentValue(name, definition, definition.default);
+    if (!validation.ok) {
+        warnings.push(`${name}.default ${validation.message}`);
+    }
+}
+
+function validateUi(name: string, definition: ArgumentDefinition, warnings: string[]): void {
+    const ui = definition.ui;
+    if (ui === undefined) {
+        return;
+    }
+    if (ui.widget !== undefined) {
+        if (!SUPPORTED_WIDGETS.has(ui.widget)) {
+            warnings.push(`${name}.ui.widget must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`);
+        }
+        if (ui.widget === "number" && definition.type !== "number") {
+            warnings.push(`${name}.ui.widget number requires a number argument`);
+        }
+        if ((ui.widget === "toggle" || ui.widget === "confirm") && definition.type !== "boolean") {
+            warnings.push(`${name}.ui.widget ${ui.widget} requires a boolean argument`);
+        }
+        if ((ui.widget === "select" || ui.widget === "radio") && definition.type !== "enum") {
+            warnings.push(`${name}.ui.widget ${ui.widget} requires an enum argument`);
+        }
+        if (ui.widget === "multiselect" && definition.type !== "multi-enum") {
+            warnings.push(`${name}.ui.widget multiselect requires a multi-enum argument`);
+        }
+    }
+    if (ui.rows !== undefined && !isPositiveInteger(ui.rows)) {
+        warnings.push(`${name}.ui.rows must be a positive integer`);
+    }
+}
+
+function validateTypeSpecificRules(
+    name: string,
+    definition: ArgumentDefinition,
+    warnings: string[],
+): void {
+    if (definition.required === true && definition.default !== undefined) {
+        warnings.push(`${name}: required arguments may not define a default`);
+    }
+
+    if (definition.position !== undefined) {
+        if (!isNonNegativeInteger(definition.position)) {
+            warnings.push(`${name}.position must be a non-negative integer`);
+        }
+        if (definition.positional !== undefined && definition.positional !== false) {
+            warnings.push(`${name}: use either position or positional, not both`);
+        }
+    }
+    if (definition.positional !== undefined && definition.positional !== false) {
+        if (
+            typeof definition.positional === "number" &&
+            !isNonNegativeInteger(definition.positional)
+        ) {
+            warnings.push(`${name}.positional must be a non-negative integer`);
+        }
+    }
+
+    if (definition.type === "string") {
+        if (definition.minLength !== undefined && !isNonNegativeInteger(definition.minLength)) {
+            warnings.push(`${name}.minLength must be a non-negative integer`);
+        }
+        if (definition.maxLength !== undefined && !isNonNegativeInteger(definition.maxLength)) {
+            warnings.push(`${name}.maxLength must be a non-negative integer`);
+        }
+        if (
+            definition.minLength !== undefined &&
+            definition.maxLength !== undefined &&
+            definition.minLength > definition.maxLength
+        ) {
+            warnings.push(`${name}.minLength must be less than or equal to maxLength`);
+        }
+        if (definition.pattern !== undefined) {
+            try {
+                if (typeof definition.pattern === "string") {
+                    new RegExp(definition.pattern);
+                }
+            } catch {
+                warnings.push(`${name}.pattern must be a valid regular expression`);
+            }
+        }
+    }
+
+    if (definition.type === "number") {
+        if (definition.min !== undefined && !Number.isFinite(definition.min)) {
+            warnings.push(`${name}.min must be a finite number`);
+        }
+        if (definition.max !== undefined && !Number.isFinite(definition.max)) {
+            warnings.push(`${name}.max must be a finite number`);
+        }
+        if (
+            definition.min !== undefined &&
+            definition.max !== undefined &&
+            definition.min > definition.max
+        ) {
+            warnings.push(`${name}.min must be less than or equal to max`);
+        }
+    }
+
+    if (definition.type === "enum" || definition.type === "multi-enum") {
+        if (definition.values.length === 0) {
+            warnings.push(`${name}.values must be a non-empty list of strings`);
+        }
+        const seen = new Set<string>();
+        for (const value of definition.values) {
+            if (value.length === 0) {
+                warnings.push(`${name}.values may not contain empty strings`);
+            }
+            if (seen.has(value)) {
+                warnings.push(`${name}.values contains duplicate value ${value}`);
+            }
+            seen.add(value);
+        }
+    }
+
+    if (definition.type === "multi-enum") {
+        if (definition.minItems !== undefined && !isNonNegativeInteger(definition.minItems)) {
+            warnings.push(`${name}.minItems must be a non-negative integer`);
+        }
+        if (definition.maxItems !== undefined && !isNonNegativeInteger(definition.maxItems)) {
+            warnings.push(`${name}.maxItems must be a non-negative integer`);
+        }
+        if (
+            definition.minItems !== undefined &&
+            definition.maxItems !== undefined &&
+            definition.minItems > definition.maxItems
+        ) {
+            warnings.push(`${name}.minItems must be less than or equal to maxItems`);
+        }
+    }
+
+    validateDefault(name, definition, warnings);
+    validateUi(name, definition, warnings);
+}
+
+function validatePositionals(definitions: ArgumentDefinitions, warnings: string[]): void {
+    const positions = new Map<number, string>();
+    for (const [name, definition] of Object.entries(definitions)) {
+        let position = definition.position;
+        let label = "position";
+        if (position === undefined && typeof definition.positional === "number") {
+            position = definition.positional;
+            label = "positional";
+        }
+        if (position === undefined || !isNonNegativeInteger(position)) {
+            continue;
+        }
+        const existing = positions.get(position);
+        if (existing !== undefined) {
+            warnings.push(`${name}.${label} duplicates position ${position} from ${existing}`);
+            continue;
+        }
+        positions.set(position, name);
+    }
+
+    let optionalBeforeRequired: string | undefined;
+    for (const [name, definition] of positionalArgumentEntries(definitions)) {
+        const required = definition.required === true && definition.default === undefined;
+        if (!required) {
+            optionalBeforeRequired = name;
+            continue;
+        }
+        if (optionalBeforeRequired !== undefined) {
+            warnings.push(
+                `${name}: required positional arguments may not follow optional positional argument ${optionalBeforeRequired}`,
+            );
+        }
+    }
+}
+
+/** Validate argument names, flags, defaults, constraints, UI metadata, and positional layout. */
 export function validateArgumentDefinitions(definitions: ArgumentDefinitions): string[] {
     const warnings: string[] = [];
     const names = Object.keys(definitions);
@@ -144,25 +404,22 @@ export function validateArgumentDefinitions(definitions: ArgumentDefinitions): s
         }
 
         const definition = definitions[name];
-        if (definition === undefined || isPositionalArgument(definition)) {
+        if (definition === undefined) {
             continue;
         }
 
-        const flag = toKebabCase(name);
-        if (flag === "help") {
-            warnings.push(`${name}: argument flag --help is reserved for generated help`);
-        }
-        if (flag.startsWith("no-")) {
-            warnings.push(`${name}: argument flags may not start with no-`);
-        }
-        const existing = flags.get(flag);
-        if (existing !== undefined && existing !== name) {
-            warnings.push(`${name}: flag --${flag} collides with ${existing}`);
+        validateTypeSpecificRules(name, definition, warnings);
+        if (isPositionalArgument(definition)) {
             continue;
         }
-        flags.set(flag, name);
+
+        validateFlagName(name, argumentFlagName(name, definition), flags, warnings);
+        for (const alias of definition.aliases ?? []) {
+            validateFlagName(name, normalizeFlagName(alias), flags, warnings);
+        }
     }
 
+    validatePositionals(definitions, warnings);
     return warnings;
 }
 
@@ -173,8 +430,9 @@ export function createArgumentLookup(definitions: ArgumentDefinitions): Argument
         if (isPositionalArgument(definition)) {
             continue;
         }
-        byFlag.set(normalizeFlagName(name), name);
-        byFlag.set(toKebabCase(name), name);
+        for (const flag of argumentFlagNames(name, definition)) {
+            byFlag.set(flag, name);
+        }
     }
 
     return { byFlag, definitions };
@@ -217,7 +475,7 @@ export function coerceArgumentValue(
     name: string,
     options?: ArgumentMessageOptions,
 ): CoercedArgumentValue {
-    const displayName = formatArgumentMessageName(name, options);
+    const displayName = formatArgumentMessageName(name, definition, options);
 
     if (definition.type === "string") {
         return { ok: true, value: raw };
@@ -340,7 +598,7 @@ export function validateArgumentValue(
     value: ArgumentValue,
     options?: ArgumentMessageOptions,
 ): ArgumentValueValidation {
-    const displayName = formatArgumentMessageName(name, options);
+    const displayName = formatArgumentMessageName(name, definition, options);
 
     if (definition.required === true && value === undefined) {
         return { ok: false, message: `${displayName} is required` };
