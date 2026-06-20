@@ -460,6 +460,72 @@ function shouldSuggestFlag(
     return !provided.has(name) || definition.type === "multi-enum";
 }
 
+type CompletionDecision = {
+    items: AutocompleteItem[];
+    prefix: string;
+};
+
+type CompletionBranch = (
+    context: CommandLineContext,
+    tokens: Token[],
+) => MaybePromise<AutocompleteItem[] | undefined>;
+
+const VALUE_COMPLETION_BRANCHES: readonly CompletionBranch[] = [
+    (context) => inlineFlagValueCompletion(context),
+    (context) => valueCompletionForPreviousFlag(context),
+    (context, tokens) => nextPositionalValueCompletion(context, tokens),
+];
+
+function flagCompletionDecision(
+    context: CommandLineContext,
+    tokens: Token[],
+): CompletionDecision | undefined {
+    if (hasEndOfOptions(tokens)) {
+        return undefined;
+    }
+
+    const provided = providedArgumentNames(context.command, tokens);
+    const items = Object.entries(context.command.args)
+        .filter(([name, definition]) => shouldSuggestFlag(name, definition, provided))
+        .map(([name, definition]) => flagItem(name, definition))
+        .filter(
+            (item) =>
+                item.value.startsWith(context.currentPrefix) ||
+                item.label.startsWith(context.currentPrefix),
+        );
+
+    if (items.length === 0) {
+        return undefined;
+    }
+    return { items, prefix: context.currentPrefix };
+}
+
+async function resolveCompletionDecisionAsync(
+    context: CommandLineContext,
+    tokens: Token[],
+): Promise<CompletionDecision | undefined> {
+    for (const branch of VALUE_COMPLETION_BRANCHES) {
+        const items = await branch(context, tokens);
+        if (items !== undefined) {
+            return { items, prefix: context.currentPrefix };
+        }
+    }
+    return flagCompletionDecision(context, tokens);
+}
+
+function resolveCompletionDecisionSync(
+    context: CommandLineContext,
+    tokens: Token[],
+): CompletionDecision | undefined {
+    for (const branch of VALUE_COMPLETION_BRANCHES) {
+        const items = syncItems(branch(context, tokens));
+        if (items !== undefined) {
+            return { items, prefix: context.currentPrefix };
+        }
+    }
+    return flagCompletionDecision(context, tokens);
+}
+
 /**
  * Compute completions for Pi's command-level completion hook.
  *
@@ -482,8 +548,6 @@ export function getTypedArgumentCompletions<
         query = "";
     }
 
-    const optionsEnded = hasEndOfOptions(tokens);
-
     let previousToken = tokens[tokens.length - 2];
     if (argumentPrefix.endsWith(" ")) {
         previousToken = tokens[tokens.length - 1];
@@ -498,43 +562,9 @@ export function getTypedArgumentCompletions<
         context.previousToken = previousToken;
     }
 
-    const inlineValueItems = inlineFlagValueCompletion(context);
-    if (isPromiseLike(inlineValueItems)) {
-        return inlineValueItems.then((items) => items ?? null);
-    }
-    if (inlineValueItems !== undefined) {
-        return inlineValueItems;
-    }
-    const valueItems = valueCompletionForPreviousFlag(context);
-    if (isPromiseLike(valueItems)) {
-        return valueItems.then((items) => items ?? null);
-    }
-    if (valueItems !== undefined) {
-        return valueItems;
-    }
-
-    const positionalItems = nextPositionalValueCompletion(context, tokens);
-    if (isPromiseLike(positionalItems)) {
-        return positionalItems.then((items) => items ?? null);
-    }
-    if (positionalItems !== undefined) {
-        return positionalItems;
-    }
-
-    if (optionsEnded) {
-        return null;
-    }
-
-    const provided = providedArgumentNames(command, tokens);
-    const items = Object.entries(command.args)
-        .filter(([name, definition]) => shouldSuggestFlag(name, definition, provided))
-        .map(([name, definition]) => flagItem(name, definition))
-        .filter((item) => item.value.startsWith(query) || item.label.startsWith(query));
-
-    if (items.length === 0) {
-        return null;
-    }
-    return items;
+    return resolveCompletionDecisionAsync(context, tokens).then(
+        (decision) => decision?.items ?? null,
+    );
 }
 
 function commandLineContext(
@@ -621,52 +651,9 @@ export function getTypedAutocompleteSuggestions(
     }
 
     const tokens = tokenizeLoose(context.argsBeforeCursor);
-    const optionsEnded = hasEndOfOptions(tokens);
-
-    const inlineValueItems = syncItems(inlineFlagValueCompletion(context));
-    if (inlineValueItems !== undefined) {
-        return {
-            items: inlineValueItems,
-            prefix: context.currentPrefix,
-        };
-    }
-
-    const valueItems = syncItems(valueCompletionForPreviousFlag(context));
-    if (valueItems !== undefined) {
-        return {
-            items: valueItems,
-            prefix: context.currentPrefix,
-        };
-    }
-
-    const positionalItems = syncItems(nextPositionalValueCompletion(context, tokens));
-    if (positionalItems !== undefined) {
-        return {
-            items: positionalItems,
-            prefix: context.currentPrefix,
-        };
-    }
-
-    if (optionsEnded) {
+    const decision = resolveCompletionDecisionSync(context, tokens);
+    if (decision === undefined) {
         return undefined;
     }
-
-    const provided = providedArgumentNames(context.command, tokens);
-    const flagItems = Object.entries(context.command.args)
-        .filter(([name, definition]) => shouldSuggestFlag(name, definition, provided))
-        .map(([name, definition]) => flagItem(name, definition))
-        .filter(
-            (item) =>
-                item.value.startsWith(context.currentPrefix) ||
-                item.label.startsWith(context.currentPrefix),
-        );
-
-    if (flagItems.length === 0) {
-        return undefined;
-    }
-
-    return {
-        items: flagItems,
-        prefix: context.currentPrefix,
-    };
+    return decision;
 }

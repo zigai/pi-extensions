@@ -2,6 +2,7 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import {
     coerceArgumentValue,
     completionValuesForArgument,
+    createParseIssue,
     formatArgumentFlagName,
     isPositionalArgument,
     validateArgumentValue,
@@ -74,24 +75,41 @@ function decodeOccurrences(
     for (const occurrence of occurrences) {
         let next: ArgumentValue;
         if (occurrence.negated === true) {
+            if (occurrence.raw !== undefined) {
+                issues.push(
+                    createParseIssue(
+                        "invalid-value",
+                        `${occurrence.token ?? formatArgumentFlagName(name, definition)} does not accept a value`,
+                        name,
+                        occurrence.token,
+                    ),
+                );
+                continue;
+            }
             if (definition.type === "boolean") {
                 next = false;
             } else {
-                issues.push({
-                    kind: "invalid-value",
-                    name,
-                    message: `${formatArgumentFlagName(name, definition)} is not a boolean flag`,
-                });
+                issues.push(
+                    createParseIssue(
+                        "invalid-value",
+                        `${formatArgumentFlagName(name, definition)} is not a boolean flag`,
+                        name,
+                        occurrence.token,
+                    ),
+                );
                 continue;
             }
         } else if (definition.type === "boolean" && occurrence.raw === undefined) {
             next = true;
         } else if (occurrence.raw === undefined) {
-            issues.push({
-                kind: "missing-value",
-                name,
-                message: `${formatArgumentFlagName(name, definition)} needs a value`,
-            });
+            issues.push(
+                createParseIssue(
+                    "missing-value",
+                    `${formatArgumentFlagName(name, definition)} needs a value`,
+                    name,
+                    occurrence.token,
+                ),
+            );
             continue;
         } else {
             const coerced = coerceArgumentValue(definition, occurrence.raw, name);
@@ -125,7 +143,7 @@ function decodeOccurrences(
     return { ok: true, value };
 }
 
-function quoteSerializedValue(value: string, force = false): string {
+export function quoteSerializedValue(value: string, force = false): string {
     if (
         !force &&
         value.length > 0 &&

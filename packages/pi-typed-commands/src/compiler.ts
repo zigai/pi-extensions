@@ -107,16 +107,11 @@ class ImmutableReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
     }
 }
 
-/** Compile and validate a command definition into immutable parser/completion metadata. */
-export function compileTypedCommandDefinition<const TDefinitions extends ArgumentDefinitions>(
+/** Build immutable parser/completion metadata for an already accepted argument definition map. */
+export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDefinitions>(
     definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
-): CompileResult<TDefinitions> {
+): CompiledCommand<TDefinitions> {
     const flattenedDefinitions = flattenGroupedArgumentDefinitions(definition.args);
-    const diagnostics = validateArgumentDefinitions(flattenedDefinitions).map(definitionDiagnostic);
-    if (diagnostics.length > 0) {
-        return { ok: false, diagnostics };
-    }
-
     const args = cloneAndFreezeDefinitions(flattenedDefinitions) as Readonly<TDefinitions>;
     const lookup = createArgumentLookup(args as ArgumentDefinitions);
     const argumentEntries = orderedArgumentEntries(args as ArgumentDefinitions);
@@ -125,7 +120,7 @@ export function compileTypedCommandDefinition<const TDefinitions extends Argumen
             compileArgumentBehavior(name, argumentDefinition),
         ),
     );
-    const command: CompiledCommand<TDefinitions> = Object.freeze({
+    return Object.freeze({
         name: definition.name,
         description: definition.description,
         args,
@@ -144,7 +139,19 @@ export function compileTypedCommandDefinition<const TDefinitions extends Argumen
         ),
         diagnostics: Object.freeze([]),
     });
-    return { ok: true, command };
+}
+
+/** Compile and validate a command definition into immutable parser/completion metadata. */
+export function compileTypedCommandDefinition<const TDefinitions extends ArgumentDefinitions>(
+    definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
+): CompileResult<TDefinitions> {
+    const flattenedDefinitions = flattenGroupedArgumentDefinitions(definition.args);
+    const diagnostics = validateArgumentDefinitions(flattenedDefinitions).map(definitionDiagnostic);
+    if (diagnostics.length > 0) {
+        return { ok: false, diagnostics };
+    }
+
+    return { ok: true, command: compileTypedCommandGrammar(definition) };
 }
 
 /** Compile a command definition or throw a startup-style error containing all diagnostics. */
