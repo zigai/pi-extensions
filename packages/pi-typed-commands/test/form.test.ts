@@ -320,6 +320,61 @@ void describe("dense argument form", () => {
 });
 
 void describe("sequential argument form", () => {
+    void it("runs command refinement after collecting form values", async () => {
+        const definitions = {
+            start: { type: "number", required: true },
+            end: { type: "number", required: true },
+        } satisfies ArgumentDefinitions;
+
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "range",
+            description: "Range command",
+            args: definitions,
+            handler() {},
+            refine(args) {
+                if (
+                    typeof args.start === "number" &&
+                    typeof args.end === "number" &&
+                    args.start > args.end
+                ) {
+                    return [{ message: "start must not exceed end", path: ["start"] }];
+                }
+                return [];
+            },
+            formSymbols: symbols,
+        };
+
+        const parsed: ParsedCommandArguments = {
+            values: { start: 10 },
+            provided: new Set(["start"]),
+            issues: [
+                {
+                    kind: "missing-required",
+                    message: "--end is required",
+                    name: "end",
+                },
+            ],
+            mode: "run",
+        };
+        const notifications: string[] = [];
+        const ctx = {
+            mode: "rpc",
+            ui: {
+                notify(message: string) {
+                    notifications.push(message);
+                },
+                input() {
+                    return Promise.resolve("5");
+                },
+            },
+        } as unknown as ExtensionCommandContext;
+
+        const result = await openArgumentForm(command, parsed, "missing", ctx);
+
+        assert.equal(result, undefined);
+        assert.deepEqual(notifications, ["• end is required", "• start must not exceed end"]);
+    });
+
     void it("prompts for multi-enum values outside TUI mode", async () => {
         const definitions = {
             tags: {

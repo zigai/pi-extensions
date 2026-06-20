@@ -13,6 +13,7 @@ import {
     type TUI,
 } from "@earendil-works/pi-tui";
 import { formatFlagName, toKebabCase } from "./names.js";
+import { getTypedCommandRefinementIssues } from "./parser.js";
 import {
     applyArgumentDefault,
     coerceArgumentValue,
@@ -1221,9 +1222,20 @@ export async function openArgumentForm<TDefinitions extends Record<string, Argum
     mode: FormMode,
     ctx: ExtensionCommandContext,
 ): Promise<Record<string, ArgumentValue> | undefined> {
+    let result: Record<string, ArgumentValue> | undefined;
     if (ctx.mode === "tui") {
-        return openDenseArgumentForm(command, parsed, mode, ctx);
+        result = await openDenseArgumentForm(command, parsed, mode, ctx);
+    } else {
+        result = await new SequentialArgumentForm(command, parsed, mode, ctx).run();
+    }
+    if (result === undefined) {
+        return undefined;
     }
 
-    return new SequentialArgumentForm(command, parsed, mode, ctx).run();
+    const refinementIssues = getTypedCommandRefinementIssues(command, result, parsed.provided);
+    if (refinementIssues.length > 0) {
+        ctx.ui.notify(formatIssues(refinementIssues.map(formatFormIssueMessage)), "error");
+        return undefined;
+    }
+    return result;
 }

@@ -281,6 +281,24 @@ function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
     return value;
 }
 
+export function getTypedCommandRefinementIssues<TDefinitions extends ArgumentDefinitions>(
+    command: { refine?: TypedCommandRefinement<TDefinitions> },
+    values: Record<string, ArgumentValue>,
+    provided: ReadonlySet<string>,
+): ParseIssue[] {
+    const refine = command.refine;
+    if (refine === undefined) {
+        return [];
+    }
+    const issues = refine(values as Partial<InferArguments<TDefinitions>>, {
+        provided: provided as ReadonlySet<keyof TDefinitions & string>,
+    });
+    return issues.map((issue) => {
+        const name = issue.path?.[0];
+        return createParseIssue("invalid-value", issue.message, name);
+    });
+}
+
 class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     private readonly command: ParsableTypedCommand<TDefinitions>;
     private readonly grammar: TypedCommandGrammar<TDefinitions>;
@@ -599,17 +617,16 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     }
 
     private addRefinementIssues(): void {
-        const refine = this.command.refine;
-        if (refine === undefined || this.result.issues.length > 0) {
+        if (this.result.issues.length > 0) {
             return;
         }
-        const issues = refine(this.result.values as Partial<InferArguments<TDefinitions>>, {
-            provided: this.result.provided as ReadonlySet<keyof TDefinitions & string>,
-        });
-        for (const issue of issues) {
-            const name = issue.path?.[0];
-            this.result.issues.push(createParseIssue("invalid-value", issue.message, name));
-        }
+        this.result.issues.push(
+            ...getTypedCommandRefinementIssues(
+                this.command,
+                this.result.values,
+                this.result.provided,
+            ),
+        );
     }
 }
 
