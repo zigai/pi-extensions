@@ -123,6 +123,8 @@ void describe("typed command schema", () => {
             text: { type: "string", minLength: 5, maxLength: 2, pattern: "[" },
             choice: { type: "enum", values: ["dev", "dev", ""] },
             many: { type: "multi-enum", values: ["a"], minItems: 3, maxItems: 1 },
+            commaMulti: { type: "multi-enum", values: ["a,b"] },
+            badCompletionTimeout: { type: "string", completionTimeoutMs: -1 },
             defaulted: { type: "string", required: true, default: "main" },
             first: { type: "string", positional: 0 },
             second: { type: "string", required: true, positional: 1 },
@@ -140,6 +142,11 @@ void describe("typed command schema", () => {
         assert.match(text, /choice\.values contains duplicate value dev/);
         assert.match(text, /choice\.values may not contain empty strings/);
         assert.match(text, /many\.minItems must be less than or equal to maxItems/);
+        assert.match(text, /commaMulti\.values may not contain commas/);
+        assert.match(
+            text,
+            /badCompletionTimeout\.completionTimeoutMs must be a non-negative integer/,
+        );
         assert.match(text, /defaulted: required arguments may not define a default/);
         assert.match(
             text,

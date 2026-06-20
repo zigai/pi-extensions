@@ -75,10 +75,10 @@ Users of your extension can then run:
 | `number`     | Numeric values                             | `integer`, `min`, `max`, `default`                                 |
 | `boolean`    | Flags and toggles                          | `--flag`, `--flag true`, `--no-flag`, `default`                    |
 | `enum`       | One value from a fixed set                 | `values`, `default`, `position`                                    |
-| `multi-enum` | Multiple values from a fixed set           | repeated flags, comma-separated values, `minItems`, `maxItems`     |
+| `multi-enum` | Multiple values from a fixed set           | repeated flags, comma-separated values, no commas in values        |
 | `group()`    | Nested handler objects with flat CLI flags | `group({ host, port })` becomes flags like `--database-host`       |
 
-All argument definitions can also use common metadata such as `description`, `title`, `required`, `flag`, `aliases`, `placeholder`, `occurrence`, `complete`, and `ui`.
+All argument definitions can also use common metadata such as `description`, `title`, `required`, `flag`, `aliases`, `placeholder`, `occurrence`, `complete`, `completionTimeoutMs`, and `ui`.
 
 ## Documentation
 

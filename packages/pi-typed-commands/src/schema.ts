@@ -272,6 +272,12 @@ function validateTypeSpecificRules(
     if (definition.occurrence === "append" && definition.type !== "multi-enum") {
         warnings.push(`${name}.occurrence append is only valid for multi-enum arguments`);
     }
+    if (
+        definition.completionTimeoutMs !== undefined &&
+        !isNonNegativeInteger(definition.completionTimeoutMs)
+    ) {
+        warnings.push(`${name}.completionTimeoutMs must be a non-negative integer`);
+    }
 
     if (definition.required === true && definition.default !== undefined) {
         warnings.push(`${name}: required arguments may not define a default`);
@@ -351,6 +357,9 @@ function validateTypeSpecificRules(
         for (const value of definition.values) {
             if (value.length === 0) {
                 warnings.push(`${name}.values may not contain empty strings`);
+            }
+            if (definition.type === "multi-enum" && value.includes(",")) {
+                warnings.push(`${name}.values may not contain commas`);
             }
             if (seen.has(value)) {
                 warnings.push(`${name}.values contains duplicate value ${value}`);

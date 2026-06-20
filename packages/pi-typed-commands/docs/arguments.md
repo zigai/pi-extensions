@@ -27,6 +27,7 @@ Most arguments can use:
 - `rest` - consume remaining positional values;
 - `occurrence` - duplicate flag policy;
 - `complete` - value completion provider;
+- `completionTimeoutMs` - async completion timeout in milliseconds, defaulting to 1000 and disabled with `0`;
 - `ui` - form presentation metadata.
 
 `required: true` and `default` are mutually exclusive. A required argument must come from the user. A defaulted argument is optional but non-null in the handler.
@@ -76,7 +77,7 @@ Rules enforced by the compiler include:
 | `last`   | Keep the last value.                                             |
 | `append` | Append values. Valid for `multi-enum`.                           |
 
-`multi-enum` defaults to append and deduplicates selected values.
+`multi-enum` defaults to append and deduplicates selected values. Because CLI multi-enum values are comma-separated, individual `multi-enum.values` entries may not contain commas.
 
 ## Groups
 
