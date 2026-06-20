@@ -168,6 +168,8 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
     occurrence?: ArgumentOccurrencePolicy;
     /** Optional completion provider for this argument's values. */
     complete?: TypedCompletionProvider;
+    /** Maximum milliseconds to wait for async completions. Defaults to 1000; set to 0 to disable. */
+    completionTimeoutMs?: number;
     /** Explicit positional index. Prefer this over legacy `positional: number`. */
     position?: number;
     /** Consume all remaining positional tokens into this positional argument. */

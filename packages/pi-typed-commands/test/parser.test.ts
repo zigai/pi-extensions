@@ -586,6 +586,71 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
+    void it("contains invalid and throwing completion providers", async () => {
+        const throwingCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                ref: {
+                    type: "string",
+                    complete() {
+                        throw new Error("boom");
+                    },
+                },
+            },
+        };
+        const invalidCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                ref: {
+                    type: "string",
+                    complete: () =>
+                        [
+                            { value: 123 },
+                            { value: "feature", label: 456, description: "valid item" },
+                            { value: "quoted", replacement: '"quoted value"' },
+                        ] as never,
+                },
+            },
+        };
+
+        assert.equal(await getTypedArgumentCompletions(throwingCommand, "--ref f"), null);
+        const suggestions = await getTypedArgumentCompletions(invalidCommand, "--ref f");
+
+        assert.deepEqual(
+            suggestions?.map((item) => item.value),
+            ["feature", '"quoted value"'],
+        );
+        assert.deepEqual(
+            suggestions?.map((item) => item.label),
+            ["feature", "quoted"],
+        );
+    });
+
+    void it("times out async completion providers and passes an abort signal", async () => {
+        let sawSignal = false;
+        let aborted = false;
+        const timeoutCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                ref: {
+                    type: "string",
+                    completionTimeoutMs: 1,
+                    complete(_query, context) {
+                        sawSignal = context.signal !== undefined;
+                        context.signal?.addEventListener("abort", () => {
+                            aborted = true;
+                        });
+                        return new Promise(() => {});
+                    },
+                },
+            },
+        };
+
+        assert.equal(await getTypedArgumentCompletions(timeoutCommand, "--ref f"), null);
+        assert.equal(sawSignal, true);
+        assert.equal(aborted, true);
+    });
+
     void it("completes command widget values from typed commands", async () => {
         registerTypedCommandMetadata(command);
         const commandArgument: RegisteredTypedCommand = {
@@ -647,6 +712,39 @@ void describe("getTypedAutocompleteSuggestions", () => {
         assert.deepEqual(
             suggestions?.items.map((item) => item.value),
             ["web", "worker"],
+        );
+    });
+
+    void it("uses quoted source prefixes for editor value completions", () => {
+        const quoteCommand: RegisteredTypedCommand = {
+            ...command,
+            name: "quote-complete",
+            args: {
+                ref: {
+                    type: "string",
+                    complete: (query) =>
+                        ["feature branch", 'feat"quote', String.raw`path\name`]
+                            .filter((value) => value.startsWith(query))
+                            .map((value) => ({ value })),
+                },
+            },
+        };
+        registerTypedCommandMetadata(quoteCommand);
+
+        const quotedLine = '/quote-complete --ref "fea';
+        const quoted = getTypedAutocompleteSuggestions([quotedLine], 0, quotedLine.length);
+        const inlineLine = '/quote-complete --ref="pa';
+        const inline = getTypedAutocompleteSuggestions([inlineLine], 0, inlineLine.length);
+
+        assert.equal(quoted?.prefix, '"fea');
+        assert.deepEqual(
+            quoted?.items.map((item) => item.value),
+            [JSON.stringify("feature branch"), JSON.stringify('feat"quote')],
+        );
+        assert.equal(inline?.prefix, '--ref="pa');
+        assert.deepEqual(
+            inline?.items.map((item) => item.value),
+            [`--ref=${JSON.stringify(String.raw`path\name`)}`],
         );
     });
 });

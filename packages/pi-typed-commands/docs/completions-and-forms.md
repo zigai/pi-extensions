@@ -30,9 +30,9 @@ The completion context contains:
 - `provided` - names supplied by the user;
 - `cwd` - active working directory when available;
 - `ctx` - Pi extension context when completions run through the Pi adapter;
-- `signal` - optional cancellation signal for future adapters.
+- `signal` - cancellation signal that is aborted when the completion request times out.
 
-Completion providers can return values synchronously or asynchronously.
+Completion providers can return values synchronously or asynchronously. Provider failures are contained: thrown errors, rejected promises, and invalid items produce no suggestions instead of breaking completion. Async providers time out after 1000 ms by default; set `completionTimeoutMs` on the argument to override that, or `0` to disable the timeout.
 
 ## Replacement text
 

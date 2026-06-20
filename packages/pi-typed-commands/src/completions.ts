@@ -28,6 +28,7 @@ type CommandLineContext = {
     command: RegisteredTypedCommand;
     argsBeforeCursor: string;
     currentPrefix: string;
+    replacementPrefix: string;
     cwd?: string;
     ctx?: ExtensionContext;
     previousToken?: Token;
@@ -36,6 +37,8 @@ type CommandLineContext = {
 type ValueCompletionItem = AutocompleteItem & {
     replacementReady?: boolean;
 };
+
+const DEFAULT_COMPLETION_TIMEOUT_MS = 1000;
 
 function tokenizeLoose(input: string): Token[] {
     return lexTypedArgumentString(input).tokens;
@@ -111,6 +114,144 @@ function isPromiseLike<T>(value: MaybePromise<T> | undefined): value is Promise<
     return value !== undefined && typeof (value as { then?: unknown }).then === "function";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizedCompletionTimeoutMs(definition: ArgumentDefinition): number | undefined {
+    const timeoutMs = definition.completionTimeoutMs ?? DEFAULT_COMPLETION_TIMEOUT_MS;
+    if (timeoutMs <= 0) {
+        return undefined;
+    }
+    return timeoutMs;
+}
+
+type ProviderCompletionItem = {
+    value: string;
+    label?: string;
+    description?: string;
+    replacement?: string;
+};
+
+function normalizeProviderCompletionItems(value: unknown): ProviderCompletionItem[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const items: ProviderCompletionItem[] = [];
+    for (const item of value) {
+        if (!isRecord(item) || typeof item.value !== "string") {
+            continue;
+        }
+        const normalized: ProviderCompletionItem = { value: item.value };
+        if (typeof item.label === "string") {
+            normalized.label = item.label;
+        }
+        if (typeof item.description === "string") {
+            normalized.description = item.description;
+        }
+        if (typeof item.replacement === "string") {
+            normalized.replacement = item.replacement;
+        }
+        items.push(normalized);
+    }
+    return items;
+}
+
+function mapProviderCompletionItems(value: unknown): ValueCompletionItem[] {
+    return normalizeProviderCompletionItems(value).map((item) => {
+        const mapped: ValueCompletionItem = {
+            value: item.replacement ?? item.value,
+            label: item.label ?? item.value,
+            replacementReady: item.replacement !== undefined,
+        };
+        if (item.description !== undefined) {
+            mapped.description = item.description;
+        }
+        return mapped;
+    });
+}
+
+function withCompletionTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number | undefined,
+    controller: AbortController,
+): Promise<T | undefined> {
+    if (timeoutMs === undefined) {
+        return promise.then(
+            (value) => value,
+            () => undefined,
+        );
+    }
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            controller.abort();
+            resolve(undefined);
+        }, timeoutMs);
+        promise.then(
+            (value) => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            () => {
+                clearTimeout(timer);
+                resolve(undefined);
+            },
+        );
+    });
+}
+
+function completionContext(
+    context: CommandLineContext,
+    signal?: AbortSignal,
+): TypedCompletionContext {
+    const parsed = parseTypedCommandArgs(context.command, context.argsBeforeCursor);
+    const result: TypedCompletionContext = {
+        values: parsed.values,
+        provided: parsed.provided,
+    };
+    if (context.cwd !== undefined) {
+        result.cwd = context.cwd;
+    }
+    if (context.ctx !== undefined) {
+        result.ctx = context.ctx;
+    }
+    if (signal !== undefined) {
+        result.signal = signal;
+    }
+    return result;
+}
+
+function providerArgumentValueItems(
+    definition: ArgumentDefinition,
+    query: string,
+    context: CommandLineContext,
+): MaybePromise<ValueCompletionItem[]> {
+    if (definition.complete === undefined) {
+        return [];
+    }
+
+    const controller = new AbortController();
+    let completed: MaybePromise<readonly unknown[]>;
+    try {
+        completed = definition.complete(
+            query,
+            completionContext(context, controller.signal),
+        ) as MaybePromise<readonly unknown[]>;
+    } catch {
+        controller.abort();
+        return [];
+    }
+
+    if (isPromiseLike(completed)) {
+        return withCompletionTimeout(
+            completed,
+            normalizedCompletionTimeoutMs(definition),
+            controller,
+        ).then((items) => mapProviderCompletionItems(items));
+    }
+    return mapProviderCompletionItems(completed);
+}
+
 function staticArgumentValueItems(
     definition: ArgumentDefinition,
     query: string,
@@ -124,21 +265,6 @@ function staticArgumentValueItems(
             }
             return item;
         });
-}
-
-function completionContext(context: CommandLineContext): TypedCompletionContext {
-    const parsed = parseTypedCommandArgs(context.command, context.argsBeforeCursor);
-    const result: TypedCompletionContext = {
-        values: parsed.values,
-        provided: parsed.provided,
-    };
-    if (context.cwd !== undefined) {
-        result.cwd = context.cwd;
-    }
-    if (context.ctx !== undefined) {
-        result.ctx = context.ctx;
-    }
-    return result;
 }
 
 function commandCompletionItems(query: string): AutocompleteItem[] {
@@ -203,39 +329,16 @@ function argumentValueItems(
     query: string,
     context: CommandLineContext,
 ): MaybePromise<ValueCompletionItem[]> {
-    if (definition.complete === undefined) {
-        if (definition.ui?.widget === "path") {
-            return pathCompletionItems(query, context.cwd);
-        }
-        if (definition.ui?.widget === "command") {
-            return commandCompletionItems(query);
-        }
-        return staticArgumentValueItems(definition, query);
+    if (definition.complete !== undefined) {
+        return providerArgumentValueItems(definition, query, context);
     }
-    const completed = definition.complete(query, completionContext(context));
-    const mapItems = (
-        items: readonly {
-            value: string;
-            label?: string;
-            description?: string;
-            replacement?: string;
-        }[],
-    ): ValueCompletionItem[] =>
-        items.map((item) => {
-            const mapped: ValueCompletionItem = {
-                value: item.replacement ?? item.value,
-                label: item.label ?? item.value,
-                replacementReady: item.replacement !== undefined,
-            };
-            if (item.description !== undefined) {
-                mapped.description = item.description;
-            }
-            return mapped;
-        });
-    if (isPromiseLike(completed)) {
-        return completed.then(mapItems);
+    if (definition.ui?.widget === "path") {
+        return pathCompletionItems(query, context.cwd);
     }
-    return mapItems(completed);
+    if (definition.ui?.widget === "command") {
+        return commandCompletionItems(query);
+    }
+    return staticArgumentValueItems(definition, query);
 }
 
 function syncItems<T>(items: MaybePromise<T> | undefined): T | undefined {
@@ -497,7 +600,7 @@ function flagCompletionDecision(
     if (items.length === 0) {
         return undefined;
     }
-    return { items, prefix: context.currentPrefix };
+    return { items, prefix: context.replacementPrefix };
 }
 
 async function resolveCompletionDecisionAsync(
@@ -507,7 +610,7 @@ async function resolveCompletionDecisionAsync(
     for (const branch of VALUE_COMPLETION_BRANCHES) {
         const items = await branch(context, tokens);
         if (items !== undefined) {
-            return { items, prefix: context.currentPrefix };
+            return { items, prefix: context.replacementPrefix };
         }
     }
     return flagCompletionDecision(context, tokens);
@@ -520,7 +623,7 @@ function resolveCompletionDecisionSync(
     for (const branch of VALUE_COMPLETION_BRANCHES) {
         const items = syncItems(branch(context, tokens));
         if (items !== undefined) {
-            return { items, prefix: context.currentPrefix };
+            return { items, prefix: context.replacementPrefix };
         }
     }
     return flagCompletionDecision(context, tokens);
@@ -540,12 +643,15 @@ export function getTypedArgumentCompletions<
     const tokens = tokenizeLoose(argumentPrefix);
     const lastToken = tokens[tokens.length - 1];
     let query = "";
+    let replacementPrefix = "";
     if (lastToken !== undefined) {
         query = lastToken.value;
+        replacementPrefix = lastToken.raw;
     }
 
     if (argumentPrefix.endsWith(" ")) {
         query = "";
+        replacementPrefix = "";
     }
 
     let previousToken = tokens[tokens.length - 2];
@@ -556,6 +662,7 @@ export function getTypedArgumentCompletions<
         command: command as RegisteredTypedCommand,
         argsBeforeCursor: argumentPrefix,
         currentPrefix: query,
+        replacementPrefix,
         cwd: process.cwd(),
     };
     if (previousToken !== undefined) {
@@ -602,10 +709,12 @@ function commandLineContext(
 
     const tokens = tokenizeLoose(argsBeforeCursor);
     let currentPrefix = "";
+    let replacementPrefix = "";
     if (!argsBeforeCursor.endsWith(" ")) {
         const lastToken = tokens[tokens.length - 1];
         if (lastToken !== undefined) {
             currentPrefix = lastToken.value;
+            replacementPrefix = lastToken.raw;
         }
     }
 
@@ -620,6 +729,7 @@ function commandLineContext(
         command,
         argsBeforeCursor,
         currentPrefix,
+        replacementPrefix,
     };
     if (cwd !== undefined) {
         context.cwd = cwd;
