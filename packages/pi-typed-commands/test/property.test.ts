@@ -1,54 +1,72 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import fc from "fast-check";
-import { defineTypedCommand } from "../src/index.js";
+import {
+    compileTypedCommandDefinition,
+    defineTypedCommand,
+    parseTypedCommandArgs,
+    serializeTypedCommandArgs,
+} from "../src/index.js";
 import { renderTypedSkillInvocation } from "../src/skills.js";
 
 const PROPERTY_RUNS = 300;
 
-const roundTripCommand = defineTypedCommand({
+const roundTripArgs = {
+    action: {
+        type: "enum",
+        values: ["deploy", "rollback"],
+        required: true,
+        position: 0,
+    },
+    path: {
+        type: "string",
+        required: true,
+        position: 1,
+    },
+    ref: {
+        type: "string",
+        required: true,
+    },
+    dryRun: {
+        type: "boolean",
+        required: true,
+    },
+    count: {
+        type: "number",
+        integer: true,
+        min: -1000,
+        max: 1000,
+        required: true,
+    },
+    target: {
+        type: "enum",
+        values: ["dev", "staging", "prod"],
+        required: true,
+    },
+    tags: {
+        type: "multi-enum",
+        values: ["api", "web", "worker"],
+        required: true,
+        minItems: 1,
+    },
+} as const;
+
+const roundTripCommandDefinition = {
     name: "property-demo",
     description: "Command used by property tests",
-    args: {
-        action: {
-            type: "enum",
-            values: ["deploy", "rollback"],
-            required: true,
-            position: 0,
-        },
-        path: {
-            type: "string",
-            required: true,
-            position: 1,
-        },
-        ref: {
-            type: "string",
-            required: true,
-        },
-        dryRun: {
-            type: "boolean",
-            required: true,
-        },
-        count: {
-            type: "number",
-            integer: true,
-            min: -1000,
-            max: 1000,
-            required: true,
-        },
-        target: {
-            type: "enum",
-            values: ["dev", "staging", "prod"],
-            required: true,
-        },
-        tags: {
-            type: "multi-enum",
-            values: ["api", "web", "worker"],
-            required: true,
-            minItems: 1,
-        },
-    },
-});
+    args: roundTripArgs,
+};
+
+const roundTripCommand = defineTypedCommand(roundTripCommandDefinition);
+
+const compiledRoundTripCommand = (() => {
+    const compiled = compileTypedCommandDefinition(roundTripCommandDefinition);
+    assert.equal(compiled.ok, true);
+    if (!compiled.ok) {
+        throw new Error("property command did not compile");
+    }
+    return { ...roundTripCommandDefinition, compiled: compiled.command };
+})();
 
 const roundTripValues = fc.record({
     action: fc.constantFrom("deploy", "rollback"),
@@ -89,6 +107,22 @@ void describe("parser and serializer properties", () => {
                 assert.doesNotThrow(() => {
                     roundTripCommand.parse(raw);
                 });
+            }),
+            { numRuns: PROPERTY_RUNS },
+        );
+    });
+
+    void it("keeps compiled and uncompiled grammar behavior equivalent", () => {
+        fc.assert(
+            fc.property(boundedString, roundTripValues, (raw, values) => {
+                assert.deepEqual(
+                    parseTypedCommandArgs(compiledRoundTripCommand, raw),
+                    parseTypedCommandArgs(roundTripCommandDefinition, raw),
+                );
+                assert.equal(
+                    serializeTypedCommandArgs(compiledRoundTripCommand, values),
+                    serializeTypedCommandArgs(roundTripCommandDefinition, values),
+                );
             }),
             { numRuns: PROPERTY_RUNS },
         );

@@ -66,17 +66,27 @@ type ParsableTypedCommand<TDefinitions extends ArgumentDefinitions> = {
 
 type TypedCommandGrammar<TDefinitions extends ArgumentDefinitions> = CompiledCommand<TDefinitions>;
 
+const grammarCache = new WeakMap<object, CompiledCommand>();
+
 function commandGrammar<TDefinitions extends ArgumentDefinitions>(
     command: ParsableTypedCommand<TDefinitions>,
 ): TypedCommandGrammar<TDefinitions> {
-    return (
-        command.compiled ??
-        compileTypedCommandGrammar({
-            name: "typed-command",
-            description: "",
-            args: command.args,
-        })
-    );
+    if (command.compiled !== undefined) {
+        return command.compiled;
+    }
+
+    const cached = grammarCache.get(command);
+    if (cached !== undefined) {
+        return cached as TypedCommandGrammar<TDefinitions>;
+    }
+
+    const grammar = compileTypedCommandGrammar({
+        name: "typed-command",
+        description: "",
+        args: command.args,
+    });
+    grammarCache.set(command, grammar);
+    return grammar;
 }
 
 function isHelpTokenValue(value: string): boolean {
