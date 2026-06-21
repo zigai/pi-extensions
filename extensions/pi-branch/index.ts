@@ -7,7 +7,8 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { registerTypedCommand } from "pi-typed-commands";
+import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands/pi";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import * as path from "node:path";
@@ -72,6 +73,27 @@ type SessionInfoEntry = {
     timestamp: string;
     name: string;
 };
+
+type CommandResult = {
+    code: number;
+    stdout?: string;
+    stderr?: string;
+};
+
+function runCommand(command: string, args: string[]): Promise<CommandResult> {
+    return new Promise((resolve) => {
+        execFile(command, args, { encoding: "utf8" }, (error, stdout, stderr) => {
+            let code = 0;
+            if (error !== null) {
+                code = 1;
+                if (typeof error.code === "number") {
+                    code = error.code;
+                }
+            }
+            resolve({ code, stdout, stderr });
+        });
+    });
+}
 
 function shellQuote(value: string): string {
     if (value.length === 0) {
@@ -201,14 +223,14 @@ function describeLaunchTarget(target: LaunchTarget): string {
     }
 }
 
-async function getCurrentTmuxWindowTarget(pi: ExtensionAPI): Promise<string | undefined> {
+async function getCurrentTmuxWindowTarget(): Promise<string | undefined> {
     const targetPane = process.env.TMUX_PANE?.trim();
     if (targetPane === undefined || targetPane.length === 0) {
         return undefined;
     }
 
     try {
-        const result = await pi.exec("tmux", [
+        const result = await runCommand("tmux", [
             "display-message",
             "-p",
             "-t",
@@ -280,8 +302,8 @@ function buildForkName(baseName: string, index: number): string {
     return `${baseName} ${branchNumber}`;
 }
 
-function getBaseSessionName(pi: ExtensionAPI, ctx: ExtensionCommandContext): string {
-    const sessionName = pi.getSessionName();
+function getBaseSessionName(ctx: ExtensionCommandContext): string {
+    const sessionName = ctx.sessionManager.getSessionName();
     if (sessionName !== undefined && sessionName.trim().length > 0) {
         return sessionName.trim();
     }
@@ -349,7 +371,6 @@ async function createForkedSession(
 }
 
 async function launchForkedPi(
-    pi: ExtensionAPI,
     target: LaunchTarget,
     ctx: ExtensionCommandContext,
     sessionFile: string | undefined,
@@ -373,7 +394,7 @@ async function launchForkedPi(
                 ctx.cwd,
                 buildPiShellCommand(sessionFile, prompt, modelArg, keepOpen),
             );
-            return pi.exec("tmux", tmuxArgs);
+            return runCommand("tmux", tmuxArgs);
         }
         case "tmux-pane": {
             const tmuxArgs = ["split-window", "-h", "-c", ctx.cwd];
@@ -382,10 +403,10 @@ async function launchForkedPi(
                 tmuxArgs.push("-t", targetPane);
             }
             tmuxArgs.push(buildPiShellCommand(sessionFile, prompt, modelArg, keepOpen));
-            return pi.exec("tmux", tmuxArgs);
+            return runCommand("tmux", tmuxArgs);
         }
         case "ghostty-split":
-            return pi.exec("osascript", [
+            return runCommand("osascript", [
                 "-e",
                 GHOSTTY_SPLIT_SCRIPT,
                 "--",
@@ -394,7 +415,7 @@ async function launchForkedPi(
             ]);
         case "ghostty-window":
             if (process.platform === "darwin") {
-                return pi.exec("osascript", [
+                return runCommand("osascript", [
                     "-e",
                     GHOSTTY_WINDOW_SCRIPT,
                     "--",
@@ -404,7 +425,7 @@ async function launchForkedPi(
             }
 
             if (keepOpen) {
-                return pi.exec("ghostty", [
+                return runCommand("ghostty", [
                     "+new-window",
                     `--working-directory=${ctx.cwd}`,
                     "-e",
@@ -414,7 +435,7 @@ async function launchForkedPi(
                 ]);
             }
 
-            return pi.exec("ghostty", [
+            return runCommand("ghostty", [
                 "+new-window",
                 `--working-directory=${ctx.cwd}`,
                 "-e",
@@ -424,7 +445,6 @@ async function launchForkedPi(
 }
 
 async function launchOneFork(
-    pi: ExtensionAPI,
     ctx: ExtensionCommandContext,
     launchTargets: LaunchTarget[],
     prompt: string,
@@ -443,7 +463,6 @@ async function launchOneFork(
     for (const target of launchTargets) {
         try {
             const result = await launchForkedPi(
-                pi,
                 target,
                 ctx,
                 forkedSessionFile,
@@ -475,11 +494,7 @@ async function launchOneFork(
     return { sessionFile: forkedSessionFile, failures };
 }
 
-async function handleParsedBranch(
-    pi: ExtensionAPI,
-    parsed: ParsedArgs,
-    ctx: ExtensionCommandContext,
-): Promise<void> {
+async function handleParsedBranch(parsed: ParsedArgs, ctx: ExtensionCommandContext): Promise<void> {
     const launchTargets = getLaunchTargets(parsed.mode);
     if (launchTargets.length === 0) {
         ctx.ui.notify(
@@ -490,19 +505,18 @@ async function handleParsedBranch(
     }
 
     const wasBusy = !ctx.isIdle();
-    const baseSessionName = getBaseSessionName(pi, ctx);
+    const baseSessionName = getBaseSessionName(ctx);
     const successfulSessions: string[] = [];
     const failedReasons: string[] = [];
     let launchedVia: LaunchTarget | undefined;
     let tmuxWindowTarget: string | undefined;
     if (launchTargets.includes("tmux-window")) {
-        tmuxWindowTarget = await getCurrentTmuxWindowTarget(pi);
+        tmuxWindowTarget = await getCurrentTmuxWindowTarget();
     }
 
     for (let index = 0; index < parsed.count; index += 1) {
         const launchName = buildForkName(baseSessionName, index);
         const result = await launchOneFork(
-            pi,
             ctx,
             launchTargets,
             parsed.prompt,
@@ -572,14 +586,16 @@ async function handleParsedBranch(
     }
 }
 
-export default function (pi: ExtensionAPI): void {
-    registerTypedCommand(pi, "branch", {
+function createBranchCommand() {
+    return defineTypedCommand({
+        name: "branch",
         description: "Fork this session into one or more parallel Pi processes",
         formTitle: "Branch session",
         args: {
             count: {
                 type: "number",
                 integer: true,
+                position: 0,
                 min: 1,
                 max: MAX_FORK_COUNT,
                 default: 1,
@@ -605,8 +621,12 @@ export default function (pi: ExtensionAPI): void {
                 },
             },
         },
-        handler: async (args, ctx) => {
-            await handleParsedBranch(pi, parseTypedArgs(args), ctx);
+        run: async (args, ctx) => {
+            await handleParsedBranch(parseTypedArgs(args), ctx);
         },
     });
+}
+
+export default function (pi: ExtensionAPI): void {
+    registerTypedCommand(pi, createBranchCommand());
 }
