@@ -63,7 +63,8 @@ const LEFT_PADDING = 1;
 const FIELD_GAP = 1;
 const MIN_VALUE_WIDTH = 12;
 const MAX_VALUE_WIDTH = 32;
-const NAME_WIDTH = 12;
+const MIN_NAME_WIDTH = 12;
+const MAX_NAME_WIDTH = 24;
 const FORM_MESSAGE_OPTIONS = { nameStyle: "field" } as const;
 
 function currentValueText(value: ArgumentValue): string {
@@ -483,12 +484,16 @@ function paddedCell(text: string, width: number): string {
     return truncated + " ".repeat(padding);
 }
 
-function calculateValueWidth(width: number): number {
-    const available = width - LEFT_PADDING - NAME_WIDTH - FIELD_GAP * 3 - 6;
+function calculateValueWidth(width: number, nameWidth: number): number {
+    const available = width - LEFT_PADDING - nameWidth - FIELD_GAP * 3 - 6;
     if (available < MIN_VALUE_WIDTH) {
         return MIN_VALUE_WIDTH;
     }
     return Math.min(MAX_VALUE_WIDTH, available);
+}
+
+function fieldTitle(field: FormField): string {
+    return field.definition.title ?? field.definition.ui?.title ?? toKebabCase(field.name);
 }
 
 function valueIndex(values: ArgumentValue[], current: ArgumentValue): number {
@@ -696,13 +701,14 @@ class ArgumentFormComponent implements Component, Focusable {
 
     render(width: number): string[] {
         this.applyComputedValues();
-        const valueWidth = calculateValueWidth(width);
+        const nameWidth = this.calculateNameWidth(width);
+        const valueWidth = calculateValueWidth(width, nameWidth);
         const lines: string[] = [];
         lines.push(this.renderHeader(width));
         lines.push("");
 
         for (let index = 0; index < this.fields.length; index += 1) {
-            lines.push(...this.renderField(index, width, valueWidth));
+            lines.push(...this.renderField(index, width, nameWidth, valueWidth));
         }
 
         const selectedIssue = this.currentIssue();
@@ -725,7 +731,22 @@ class ArgumentFormComponent implements Component, Focusable {
         return this.fitLine(this.theme.fg("accent", this.theme.bold(this.title)), width);
     }
 
-    private renderField(index: number, width: number, valueWidth: number): string[] {
+    private calculateNameWidth(width: number): number {
+        const visibleTitleWidths = this.fields
+            .filter((field) => !isHiddenField(field.definition, this.state))
+            .map((field) => visibleWidth(fieldTitle(field)));
+        const desired = Math.max(MIN_NAME_WIDTH, ...visibleTitleWidths);
+        const available = width - LEFT_PADDING - FIELD_GAP * 3 - MIN_VALUE_WIDTH - 6;
+        const maxWidth = Math.max(MIN_NAME_WIDTH, Math.min(MAX_NAME_WIDTH, available));
+        return Math.min(desired, maxWidth);
+    }
+
+    private renderField(
+        index: number,
+        width: number,
+        nameWidth: number,
+        valueWidth: number,
+    ): string[] {
         const field = this.fields[index];
         if (field === undefined) {
             return [""];
@@ -736,13 +757,23 @@ class ArgumentFormComponent implements Component, Focusable {
 
         const selected = index === this.selectedIndex;
         const marker = this.fieldMarker(selected);
-        const title =
-            field.definition.title ?? field.definition.ui?.title ?? toKebabCase(field.name);
-        const name = paddedCell(title, NAME_WIDTH);
+        const rawName = paddedCell(fieldTitle(field), nameWidth);
+        let name = rawName;
+        if (selected) {
+            name = this.theme.fg("accent", rawName);
+        }
         const prefix = " ".repeat(LEFT_PADDING) + marker + " ";
 
         if (isExpandedOptionsWidget(field.definition)) {
-            return this.renderExpandedField(prefix, name, field, selected, width, valueWidth);
+            return this.renderExpandedField(
+                prefix,
+                name,
+                field,
+                selected,
+                width,
+                nameWidth,
+                valueWidth,
+            );
         }
 
         const value = this.renderFieldValue(field, selected, valueWidth);
@@ -771,7 +802,10 @@ class ArgumentFormComponent implements Component, Focusable {
         return this.fitLine(base + separator + this.theme.fg("dim", description), width);
     }
 
-    private fieldMarker(_selected: boolean): string {
+    private fieldMarker(selected: boolean): string {
+        if (selected) {
+            return this.theme.fg("accent", "›");
+        }
         return " ";
     }
 
@@ -899,6 +933,7 @@ class ArgumentFormComponent implements Component, Focusable {
         field: FormField,
         selected: boolean,
         width: number,
+        nameWidth: number,
         valueWidth: number,
     ): string[] {
         const parts = this.optionParts(field, selected);
@@ -911,7 +946,7 @@ class ArgumentFormComponent implements Component, Focusable {
 
         const base = fieldPrefix + paddedCell("", valueWidth);
         const lines = [this.renderInlineFieldLine(base, field, width)];
-        const optionPrefix = " ".repeat(LEFT_PADDING + 2 + NAME_WIDTH + FIELD_GAP);
+        const optionPrefix = " ".repeat(LEFT_PADDING + 2 + nameWidth + FIELD_GAP);
         for (const part of parts) {
             lines.push(this.fitLine(optionPrefix + part, width));
         }

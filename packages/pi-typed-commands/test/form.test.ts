@@ -209,6 +209,117 @@ void describe("dense argument form", () => {
         assert.ok(renderedLines.some((line) => line.includes("source=api")));
     });
 
+    void it("widens the label column for readable field titles", async () => {
+        const definitions: ArgumentDefinitions = {
+            panes: {
+                type: "boolean",
+                default: false,
+                title: "Current tab panes",
+                description: "Split the current tab/window into panes",
+            },
+        };
+
+        const command: RegisteredTypedCommand = {
+            name: "example",
+            description: "Example command",
+            args: definitions,
+            handler() {},
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: { panes: false },
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+
+        let renderedLines: string[] = [];
+        const ctx = {
+            mode: "tui",
+            ui: {
+                notify() {},
+                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                    const component = (await factory(
+                        tui,
+                        theme as never,
+                        {} as never,
+                        () => {},
+                    )) as TestFormComponent;
+
+                    component.focused = true;
+                    renderedLines = component.render(80);
+                    return undefined;
+                },
+            },
+        } as unknown as ExtensionCommandContext;
+
+        await openArgumentForm(command, parsed, "all", ctx);
+
+        assert.ok(
+            renderedLines.some((line) => line.includes("Current tab panes")),
+            `expected full field title, got ${JSON.stringify(renderedLines)}`,
+        );
+        assert.ok(
+            !renderedLines.some((line) => line.includes("Current tab…")),
+            `expected no truncated field title, got ${JSON.stringify(renderedLines)}`,
+        );
+    });
+
+    void it("marks and highlights the currently selected field", async () => {
+        const definitions: ArgumentDefinitions = {
+            count: { type: "number", integer: true, default: 1, title: "Count" },
+            panes: { type: "boolean", default: false, title: "Current tab panes" },
+        };
+
+        const command: RegisteredTypedCommand = {
+            name: "example",
+            description: "Example command",
+            args: definitions,
+            handler() {},
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: { count: 1, panes: false },
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+
+        let initialLines: string[] = [];
+        let afterTabLines: string[] = [];
+        const ctx = {
+            mode: "tui",
+            ui: {
+                notify() {},
+                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                    const component = (await factory(
+                        tui,
+                        theme as never,
+                        {} as never,
+                        () => {},
+                    )) as TestFormComponent;
+
+                    component.focused = true;
+                    initialLines = component.render(80);
+                    component.handleInput("\t");
+                    afterTabLines = component.render(80);
+                    return undefined;
+                },
+            },
+        } as unknown as ExtensionCommandContext;
+
+        await openArgumentForm(command, parsed, "all", ctx);
+
+        assert.ok(
+            initialLines.some((line) => line.includes("› Count")),
+            `expected selected marker on initial field, got ${JSON.stringify(initialLines)}`,
+        );
+        assert.ok(
+            afterTabLines.some((line) => line.includes("› Current tab panes")),
+            `expected selected marker after tab, got ${JSON.stringify(afterTabLines)}`,
+        );
+    });
+
     void it("computes read-only field values", async () => {
         const definitions: ArgumentDefinitions = {
             source: { type: "string", default: "api" },
