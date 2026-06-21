@@ -1333,6 +1333,7 @@ function createBranchCommand() {
                 min: 1,
                 max: MAX_FORK_COUNT,
                 default: 1,
+                title: "Count",
                 description: "Number of forks to create",
             },
             panes: {
@@ -1351,15 +1352,18 @@ function createBranchCommand() {
             keepOpen: {
                 type: "boolean",
                 default: false,
+                title: "Keep open",
                 description: "Keep the terminal shell open after Pi exits",
             },
             worktree: {
                 type: "boolean",
                 default: false,
+                title: "Worktree",
                 description: "Open forks in git worktrees",
             },
             prompt: {
                 type: "string",
+                title: "Prompt",
                 description: "Optional initial prompt sent to each fork",
                 placeholder: "prompt",
                 ui: {
