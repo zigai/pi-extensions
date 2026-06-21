@@ -1,5 +1,9 @@
 # Pi Typed Commands
 
+[![npm version](https://img.shields.io/npm/v/pi-typed-commands.svg?color=blue)](https://www.npmjs.com/package/pi-typed-commands)
+[![npm downloads](https://img.shields.io/npm/dm/pi-typed-commands.svg)](https://www.npmjs.com/package/pi-typed-commands)
+[![license](https://img.shields.io/npm/l/pi-typed-commands.svg)](LICENSE)
+
 Pi Typed Commands is a TypeScript library for adding typed inputs to Pi slash commands and Agent Skills. Define arguments once, then use them for parsing, validation, completion hints, generated help, live usage hints, and TUI input forms.
 
 Use it inside your own Pi extension when commands or skills need structured input instead of hand-parsed raw strings.
@@ -9,7 +13,7 @@ Use it inside your own Pi extension when commands or skills need structured inpu
 Add the library to the package that contains your Pi extension:
 
 ```sh
-npm install github:zigai/pi-typed-commands
+npm install pi-typed-commands
 ```
 
 Or add it manually to your extension package manifest:
@@ -17,7 +21,7 @@ Or add it manually to your extension package manifest:
 ```json
 {
   "dependencies": {
-    "pi-typed-commands": "github:zigai/pi-typed-commands"
+    "pi-typed-commands": "^0.1.0"
   }
 }
 ```
