@@ -12,7 +12,12 @@ import {
 } from "./arguments.js";
 import { getTypedArgumentCompletions, getTypedAutocompleteSuggestions } from "./completions.js";
 import { cloneAndFreezeDefinitions, compileTypedCommandDefinition } from "./compiler.js";
-import { parseTypedCommandArgs, serializeTypedCommandArgs, toTypedParseResult } from "./parser.js";
+import {
+    lexTypedArgumentString,
+    parseTypedCommandArgs,
+    serializeTypedCommandArgs,
+    toTypedParseResult,
+} from "./parser.js";
 import {
     combineSkillAdditionalInput,
     decideArgumentIssueAction,
@@ -27,11 +32,13 @@ import {
     unregisterTypedCommandMetadata,
 } from "./registry.js";
 import type {
+    ArgumentDefinition,
     ArgumentDefinitions,
     ArgumentValue,
     DefinedTypedCommand,
     InferArguments,
     ParsedCommandArguments,
+    ParseIssue,
     RegisteredTypedCommand,
     TypedCommandDefinition,
     TypedCommandHandler,
@@ -42,7 +49,13 @@ import type {
     TypedParseResult,
     FormMode,
 } from "./types.js";
-import { formatCommandUsage, formatDetailedHelp, formatHelperLineParts } from "./usage.js";
+import { formatCommandUsage, formatDetailedHelp } from "./usage.js";
+import {
+    argumentValueHint,
+    formatArgumentFlagName,
+    isPositionalArgument,
+    orderedCommandArgumentEntries,
+} from "./schema.js";
 import { openArgumentForm } from "./form.js";
 import {
     formatTypedSkillDiagnostics,
@@ -56,6 +69,7 @@ import {
 } from "./skills.js";
 
 const WIDGET_KEY = "pi-typed-commands.helper";
+let submittedInvalidEditorText: string | undefined;
 
 type EditorTypedCommandInvocation = {
     command: RegisteredTypedCommand;
@@ -174,6 +188,10 @@ function notifyIssues(ctx: ExtensionCommandContext, messages: string[]): void {
     ctx.ui.notify(messages.join("\n"), "error");
 }
 
+function shouldNotifyInsteadOfOpeningForm(issues: readonly ParseIssue[]): boolean {
+    return issues.some((issue) => issue.kind !== "missing-required");
+}
+
 async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     rawArgs: string,
@@ -187,7 +205,10 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
 
     const issueMessages = parsed.issues.map((item) => item.message);
     const formMode: FormMode = "missing";
-    const issueAction = decideArgumentIssueAction(parsed.issues);
+    let issueAction = decideArgumentIssueAction(parsed.issues);
+    if (shouldNotifyInsteadOfOpeningForm(parsed.issues)) {
+        issueAction = "notify";
+    }
 
     if (issueAction === "open-form") {
         if (!ctx.hasUI) {
@@ -202,6 +223,17 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     }
 
     if (issueAction === "notify") {
+        if (ctx.hasUI) {
+            const commandName = command.invocationName ?? command.name;
+            let editorText = `/${commandName}`;
+            if (rawArgs.length > 0) {
+                editorText += ` ${rawArgs}`;
+            }
+            submittedInvalidEditorText = editorText;
+            ctx.ui.setEditorText(editorText);
+            setHelperWidget(ctx, helperInvocationForEditorText(editorText));
+            return undefined;
+        }
         notifyIssues(ctx, issueMessages);
         return undefined;
     }
@@ -567,12 +599,9 @@ function notifySkillDiagnosticsForText(text: string, ctx: ExtensionCommandContex
     return true;
 }
 
-function helperCommandForEditorText(editorText: string): RegisteredTypedCommand | undefined {
-    const match = slashCommandMatch(editorText);
-    if (match === undefined) {
-        return undefined;
-    }
-
+function helperInvocationForEditorText(
+    editorText: string,
+): EditorTypedCommandInvocation | undefined {
     const invocation = commandInvocationForEditorText(editorText);
     if (invocation === undefined) {
         return undefined;
@@ -584,7 +613,7 @@ function helperCommandForEditorText(editorText: string): RegisteredTypedCommand 
         return undefined;
     }
 
-    return command;
+    return invocation;
 }
 
 function parseSkillArguments(
@@ -629,7 +658,10 @@ async function renderTypedSkillInput(
 
     const issueMessages = parsed.issues.map((item) => item.message);
     let values = parsed.values;
-    const issueAction = decideArgumentIssueAction(parsed.issues);
+    let issueAction = decideArgumentIssueAction(parsed.issues);
+    if (shouldNotifyInsteadOfOpeningForm(parsed.issues)) {
+        issueAction = "notify";
+    }
 
     if (issueAction === "open-form") {
         if (!ctx.hasUI) {
@@ -766,8 +798,310 @@ function refreshTypedSkills(pi: ExtensionAPI): void {
     replaceTypedSkillMetadata(commands, diagnostics);
 }
 
-function setHelperWidget(ctx: ExtensionContext, command: RegisteredTypedCommand | undefined): void {
-    if (command === undefined) {
+function commandDisplayName(command: RegisteredTypedCommand): string {
+    return command.invocationName ?? command.name;
+}
+
+function commandArgumentEntries(
+    command: RegisteredTypedCommand,
+): Array<[string, ArgumentDefinition]> {
+    return orderedCommandArgumentEntries(command);
+}
+
+function helperAvailableToken(name: string, definition: ArgumentDefinition): string {
+    if (isPositionalArgument(definition)) {
+        return name;
+    }
+    if (definition.type === "boolean") {
+        return formatArgumentFlagName(name, definition);
+    }
+    return `${formatArgumentFlagName(name, definition)} <${argumentValueHint(definition, name)}>`;
+}
+
+function helperHasNamedFlag(rawArgs: string): boolean {
+    return /(?:^|\s)--?[^\s-]/.test(rawArgs);
+}
+
+function formatHelperValue(value: unknown): string {
+    if (Array.isArray(value)) {
+        return value.map((item) => formatHelperValue(item)).join(",");
+    }
+    if (value === undefined) {
+        return "?";
+    }
+    if (typeof value === "string") {
+        return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    return JSON.stringify(value);
+}
+
+function providedHelperToken(name: string, definition: ArgumentDefinition, value: unknown): string {
+    if (isPositionalArgument(definition)) {
+        return `${name}=${formatHelperValue(value)}`;
+    }
+    const flag = formatArgumentFlagName(name, definition);
+    if (definition.type === "boolean") {
+        if (value === true) {
+            return flag;
+        }
+        return `${flag}=false`;
+    }
+    return `${flag}=${formatHelperValue(value)}`;
+}
+
+type InlineHelperTokens = {
+    active: string[];
+    required: string[];
+    available: string[];
+};
+
+function shouldDisplayDefaultToken(
+    definition: ArgumentDefinition,
+    value: ArgumentValue | undefined,
+): boolean {
+    if (value === undefined) {
+        return false;
+    }
+    if (definition.type === "boolean") {
+        return value === true;
+    }
+    if (definition.type === "multi-enum" && Array.isArray(value)) {
+        return value.length > 0;
+    }
+    return true;
+}
+
+function defaultHelperToken(
+    name: string,
+    definition: ArgumentDefinition,
+    value: ArgumentValue | undefined,
+): string {
+    if (isPositionalArgument(definition)) {
+        return `${name}=${formatHelperValue(value)}`;
+    }
+    const flag = formatArgumentFlagName(name, definition);
+    if (definition.type === "boolean") {
+        return `${flag}=true`;
+    }
+    return `${flag}=${formatHelperValue(value)}`;
+}
+
+function collectInlineHelperTokens(invocation: EditorTypedCommandInvocation): InlineHelperTokens {
+    const parsed = parseTypedCommandArgs(invocation.command, invocation.rawArgs);
+    const hasNamedFlag = helperHasNamedFlag(invocation.rawArgs);
+    const active: string[] = [];
+    const required: string[] = [];
+    const available: string[] = [];
+
+    for (const [name, definition] of commandArgumentEntries(invocation.command)) {
+        const value = parsed.values[name];
+        const source = parsed.sources?.get(name);
+        if (parsed.provided.has(name)) {
+            active.push(providedHelperToken(name, definition, value));
+            continue;
+        }
+        if (source === "default" && shouldDisplayDefaultToken(definition, value)) {
+            active.push(defaultHelperToken(name, definition, value));
+            continue;
+        }
+        if (hasNamedFlag && isPositionalArgument(definition)) {
+            continue;
+        }
+        if (definition.required === true) {
+            required.push(helperAvailableToken(name, definition));
+        } else {
+            available.push(helperAvailableToken(name, definition));
+        }
+    }
+
+    return { active, required, available };
+}
+
+function editorTextForInvocation(invocation: EditorTypedCommandInvocation): string {
+    let text = `/${commandDisplayName(invocation.command)}`;
+    if (invocation.rawArgs.length > 0) {
+        text += ` ${invocation.rawArgs}`;
+    }
+    if (invocation.trailingBody.length > 0) {
+        text += `\n${invocation.trailingBody}`;
+    }
+    return text;
+}
+
+type ArgumentToken = { raw: string; value: string };
+
+function lastArgumentToken(rawArgs: string): ArgumentToken | undefined {
+    const tokens = lexTypedArgumentString(rawArgs).tokens;
+    const token = tokens[tokens.length - 1];
+    if (token === undefined) {
+        return undefined;
+    }
+    return { raw: token.raw, value: token.value };
+}
+
+function issueMatchesArgumentToken(issue: ParseIssue, token: ArgumentToken): boolean {
+    return issue.token === token.raw || issue.token === token.value;
+}
+
+function shouldShowInlineIssue(
+    invocation: EditorTypedCommandInvocation,
+    issue: ParseIssue,
+): boolean {
+    if (editorTextForInvocation(invocation) === submittedInvalidEditorText) {
+        return true;
+    }
+
+    const lastToken = lastArgumentToken(invocation.rawArgs);
+    if (lastToken === undefined) {
+        return false;
+    }
+
+    const issueIsForLastToken = issueMatchesArgumentToken(issue, lastToken);
+    if (issue.kind === "missing-value") {
+        return !issueIsForLastToken;
+    }
+    if (issue.kind === "unterminated-quote") {
+        return false;
+    }
+    if (issueIsForLastToken) {
+        return /\s$/.test(invocation.rawArgs);
+    }
+    return true;
+}
+
+function inlineIssueLine(invocation: EditorTypedCommandInvocation): string | undefined {
+    const parsed = parseTypedCommandArgs(invocation.command, invocation.rawArgs);
+    const issue = parsed.issues.find(
+        (item) => item.kind !== "missing-required" && shouldShowInlineIssue(invocation, item),
+    );
+    if (issue === undefined) {
+        return undefined;
+    }
+    return `error: ${issue.message}`;
+}
+
+type TabCompletionResult = { handled: false } | { handled: true; editorText?: string };
+
+type FlagCompletionCandidate = {
+    stem: string;
+    replacement: string;
+};
+
+function flagCompletionCandidates(
+    command: RegisteredTypedCommand,
+    token: string,
+): FlagCompletionCandidate[] {
+    const stem = token.replace(/^-+/, "");
+    if (stem.length === 0) {
+        return [];
+    }
+
+    const candidates: FlagCompletionCandidate[] = [];
+    const seen = new Set<string>();
+    for (const [name, definition] of commandArgumentEntries(command)) {
+        if (isPositionalArgument(definition)) {
+            continue;
+        }
+        const replacement = formatArgumentFlagName(name, definition);
+        const primary = replacement.replace(/^--/, "");
+        const searchable = [primary, ...(definition.aliases ?? [])];
+        for (const item of searchable) {
+            if (!item.startsWith(stem) || seen.has(replacement)) {
+                continue;
+            }
+            seen.add(replacement);
+            candidates.push({ stem: item, replacement });
+        }
+    }
+    return candidates;
+}
+
+function bestFlagCompletion(command: RegisteredTypedCommand, token: string): string | undefined {
+    const stem = token.replace(/^-+/, "");
+    const candidates = flagCompletionCandidates(command, token);
+    const exact = candidates.find((candidate) => candidate.stem === stem);
+    if (exact !== undefined) {
+        return exact.replacement;
+    }
+    if (candidates.length === 1) {
+        return candidates[0]?.replacement;
+    }
+    return undefined;
+}
+
+function completePartialFlagOnTab(editorText: string): TabCompletionResult {
+    const invocation = commandInvocationForEditorText(editorText);
+    if (invocation === undefined) {
+        return { handled: false };
+    }
+
+    const firstLineEnd = editorText.indexOf("\n");
+    let firstLine = editorText;
+    let rest = "";
+    if (firstLineEnd >= 0) {
+        firstLine = editorText.slice(0, firstLineEnd);
+        rest = editorText.slice(firstLineEnd);
+    }
+
+    const tokenMatch = /(?:^|\s)(-\S*)$/.exec(firstLine);
+    if (tokenMatch === null) {
+        return { handled: false };
+    }
+
+    const token = tokenMatch[1];
+    if (token === undefined) {
+        return { handled: false };
+    }
+
+    const replacement = bestFlagCompletion(invocation.command, token);
+    if (replacement === undefined) {
+        return { handled: true };
+    }
+
+    const tokenStart = firstLine.length - token.length;
+    const completedLine = `${firstLine.slice(0, tokenStart)}${replacement} `;
+    return { handled: true, editorText: `${completedLine}${rest}` };
+}
+
+type HelperTheme = {
+    fg(color: string, text: string): string;
+};
+
+function renderInlineHelper(
+    invocation: EditorTypedCommandInvocation,
+    width: number,
+    theme: HelperTheme,
+): string[] {
+    const tokens = collectInlineHelperTokens(invocation);
+    const active = tokens.active.map((token) => `[${token}]`).join(" ");
+    const required = tokens.required.map((token) => `[${token}]`).join(" ");
+    const available = tokens.available.map((token) => `[${token}]`).join(" ");
+    let commandLine = theme.fg("accent", `/${commandDisplayName(invocation.command)}`);
+    if (active.length > 0) {
+        commandLine += " " + theme.fg("accent", active);
+    }
+    if (required.length > 0) {
+        commandLine += "  " + theme.fg("warning", required);
+    }
+    if (available.length > 0) {
+        commandLine += "  " + theme.fg("dim", available);
+    }
+    const rendered = [truncateToWidth(commandLine, width, "")];
+    const issueLine = inlineIssueLine(invocation);
+    if (issueLine !== undefined) {
+        rendered.push(truncateToWidth(theme.fg("error", issueLine), width, ""));
+    }
+    return rendered;
+}
+
+function setHelperWidget(
+    ctx: ExtensionContext,
+    invocation: EditorTypedCommandInvocation | undefined,
+): void {
+    if (invocation === undefined) {
         ctx.ui.setWidget(WIDGET_KEY, undefined, { placement: "belowEditor" });
         return;
     }
@@ -776,31 +1110,13 @@ function setHelperWidget(ctx: ExtensionContext, command: RegisteredTypedCommand 
         WIDGET_KEY,
         (_tui, theme) => ({
             render(width: number): string[] {
-                const content = formatHelperLineParts(command)
-                    .map((part) => {
-                        if (part.kind === "command") {
-                            return theme.fg("accent", part.text);
-                        }
-                        if (part.kind === "positional") {
-                            return theme.fg("warning", part.text);
-                        }
-                        if (part.kind === "flag") {
-                            return theme.fg("success", part.text);
-                        }
-                        if (part.kind === "detail") {
-                            return theme.fg("muted", part.text);
-                        }
-                        return theme.fg("dim", part.text);
-                    })
-                    .join("");
-                return [truncateToWidth(content, width, "")];
+                return renderInlineHelper(invocation, width, theme);
             },
             invalidate(): void {},
         }),
         { placement: "belowEditor" },
     );
 }
-
 class TypedCommandUxSession {
     private cleanup: Array<() => void> = [];
     private refreshTimer: NodeJS.Timeout | undefined;
@@ -852,8 +1168,8 @@ class TypedCommandUxSession {
             setHelperWidget(ctx, undefined);
             return;
         }
-        const helperCommand = helperCommandForEditorText(ctx.ui.getEditorText());
-        setHelperWidget(ctx, helperCommand);
+        const helperInvocation = helperInvocationForEditorText(ctx.ui.getEditorText());
+        setHelperWidget(ctx, helperInvocation);
     }
 
     private scheduleRefresh(ctx: ExtensionContext): void {
@@ -872,10 +1188,22 @@ class TypedCommandUxSession {
             return undefined;
         }
         if (!matchesKey(data, "tab")) {
+            submittedInvalidEditorText = undefined;
             this.scheduleRefresh(ctx);
             return undefined;
         }
-        if (commandInvocationForEditorText(ctx.ui.getEditorText()) === undefined) {
+
+        const editorText = ctx.ui.getEditorText();
+        const completion = completePartialFlagOnTab(editorText);
+        if (completion.handled === true) {
+            if ("editorText" in completion && completion.editorText !== undefined) {
+                ctx.ui.setEditorText(completion.editorText);
+            }
+            this.scheduleRefresh(ctx);
+            return { consume: true };
+        }
+
+        if (commandInvocationForEditorText(editorText) === undefined) {
             this.scheduleRefresh(ctx);
             return undefined;
         }
@@ -892,6 +1220,14 @@ class TypedCommandUxSession {
     private addAutocompleteProvider(ctx: ExtensionContext): void {
         ctx.ui.addAutocompleteProvider((current) => ({
             async getSuggestions(lines, cursorLine, cursorCol, options) {
+                if (
+                    commandInvocationForEditorText(
+                        (lines[cursorLine] ?? "").slice(0, cursorCol),
+                    ) !== undefined
+                ) {
+                    return null;
+                }
+
                 const suggestions = getTypedAutocompleteSuggestions(
                     lines,
                     cursorLine,
