@@ -71,6 +71,8 @@ Users of your extension can then run:
 /deploy --help     # show generated help
 ```
 
+While users type a command, Pi shows a compact live helper below the editor with parsed values, defaults, and remaining arguments. `Tab` completes an unambiguous partial flag such as `/deploy --r<Tab>` to `/deploy --ref `, or opens the form from a completed command such as `/deploy<Tab>`. Inline validation waits until the user moves past an argument or submits the command, so value-taking flags do not error while their value is still being typed.
+
 ## Supported argument types
 
 | Type         | What it is for                             | Common options                                                     |

@@ -63,6 +63,21 @@ The completion engine supports:
 
 It respects `--` as an end-of-options marker and keeps repeatable multi-enum flags available.
 
+## Live editor helper
+
+When the Pi UX bridge is installed, typed commands render a compact helper below the editor while a slash command is being typed. The helper shows active values first, including meaningful defaults such as `[count=1]`, then remaining available arguments in a dimmed style.
+
+For example:
+
+```text
+/branch --worktree --pane-window
+/branch [count=1] [--pane-window] [--worktree]  [--panes] [--keep-open] [--prompt <prompt>]
+```
+
+`Tab` completes unambiguous partial flags before opening the form. For example, `/branch -pro<Tab>` becomes `/branch --prompt `. A completed command such as `/branch<Tab>` opens the dense form.
+
+Inline errors are deferred while the user is still typing the current token. A value-taking flag such as `/branch --prompt ` stays quiet until a value is supplied, another argument is started, or the command is submitted.
+
 ## TUI forms
 
 When installed through `registerTypedCommand()` and the Pi UI is available, typed commands can open a dense TUI form for missing or invalid values.
@@ -74,6 +89,8 @@ Users can open the form by typing a completed command and pressing Tab:
 ```
 
 Forms can also open automatically for missing required arguments or invalid values, depending on command options.
+
+The selected field is marked with `›` and accented so users can tell which value arrow keys, space, or typing will edit.
 
 ## Form configuration
 
