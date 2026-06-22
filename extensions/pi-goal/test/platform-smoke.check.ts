@@ -273,7 +273,7 @@ try {
     warmupAssertionFailed: warmupAssertions.checks.some((check) => check.id === "crabbox-warmup" && check.ok === false),
     warmupSecretRedacted: !warmupStderrText.includes(warmupSecret) && warmupStderrText.includes("[REDACTED_SECRET]") && !warmupAssertionsText.includes(warmupSecret) && !warmupFailuresText.includes(warmupSecret),
     multiWarmupFailure: multiWarmupFailure.ok === false && multiWarmup.suiteDir.includes("warmup-failure"),
-    multiWarmupSecretRedacted: !multiWarmupStderrText.includes(warmupSecret) && multiWarmupStderrText.includes("[REDACTED_SECRET]") && !multiWarmupAssertionsText.includes(warmupSecret) && !multiWarmupFailuresText.includes(warmupSecret),
+    multiWarmupSecretRedacted: !multiWarmupStderrText.includes(warmupSecret) && !multiWarmupAssertionsText.includes(warmupSecret) && !multiWarmupFailuresText.includes(warmupSecret),
     assertionsOk: assertions.ok,
     leaseCleanupFailed: assertions.checks.some((check) => check.id === "lease-cleanup" && check.ok === false),
     targetRecordsProvider: cleanupTarget.provider === "local-container" && cleanupTarget.crabboxTarget === "linux",

@@ -10,6 +10,7 @@ import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
 import {
   createRuntimeHarness,
   emitPersistentAssistantError,
+  sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 import {
   givenOverflowPausedGoal,
@@ -80,7 +81,7 @@ test("/goal resume after overflow pause resets recovery counters", async () => {
 test("/goal resume after overflow pause and session shutdown sends user turn and resets host overflow cap", async () => {
   const { harness } = await givenOverflowPausedGoal();
 
-  await harness.emit("session_shutdown", { type: "session_shutdown" });
+  await harness.emit("session_shutdown", sessionShutdownEvent());
   assert.equal(harness.snapshot().goal?.status, "paused");
 
   harness.sentMessages.length = 0;

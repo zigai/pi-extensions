@@ -16,6 +16,9 @@ import {
   countGoalUsageEntries,
   createRuntimeHarness,
   emitToolExecutionEnd,
+  sessionBeforeCompactEvent,
+  sessionCompactEvent,
+  sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 
 test("duplicate update_goal complete appends only one complete entry", async () => {
@@ -44,17 +47,8 @@ test("compaction after complete does not append duplicate runtime entries", asyn
   await harness.runTool("update_goal", { status: "complete" });
   const entryCountAfterComplete = harness.entries.length;
 
-  await harness.emit("session_before_compact", {
-    type: "session_before_compact",
-    preparation: {},
-    branchEntries: [],
-    signal: new AbortController().signal,
-  });
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    compactionEntry: {},
-    fromExtension: false,
-  });
+  await harness.emit("session_before_compact", sessionBeforeCompactEvent());
+  await harness.emit("session_compact", sessionCompactEvent());
 
   assert.equal(harness.entries.length, entryCountAfterComplete);
   assert.equal(harness.snapshot().goal?.status, "complete");
@@ -133,7 +127,7 @@ test("session_shutdown flushes pending runtime usage", async () => {
     await emitToolExecutionEnd(harness);
     assert.equal(countGoalSetEntries(harness.entries, goalId), 1);
 
-    await harness.emit("session_shutdown", { type: "session_shutdown" });
+    await harness.emit("session_shutdown", sessionShutdownEvent());
 
     assert.equal(countGoalSetEntries(harness.entries, goalId), 1);
     assert.equal(countGoalUsageEntries(harness.entries, goalId), 1);
@@ -240,17 +234,8 @@ test("compaction with unchanged paused goal appends no new entry", async () => {
   assert.ok(goalId);
   const entryCountAfterPause = harness.entries.length;
 
-  await harness.emit("session_before_compact", {
-    type: "session_before_compact",
-    preparation: {},
-    branchEntries: [],
-    signal: new AbortController().signal,
-  });
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    compactionEntry: {},
-    fromExtension: false,
-  });
+  await harness.emit("session_before_compact", sessionBeforeCompactEvent());
+  await harness.emit("session_compact", sessionCompactEvent());
 
   assert.equal(harness.entries.length, entryCountAfterPause);
   assert.equal(harness.snapshot().goal?.status, "paused");
@@ -287,17 +272,8 @@ test("compaction with unchanged budgetLimited goal appends no new entry", async 
 
     now += 60_000;
 
-    await harness.emit("session_before_compact", {
-      type: "session_before_compact",
-      preparation: {},
-      branchEntries: [],
-      signal: new AbortController().signal,
-    });
-    await harness.emit("session_compact", {
-      type: "session_compact",
-      compactionEntry: {},
-      fromExtension: false,
-    });
+    await harness.emit("session_before_compact", sessionBeforeCompactEvent());
+    await harness.emit("session_compact", sessionCompactEvent());
 
     assert.equal(harness.entries.length, entryCountAfterBudgetLimit);
     assert.equal(harness.snapshot().goal?.status, "budgetLimited");
@@ -340,7 +316,7 @@ test("session_shutdown with unchanged budgetLimited goal appends no new entry", 
 
     now += 60_000;
 
-    await harness.emit("session_shutdown", { type: "session_shutdown" });
+    await harness.emit("session_shutdown", sessionShutdownEvent());
 
     assert.equal(harness.entries.length, entryCountAfterBudgetLimit);
     assert.equal(harness.snapshot().goal?.status, "budgetLimited");

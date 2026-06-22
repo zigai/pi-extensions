@@ -10,6 +10,8 @@ import {
   providerContextMessageAt,
   queuedCustomMessage,
   requireProviderContextResult,
+  sessionBeforeCompactEvent,
+  sessionCompactEvent,
 } from "./support/runtime-harness.js";
 import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
 
@@ -358,17 +360,8 @@ test("compaction between stale context abort and cleanup does not persist, accou
     assert.equal(harness.abortCount, 1);
 
     now = 5_000;
-    await harness.emit("session_before_compact", {
-      type: "session_before_compact",
-      preparation: {},
-      branchEntries: [],
-      signal: new AbortController().signal,
-    });
-    await harness.emit("session_compact", {
-      type: "session_compact",
-      compactionEntry: {},
-      fromExtension: false,
-    });
+    await harness.emit("session_before_compact", sessionBeforeCompactEvent());
+    await harness.emit("session_compact", sessionCompactEvent());
 
     assert.equal(harness.entries.length, entryCountBeforeCompaction);
     assert.equal(harness.sentMessages.length, 0);

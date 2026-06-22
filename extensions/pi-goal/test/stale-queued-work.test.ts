@@ -11,6 +11,7 @@ import {
   providerContextMessageAt,
   queuedCustomMessage,
   requireProviderContextResult,
+  sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 
 test("stale prompt continuation input is handled before agent start", async () => {
@@ -323,7 +324,7 @@ test("stale custom queued work aborts without pausing, charging, or requeueing a
     });
 
     now = 5_000;
-    await harness.emit("session_shutdown", { type: "session_shutdown" });
+    await harness.emit("session_shutdown", sessionShutdownEvent());
 
     const goal = harness.snapshot().goal;
     assert.equal(goal?.goalId, replacement?.goalId);

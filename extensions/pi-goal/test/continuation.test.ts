@@ -10,6 +10,8 @@ import {
   emitPersistentAssistantError,
   flushContinuationScheduler,
   queuedCustomMessage,
+  sessionCompactEvent,
+  sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 
 test("aborted turns pause goals and do not queue continuation", async () => {
@@ -433,11 +435,7 @@ test("extension user continuation accepted before compaction suppresses duplicat
   });
 
   assert.deepEqual(results, [{ action: "continue" }]);
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    summary: "compact summary",
-    tokensBefore: 100,
-  });
+  await harness.emit("session_compact", sessionCompactEvent());
 
   const goal = harness.snapshot().goal;
   assert.equal(goal?.status, "active");
@@ -460,11 +458,7 @@ test("session compaction queues continuation for active goals after the compacti
       systemPrompt: "",
       systemPromptOptions: {},
     });
-    await harness.emit("session_compact", {
-      type: "session_compact",
-      summary: "compact summary",
-      tokensBefore: 100,
-    });
+    await harness.emit("session_compact", sessionCompactEvent());
 
     const goal = harness.snapshot().goal;
     assert.equal(goal?.status, "active");
@@ -506,11 +500,7 @@ test("session compaction accelerates an existing idle retry after length stops",
 
     harness.setIdle(true);
     harness.setPendingMessages(false);
-    await harness.emit("session_compact", {
-      type: "session_compact",
-      summary: "compact summary",
-      tokensBefore: 100,
-    });
+    await harness.emit("session_compact", sessionCompactEvent());
 
     mock.timers.tick(1);
     const goal = harness.snapshot().goal;
@@ -541,11 +531,7 @@ test("session compaction continuation is cancelled if a host retry starts before
       systemPrompt: "",
       systemPromptOptions: {},
     });
-    await harness.emit("session_compact", {
-      type: "session_compact",
-      summary: "compact summary",
-      tokensBefore: 100,
-    });
+    await harness.emit("session_compact", sessionCompactEvent());
     assert.equal(harness.sentMessages.length, 0);
 
     await harness.emit("before_agent_start", {
@@ -590,11 +576,10 @@ test("repeated session_compact events before the deferred check queue at most on
       systemPromptOptions: {},
     });
     for (let index = 0; index < 3; index += 1) {
-      await harness.emit("session_compact", {
-        type: "session_compact",
+      await harness.emit("session_compact", sessionCompactEvent({
         summary: `compact summary ${index}`,
         tokensBefore: 100 + index,
-      });
+      }));
     }
 
     mock.timers.tick(1);
@@ -626,12 +611,8 @@ test("session shutdown cancels deferred session_compact continuations", async ()
       systemPrompt: "",
       systemPromptOptions: {},
     });
-    await harness.emit("session_compact", {
-      type: "session_compact",
-      summary: "compact summary",
-      tokensBefore: 100,
-    });
-    await harness.emit("session_shutdown", { type: "session_shutdown" });
+    await harness.emit("session_compact", sessionCompactEvent());
+    await harness.emit("session_shutdown", sessionShutdownEvent());
 
     mock.timers.tick(1);
     assert.equal(harness.sentMessages.length, 0);

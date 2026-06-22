@@ -74,12 +74,32 @@ function parseLeaseId(text) {
 		?? null;
 }
 
+function quoteCmd(value) {
+	return `"${String(value).replace(/["^&|<>()%]/g, "^$&")}"`;
+}
+
+function spawnCrabbox(args, options = {}) {
+	const bin = crabboxBin();
+	const spawnOptions = {
+		stdio: ["ignore", "pipe", "pipe"],
+		env: { ...process.env, CRABBOX_SYNC_GIT_SEED: "false", ...options.env },
+	};
+	if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(bin)) {
+		const comspec = process.env.ComSpec || "cmd.exe";
+		return spawn(comspec, ["/d", "/s", "/c", [quoteCmd(bin), ...args.map(quoteCmd)].join(" ")], spawnOptions);
+	}
+	return spawn(bin, args, spawnOptions);
+}
+
 export function execCrabbox(args, options = {}) {
 	return new Promise((resolvePromise) => {
-		const child = spawn(crabboxBin(), args, {
-			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, CRABBOX_SYNC_GIT_SEED: "false", ...options.env },
-		});
+		let child;
+		try {
+			child = spawnCrabbox(args, options);
+		} catch (error) {
+			resolvePromise({ stdout: "", stderr: `${error instanceof Error ? error.message : String(error)}\n`, code: 1, signal: null });
+			return;
+		}
 		const stdout = [];
 		const stderr = [];
 		let timeout;

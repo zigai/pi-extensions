@@ -31,6 +31,52 @@ export interface SentUserMessage {
   options: Parameters<ExtensionAPI["sendUserMessage"]>[1];
 }
 
+type CompactionReason = "manual" | "threshold" | "overflow";
+
+interface CompactionEventOptions {
+  reason?: CompactionReason;
+  willRetry?: boolean;
+  summary?: string;
+  tokensBefore?: number;
+}
+
+export function sessionBeforeCompactEvent(options: CompactionEventOptions = {}): object {
+  return {
+    type: "session_before_compact",
+    preparation: {},
+    branchEntries: [],
+    reason: options.reason ?? "manual",
+    willRetry: options.willRetry ?? false,
+    signal: new AbortController().signal,
+  };
+}
+
+export function sessionCompactEvent(options: CompactionEventOptions = {}): object {
+  const summary = options.summary ?? "compact summary";
+  const tokensBefore = options.tokensBefore ?? 100;
+  return {
+    type: "session_compact",
+    compactionEntry: {
+      type: "compaction",
+      id: "compaction-entry",
+      parentId: null,
+      timestamp: new Date(0).toISOString(),
+      summary,
+      firstKeptEntryId: "entry-1",
+      tokensBefore,
+    },
+    fromExtension: false,
+    reason: options.reason ?? "manual",
+    willRetry: options.willRetry ?? false,
+  };
+}
+
+export function sessionShutdownEvent(
+  reason: "quit" | "reload" | "new" | "resume" | "fork" = "quit",
+): object {
+  return { type: "session_shutdown", reason };
+}
+
 export function createRuntimeHarness(options: {
   idle?: boolean;
   pendingMessages?: boolean;
@@ -270,7 +316,7 @@ export function createRuntimeHarness(options: {
     goalExtension(pi);
   }
 
-  async function reloadSession(reason: "startup" | "resume" = "startup"): Promise<void> {
+  async function reloadSession(reason: "startup" | "reload" | "resume" = "startup"): Promise<void> {
     reloadExtension();
     await emit("session_start", { type: "session_start", reason });
   }
@@ -550,18 +596,13 @@ export async function emitPersistentAssistantError(
   }
 }
 
-export async function emitHostSessionCompact(harness: RuntimeHarness): Promise<void> {
-  await harness.emit("session_before_compact", {
-    type: "session_before_compact",
-    preparation: {},
-    branchEntries: [],
-    signal: new AbortController().signal,
-  });
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    summary: "compact summary",
-    tokensBefore: 100,
-  });
+export async function emitHostSessionCompact(
+  harness: RuntimeHarness,
+  options: CompactionEventOptions = {},
+): Promise<void> {
+  const eventOptions: CompactionEventOptions = { reason: "overflow", ...options };
+  await harness.emit("session_before_compact", sessionBeforeCompactEvent(eventOptions));
+  await harness.emit("session_compact", sessionCompactEvent(eventOptions));
 }
 
 export async function emitSilentContextOverflow(

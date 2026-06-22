@@ -1,15 +1,15 @@
 # Codebase Audit — pi-codex-goal
 
-**Date:** 2026-06-10
+**Date:** 2026-06-22
 **Scope:** Full repository (`src/`, `test/`, package metadata, docs, platform-smoke operability)
-**Baseline:** `0.1.26` on the local checkout after platform-smoke/read-tool smoke hardening
+**Baseline:** `0.1.28` release-prep checkout after Pi 0.79.10 compaction metadata hardening
 **Local gate:** `npm run verify`
 
 ## Executive summary
 
-The package is in **good structural health**. Core behavior is split across focused runtime modules: controller wiring, event handlers, state transitions, recovery, stale queued-work cleanup, persistence, prompt generation, and platform-smoke tooling. TypeScript remains strict, the package keeps pi runtime dependencies optional wildcard peers, and the local gate is broad.
+The package is in **good structural health**. Core behavior is split across focused runtime modules: controller wiring, event handlers, state transitions, recovery, stale queued-work cleanup, persistence, prompt generation, and platform-smoke tooling. TypeScript remains strict, the package keeps pi runtime dependencies optional wildcard peers, and the local plus Crabbox gates are broad.
 
-No critical or high-severity structural defects were found in the 2026-06-10 audit. The meaningful findings were source-of-truth drift in this audit document, duplicated local execution of the platform-smoke test file, and a low-risk type-only event-registration back edge. Those findings were decomposed into CueLoop tasks and remediated in the queue-drain pass.
+No critical or high-severity structural defects were found in the 2026-06-22 Pi 0.79.10 refresh. Required work was narrow: retarget the local Pi dev baseline, consume the new compaction retry metadata to avoid extension fallback races, refresh compact/shutdown fixtures, and fix a Windows-only platform-smoke fake Crabbox runner edge caught by the release gate.
 
 ## Coverage map
 
@@ -21,8 +21,8 @@ No critical or high-severity structural defects were found in the 2026-06-10 aud
 | Runtime lifecycle | Inspected | `goal-runtime-*`, `goal-state-controller.ts`, `goal-transition*.ts` |
 | Continuation/queued work | Inspected | `continuation-scheduler.ts`, `queued-goal-*.ts`, `stale-queued-work-*` |
 | Recovery | Inspected | `recovery*.ts`, recovery tests |
-| Tests/local CI | Inspected and run | `npm run verify` passed with 307 tests before remediation; after remediation, platform-smoke checks are owned by `check:platform-smoke` and 302 tests remain under `npm test` |
-| Platform smoke | Inspected, local syntax/unit gate run | `scripts/platform-smoke*`, `platform-smoke.config.mjs`, `docs/platform-smoke.md`; full Crabbox `smoke:platform:all` not run in this audit |
+| Tests/local CI | Inspected and run | `npm run verify` passed; `check:platform-smoke` ran 6 platform-smoke checks and `npm test` ran 304 regular tests |
+| Platform smoke | Inspected and run | `scripts/platform-smoke*`, `platform-smoke.config.mjs`, `docs/platform-smoke.md`; full Crabbox `smoke:platform:all` passed on macOS, Ubuntu, and native Windows |
 | Security/performance | Sampled only | Secret redaction/artifact checks inspected; no dedicated threat model or profiling performed |
 
 ## Current architecture
@@ -74,15 +74,23 @@ No critical or high-severity structural defects were found in the 2026-06-10 aud
 - **Good:** Stale queued-work and recovery behavior is tested heavily against delayed terminal events, context aborts, provider errors, compaction, and shutdown.
 - **Good:** Platform-smoke tooling validates packed-package install/list behavior and model-backed runtime behavior, not just source-tree shortcuts.
 - **Watch:** Source-of-truth docs must be refreshed when release-sensitive platform/runtime changes land; otherwise README/AGENTS links can point to stale confidence claims.
+- **Fixed in 0.1.28 prep:** Pi 0.79.10 `session_compact.willRetry` is now part of the continuation decision, so host overflow retry compactions do not schedule extension fallback continuations.
 
 ## Remediation roadmap
 
-### Completed in the queue-drain pass
+### Completed in prior queue-drain pass
 
 - [x] Refresh this audit to the `0.1.26` baseline.
 - [x] Keep README/AGENTS audit links aligned with the current-vs-historical source of truth.
 - [x] Remove duplicate platform-smoke test execution from `npm run verify`.
 - [x] Narrow the event registrar type dependency to `GoalRuntimeEventHandlers`.
+
+### Completed in the 0.1.28 Pi 0.79.10 refresh
+
+- [x] Update the local Pi dev baseline and README compatibility note to Pi 0.79.10 on Node 24.
+- [x] Use `session_compact.willRetry` to skip extension fallback continuations while the host will retry an overflow turn.
+- [x] Refresh compact/shutdown test fixtures to include `reason`, `willRetry`, and shutdown `reason`.
+- [x] Fix native Windows platform-smoke coverage for fake `.cmd` Crabbox wrappers and warmup failure redaction assertions.
 
 ### Ongoing release-sensitive gate
 
@@ -93,12 +101,13 @@ No critical or high-severity structural defects were found in the 2026-06-10 aud
 
 ## Validation evidence
 
-- `npm run verify` passed before remediation with 307 tests.
-- `npm run verify` passed after remediation: `check:platform-smoke` ran 5 platform-smoke checks once, and `npm test` ran 302 regular tests.
-- `npm pack --dry-run --json` showed the package includes source, docs, platform-smoke scripts/config, prompts, and excludes local artifact directories.
+- `npm run verify` passed under Pi 0.79.10: typecheck, 6 platform-smoke checks, and 304 regular tests.
+- `npm run smoke:platform:doctor` passed with Crabbox 0.33.0 and model auth for `zai/glm-5.2`.
+- `npm run smoke:platform:all` passed on macOS, Ubuntu Linux, and native Windows. The gate ran `platform-build` and `goal-runtime-smoke`, packed the package, installed it into isolated projects with `--approve`, checked `pi list`, and completed real model-backed goal-tool smokes.
+- `npm pack --dry-run --json` is covered by `check:platform-smoke` and showed the package includes source, docs, platform-smoke scripts/config, prompts, and excludes local artifact directories.
+- `npm audit --omit=optional` found 0 vulnerabilities after lockfile refresh.
 
 ## Assumptions, gaps, and blocked checks
 
-- Full Crabbox `npm run smoke:platform:all` was not run during the audit; use it for release-sensitive changes.
 - Security review was limited to structural inspection of artifact/secret hygiene and package contents; no dedicated threat model was performed.
 - Performance was not profiled; event-driven paths and persistence coalescing did not show obvious structural performance risks.

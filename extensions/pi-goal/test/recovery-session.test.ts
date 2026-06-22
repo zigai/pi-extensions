@@ -7,6 +7,9 @@ import { createThreadGoal } from "../src/state.js";
 import {
   createRuntimeHarness,
   emitPersistentAssistantError,
+  sessionBeforeCompactEvent,
+  sessionCompactEvent,
+  sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 import {
   emitPendingRecoveryShutdown,
@@ -55,7 +58,7 @@ test("session_start after pending transient shutdown does not auto-continue", as
     assert.equal(harness.snapshot().goal?.status, "active");
   }
 
-  await harness.emit("session_shutdown", { type: "session_shutdown" });
+  await harness.emit("session_shutdown", sessionShutdownEvent());
   assert.equal(harness.snapshot().goal?.status, "paused");
 
   harness.sentMessages.length = 0;
@@ -102,7 +105,7 @@ test("session_tree after pending transient shutdown does not auto-continue", asy
   harness.sentMessages.length = 0;
 
   await emitPersistentAssistantError(harness, 0, "websocket closed");
-  await harness.emit("session_shutdown", { type: "session_shutdown" });
+  await harness.emit("session_shutdown", sessionShutdownEvent());
   assert.equal(harness.snapshot().goal?.status, "paused");
 
   harness.sentMessages.length = 0;
@@ -118,7 +121,7 @@ test("session_start after pending overflow shutdown does not auto-continue", asy
   harness.sentMessages.length = 0;
 
   await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
-  await harness.emit("session_shutdown", { type: "session_shutdown" });
+  await harness.emit("session_shutdown", sessionShutdownEvent());
   assert.equal(harness.snapshot().goal?.status, "paused");
 
   harness.sentMessages.length = 0;
@@ -231,21 +234,12 @@ test("delayed session_compact keeps goal active without premature pause or exten
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
 
-  await harness.emit("session_before_compact", {
-    type: "session_before_compact",
-    preparation: {},
-    branchEntries: [],
-    signal: new AbortController().signal,
-  });
+  await harness.emit("session_before_compact", sessionBeforeCompactEvent());
 
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
 
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    summary: "compact summary",
-    tokensBefore: 100,
-  });
+  await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
 
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);

@@ -119,7 +119,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       stateController.flushGoalPersistence("runtime");
     }) satisfies ExtensionHandler<SessionBeforeCompactEvent>,
 
-    onSessionCompact: (async (_event, ctx) => {
+    onSessionCompact: (async (event, ctx) => {
       if (runStaleQueuedWorkPlan(runtimeState.staleQueuedWorkGuard.planSessionCompact(), ctx, deps)) {
         return;
       }
@@ -130,6 +130,10 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       );
       recoveryRuntime.onSessionCompact();
       status.refreshUi(ctx);
+      if (event.willRetry) {
+        clearHostOverflowPostCompactFallback();
+        return;
+      }
       if (!recoveryPhaseBlocksContinuation(runtimeState.recoveryState.phase)) {
         continuation.maybeContinueAfterCurrentEvent(ctx);
       } else if (wasRecoveringFromHostOverflow) {

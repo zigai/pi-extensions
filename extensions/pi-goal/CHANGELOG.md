@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.1.28 - 2026-06-22
+
+- Update the local pi development baseline to `@earendil-works/*` `0.79.10` after reviewing the Pi `0.79.10` changelog, extension docs/types, package docs, project-trust docs, and compaction docs.
+- Use Pi `0.79.10` `session_compact.willRetry` metadata so overflow compactions that will be retried by the host do not schedule extension fallback continuations.
+- Refresh compact/shutdown runtime test fixtures to include current Pi compaction retry metadata and shutdown reasons.
+- Fix the platform-smoke Crabbox runner/test harness so fake `.cmd` Crabbox binaries and warmup-secret redaction checks work during native Windows verification.
+- Refresh vulnerable dev transitive lockfile entries flagged by `npm audit`.
+- Remove the obsolete `.pi-fleet-tested-version` marker; the release baseline now lives in package metadata and docs.
+- Update README compatibility notes for the Pi `0.79.10` / Node 24 release baseline.
+
+### Validation
+
+- Ran `npm run verify` under pi `0.79.10`.
+- Ran `npm run typecheck` under pi `0.79.10`.
+- Ran `npm test` under pi `0.79.10`.
+- Ran `npm run check:platform-smoke` under pi `0.79.10`.
+- Ran `npm run smoke:platform:doctor` and `npm run smoke:platform:all` under pi `0.79.10`.
+- Ran `npm audit --omit=optional`.
+
 ## 0.1.27 - 2026-06-15
 
 - Raise the source-tree package Node engine floor to Node 24 so package metadata matches the platform-smoke validation baseline for the next release.

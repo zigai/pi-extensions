@@ -14,6 +14,8 @@ import {
   emitPersistentAssistantError,
   emitSilentContextOverflow,
   flushContinuationScheduler,
+  sessionBeforeCompactEvent,
+  sessionCompactEvent,
 } from "./support/runtime-harness.js";
 
 test("non-retryable provider errors pause active goals immediately", async () => {
@@ -70,12 +72,7 @@ test("non-retryable provider error pause does not cancel host compaction", async
 
   assert.equal(harness.snapshot().goal?.status, "paused");
 
-  const compaction = await harness.emit("session_before_compact", {
-    type: "session_before_compact",
-    preparation: {},
-    branchEntries: [],
-    signal: new AbortController().signal,
-  });
+  const compaction = await harness.emit("session_before_compact", sessionBeforeCompactEvent());
   assert.notDeepEqual(compaction[0], { cancel: true });
 });
 
@@ -256,11 +253,10 @@ test("threshold session_compact after transient provider error preserves pending
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
 
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    summary: "threshold compact",
-    tokensBefore: 100,
-  });
+  await harness.emit(
+    "session_compact",
+    sessionCompactEvent({ reason: "threshold", summary: "threshold compact" }),
+  );
 
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
@@ -285,18 +281,12 @@ test("repeated silent stop overflow after host compaction pauses without blockin
   });
   await emitSilentContextOverflow(harness, 0, firstOverflow);
 
-  const firstCompaction = await harness.emit("session_before_compact", {
-    type: "session_before_compact",
-    preparation: {},
-    branchEntries: [],
-    signal: new AbortController().signal,
-  });
+  const firstCompaction = await harness.emit(
+    "session_before_compact",
+    sessionBeforeCompactEvent({ reason: "overflow" }),
+  );
   assert.notDeepEqual(firstCompaction[0], { cancel: true });
-  await harness.emit("session_compact", {
-    type: "session_compact",
-    summary: "compact summary",
-    tokensBefore: 100,
-  });
+  await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow" }));
 
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
@@ -312,12 +302,7 @@ test("repeated silent stop overflow after host compaction pauses without blockin
   assert.equal(harness.sentMessages.length, 0);
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal needs attention/);
 
-  const manualCompaction = await harness.emit("session_before_compact", {
-    type: "session_before_compact",
-    preparation: {},
-    branchEntries: [],
-    signal: new AbortController().signal,
-  });
+  const manualCompaction = await harness.emit("session_before_compact", sessionBeforeCompactEvent());
   assert.notDeepEqual(manualCompaction[0], { cancel: true });
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -347,11 +332,6 @@ test("repeated zero-output length overflow after host compaction pauses without 
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
 
-  const manualCompaction = await harness.emit("session_before_compact", {
-    type: "session_before_compact",
-    preparation: {},
-    branchEntries: [],
-    signal: new AbortController().signal,
-  });
+  const manualCompaction = await harness.emit("session_before_compact", sessionBeforeCompactEvent());
   assert.notDeepEqual(manualCompaction[0], { cancel: true });
 });

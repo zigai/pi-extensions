@@ -13,6 +13,8 @@ import {
   emitQueuedTurnThroughContext,
   queuedCustomMessage,
   type RuntimeHarness,
+  sessionCompactEvent,
+  sessionShutdownEvent,
 } from "./runtime-harness.js";
 
 export function replaceHarnessBranchWithGoal(
@@ -43,11 +45,7 @@ export async function givenOverflowPausedGoal(
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await emitPersistentAssistantError(harness, attempt, "context_length_exceeded");
-    await harness.emit("session_compact", {
-      type: "session_compact",
-      summary: "compact summary",
-      tokensBefore: 100,
-    });
+    await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
   }
 
   const goal = harness.snapshot().goal;
@@ -87,7 +85,7 @@ export async function emitPendingRecoveryShutdown(
   harness: RuntimeHarness,
   kind: "overflow" | "transient",
 ): Promise<ReturnType<RuntimeHarness["snapshot"]>["goal"]> {
-  await harness.emit("session_shutdown", { type: "session_shutdown" });
+  await harness.emit("session_shutdown", sessionShutdownEvent());
   const pausedGoal = harness.snapshot().goal;
   assert.equal(pausedGoal?.status, "paused");
   assert.match(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);

@@ -10,6 +10,7 @@ import {
   providerContextMessageAt,
   queuedCustomMessage,
   requireProviderContextResult,
+  sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
 
@@ -457,7 +458,7 @@ test("current id-less agent_end error after stale abort release and current cont
     assert.equal(harness.sentMessages.length, 0);
 
     now = 6_000;
-    await harness.emit("session_shutdown", { type: "session_shutdown" });
+    await harness.emit("session_shutdown", sessionShutdownEvent());
 
     const goal = harness.snapshot().goal;
     assert.equal(goal?.goalId, replacement?.goalId);
