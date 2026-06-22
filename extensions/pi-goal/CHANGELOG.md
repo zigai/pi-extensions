@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.29 - 2026-06-22
+
+- Remove a stale exact Pi version from a recovery-code comment so source guidance points at the current host retryable-error contract instead of an old Pi baseline.
+
+### Validation
+
+- Ran `npm run verify` under pi `0.79.10`.
+
 ## 0.1.28 - 2026-06-22
 
 - Update the local pi development baseline to `@earendil-works/*` `0.79.10` after reviewing the Pi `0.79.10` changelog, extension docs/types, package docs, project-trust docs, and compaction docs.

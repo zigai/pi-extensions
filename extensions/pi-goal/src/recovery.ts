@@ -77,7 +77,7 @@ function isNonRetryableProviderLimitError(errorMessage: string): boolean {
 }
 
 /**
- * Mirrors Pi 0.77.0 host AgentSession._isRetryableError() classification for transient provider failures.
+ * Mirrors the current Pi host AgentSession retryable-error classification for transient provider failures.
  * Context overflow is not transient retryable because host compaction handles that path.
  * Terminal quota, billing, and provider-limit errors are not retryable even when they contain 429 or rate-limit wording.
  */
