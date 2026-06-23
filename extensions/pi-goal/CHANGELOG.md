@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.1.30 - 2026-06-23
+
+- Update the local pi development baseline to `@earendil-works/*` `0.80.1` after reviewing the Pi 0.80.0 and 0.80.1 changelogs plus current extension/package/security docs.
+- Move `@earendil-works/pi-ai` source imports to `@earendil-works/pi-ai/compat`, matching the Pi 0.80 source typechecking migration guidance.
+- Refresh README compatibility notes for the Pi `0.80.1` / Node 24 release baseline.
+
+### Validation
+
+- Pending in this release train.
+
 ## 0.1.29 - 2026-06-22
 
 - Remove a stale exact Pi version from a recovery-code comment so source guidance points at the current host retryable-error contract instead of an old Pi baseline.
