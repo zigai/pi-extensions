@@ -27,6 +27,8 @@ export function createGoalRuntimeStatus(deps: GoalRuntimeStatusDeps) {
 
   const syncStatusRefresh = (): void => {
     if (deps.getGoalStatus() === "active" && statusContext && !statusRefreshTimer) {
+      // 1 Hz footer refresh is the intentional steady-state cost of live
+      // elapsed-time display for active goals; stopped when the goal leaves active.
       statusRefreshTimer = setInterval(() => {
         if (!statusContext || deps.getGoalStatus() !== "active") {
           stopStatusRefresh();

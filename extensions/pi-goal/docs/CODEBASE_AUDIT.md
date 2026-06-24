@@ -1,15 +1,15 @@
 # Codebase Audit — pi-codex-goal
 
-**Date:** 2026-06-22
+**Date:** 2026-06-24
 **Scope:** Full repository (`src/`, `test/`, package metadata, docs, platform-smoke operability)
-**Baseline:** `0.1.28` release-prep checkout after Pi 0.79.10 compaction metadata hardening
+**Baseline:** `0.1.30` checkout against Pi `0.80.2`
 **Local gate:** `npm run verify`
 
 ## Executive summary
 
 The package is in **good structural health**. Core behavior is split across focused runtime modules: controller wiring, event handlers, state transitions, recovery, stale queued-work cleanup, persistence, prompt generation, and platform-smoke tooling. TypeScript remains strict, the package keeps pi runtime dependencies optional wildcard peers, and the local plus Crabbox gates are broad.
 
-No critical or high-severity structural defects were found in the 2026-06-22 Pi 0.79.10 refresh. Required work was narrow: retarget the local Pi dev baseline, consume the new compaction retry metadata to avoid extension fallback races, refresh compact/shutdown fixtures, and fix a Windows-only platform-smoke fake Crabbox runner edge caught by the release gate.
+No critical or high-severity structural defects were found in the 2026-06-24 Pi 0.80.2 audit. The runtime was verified against installed Pi 0.80.2 types/CLI/docs: tool/event/command APIs, `/compat` imports, lifecycle boundaries, project-trust handling, prompt-guideline dedup, and extension tax are all clean. Required work was release/docs fidelity only: align the dev baseline to the installed `0.80.2` runtime, stop hard-coding the published npm version in the README, curate the already-published `0.1.30` changelog, and document the intentional steady-state footer-refresh cost.
 
 ## Coverage map
 
@@ -101,7 +101,7 @@ No critical or high-severity structural defects were found in the 2026-06-22 Pi 
 
 ## Validation evidence
 
-- `npm run verify` passed under Pi 0.79.10: typecheck, 6 platform-smoke checks, and 304 regular tests.
+- `npm run verify` passed under Pi 0.80.2: typecheck, 6 platform-smoke checks, and 304 regular tests.
 - `npm run smoke:platform:doctor` passed with Crabbox 0.33.0 and model auth for `zai/glm-5.2`.
 - `npm run smoke:platform:all` passed on macOS, Ubuntu Linux, and native Windows. The gate ran `platform-build` and `goal-runtime-smoke`, packed the package, installed it into isolated projects with `--approve`, checked `pi list`, and completed real model-backed goal-tool smokes.
 - `npm pack --dry-run --json` is covered by `check:platform-smoke` and showed the package includes source, docs, platform-smoke scripts/config, prompts, and excludes local artifact directories.

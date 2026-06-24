@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.1.31 - 2026-06-24
+
+- Update the local pi development baseline to `@earendil-works/*` `0.80.2` so typecheck fidelity matches the installed runtime pi release.
+- Stop hard-coding the published npm version in the README compatibility note so reproducibility guidance does not drift between releases; update the baseline to Pi `0.80.2`.
+- Re-baseline the structural audit record to `0.1.30` / `0.80.2` and refresh its summary and validation evidence.
+- Document the intentional steady-state cost of the 1 Hz footer status refresh for active goals.
+
+### Validation
+
+- Ran `npm run verify` under pi `0.80.2`: `tsc --noEmit`, 6 platform-smoke checks, and 304 regular tests, all passing.
+- Ran `npm run smoke:platform:doctor` and `npm run smoke:platform:all` (macOS, Ubuntu, native Windows) under pi `0.80.2`; doctor reported 0 failures and every platform-build, goal-runtime-smoke, and lease-cleanup assertion suite passed on all three targets.
+
 ## 0.1.30 - 2026-06-23
 
 - Update the local pi development baseline to `@earendil-works/*` `0.80.1` after reviewing the Pi 0.80.0 and 0.80.1 changelogs plus current extension/package/security docs.
@@ -10,7 +22,7 @@
 
 ### Validation
 
-- Pending in this release train.
+- Package published to npm as `0.1.30`. Reproduce the release gate with `npm run verify` and `npm run check:platform-smoke` under the `0.80.1` baseline recorded above.
 
 ## 0.1.29 - 2026-06-22
 
