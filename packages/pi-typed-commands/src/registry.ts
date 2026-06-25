@@ -1,4 +1,4 @@
-import type { TypedSkillDiagnostics } from "./skills.js";
+import type { TypedSkillDiagnostics } from "./skills/types.js";
 import type { ArgumentDefinitions, RegisteredTypedCommand } from "./types.js";
 
 type RegistryListener = () => void;
