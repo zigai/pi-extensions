@@ -66,7 +66,7 @@ function setNestedValue(target: Record<string, unknown>, path: string[], value: 
 
 /** Expand dotted argument names such as `config.path` into nested objects. */
 export function expandArgumentObject(
-    values: Record<string, ArgumentValue>,
+    values: Readonly<Record<string, ArgumentValue>>,
 ): Record<string, unknown> {
     const expanded = createSafeRecord();
     for (const [name, value] of Object.entries(values)) {
@@ -79,7 +79,10 @@ export function expandArgumentObject(
     return expanded;
 }
 
-function resolveArgumentPath(values: Record<string, ArgumentValue>, path: string): unknown {
+function resolveArgumentPath(
+    values: Readonly<Record<string, ArgumentValue>>,
+    path: string,
+): unknown {
     if (Object.hasOwn(values, path)) {
         return values[path];
     }

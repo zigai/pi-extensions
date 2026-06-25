@@ -4,7 +4,7 @@ import { formatCommandUsage, formatDetailedHelp } from "../usage.js";
 import type {
     ArgumentDefinitions,
     DefinedTypedCommand,
-    InferArguments,
+    SerializableArgumentValues,
     TypedCommandDefinition,
 } from "../types.js";
 import { maybeFlattenGroupedValues, typedParseResultForDefinition } from "./grouped-values.js";
@@ -19,10 +19,10 @@ export function defineTypedCommand<const TDefinitions extends ArgumentDefinition
         throw definitionError(definition.name, compiled.diagnostics);
     }
 
-    const normalizedDefinition = {
+    const normalizedDefinition: TypedCommandDefinition<TDefinitions> = {
         ...definition,
-        args: cloneAndFreezeDefinitions(definition.args) as TDefinitions,
-    } as TypedCommandDefinition<TDefinitions>;
+        args: cloneAndFreezeDefinitions(definition.args),
+    };
     const command = registeredCommandForDefinition(normalizedDefinition);
     const defined = {
         ...normalizedDefinition,
@@ -32,13 +32,10 @@ export function defineTypedCommand<const TDefinitions extends ArgumentDefinition
                 normalizedDefinition.args,
             );
         },
-        serialize(values: Partial<InferArguments<TDefinitions>>) {
+        serialize(values: SerializableArgumentValues<TDefinitions>) {
             return serializeTypedCommandArgs(
                 command,
-                maybeFlattenGroupedValues(
-                    values as Record<string, unknown>,
-                    normalizedDefinition.args,
-                ),
+                maybeFlattenGroupedValues(values, normalizedDefinition.args),
             );
         },
         formatUsage() {
@@ -48,5 +45,5 @@ export function defineTypedCommand<const TDefinitions extends ArgumentDefinition
             return formatDetailedHelp(command);
         },
     };
-    return Object.freeze(defined) as DefinedTypedCommand<TDefinitions>;
+    return Object.freeze(defined);
 }

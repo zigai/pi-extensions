@@ -40,12 +40,16 @@ function duplicateIssue(name: string, definition: ArgumentDefinition): ParseIssu
     };
 }
 
+function isStringArrayValue(value: ArgumentValue): value is string[] {
+    return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
+}
+
 function appendValues(current: ArgumentValue, next: ArgumentValue): ArgumentValue {
-    if (!Array.isArray(next)) {
+    if (!isStringArrayValue(next)) {
         return next;
     }
     let values: string[] = [];
-    if (Array.isArray(current)) {
+    if (isStringArrayValue(current)) {
         values = current;
     }
     const combined = [...values];

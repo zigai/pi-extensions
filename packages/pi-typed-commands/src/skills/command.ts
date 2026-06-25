@@ -50,5 +50,5 @@ export function typedSkillCommandFromMetadata(
 export function isTypedSkillCommand(
     command: RegisteredTypedCommand,
 ): command is RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
-    return (command as { source?: unknown }).source === "skill";
+    return command.source === "skill";
 }

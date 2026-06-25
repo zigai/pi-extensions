@@ -19,6 +19,7 @@ import {
 } from "./schema.js";
 import type {
     ArgumentDefinition,
+    ArgumentDefinitions,
     MaybePromise,
     RegisteredTypedCommand,
     TypedCompletionContext,
@@ -44,7 +45,7 @@ function tokenizeLoose(input: string): Token[] {
     return lexTypedArgumentString(input).tokens;
 }
 
-function providedArgumentNames<TDefinitions extends Record<string, ArgumentDefinition>>(
+function providedArgumentNames<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     tokens: Token[],
 ): Set<string> {
@@ -634,9 +635,7 @@ function resolveCompletionDecisionSync(
  *
  * Returns `null` when typed completions have no suggestion so Pi can continue its normal behavior.
  */
-export function getTypedArgumentCompletions<
-    TDefinitions extends Record<string, ArgumentDefinition>,
->(
+export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
 ): MaybePromise<AutocompleteItem[] | null> {
@@ -659,7 +658,7 @@ export function getTypedArgumentCompletions<
         previousToken = tokens[tokens.length - 1];
     }
     const context: CommandLineContext = {
-        command: command as RegisteredTypedCommand,
+        command,
         argsBeforeCursor: argumentPrefix,
         currentPrefix: query,
         replacementPrefix,

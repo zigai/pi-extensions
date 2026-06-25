@@ -6,7 +6,7 @@ import { skillArgumentDiagnostic, typedSkillDiagnostics } from "./diagnostics.js
 import { parseSkillMarkdown } from "./frontmatter.js";
 import { PLACEHOLDER_PATTERN } from "./prompt.js";
 import type {
-    ArgumentDefinitions,
+    FlatArgumentDefinitions,
     ReadTypedSkillMetadataResult,
     SkillArgumentDiagnostic,
     TypedSkillMetadata,
@@ -14,7 +14,7 @@ import type {
 
 function validateSkillPlaceholders(
     body: string,
-    args: ArgumentDefinitions,
+    args: FlatArgumentDefinitions,
 ): SkillArgumentDiagnostic[] {
     const diagnostics: SkillArgumentDiagnostic[] = [];
     const names = Object.keys(args);
@@ -89,7 +89,7 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
         filePath,
         baseDir: dirname(filePath),
         body,
-        args: compiled.command.args as ArgumentDefinitions,
+        args: compiled.command.args,
     };
     if (formTitle !== undefined) {
         metadata.formTitle = formTitle;

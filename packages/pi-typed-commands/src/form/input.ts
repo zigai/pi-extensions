@@ -1,13 +1,9 @@
 import { decodeKittyPrintable, type Input } from "@earendil-works/pi-tui";
 import type { ArgumentDefinition } from "../types.js";
 
-type InputCursorState = {
-    cursor?: unknown;
-};
-
 /** Return the current cursor offset from Pi TUI's input widget, falling back to end-of-value. */
 export function inputCursor(input: Input): number {
-    const cursor = (input as unknown as InputCursorState).cursor;
+    const cursor: unknown = Reflect.get(input, "cursor");
     if (typeof cursor === "number") {
         return cursor;
     }
@@ -17,7 +13,7 @@ export function inputCursor(input: Input): number {
 /** Set Pi TUI's input cursor to a bounded offset. */
 export function setInputCursor(input: Input, cursor: number): void {
     const boundedCursor = Math.max(0, Math.min(cursor, input.getValue().length));
-    (input as unknown as { cursor: number }).cursor = boundedCursor;
+    Reflect.set(input, "cursor", boundedCursor);
 }
 
 function numberAllowsNegative(definition: ArgumentDefinition): boolean {

@@ -10,4 +10,7 @@ export type {
     TypedCompletionContext,
     TypedCompletionItem,
     TypedCompletionProvider,
+    FlatArgumentDefinitions,
+    ParsedArgumentDraft,
+    SerializableArgumentValues,
 } from "../types.js";

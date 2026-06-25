@@ -6,6 +6,7 @@ import type {
     ArgumentDefinitions,
     ArgumentValue,
     DefinitionDiagnostic,
+    FlatArgumentDefinitions,
     ParseIssue,
     RegisteredTypedCommand,
 } from "./types.js";
@@ -20,7 +21,7 @@ const RESERVED_ARGUMENT_NAME_SEGMENTS: ReadonlySet<string> = new Set([
 /** Parser lookup for non-positional flags, keyed by canonical flag name without leading dashes. */
 export type ArgumentLookup = {
     byFlag: Map<string, string>;
-    definitions: ArgumentDefinitions;
+    definitions: FlatArgumentDefinitions;
 };
 
 /** Result of turning one raw CLI token into a typed argument value. */
@@ -134,9 +135,9 @@ export function orderedArgumentEntries(
 }
 
 /** Return a registered command's arguments in parser/help order. */
-export function orderedCommandArgumentEntries<
-    TDefinitions extends Record<string, ArgumentDefinition>,
->(command: RegisteredTypedCommand<TDefinitions>): Array<[string, ArgumentDefinition]> {
+export function orderedCommandArgumentEntries<TDefinitions extends ArgumentDefinitions>(
+    command: RegisteredTypedCommand<TDefinitions>,
+): Array<[string, ArgumentDefinition]> {
     return orderedArgumentEntries(command.args);
 }
 
@@ -256,6 +257,10 @@ function validateFlagName(
     flags.set(flag, owner);
 }
 
+function isStringArrayValue(value: ArgumentValue): value is string[] {
+    return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
+}
+
 /** Validate a parsed, defaulted, or form-collected argument value against its full definition. */
 export function validateArgumentValue(
     name: string,
@@ -332,7 +337,10 @@ export function validateArgumentValue(
     }
 
     if (definition.type === "multi-enum") {
-        if (!Array.isArray(value) || !value.every((item) => definition.values.includes(item))) {
+        if (
+            !isStringArrayValue(value) ||
+            !value.every((item) => definition.values.includes(item))
+        ) {
             return {
                 ok: false,
                 message: `${displayName} must use values from: ${definition.values.join(", ")}`,
@@ -858,7 +866,7 @@ export function findArgumentName(lookup: ArgumentLookup, flag: string): string |
 /** Return an argument default, cloning array defaults so parses cannot share mutable selections. */
 export function applyArgumentDefault(definition: ArgumentDefinition): ArgumentValue {
     if (definition.default !== undefined) {
-        if (Array.isArray(definition.default)) {
+        if (isStringArrayValue(definition.default)) {
             return [...definition.default];
         }
         return definition.default;
@@ -872,7 +880,9 @@ export function applyArgumentDefaults(
     values: Record<string, ArgumentValue>,
 ): Record<string, ArgumentValue> {
     const next: Record<string, ArgumentValue> = { ...values };
-    for (const [name, definition] of Object.entries(definitions)) {
+    for (const [name, definition] of Object.entries(
+        flattenGroupedArgumentDefinitions(definitions),
+    )) {
         if (next[name] !== undefined) {
             continue;
         }

@@ -12,10 +12,13 @@ import type {
     ArgumentDefinitions,
     ArgumentValue,
     CompiledCommand,
+    FlatArgumentDefinitions,
     InferArguments,
+    ParsedArgumentDraft,
     ParsedCommandArguments,
     ParseIssue,
     RawArgumentOccurrence,
+    SerializableArgumentValues,
     TypedCommandRefinement,
     TypedParseResult,
 } from "./types.js";
@@ -59,25 +62,33 @@ type ParsedFlagToken = {
 };
 
 type ParsableTypedCommand<TDefinitions extends ArgumentDefinitions> = {
-    args: TDefinitions;
+    args: FlatArgumentDefinitions;
     compiled?: CompiledCommand<TDefinitions>;
-    refine?: TypedCommandRefinement<TDefinitions>;
+    refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
 };
 
-type TypedCommandGrammar<TDefinitions extends ArgumentDefinitions> = CompiledCommand<TDefinitions>;
+type TypedCommandGrammar = CompiledCommand;
+
+type MutableParsedCommandArguments = {
+    values: Record<string, ArgumentValue>;
+    provided: Set<string>;
+    sources?: Map<string, "explicit" | "default">;
+    issues: ParseIssue[];
+    mode: "run" | "help";
+};
 
 const grammarCache = new WeakMap<object, CompiledCommand>();
 
 function commandGrammar<TDefinitions extends ArgumentDefinitions>(
     command: ParsableTypedCommand<TDefinitions>,
-): TypedCommandGrammar<TDefinitions> {
+): TypedCommandGrammar {
     if (command.compiled !== undefined) {
         return command.compiled;
     }
 
     const cached = grammarCache.get(command);
     if (cached !== undefined) {
-        return cached as TypedCommandGrammar<TDefinitions>;
+        return cached;
     }
 
     const grammar = compileTypedCommandGrammar({
@@ -284,15 +295,52 @@ function tokenCanBeValueForDefinition(token: Token, definition: ArgumentDefiniti
     return definition.type === "number" && isNumericToken(token);
 }
 
+function isStringArrayValue(value: ArgumentValue): value is readonly string[] {
+    return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
+}
+
 function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
-    if (Array.isArray(value)) {
+    if (isStringArrayValue(value)) {
         return [...value];
     }
     return value;
 }
 
-export function getTypedCommandRefinementIssues<TDefinitions extends ArgumentDefinitions>(
-    command: { refine?: TypedCommandRefinement<TDefinitions> },
+function serializableRecord<TDefinitions extends ArgumentDefinitions>(
+    values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, ArgumentValue>>,
+): Readonly<Record<string, ArgumentValue>> {
+    return values as Readonly<Record<string, ArgumentValue>>;
+}
+
+function typedDraft<TDefinitions extends ArgumentDefinitions>(
+    values: Readonly<Record<string, ArgumentValue>>,
+): ParsedArgumentDraft<TDefinitions> {
+    return values as ParsedArgumentDraft<TDefinitions>;
+}
+
+function typedValues<TDefinitions extends ArgumentDefinitions>(
+    values: Readonly<Record<string, ArgumentValue>>,
+): InferArguments<TDefinitions> {
+    return values as InferArguments<TDefinitions>;
+}
+
+function typedProvided<TDefinitions extends ArgumentDefinitions>(
+    provided: ReadonlySet<string>,
+): ReadonlySet<keyof TDefinitions & string> {
+    return provided as ReadonlySet<keyof TDefinitions & string>;
+}
+
+function typedSources<TDefinitions extends ArgumentDefinitions>(
+    sources: ReadonlyMap<string, "explicit" | "default"> | undefined,
+): ReadonlyMap<keyof TDefinitions & string, "explicit" | "default"> {
+    return (sources ?? new Map()) as ReadonlyMap<
+        keyof TDefinitions & string,
+        "explicit" | "default"
+    >;
+}
+
+export function getTypedCommandRefinementIssues(
+    command: { refine?: TypedCommandRefinement<FlatArgumentDefinitions> },
     values: Record<string, ArgumentValue>,
     provided: ReadonlySet<string>,
 ): ParseIssue[] {
@@ -300,9 +348,7 @@ export function getTypedCommandRefinementIssues<TDefinitions extends ArgumentDef
     if (refine === undefined) {
         return [];
     }
-    const issues = refine(values as Partial<InferArguments<TDefinitions>>, {
-        provided: provided as ReadonlySet<keyof TDefinitions & string>,
-    });
+    const issues = refine(values, { provided });
     return issues.map((issue) => {
         const name = issue.path?.[0];
         return createParseIssue("invalid-value", issue.message, name);
@@ -311,9 +357,9 @@ export function getTypedCommandRefinementIssues<TDefinitions extends ArgumentDef
 
 class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     private readonly command: ParsableTypedCommand<TDefinitions>;
-    private readonly grammar: TypedCommandGrammar<TDefinitions>;
+    private readonly grammar: TypedCommandGrammar;
     private readonly rawArgs: string;
-    private readonly result: ParsedCommandArguments = {
+    private readonly result: MutableParsedCommandArguments = {
         values: {},
         provided: new Set<string>(),
         sources: new Map<string, "explicit" | "default">(),
@@ -643,12 +689,13 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
 /** Serialize typed argument values into a raw string that `parseTypedCommandArgs` can read. */
 export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     command: Pick<ParsableTypedCommand<TDefinitions>, "args" | "compiled">,
-    values: Partial<InferArguments<TDefinitions>> | Record<string, ArgumentValue>,
+    values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, ArgumentValue>>,
 ): string {
     const grammar = commandGrammar(command);
+    const flatValues = serializableRecord(values);
     const parts: string[] = [];
     for (const argument of grammar.arguments) {
-        const value = (values as Record<string, ArgumentValue>)[argument.key];
+        const value = flatValues[argument.key];
         if (isPositionalArgument(argument.definition)) {
             if (value !== undefined) {
                 parts.push(quoteSerializedValue(String(value), String(value).startsWith("-")));
@@ -684,18 +731,15 @@ export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
         return {
             status: "error",
             issues: parsed.issues,
-            partial: parsed.values as Partial<InferArguments<TDefinitions>>,
-            provided: parsed.provided as ReadonlySet<keyof TDefinitions & string>,
+            partial: typedDraft<TDefinitions>(parsed.values),
+            provided: typedProvided<TDefinitions>(parsed.provided),
         };
     }
     return {
         status: "success",
-        value: parsed.values as InferArguments<TDefinitions>,
-        provided: parsed.provided as ReadonlySet<keyof TDefinitions & string>,
-        sources: (parsed.sources ?? new Map()) as ReadonlyMap<
-            keyof TDefinitions & string,
-            "explicit" | "default"
-        >,
+        value: typedValues<TDefinitions>(parsed.values),
+        provided: typedProvided<TDefinitions>(parsed.provided),
+        sources: typedSources<TDefinitions>(parsed.sources),
     };
 }
 

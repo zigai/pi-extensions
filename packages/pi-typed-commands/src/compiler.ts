@@ -45,7 +45,7 @@ function freezeValue<T>(value: T): T {
 /** Deep-clone and freeze argument definitions so later caller mutation cannot affect compiled commands. */
 export function cloneAndFreezeDefinitions<TDefinitions extends ArgumentDefinitions>(
     definitions: TDefinitions,
-): Readonly<TDefinitions> {
+): TDefinitions {
     return freezeValue(cloneValue(definitions));
 }
 
@@ -95,9 +95,9 @@ export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDe
     definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
 ): CompiledCommand<TDefinitions> {
     const flattenedDefinitions = flattenGroupedArgumentDefinitions(definition.args);
-    const args = cloneAndFreezeDefinitions(flattenedDefinitions) as Readonly<TDefinitions>;
-    const lookup = createArgumentLookup(args as ArgumentDefinitions);
-    const argumentEntries = orderedArgumentEntries(args as ArgumentDefinitions);
+    const args = cloneAndFreezeDefinitions(flattenedDefinitions);
+    const lookup = createArgumentLookup(args);
+    const argumentEntries = orderedArgumentEntries(args);
     const compiledArguments = Object.freeze(
         argumentEntries.map(([name, argumentDefinition]) =>
             compileArgumentBehavior(name, argumentDefinition),
@@ -111,15 +111,9 @@ export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDe
         argumentByName: new ImmutableReadonlyMap(
             compiledArguments.map((argument) => [argument.key, argument] as const),
         ),
-        argumentOrder: Object.freeze(
-            argumentEntries.map(([name]) => name),
-        ) as readonly (keyof TDefinitions & string)[],
-        positionalOrder: Object.freeze(
-            positionalArgumentEntries(args as ArgumentDefinitions).map(([name]) => name),
-        ) as readonly (keyof TDefinitions & string)[],
-        flagToName: new ImmutableReadonlyMap(
-            lookup.byFlag as ReadonlyMap<string, keyof TDefinitions & string>,
-        ),
+        argumentOrder: Object.freeze(argumentEntries.map(([name]) => name)),
+        positionalOrder: Object.freeze(positionalArgumentEntries(args).map(([name]) => name)),
+        flagToName: new ImmutableReadonlyMap(lookup.byFlag),
         diagnostics: Object.freeze([]),
     });
 }

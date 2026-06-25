@@ -11,6 +11,7 @@ import { openArgumentForm } from "../form/open.js";
 import type {
     ArgumentDefinitions,
     DefinedTypedCommand,
+    FlatArgumentDefinitions,
     FormMode,
     InferArguments,
     ParseIssue,
@@ -38,7 +39,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     command: RegisteredTypedCommand<TDefinitions>,
     rawArgs: string,
     ctx: ExtensionCommandContext,
-): Promise<InferArguments<TDefinitions> | undefined> {
+): Promise<InferArguments<FlatArgumentDefinitions> | undefined> {
     const parsed = parseTypedCommandArgs(command, rawArgs);
     if (parsed.mode === "help") {
         ctx.ui.notify(formatDetailedHelp(command), "info");
@@ -61,7 +62,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         if (collected === undefined) {
             return undefined;
         }
-        return collected as InferArguments<TDefinitions>;
+        return collected;
     }
 
     if (issueAction === "notify") {
@@ -80,7 +81,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         return undefined;
     }
 
-    return parsed.values as InferArguments<TDefinitions>;
+    return parsed.values;
 }
 
 /**
@@ -100,7 +101,7 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     const name = definition.name;
 
     const command = normalizeRegisteredCommand(definition);
-    const maybeInvocationName = pi.registerCommand(name, {
+    const maybeInvocationName: unknown = pi.registerCommand(name, {
         description: command.description,
         getArgumentCompletions(argumentPrefix) {
             return getTypedArgumentCompletions(command, argumentPrefix);
@@ -119,7 +120,7 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             }
             await command.target.run(args, ctx);
         },
-    }) as unknown;
+    });
 
     let piInvocationName: string | undefined;
     if (typeof maybeInvocationName === "string") {
@@ -133,6 +134,6 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             invocationName: piInvocationName,
         });
     }
-    const definedCommand = defineTypedCommand({ ...definition, args: command.args });
+    const definedCommand = defineTypedCommand(definition);
     return createCommandHandle(definedCommand, command, invocationName);
 }

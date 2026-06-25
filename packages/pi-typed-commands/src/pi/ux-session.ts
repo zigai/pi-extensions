@@ -70,7 +70,7 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
     }
 
     ctx.ui.setEditorText("");
-    await command.target.run(args as never, commandCtx);
+    await command.target.run(args, commandCtx);
 }
 
 function notifyDetachedError(ctx: ExtensionContext, error: unknown): void {

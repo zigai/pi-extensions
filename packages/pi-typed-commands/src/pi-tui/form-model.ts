@@ -2,6 +2,7 @@ import { formatFlagName, toKebabCase } from "../names.js";
 import type {
     ArgumentDefinition,
     ArgumentValue,
+    FlatArgumentDefinitions,
     FormMode,
     ParsedCommandArguments,
     ParseIssue,
@@ -76,7 +77,7 @@ export function shouldPromptArgument(
 
 /** Build initial form state, ordered fields, and first selected field from parser output. */
 export function createHeadlessFormModel(
-    definitions: Record<string, ArgumentDefinition>,
+    definitions: FlatArgumentDefinitions,
     parsed: ParsedCommandArguments,
     mode: FormMode,
 ): HeadlessFormModel {

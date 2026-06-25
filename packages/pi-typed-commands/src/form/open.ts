@@ -2,7 +2,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getTypedCommandRefinementIssues } from "../parser.js";
 import { formatFormIssueMessage } from "../pi-tui/form-model.js";
 import type {
-    ArgumentDefinition,
+    ArgumentDefinitions,
     ArgumentValue,
     FormMode,
     ParsedCommandArguments,
@@ -17,7 +17,7 @@ import { SequentialArgumentForm } from "./sequential.js";
  *
  * Returns collected argument values, or `undefined` when the user cancels or no UI value is submitted.
  */
-export async function openArgumentForm<TDefinitions extends Record<string, ArgumentDefinition>>(
+export async function openArgumentForm<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     parsed: ParsedCommandArguments,
     mode: FormMode,

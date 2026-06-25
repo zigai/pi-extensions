@@ -81,9 +81,9 @@ function parseSkillArguments(
     rawArgs: string,
     trailingBody: string,
 ): SkillParseResult {
-    const parsed = parseTypedCommandArgs(command, rawArgs);
+    const parsedResult = parseTypedCommandArgs(command, rawArgs);
     const additionalTokens: string[] = [];
-    parsed.issues = parsed.issues.filter((issue) => {
+    const issues = parsedResult.issues.filter((issue) => {
         const canPreserveAsAdditionalInput =
             issue.kind === "unexpected-positional" ||
             (issue.kind === "unknown-argument" && issue.name === undefined);
@@ -94,7 +94,7 @@ function parseSkillArguments(
         return false;
     });
     return {
-        parsed,
+        parsed: { ...parsedResult, issues },
         additionalInput: combineSkillAdditionalInput(additionalTokens.join(" "), trailingBody),
     };
 }

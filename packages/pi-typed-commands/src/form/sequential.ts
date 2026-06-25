@@ -4,6 +4,7 @@ import { applyArgumentDefault, coerceArgumentValue, validateArgumentValue } from
 import { formatFormIssueMessage, shouldPromptArgument } from "../pi-tui/form-model.js";
 import type {
     ArgumentDefinition,
+    ArgumentDefinitions,
     ArgumentValue,
     FormMode,
     ParsedCommandArguments,
@@ -20,7 +21,7 @@ function currentValueText(value: ArgumentValue): string {
 }
 
 /** Sequential prompt-based argument form used outside TUI mode. */
-export class SequentialArgumentForm<TDefinitions extends Record<string, ArgumentDefinition>> {
+export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
     private readonly command: RegisteredTypedCommand<TDefinitions>;
     private readonly parsed: ParsedCommandArguments;
     private readonly mode: FormMode;

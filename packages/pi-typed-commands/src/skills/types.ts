@@ -7,6 +7,7 @@ import type {
     BooleanArgumentDefinition,
     DefinitionDiagnostic,
     EnumArgumentDefinition,
+    FlatArgumentDefinitions,
     MultiEnumArgumentDefinition,
     NumberArgumentDefinition,
     StringArgumentDefinition,
@@ -20,6 +21,7 @@ export type {
     ArgumentWidget,
     BooleanArgumentDefinition,
     EnumArgumentDefinition,
+    FlatArgumentDefinitions,
     MultiEnumArgumentDefinition,
     NumberArgumentDefinition,
     StringArgumentDefinition,
@@ -46,7 +48,7 @@ export type TypedSkillMetadata = {
     filePath: string;
     baseDir: string;
     body: string;
-    args: ArgumentDefinitions;
+    args: FlatArgumentDefinitions;
     formTitle?: string;
 };
 
@@ -63,7 +65,7 @@ export type TypedSkillDiagnostics = {
 /** Result of normalizing raw skill YAML into command argument definitions. */
 export type SkillArgumentNormalizationResult = {
     /** Successfully normalized argument definitions keyed by argument path. */
-    args: ArgumentDefinitions;
+    args: FlatArgumentDefinitions;
     /** Structured authoring diagnostics that should be shown before using the typed skill. */
     diagnostics: readonly SkillArgumentDiagnostic[];
 };
@@ -77,6 +79,6 @@ export type ReadTypedSkillMetadataResult = {
 /** Inputs for rendering a typed skill invocation into the prompt sent to the model. */
 export type RenderTypedSkillInvocationOptions = {
     skill: Pick<TypedSkillMetadata, "name" | "filePath" | "baseDir" | "body">;
-    values: Record<string, ArgumentValue>;
+    values: Readonly<Record<string, ArgumentValue>>;
     additionalInput?: string;
 };

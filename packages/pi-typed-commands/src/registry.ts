@@ -99,7 +99,7 @@ export function registerTypedCommandMetadata<TDefinitions extends ArgumentDefini
     options: RegisterTypedCommandMetadataOptions = {},
 ): string {
     const registry = getTypedCommandRegistry();
-    removeExistingRecord(registry, command as RegisteredTypedCommand);
+    removeExistingRecord(registry, command);
 
     const id = options.id ?? Symbol(command.name);
     const ownerId = options.ownerId ?? DEFAULT_OWNER_ID;
@@ -116,9 +116,9 @@ export function registerTypedCommandMetadata<TDefinitions extends ArgumentDefini
         source,
         localName: command.name,
         invocationName,
-        command: command as RegisteredTypedCommand,
+        command,
     });
-    registry.commands.set(invocationName, command as RegisteredTypedCommand);
+    registry.commands.set(invocationName, command);
     notifyRegistryListeners(registry);
     return invocationName;
 }

@@ -32,7 +32,7 @@ export function registeredCommandForDefinition<TDefinitions extends ArgumentDefi
     const command: RegisteredTypedCommand<TDefinitions> = {
         name: definition.name,
         description: definition.description,
-        args: compiled.command.args as TDefinitions,
+        args: compiled.command.args,
         compiled: compiled.command,
         target: { kind: "extension", run: () => {} },
         formSymbols: DEFAULT_FORM_SYMBOLS,
@@ -48,7 +48,7 @@ export function registeredCommandForDefinition<TDefinitions extends ArgumentDefi
 export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
     definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
 ): RegisteredTypedCommand<TDefinitions> {
-    const runtimeArgs = flattenGroupedArgumentDefinitions(definition.args) as TDefinitions;
+    const runtimeArgs = flattenGroupedArgumentDefinitions(definition.args);
     const compiled = compileTypedCommandDefinition({
         name: definition.name,
         description: definition.description,
@@ -61,7 +61,7 @@ export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefiniti
     const command: RegisteredTypedCommand<TDefinitions> = {
         name: definition.name,
         description: definition.description,
-        args: compiled.command.args as TDefinitions,
+        args: compiled.command.args,
         compiled: compiled.command,
         target: {
             kind: "extension",

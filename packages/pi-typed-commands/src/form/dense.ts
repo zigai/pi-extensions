@@ -1,7 +1,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { createHeadlessFormModel } from "../pi-tui/form-model.js";
 import type {
-    ArgumentDefinition,
+    ArgumentDefinitions,
     ArgumentValue,
     FormMode,
     ParsedCommandArguments,
@@ -9,7 +9,7 @@ import type {
 } from "../types.js";
 import { ArgumentFormComponent, type FormResult } from "./dense-component.js";
 
-function resolveFormTitle<TDefinitions extends Record<string, ArgumentDefinition>>(
+function resolveFormTitle<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     ctx: ExtensionCommandContext,
 ): string {
@@ -24,9 +24,7 @@ function resolveFormTitle<TDefinitions extends Record<string, ArgumentDefinition
 }
 
 /** Open the dense TUI argument form for a parsed typed command. */
-export async function openDenseArgumentForm<
-    TDefinitions extends Record<string, ArgumentDefinition>,
->(
+export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     parsed: ParsedCommandArguments,
     mode: FormMode,

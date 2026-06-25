@@ -7,7 +7,7 @@ import {
     isPositionalArgument,
     orderedCommandArgumentEntries,
 } from "./schema.js";
-import type { ArgumentDefinition, RegisteredTypedCommand } from "./types.js";
+import type { ArgumentDefinition, ArgumentDefinitions, RegisteredTypedCommand } from "./types.js";
 
 /** Style category for one segment of a typed command usage line. */
 export type CommandUsagePartKind = "label" | "command" | "positional" | "flag" | "detail" | "muted";
@@ -103,7 +103,7 @@ function formatArgumentUsage(
 }
 
 /** Format a compact usage string such as `/deploy env [--ref=main]`. */
-export function formatCommandUsage<TDefinitions extends Record<string, ArgumentDefinition>>(
+export function formatCommandUsage<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
 ): string {
@@ -118,7 +118,7 @@ export function formatCommandUsage<TDefinitions extends Record<string, ArgumentD
 }
 
 /** Format the one-line editor helper text shown below the Pi editor. */
-export function formatHelperLine<TDefinitions extends Record<string, ArgumentDefinition>>(
+export function formatHelperLine<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
 ): string {
@@ -126,7 +126,7 @@ export function formatHelperLine<TDefinitions extends Record<string, ArgumentDef
 }
 
 /** Format the editor helper as styled text segments for TUI rendering. */
-export function formatHelperLineParts<TDefinitions extends Record<string, ArgumentDefinition>>(
+export function formatHelperLineParts<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
 ): CommandUsagePart[] {
@@ -149,7 +149,7 @@ export function formatHelperLineParts<TDefinitions extends Record<string, Argume
 }
 
 /** Format detailed multi-line help for a registered typed command. */
-export function formatDetailedHelp<TDefinitions extends Record<string, ArgumentDefinition>>(
+export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
 ): string {
     const lines = [

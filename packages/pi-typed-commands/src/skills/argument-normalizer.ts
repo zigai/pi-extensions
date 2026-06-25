@@ -12,7 +12,6 @@ import { skillArgumentDiagnostic, skillArgumentDiagnostics } from "./diagnostics
 import type { DefinitionDiagnostic } from "../types.js";
 import type {
     ArgumentDefinition,
-    ArgumentDefinitions,
     ArgumentUi,
     ArgumentWidget,
     BooleanArgumentDefinition,
@@ -24,6 +23,8 @@ import type {
     SkillArgumentNormalizationResult,
     StringArgumentDefinition,
 } from "./types.js";
+
+type MutableArgumentDefinitions = Record<string, ArgumentDefinition>;
 
 const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "text",
@@ -496,7 +497,7 @@ function flattenRawArguments(
  */
 export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNormalizationResult {
     const warnings = createSkillDiagnosticSink();
-    const args = createSafeRecord() as ArgumentDefinitions;
+    const args = createSafeRecord() as MutableArgumentDefinitions;
     if (!isRecord(rawArguments)) {
         const messages = ["arguments must be an object"];
         return {

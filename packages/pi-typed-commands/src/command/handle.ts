@@ -2,8 +2,8 @@ import { unregisterTypedCommandMetadata } from "../registry.js";
 import type {
     ArgumentDefinitions,
     DefinedTypedCommand,
-    InferArguments,
     RegisteredTypedCommand,
+    SerializableArgumentValues,
     TypedCommandHandle,
 } from "../types.js";
 
@@ -20,7 +20,7 @@ export function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
         parse(rawArgs: string) {
             return definition.parse(rawArgs);
         },
-        serialize(values: Partial<InferArguments<TDefinitions>>) {
+        serialize(values: SerializableArgumentValues<TDefinitions>) {
             return definition.serialize(values);
         },
         formatUsage() {

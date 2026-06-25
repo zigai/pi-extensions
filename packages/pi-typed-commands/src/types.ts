@@ -28,7 +28,7 @@ export type ArgumentWidget =
 export type PrimitiveArgumentValue = string | number | boolean;
 
 /** Selected values produced by a `multi-enum` argument. */
-export type MultiArgumentValue = string[];
+export type MultiArgumentValue = readonly string[];
 
 export const ARGUMENT_GROUP: unique symbol = Symbol.for("pi-typed-commands.argument-group");
 
@@ -136,7 +136,7 @@ export type TypedCompletionItem = {
 
 export type TypedCompletionContext<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
     {
-        values: Partial<InferArguments<TDefinitions>>;
+        values: ParsedArgumentDraft<TDefinitions>;
         provided: ReadonlySet<keyof TDefinitions & string>;
         cwd?: string;
         /** Pi extension context when completions run from the Pi adapter. */
@@ -153,33 +153,50 @@ export type TypedCompletionProvider<
     context: TypedCompletionContext<TDefinitions>,
 ) => MaybePromise<readonly TypedCompletionItem[]>;
 
-export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
-    /** Text shown in detailed help, completions, and forms. */
-    description?: string;
-    /** Require the caller to explicitly provide a value. Mutually exclusive with `default`. */
-    required?: boolean;
-    /** Value used when the user leaves the argument unset. Mutually exclusive with `required`. */
-    default?: TValue;
-    /** Explicit CLI flag name without leading dashes. Defaults to the kebab-cased object key. */
-    flag?: string;
-    /** Additional CLI flag aliases without leading dashes. */
-    aliases?: readonly string[];
-    /** Human-readable field title shown in forms and help; defaults to the argument key. */
-    title?: string;
-    /** Value hint shown in usage text and forms. */
-    placeholder?: string;
-    /** How repeated occurrences of this argument are handled. Defaults to error for scalars and append for multi-enum. */
-    occurrence?: ArgumentOccurrencePolicy;
-    /** Optional completion provider for this argument's values. */
-    complete?: TypedCompletionProvider;
-    /** Maximum milliseconds to wait for async completions. Defaults to 1000; set to 0 to disable. */
-    completionTimeoutMs?: number;
-    /** Explicit positional index. */
-    position?: number;
-    /** Consume all remaining positional tokens into this positional argument. */
-    rest?: boolean;
-    ui?: ArgumentUi;
-};
+type ArgumentPresence<TValue extends ConcreteArgumentValue> =
+    | {
+          /** Require the caller to explicitly provide a value. Mutually exclusive with `default`. */
+          required: true;
+          /** Required arguments may not define a default. */
+          default?: never;
+      }
+    | {
+          /** Omit or set false when the value may come from a default or remain unset. */
+          required?: false;
+          /** Value used when the user leaves the argument unset. Mutually exclusive with `required: true`. */
+          default?: TValue;
+      }
+    | {
+          /** Dynamic requiredness is allowed only when no default is present. */
+          required?: boolean;
+          /** Requiredness decided at runtime may not define a default. */
+          default?: never;
+      };
+
+export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> =
+    ArgumentPresence<TValue> & {
+        /** Text shown in detailed help, completions, and forms. */
+        description?: string;
+        /** Explicit CLI flag name without leading dashes. Defaults to the kebab-cased object key. */
+        flag?: string;
+        /** Additional CLI flag aliases without leading dashes. */
+        aliases?: readonly string[];
+        /** Human-readable field title shown in forms and help; defaults to the argument key. */
+        title?: string;
+        /** Value hint shown in usage text and forms. */
+        placeholder?: string;
+        /** How repeated occurrences of this argument are handled. Defaults to error for scalars and append for multi-enum. */
+        occurrence?: ArgumentOccurrencePolicy;
+        /** Optional completion provider for this argument's values. */
+        complete?: TypedCompletionProvider;
+        /** Maximum milliseconds to wait for async completions. Defaults to 1000; set to 0 to disable. */
+        completionTimeoutMs?: number;
+        /** Explicit positional index. */
+        position?: number;
+        /** Consume all remaining positional tokens into this positional argument. */
+        rest?: boolean;
+        ui?: ArgumentUi;
+    };
 
 /** Text argument definition, optionally constrained by length or regular expression. */
 export type StringArgumentDefinition = BaseArgumentDefinition<string> & {
@@ -218,7 +235,7 @@ export type EnumArgumentDefinition<TValues extends readonly string[] = readonly 
 
 /** Multi-choice string argument definition parsed from repeated or comma-separated flags. */
 export type MultiEnumArgumentDefinition<TValues extends readonly string[] = readonly string[]> =
-    BaseArgumentDefinition<Array<TValues[number]>> & {
+    BaseArgumentDefinition<readonly TValues[number][]> & {
         type: "multi-enum";
         /** Allowed string values. Use `as const` to preserve literal inference. */
         values: TValues;
@@ -247,7 +264,12 @@ export type ArgumentGroupDefinition<
 };
 
 /** Map from argument name to definition for a typed command or skill. */
-export type ArgumentDefinitions = Record<string, ArgumentDefinition>;
+export interface ArgumentDefinitions {
+    readonly [name: string]: ArgumentDefinition | ArgumentGroupDefinition;
+}
+
+/** Flattened parser-facing argument map after groups have been expanded to dotted names. */
+export type FlatArgumentDefinitions = Readonly<Record<string, ArgumentDefinition>>;
 
 type HasDefault<TDefinition> = TDefinition extends { default: ConcreteArgumentValue }
     ? true
@@ -263,7 +285,7 @@ type BaseValue<TDefinition> = TDefinition extends StringArgumentDefinition
         : TDefinition extends EnumArgumentDefinition<infer TValues>
           ? TValues[number]
           : TDefinition extends MultiEnumArgumentDefinition<infer TValues>
-            ? Array<TValues[number]>
+            ? readonly TValues[number][]
             : never;
 
 type MaybeOptional<TDefinition, TValue> =
@@ -282,6 +304,16 @@ export type InferArgumentValue<TDefinition> =
 /** Infer the typed handler argument object for a command's `args` definition map. */
 export type InferArguments<TDefinitions extends ArgumentDefinitions> = {
     [TKey in keyof TDefinitions]: InferArgumentValue<TDefinitions[TKey]>;
+};
+
+/** Partially parsed argument values used before every required/defaulted value is guaranteed. */
+export type ParsedArgumentDraft<TDefinitions extends ArgumentDefinitions> = {
+    readonly [TKey in keyof TDefinitions]?: InferArgumentValue<TDefinitions[TKey]>;
+};
+
+/** Values accepted by typed-command serializers, where callers may include only fields to emit. */
+export type SerializableArgumentValues<TDefinitions extends ArgumentDefinitions> = {
+    readonly [TKey in keyof TDefinitions]?: InferArgumentValue<TDefinitions[TKey]>;
 };
 
 /** Handler called after typed arguments have been parsed, defaulted, and validated. */
@@ -339,7 +371,7 @@ export type TypedCommandRefinementContext<TDefinitions extends ArgumentDefinitio
 
 /** Command-level cross-field validation. */
 export type TypedCommandRefinement<TDefinitions extends ArgumentDefinitions> = (
-    args: Partial<InferArguments<TDefinitions>>,
+    args: ParsedArgumentDraft<TDefinitions>,
     context: TypedCommandRefinementContext<TDefinitions>,
 ) => readonly TypedCommandRefinementIssue[];
 
@@ -358,13 +390,17 @@ export type TypedCommandConfig<TDefinitions extends ArgumentDefinitions> = {
 
 /** Normalized command metadata stored in the typed command registry. */
 export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
-    TypedCommandConfig<TDefinitions> & {
+    Omit<TypedCommandConfig<TDefinitions>, "args" | "refine"> & {
         /** Local slash command name without the leading `/`. */
         name: string;
+        /** Flattened parser-facing argument definitions. */
+        args: FlatArgumentDefinitions;
+        /** Runtime cross-field validation over flattened parser-facing values. */
+        refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
         /** Discriminated runtime target for extension commands and typed skills. */
-        target?: InvocationTarget<TDefinitions>;
+        target?: InvocationTarget<FlatArgumentDefinitions>;
         /** Immutable compiled command schema. */
-        compiled?: CompiledCommand<TDefinitions>;
+        compiled?: CompiledCommand;
         /** Concrete invocation name assigned by Pi or the registry, including duplicate suffixes. */
         invocationName?: string;
         /** Unique wrapper registration identity. */
@@ -390,7 +426,7 @@ export type DefinedTypedCommand<TDefinitions extends ArgumentDefinitions> = Read
     TypedCommandDefinition<TDefinitions>
 > & {
     parse(rawArgs: string): TypedParseResult<TDefinitions>;
-    serialize(values: Partial<InferArguments<TDefinitions>>): string;
+    serialize(values: SerializableArgumentValues<TDefinitions>): string;
     formatUsage(): string;
     formatHelp(): string;
 };
@@ -454,15 +490,15 @@ export type CompiledArgument<TValue extends ArgumentValue = ArgumentValue> = {
 };
 
 /** Immutable internal representation consumed by parsing, formatting, completion, forms, and Pi. */
-export type CompiledCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> = {
+export type CompiledCommand<_TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> = {
     readonly name: string;
     readonly description: string;
-    readonly args: Readonly<TDefinitions>;
+    readonly args: FlatArgumentDefinitions;
     readonly arguments: readonly CompiledArgument[];
     readonly argumentByName: ReadonlyMap<string, CompiledArgument>;
-    readonly argumentOrder: readonly (keyof TDefinitions & string)[];
-    readonly positionalOrder: readonly (keyof TDefinitions & string)[];
-    readonly flagToName: ReadonlyMap<string, keyof TDefinitions & string>;
+    readonly argumentOrder: readonly string[];
+    readonly positionalOrder: readonly string[];
+    readonly flagToName: ReadonlyMap<string, string>;
     readonly diagnostics: readonly DefinitionDiagnostic[];
 };
 
@@ -470,7 +506,7 @@ export type TypedCommandHandle<TDefinitions extends ArgumentDefinitions> = {
     readonly definition: DefinedTypedCommand<TDefinitions>;
     readonly invocationName: string;
     parse(rawArgs: string): TypedParseResult<TDefinitions>;
-    serialize(values: Partial<InferArguments<TDefinitions>>): string;
+    serialize(values: SerializableArgumentValues<TDefinitions>): string;
     formatUsage(): string;
     formatHelp(): string;
     /** Remove wrapper-owned metadata and listeners. Safe to call more than once. */
@@ -502,15 +538,15 @@ export type ParseIssue = {
 /** Parsed raw slash-command arguments before conversion to `TypedParseResult`. */
 export type ParsedCommandArguments = {
     /** Parsed values plus defaults that could be applied without prompting. */
-    values: Record<string, ArgumentValue>;
+    readonly values: Readonly<Record<string, ArgumentValue>>;
     /** Argument names explicitly provided by the user, even when their value failed to parse. */
-    provided: Set<string>;
+    readonly provided: ReadonlySet<string>;
     /** Value provenance when it is available. */
-    sources?: Map<string, "explicit" | "default">;
+    readonly sources?: ReadonlyMap<string, "explicit" | "default">;
     /** Syntax, coercion, and validation issues found while parsing. */
-    issues: ParseIssue[];
+    readonly issues: readonly ParseIssue[];
     /** Requested action: run handler or show help. */
-    mode: "run" | "help";
+    readonly mode: "run" | "help";
 };
 
 export type TypedParseResult<TDefinitions extends ArgumentDefinitions> =
@@ -524,7 +560,7 @@ export type TypedParseResult<TDefinitions extends ArgumentDefinitions> =
     | {
           status: "error";
           issues: readonly ParseIssue[];
-          partial: Partial<InferArguments<TDefinitions>>;
+          partial: ParsedArgumentDraft<TDefinitions>;
           provided: ReadonlySet<keyof TDefinitions & string>;
       };
 

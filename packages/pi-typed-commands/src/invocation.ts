@@ -9,7 +9,7 @@ export type ParsedSlashCommandText = {
 };
 
 /** Decide whether parser/validation issues should notify directly or open the argument form. */
-export function decideArgumentIssueAction(issues: ParseIssue[]): ArgumentIssueAction {
+export function decideArgumentIssueAction(issues: readonly ParseIssue[]): ArgumentIssueAction {
     if (issues.length === 0) {
         return "ok";
     }

@@ -117,6 +117,13 @@ function formatValue(value: ArgumentValue): string {
     return String(value);
 }
 
+function stringSelections(value: ArgumentValue): readonly string[] {
+    if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
+        return [];
+    }
+    return value;
+}
+
 function paddedCell(text: string, width: number): string {
     const truncated = truncateToWidth(text, width, "…");
     const padding = Math.max(0, width - visibleWidth(truncated));
@@ -539,10 +546,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             return paddedCell(formatValue(this.state[field.name]), width);
         }
 
-        let currentValues: string[] = [];
-        if (Array.isArray(this.state[field.name])) {
-            currentValues = this.state[field.name] as string[];
-        }
+        const currentValues = stringSelections(this.state[field.name]);
         const selectedValues = new Set(currentValues);
         const cursor = this.multiCursorByName.get(field.name) ?? 0;
         const parts = field.definition.values.map((value, index) => {
@@ -619,10 +623,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             return [];
         }
 
-        let currentValues: string[] = [];
-        if (Array.isArray(this.state[field.name])) {
-            currentValues = this.state[field.name] as string[];
-        }
+        const currentValues = stringSelections(this.state[field.name]);
         const selectedValues = new Set(currentValues);
         const cursor = this.multiCursorByName.get(field.name) ?? 0;
         const parts = field.definition.values.map((value, index) => {
@@ -759,10 +760,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (value === undefined) {
             return;
         }
-        let current: string[] = [];
-        if (Array.isArray(this.state[field.name])) {
-            current = [...(this.state[field.name] as string[])];
-        }
+        const current = [...stringSelections(this.state[field.name])];
         const existingIndex = current.indexOf(value);
         if (existingIndex >= 0) {
             current.splice(existingIndex, 1);
