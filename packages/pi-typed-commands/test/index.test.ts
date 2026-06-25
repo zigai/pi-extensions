@@ -732,6 +732,178 @@ void describe("typed command live helper", () => {
         }
     });
 
+    void it("reports detached argument-form failures", async () => {
+        const commandName = "branch-helper-detached-error-test";
+        const command: RegisteredTypedCommand = {
+            name: commandName,
+            description: "Detached failure demo",
+            args: {
+                path: { type: "string", required: true },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+
+        registerTypedCommandMetadata(command);
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        const notifications: string[] = [];
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            mode: "tui",
+            ui: {
+                getEditorText() {
+                    return `/${commandName}`;
+                },
+                setEditorText() {},
+                setWidget() {},
+                onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
+                    terminalInput = handler;
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify(message: string) {
+                    notifications.push(message);
+                },
+                custom() {
+                    throw new Error("form boom");
+                },
+            },
+        };
+
+        try {
+            installTypedCommandUx(pi, { helperPlacement: "aboveEditor" });
+            await firstHandler(handlers, "session_start")({}, ctx);
+
+            if (terminalInput === undefined) {
+                assert.fail("expected terminal input handler to be registered");
+            }
+
+            assert.deepEqual(terminalInput("\t"), { consume: true });
+            await new Promise((resolve) => setImmediate(resolve));
+
+            assert.match(notifications.join("\n"), /form boom/);
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            unregisterTypedCommandMetadata(command);
+        }
+    });
+
+    void it("uses session placement and keeps submitted invalid errors visible", async () => {
+        const commandName = "branch-helper-invalid-submit-test";
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        type RegisteredCommandOptions = {
+            handler(rawArgs: string, ctx: unknown): Promise<void> | void;
+        };
+        type HelperWidgetFactory = (
+            tui: unknown,
+            theme: { fg(color: string, text: string): string },
+        ) => { render(width: number): string[] };
+
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        let registeredHandler: RegisteredCommandOptions["handler"] | undefined;
+        let editorText = `/${commandName} --count nope`;
+        let widgetFactory: HelperWidgetFactory | undefined;
+        let widgetPlacement: string | undefined;
+
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+            registerCommand(_name: string, options: RegisteredCommandOptions) {
+                registeredHandler = (rawArgs, handlerCtx) => options.handler(rawArgs, handlerCtx);
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            mode: "interactive",
+            ui: {
+                getEditorText() {
+                    return editorText;
+                },
+                setEditorText(next: string) {
+                    editorText = next;
+                },
+                setWidget(_key: string, value: unknown, options?: { placement?: string }) {
+                    widgetFactory = value as HelperWidgetFactory | undefined;
+                    if (value !== undefined) {
+                        widgetPlacement = options?.placement;
+                    }
+                },
+                onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
+                    terminalInput = handler;
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify() {},
+            },
+        };
+
+        const handle = registerTypedCommand(pi, {
+            name: commandName,
+            description: "Invalid submit demo",
+            args: {
+                count: { type: "number", required: true },
+            },
+            run() {
+                assert.fail("invalid arguments should not run the command");
+            },
+        });
+
+        try {
+            installTypedCommandUx(pi, { helperPlacement: "belowEditor" });
+            await firstHandler(handlers, "session_start")({}, ctx);
+
+            if (terminalInput === undefined) {
+                assert.fail("expected terminal input handler to be registered");
+            }
+            if (registeredHandler === undefined) {
+                assert.fail("expected command handler to be registered");
+            }
+
+            terminalInput("\r");
+            await registeredHandler("--count nope", ctx);
+            await new Promise((resolve) => setImmediate(resolve));
+
+            if (widgetFactory === undefined) {
+                assert.fail("expected helper widget to be installed");
+            }
+            const widget = widgetFactory(undefined, {
+                fg(_color: string, text: string) {
+                    return text;
+                },
+            });
+            const lines = widget.render(200);
+            const indent = " ".repeat(`/${commandName}`.length + 2);
+
+            assert.equal(widgetPlacement, "belowEditor");
+            assert.equal(lines[1], `${indent}✕ 'count' expects a number`);
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            handle.dispose();
+        }
+    });
+
     void it("places the helper above the editor by default", async () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-helper-default-agent-"));
         const previousAgentDir = process.env.PI_CODING_AGENT_DIR;

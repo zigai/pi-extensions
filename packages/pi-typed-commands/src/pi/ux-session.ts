@@ -15,13 +15,9 @@ import {
     commandInvocationForEditorText,
     helperInvocationForEditorText,
 } from "./editor-invocation.js";
-import {
-    clearSubmittedInvalidEditorText,
-    setCurrentHelperPlacement,
-    setHelperWidget,
-    WIDGET_KEY,
-} from "./helper.js";
+import { setHelperWidget, WIDGET_KEY } from "./helper.js";
 import { renderTypedSkillInput } from "./skill-input.js";
+import { registerSubmittedInvalidCommandHandler } from "./session-state.js";
 import { resolveTypedCommandUxOptions } from "./settings.js";
 import { completePartialFlagOnTab } from "./tab-completion.js";
 
@@ -81,11 +77,23 @@ function notifyDetachedError(ctx: ExtensionContext, error: unknown): void {
     ctx.ui.notify(message, "error");
 }
 
+function reportDetachedError(ctx: ExtensionContext, error: unknown): void {
+    try {
+        notifyDetachedError(ctx, error);
+    } catch (notifyError) {
+        console.error("pi-typed-commands detached form task failed", error);
+        console.error("pi-typed-commands failed to report detached form task error", notifyError);
+    }
+}
+
 /** Session-scoped Pi UX bridge for helper widgets, autocomplete, and Tab-to-form behavior. */
 export class TypedCommandUxSession {
     private cleanup: Array<() => void> = [];
     private refreshTimer: NodeJS.Timeout | undefined;
     private openingForm = false;
+    private active = false;
+    private formRunId = 0;
+    private submittedInvalidEditorText: string | undefined;
     private options: Required<TypedCommandUxOptions>;
 
     constructor(
@@ -97,8 +105,8 @@ export class TypedCommandUxSession {
 
     start(ctx: ExtensionContext): void {
         this.stop();
+        this.active = true;
         this.options = resolveTypedCommandUxOptions(this.configuredOptions, ctx);
-        setCurrentHelperPlacement(this.options.helperPlacement);
         if (!ctx.hasUI) {
             return;
         }
@@ -107,6 +115,11 @@ export class TypedCommandUxSession {
         };
 
         this.cleanup.push(ctx.ui.onTerminalInput((data) => this.handleTerminalInput(data, ctx)));
+        this.cleanup.push(
+            registerSubmittedInvalidCommandHandler(ctx, (editorText) => {
+                this.showSubmittedInvalidCommand(ctx, editorText);
+            }),
+        );
         this.cleanup.push(onTypedCommandsChanged(refresh));
         this.addAutocompleteProvider(ctx);
         refresh();
@@ -128,6 +141,9 @@ export class TypedCommandUxSession {
         }
         this.cleanup = [];
         this.openingForm = false;
+        this.active = false;
+        this.formRunId += 1;
+        this.submittedInvalidEditorText = undefined;
     }
 
     private clearRefreshTimer(): void {
@@ -144,14 +160,60 @@ export class TypedCommandUxSession {
             return;
         }
         const helperInvocation = helperInvocationForEditorText(ctx.ui.getEditorText());
-        setHelperWidget(ctx, helperInvocation, this.options.helperPlacement);
+        setHelperWidget(ctx, helperInvocation, this.options.helperPlacement, {
+            submittedInvalidEditorText: this.submittedInvalidEditorText,
+        });
+    }
+
+    private showSubmittedInvalidCommand(ctx: ExtensionContext, editorText: string): void {
+        this.clearRefreshTimer();
+        this.submittedInvalidEditorText = editorText;
+        const helperInvocation = helperInvocationForEditorText(editorText);
+        setHelperWidget(ctx, helperInvocation, this.options.helperPlacement, {
+            submittedInvalidEditorText: editorText,
+        });
     }
 
     private scheduleRefresh(ctx: ExtensionContext): void {
+        if (!this.active) {
+            return;
+        }
         this.clearRefreshTimer();
         this.refreshTimer = setTimeout(() => {
-            this.refresh(ctx);
+            try {
+                if (this.active) {
+                    this.refresh(ctx);
+                }
+            } catch (error) {
+                reportDetachedError(ctx, error);
+            }
         }, 0);
+    }
+
+    private launchOpenEditorCommandForm(ctx: ExtensionContext): void {
+        this.openingForm = true;
+        const runId = this.formRunId + 1;
+        this.formRunId = runId;
+        this.clearWidget(ctx);
+        void this.runOpenEditorCommandForm(ctx, runId);
+    }
+
+    private async runOpenEditorCommandForm(ctx: ExtensionContext, runId: number): Promise<void> {
+        try {
+            await openEditorCommandForm(this.pi, ctx);
+        } catch (error) {
+            reportDetachedError(ctx, error);
+        }
+
+        try {
+            if (this.formRunId !== runId) {
+                return;
+            }
+            this.openingForm = false;
+            this.scheduleRefresh(ctx);
+        } catch (error) {
+            reportDetachedError(ctx, error);
+        }
     }
 
     private handleTerminalInput(
@@ -163,7 +225,7 @@ export class TypedCommandUxSession {
             return undefined;
         }
         if (!matchesKey(data, "tab")) {
-            clearSubmittedInvalidEditorText();
+            this.submittedInvalidEditorText = undefined;
             this.scheduleRefresh(ctx);
             return undefined;
         }
@@ -183,16 +245,7 @@ export class TypedCommandUxSession {
             return undefined;
         }
 
-        this.openingForm = true;
-        this.clearWidget(ctx);
-        void openEditorCommandForm(this.pi, ctx)
-            .catch((error: unknown) => {
-                notifyDetachedError(ctx, error);
-            })
-            .finally(() => {
-                this.openingForm = false;
-                this.scheduleRefresh(ctx);
-            });
+        this.launchOpenEditorCommandForm(ctx);
         return { consume: true };
     }
 

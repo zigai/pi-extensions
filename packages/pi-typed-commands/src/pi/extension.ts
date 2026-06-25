@@ -4,13 +4,11 @@ import type {
     ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import type { TypedCommandUxOptions } from "../types.js";
-import { setCurrentHelperPlacement } from "./helper.js";
 import {
     notifySkillDiagnosticsForText,
     refreshTypedSkills,
     transformTypedSkillInput,
 } from "./skill-input.js";
-import { resolveTypedCommandUxOptions } from "./settings.js";
 import { TypedCommandUxSession } from "./ux-session.js";
 
 /**
@@ -20,8 +18,6 @@ import { TypedCommandUxSession } from "./ux-session.js";
  * call it directly when composing pi-typed-commands into a custom extension entrypoint.
  */
 export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxOptions = {}): void {
-    const resolvedOptions = resolveTypedCommandUxOptions(options);
-    setCurrentHelperPlacement(resolvedOptions.helperPlacement);
     const session = new TypedCommandUxSession(pi, options);
 
     pi.on("session_start", async (_event, ctx) => {

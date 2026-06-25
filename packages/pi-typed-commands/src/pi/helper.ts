@@ -25,32 +25,9 @@ export const WIDGET_KEY = "pi-typed-commands.helper";
 /** Default placement for the typed-command live helper. */
 export const DEFAULT_HELPER_PLACEMENT: WidgetPlacement = "aboveEditor";
 
-let submittedInvalidEditorText: string | undefined;
-let currentHelperPlacement: WidgetPlacement = DEFAULT_HELPER_PLACEMENT;
-
-// Pi command handlers and TUI session callbacks are registered independently, so this tiny
-// process-local helper state is the compatibility seam between submitted command handling and
-// helper rendering.
-
-/** Record the current helper placement selected by extension options or project settings. */
-export function setCurrentHelperPlacement(placement: WidgetPlacement): void {
-    currentHelperPlacement = placement;
-}
-
-/** Return the process-local helper placement used by command handlers without a session reference. */
-export function getCurrentHelperPlacement(): WidgetPlacement {
-    return currentHelperPlacement;
-}
-
-/** Clear the editor text marker that forces inline validation display after command submission. */
-export function clearSubmittedInvalidEditorText(): void {
-    submittedInvalidEditorText = undefined;
-}
-
-/** Mark submitted editor text so the helper can show its inline validation immediately. */
-export function markSubmittedInvalidEditorText(editorText: string): void {
-    submittedInvalidEditorText = editorText;
-}
+export type HelperRenderState = {
+    submittedInvalidEditorText?: string | undefined;
+};
 
 /** Return a command's arguments in the order used by helper rendering. */
 export function commandArgumentEntries(
@@ -189,8 +166,9 @@ function issueMatchesArgumentToken(issue: ParseIssue, token: ArgumentToken): boo
 function shouldShowInlineIssue(
     invocation: EditorTypedCommandInvocation,
     issue: ParseIssue,
+    state: HelperRenderState,
 ): boolean {
-    if (editorTextForInvocation(invocation) === submittedInvalidEditorText) {
+    if (editorTextForInvocation(invocation) === state.submittedInvalidEditorText) {
         return true;
     }
 
@@ -267,10 +245,14 @@ function formatInlineIssueMessage(
     return issue.message;
 }
 
-function inlineIssueLine(invocation: EditorTypedCommandInvocation): string | undefined {
+function inlineIssueLine(
+    invocation: EditorTypedCommandInvocation,
+    state: HelperRenderState,
+): string | undefined {
     const parsed = parseTypedCommandArgs(invocation.command, invocation.rawArgs);
     const issue = parsed.issues.find(
-        (item) => item.kind !== "missing-required" && shouldShowInlineIssue(invocation, item),
+        (item) =>
+            item.kind !== "missing-required" && shouldShowInlineIssue(invocation, item, state),
     );
     if (issue === undefined) {
         return undefined;
@@ -287,6 +269,7 @@ export function renderInlineHelper(
     invocation: EditorTypedCommandInvocation,
     width: number,
     theme: HelperTheme,
+    state: HelperRenderState = {},
 ): string[] {
     const tokens = collectInlineHelperTokens(invocation);
     const active = tokens.active.map((token) => `[${token}]`).join(" ");
@@ -306,7 +289,7 @@ export function renderInlineHelper(
     }
     const commandLine = `${helperIndent}${tokenGroups.join("  ")}`;
     const rendered = [truncateToWidth(commandLine, width, "")];
-    const issueLine = inlineIssueLine(invocation);
+    const issueLine = inlineIssueLine(invocation, state);
     if (issueLine !== undefined) {
         rendered.push(truncateToWidth(`${helperIndent}${theme.fg("error", issueLine)}`, width, ""));
     }
@@ -317,7 +300,8 @@ export function renderInlineHelper(
 export function setHelperWidget(
     ctx: ExtensionContext,
     invocation: EditorTypedCommandInvocation | undefined,
-    placement: WidgetPlacement = currentHelperPlacement,
+    placement: WidgetPlacement,
+    state: HelperRenderState = {},
 ): void {
     if (invocation === undefined) {
         ctx.ui.setWidget(WIDGET_KEY, undefined, { placement });
@@ -328,7 +312,7 @@ export function setHelperWidget(
         WIDGET_KEY,
         (_tui, theme) => ({
             render(width: number): string[] {
-                return renderInlineHelper(invocation, width, theme);
+                return renderInlineHelper(invocation, width, theme, state);
             },
             invalidate(): void {},
         }),
