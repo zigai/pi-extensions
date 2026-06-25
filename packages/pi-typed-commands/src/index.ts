@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
     getAgentDir,
     SettingsManager,
@@ -9,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import Type from "typebox";
-import Schema from "typebox/schema";
+import type SchemaModule from "typebox/schema";
 import {
     expandGroupedArgumentValues,
     flattenGroupedArgumentDefinitions,
@@ -78,6 +81,10 @@ const WIDGET_KEY = "pi-typed-commands.helper";
 const DEFAULT_HELPER_PLACEMENT: WidgetPlacement = "aboveEditor";
 let submittedInvalidEditorText: string | undefined;
 let currentHelperPlacement: WidgetPlacement = DEFAULT_HELPER_PLACEMENT;
+const require = createRequire(import.meta.url);
+const Schema: typeof SchemaModule = await import(
+    pathToFileURL(join(dirname(require.resolve("typebox")), "schema/index.mjs")).href
+);
 
 const PiSettingsSchema = Type.Object(
     {
