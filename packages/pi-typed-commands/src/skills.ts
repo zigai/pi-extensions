@@ -47,7 +47,6 @@ export type SkillFrontmatter = {
     description?: string;
     formTitle?: string;
     arguments?: unknown;
-    metadata?: Record<string, unknown>;
 };
 
 /** Normalized metadata for a skill that declares typed arguments. */
@@ -74,8 +73,6 @@ export type TypedSkillDiagnostics = {
     name: string;
     filePath: string;
     diagnostics: readonly SkillArgumentDiagnostic[];
-    /** @deprecated Prefer structured `diagnostics`. */
-    messages: string[];
 };
 
 /** Result of normalizing raw skill YAML into command argument definitions. */
@@ -84,8 +81,6 @@ export type SkillArgumentNormalizationResult = {
     args: ArgumentDefinitions;
     /** Structured authoring diagnostics that should be shown before using the typed skill. */
     diagnostics: readonly SkillArgumentDiagnostic[];
-    /** @deprecated Prefer structured `diagnostics`. */
-    warnings: string[];
 };
 
 /** Result of reading typed metadata from one `SKILL.md` file. */
@@ -146,13 +141,6 @@ function optionalStringArray(value: unknown): string[] | undefined {
         return undefined;
     }
     return items;
-}
-
-function optionalPositional(value: unknown): boolean | number | undefined {
-    if (typeof value === "boolean") {
-        return value;
-    }
-    return optionalNonNegativeInteger(value);
 }
 
 function normalizeArgumentType(type: unknown): ArgumentDefinition["type"] | undefined {
@@ -335,15 +323,6 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
     }
 
     assignOptionalBoolean(target, "rest", raw, "rest", name, warnings);
-
-    if (Object.hasOwn(raw, "positional")) {
-        const positional = optionalPositional(raw.positional);
-        if (positional === undefined) {
-            warnings.push(`${name}.positional must be a boolean or non-negative integer`);
-        } else {
-            definition.positional = positional;
-        }
-    }
 
     const ui = normalizeUi(name, raw.ui, warnings);
     if (ui !== undefined) {
@@ -578,7 +557,7 @@ function typedSkillDiagnostics(
     filePath: string,
     messages: string[],
 ): TypedSkillDiagnostics {
-    return { name, filePath, messages, diagnostics: skillArgumentDiagnostics(messages) };
+    return { name, filePath, diagnostics: skillArgumentDiagnostics(messages) };
 }
 
 function flattenRawArguments(
@@ -616,7 +595,7 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
     const args = createSafeRecord() as ArgumentDefinitions;
     if (!isRecord(rawArguments)) {
         const messages = ["arguments must be an object"];
-        return { args, warnings: messages, diagnostics: skillArgumentDiagnostics(messages) };
+        return { args, diagnostics: skillArgumentDiagnostics(messages) };
     }
 
     for (const [name, raw] of flattenRawArguments(rawArguments, warnings)) {
@@ -627,7 +606,7 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
     }
 
     warnings.push(...validateArgumentDefinitions(args));
-    return { args, warnings, diagnostics: skillArgumentDiagnostics(warnings) };
+    return { args, diagnostics: skillArgumentDiagnostics(warnings) };
 }
 
 /** Parse a `SKILL.md` document into frontmatter fields and trimmed Markdown body. */
@@ -663,9 +642,6 @@ export function parseSkillMarkdown(content: string): {
     if (Object.hasOwn(parsed, "arguments")) {
         frontmatter.arguments = parsed.arguments;
     }
-    if (isRecord(parsed.metadata)) {
-        frontmatter.metadata = parsed.metadata;
-    }
     return { frontmatter, body };
 }
 
@@ -695,12 +671,13 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
         return {};
     }
 
-    const rawArguments = frontmatter.arguments ?? frontmatter.metadata?.arguments;
+    const rawArguments = frontmatter.arguments;
     if (rawArguments === undefined) {
         return {};
     }
 
-    const { args, warnings } = normalizeSkillArguments(rawArguments);
+    const { args, diagnostics } = normalizeSkillArguments(rawArguments);
+    const warnings = diagnostics.map((diagnostic) => diagnostic.message);
     warnings.push(...validateSkillPlaceholders(body, args));
     if (warnings.length > 0) {
         return {
@@ -730,7 +707,7 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
         };
     }
 
-    const formTitle = frontmatter.formTitle ?? optionalString(frontmatter.metadata?.form_title);
+    const formTitle = frontmatter.formTitle;
     const metadata: TypedSkillMetadata = {
         name: frontmatter.name,
         description: frontmatter.description,

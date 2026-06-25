@@ -65,17 +65,6 @@
         "rest": {
           "type": "boolean"
         },
-        "positional": {
-          "oneOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "integer",
-              "minimum": 0
-            }
-          ]
-        },
         "ui": {
           "$ref": "#/$defs/ui"
         }
@@ -152,7 +141,6 @@
             },
             "position": true,
             "rest": true,
-            "positional": true,
             "ui": true,
             "min_length": {
               "type": "integer",
@@ -196,7 +184,6 @@
             "rest": {
               "const": false
             },
-            "positional": true,
             "ui": true,
             "integer": {
               "type": "boolean"
@@ -238,7 +225,6 @@
             "rest": {
               "const": false
             },
-            "positional": true,
             "ui": true
           }
         }
@@ -271,7 +257,6 @@
             "rest": {
               "const": false
             },
-            "positional": true,
             "ui": true,
             "values": {
               "type": "array",
@@ -314,7 +299,6 @@
             "occurrence": true,
             "position": true,
             "rest": true,
-            "positional": true,
             "ui": true,
             "values": {
               "type": "array",

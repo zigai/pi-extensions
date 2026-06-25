@@ -1,4 +1,8 @@
-import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+    ExtensionCommandContext,
+    ExtensionContext,
+    WidgetPlacement,
+} from "@earendil-works/pi-coding-agent";
 
 /**
  * Built-in dense-form widget names for typed command arguments.
@@ -170,16 +174,10 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> = {
     complete?: TypedCompletionProvider;
     /** Maximum milliseconds to wait for async completions. Defaults to 1000; set to 0 to disable. */
     completionTimeoutMs?: number;
-    /** Explicit positional index. Prefer this over legacy `positional: number`. */
+    /** Explicit positional index. */
     position?: number;
     /** Consume all remaining positional tokens into this positional argument. */
     rest?: boolean;
-    /**
-     * Parse this argument positionally instead of as a named flag.
-     *
-     * @deprecated Prefer explicit `position` for stable CLI contracts.
-     */
-    positional?: boolean | number;
     ui?: ArgumentUi;
 };
 
@@ -317,7 +315,13 @@ export type TypedCommandFormSymbols = {
     unselectedRadio?: string;
 };
 
-/** Options passed to `registerTypedCommand`. */
+/** Options for the Pi live typed-command UX bridge. */
+export type TypedCommandUxOptions = {
+    /** Where the compact live helper is rendered. Defaults to `"aboveEditor"`. */
+    helperPlacement?: WidgetPlacement;
+};
+
+/** Command-level refinement issue shown as a parse/form diagnostic. */
 export type TypedCommandRefinementIssue = {
     /** Stable issue code for command-level validation. */
     code?: string;
@@ -339,13 +343,11 @@ export type TypedCommandRefinement<TDefinitions extends ArgumentDefinitions> = (
     context: TypedCommandRefinementContext<TDefinitions>,
 ) => readonly TypedCommandRefinementIssue[];
 
-export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
+export type TypedCommandConfig<TDefinitions extends ArgumentDefinitions> = {
     /** One-line command description used by Pi command listings and detailed help. */
     description: string;
     /** Argument definitions used for parsing, validation, completions, usage, and forms. */
     args: TDefinitions;
-    /** Handler invoked with typed values when parsing and validation succeed. */
-    handler: TypedCommandHandler<TDefinitions>;
     /** Cross-field validation invoked after individual arguments are parsed and validated. */
     refine?: TypedCommandRefinement<TDefinitions>;
     /** Title shown at the top of the dense argument form. */
@@ -354,17 +356,11 @@ export type TypedCommandOptions<TDefinitions extends ArgumentDefinitions> = {
     formSymbols?: TypedCommandFormSymbols;
 };
 
-/**
- * Normalized command metadata stored in the typed command registry.
- *
- * @deprecated Prefer `DefinedTypedCommand` and `TypedCommandHandle` in public code.
- */
+/** Normalized command metadata stored in the typed command registry. */
 export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
-    Omit<TypedCommandOptions<TDefinitions>, "handler"> & {
+    TypedCommandConfig<TDefinitions> & {
         /** Local slash command name without the leading `/`. */
         name: string;
-        /** Handler for extension-backed commands. Skill-backed commands use `target.kind === "skill"`. */
-        handler?: TypedCommandHandler<TDefinitions>;
         /** Discriminated runtime target for extension commands and typed skills. */
         target?: InvocationTarget<TDefinitions>;
         /** Immutable compiled command schema. */
@@ -381,17 +377,13 @@ export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = Ar
     };
 
 /** Declaration-only object created by `defineTypedCommand`. */
-export type TypedCommandDefinition<TDefinitions extends ArgumentDefinitions> = Omit<
-    TypedCommandOptions<TDefinitions>,
-    "handler"
-> & {
-    /** Slash command name without the leading `/`. */
-    name: string;
-    /** Preferred handler spelling for declaration-style commands. */
-    run?: TypedCommandHandler<TDefinitions>;
-    /** Backward-compatible handler spelling. */
-    handler?: TypedCommandHandler<TDefinitions>;
-};
+export type TypedCommandDefinition<TDefinitions extends ArgumentDefinitions> =
+    TypedCommandConfig<TDefinitions> & {
+        /** Slash command name without the leading `/`. */
+        name: string;
+        /** Handler invoked with typed values when parsing and validation succeed. */
+        run: TypedCommandHandler<TDefinitions>;
+    };
 
 /** A command definition with convenience pure-core methods attached. */
 export type DefinedTypedCommand<TDefinitions extends ArgumentDefinitions> = Readonly<
@@ -507,11 +499,7 @@ export type ParseIssue = {
     token?: string;
 };
 
-/**
- * Result returned by the legacy parser adapter.
- *
- * @deprecated Prefer `TypedParseResult` from `defineTypedCommand().parse()`.
- */
+/** Parsed raw slash-command arguments before conversion to `TypedParseResult`. */
 export type ParsedCommandArguments = {
     /** Parsed values plus defaults that could be applied without prompting. */
     values: Record<string, ArgumentValue>;

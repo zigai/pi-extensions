@@ -663,8 +663,8 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
 /**
  * Parse raw slash-command arguments without opening UI or invoking handlers.
  *
- * The returned legacy shape preserves partial values, defaults, provided argument names, syntax and
- * validation issues, and whether the user requested generated help.
+ * The returned shape preserves partial values, defaults, provided argument names, syntax and
+ * validation issues, plus whether the user requested generated help.
  */
 export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     command: ParsableTypedCommand<TDefinitions>,
@@ -673,7 +673,7 @@ export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     return new ArgumentParser(command, rawArgs).parse();
 }
 
-/** Convert a legacy parser result into the discriminated result returned by defined commands. */
+/** Convert parser details into the discriminated result returned by defined commands. */
 export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
     parsed: ParsedCommandArguments,
 ): TypedParseResult<TDefinitions> {

@@ -29,13 +29,7 @@ function occurrencePolicy(definition: ArgumentDefinition): "error" | "first" | "
 }
 
 function positionFor(definition: ArgumentDefinition): number | undefined {
-    if (definition.position !== undefined) {
-        return definition.position;
-    }
-    if (typeof definition.positional === "number") {
-        return definition.positional;
-    }
-    return undefined;
+    return definition.position;
 }
 
 function duplicateIssue(name: string, definition: ArgumentDefinition): ParseIssue {

@@ -1,9 +1,15 @@
-import type {
-    ExtensionAPI,
-    ExtensionCommandContext,
-    ExtensionContext,
+import {
+    getAgentDir,
+    SettingsManager,
+    type ExtensionAPI,
+    type ExtensionCommandContext,
+    type ExtensionContext,
+    type ExtensionFactory,
+    type WidgetPlacement,
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import Type from "typebox";
+import Schema from "typebox/schema";
 import {
     expandGroupedArgumentValues,
     flattenGroupedArgumentDefinitions,
@@ -44,8 +50,8 @@ import type {
     TypedCommandHandler,
     TypedCommandFormSymbols,
     TypedCommandHandle,
-    TypedCommandOptions,
     TypedCommandRefinement,
+    TypedCommandUxOptions,
     TypedParseResult,
     FormMode,
 } from "./types.js";
@@ -69,7 +75,63 @@ import {
 } from "./skills.js";
 
 const WIDGET_KEY = "pi-typed-commands.helper";
+const DEFAULT_HELPER_PLACEMENT: WidgetPlacement = "aboveEditor";
 let submittedInvalidEditorText: string | undefined;
+let currentHelperPlacement: WidgetPlacement = DEFAULT_HELPER_PLACEMENT;
+
+const PiSettingsSchema = Type.Object(
+    {
+        piTypedCommands: Type.Optional(
+            Type.Object(
+                {
+                    helperPlacement: Type.Optional(
+                        Type.Union([Type.Literal("aboveEditor"), Type.Literal("belowEditor")]),
+                    ),
+                },
+                { additionalProperties: true },
+            ),
+        ),
+    },
+    { additionalProperties: true },
+);
+
+function helperPlacementFromSettings(settings: unknown): WidgetPlacement | undefined {
+    try {
+        return Schema.Parse(PiSettingsSchema, settings).piTypedCommands?.helperPlacement;
+    } catch {
+        return undefined;
+    }
+}
+
+function helperPlacementFromPiSettings(ctx: ExtensionContext): WidgetPlacement | undefined {
+    try {
+        let projectTrusted = true;
+        if (typeof ctx.isProjectTrusted === "function") {
+            projectTrusted = ctx.isProjectTrusted();
+        }
+        const settings = SettingsManager.create(ctx.cwd, getAgentDir(), { projectTrusted });
+        return (
+            helperPlacementFromSettings(settings.getProjectSettings()) ??
+            helperPlacementFromSettings(settings.getGlobalSettings())
+        );
+    } catch {
+        return undefined;
+    }
+}
+
+function resolveTypedCommandUxOptions(
+    options: TypedCommandUxOptions = {},
+    ctx?: ExtensionContext,
+): Required<TypedCommandUxOptions> {
+    let settingsHelperPlacement: WidgetPlacement | undefined;
+    if (ctx !== undefined) {
+        settingsHelperPlacement = helperPlacementFromPiSettings(ctx);
+    }
+    return {
+        helperPlacement:
+            options.helperPlacement ?? settingsHelperPlacement ?? DEFAULT_HELPER_PLACEMENT,
+    };
+}
 
 type EditorTypedCommandInvocation = {
     command: RegisteredTypedCommand;
@@ -114,21 +176,16 @@ export type {
     FieldEditor,
     EnumArgumentDefinition,
     InferArguments,
-    InvocationTarget,
     MaybePromise,
     MultiEnumArgumentDefinition,
     NumberArgumentDefinition,
-    ParsedCommandArguments,
     ParseIssue,
     ParseIssueKind,
-    RawArgumentOccurrence,
     PrimitiveArgumentValue,
-    RegisteredTypedCommand,
     StringArgumentDefinition,
     TypedCommandDefinition,
     TypedCommandHandler,
     TypedCommandHandle,
-    TypedCommandOptions,
     TypedCompletionContext,
     TypedCompletionItem,
     TypedCompletionProvider,
@@ -138,6 +195,7 @@ export type {
     TypedCommandRefinementIssue,
     TypedCommandFormSymbols,
     TypedCommandFormTitle,
+    TypedCommandUxOptions,
     TypedParseResult,
     FormMode,
 } from "./types.js";
@@ -386,65 +444,42 @@ export function defineTypedCommand<const TDefinitions extends ArgumentDefinition
 }
 
 function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
-    name: string,
-    options: TypedCommandOptions<TDefinitions>,
+    definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
 ): RegisteredTypedCommand<TDefinitions> {
-    const runtimeArgs = flattenGroupedArgumentDefinitions(options.args) as TDefinitions;
+    const runtimeArgs = flattenGroupedArgumentDefinitions(definition.args) as TDefinitions;
     const compiled = compileTypedCommandDefinition({
-        name,
-        description: options.description,
+        name: definition.name,
+        description: definition.description,
         args: runtimeArgs,
     });
     if (!compiled.ok) {
         throw definitionError(
-            name,
+            definition.name,
             compiled.diagnostics.map((diagnostic) => diagnostic.message),
         );
     }
 
     const command: RegisteredTypedCommand<TDefinitions> = {
-        name,
-        description: options.description,
+        name: definition.name,
+        description: definition.description,
         args: compiled.command.args as TDefinitions,
         compiled: compiled.command,
-        handler: maybeWrapGroupedHandler(options.args, options.handler),
-        target: { kind: "extension", run: maybeWrapGroupedHandler(options.args, options.handler) },
-        formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...options.formSymbols },
+        target: {
+            kind: "extension",
+            run: maybeWrapGroupedHandler(definition.args, definition.run),
+        },
+        formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...definition.formSymbols },
         source: "extension",
     };
 
-    const refine = maybeWrapGroupedRefinement(options.args, options.refine);
+    const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
     if (refine !== undefined) {
         command.refine = refine;
     }
-    if (options.formTitle !== undefined) {
-        command.formTitle = options.formTitle;
+    if (definition.formTitle !== undefined) {
+        command.formTitle = definition.formTitle;
     }
     return command;
-}
-
-function commandOptionsFromDefinition<TDefinitions extends ArgumentDefinitions>(
-    definition: TypedCommandDefinition<TDefinitions>,
-): TypedCommandOptions<TDefinitions> {
-    const handler = definition.handler ?? definition.run;
-    if (handler === undefined) {
-        throw new Error(`Typed command /${definition.name} must define a handler or run function`);
-    }
-    const options: TypedCommandOptions<TDefinitions> = {
-        description: definition.description,
-        args: definition.args,
-        handler,
-    };
-    if (definition.refine !== undefined) {
-        options.refine = definition.refine;
-    }
-    if (definition.formTitle !== undefined) {
-        options.formTitle = definition.formTitle;
-    }
-    if (definition.formSymbols !== undefined) {
-        options.formSymbols = definition.formSymbols;
-    }
-    return options;
 }
 
 function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
@@ -482,40 +517,19 @@ function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
  * Register a Pi slash command with typed named arguments.
  *
  * The command is still registered with Pi's raw command system, but pi-typed-commands parses,
- * validates, defaults, completes, and optionally prompts for arguments before calling `handler`.
+ * validates, defaults, completes, and optionally prompts for arguments before calling `run`.
  */
 export function registerTypedCommand<const TDefinitions extends ArgumentDefinitions>(
     pi: ExtensionAPI,
     definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
 ): TypedCommandHandle<TDefinitions>;
-export function registerTypedCommand<const TDefinitions extends ArgumentDefinitions>(
-    pi: ExtensionAPI,
-    name: string,
-    options: TypedCommandOptions<TDefinitions>,
-): TypedCommandHandle<TDefinitions>;
 export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     pi: ExtensionAPI,
-    nameOrDefinition:
-        | string
-        | TypedCommandDefinition<TDefinitions>
-        | DefinedTypedCommand<TDefinitions>,
-    options?: TypedCommandOptions<TDefinitions>,
+    definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
 ): TypedCommandHandle<TDefinitions> {
-    const definitionMode = typeof nameOrDefinition !== "string";
-    let name: string;
-    let commandOptions: TypedCommandOptions<TDefinitions> | undefined;
-    if (definitionMode) {
-        name = nameOrDefinition.name;
-        commandOptions = commandOptionsFromDefinition(nameOrDefinition);
-    } else {
-        name = nameOrDefinition;
-        commandOptions = options;
-    }
-    if (commandOptions === undefined) {
-        throw new Error(`Typed command /${name} is missing options`);
-    }
+    const name = definition.name;
 
-    const command = normalizeRegisteredCommand(name, commandOptions);
+    const command = normalizeRegisteredCommand(definition);
     const maybeInvocationName = pi.registerCommand(name, {
         description: command.description,
         getArgumentCompletions(argumentPrefix) {
@@ -526,18 +540,14 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             if (args === undefined) {
                 return;
             }
-            let handler = command.handler;
-            if (handler === undefined && command.target?.kind === "extension") {
-                handler = command.target.run;
-            }
-            if (handler === undefined) {
+            if (command.target?.kind !== "extension") {
                 ctx.ui.notify(
                     `Typed command /${name} does not have an extension handler.`,
                     "error",
                 );
                 return;
             }
-            await handler(args, ctx);
+            await command.target.run(args, ctx);
         },
     }) as unknown;
 
@@ -553,13 +563,8 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             invocationName: piInvocationName,
         });
     }
-    let definition: DefinedTypedCommand<TDefinitions>;
-    if (definitionMode) {
-        definition = defineTypedCommand({ ...nameOrDefinition, args: command.args });
-    } else {
-        definition = defineTypedCommand({ name, ...commandOptions, args: command.args });
-    }
-    return createCommandHandle(definition, command, invocationName);
+    const definedCommand = defineTypedCommand({ ...definition, args: command.args });
+    return createCommandHandle(definedCommand, command, invocationName);
 }
 
 function slashCommandMatch(editorText: string): ReturnType<typeof parseSlashCommandText> {
@@ -744,11 +749,7 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
         return;
     }
 
-    let handler = command.handler;
-    if (handler === undefined && command.target?.kind === "extension") {
-        handler = command.target.run;
-    }
-    if (handler === undefined) {
+    if (command.target?.kind !== "extension") {
         ctx.ui.notify(
             `Typed command /${command.name} does not have an extension handler.`,
             "error",
@@ -757,7 +758,7 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
     }
 
     ctx.ui.setEditorText("");
-    await handler(args as never, commandCtx);
+    await command.target.run(args as never, commandCtx);
 }
 
 function refreshTypedSkills(pi: ExtensionAPI): void {
@@ -790,7 +791,6 @@ function refreshTypedSkills(pi: ExtensionAPI): void {
             diagnostics.push({
                 name: command.name.replace(/^skill:/, ""),
                 filePath: skillPath,
-                messages: [diagnostic.message],
                 diagnostics: [diagnostic],
             });
         }
@@ -972,6 +972,61 @@ function shouldShowInlineIssue(
     return true;
 }
 
+function quoteInlineArgumentLabel(label: string): string {
+    return `'${label}'`;
+}
+
+function bareInlineArgumentLabel(name: string, definition: ArgumentDefinition | undefined): string {
+    if (definition === undefined) {
+        return name;
+    }
+    return formatArgumentFlagName(name, definition).replace(/^--/, "");
+}
+
+function uniqueStrings(values: string[]): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of values) {
+        if (value.length === 0 || seen.has(value)) {
+            continue;
+        }
+        seen.add(value);
+        result.push(value);
+    }
+    return result;
+}
+
+function formatInlineIssueMessage(
+    invocation: EditorTypedCommandInvocation,
+    issue: ParseIssue,
+): string {
+    if (issue.name !== undefined) {
+        const definition = invocation.command.args[issue.name];
+        const label = bareInlineArgumentLabel(issue.name, definition);
+        const quoted = quoteInlineArgumentLabel(label);
+        const candidates = [issue.token ?? ""];
+        if (definition !== undefined) {
+            candidates.push(formatArgumentFlagName(issue.name, definition));
+        }
+        candidates.push(`--${label}`, label);
+        const sortedCandidates = uniqueStrings(candidates).sort(
+            (left, right) => right.length - left.length,
+        );
+        for (const candidate of sortedCandidates) {
+            if (issue.message.startsWith(candidate)) {
+                return `${quoted}${issue.message.slice(candidate.length)}`;
+            }
+        }
+    }
+
+    if (issue.kind === "unknown-argument" && issue.token !== undefined) {
+        const label = quoteInlineArgumentLabel(issue.token.replace(/^-+/, ""));
+        return issue.message.replace(issue.token, label);
+    }
+
+    return issue.message;
+}
+
 function inlineIssueLine(invocation: EditorTypedCommandInvocation): string | undefined {
     const parsed = parseTypedCommandArgs(invocation.command, invocation.rawArgs);
     const issue = parsed.issues.find(
@@ -980,7 +1035,7 @@ function inlineIssueLine(invocation: EditorTypedCommandInvocation): string | und
     if (issue === undefined) {
         return undefined;
     }
-    return `error: ${issue.message}`;
+    return `✕ ${formatInlineIssueMessage(invocation, issue)}`;
 }
 
 type TabCompletionResult = { handled: false } | { handled: true; editorText?: string };
@@ -988,6 +1043,11 @@ type TabCompletionResult = { handled: false } | { handled: true; editorText?: st
 type FlagCompletionCandidate = {
     stem: string;
     replacement: string;
+};
+
+type FlagCompletion = {
+    replacement: string;
+    addTrailingSpace: boolean;
 };
 
 function flagCompletionCandidates(
@@ -1019,15 +1079,44 @@ function flagCompletionCandidates(
     return candidates;
 }
 
-function bestFlagCompletion(command: RegisteredTypedCommand, token: string): string | undefined {
+function commonStringPrefix(values: readonly string[]): string {
+    const [first] = values;
+    if (first === undefined) {
+        return "";
+    }
+    let prefix = first;
+    for (const value of values.slice(1)) {
+        while (!value.startsWith(prefix)) {
+            prefix = prefix.slice(0, -1);
+            if (prefix.length === 0) {
+                return "";
+            }
+        }
+    }
+    return prefix;
+}
+
+function flagCompletionForTab(
+    command: RegisteredTypedCommand,
+    token: string,
+): FlagCompletion | undefined {
     const stem = token.replace(/^-+/, "");
     const candidates = flagCompletionCandidates(command, token);
     const exact = candidates.find((candidate) => candidate.stem === stem);
     if (exact !== undefined) {
-        return exact.replacement;
+        return { replacement: exact.replacement, addTrailingSpace: true };
     }
     if (candidates.length === 1) {
-        return candidates[0]?.replacement;
+        const candidate = candidates[0];
+        if (candidate === undefined) {
+            return undefined;
+        }
+        return { replacement: candidate.replacement, addTrailingSpace: true };
+    }
+
+    const sharedPrefix = commonStringPrefix(candidates.map((candidate) => candidate.replacement));
+    if (sharedPrefix.length > token.length) {
+        return { replacement: sharedPrefix, addTrailingSpace: false };
     }
     return undefined;
 }
@@ -1056,13 +1145,16 @@ function completePartialFlagOnTab(editorText: string): TabCompletionResult {
         return { handled: false };
     }
 
-    const replacement = bestFlagCompletion(invocation.command, token);
-    if (replacement === undefined) {
+    const completion = flagCompletionForTab(invocation.command, token);
+    if (completion === undefined) {
         return { handled: true };
     }
 
     const tokenStart = firstLine.length - token.length;
-    const completedLine = `${firstLine.slice(0, tokenStart)}${replacement} `;
+    let completedLine = `${firstLine.slice(0, tokenStart)}${completion.replacement}`;
+    if (completion.addTrailingSpace) {
+        completedLine += " ";
+    }
     return { handled: true, editorText: `${completedLine}${rest}` };
 }
 
@@ -1079,20 +1171,23 @@ function renderInlineHelper(
     const active = tokens.active.map((token) => `[${token}]`).join(" ");
     const required = tokens.required.map((token) => `[${token}]`).join(" ");
     const available = tokens.available.map((token) => `[${token}]`).join(" ");
-    let commandLine = theme.fg("accent", `/${commandDisplayName(invocation.command)}`);
+    const commandPrefix = `/${commandDisplayName(invocation.command)}`;
+    const helperIndent = " ".repeat(commandPrefix.length + 2);
+    const tokenGroups: string[] = [];
     if (active.length > 0) {
-        commandLine += " " + theme.fg("accent", active);
+        tokenGroups.push(theme.fg("accent", active));
     }
     if (required.length > 0) {
-        commandLine += "  " + theme.fg("warning", required);
+        tokenGroups.push(theme.fg("warning", required));
     }
     if (available.length > 0) {
-        commandLine += "  " + theme.fg("dim", available);
+        tokenGroups.push(theme.fg("dim", available));
     }
+    const commandLine = `${helperIndent}${tokenGroups.join("  ")}`;
     const rendered = [truncateToWidth(commandLine, width, "")];
     const issueLine = inlineIssueLine(invocation);
     if (issueLine !== undefined) {
-        rendered.push(truncateToWidth(theme.fg("error", issueLine), width, ""));
+        rendered.push(truncateToWidth(`${helperIndent}${theme.fg("error", issueLine)}`, width, ""));
     }
     return rendered;
 }
@@ -1100,9 +1195,10 @@ function renderInlineHelper(
 function setHelperWidget(
     ctx: ExtensionContext,
     invocation: EditorTypedCommandInvocation | undefined,
+    placement: WidgetPlacement = currentHelperPlacement,
 ): void {
     if (invocation === undefined) {
-        ctx.ui.setWidget(WIDGET_KEY, undefined, { placement: "belowEditor" });
+        ctx.ui.setWidget(WIDGET_KEY, undefined, { placement });
         return;
     }
 
@@ -1114,18 +1210,26 @@ function setHelperWidget(
             },
             invalidate(): void {},
         }),
-        { placement: "belowEditor" },
+        { placement },
     );
 }
 class TypedCommandUxSession {
     private cleanup: Array<() => void> = [];
     private refreshTimer: NodeJS.Timeout | undefined;
     private openingForm = false;
+    private options: Required<TypedCommandUxOptions>;
 
-    constructor(private readonly pi: ExtensionAPI) {}
+    constructor(
+        private readonly pi: ExtensionAPI,
+        private readonly configuredOptions: TypedCommandUxOptions,
+    ) {
+        this.options = resolveTypedCommandUxOptions(configuredOptions);
+    }
 
     start(ctx: ExtensionContext): void {
         this.stop();
+        this.options = resolveTypedCommandUxOptions(this.configuredOptions, ctx);
+        currentHelperPlacement = this.options.helperPlacement;
         if (!ctx.hasUI) {
             return;
         }
@@ -1142,7 +1246,9 @@ class TypedCommandUxSession {
     clearWidget(ctx: ExtensionContext): void {
         this.clearRefreshTimer();
         if (ctx.hasUI) {
-            ctx.ui.setWidget(WIDGET_KEY, undefined, { placement: "belowEditor" });
+            ctx.ui.setWidget(WIDGET_KEY, undefined, {
+                placement: this.options.helperPlacement,
+            });
         }
     }
 
@@ -1165,11 +1271,11 @@ class TypedCommandUxSession {
 
     private refresh(ctx: ExtensionContext): void {
         if (this.openingForm) {
-            setHelperWidget(ctx, undefined);
+            setHelperWidget(ctx, undefined, this.options.helperPlacement);
             return;
         }
         const helperInvocation = helperInvocationForEditorText(ctx.ui.getEditorText());
-        setHelperWidget(ctx, helperInvocation);
+        setHelperWidget(ctx, helperInvocation, this.options.helperPlacement);
     }
 
     private scheduleRefresh(ctx: ExtensionContext): void {
@@ -1184,7 +1290,7 @@ class TypedCommandUxSession {
         ctx: ExtensionContext,
     ): { consume: true } | undefined {
         if (this.openingForm) {
-            setHelperWidget(ctx, undefined);
+            setHelperWidget(ctx, undefined, this.options.helperPlacement);
             return undefined;
         }
         if (!matchesKey(data, "tab")) {
@@ -1256,8 +1362,10 @@ class TypedCommandUxSession {
  * This is installed automatically by the default extension export. Extension authors usually only
  * call it directly when composing pi-typed-commands into a custom extension entrypoint.
  */
-export function installTypedCommandUx(pi: ExtensionAPI): void {
-    const session = new TypedCommandUxSession(pi);
+export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxOptions = {}): void {
+    const resolvedOptions = resolveTypedCommandUxOptions(options);
+    currentHelperPlacement = resolvedOptions.helperPlacement;
+    const session = new TypedCommandUxSession(pi, options);
 
     pi.on("session_start", async (_event, ctx) => {
         refreshTypedSkills(pi);
@@ -1291,6 +1399,15 @@ export function installTypedCommandUx(pi: ExtensionAPI): void {
         session.stop();
         session.clearWidget(ctx);
     });
+}
+
+/** Create a Pi extension entrypoint with custom typed-command UX options. */
+export function createTypedCommandUxExtension(
+    options: TypedCommandUxOptions = {},
+): ExtensionFactory {
+    return (pi) => {
+        installTypedCommandUx(pi, options);
+    };
 }
 
 /** Pi extension entrypoint that installs the typed-args UX. */

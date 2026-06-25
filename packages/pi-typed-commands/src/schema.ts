@@ -78,12 +78,9 @@ export function booleanFromString(value: string): boolean | undefined {
     return undefined;
 }
 
-/** Return whether a definition uses modern `position` or legacy `positional` placement. */
+/** Return whether a definition is parsed positionally instead of as a named flag. */
 export function isPositionalArgument(definition: ArgumentDefinition): boolean {
-    if (definition.position !== undefined) {
-        return true;
-    }
-    return definition.positional !== undefined && definition.positional !== false;
+    return definition.position !== undefined;
 }
 
 /** Return the canonical no-leading-dash flag name for an argument definition. */
@@ -125,14 +122,10 @@ export function orderedArgumentEntries(
             let leftPosition = left.index;
             if (typeof left.definition.position === "number") {
                 leftPosition = left.definition.position;
-            } else if (typeof left.definition.positional === "number") {
-                leftPosition = left.definition.positional;
             }
             let rightPosition = right.index;
             if (typeof right.definition.position === "number") {
                 rightPosition = right.definition.position;
-            } else if (typeof right.definition.positional === "number") {
-                rightPosition = right.definition.positional;
             }
             return leftPosition - rightPosition;
         })
@@ -287,9 +280,6 @@ function validateTypeSpecificRules(
         if (!isNonNegativeInteger(definition.position)) {
             warnings.push(`${name}.position must be a non-negative integer`);
         }
-        if (definition.positional !== undefined && definition.positional !== false) {
-            warnings.push(`${name}: use either position or positional, not both`);
-        }
     }
     if (definition.rest === true) {
         if (!isPositionalArgument(definition)) {
@@ -299,15 +289,6 @@ function validateTypeSpecificRules(
             warnings.push(`${name}.rest is only valid for string or multi-enum arguments`);
         }
     }
-    if (definition.positional !== undefined && definition.positional !== false) {
-        if (
-            typeof definition.positional === "number" &&
-            !isNonNegativeInteger(definition.positional)
-        ) {
-            warnings.push(`${name}.positional must be a non-negative integer`);
-        }
-    }
-
     if (definition.type === "string") {
         if (definition.minLength !== undefined && !isNonNegativeInteger(definition.minLength)) {
             warnings.push(`${name}.minLength must be a non-negative integer`);
@@ -392,12 +373,8 @@ function validatePositionals(definitions: ArgumentDefinitions, warnings: string[
     const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
     const positions = new Map<number, string>();
     for (const [name, definition] of Object.entries(flatDefinitions)) {
-        let position = definition.position;
-        let label = "position";
-        if (position === undefined && typeof definition.positional === "number") {
-            position = definition.positional;
-            label = "positional";
-        }
+        const position = definition.position;
+        const label = "position";
         if (position === undefined || !isNonNegativeInteger(position)) {
             continue;
         }
