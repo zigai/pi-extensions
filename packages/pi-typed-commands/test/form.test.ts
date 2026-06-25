@@ -4,7 +4,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { CURSOR_MARKER, type Component, type TUI } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
 import type {
-    ArgumentDefinitions,
+    FlatArgumentDefinitions,
     ParsedCommandArguments,
     RegisteredTypedCommand,
 } from "../src/types.js";
@@ -36,7 +36,7 @@ void describe("dense argument form", () => {
     void it("shows field names instead of CLI flags in validation messages", async () => {
         const definitions = {
             count: { type: "number", integer: true, max: 3, default: 1 },
-        } satisfies ArgumentDefinitions;
+        } satisfies FlatArgumentDefinitions;
 
         const command: RegisteredTypedCommand<typeof definitions> = {
             name: "example",
@@ -94,7 +94,7 @@ void describe("dense argument form", () => {
     void it("rejects non-number characters in number fields", async () => {
         const definitions = {
             count: { type: "number", integer: true, default: 1 },
-        } satisfies ArgumentDefinitions;
+        } satisfies FlatArgumentDefinitions;
 
         const command: RegisteredTypedCommand<typeof definitions> = {
             name: "example",
@@ -151,7 +151,7 @@ void describe("dense argument form", () => {
     });
 
     void it("uses field titles and whole-form values for custom widgets", async () => {
-        const definitions: ArgumentDefinitions = {
+        const definitions: FlatArgumentDefinitions = {
             source: { type: "string", default: "api" },
             output: {
                 type: "string",
@@ -207,7 +207,7 @@ void describe("dense argument form", () => {
     });
 
     void it("widens the label column for readable field titles", async () => {
-        const definitions: ArgumentDefinitions = {
+        const definitions: FlatArgumentDefinitions = {
             panes: {
                 type: "boolean",
                 default: false,
@@ -262,7 +262,7 @@ void describe("dense argument form", () => {
     });
 
     void it("marks and highlights the currently selected field", async () => {
-        const definitions: ArgumentDefinitions = {
+        const definitions: FlatArgumentDefinitions = {
             count: { type: "number", integer: true, default: 1, title: "Count" },
             panes: { type: "boolean", default: false, title: "Current tab panes" },
         };
@@ -316,7 +316,7 @@ void describe("dense argument form", () => {
     });
 
     void it("computes read-only field values", async () => {
-        const definitions: ArgumentDefinitions = {
+        const definitions: FlatArgumentDefinitions = {
             source: { type: "string", default: "api" },
             output: {
                 type: "string",
@@ -370,7 +370,7 @@ void describe("dense argument form", () => {
         const definitions = {
             label: { type: "string" },
             count: { type: "number", integer: true, default: 1 },
-        } satisfies ArgumentDefinitions;
+        } satisfies FlatArgumentDefinitions;
 
         const command: RegisteredTypedCommand<typeof definitions> = {
             name: "example",
@@ -428,7 +428,7 @@ void describe("sequential argument form", () => {
         const definitions = {
             start: { type: "number", required: true },
             end: { type: "number", required: true },
-        } satisfies ArgumentDefinitions;
+        } satisfies FlatArgumentDefinitions;
 
         const command: RegisteredTypedCommand<typeof definitions> = {
             name: "range",
@@ -486,7 +486,7 @@ void describe("sequential argument form", () => {
                 required: true,
                 minItems: 2,
             },
-        } satisfies ArgumentDefinitions;
+        } satisfies FlatArgumentDefinitions;
 
         const command: RegisteredTypedCommand<typeof definitions> = {
             name: "example",

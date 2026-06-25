@@ -11,9 +11,9 @@ import {
     validateArgumentDefinitions,
     validateArgumentValue,
 } from "../src/schema.js";
-import type { ArgumentDefinitions } from "../src/types.js";
+import type { FlatArgumentDefinitions } from "../src/types.js";
 
-const definitions: ArgumentDefinitions = {
+const definitions: FlatArgumentDefinitions = {
     action: {
         type: "enum",
         values: ["create", "delete"],
@@ -125,7 +125,7 @@ void describe("typed command schema", () => {
             many: { type: "multi-enum", values: ["a"], minItems: 3, maxItems: 1 },
             commaMulti: { type: "multi-enum", values: ["a,b"] },
             badCompletionTimeout: { type: "string", completionTimeoutMs: -1 },
-            defaulted: { type: "string", required: true, default: "main" },
+            defaulted: { type: "string", required: true, default: "main" } as never,
             first: { type: "string", position: 0 },
             second: { type: "string", required: true, position: 1 },
             duplicatePosition: { type: "string", position: 1 },

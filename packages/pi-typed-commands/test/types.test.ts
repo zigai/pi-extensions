@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+    type ArgumentDefinitions,
     defineTypedCommand,
     enumArgument,
     group,
+    type MultiArgumentValue,
     multiEnumArgument,
     numberArgument,
     stringArgument,
@@ -25,7 +27,7 @@ void describe("compile-time API inference", () => {
             run(args) {
                 expectType<"dev" | "staging" | "prod">(args.env);
                 expectType<string>(args.ref);
-                expectType<Array<"api" | "web"> | undefined>(args.tags);
+                expectType<readonly ("api" | "web")[] | undefined>(args.tags);
                 expectType<number | undefined>(args.count);
             },
         });
@@ -55,7 +57,7 @@ void describe("compile-time API inference", () => {
             run(values) {
                 expectType<"dev" | "prod">(values.env);
                 expectType<string>(values.ref);
-                expectType<Array<"api" | "web"> | undefined>(values.tags);
+                expectType<readonly ("api" | "web")[] | undefined>(values.tags);
             },
         });
         const parsed = command.parse("--env dev --tags api");
@@ -101,7 +103,7 @@ void describe("compile-time API inference", () => {
                 expectType<number | undefined>(args.start);
                 expectType<number | undefined>(args.end);
                 expectType<string | undefined>(args.ref);
-                expectType<Array<"bug" | "feature"> | undefined>(args.labels);
+                expectType<readonly ("bug" | "feature")[] | undefined>(args.labels);
                 expectType<ReadonlySet<"start" | "end" | "ref" | "labels">>(context.provided);
                 return [];
             },
@@ -109,7 +111,7 @@ void describe("compile-time API inference", () => {
                 expectType<number>(values.start);
                 expectType<number | undefined>(values.end);
                 expectType<string>(values.ref);
-                expectType<Array<"bug" | "feature">>(values.labels);
+                expectType<readonly ("bug" | "feature")[]>(values.labels);
             },
         });
         const parsed = command.parse("--start 1 --labels bug");
@@ -121,7 +123,42 @@ void describe("compile-time API inference", () => {
         assert.equal(parsed.status, "success");
         if (parsed.status === "success") {
             expectType<number>(parsed.value.start);
-            expectType<Array<"bug" | "feature">>(parsed.value.labels);
+            expectType<readonly ("bug" | "feature")[]>(parsed.value.labels);
         }
+    });
+
+    void it("rejects invalid public contracts at compile time", () => {
+        const assertPublicContracts = (): void => {
+            const dynamicRequired = Math.random() > 0.5;
+            stringArgument({ required: dynamicRequired });
+
+            // @ts-expect-error required arguments cannot also define defaults.
+            stringArgument({ required: true, default: "main" });
+            // @ts-expect-error dynamic requiredness cannot be combined with defaults.
+            stringArgument({ required: dynamicRequired, default: "main" });
+
+            defineTypedCommand({
+                name: "invalid-contract-demo",
+                description: "Invalid contract demo",
+                args: {
+                    // @ts-expect-error required arguments cannot also define defaults.
+                    bad: { type: "string", required: true, default: "main" },
+                },
+                run() {},
+            });
+
+            const multi: MultiArgumentValue = ["api"];
+            // @ts-expect-error selected multi-enum values are readonly at public boundaries.
+            multi.push("web");
+
+            const definitions: ArgumentDefinitions = {
+                env: enumArgument(["dev", "prod"], { required: true }),
+            };
+            // @ts-expect-error public definition maps are readonly.
+            definitions.ref = stringArgument();
+        };
+        void assertPublicContracts;
+
+        assert.ok(true);
     });
 });

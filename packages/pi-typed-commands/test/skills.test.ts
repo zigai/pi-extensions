@@ -228,7 +228,7 @@ void describe("typed skill required/default behavior", () => {
                     type: "string",
                     required: true,
                     default: ".",
-                },
+                } as never,
                 token: {
                     type: "string",
                     required: true,
