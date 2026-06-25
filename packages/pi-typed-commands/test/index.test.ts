@@ -242,7 +242,14 @@ void describe("registerTypedCommand", () => {
         registerTypedCommandMetadata(command);
         replaceTypedSkillMetadata([]);
 
-        assert.equal(getTypedCommand("skill:extension-owned-test"), command);
+        const registered = getTypedCommand("skill:extension-owned-test");
+        assert.notEqual(registered, command);
+        assert.equal(registered?.name, command.name);
+        assert.equal(registered?.source, "extension");
+        assert.equal(registered?.invocationName, "skill:extension-owned-test");
+        assert.equal("invocationName" in command, false);
+        assert.equal("registrationId" in command, false);
+        assert.equal("ownerId" in command, false);
         unregisterTypedCommandMetadata(command);
     });
 });

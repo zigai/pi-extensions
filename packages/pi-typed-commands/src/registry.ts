@@ -14,7 +14,7 @@ type RegistrationRecord = {
 
 type TypedCommandRegistry = {
     version: 1;
-    commands: Map<string, RegisteredTypedCommand>;
+    commands: Map<string, RegistrationRecord>;
     records: Map<symbol, RegistrationRecord>;
     skillDiagnostics: Map<string, TypedSkillDiagnostics>;
     listeners: Set<RegistryListener>;
@@ -30,7 +30,7 @@ type GlobalWithRegistry = typeof globalThis & {
 function createRegistry(): TypedCommandRegistry {
     return {
         version: 1,
-        commands: new Map<string, RegisteredTypedCommand>(),
+        commands: new Map<string, RegistrationRecord>(),
         records: new Map<symbol, RegistrationRecord>(),
         skillDiagnostics: new Map<string, TypedSkillDiagnostics>(),
         listeners: new Set<RegistryListener>(),
@@ -70,22 +70,43 @@ function nextInvocationName(registry: TypedCommandRegistry, localName: string): 
     return `${localName}:${suffix}`;
 }
 
+function commandWithRegistration(record: RegistrationRecord): RegisteredTypedCommand {
+    return {
+        ...record.command,
+        invocationName: record.invocationName,
+        registrationId: record.id,
+        ownerId: record.ownerId,
+    };
+}
+
+function findExistingRecord(
+    registry: TypedCommandRegistry,
+    command: RegisteredTypedCommand,
+): RegistrationRecord | undefined {
+    const id = command.registrationId;
+    if (id !== undefined) {
+        return registry.records.get(id);
+    }
+    for (const record of registry.records.values()) {
+        if (record.command === command) {
+            return record;
+        }
+    }
+    return undefined;
+}
+
 function removeExistingRecord(
     registry: TypedCommandRegistry,
     command: RegisteredTypedCommand,
 ): void {
-    const id = command.registrationId;
-    if (id === undefined) {
-        return;
-    }
-    const record = registry.records.get(id);
+    const record = findExistingRecord(registry, command);
     if (record === undefined) {
         return;
     }
-    if (registry.commands.get(record.invocationName) === command) {
+    if (registry.commands.get(record.invocationName) === record) {
         registry.commands.delete(record.invocationName);
     }
-    registry.records.delete(id);
+    registry.records.delete(record.id);
 }
 
 export type RegisterTypedCommandMetadataOptions = {
@@ -106,19 +127,17 @@ export function registerTypedCommandMetadata<TDefinitions extends ArgumentDefini
     const invocationName = options.invocationName ?? nextInvocationName(registry, command.name);
     const source = command.source ?? "extension";
 
-    command.registrationId = id;
-    command.ownerId = ownerId;
-    command.invocationName = invocationName;
-
-    registry.records.set(id, {
+    const record: RegistrationRecord = {
         id,
         ownerId,
         source,
         localName: command.name,
         invocationName,
         command,
-    });
-    registry.commands.set(invocationName, command);
+    };
+
+    registry.records.set(id, record);
+    registry.commands.set(invocationName, record);
     notifyRegistryListeners(registry);
     return invocationName;
 }
@@ -128,14 +147,14 @@ export function unregisterTypedCommandMetadata<TDefinitions extends ArgumentDefi
     command: RegisteredTypedCommand<TDefinitions>,
 ): void {
     const registry = getTypedCommandRegistry();
-    const invocationName = command.invocationName ?? command.name;
-    if (registry.commands.get(invocationName) !== command) {
+    const record = findExistingRecord(registry, command);
+    if (record === undefined) {
         return;
     }
-    registry.commands.delete(invocationName);
-    if (command.registrationId !== undefined) {
-        registry.records.delete(command.registrationId);
+    if (registry.commands.get(record.invocationName) === record) {
+        registry.commands.delete(record.invocationName);
     }
+    registry.records.delete(record.id);
     notifyRegistryListeners(registry);
 }
 
@@ -154,7 +173,7 @@ export function replaceTypedSkillMetadata(
     for (const record of records) {
         if (record.source === "skill") {
             registry.records.delete(record.id);
-            if (registry.commands.get(record.invocationName) === record.command) {
+            if (registry.commands.get(record.invocationName) === record) {
                 registry.commands.delete(record.invocationName);
             }
         }
@@ -171,7 +190,11 @@ export function replaceTypedSkillMetadata(
 
 /** Look up a registered typed command by slash command name, without the leading `/`. */
 export function getTypedCommand(name: string): RegisteredTypedCommand | undefined {
-    return getTypedCommandRegistry().commands.get(name);
+    const record = getTypedCommandRegistry().commands.get(name);
+    if (record === undefined) {
+        return undefined;
+    }
+    return commandWithRegistration(record);
 }
 
 /** Look up typed skill metadata diagnostics by slash command name, without the leading `/`. */
@@ -181,9 +204,9 @@ export function getTypedSkillDiagnostics(name: string): TypedSkillDiagnostics | 
 
 /** Return all registered typed commands sorted by invocation name. */
 export function getTypedCommands(): RegisteredTypedCommand[] {
-    return [...getTypedCommandRegistry().commands.values()].sort((a, b) =>
-        (a.invocationName ?? a.name).localeCompare(b.invocationName ?? b.name),
-    );
+    return [...getTypedCommandRegistry().commands.values()]
+        .map(commandWithRegistration)
+        .sort((a, b) => (a.invocationName ?? a.name).localeCompare(b.invocationName ?? b.name));
 }
 
 /**
