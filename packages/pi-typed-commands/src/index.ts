@@ -82,6 +82,8 @@ export {
 export type {
     RawSkillArgumentDefinition,
     RawSkillArguments,
+    ParseSkillMarkdownResult,
+    ReadTypedSkillMetadataOptions,
     ReadTypedSkillMetadataResult,
     RenderTypedSkillInvocationOptions,
     SkillArgumentDiagnostic,

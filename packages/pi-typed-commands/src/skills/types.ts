@@ -41,6 +41,11 @@ export type SkillFrontmatter = {
     arguments?: unknown;
 };
 
+/** Result of parsing a skill Markdown file and its YAML frontmatter. */
+export type ParseSkillMarkdownResult =
+    | { status: "ok"; frontmatter: SkillFrontmatter; body: string }
+    | { status: "invalid"; body: string; diagnostics: readonly SkillArgumentDiagnostic[] };
+
 /** Normalized metadata for a skill that declares typed arguments. */
 export type TypedSkillMetadata = {
     name: string;
@@ -71,9 +76,15 @@ export type SkillArgumentNormalizationResult = {
 };
 
 /** Result of reading typed metadata from one `SKILL.md` file. */
-export type ReadTypedSkillMetadataResult = {
-    metadata?: TypedSkillMetadata;
-    diagnostics?: TypedSkillDiagnostics;
+export type ReadTypedSkillMetadataResult =
+    | { status: "absent" }
+    | { status: "ok"; metadata: TypedSkillMetadata }
+    | { status: "invalid"; diagnostics: TypedSkillDiagnostics };
+
+/** Options for loading typed metadata from one `SKILL.md` file. */
+export type ReadTypedSkillMetadataOptions = {
+    /** Stable skill name to use when malformed frontmatter prevents reading `name`. */
+    fallbackName?: string;
 };
 
 /** Inputs for rendering a typed skill invocation into the prompt sent to the model. */

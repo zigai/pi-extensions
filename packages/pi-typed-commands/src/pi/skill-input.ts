@@ -33,12 +33,13 @@ export function refreshTypedSkills(pi: ExtensionAPI): void {
         if (skillPath === undefined) {
             continue;
         }
+        const fallbackName = command.name.replace(/^skill:/, "");
         try {
-            const result = readTypedSkillMetadataResult(skillPath);
-            if (result.metadata !== undefined) {
+            const result = readTypedSkillMetadataResult(skillPath, { fallbackName });
+            if (result.status === "ok") {
                 commands.push(typedSkillCommandFromMetadata(result.metadata));
             }
-            if (result.diagnostics !== undefined) {
+            if (result.status === "invalid") {
                 diagnostics.push(result.diagnostics);
             }
         } catch (error) {
@@ -53,7 +54,7 @@ export function refreshTypedSkills(pi: ExtensionAPI): void {
                 severity: "error",
             };
             diagnostics.push({
-                name: command.name.replace(/^skill:/, ""),
+                name: fallbackName,
                 filePath: skillPath,
                 diagnostics: [diagnostic],
             });

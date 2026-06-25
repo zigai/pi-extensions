@@ -7,6 +7,7 @@ import { parseSkillMarkdown } from "./frontmatter.js";
 import { PLACEHOLDER_PATTERN } from "./prompt.js";
 import type {
     FlatArgumentDefinitions,
+    ReadTypedSkillMetadataOptions,
     ReadTypedSkillMetadataResult,
     SkillArgumentDiagnostic,
     TypedSkillMetadata,
@@ -40,27 +41,40 @@ function validateSkillPlaceholders(
 }
 
 /** Read and validate typed skill metadata from a `SKILL.md` file. */
-export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMetadataResult {
+export function readTypedSkillMetadataResult(
+    filePath: string,
+    options: ReadTypedSkillMetadataOptions = {},
+): ReadTypedSkillMetadataResult {
     const content = readFileSync(filePath, "utf8");
-    const { frontmatter, body } = parseSkillMarkdown(content);
+    const parsedSkill = parseSkillMarkdown(content);
+    if (parsedSkill.status === "invalid") {
+        const diagnosticName = options.fallbackName ?? "unknown";
+        return {
+            status: "invalid",
+            diagnostics: typedSkillDiagnostics(diagnosticName, filePath, parsedSkill.diagnostics),
+        };
+    }
+    const { frontmatter, body } = parsedSkill;
     if (frontmatter.name === undefined || frontmatter.description === undefined) {
-        return {};
+        return { status: "absent" };
     }
 
     const rawArguments = frontmatter.arguments;
     if (rawArguments === undefined) {
-        return {};
+        return { status: "absent" };
     }
 
     const { args, diagnostics } = normalizeSkillArguments(rawArguments);
     const allDiagnostics = [...diagnostics, ...validateSkillPlaceholders(body, args)];
     if (allDiagnostics.length > 0) {
         return {
+            status: "invalid",
             diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, allDiagnostics),
         };
     }
     if (Object.keys(args).length === 0) {
         return {
+            status: "invalid",
             diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, [
                 skillArgumentDiagnostic({
                     code: "skill.arguments.empty",
@@ -78,6 +92,7 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
     });
     if (!compiled.ok) {
         return {
+            status: "invalid",
             diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, compiled.diagnostics),
         };
     }
@@ -94,11 +109,14 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
     if (formTitle !== undefined) {
         metadata.formTitle = formTitle;
     }
-    return { metadata };
+    return { status: "ok", metadata };
 }
 
 /** Read typed skill metadata, returning `undefined` when absent or invalid. */
 export function readTypedSkillMetadata(filePath: string): TypedSkillMetadata | undefined {
     const result = readTypedSkillMetadataResult(filePath);
-    return result.metadata;
+    if (result.status === "ok") {
+        return result.metadata;
+    }
+    return undefined;
 }

@@ -87,11 +87,31 @@ arguments:
 Use {args.path}.
 `);
 
-        assert.equal(parsed.frontmatter.name, "demo");
-        assert.equal(parsed.frontmatter.description, "Demo skill");
-        assert.equal(parsed.frontmatter.formTitle, "Demo Form");
-        assert.deepEqual(parsed.frontmatter.arguments, { path: { type: "string" } });
-        assert.equal(parsed.body, "Use {args.path}.");
+        assert.equal(parsed.status, "ok");
+        if (parsed.status === "ok") {
+            assert.equal(parsed.frontmatter.name, "demo");
+            assert.equal(parsed.frontmatter.description, "Demo skill");
+            assert.equal(parsed.frontmatter.formTitle, "Demo Form");
+            assert.deepEqual(parsed.frontmatter.arguments, { path: { type: "string" } });
+            assert.equal(parsed.body, "Use {args.path}.");
+        }
+    });
+
+    void it("returns diagnostics for invalid YAML frontmatter", () => {
+        const parsed = parseSkillMarkdown(`---
+name: [unterminated
+---
+
+Body
+`);
+
+        assert.equal(parsed.status, "invalid");
+        if (parsed.status === "invalid") {
+            assert.match(
+                parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+                /frontmatter: invalid YAML/,
+            );
+        }
     });
 
     void it("reports invalid skill argument metadata", () => {
@@ -121,6 +141,10 @@ Use {args.path}.
                 type: "string",
                 aliases: ["o"],
             },
+            typo: {
+                type: "string",
+                minLength: 2,
+            },
         });
 
         const messages = diagnosticMessages(result);
@@ -133,6 +157,7 @@ Use {args.path}.
         assert.match(messages, /config_path: flag --config-path collides with config\.path/);
         assert.match(messages, /branch\.pattern must be a valid regular expression/);
         assert.match(messages, /old\.aliases is not supported/);
+        assert.match(messages, /typo\.minLength is not a supported typed skill argument field/);
     });
 
     void it("rejects prototype-reserved skill argument path segments", () => {
@@ -181,12 +206,14 @@ Use {args.path}.
 
         const result = readTypedSkillMetadataResult(skillPath);
 
-        assert.equal(result.diagnostics, undefined);
-        assert.equal(result.metadata?.name, "demo");
-        assert.equal(result.metadata?.formTitle, "Demo Form");
-        assert.equal(result.metadata?.args.path?.type, "string");
-        assert.equal(result.metadata?.args.path?.required, true);
-        assert.equal(result.metadata?.body, "Use {args.path}.");
+        assert.equal(result.status, "ok");
+        if (result.status === "ok") {
+            assert.equal(result.metadata.name, "demo");
+            assert.equal(result.metadata.formTitle, "Demo Form");
+            assert.equal(result.metadata.args.path?.type, "string");
+            assert.equal(result.metadata.args.path?.required, true);
+            assert.equal(result.metadata.body, "Use {args.path}.");
+        }
     });
 
     void it("reports unknown typed placeholders while loading skills", () => {
@@ -209,10 +236,10 @@ Use {args.missing} and {args.path}.
 
         const result = readTypedSkillMetadataResult(skillPath);
 
-        assert.equal(result.metadata, undefined);
+        assert.equal(result.status, "invalid");
+        assert.ok(result.status === "invalid");
         assert.match(
-            result.diagnostics?.diagnostics.map((diagnostic) => diagnostic.message).join("\n") ??
-                "",
+            result.diagnostics.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
             /body: unknown argument placeholder \{args\.missing\}/,
         );
     });

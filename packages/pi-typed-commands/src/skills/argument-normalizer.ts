@@ -41,6 +41,47 @@ const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "confirm",
 ]);
 
+const SHARED_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([
+    "type",
+    "description",
+    "title",
+    "required",
+    "placeholder",
+    "occurrence",
+    "aliases",
+    "position",
+    "rest",
+    "ui",
+    "default",
+]);
+
+const STRING_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([
+    ...SHARED_ARGUMENT_FIELDS,
+    "min_length",
+    "max_length",
+    "pattern",
+]);
+
+const NUMBER_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([
+    ...SHARED_ARGUMENT_FIELDS,
+    "integer",
+    "min",
+    "max",
+]);
+
+const BOOLEAN_ARGUMENT_FIELDS: ReadonlySet<string> = SHARED_ARGUMENT_FIELDS;
+
+const ENUM_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([...SHARED_ARGUMENT_FIELDS, "values"]);
+
+const MULTI_ENUM_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([
+    ...SHARED_ARGUMENT_FIELDS,
+    "values",
+    "min_items",
+    "max_items",
+]);
+
+const UI_FIELDS: ReadonlySet<string> = new Set(["widget", "rows", "title", "custom"]);
+
 type SkillDiagnosticInput = string | DefinitionDiagnostic;
 
 type SkillDiagnosticSink = {
@@ -67,6 +108,19 @@ function createSkillDiagnosticSink(): SkillDiagnosticSink {
             }
         },
     };
+}
+
+function warnUnknownFields(
+    name: string,
+    raw: Record<string, unknown>,
+    allowed: ReadonlySet<string>,
+    warnings: SkillDiagnosticSink,
+): void {
+    for (const key of Object.keys(raw)) {
+        if (!allowed.has(key)) {
+            warnings.push(`${name}.${key} is not a supported typed skill argument field`);
+        }
+    }
 }
 
 function normalizeArgumentType(type: unknown): ArgumentDefinition["type"] | undefined {
@@ -171,6 +225,7 @@ function normalizeUi(
         warnings.push(`${name}.ui must be an object`);
         return undefined;
     }
+    warnUnknownFields(`${name}.ui`, raw, UI_FIELDS, warnings);
 
     const ui: ArgumentUi = {};
     if (Object.hasOwn(raw, "widget")) {
@@ -336,6 +391,7 @@ function normalizeOneArgument(
     }
 
     if (type === "string") {
+        warnUnknownFields(name, raw, STRING_ARGUMENT_FIELDS, warnings);
         const definition: StringArgumentDefinition = applySharedFields(
             name,
             { type },
@@ -355,6 +411,7 @@ function normalizeOneArgument(
     }
 
     if (type === "boolean") {
+        warnUnknownFields(name, raw, BOOLEAN_ARGUMENT_FIELDS, warnings);
         const definition: BooleanArgumentDefinition = applySharedFields(
             name,
             { type },
@@ -373,6 +430,7 @@ function normalizeOneArgument(
     }
 
     if (type === "number") {
+        warnUnknownFields(name, raw, NUMBER_ARGUMENT_FIELDS, warnings);
         const definition: NumberArgumentDefinition = applySharedFields(
             name,
             { type },
@@ -429,6 +487,7 @@ function normalizeOneArgument(
     }
 
     if (type === "enum") {
+        warnUnknownFields(name, raw, ENUM_ARGUMENT_FIELDS, warnings);
         const definition: EnumArgumentDefinition = applySharedFields(
             name,
             { type, values },
@@ -446,6 +505,7 @@ function normalizeOneArgument(
         return definition;
     }
 
+    warnUnknownFields(name, raw, MULTI_ENUM_ARGUMENT_FIELDS, warnings);
     const definition: MultiEnumArgumentDefinition = applySharedFields(
         name,
         { type, values },

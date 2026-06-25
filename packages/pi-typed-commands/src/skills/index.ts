@@ -11,6 +11,8 @@ export { expandArgumentObject, renderTypedSkillInvocation } from "./prompt.js";
 export type {
     RawSkillArgumentDefinition,
     RawSkillArguments,
+    ParseSkillMarkdownResult,
+    ReadTypedSkillMetadataOptions,
     ReadTypedSkillMetadataResult,
     RenderTypedSkillInvocationOptions,
     SkillArgumentDiagnostic,

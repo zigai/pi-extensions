@@ -11,6 +11,8 @@ export { expandArgumentObject, renderTypedSkillInvocation } from "./skills/promp
 export type {
     RawSkillArgumentDefinition,
     RawSkillArguments,
+    ParseSkillMarkdownResult,
+    ReadTypedSkillMetadataOptions,
     ReadTypedSkillMetadataResult,
     RenderTypedSkillInvocationOptions,
     SkillArgumentDiagnostic,
