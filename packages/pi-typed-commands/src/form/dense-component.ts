@@ -10,6 +10,7 @@ import {
     type SelectListTheme,
     type TUI,
 } from "@earendil-works/pi-tui";
+import { casesHandled } from "../exhaustive.js";
 import { toKebabCase } from "../names.js";
 import {
     normalizeTextArgumentInput,
@@ -53,16 +54,19 @@ function widgetFor(definition: ArgumentDefinition): string {
     if (definition.ui?.widget !== undefined) {
         return definition.ui.widget;
     }
-    if (definition.type === "boolean") {
-        return "toggle";
+    switch (definition.type) {
+        case "string":
+        case "number":
+            return definition.type;
+        case "boolean":
+            return "toggle";
+        case "enum":
+            return "select";
+        case "multi-enum":
+            return "multiselect";
+        default:
+            return casesHandled(definition);
     }
-    if (definition.type === "enum") {
-        return "select";
-    }
-    if (definition.type === "multi-enum") {
-        return "multiselect";
-    }
-    return definition.type;
 }
 
 function isTextWidget(definition: ArgumentDefinition): boolean {
@@ -273,30 +277,8 @@ export class ArgumentFormComponent implements Component, Focusable {
             return;
         }
 
-        if (field.definition.type === "multi-enum") {
-            if (matchesKey(data, "left")) {
-                this.moveMultiCursor(field, -1);
-                return;
-            }
-            if (matchesKey(data, "right")) {
-                this.moveMultiCursor(field, 1);
-                return;
-            }
-            if (matchesKey(data, "space")) {
-                this.toggleMultiValue(field);
-                return;
-            }
-        }
-
-        if (field.definition.type === "boolean" || field.definition.type === "enum") {
-            if (matchesKey(data, "left")) {
-                this.setCurrentValue(stepValue(field.definition, this.state[field.name], -1));
-                return;
-            }
-            if (matchesKey(data, "right") || matchesKey(data, "space")) {
-                this.setCurrentValue(stepValue(field.definition, this.state[field.name], 1));
-                return;
-            }
+        if (this.handleDiscreteInput(field, data)) {
+            return;
         }
 
         if (isTextareaWidget(field.definition)) {
@@ -307,6 +289,41 @@ export class ArgumentFormComponent implements Component, Focusable {
 
         if (isTextWidget(field.definition)) {
             this.handleTextInput(field, data);
+        }
+    }
+
+    private handleDiscreteInput(field: FormField, data: string): boolean {
+        switch (field.definition.type) {
+            case "string":
+            case "number":
+                return false;
+            case "boolean":
+            case "enum":
+                if (matchesKey(data, "left")) {
+                    this.setCurrentValue(stepValue(field.definition, this.state[field.name], -1));
+                    return true;
+                }
+                if (matchesKey(data, "right") || matchesKey(data, "space")) {
+                    this.setCurrentValue(stepValue(field.definition, this.state[field.name], 1));
+                    return true;
+                }
+                return false;
+            case "multi-enum":
+                if (matchesKey(data, "left")) {
+                    this.moveMultiCursor(field, -1);
+                    return true;
+                }
+                if (matchesKey(data, "right")) {
+                    this.moveMultiCursor(field, 1);
+                    return true;
+                }
+                if (matchesKey(data, "space")) {
+                    this.toggleMultiValue(field);
+                    return true;
+                }
+                return false;
+            default:
+                return casesHandled(field.definition);
         }
     }
 
@@ -462,22 +479,26 @@ export class ArgumentFormComponent implements Component, Focusable {
             return this.renderSelectedInput(width);
         }
 
-        if (field.definition.type === "boolean") {
-            return this.renderBooleanValue(field, selected, width);
+        switch (field.definition.type) {
+            case "boolean":
+                return this.renderBooleanValue(field, selected, width);
+            case "multi-enum":
+                return this.renderMultiValue(field, selected, width);
+            case "string":
+            case "number":
+            case "enum": {
+                const rawValue = paddedCell(formatValue(this.state[field.name]), width);
+                if (selected) {
+                    return this.theme.fg("accent", rawValue);
+                }
+                if (this.state[field.name] === undefined) {
+                    return this.theme.fg("muted", rawValue);
+                }
+                return rawValue;
+            }
+            default:
+                return casesHandled(field.definition);
         }
-
-        if (field.definition.type === "multi-enum") {
-            return this.renderMultiValue(field, selected, width);
-        }
-
-        const rawValue = paddedCell(formatValue(this.state[field.name]), width);
-        if (selected) {
-            return this.theme.fg("accent", rawValue);
-        }
-        if (this.state[field.name] === undefined) {
-            return this.theme.fg("muted", rawValue);
-        }
-        return rawValue;
     }
 
     private renderCustomValue(
@@ -590,13 +611,18 @@ export class ArgumentFormComponent implements Component, Focusable {
     }
 
     private optionParts(field: FormField, selected: boolean): string[] {
-        if (field.definition.type === "enum") {
-            return this.enumOptionParts(field, selected);
+        switch (field.definition.type) {
+            case "string":
+            case "number":
+            case "boolean":
+                return [];
+            case "enum":
+                return this.enumOptionParts(field, selected);
+            case "multi-enum":
+                return this.multiOptionParts(field, selected);
+            default:
+                return casesHandled(field.definition);
         }
-        if (field.definition.type === "multi-enum") {
-            return this.multiOptionParts(field, selected);
-        }
-        return [];
     }
 
     private enumOptionParts(field: FormField, selected: boolean): string[] {

@@ -1,4 +1,5 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { casesHandled } from "../exhaustive.js";
 import { formatFlagName, toKebabCase } from "../names.js";
 import { applyArgumentDefault, coerceArgumentValue, validateArgumentValue } from "../schema.js";
 import { formatFormIssueMessage, shouldPromptArgument } from "../pi-tui/form-model.js";
@@ -6,9 +7,14 @@ import type {
     ArgumentDefinition,
     ArgumentDefinitions,
     ArgumentValue,
+    BooleanArgumentDefinition,
+    EnumArgumentDefinition,
     FormMode,
+    MultiEnumArgumentDefinition,
+    NumberArgumentDefinition,
     ParsedCommandArguments,
     RegisteredTypedCommand,
+    StringArgumentDefinition,
 } from "../types.js";
 import { formatIssues } from "../usage.js";
 import { FORM_MESSAGE_OPTIONS, UNSET_OPTION } from "./constants.js";
@@ -70,26 +76,22 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
     }
 
     private async promptArgument(name: string, definition: ArgumentDefinition): Promise<boolean> {
-        let completed = await this.promptEnum(name, definition);
-        if (!completed) {
-            return false;
+        switch (definition.type) {
+            case "string":
+            case "number":
+                return this.promptStringLike(name, definition);
+            case "boolean":
+                return this.promptBoolean(name, definition);
+            case "enum":
+                return this.promptEnum(name, definition);
+            case "multi-enum":
+                return this.promptMultiEnum(name, definition);
+            default:
+                return casesHandled(definition);
         }
-        completed = await this.promptBoolean(name, definition);
-        if (!completed) {
-            return false;
-        }
-        completed = await this.promptMultiEnum(name, definition);
-        if (!completed) {
-            return false;
-        }
-        return this.promptStringLike(name, definition);
     }
 
-    private async promptEnum(name: string, definition: ArgumentDefinition): Promise<boolean> {
-        if (definition.type !== "enum") {
-            return true;
-        }
-
+    private async promptEnum(name: string, definition: EnumArgumentDefinition): Promise<boolean> {
         const options = [...definition.values];
         if (definition.required !== true) {
             options.unshift(UNSET_OPTION);
@@ -109,11 +111,10 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         return true;
     }
 
-    private async promptBoolean(name: string, definition: ArgumentDefinition): Promise<boolean> {
-        if (definition.type !== "boolean") {
-            return true;
-        }
-
+    private async promptBoolean(
+        name: string,
+        definition: BooleanArgumentDefinition,
+    ): Promise<boolean> {
         const options = ["true", "false"];
         if (definition.required !== true) {
             options.push(UNSET_OPTION);
@@ -133,11 +134,10 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         return true;
     }
 
-    private async promptMultiEnum(name: string, definition: ArgumentDefinition): Promise<boolean> {
-        if (definition.type !== "multi-enum") {
-            return true;
-        }
-
+    private async promptMultiEnum(
+        name: string,
+        definition: MultiEnumArgumentDefinition,
+    ): Promise<boolean> {
         const current = this.state[name];
         let placeholder = definition.placeholder ?? currentValueText(current);
         if (placeholder.length === 0) {
@@ -175,11 +175,10 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         return true;
     }
 
-    private async promptStringLike(name: string, definition: ArgumentDefinition): Promise<boolean> {
-        if (definition.type !== "string" && definition.type !== "number") {
-            return true;
-        }
-
+    private async promptStringLike(
+        name: string,
+        definition: StringArgumentDefinition | NumberArgumentDefinition,
+    ): Promise<boolean> {
         const current = this.state[name];
         const placeholder = definition.placeholder ?? currentValueText(current);
 
@@ -193,29 +192,44 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             return this.applyEmptyTextInput(name, definition, current);
         }
 
-        if (definition.type === "string") {
-            const validation = validateArgumentValue(name, definition, input, FORM_MESSAGE_OPTIONS);
-            if (!validation.ok) {
-                this.ctx.ui.notify(validation.message, "error");
-                return this.promptStringLike(name, definition);
+        switch (definition.type) {
+            case "string": {
+                const validation = validateArgumentValue(
+                    name,
+                    definition,
+                    input,
+                    FORM_MESSAGE_OPTIONS,
+                );
+                if (!validation.ok) {
+                    this.ctx.ui.notify(validation.message, "error");
+                    return this.promptStringLike(name, definition);
+                }
+                this.state[name] = input;
+                return true;
             }
-            this.state[name] = input;
-            return true;
-        }
+            case "number": {
+                const numberValue = coerceArgumentValue(
+                    definition,
+                    input,
+                    name,
+                    FORM_MESSAGE_OPTIONS,
+                );
+                if (!numberValue.ok) {
+                    this.ctx.ui.notify(numberValue.issue.message, "error");
+                    return this.promptStringLike(name, definition);
+                }
 
-        const numberValue = coerceArgumentValue(definition, input, name, FORM_MESSAGE_OPTIONS);
-        if (!numberValue.ok) {
-            this.ctx.ui.notify(numberValue.issue.message, "error");
-            return this.promptStringLike(name, definition);
+                this.state[name] = numberValue.value;
+                return true;
+            }
+            default:
+                return casesHandled(definition);
         }
-
-        this.state[name] = numberValue.value;
-        return true;
     }
 
     private async applyEmptyMultiEnumInput(
         name: string,
-        definition: ArgumentDefinition,
+        definition: MultiEnumArgumentDefinition,
         current: ArgumentValue,
     ): Promise<boolean> {
         if (current !== undefined) {
@@ -236,7 +250,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
 
     private async applyEmptyTextInput(
         name: string,
-        definition: ArgumentDefinition,
+        definition: StringArgumentDefinition | NumberArgumentDefinition,
         current: ArgumentValue,
     ): Promise<boolean> {
         if (current !== undefined) {

@@ -1,4 +1,5 @@
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { casesHandled } from "./exhaustive.js";
 import {
     coerceArgumentValue,
     completionValuesForArgument,
@@ -22,10 +23,17 @@ function occurrencePolicy(definition: ArgumentDefinition): "error" | "first" | "
     if (definition.occurrence !== undefined) {
         return definition.occurrence;
     }
-    if (definition.type === "multi-enum") {
-        return "append";
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "boolean":
+        case "enum":
+            return "error";
+        case "multi-enum":
+            return "append";
+        default:
+            return casesHandled(definition);
     }
-    return "error";
 }
 
 function positionFor(definition: ArgumentDefinition): number | undefined {
@@ -42,6 +50,37 @@ function duplicateIssue(name: string, definition: ArgumentDefinition): ParseIssu
 
 function isStringArrayValue(value: ArgumentValue): value is string[] {
     return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
+}
+
+function acceptsImplicitBooleanValue(definition: ArgumentDefinition): boolean {
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "enum":
+        case "multi-enum":
+            return false;
+        case "boolean":
+            return true;
+        default:
+            return casesHandled(definition);
+    }
+}
+
+function appendsOccurrenceValues(
+    definition: ArgumentDefinition,
+    policy: ReturnType<typeof occurrencePolicy>,
+): boolean {
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "boolean":
+        case "enum":
+            return false;
+        case "multi-enum":
+            return policy === "append";
+        default:
+            return casesHandled(definition);
+    }
 }
 
 function appendValues(current: ArgumentValue, next: ArgumentValue): ArgumentValue {
@@ -84,7 +123,7 @@ function decodeOccurrences(
                 );
                 continue;
             }
-            if (definition.type === "boolean") {
+            if (acceptsImplicitBooleanValue(definition)) {
                 next = false;
             } else {
                 issues.push(
@@ -97,7 +136,7 @@ function decodeOccurrences(
                 );
                 continue;
             }
-        } else if (definition.type === "boolean" && occurrence.raw === undefined) {
+        } else if (acceptsImplicitBooleanValue(definition) && occurrence.raw === undefined) {
             next = true;
         } else if (occurrence.raw === undefined) {
             issues.push(
@@ -128,7 +167,7 @@ function decodeOccurrences(
             }
         }
 
-        if (definition.type === "multi-enum" && policy === "append") {
+        if (appendsOccurrenceValues(definition, policy)) {
             value = appendValues(value, next);
         } else {
             value = next;
@@ -163,23 +202,33 @@ function serializeValue(
     if (value === undefined) {
         return [];
     }
-    if (definition.type === "boolean") {
-        if (value === true) {
-            return [formatArgumentFlagName(name, definition)];
-        }
-        if (value === false) {
-            return [`--no-${formatArgumentFlagName(name, definition).slice(2)}`];
-        }
-    }
-    if (definition.type === "multi-enum" && Array.isArray(value)) {
-        if (value.length === 0) {
+    switch (definition.type) {
+        case "boolean": {
+            if (value === true) {
+                return [formatArgumentFlagName(name, definition)];
+            }
+            if (value === false) {
+                return [`--no-${formatArgumentFlagName(name, definition).slice(2)}`];
+            }
             return [];
         }
-        return [
-            `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value.join(","))}`,
-        ];
+        case "multi-enum": {
+            if (!Array.isArray(value) || value.length === 0) {
+                return [];
+            }
+            return [
+                `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value.join(","))}`,
+            ];
+        }
+        case "string":
+        case "number":
+        case "enum":
+            return [
+                `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(String(value))}`,
+            ];
+        default:
+            return casesHandled(definition);
     }
-    return [`${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(String(value))}`];
 }
 
 function staticCompletionItems(definition: ArgumentDefinition, query: string): AutocompleteItem[] {

@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
+import { casesHandled } from "./exhaustive.js";
 import {
     lexTypedArgumentString,
     parseTypedCommandArgs,
@@ -84,6 +85,34 @@ function completionInsertionValue(value: string): string {
     return quoteSerializedValue(value, value.startsWith("-"));
 }
 
+function flagConsumesValue(definition: ArgumentDefinition): boolean {
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "enum":
+        case "multi-enum":
+            return true;
+        case "boolean":
+            return false;
+        default:
+            return casesHandled(definition);
+    }
+}
+
+function supportsRepeatedCompletion(definition: ArgumentDefinition): boolean {
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "boolean":
+        case "enum":
+            return false;
+        case "multi-enum":
+            return true;
+        default:
+            return casesHandled(definition);
+    }
+}
+
 function mapValueItemsForInsertion(items: ValueCompletionItem[]): AutocompleteItem[] {
     return items.map((item) => {
         if (item.replacementReady === true) {
@@ -98,7 +127,7 @@ function mapValueItemsForInsertion(items: ValueCompletionItem[]): AutocompleteIt
 
 function flagItem(name: string, definition: ArgumentDefinition): AutocompleteItem {
     let value = `${formatArgumentFlagName(name, definition)} `;
-    if (definition.type === "boolean") {
+    if (!flagConsumesValue(definition)) {
         value = formatArgumentFlagName(name, definition);
     }
 
@@ -378,10 +407,10 @@ function inlineFlagValueCompletion(
     }
 
     const definition = context.command.args[name];
-    if (definition === undefined || definition.type === "boolean") {
+    if (definition === undefined || !flagConsumesValue(definition)) {
         return undefined;
     }
-    if (definition.type !== "multi-enum" && commaIndex >= 0) {
+    if (!supportsRepeatedCompletion(definition) && commaIndex >= 0) {
         return undefined;
     }
 
@@ -426,7 +455,7 @@ function valueCompletionForPreviousFlag(
         return undefined;
     }
 
-    if (definition.type === "boolean") {
+    if (!flagConsumesValue(definition)) {
         return undefined;
     }
 
@@ -470,7 +499,7 @@ function currentTokenIsFlagValue(context: CommandLineContext): boolean {
     const previousDefinition = flagDefinitionForToken(context.command, context.previousToken);
     return (
         previousDefinition !== undefined &&
-        previousDefinition.type !== "boolean" &&
+        flagConsumesValue(previousDefinition) &&
         context.previousToken?.value.includes("=") !== true
     );
 }
@@ -518,7 +547,7 @@ function nextPositionalValueCompletion(
             flagDefinition = flagDefinitionForToken(context.command, token);
         }
         if (flagDefinition !== undefined) {
-            if (flagDefinition.type !== "boolean" && !token.value.includes("=")) {
+            if (flagConsumesValue(flagDefinition) && !token.value.includes("=")) {
                 skipNextValue = true;
             }
             continue;
@@ -561,7 +590,7 @@ function shouldSuggestFlag(
     if (isPositionalArgument(definition)) {
         return false;
     }
-    return !provided.has(name) || definition.type === "multi-enum";
+    return !provided.has(name) || supportsRepeatedCompletion(definition);
 }
 
 type CompletionDecision = {

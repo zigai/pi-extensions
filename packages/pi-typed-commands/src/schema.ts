@@ -1,5 +1,6 @@
 import { flattenGroupedArgumentDefinitions } from "./arguments.js";
 import { createDefinitionDiagnostic } from "./diagnostics.js";
+import { casesHandled } from "./exhaustive.js";
 import { formatFlagName, normalizeFlagName, toKebabCase } from "./names.js";
 import type {
     ArgumentDefinition,
@@ -261,6 +262,34 @@ function isStringArrayValue(value: ArgumentValue): value is string[] {
     return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
 }
 
+function supportsAppendOccurrence(definition: ArgumentDefinition): boolean {
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "boolean":
+        case "enum":
+            return false;
+        case "multi-enum":
+            return true;
+        default:
+            return casesHandled(definition);
+    }
+}
+
+function supportsRestPosition(definition: ArgumentDefinition): boolean {
+    switch (definition.type) {
+        case "string":
+        case "multi-enum":
+            return true;
+        case "number":
+        case "boolean":
+        case "enum":
+            return false;
+        default:
+            return casesHandled(definition);
+    }
+}
+
 /** Validate a parsed, defaulted, or form-collected argument value against its full definition. */
 export function validateArgumentValue(
     name: string,
@@ -278,102 +307,104 @@ export function validateArgumentValue(
         return { ok: true };
     }
 
-    if (definition.type === "string") {
-        if (typeof value !== "string") {
-            return { ok: false, message: `${displayName} expects text` };
-        }
-        if (definition.minLength !== undefined && value.length < definition.minLength) {
-            return {
-                ok: false,
-                message: `${displayName} must be at least ${definition.minLength} characters`,
-            };
-        }
-        if (definition.maxLength !== undefined && value.length > definition.maxLength) {
-            return {
-                ok: false,
-                message: `${displayName} must be at most ${definition.maxLength} characters`,
-            };
-        }
-        if (definition.pattern !== undefined) {
-            let pattern: RegExp;
-            try {
-                if (typeof definition.pattern === "string") {
-                    pattern = new RegExp(definition.pattern);
-                } else {
-                    pattern = definition.pattern;
+    switch (definition.type) {
+        case "string": {
+            if (typeof value !== "string") {
+                return { ok: false, message: `${displayName} expects text` };
+            }
+            if (definition.minLength !== undefined && value.length < definition.minLength) {
+                return {
+                    ok: false,
+                    message: `${displayName} must be at least ${definition.minLength} characters`,
+                };
+            }
+            if (definition.maxLength !== undefined && value.length > definition.maxLength) {
+                return {
+                    ok: false,
+                    message: `${displayName} must be at most ${definition.maxLength} characters`,
+                };
+            }
+            if (definition.pattern !== undefined) {
+                let pattern: RegExp;
+                try {
+                    if (typeof definition.pattern === "string") {
+                        pattern = new RegExp(definition.pattern);
+                    } else {
+                        pattern = definition.pattern;
+                    }
+                } catch {
+                    return {
+                        ok: false,
+                        message: `${displayName} has an invalid pattern`,
+                    };
                 }
-            } catch {
-                return {
-                    ok: false,
-                    message: `${displayName} has an invalid pattern`,
-                };
+                pattern.lastIndex = 0;
+                if (!pattern.test(value)) {
+                    return {
+                        ok: false,
+                        message: `${displayName} must match pattern ${String(definition.pattern)}`,
+                    };
+                }
             }
-            pattern.lastIndex = 0;
-            if (!pattern.test(value)) {
-                return {
-                    ok: false,
-                    message: `${displayName} must match pattern ${String(definition.pattern)}`,
-                };
-            }
-        }
-        return { ok: true };
-    }
-
-    if (definition.type === "boolean") {
-        if (typeof value === "boolean") {
             return { ok: true };
         }
-        return { ok: false, message: `${displayName} expects true or false` };
-    }
-
-    if (definition.type === "enum") {
-        if (typeof value === "string" && definition.values.includes(value)) {
+        case "number": {
+            if (typeof value !== "number" || !Number.isFinite(value)) {
+                return { ok: false, message: `${displayName} expects a number` };
+            }
+            if (definition.integer === true && !Number.isInteger(value)) {
+                return { ok: false, message: `${displayName} expects an integer` };
+            }
+            if (definition.min !== undefined && value < definition.min) {
+                return { ok: false, message: `${displayName} must be at least ${definition.min}` };
+            }
+            if (definition.max !== undefined && value > definition.max) {
+                return { ok: false, message: `${displayName} must be at most ${definition.max}` };
+            }
             return { ok: true };
         }
-        return {
-            ok: false,
-            message: `${displayName} must be one of: ${definition.values.join(", ")}`,
-        };
-    }
-
-    if (definition.type === "multi-enum") {
-        if (
-            !isStringArrayValue(value) ||
-            !value.every((item) => definition.values.includes(item))
-        ) {
+        case "boolean": {
+            if (typeof value === "boolean") {
+                return { ok: true };
+            }
+            return { ok: false, message: `${displayName} expects true or false` };
+        }
+        case "enum": {
+            if (typeof value === "string" && definition.values.includes(value)) {
+                return { ok: true };
+            }
             return {
                 ok: false,
-                message: `${displayName} must use values from: ${definition.values.join(", ")}`,
+                message: `${displayName} must be one of: ${definition.values.join(", ")}`,
             };
         }
-        if (definition.minItems !== undefined && value.length < definition.minItems) {
-            return {
-                ok: false,
-                message: `${displayName} must include at least ${definition.minItems} item(s)`,
-            };
+        case "multi-enum": {
+            if (
+                !isStringArrayValue(value) ||
+                !value.every((item) => definition.values.includes(item))
+            ) {
+                return {
+                    ok: false,
+                    message: `${displayName} must use values from: ${definition.values.join(", ")}`,
+                };
+            }
+            if (definition.minItems !== undefined && value.length < definition.minItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at least ${definition.minItems} item(s)`,
+                };
+            }
+            if (definition.maxItems !== undefined && value.length > definition.maxItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at most ${definition.maxItems} item(s)`,
+                };
+            }
+            return { ok: true };
         }
-        if (definition.maxItems !== undefined && value.length > definition.maxItems) {
-            return {
-                ok: false,
-                message: `${displayName} must include at most ${definition.maxItems} item(s)`,
-            };
-        }
-        return { ok: true };
+        default:
+            return casesHandled(definition);
     }
-
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-        return { ok: false, message: `${displayName} expects a number` };
-    }
-    if (definition.integer === true && !Number.isInteger(value)) {
-        return { ok: false, message: `${displayName} expects an integer` };
-    }
-    if (definition.min !== undefined && value < definition.min) {
-        return { ok: false, message: `${displayName} must be at least ${definition.min}` };
-    }
-    if (definition.max !== undefined && value > definition.max) {
-        return { ok: false, message: `${displayName} must be at most ${definition.max}` };
-    }
-    return { ok: true };
 }
 
 function validateDefault(
@@ -489,7 +520,7 @@ function validateTypeSpecificRules(
             `${name}.occurrence must be one of: error, first, last, append`,
         );
     }
-    if (definition.occurrence === "append" && definition.type !== "multi-enum") {
+    if (definition.occurrence === "append" && !supportsAppendOccurrence(definition)) {
         addArgumentDiagnostic(
             diagnostics,
             name,
@@ -539,7 +570,7 @@ function validateTypeSpecificRules(
                 `${name}.rest requires a positional argument`,
             );
         }
-        if (definition.type !== "string" && definition.type !== "multi-enum") {
+        if (!supportsRestPosition(definition)) {
             addArgumentDiagnostic(
                 diagnostics,
                 name,
@@ -549,164 +580,177 @@ function validateTypeSpecificRules(
             );
         }
     }
-    if (definition.type === "string") {
-        if (definition.minLength !== undefined && !isNonNegativeInteger(definition.minLength)) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "minLength",
-                "argument.string.min-length.invalid",
-                `${name}.minLength must be a non-negative integer`,
-            );
-        }
-        if (definition.maxLength !== undefined && !isNonNegativeInteger(definition.maxLength)) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "maxLength",
-                "argument.string.max-length.invalid",
-                `${name}.maxLength must be a non-negative integer`,
-            );
-        }
-        if (
-            definition.minLength !== undefined &&
-            definition.maxLength !== undefined &&
-            definition.minLength > definition.maxLength
-        ) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "minLength",
-                "argument.string.length-range.invalid",
-                `${name}.minLength must be less than or equal to maxLength`,
-            );
-        }
-        if (definition.pattern !== undefined) {
-            try {
-                if (typeof definition.pattern === "string") {
-                    new RegExp(definition.pattern);
+    switch (definition.type) {
+        case "string": {
+            if (definition.minLength !== undefined && !isNonNegativeInteger(definition.minLength)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "minLength",
+                    "argument.string.min-length.invalid",
+                    `${name}.minLength must be a non-negative integer`,
+                );
+            }
+            if (definition.maxLength !== undefined && !isNonNegativeInteger(definition.maxLength)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "maxLength",
+                    "argument.string.max-length.invalid",
+                    `${name}.maxLength must be a non-negative integer`,
+                );
+            }
+            if (
+                definition.minLength !== undefined &&
+                definition.maxLength !== undefined &&
+                definition.minLength > definition.maxLength
+            ) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "minLength",
+                    "argument.string.length-range.invalid",
+                    `${name}.minLength must be less than or equal to maxLength`,
+                );
+            }
+            if (definition.pattern !== undefined) {
+                try {
+                    if (typeof definition.pattern === "string") {
+                        new RegExp(definition.pattern);
+                    }
+                } catch {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "pattern",
+                        "argument.string.pattern.invalid",
+                        `${name}.pattern must be a valid regular expression`,
+                    );
                 }
-            } catch {
+            }
+            break;
+        }
+        case "number": {
+            if (definition.min !== undefined && !Number.isFinite(definition.min)) {
                 addArgumentDiagnostic(
                     diagnostics,
                     name,
-                    "pattern",
-                    "argument.string.pattern.invalid",
-                    `${name}.pattern must be a valid regular expression`,
+                    "min",
+                    "argument.number.min.invalid",
+                    `${name}.min must be a finite number`,
                 );
             }
+            if (definition.max !== undefined && !Number.isFinite(definition.max)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "max",
+                    "argument.number.max.invalid",
+                    `${name}.max must be a finite number`,
+                );
+            }
+            if (
+                definition.min !== undefined &&
+                definition.max !== undefined &&
+                definition.min > definition.max
+            ) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "min",
+                    "argument.number.range.invalid",
+                    `${name}.min must be less than or equal to max`,
+                );
+            }
+            break;
         }
-    }
-
-    if (definition.type === "number") {
-        if (definition.min !== undefined && !Number.isFinite(definition.min)) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "min",
-                "argument.number.min.invalid",
-                `${name}.min must be a finite number`,
-            );
-        }
-        if (definition.max !== undefined && !Number.isFinite(definition.max)) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "max",
-                "argument.number.max.invalid",
-                `${name}.max must be a finite number`,
-            );
-        }
-        if (
-            definition.min !== undefined &&
-            definition.max !== undefined &&
-            definition.min > definition.max
-        ) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "min",
-                "argument.number.range.invalid",
-                `${name}.min must be less than or equal to max`,
-            );
-        }
-    }
-
-    if (definition.type === "enum" || definition.type === "multi-enum") {
-        if (definition.values.length === 0) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "values",
-                "argument.values.empty",
-                `${name}.values must be a non-empty list of strings`,
-            );
-        }
-        const seen = new Set<string>();
-        for (const value of definition.values) {
-            if (value.length === 0) {
+        case "boolean":
+            break;
+        case "enum":
+        case "multi-enum": {
+            if (definition.values.length === 0) {
                 addArgumentDiagnostic(
                     diagnostics,
                     name,
                     "values",
-                    "argument.values.empty-string",
-                    `${name}.values may not contain empty strings`,
+                    "argument.values.empty",
+                    `${name}.values must be a non-empty list of strings`,
                 );
             }
-            if (definition.type === "multi-enum" && value.includes(",")) {
-                addArgumentDiagnostic(
-                    diagnostics,
-                    name,
-                    "values",
-                    "argument.values.comma",
-                    `${name}.values may not contain commas`,
-                );
+            const seen = new Set<string>();
+            for (const value of definition.values) {
+                if (value.length === 0) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "values",
+                        "argument.values.empty-string",
+                        `${name}.values may not contain empty strings`,
+                    );
+                }
+                if (definition.type === "multi-enum" && value.includes(",")) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "values",
+                        "argument.values.comma",
+                        `${name}.values may not contain commas`,
+                    );
+                }
+                if (seen.has(value)) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "values",
+                        "argument.values.duplicate",
+                        `${name}.values contains duplicate value ${value}`,
+                    );
+                }
+                seen.add(value);
             }
-            if (seen.has(value)) {
-                addArgumentDiagnostic(
-                    diagnostics,
-                    name,
-                    "values",
-                    "argument.values.duplicate",
-                    `${name}.values contains duplicate value ${value}`,
-                );
+            if (definition.type === "multi-enum") {
+                if (
+                    definition.minItems !== undefined &&
+                    !isNonNegativeInteger(definition.minItems)
+                ) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "minItems",
+                        "argument.multi-enum.min-items.invalid",
+                        `${name}.minItems must be a non-negative integer`,
+                    );
+                }
+                if (
+                    definition.maxItems !== undefined &&
+                    !isNonNegativeInteger(definition.maxItems)
+                ) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "maxItems",
+                        "argument.multi-enum.max-items.invalid",
+                        `${name}.maxItems must be a non-negative integer`,
+                    );
+                }
+                if (
+                    definition.minItems !== undefined &&
+                    definition.maxItems !== undefined &&
+                    definition.minItems > definition.maxItems
+                ) {
+                    addArgumentDiagnostic(
+                        diagnostics,
+                        name,
+                        "minItems",
+                        "argument.multi-enum.item-range.invalid",
+                        `${name}.minItems must be less than or equal to maxItems`,
+                    );
+                }
             }
-            seen.add(value);
+            break;
         }
-    }
-
-    if (definition.type === "multi-enum") {
-        if (definition.minItems !== undefined && !isNonNegativeInteger(definition.minItems)) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "minItems",
-                "argument.multi-enum.min-items.invalid",
-                `${name}.minItems must be a non-negative integer`,
-            );
-        }
-        if (definition.maxItems !== undefined && !isNonNegativeInteger(definition.maxItems)) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "maxItems",
-                "argument.multi-enum.max-items.invalid",
-                `${name}.maxItems must be a non-negative integer`,
-            );
-        }
-        if (
-            definition.minItems !== undefined &&
-            definition.maxItems !== undefined &&
-            definition.minItems > definition.maxItems
-        ) {
-            addArgumentDiagnostic(
-                diagnostics,
-                name,
-                "minItems",
-                "argument.multi-enum.item-range.invalid",
-                `${name}.minItems must be less than or equal to maxItems`,
-            );
-        }
+        default:
+            casesHandled(definition);
     }
 
     validateDefault(name, definition, diagnostics);
@@ -908,155 +952,162 @@ export function coerceArgumentValue(
 ): CoercedArgumentValue {
     const displayName = formatArgumentMessageName(name, definition, options);
 
-    if (definition.type === "string") {
-        return { ok: true, value: raw };
+    switch (definition.type) {
+        case "string":
+            return { ok: true, value: raw };
+        case "number": {
+            if (raw.trim().length === 0) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} expects a number`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+            const parsed = Number(raw);
+            if (!Number.isFinite(parsed)) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} expects a number`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+            if (definition.integer === true && !Number.isInteger(parsed)) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} expects an integer`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+            if (definition.min !== undefined && parsed < definition.min) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} must be at least ${definition.min}`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+            if (definition.max !== undefined && parsed > definition.max) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} must be at most ${definition.max}`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+            return { ok: true, value: parsed };
+        }
+        case "boolean": {
+            const parsed = booleanFromString(raw);
+            if (parsed === undefined) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} expects a boolean value`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+            return { ok: true, value: parsed };
+        }
+        case "enum": {
+            if (!definition.values.includes(raw)) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} must be one of: ${definition.values.join(", ")}`,
+                        name,
+                        raw,
+                    ),
+                };
+            }
+            return { ok: true, value: raw };
+        }
+        case "multi-enum": {
+            const values = raw
+                .split(",")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+            const invalid = values.find((item) => !definition.values.includes(item));
+            if (invalid !== undefined) {
+                return {
+                    ok: false,
+                    issue: createParseIssue(
+                        "invalid-value",
+                        `${displayName} must use values from: ${definition.values.join(", ")}`,
+                        name,
+                        invalid,
+                    ),
+                };
+            }
+            return { ok: true, value: values };
+        }
+        default:
+            return casesHandled(definition);
     }
-
-    if (definition.type === "boolean") {
-        const parsed = booleanFromString(raw);
-        if (parsed === undefined) {
-            return {
-                ok: false,
-                issue: createParseIssue(
-                    "invalid-value",
-                    `${displayName} expects a boolean value`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        return { ok: true, value: parsed };
-    }
-
-    if (definition.type === "number") {
-        if (raw.trim().length === 0) {
-            return {
-                ok: false,
-                issue: createParseIssue(
-                    "invalid-value",
-                    `${displayName} expects a number`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        const parsed = Number(raw);
-        if (!Number.isFinite(parsed)) {
-            return {
-                ok: false,
-                issue: createParseIssue(
-                    "invalid-value",
-                    `${displayName} expects a number`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        if (definition.integer === true && !Number.isInteger(parsed)) {
-            return {
-                ok: false,
-                issue: createParseIssue(
-                    "invalid-value",
-                    `${displayName} expects an integer`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        if (definition.min !== undefined && parsed < definition.min) {
-            return {
-                ok: false,
-                issue: createParseIssue(
-                    "invalid-value",
-                    `${displayName} must be at least ${definition.min}`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        if (definition.max !== undefined && parsed > definition.max) {
-            return {
-                ok: false,
-                issue: createParseIssue(
-                    "invalid-value",
-                    `${displayName} must be at most ${definition.max}`,
-                    name,
-                    raw,
-                ),
-            };
-        }
-        return { ok: true, value: parsed };
-    }
-
-    if (definition.type === "multi-enum") {
-        const values = raw
-            .split(",")
-            .map((item) => item.trim())
-            .filter((item) => item.length > 0);
-        const invalid = values.find((item) => !definition.values.includes(item));
-        if (invalid !== undefined) {
-            return {
-                ok: false,
-                issue: createParseIssue(
-                    "invalid-value",
-                    `${displayName} must use values from: ${definition.values.join(", ")}`,
-                    name,
-                    invalid,
-                ),
-            };
-        }
-        return { ok: true, value: values };
-    }
-
-    if (!definition.values.includes(raw)) {
-        return {
-            ok: false,
-            issue: createParseIssue(
-                "invalid-value",
-                `${displayName} must be one of: ${definition.values.join(", ")}`,
-                name,
-                raw,
-            ),
-        };
-    }
-
-    return { ok: true, value: raw };
 }
 
 /** Return finite values suitable for select/radio/toggle form controls. */
 export function selectableArgumentValues(definition: ArgumentDefinition): ArgumentValue[] {
-    if (definition.type === "boolean") {
-        const values: ArgumentValue[] = [true, false];
-        if (definition.required !== true && definition.default === undefined) {
-            values.push(undefined);
+    switch (definition.type) {
+        case "string":
+        case "number":
+            return [];
+        case "boolean": {
+            const values: ArgumentValue[] = [true, false];
+            if (definition.required !== true && definition.default === undefined) {
+                values.push(undefined);
+            }
+            return values;
         }
-        return values;
-    }
-
-    if (definition.type === "enum") {
-        const values: ArgumentValue[] = [...definition.values];
-        if (definition.required !== true && definition.default === undefined) {
-            values.push(undefined);
+        case "enum": {
+            const values: ArgumentValue[] = [...definition.values];
+            if (definition.required !== true && definition.default === undefined) {
+                values.push(undefined);
+            }
+            return values;
         }
-        return values;
+        case "multi-enum":
+            return [...definition.values];
+        default:
+            return casesHandled(definition);
     }
-
-    if (definition.type === "multi-enum") {
-        return [...definition.values];
-    }
-
-    return [];
 }
 
 /** Return built-in static completion candidates for booleans and enum-like arguments. */
 export function completionValuesForArgument(definition: ArgumentDefinition): string[] {
-    if (definition.type === "boolean") {
-        return ["true", "false"];
+    switch (definition.type) {
+        case "string":
+        case "number":
+            return [];
+        case "boolean":
+            return ["true", "false"];
+        case "enum":
+        case "multi-enum":
+            return [...definition.values];
+        default:
+            return casesHandled(definition);
     }
-    if (definition.type === "enum" || definition.type === "multi-enum") {
-        return [...definition.values];
-    }
-    return [];
 }
 
 /** Convert freeform form input into an argument value; blank input falls back to the default/unset value. */
@@ -1068,21 +1119,36 @@ export function normalizeTextArgumentInput(
     if (trimmed.length === 0) {
         return applyArgumentDefault(definition);
     }
-    if (definition.type === "string") {
-        return input;
+    switch (definition.type) {
+        case "string":
+            return input;
+        case "number":
+            return Number(trimmed);
+        case "boolean":
+        case "enum":
+        case "multi-enum":
+            return undefined;
+        default:
+            return casesHandled(definition);
     }
-    if (definition.type === "number") {
-        return Number(trimmed);
-    }
-    return undefined;
 }
 
 /** Return the compact type label shown in generated usage/help text. */
 export function argumentTypeHint(definition: ArgumentDefinition): string {
-    if (definition.type === "number" && definition.integer === true) {
-        return "int";
+    switch (definition.type) {
+        case "string":
+        case "boolean":
+        case "enum":
+        case "multi-enum":
+            return definition.type;
+        case "number":
+            if (definition.integer === true) {
+                return "int";
+            }
+            return definition.type;
+        default:
+            return casesHandled(definition);
     }
-    return definition.type;
 }
 
 /** Return the placeholder/value hint shown for an argument in usage, help, and forms. */
@@ -1091,26 +1157,23 @@ export function argumentValueHint(definition: ArgumentDefinition, name?: string)
         return definition.placeholder;
     }
 
-    if (definition.type === "string") {
-        if (name === undefined) {
-            return "string";
-        }
-        return toKebabCase(name);
+    switch (definition.type) {
+        case "string":
+            if (name === undefined) {
+                return "string";
+            }
+            return toKebabCase(name);
+        case "number":
+            return argumentTypeHint(definition);
+        case "boolean":
+            return "boolean";
+        case "enum":
+            return definition.values.join("|");
+        case "multi-enum":
+            return definition.values.join(",");
+        default:
+            return casesHandled(definition);
     }
-
-    if (definition.type === "number") {
-        return argumentTypeHint(definition);
-    }
-
-    if (definition.type === "boolean") {
-        return "boolean";
-    }
-
-    if (definition.type === "multi-enum") {
-        return definition.values.join(",");
-    }
-
-    return definition.values.join("|");
 }
 
 /** Format an argument default as the suffix used in compact generated usage text. */
