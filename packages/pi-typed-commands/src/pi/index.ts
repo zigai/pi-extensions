@@ -1,9 +1,6 @@
-export {
-    createTypedCommandUxExtension,
-    defineTypedCommand,
-    installTypedCommandUx,
-    registerTypedCommand,
-} from "../index.js";
+export { defineTypedCommand } from "../command/definition.js";
+export { createTypedCommandUxExtension, installTypedCommandUx } from "./extension.js";
+export { registerTypedCommand } from "./register.js";
 export { getTypedCommand, getTypedCommands } from "../registry.js";
 export type {
     DefinedTypedCommand,
@@ -13,4 +10,4 @@ export type {
     TypedCompletionContext,
     TypedCompletionItem,
     TypedCompletionProvider,
-} from "../index.js";
+} from "../types.js";
