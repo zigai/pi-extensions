@@ -67,12 +67,16 @@ Skill normalization returns structured diagnostics:
 ```ts
 const result = readTypedSkillMetadataResult("/path/to/SKILL.md");
 
-if (result.diagnostics !== undefined) {
+if (result.status === "invalid") {
   result.diagnostics.diagnostics;
+}
+
+if (result.status === "ok") {
+  result.metadata;
 }
 ```
 
-Diagnostics include a code, message, path, and severity.
+Diagnostics include a code, message, path, and severity. Invalid YAML frontmatter, unknown `{args.*}` placeholders, invalid argument schemas, and unsupported typed argument fields are reported as diagnostics instead of throwing during metadata loading.
 
 ## JSON Schema
 
