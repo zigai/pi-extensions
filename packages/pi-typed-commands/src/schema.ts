@@ -34,21 +34,6 @@ export type ArgumentMessageOptions = {
     nameStyle?: "flag" | "field";
 };
 
-function formatArgumentMessageName(
-    name: string,
-    definition?: ArgumentDefinition,
-    options?: ArgumentMessageOptions,
-): string {
-    if (options?.nameStyle === "field") {
-        return toKebabCase(name);
-    }
-    if (definition !== undefined) {
-        // eslint-disable-next-line no-use-before-define
-        return formatArgumentFlagName(name, definition);
-    }
-    return formatFlagName(name);
-}
-
 /** Create a parse issue while omitting absent optional fields from the result object. */
 export function createParseIssue(
     kind: ParseIssue["kind"],
@@ -100,6 +85,20 @@ export function argumentFlagNames(name: string, definition: ArgumentDefinition):
 /** Format an argument definition's primary flag with leading `--`. */
 export function formatArgumentFlagName(name: string, definition: ArgumentDefinition): string {
     return `--${argumentFlagName(name, definition)}`;
+}
+
+function formatArgumentMessageName(
+    name: string,
+    definition?: ArgumentDefinition,
+    options?: ArgumentMessageOptions,
+): string {
+    if (options?.nameStyle === "field") {
+        return toKebabCase(name);
+    }
+    if (definition !== undefined) {
+        return formatArgumentFlagName(name, definition);
+    }
+    return formatFlagName(name);
 }
 
 /** Order flattened arguments as the parser and help output see them: positionals first, then flags. */
@@ -210,11 +209,122 @@ function validateFlagName(
     flags.set(flag, owner);
 }
 
+/** Validate a parsed, defaulted, or form-collected argument value against its full definition. */
+export function validateArgumentValue(
+    name: string,
+    definition: ArgumentDefinition,
+    value: ArgumentValue,
+    options?: ArgumentMessageOptions,
+): ArgumentValueValidation {
+    const displayName = formatArgumentMessageName(name, definition, options);
+
+    if (definition.required === true && value === undefined) {
+        return { ok: false, message: `${displayName} is required` };
+    }
+
+    if (value === undefined) {
+        return { ok: true };
+    }
+
+    if (definition.type === "string") {
+        if (typeof value !== "string") {
+            return { ok: false, message: `${displayName} expects text` };
+        }
+        if (definition.minLength !== undefined && value.length < definition.minLength) {
+            return {
+                ok: false,
+                message: `${displayName} must be at least ${definition.minLength} characters`,
+            };
+        }
+        if (definition.maxLength !== undefined && value.length > definition.maxLength) {
+            return {
+                ok: false,
+                message: `${displayName} must be at most ${definition.maxLength} characters`,
+            };
+        }
+        if (definition.pattern !== undefined) {
+            let pattern: RegExp;
+            try {
+                if (typeof definition.pattern === "string") {
+                    pattern = new RegExp(definition.pattern);
+                } else {
+                    pattern = definition.pattern;
+                }
+            } catch {
+                return {
+                    ok: false,
+                    message: `${displayName} has an invalid pattern`,
+                };
+            }
+            pattern.lastIndex = 0;
+            if (!pattern.test(value)) {
+                return {
+                    ok: false,
+                    message: `${displayName} must match pattern ${String(definition.pattern)}`,
+                };
+            }
+        }
+        return { ok: true };
+    }
+
+    if (definition.type === "boolean") {
+        if (typeof value === "boolean") {
+            return { ok: true };
+        }
+        return { ok: false, message: `${displayName} expects true or false` };
+    }
+
+    if (definition.type === "enum") {
+        if (typeof value === "string" && definition.values.includes(value)) {
+            return { ok: true };
+        }
+        return {
+            ok: false,
+            message: `${displayName} must be one of: ${definition.values.join(", ")}`,
+        };
+    }
+
+    if (definition.type === "multi-enum") {
+        if (!Array.isArray(value) || !value.every((item) => definition.values.includes(item))) {
+            return {
+                ok: false,
+                message: `${displayName} must use values from: ${definition.values.join(", ")}`,
+            };
+        }
+        if (definition.minItems !== undefined && value.length < definition.minItems) {
+            return {
+                ok: false,
+                message: `${displayName} must include at least ${definition.minItems} item(s)`,
+            };
+        }
+        if (definition.maxItems !== undefined && value.length > definition.maxItems) {
+            return {
+                ok: false,
+                message: `${displayName} must include at most ${definition.maxItems} item(s)`,
+            };
+        }
+        return { ok: true };
+    }
+
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+        return { ok: false, message: `${displayName} expects a number` };
+    }
+    if (definition.integer === true && !Number.isInteger(value)) {
+        return { ok: false, message: `${displayName} expects an integer` };
+    }
+    if (definition.min !== undefined && value < definition.min) {
+        return { ok: false, message: `${displayName} must be at least ${definition.min}` };
+    }
+    if (definition.max !== undefined && value > definition.max) {
+        return { ok: false, message: `${displayName} must be at most ${definition.max}` };
+    }
+    return { ok: true };
+}
+
 function validateDefault(name: string, definition: ArgumentDefinition, warnings: string[]): void {
     if (definition.default === undefined) {
         return;
     }
-    // eslint-disable-next-line no-use-before-define
     const validation = validateArgumentValue(name, definition, definition.default);
     if (!validation.ok) {
         warnings.push(`${name}.default ${validation.message}`);
@@ -638,118 +748,6 @@ export function coerceArgumentValue(
     }
 
     return { ok: true, value: raw };
-}
-
-/** Validate a parsed, defaulted, or form-collected argument value against its full definition. */
-export function validateArgumentValue(
-    name: string,
-    definition: ArgumentDefinition,
-    value: ArgumentValue,
-    options?: ArgumentMessageOptions,
-): ArgumentValueValidation {
-    const displayName = formatArgumentMessageName(name, definition, options);
-
-    if (definition.required === true && value === undefined) {
-        return { ok: false, message: `${displayName} is required` };
-    }
-
-    if (value === undefined) {
-        return { ok: true };
-    }
-
-    if (definition.type === "string") {
-        if (typeof value !== "string") {
-            return { ok: false, message: `${displayName} expects text` };
-        }
-        if (definition.minLength !== undefined && value.length < definition.minLength) {
-            return {
-                ok: false,
-                message: `${displayName} must be at least ${definition.minLength} characters`,
-            };
-        }
-        if (definition.maxLength !== undefined && value.length > definition.maxLength) {
-            return {
-                ok: false,
-                message: `${displayName} must be at most ${definition.maxLength} characters`,
-            };
-        }
-        if (definition.pattern !== undefined) {
-            let pattern: RegExp;
-            try {
-                if (typeof definition.pattern === "string") {
-                    pattern = new RegExp(definition.pattern);
-                } else {
-                    pattern = definition.pattern;
-                }
-            } catch {
-                return {
-                    ok: false,
-                    message: `${displayName} has an invalid pattern`,
-                };
-            }
-            pattern.lastIndex = 0;
-            if (!pattern.test(value)) {
-                return {
-                    ok: false,
-                    message: `${displayName} must match pattern ${String(definition.pattern)}`,
-                };
-            }
-        }
-        return { ok: true };
-    }
-
-    if (definition.type === "boolean") {
-        if (typeof value === "boolean") {
-            return { ok: true };
-        }
-        return { ok: false, message: `${displayName} expects true or false` };
-    }
-
-    if (definition.type === "enum") {
-        if (typeof value === "string" && definition.values.includes(value)) {
-            return { ok: true };
-        }
-        return {
-            ok: false,
-            message: `${displayName} must be one of: ${definition.values.join(", ")}`,
-        };
-    }
-
-    if (definition.type === "multi-enum") {
-        if (!Array.isArray(value) || !value.every((item) => definition.values.includes(item))) {
-            return {
-                ok: false,
-                message: `${displayName} must use values from: ${definition.values.join(", ")}`,
-            };
-        }
-        if (definition.minItems !== undefined && value.length < definition.minItems) {
-            return {
-                ok: false,
-                message: `${displayName} must include at least ${definition.minItems} item(s)`,
-            };
-        }
-        if (definition.maxItems !== undefined && value.length > definition.maxItems) {
-            return {
-                ok: false,
-                message: `${displayName} must include at most ${definition.maxItems} item(s)`,
-            };
-        }
-        return { ok: true };
-    }
-
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-        return { ok: false, message: `${displayName} expects a number` };
-    }
-    if (definition.integer === true && !Number.isInteger(value)) {
-        return { ok: false, message: `${displayName} expects an integer` };
-    }
-    if (definition.min !== undefined && value < definition.min) {
-        return { ok: false, message: `${displayName} must be at least ${definition.min}` };
-    }
-    if (definition.max !== undefined && value > definition.max) {
-        return { ok: false, message: `${displayName} must be at most ${definition.max}` };
-    }
-    return { ok: true };
 }
 
 /** Return finite values suitable for select/radio/toggle form controls. */

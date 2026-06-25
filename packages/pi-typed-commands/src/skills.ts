@@ -738,50 +738,6 @@ export function formatTypedSkillDiagnostics(diagnostics: TypedSkillDiagnostics):
     ].join("\n");
 }
 
-/** Adapt typed skill metadata into the internal typed command representation. */
-export function typedSkillCommandFromMetadata(
-    skill: TypedSkillMetadata,
-): RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
-    const command: RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } = {
-        name: `skill:${skill.name}`,
-        description: skill.description,
-        args: skill.args,
-        target: {
-            kind: "skill",
-            render: (args, additionalInput) => {
-                const options: RenderTypedSkillInvocationOptions = {
-                    skill,
-                    values: args,
-                };
-                if (additionalInput !== undefined) {
-                    options.additionalInput = additionalInput;
-                }
-                // eslint-disable-next-line no-use-before-define
-                return renderTypedSkillInvocation(options);
-            },
-        },
-        formSymbols: {
-            selectedCheckbox: "■",
-            unselectedCheckbox: "□",
-            selectedRadio: "●",
-            unselectedRadio: "○",
-        },
-        source: "skill",
-        skill,
-    };
-    if (skill.formTitle !== undefined) {
-        command.formTitle = skill.formTitle;
-    }
-    return command;
-}
-
-/** Return whether a registered typed command represents a typed skill invocation. */
-export function isTypedSkillCommand(
-    command: RegisteredTypedCommand,
-): command is RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
-    return (command as { source?: unknown }).source === "skill";
-}
-
 /** Extract the `SKILL.md` path from a Pi skill command record. */
 export function skillPathFromCommand(command: SlashCommandInfo): string | undefined {
     if (command.source !== "skill") {
@@ -930,4 +886,47 @@ export function renderTypedSkillInvocation(options: RenderTypedSkillInvocationOp
 
     sections.push("</skill>");
     return sections.join("\n");
+}
+
+/** Adapt typed skill metadata into the internal typed command representation. */
+export function typedSkillCommandFromMetadata(
+    skill: TypedSkillMetadata,
+): RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
+    const command: RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } = {
+        name: `skill:${skill.name}`,
+        description: skill.description,
+        args: skill.args,
+        target: {
+            kind: "skill",
+            render: (args, additionalInput) => {
+                const options: RenderTypedSkillInvocationOptions = {
+                    skill,
+                    values: args,
+                };
+                if (additionalInput !== undefined) {
+                    options.additionalInput = additionalInput;
+                }
+                return renderTypedSkillInvocation(options);
+            },
+        },
+        formSymbols: {
+            selectedCheckbox: "■",
+            unselectedCheckbox: "□",
+            selectedRadio: "●",
+            unselectedRadio: "○",
+        },
+        source: "skill",
+        skill,
+    };
+    if (skill.formTitle !== undefined) {
+        command.formTitle = skill.formTitle;
+    }
+    return command;
+}
+
+/** Return whether a registered typed command represents a typed skill invocation. */
+export function isTypedSkillCommand(
+    command: RegisteredTypedCommand,
+): command is RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
+    return (command as { source?: unknown }).source === "skill";
 }
