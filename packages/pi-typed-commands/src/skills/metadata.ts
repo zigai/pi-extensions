@@ -2,17 +2,21 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { compileTypedCommandDefinition } from "../compiler.js";
 import { normalizeSkillArguments } from "./argument-normalizer.js";
-import { typedSkillDiagnostics } from "./diagnostics.js";
+import { skillArgumentDiagnostic, typedSkillDiagnostics } from "./diagnostics.js";
 import { parseSkillMarkdown } from "./frontmatter.js";
 import { PLACEHOLDER_PATTERN } from "./prompt.js";
 import type {
     ArgumentDefinitions,
     ReadTypedSkillMetadataResult,
+    SkillArgumentDiagnostic,
     TypedSkillMetadata,
 } from "./types.js";
 
-function validateSkillPlaceholders(body: string, args: ArgumentDefinitions): string[] {
-    const warnings: string[] = [];
+function validateSkillPlaceholders(
+    body: string,
+    args: ArgumentDefinitions,
+): SkillArgumentDiagnostic[] {
+    const diagnostics: SkillArgumentDiagnostic[] = [];
     const names = Object.keys(args);
     PLACEHOLDER_PATTERN.lastIndex = 0;
     for (const match of body.matchAll(PLACEHOLDER_PATTERN)) {
@@ -23,10 +27,16 @@ function validateSkillPlaceholders(body: string, args: ArgumentDefinitions): str
         const valid =
             Object.hasOwn(args, path) || names.some((name) => name.startsWith(`${path}.`));
         if (!valid) {
-            warnings.push(`body: unknown argument placeholder {args.${path}}`);
+            diagnostics.push(
+                skillArgumentDiagnostic({
+                    code: "skill.body.placeholder.unknown",
+                    message: `body: unknown argument placeholder {args.${path}}`,
+                    path: ["body", "args", path],
+                }),
+            );
         }
     }
-    return warnings;
+    return diagnostics;
 }
 
 /** Read and validate typed skill metadata from a `SKILL.md` file. */
@@ -43,17 +53,20 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
     }
 
     const { args, diagnostics } = normalizeSkillArguments(rawArguments);
-    const warnings = diagnostics.map((diagnostic) => diagnostic.message);
-    warnings.push(...validateSkillPlaceholders(body, args));
-    if (warnings.length > 0) {
+    const allDiagnostics = [...diagnostics, ...validateSkillPlaceholders(body, args)];
+    if (allDiagnostics.length > 0) {
         return {
-            diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, warnings),
+            diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, allDiagnostics),
         };
     }
     if (Object.keys(args).length === 0) {
         return {
             diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, [
-                "arguments must define at least one argument",
+                skillArgumentDiagnostic({
+                    code: "skill.arguments.empty",
+                    message: "arguments must define at least one argument",
+                    path: ["arguments"],
+                }),
             ]),
         };
     }
@@ -65,11 +78,7 @@ export function readTypedSkillMetadataResult(filePath: string): ReadTypedSkillMe
     });
     if (!compiled.ok) {
         return {
-            diagnostics: typedSkillDiagnostics(
-                frontmatter.name,
-                filePath,
-                compiled.diagnostics.map((diagnostic) => diagnostic.message),
-            ),
+            diagnostics: typedSkillDiagnostics(frontmatter.name, filePath, compiled.diagnostics),
         };
     }
 

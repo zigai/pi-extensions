@@ -118,7 +118,7 @@ void describe("typed command schema", () => {
     });
 
     void it("validates schema constraints before registration", () => {
-        const warnings = validateArgumentDefinitions({
+        const diagnostics = validateArgumentDefinitions({
             range: { type: "number", min: 10, max: 1 },
             text: { type: "string", minLength: 5, maxLength: 2, pattern: "[" },
             choice: { type: "enum", values: ["dev", "dev", ""] },
@@ -134,7 +134,7 @@ void describe("typed command schema", () => {
             restBeforeOther: { type: "string", position: 2, rest: true },
             afterRest: { type: "string", position: 3 },
         });
-        const text = warnings.join("\n");
+        const text = diagnostics.map((diagnostic) => diagnostic.message).join("\n");
 
         assert.match(text, /range\.min must be less than or equal to max/);
         assert.match(text, /text\.minLength must be less than or equal to maxLength/);
@@ -158,6 +158,13 @@ void describe("typed command schema", () => {
         assert.match(
             text,
             /afterRest: positional arguments may not follow rest argument restBeforeOther/,
+        );
+        assert.ok(
+            diagnostics.some(
+                (diagnostic) =>
+                    diagnostic.code === "argument.number.range.invalid" &&
+                    diagnostic.path.join(".") === "range.min",
+            ),
         );
     });
 });

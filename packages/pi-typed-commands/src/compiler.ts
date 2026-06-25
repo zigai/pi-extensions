@@ -1,5 +1,6 @@
 import { compileArgumentBehavior } from "./behavior.js";
 import { flattenGroupedArgumentDefinitions } from "./arguments.js";
+import { diagnosticMessages } from "./diagnostics.js";
 import {
     createArgumentLookup,
     orderedArgumentEntries,
@@ -10,7 +11,6 @@ import type {
     ArgumentDefinitions,
     CompileResult,
     CompiledCommand,
-    DefinitionDiagnostic,
     TypedCommandDefinition,
 } from "./types.js";
 
@@ -47,23 +47,6 @@ export function cloneAndFreezeDefinitions<TDefinitions extends ArgumentDefinitio
     definitions: TDefinitions,
 ): Readonly<TDefinitions> {
     return freezeValue(cloneValue(definitions));
-}
-
-function diagnosticPathFromMessage(message: string): readonly (string | number)[] {
-    const match = /^([^:\s]+)(?:[.:][^:\s]+)?/.exec(message);
-    if (match?.[1] !== undefined) {
-        return [match[1]];
-    }
-    return [];
-}
-
-function definitionDiagnostic(message: string): DefinitionDiagnostic {
-    return {
-        code: "definition.invalid",
-        message,
-        path: diagnosticPathFromMessage(message),
-        severity: "error",
-    };
 }
 
 class ImmutableReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
@@ -146,7 +129,7 @@ export function compileTypedCommandDefinition<const TDefinitions extends Argumen
     definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
 ): CompileResult<TDefinitions> {
     const flattenedDefinitions = flattenGroupedArgumentDefinitions(definition.args);
-    const diagnostics = validateArgumentDefinitions(flattenedDefinitions).map(definitionDiagnostic);
+    const diagnostics = validateArgumentDefinitions(flattenedDefinitions);
     if (diagnostics.length > 0) {
         return { ok: false, diagnostics };
     }
@@ -162,5 +145,5 @@ export function assertCompiles<const TDefinitions extends ArgumentDefinitions>(
     if (result.ok) {
         return result.command;
     }
-    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+    throw new Error(diagnosticMessages(result.diagnostics).join("\n"));
 }

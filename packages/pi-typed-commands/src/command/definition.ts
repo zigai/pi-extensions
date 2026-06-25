@@ -16,10 +16,7 @@ export function defineTypedCommand<const TDefinitions extends ArgumentDefinition
 ): DefinedTypedCommand<TDefinitions> {
     const compiled = compileTypedCommandDefinition(definition);
     if (!compiled.ok) {
-        throw definitionError(
-            definition.name,
-            compiled.diagnostics.map((diagnostic) => diagnostic.message),
-        );
+        throw definitionError(definition.name, compiled.diagnostics);
     }
 
     const normalizedDefinition = {

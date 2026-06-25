@@ -1,34 +1,31 @@
+import { createDefinitionDiagnostic } from "../diagnostics.js";
+import type { DefinitionDiagnostic } from "../types.js";
 import type { SkillArgumentDiagnostic, TypedSkillDiagnostics } from "./types.js";
 
-function diagnosticPathFromMessage(message: string): readonly (string | number)[] {
-    const match = /^([^:\s]+)(?:[.:][^:\s]+)?/.exec(message);
-    if (match?.[1] !== undefined) {
-        return [match[1]];
-    }
-    return [];
+/** Create a structured typed-skill argument diagnostic. */
+export function skillArgumentDiagnostic(input: {
+    code: string;
+    message: string;
+    path?: readonly (string | number)[];
+    severity?: DefinitionDiagnostic["severity"];
+}): SkillArgumentDiagnostic {
+    return createDefinitionDiagnostic(input);
 }
 
-function skillArgumentDiagnostic(message: string): SkillArgumentDiagnostic {
-    return {
-        code: "skill.argument.invalid",
-        message,
-        path: diagnosticPathFromMessage(message),
-        severity: "error",
-    };
-}
-
-/** Convert skill argument diagnostic messages into structured diagnostics. */
-export function skillArgumentDiagnostics(messages: string[]): SkillArgumentDiagnostic[] {
-    return messages.map(skillArgumentDiagnostic);
+/** Convert compiler diagnostics into typed-skill diagnostics without losing structure. */
+export function skillArgumentDiagnostics(
+    diagnostics: readonly DefinitionDiagnostic[],
+): SkillArgumentDiagnostic[] {
+    return diagnostics.map((diagnostic) => createDefinitionDiagnostic(diagnostic));
 }
 
 /** Build a typed-skill diagnostic report for one skill file. */
 export function typedSkillDiagnostics(
     name: string,
     filePath: string,
-    messages: string[],
+    diagnostics: readonly DefinitionDiagnostic[],
 ): TypedSkillDiagnostics {
-    return { name, filePath, diagnostics: skillArgumentDiagnostics(messages) };
+    return { name, filePath, diagnostics: skillArgumentDiagnostics(diagnostics) };
 }
 
 /** Format typed skill schema diagnostics for display in Pi notifications. */

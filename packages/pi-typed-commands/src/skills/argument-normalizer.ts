@@ -8,7 +8,8 @@ import {
     optionalString,
     optionalStringArray,
 } from "./guards.js";
-import { skillArgumentDiagnostics } from "./diagnostics.js";
+import { skillArgumentDiagnostic, skillArgumentDiagnostics } from "./diagnostics.js";
+import type { DefinitionDiagnostic } from "../types.js";
 import type {
     ArgumentDefinition,
     ArgumentDefinitions,
@@ -19,6 +20,7 @@ import type {
     MultiEnumArgumentDefinition,
     NumberArgumentDefinition,
     RawSkillArguments,
+    SkillArgumentDiagnostic,
     SkillArgumentNormalizationResult,
     StringArgumentDefinition,
 } from "./types.js";
@@ -37,6 +39,34 @@ const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "computed",
     "confirm",
 ]);
+
+type SkillDiagnosticInput = string | DefinitionDiagnostic;
+
+type SkillDiagnosticSink = {
+    diagnostics: SkillArgumentDiagnostic[];
+    push(...items: SkillDiagnosticInput[]): void;
+};
+
+function createSkillDiagnosticSink(): SkillDiagnosticSink {
+    const diagnostics: SkillArgumentDiagnostic[] = [];
+    return {
+        diagnostics,
+        push(...items) {
+            for (const item of items) {
+                if (typeof item === "string") {
+                    diagnostics.push(
+                        skillArgumentDiagnostic({
+                            code: "skill.argument.invalid",
+                            message: item,
+                        }),
+                    );
+                } else {
+                    diagnostics.push(...skillArgumentDiagnostics([item]));
+                }
+            }
+        },
+    };
+}
 
 function normalizeArgumentType(type: unknown): ArgumentDefinition["type"] | undefined {
     if (type === "string" || type === "number" || type === "boolean" || type === "enum") {
@@ -58,7 +88,7 @@ function assignOptionalString(
     raw: Record<string, unknown>,
     sourceKey: string,
     name: string,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
 ): void {
     if (!Object.hasOwn(raw, sourceKey)) {
         return;
@@ -77,7 +107,7 @@ function assignOptionalBoolean(
     raw: Record<string, unknown>,
     sourceKey: string,
     name: string,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
 ): void {
     if (!Object.hasOwn(raw, sourceKey)) {
         return;
@@ -96,7 +126,7 @@ function assignOptionalNumber(
     raw: Record<string, unknown>,
     sourceKey: string,
     name: string,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
 ): void {
     if (!Object.hasOwn(raw, sourceKey)) {
         return;
@@ -115,7 +145,7 @@ function assignOptionalNonNegativeInteger(
     raw: Record<string, unknown>,
     sourceKey: string,
     name: string,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
 ): void {
     if (!Object.hasOwn(raw, sourceKey)) {
         return;
@@ -128,7 +158,11 @@ function assignOptionalNonNegativeInteger(
     target[targetKey] = value;
 }
 
-function normalizeUi(name: string, raw: unknown, warnings: string[]): ArgumentUi | undefined {
+function normalizeUi(
+    name: string,
+    raw: unknown,
+    warnings: SkillDiagnosticSink,
+): ArgumentUi | undefined {
     if (raw === undefined) {
         return undefined;
     }
@@ -183,7 +217,7 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
     name: string,
     definition: TDefinition,
     raw: Record<string, unknown>,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
 ): TDefinition {
     const target = definition as Record<string, unknown>;
     assignOptionalString(target, "description", raw, "description", name, warnings);
@@ -226,7 +260,11 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
     return definition;
 }
 
-function validateDefault(name: string, definition: ArgumentDefinition, warnings: string[]): void {
+function validateDefault(
+    name: string,
+    definition: ArgumentDefinition,
+    warnings: SkillDiagnosticSink,
+): void {
     if (definition.default === undefined) {
         return;
     }
@@ -240,7 +278,7 @@ function assignStringConstraints(
     name: string,
     definition: StringArgumentDefinition,
     raw: Record<string, unknown>,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
 ): void {
     const target = definition as Record<string, unknown>;
     assignOptionalNonNegativeInteger(target, "minLength", raw, "min_length", name, warnings);
@@ -271,7 +309,7 @@ function assignMultiEnumConstraints(
     name: string,
     definition: MultiEnumArgumentDefinition,
     raw: Record<string, unknown>,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
 ): void {
     const target = definition as Record<string, unknown>;
     assignOptionalNonNegativeInteger(target, "minItems", raw, "min_items", name, warnings);
@@ -288,7 +326,7 @@ function assignMultiEnumConstraints(
 function normalizeOneArgument(
     name: string,
     raw: Record<string, unknown>,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
 ): ArgumentDefinition | undefined {
     const type = normalizeArgumentType(raw.type);
     if (type === undefined) {
@@ -428,7 +466,7 @@ function normalizeOneArgument(
 
 function flattenRawArguments(
     rawArguments: RawSkillArguments,
-    warnings: string[],
+    warnings: SkillDiagnosticSink,
     prefix = "",
 ): Array<[string, Record<string, unknown>]> {
     const entries: Array<[string, Record<string, unknown>]> = [];
@@ -457,11 +495,16 @@ function flattenRawArguments(
  * single descriptive schema error for the skill.
  */
 export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNormalizationResult {
-    const warnings: string[] = [];
+    const warnings = createSkillDiagnosticSink();
     const args = createSafeRecord() as ArgumentDefinitions;
     if (!isRecord(rawArguments)) {
         const messages = ["arguments must be an object"];
-        return { args, diagnostics: skillArgumentDiagnostics(messages) };
+        return {
+            args,
+            diagnostics: messages.map((message) =>
+                skillArgumentDiagnostic({ code: "skill.argument.invalid", message }),
+            ),
+        };
     }
 
     for (const [name, raw] of flattenRawArguments(rawArguments, warnings)) {
@@ -472,5 +515,5 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
     }
 
     warnings.push(...validateArgumentDefinitions(args));
-    return { args, diagnostics: skillArgumentDiagnostics(warnings) };
+    return { args, diagnostics: warnings.diagnostics };
 }

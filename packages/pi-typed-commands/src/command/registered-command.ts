@@ -1,7 +1,9 @@
 import { flattenGroupedArgumentDefinitions } from "../arguments.js";
 import { compileTypedCommandDefinition } from "../compiler.js";
+import { diagnosticMessages } from "../diagnostics.js";
 import type {
     ArgumentDefinitions,
+    DefinitionDiagnostic,
     DefinedTypedCommand,
     RegisteredTypedCommand,
     TypedCommandDefinition,
@@ -10,8 +12,10 @@ import { maybeWrapGroupedHandler, maybeWrapGroupedRefinement } from "./grouped-v
 import { DEFAULT_FORM_SYMBOLS } from "./symbols.js";
 
 /** Create a startup-style error for invalid typed command definitions. */
-export function definitionError(name: string, diagnostics: readonly string[]): Error {
-    return new Error([`Invalid typed arguments for /${name}:`, ...diagnostics].join("\n"));
+export function definitionError(name: string, diagnostics: readonly DefinitionDiagnostic[]): Error {
+    return new Error(
+        [`Invalid typed arguments for /${name}:`, ...diagnosticMessages(diagnostics)].join("\n"),
+    );
 }
 
 /** Compile a definition into normalized registered-command metadata used by pure helpers. */
@@ -23,10 +27,7 @@ export function registeredCommandForDefinition<TDefinitions extends ArgumentDefi
 ): RegisteredTypedCommand<TDefinitions> {
     const compiled = compileTypedCommandDefinition(definition);
     if (!compiled.ok) {
-        throw definitionError(
-            definition.name,
-            compiled.diagnostics.map((diagnostic) => diagnostic.message),
-        );
+        throw definitionError(definition.name, compiled.diagnostics);
     }
     const command: RegisteredTypedCommand<TDefinitions> = {
         name: definition.name,
@@ -54,10 +55,7 @@ export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefiniti
         args: runtimeArgs,
     });
     if (!compiled.ok) {
-        throw definitionError(
-            definition.name,
-            compiled.diagnostics.map((diagnostic) => diagnostic.message),
-        );
+        throw definitionError(definition.name, compiled.diagnostics);
     }
 
     const command: RegisteredTypedCommand<TDefinitions> = {

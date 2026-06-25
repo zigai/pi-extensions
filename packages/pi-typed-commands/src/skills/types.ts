@@ -5,6 +5,7 @@ import type {
     ArgumentValue,
     ArgumentWidget,
     BooleanArgumentDefinition,
+    DefinitionDiagnostic,
     EnumArgumentDefinition,
     MultiEnumArgumentDefinition,
     NumberArgumentDefinition,
@@ -50,12 +51,7 @@ export type TypedSkillMetadata = {
 };
 
 /** Structured diagnostic produced while normalizing typed skill frontmatter. */
-export type SkillArgumentDiagnostic = {
-    code: string;
-    message: string;
-    path: readonly (string | number)[];
-    severity: "error" | "warning";
-};
+export type SkillArgumentDiagnostic = DefinitionDiagnostic;
 
 /** Schema diagnostics for a skill whose typed arguments could not be registered. */
 export type TypedSkillDiagnostics = {

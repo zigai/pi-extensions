@@ -397,10 +397,10 @@ export type DefinedTypedCommand<TDefinitions extends ArgumentDefinitions> = Read
 
 /** Stable diagnostic produced while compiling a command definition. */
 export type DefinitionDiagnostic = {
-    code: string;
-    message: string;
-    path: readonly (string | number)[];
-    severity: "error" | "warning";
+    readonly code: string;
+    readonly message: string;
+    readonly path: readonly (string | number)[];
+    readonly severity: "error" | "warning";
 };
 
 export type CompileResult<TDefinitions extends ArgumentDefinitions> =

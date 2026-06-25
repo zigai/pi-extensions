@@ -1,9 +1,11 @@
 import { flattenGroupedArgumentDefinitions } from "./arguments.js";
+import { createDefinitionDiagnostic } from "./diagnostics.js";
 import { formatFlagName, normalizeFlagName, toKebabCase } from "./names.js";
 import type {
     ArgumentDefinition,
     ArgumentDefinitions,
     ArgumentValue,
+    DefinitionDiagnostic,
     ParseIssue,
     RegisteredTypedCommand,
 } from "./types.js";
@@ -181,29 +183,74 @@ function isPositiveInteger(value: unknown): value is number {
     return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function addDefinitionDiagnostic(
+    diagnostics: DefinitionDiagnostic[],
+    code: string,
+    message: string,
+    path: readonly (string | number)[],
+): void {
+    diagnostics.push(createDefinitionDiagnostic({ code, message, path }));
+}
+
+function addArgumentDiagnostic(
+    diagnostics: DefinitionDiagnostic[],
+    name: string,
+    field: string,
+    code: string,
+    message: string,
+): void {
+    addDefinitionDiagnostic(diagnostics, code, message, [name, ...field.split(".")]);
+}
+
 function validateFlagName(
     owner: string,
     flag: string,
     flags: Map<string, string>,
-    warnings: string[],
+    diagnostics: DefinitionDiagnostic[],
+    path: readonly (string | number)[],
 ): void {
     if (!FLAG_NAME_PATTERN.test(flag)) {
-        warnings.push(`${owner}: flag --${flag} must contain only letters, numbers, and hyphens`);
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.invalid",
+            `${owner}: flag --${flag} must contain only letters, numbers, and hyphens`,
+            path,
+        );
         return;
     }
     if (flag === "help") {
-        warnings.push(`${owner}: argument flag --help is reserved for generated help`);
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.reserved",
+            `${owner}: argument flag --help is reserved for generated help`,
+            path,
+        );
     }
     if (flag.startsWith("no-")) {
-        warnings.push(`${owner}: argument flags may not start with no-`);
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.negated-prefix",
+            `${owner}: argument flags may not start with no-`,
+            path,
+        );
     }
     const existing = flags.get(flag);
     if (existing === owner) {
-        warnings.push(`${owner}: flag --${flag} is defined more than once`);
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.duplicate",
+            `${owner}: flag --${flag} is defined more than once`,
+            path,
+        );
         return;
     }
     if (existing !== undefined) {
-        warnings.push(`${owner}: flag --${flag} collides with ${existing}`);
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.flag.collision",
+            `${owner}: flag --${flag} collides with ${existing}`,
+            path,
+        );
         return;
     }
     flags.set(flag, owner);
@@ -321,97 +368,210 @@ export function validateArgumentValue(
     return { ok: true };
 }
 
-function validateDefault(name: string, definition: ArgumentDefinition, warnings: string[]): void {
+function validateDefault(
+    name: string,
+    definition: ArgumentDefinition,
+    diagnostics: DefinitionDiagnostic[],
+): void {
     if (definition.default === undefined) {
         return;
     }
     const validation = validateArgumentValue(name, definition, definition.default);
     if (!validation.ok) {
-        warnings.push(`${name}.default ${validation.message}`);
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "default",
+            "argument.default.invalid",
+            `${name}.default ${validation.message}`,
+        );
     }
 }
 
-function validateUi(name: string, definition: ArgumentDefinition, warnings: string[]): void {
+function validateUi(
+    name: string,
+    definition: ArgumentDefinition,
+    diagnostics: DefinitionDiagnostic[],
+): void {
     const ui = definition.ui;
     if (ui === undefined) {
         return;
     }
     if (ui.widget !== undefined) {
         if (!SUPPORTED_WIDGETS.has(ui.widget)) {
-            warnings.push(`${name}.ui.widget must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.invalid",
+                `${name}.ui.widget must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`,
+            );
         }
         if (ui.widget === "number" && definition.type !== "number") {
-            warnings.push(`${name}.ui.widget number requires a number argument`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget number requires a number argument`,
+            );
         }
         if ((ui.widget === "toggle" || ui.widget === "confirm") && definition.type !== "boolean") {
-            warnings.push(`${name}.ui.widget ${ui.widget} requires a boolean argument`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget ${ui.widget} requires a boolean argument`,
+            );
         }
         if ((ui.widget === "select" || ui.widget === "radio") && definition.type !== "enum") {
-            warnings.push(`${name}.ui.widget ${ui.widget} requires an enum argument`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget ${ui.widget} requires an enum argument`,
+            );
         }
         if (ui.widget === "multiselect" && definition.type !== "multi-enum") {
-            warnings.push(`${name}.ui.widget multiselect requires a multi-enum argument`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget multiselect requires a multi-enum argument`,
+            );
         }
     }
     if (ui.rows !== undefined && !isPositiveInteger(ui.rows)) {
-        warnings.push(`${name}.ui.rows must be a positive integer`);
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.rows",
+            "argument.ui.rows.invalid",
+            `${name}.ui.rows must be a positive integer`,
+        );
     }
 }
 
 function validateTypeSpecificRules(
     name: string,
     definition: ArgumentDefinition,
-    warnings: string[],
+    diagnostics: DefinitionDiagnostic[],
 ): void {
     if (definition.title !== undefined && typeof definition.title !== "string") {
-        warnings.push(`${name}.title must be a string`);
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "title",
+            "argument.title.invalid",
+            `${name}.title must be a string`,
+        );
     }
     if (
         definition.occurrence !== undefined &&
         !["error", "first", "last", "append"].includes(definition.occurrence)
     ) {
-        warnings.push(`${name}.occurrence must be one of: error, first, last, append`);
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "occurrence",
+            "argument.occurrence.invalid",
+            `${name}.occurrence must be one of: error, first, last, append`,
+        );
     }
     if (definition.occurrence === "append" && definition.type !== "multi-enum") {
-        warnings.push(`${name}.occurrence append is only valid for multi-enum arguments`);
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "occurrence",
+            "argument.occurrence.type-mismatch",
+            `${name}.occurrence append is only valid for multi-enum arguments`,
+        );
     }
     if (
         definition.completionTimeoutMs !== undefined &&
         !isNonNegativeInteger(definition.completionTimeoutMs)
     ) {
-        warnings.push(`${name}.completionTimeoutMs must be a non-negative integer`);
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "completionTimeoutMs",
+            "argument.completion-timeout.invalid",
+            `${name}.completionTimeoutMs must be a non-negative integer`,
+        );
     }
 
     if (definition.required === true && definition.default !== undefined) {
-        warnings.push(`${name}: required arguments may not define a default`);
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.required-default.conflict",
+            `${name}: required arguments may not define a default`,
+            [name],
+        );
     }
 
-    if (definition.position !== undefined) {
-        if (!isNonNegativeInteger(definition.position)) {
-            warnings.push(`${name}.position must be a non-negative integer`);
-        }
+    if (definition.position !== undefined && !isNonNegativeInteger(definition.position)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "position",
+            "argument.position.invalid",
+            `${name}.position must be a non-negative integer`,
+        );
     }
     if (definition.rest === true) {
         if (!isPositionalArgument(definition)) {
-            warnings.push(`${name}.rest requires a positional argument`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "rest",
+                "argument.rest.requires-position",
+                `${name}.rest requires a positional argument`,
+            );
         }
         if (definition.type !== "string" && definition.type !== "multi-enum") {
-            warnings.push(`${name}.rest is only valid for string or multi-enum arguments`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "rest",
+                "argument.rest.type-mismatch",
+                `${name}.rest is only valid for string or multi-enum arguments`,
+            );
         }
     }
     if (definition.type === "string") {
         if (definition.minLength !== undefined && !isNonNegativeInteger(definition.minLength)) {
-            warnings.push(`${name}.minLength must be a non-negative integer`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "minLength",
+                "argument.string.min-length.invalid",
+                `${name}.minLength must be a non-negative integer`,
+            );
         }
         if (definition.maxLength !== undefined && !isNonNegativeInteger(definition.maxLength)) {
-            warnings.push(`${name}.maxLength must be a non-negative integer`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "maxLength",
+                "argument.string.max-length.invalid",
+                `${name}.maxLength must be a non-negative integer`,
+            );
         }
         if (
             definition.minLength !== undefined &&
             definition.maxLength !== undefined &&
             definition.minLength > definition.maxLength
         ) {
-            warnings.push(`${name}.minLength must be less than or equal to maxLength`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "minLength",
+                "argument.string.length-range.invalid",
+                `${name}.minLength must be less than or equal to maxLength`,
+            );
         }
         if (definition.pattern !== undefined) {
             try {
@@ -419,41 +579,89 @@ function validateTypeSpecificRules(
                     new RegExp(definition.pattern);
                 }
             } catch {
-                warnings.push(`${name}.pattern must be a valid regular expression`);
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "pattern",
+                    "argument.string.pattern.invalid",
+                    `${name}.pattern must be a valid regular expression`,
+                );
             }
         }
     }
 
     if (definition.type === "number") {
         if (definition.min !== undefined && !Number.isFinite(definition.min)) {
-            warnings.push(`${name}.min must be a finite number`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "min",
+                "argument.number.min.invalid",
+                `${name}.min must be a finite number`,
+            );
         }
         if (definition.max !== undefined && !Number.isFinite(definition.max)) {
-            warnings.push(`${name}.max must be a finite number`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "max",
+                "argument.number.max.invalid",
+                `${name}.max must be a finite number`,
+            );
         }
         if (
             definition.min !== undefined &&
             definition.max !== undefined &&
             definition.min > definition.max
         ) {
-            warnings.push(`${name}.min must be less than or equal to max`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "min",
+                "argument.number.range.invalid",
+                `${name}.min must be less than or equal to max`,
+            );
         }
     }
 
     if (definition.type === "enum" || definition.type === "multi-enum") {
         if (definition.values.length === 0) {
-            warnings.push(`${name}.values must be a non-empty list of strings`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "values",
+                "argument.values.empty",
+                `${name}.values must be a non-empty list of strings`,
+            );
         }
         const seen = new Set<string>();
         for (const value of definition.values) {
             if (value.length === 0) {
-                warnings.push(`${name}.values may not contain empty strings`);
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "values",
+                    "argument.values.empty-string",
+                    `${name}.values may not contain empty strings`,
+                );
             }
             if (definition.type === "multi-enum" && value.includes(",")) {
-                warnings.push(`${name}.values may not contain commas`);
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "values",
+                    "argument.values.comma",
+                    `${name}.values may not contain commas`,
+                );
             }
             if (seen.has(value)) {
-                warnings.push(`${name}.values contains duplicate value ${value}`);
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "values",
+                    "argument.values.duplicate",
+                    `${name}.values contains duplicate value ${value}`,
+                );
             }
             seen.add(value);
         }
@@ -461,25 +669,46 @@ function validateTypeSpecificRules(
 
     if (definition.type === "multi-enum") {
         if (definition.minItems !== undefined && !isNonNegativeInteger(definition.minItems)) {
-            warnings.push(`${name}.minItems must be a non-negative integer`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "minItems",
+                "argument.multi-enum.min-items.invalid",
+                `${name}.minItems must be a non-negative integer`,
+            );
         }
         if (definition.maxItems !== undefined && !isNonNegativeInteger(definition.maxItems)) {
-            warnings.push(`${name}.maxItems must be a non-negative integer`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "maxItems",
+                "argument.multi-enum.max-items.invalid",
+                `${name}.maxItems must be a non-negative integer`,
+            );
         }
         if (
             definition.minItems !== undefined &&
             definition.maxItems !== undefined &&
             definition.minItems > definition.maxItems
         ) {
-            warnings.push(`${name}.minItems must be less than or equal to maxItems`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "minItems",
+                "argument.multi-enum.item-range.invalid",
+                `${name}.minItems must be less than or equal to maxItems`,
+            );
         }
     }
 
-    validateDefault(name, definition, warnings);
-    validateUi(name, definition, warnings);
+    validateDefault(name, definition, diagnostics);
+    validateUi(name, definition, diagnostics);
 }
 
-function validatePositionals(definitions: ArgumentDefinitions, warnings: string[]): void {
+function validatePositionals(
+    definitions: ArgumentDefinitions,
+    diagnostics: DefinitionDiagnostic[],
+): void {
     const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
     const positions = new Map<number, string>();
     for (const [name, definition] of Object.entries(flatDefinitions)) {
@@ -490,7 +719,13 @@ function validatePositionals(definitions: ArgumentDefinitions, warnings: string[
         }
         const existing = positions.get(position);
         if (existing !== undefined) {
-            warnings.push(`${name}.${label} duplicates position ${position} from ${existing}`);
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                label,
+                "argument.position.duplicate",
+                `${name}.${label} duplicates position ${position} from ${existing}`,
+            );
             continue;
         }
         positions.set(position, name);
@@ -500,8 +735,11 @@ function validatePositionals(definitions: ArgumentDefinitions, warnings: string[
     let restArgument: string | undefined;
     for (const [name, definition] of positionalArgumentEntries(definitions)) {
         if (restArgument !== undefined) {
-            warnings.push(
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.position.after-rest",
                 `${name}: positional arguments may not follow rest argument ${restArgument}`,
+                [name, "position"],
             );
         }
         if (definition.rest === true) {
@@ -513,8 +751,11 @@ function validatePositionals(definitions: ArgumentDefinitions, warnings: string[
             continue;
         }
         if (optionalBeforeRequired !== undefined) {
-            warnings.push(
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.position.required-after-optional",
                 `${name}: required positional arguments may not follow optional positional argument ${optionalBeforeRequired}`,
+                [name, "position"],
             );
         }
     }
@@ -523,29 +764,44 @@ function validatePositionals(definitions: ArgumentDefinitions, warnings: string[
 /**
  * Validate argument names, flags, defaults, constraints, UI metadata, and positional layout.
  *
- * The function does not throw; returned strings are user-facing diagnostics.
+ * The function does not throw; returned diagnostics are structured for programmatic handling.
  */
-export function validateArgumentDefinitions(definitions: ArgumentDefinitions): string[] {
+export function validateArgumentDefinitions(
+    definitions: ArgumentDefinitions,
+): DefinitionDiagnostic[] {
     const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
-    const warnings: string[] = [];
+    const diagnostics: DefinitionDiagnostic[] = [];
     const names = Object.keys(flatDefinitions);
     const flags = new Map<string, string>();
 
     for (const name of names) {
         if (!ARGUMENT_NAME_PATTERN.test(name)) {
-            warnings.push(
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.name.invalid",
                 `${name}: argument names may only contain letters, numbers, dots, underscores, and hyphens`,
+                [name],
             );
         }
 
         const reservedSegment = reservedArgumentNameSegment(name);
         if (reservedSegment !== undefined) {
-            warnings.push(`${name}: argument path segment ${reservedSegment} is reserved`);
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.name.reserved-segment",
+                `${name}: argument path segment ${reservedSegment} is reserved`,
+                [name],
+            );
         }
 
         for (const other of names) {
             if (name !== other && other.startsWith(`${name}.`)) {
-                warnings.push(`${name}: cannot define both ${name} and nested argument ${other}`);
+                addDefinitionDiagnostic(
+                    diagnostics,
+                    "argument.name.nested-collision",
+                    `${name}: cannot define both ${name} and nested argument ${other}`,
+                    [name],
+                );
                 break;
             }
         }
@@ -555,19 +811,26 @@ export function validateArgumentDefinitions(definitions: ArgumentDefinitions): s
             continue;
         }
 
-        validateTypeSpecificRules(name, definition, warnings);
+        validateTypeSpecificRules(name, definition, diagnostics);
         if (isPositionalArgument(definition)) {
             continue;
         }
 
-        validateFlagName(name, argumentFlagName(name, definition), flags, warnings);
-        for (const alias of definition.aliases ?? []) {
-            validateFlagName(name, normalizeFlagName(alias), flags, warnings);
+        validateFlagName(name, argumentFlagName(name, definition), flags, diagnostics, [
+            name,
+            "flag",
+        ]);
+        for (const [index, alias] of (definition.aliases ?? []).entries()) {
+            validateFlagName(name, normalizeFlagName(alias), flags, diagnostics, [
+                name,
+                "aliases",
+                index,
+            ]);
         }
     }
 
-    validatePositionals(flatDefinitions, warnings);
-    return warnings;
+    validatePositionals(flatDefinitions, diagnostics);
+    return diagnostics;
 }
 
 /** Build the flag lookup used by the parser; positional arguments are intentionally excluded. */
