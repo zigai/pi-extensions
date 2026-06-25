@@ -103,15 +103,3 @@ const range = defineTypedCommand({
 ```
 
 Keep refinement deterministic and synchronous. Put filesystem, network, or model checks in a separate pre-run stage.
-
-## Legacy overload
-
-The definition-first API is preferred, but the older registration shape remains available:
-
-```ts
-registerTypedCommand(pi, "deploy", {
-  description: "Deploy a ref",
-  args: { env: { type: "enum", values: ["dev", "prod"], required: true } },
-  handler(args, ctx) {},
-});
-```

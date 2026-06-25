@@ -48,7 +48,7 @@ const args = {
 
 ## Positionals
 
-Prefer `position` for public CLI contracts:
+Use `position` for public CLI contracts:
 
 ```ts
 args: {
@@ -56,8 +56,6 @@ args: {
   ref: { type: "string", position: 1, default: "main" },
 }
 ```
-
-Legacy `positional: true` and `positional: 0` remain accepted for migration, but `position` is clearer and more stable.
 
 Rules enforced by the compiler include:
 

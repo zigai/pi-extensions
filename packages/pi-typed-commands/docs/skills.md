@@ -32,8 +32,6 @@ Safe fixes enabled: `{args.fix}`.
 Rules: `{args.rules}`.
 ```
 
-The legacy `metadata.arguments` location remains accepted as a compatibility fallback, but top-level `arguments` is preferred.
-
 ## YAML field names
 
 Skill YAML uses serializable names for fields that are camelCase in TypeScript:
@@ -71,11 +69,10 @@ const result = readTypedSkillMetadataResult("/path/to/SKILL.md");
 
 if (result.diagnostics !== undefined) {
   result.diagnostics.diagnostics;
-  result.diagnostics.messages; // compatibility fallback
 }
 ```
 
-Diagnostics include a code, message, path, and severity. The compatibility `warnings`/`messages` arrays remain available for older callers.
+Diagnostics include a code, message, path, and severity.
 
 ## JSON Schema
 
