@@ -4,13 +4,13 @@ Arguments describe the values a command accepts. The same definitions drive pars
 
 ## Built-in types
 
-| Type         | Value type                 | Notes                                                                           |
-| ------------ | -------------------------- | ------------------------------------------------------------------------------- |
-| `string`     | `string`                   | Supports `minLength`, `maxLength`, `pattern`, `rest`, and text-like widgets.    |
-| `number`     | `number`                   | Supports `integer`, `min`, and `max`.                                           |
-| `boolean`    | `boolean`                  | Supports `--flag`, `--flag true`, `--flag false`, and `--no-flag`.              |
-| `enum`       | one string from `values`   | Preserves literal unions when values are inline or built with `enumArgument()`. |
-| `multi-enum` | string array from `values` | Supports repeated flags and comma-separated values.                             |
+| Type         | Value type                          | Notes                                                                           |
+| ------------ | ----------------------------------- | ------------------------------------------------------------------------------- |
+| `string`     | `string`                            | Supports `minLength`, `maxLength`, `pattern`, `rest`, and text-like widgets.    |
+| `number`     | `number`                            | Supports `integer`, `min`, and `max`.                                           |
+| `boolean`    | `boolean`                           | Supports `--flag`, `--flag true`, `--flag false`, and `--no-flag`.              |
+| `enum`       | one string from `values`            | Preserves literal unions when values are inline or built with `enumArgument()`. |
+| `multi-enum` | readonly string array from `values` | Supports repeated flags and comma-separated values.                             |
 
 ## Shared fields
 
@@ -30,7 +30,9 @@ Most arguments can use:
 - `completionTimeoutMs` - async completion timeout in milliseconds, defaulting to 1000 and disabled with `0`;
 - `ui` - form presentation metadata.
 
-`required: true` and `default` are mutually exclusive. A required argument must come from the user. A defaulted argument is optional but non-null in the handler.
+`required: true` and `default` are mutually exclusive. A required argument must come from the user. A defaulted argument is optional but non-null in the handler. TypeScript rejects that combination in public definition types, and runtime validation reports it for untyped/loaded schemas.
+
+Public `ArgumentDefinitions` maps are readonly inputs and may include `group()` entries. Parser-facing maps that have already expanded groups use `FlatArgumentDefinitions`.
 
 ## Argument builders
 

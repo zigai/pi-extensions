@@ -75,7 +75,7 @@ Serialization quotes values when needed so the parser can read them back.
 
 ## Command-level refinement
 
-Use `refine()` for cross-field validation after individual fields parse successfully.
+Use `refine()` for cross-field validation after individual fields parse successfully. Its `args` parameter is a `ParsedArgumentDraft<TDefinitions>`, so every field is optional even if the handler later receives required/defaulted fields as present.
 
 ```ts
 const range = defineTypedCommand({
@@ -103,3 +103,5 @@ const range = defineTypedCommand({
 ```
 
 Keep refinement deterministic and synchronous. Put filesystem, network, or model checks in a separate pre-run stage.
+
+`parse()` error results also expose `partial` as `ParsedArgumentDraft<TDefinitions>`. `serialize(values)` accepts `SerializableArgumentValues<TDefinitions>`, a readonly object containing only the fields to emit.
