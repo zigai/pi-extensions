@@ -55,6 +55,7 @@ const roundTripCommandDefinition = {
     name: "property-demo",
     description: "Command used by property tests",
     args: roundTripArgs,
+    run() {},
 };
 
 const roundTripCommand = defineTypedCommand(roundTripCommandDefinition);

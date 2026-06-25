@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { compileTypedCommandDefinition, enumArgument, group } from "pi-typed-commands/core";
-import { defineTypedCommand } from "pi-typed-commands/pi";
+import { createTypedCommandUxExtension, defineTypedCommand } from "pi-typed-commands/pi";
 import { normalizeSkillArguments } from "pi-typed-commands/skills";
 import { createHeadlessFormModel, type FormMode } from "pi-typed-commands/pi-tui";
 
@@ -35,9 +35,10 @@ void describe("package subpath exports", () => {
         );
 
         assert.equal(model.fields.length, 1);
+        assert.equal(typeof createTypedCommandUxExtension, "function");
         assert.equal(grouped.args.host?.type, "enum");
         assert.equal(compiled.ok, true);
-        assert.deepEqual(normalized.warnings, []);
+        assert.deepEqual(normalized.diagnostics, []);
     });
 
     void it("keeps the published skill JSON schema aligned with compiler-only constraints", () => {

@@ -42,7 +42,6 @@ void describe("dense argument form", () => {
             name: "example",
             description: "Example command",
             args: definitions,
-            handler() {},
             formSymbols: symbols,
         };
 
@@ -101,7 +100,6 @@ void describe("dense argument form", () => {
             name: "example",
             description: "Example command",
             args: definitions,
-            handler() {},
             formSymbols: symbols,
         };
 
@@ -172,7 +170,6 @@ void describe("dense argument form", () => {
             name: "example",
             description: "Example command",
             args: definitions,
-            handler() {},
             formSymbols: symbols,
         };
         const parsed: ParsedCommandArguments = {
@@ -223,7 +220,6 @@ void describe("dense argument form", () => {
             name: "example",
             description: "Example command",
             args: definitions,
-            handler() {},
             formSymbols: symbols,
         };
         const parsed: ParsedCommandArguments = {
@@ -275,7 +271,6 @@ void describe("dense argument form", () => {
             name: "example",
             description: "Example command",
             args: definitions,
-            handler() {},
             formSymbols: symbols,
         };
         const parsed: ParsedCommandArguments = {
@@ -336,7 +331,6 @@ void describe("dense argument form", () => {
             name: "example",
             description: "Example command",
             args: definitions,
-            handler() {},
             formSymbols: symbols,
         };
         const parsed: ParsedCommandArguments = {
@@ -382,7 +376,6 @@ void describe("dense argument form", () => {
             name: "example",
             description: "Example command",
             args: definitions,
-            handler() {},
             formSymbols: symbols,
         };
 
@@ -441,7 +434,6 @@ void describe("sequential argument form", () => {
             name: "range",
             description: "Range command",
             args: definitions,
-            handler() {},
             refine(args) {
                 if (
                     typeof args.start === "number" &&
@@ -500,7 +492,6 @@ void describe("sequential argument form", () => {
             name: "example",
             description: "Example command",
             args: definitions,
-            handler() {},
             formSymbols: symbols,
         };
 

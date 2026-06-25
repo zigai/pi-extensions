@@ -18,12 +18,12 @@ const definitions: ArgumentDefinitions = {
         type: "enum",
         values: ["create", "delete"],
         required: true,
-        positional: 0,
+        position: 0,
     },
     branchName: {
         type: "string",
         required: true,
-        positional: 1,
+        position: 1,
         minLength: 1,
         pattern: "^[a-zA-Z0-9/_-]+$",
     },
@@ -126,9 +126,9 @@ void describe("typed command schema", () => {
             commaMulti: { type: "multi-enum", values: ["a,b"] },
             badCompletionTimeout: { type: "string", completionTimeoutMs: -1 },
             defaulted: { type: "string", required: true, default: "main" },
-            first: { type: "string", positional: 0 },
-            second: { type: "string", required: true, positional: 1 },
-            duplicatePosition: { type: "string", positional: 1 },
+            first: { type: "string", position: 0 },
+            second: { type: "string", required: true, position: 1 },
+            duplicatePosition: { type: "string", position: 1 },
             badTitle: { type: "string", title: 123 as never },
             badRows: { type: "string", ui: { rows: 0 } },
             restBeforeOther: { type: "string", position: 2, rest: true },
@@ -152,7 +152,7 @@ void describe("typed command schema", () => {
             text,
             /second: required positional arguments may not follow optional positional argument first/,
         );
-        assert.match(text, /duplicatePosition\.positional duplicates position 1 from second/);
+        assert.match(text, /duplicatePosition\.position duplicates position 1 from second/);
         assert.match(text, /badTitle\.title must be a string/);
         assert.match(text, /badRows\.ui\.rows must be a positive integer/);
         assert.match(

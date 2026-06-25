@@ -11,9 +11,9 @@ import {
     formatCommandUsage,
     parseTypedCommandArgs,
     serializeTypedCommandArgs,
-    type RegisteredTypedCommand,
 } from "../src/index.js";
 import { registerTypedCommandMetadata } from "../src/registry.js";
+import type { RegisteredTypedCommand } from "../src/types.js";
 
 const command: RegisteredTypedCommand = {
     name: "deploy",
@@ -45,7 +45,6 @@ const command: RegisteredTypedCommand = {
             values: ["api", "web", "worker"],
         },
     },
-    handler: () => {},
     formSymbols: {
         selectedCheckbox: "■",
         unselectedCheckbox: "□",
@@ -63,13 +62,13 @@ const branchCommand: RegisteredTypedCommand = {
             type: "enum",
             values: ["create", "delete", "rename"],
             required: true,
-            positional: 0,
+            position: 0,
             description: "Branch action",
         },
         name: {
             type: "string",
             required: true,
-            positional: 1,
+            position: 1,
             description: "Branch name",
         },
         base: {
@@ -151,7 +150,7 @@ void describe("parseTypedCommandArgs", () => {
             args: {
                 offset: {
                     type: "number",
-                    positional: 0,
+                    position: 0,
                     min: -5,
                 },
             },
@@ -288,8 +287,8 @@ void describe("parseTypedCommandArgs", () => {
         const pathCommand: RegisteredTypedCommand = {
             ...command,
             args: {
-                path: { type: "string", required: true, positional: 0 },
-                label: { type: "string", positional: 1 },
+                path: { type: "string", required: true, position: 0 },
+                label: { type: "string", position: 1 },
             },
         };
 
@@ -304,7 +303,7 @@ void describe("parseTypedCommandArgs", () => {
         const pathCommand: RegisteredTypedCommand = {
             ...command,
             args: {
-                path: { type: "string", required: true, positional: 0 },
+                path: { type: "string", required: true, position: 0 },
             },
         };
 

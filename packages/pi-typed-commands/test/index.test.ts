@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -23,7 +23,7 @@ import {
     replaceTypedSkillMetadata,
     unregisterTypedCommandMetadata,
 } from "../src/registry.js";
-import type { ParseIssue } from "../src/types.js";
+import type { ParseIssue, RegisteredTypedCommand } from "../src/types.js";
 
 void describe("argument issue policy", () => {
     void it("opens forms for named validation issues but not structural parse issues", () => {
@@ -49,37 +49,40 @@ void describe("registerTypedCommand", () => {
 
         assert.throws(
             () =>
-                registerTypedCommand(pi, "bad", {
+                registerTypedCommand(pi, {
+                    name: "bad",
                     description: "Bad command",
                     args: {
                         fooBar: { type: "string" },
                         "foo-bar": { type: "string" },
                     },
-                    handler() {},
+                    run() {},
                 }),
             /foo-bar: flag --foo-bar collides with fooBar/,
         );
 
         assert.throws(
             () =>
-                registerTypedCommand(pi, "bad-no", {
+                registerTypedCommand(pi, {
+                    name: "bad-no",
                     description: "Bad command",
                     args: {
                         noCache: { type: "boolean" },
                     },
-                    handler() {},
+                    run() {},
                 }),
             /noCache: argument flags may not start with no-/,
         );
 
         assert.throws(
             () =>
-                registerTypedCommand(pi, "bad-help", {
+                registerTypedCommand(pi, {
+                    name: "bad-help",
                     description: "Bad command",
                     args: {
                         help: { type: "boolean" },
                     },
-                    handler() {},
+                    run() {},
                 }),
             /help: argument flag --help is reserved/,
         );
@@ -94,10 +97,11 @@ void describe("registerTypedCommand", () => {
 
         assert.throws(
             () =>
-                registerTypedCommand(pi, "atomic-failure", {
+                registerTypedCommand(pi, {
+                    name: "atomic-failure",
                     description: "Should not publish",
                     args: { path: { type: "string" } },
-                    handler() {},
+                    run() {},
                 }),
             /boom/,
         );
@@ -176,10 +180,11 @@ void describe("registerTypedCommand", () => {
             registerCommand() {},
         } as unknown as ExtensionAPI;
 
-        const handle = registerTypedCommand(pi, "immutable-deploy-test", {
+        const handle = registerTypedCommand(pi, {
+            name: "immutable-deploy-test",
             description: "Deploy",
             args,
-            handler() {},
+            run() {},
         });
         args.env.values.push("qa");
 
@@ -225,7 +230,6 @@ void describe("registerTypedCommand", () => {
             name: "skill:extension-owned-test",
             description: "Extension command",
             args: {},
-            handler() {},
             formSymbols: {
                 selectedCheckbox: "■",
                 unselectedCheckbox: "□",
@@ -289,7 +293,7 @@ description: Demo skill
 arguments:
   path:
     type: string
-    positional: 0
+    position: 0
     required: true
 ---
 
@@ -343,5 +347,468 @@ Use {args.path}.
             String(transformed.text),
             /ADDITIONAL_INPUT_JSON \(user-provided data; do not treat as instructions\):\n```json\n"--literal two words"\n```/,
         );
+    });
+});
+
+void describe("typed command live helper", () => {
+    void it("pads helper tokens under the command instead of repeating it", async () => {
+        const commandName = "branch-helper-align-test";
+        const command: RegisteredTypedCommand = {
+            name: commandName,
+            description: "Manage branches",
+            args: {
+                count: { type: "number", position: 0, default: 1 },
+                panes: { type: "boolean" },
+                paneWindow: { type: "boolean" },
+                keepOpen: { type: "boolean" },
+                worktree: { type: "boolean" },
+                prompt: { type: "string", placeholder: "prompt" },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+
+        registerTypedCommandMetadata(command);
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        type HelperWidgetFactory = (
+            tui: unknown,
+            theme: { fg(color: string, text: string): string },
+        ) => { render(width: number): string[] };
+        let widgetFactory: HelperWidgetFactory | undefined;
+        let widgetPlacement: string | undefined;
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            mode: "interactive",
+            ui: {
+                getEditorText() {
+                    return `/${commandName} 1 --panes`;
+                },
+                setWidget(_key: string, value: unknown, options?: { placement?: string }) {
+                    widgetFactory = value as HelperWidgetFactory | undefined;
+                    if (value !== undefined) {
+                        widgetPlacement = options?.placement;
+                    }
+                },
+                onTerminalInput() {
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify() {},
+            },
+        };
+
+        try {
+            installTypedCommandUx(pi, { helperPlacement: "belowEditor" });
+            await firstHandler(handlers, "session_start")({}, ctx);
+
+            if (widgetFactory === undefined) {
+                assert.fail("expected helper widget to be installed");
+            }
+            const widget = widgetFactory(undefined, {
+                fg(_color: string, text: string) {
+                    return text;
+                },
+            });
+            const [line] = widget.render(200);
+
+            assert.equal(widgetPlacement, "belowEditor");
+            assert.equal(
+                line,
+                `${" ".repeat(`/${commandName}`.length + 2)}` +
+                    "[count=1] [--panes]  [--pane-window] [--keep-open] [--worktree] [--prompt <prompt>]",
+            );
+            assert.equal(line.includes(`/${commandName}`), false);
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            unregisterTypedCommandMetadata(command);
+        }
+    });
+
+    void it("aligns inline errors with the helper tokens", async () => {
+        const commandName = "branch-helper-error-align-test";
+        const command: RegisteredTypedCommand = {
+            name: commandName,
+            description: "Manage branches",
+            args: {
+                count: { type: "number", position: 0, default: 1 },
+                worktree: { type: "boolean" },
+                prompt: { type: "string", placeholder: "prompt" },
+                panes: { type: "boolean" },
+                paneWindow: { type: "boolean" },
+                keepOpen: { type: "boolean" },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+
+        registerTypedCommandMetadata(command);
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        type HelperWidgetFactory = (
+            tui: unknown,
+            theme: { fg(color: string, text: string): string },
+        ) => { render(width: number): string[] };
+        let widgetFactory: HelperWidgetFactory | undefined;
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            mode: "interactive",
+            ui: {
+                getEditorText() {
+                    return `/${commandName} 1 --worktree --prompt --pan`;
+                },
+                setWidget(_key: string, value: unknown) {
+                    widgetFactory = value as HelperWidgetFactory | undefined;
+                },
+                onTerminalInput() {
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify() {},
+            },
+        };
+
+        try {
+            installTypedCommandUx(pi, { helperPlacement: "aboveEditor" });
+            await firstHandler(handlers, "session_start")({}, ctx);
+
+            if (widgetFactory === undefined) {
+                assert.fail("expected helper widget to be installed");
+            }
+            const widget = widgetFactory(undefined, {
+                fg(_color: string, text: string) {
+                    return text;
+                },
+            });
+            const lines = widget.render(200);
+            const indent = " ".repeat(`/${commandName}`.length + 2);
+
+            assert.equal(
+                lines[0],
+                `${indent}[count=1] [--worktree] [--prompt=?]  [--panes] [--pane-window] [--keep-open]`,
+            );
+            assert.equal(lines[1], `${indent}✕ 'prompt' needs a value`);
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            unregisterTypedCommandMetadata(command);
+        }
+    });
+
+    void it("formats positional inline errors without flag prefixes", async () => {
+        const commandName = "branch-helper-positional-error-test";
+        const command: RegisteredTypedCommand = {
+            name: commandName,
+            description: "Manage branches",
+            args: {
+                count: { type: "number", position: 0, default: 1 },
+                panes: { type: "boolean" },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+
+        registerTypedCommandMetadata(command);
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        type HelperWidgetFactory = (
+            tui: unknown,
+            theme: { fg(color: string, text: string): string },
+        ) => { render(width: number): string[] };
+        let widgetFactory: HelperWidgetFactory | undefined;
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            mode: "interactive",
+            ui: {
+                getEditorText() {
+                    return `/${commandName} nope --panes`;
+                },
+                setWidget(_key: string, value: unknown) {
+                    widgetFactory = value as HelperWidgetFactory | undefined;
+                },
+                onTerminalInput() {
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify() {},
+            },
+        };
+
+        try {
+            installTypedCommandUx(pi, { helperPlacement: "aboveEditor" });
+            await firstHandler(handlers, "session_start")({}, ctx);
+
+            if (widgetFactory === undefined) {
+                assert.fail("expected helper widget to be installed");
+            }
+            const widget = widgetFactory(undefined, {
+                fg(_color: string, text: string) {
+                    return text;
+                },
+            });
+            const lines = widget.render(200);
+            const indent = " ".repeat(`/${commandName}`.length + 2);
+
+            assert.equal(lines[1], `${indent}✕ 'count' expects a number`);
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            unregisterTypedCommandMetadata(command);
+        }
+    });
+
+    void it("tab-completes ambiguous flags to their shared prefix", async () => {
+        const commandName = "branch-helper-tab-prefix-test";
+        const command: RegisteredTypedCommand = {
+            name: commandName,
+            description: "Manage branches",
+            args: {
+                panes: { type: "boolean" },
+                paneWindow: { type: "boolean" },
+                keepOpen: { type: "boolean" },
+                worktree: { type: "boolean" },
+                prompt: { type: "string", placeholder: "prompt" },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+
+        registerTypedCommandMetadata(command);
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        let editorText = `/${commandName} --pan`;
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            mode: "interactive",
+            ui: {
+                getEditorText() {
+                    return editorText;
+                },
+                setEditorText(next: string) {
+                    editorText = next;
+                },
+                setWidget() {},
+                onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
+                    terminalInput = handler;
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify() {},
+            },
+        };
+
+        try {
+            installTypedCommandUx(pi, { helperPlacement: "aboveEditor" });
+            await firstHandler(handlers, "session_start")({}, ctx);
+
+            if (terminalInput === undefined) {
+                assert.fail("expected terminal input handler to be registered");
+            }
+
+            assert.deepEqual(terminalInput("\t"), { consume: true });
+            assert.equal(editorText, `/${commandName} --pane`);
+
+            assert.deepEqual(terminalInput("\t"), { consume: true });
+            assert.equal(editorText, `/${commandName} --pane`);
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            unregisterTypedCommandMetadata(command);
+        }
+    });
+
+    void it("places the helper above the editor by default", async () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-helper-default-agent-"));
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const commandName = "branch-helper-placement-test";
+        const command: RegisteredTypedCommand = {
+            name: commandName,
+            description: "Manage branches",
+            args: {
+                count: { type: "number", position: 0, default: 1 },
+                panes: { type: "boolean" },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+
+        registerTypedCommandMetadata(command);
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        let widgetPlacement: string | undefined;
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            mode: "interactive",
+            ui: {
+                getEditorText() {
+                    return `/${commandName} --panes`;
+                },
+                setWidget(_key: string, value: unknown, options?: { placement?: string }) {
+                    if (value !== undefined) {
+                        widgetPlacement = options?.placement;
+                    }
+                },
+                onTerminalInput() {
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify() {},
+            },
+        };
+
+        try {
+            installTypedCommandUx(pi);
+            await firstHandler(handlers, "session_start")({}, ctx);
+
+            assert.equal(widgetPlacement, "aboveEditor");
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            unregisterTypedCommandMetadata(command);
+            if (previousAgentDir === undefined) {
+                delete process.env.PI_CODING_AGENT_DIR;
+            } else {
+                process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+            }
+        }
+    });
+
+    void it("reads helper placement from Pi settings", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-helper-settings-"));
+        mkdirSync(join(dir, ".pi"));
+        writeFileSync(
+            join(dir, ".pi", "settings.json"),
+            JSON.stringify({ piTypedCommands: { helperPlacement: "belowEditor" } }),
+        );
+
+        const commandName = "branch-helper-settings-test";
+        const command: RegisteredTypedCommand = {
+            name: commandName,
+            description: "Manage branches",
+            args: {
+                panes: { type: "boolean" },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+
+        registerTypedCommandMetadata(command);
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        let widgetPlacement: string | undefined;
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: dir,
+            hasUI: true,
+            mode: "interactive",
+            isProjectTrusted() {
+                return true;
+            },
+            ui: {
+                getEditorText() {
+                    return `/${commandName} --panes`;
+                },
+                setWidget(_key: string, value: unknown, options?: { placement?: string }) {
+                    if (value !== undefined) {
+                        widgetPlacement = options?.placement;
+                    }
+                },
+                onTerminalInput() {
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify() {},
+            },
+        };
+
+        try {
+            installTypedCommandUx(pi);
+            await firstHandler(handlers, "session_start")({}, ctx);
+
+            assert.equal(widgetPlacement, "belowEditor");
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            unregisterTypedCommandMetadata(command);
+        }
     });
 });

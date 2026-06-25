@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { parseTypedCommandArgs, type RegisteredTypedCommand } from "../src/index.js";
+import { parseTypedCommandArgs } from "../src/index.js";
 import {
     expandArgumentObject,
     normalizeSkillArguments,
@@ -13,6 +13,7 @@ import {
     typedSkillCommandFromMetadata,
     type TypedSkillMetadata,
 } from "../src/skills.js";
+import type { RegisteredTypedCommand } from "../src/types.js";
 
 const formSymbols = {
     selectedCheckbox: "■",
@@ -21,12 +22,16 @@ const formSymbols = {
     unselectedRadio: "○",
 };
 
+function diagnosticMessages(result: { diagnostics: readonly { message: string }[] }): string {
+    return result.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+}
+
 void describe("normalizeSkillArguments", () => {
     void it("normalizes snake_case skill metadata into argument definitions", () => {
         const result = normalizeSkillArguments({
             path: {
                 type: "string",
-                positional: 0,
+                position: 0,
                 default: ".",
                 title: "Target path",
                 description: "Target path",
@@ -54,7 +59,6 @@ void describe("normalizeSkillArguments", () => {
             },
         });
 
-        assert.deepEqual(result.warnings, []);
         assert.deepEqual(result.diagnostics, []);
         assert.equal(result.args.path?.type, "string");
         assert.equal(result.args.path?.default, ".");
@@ -119,21 +123,16 @@ Use {args.path}.
             },
         });
 
-        assert.match(result.warnings.join("\n"), /no_cache: argument flags may not start with no-/);
-        assert.match(result.warnings.join("\n"), /count\.default --count expects an integer/);
+        const messages = diagnosticMessages(result);
+        assert.match(messages, /no_cache: argument flags may not start with no-/);
+        assert.match(messages, /count\.default --count expects an integer/);
         assert.ok(result.diagnostics.every((diagnostic) => diagnostic.severity === "error"));
         assert.ok(
             result.diagnostics.some((diagnostic) => diagnostic.message.includes("old.aliases")),
         );
-        assert.match(
-            result.warnings.join("\n"),
-            /config_path: flag --config-path collides with config\.path/,
-        );
-        assert.match(
-            result.warnings.join("\n"),
-            /branch\.pattern must be a valid regular expression/,
-        );
-        assert.match(result.warnings.join("\n"), /old\.aliases is not supported/);
+        assert.match(messages, /config_path: flag --config-path collides with config\.path/);
+        assert.match(messages, /branch\.pattern must be a valid regular expression/);
+        assert.match(messages, /old\.aliases is not supported/);
     });
 
     void it("rejects prototype-reserved skill argument path segments", () => {
@@ -147,15 +146,15 @@ Use {args.path}.
         }`) as Record<string, unknown>;
 
         const result = normalizeSkillArguments(raw);
-        const warnings = result.warnings.join("\n");
+        const messages = diagnosticMessages(result);
 
-        assert.match(warnings, /__proto__: argument path segment __proto__ is reserved/);
-        assert.match(warnings, /config\.prototype: argument path segment prototype is reserved/);
+        assert.match(messages, /__proto__: argument path segment __proto__ is reserved/);
+        assert.match(messages, /config\.prototype: argument path segment prototype is reserved/);
         assert.match(
-            warnings,
+            messages,
             /config\.nested\.__proto__: argument path segment __proto__ is reserved/,
         );
-        assert.match(warnings, /constructor: argument path segment constructor is reserved/);
+        assert.match(messages, /constructor: argument path segment constructor is reserved/);
     });
 });
 
@@ -190,33 +189,6 @@ Use {args.path}.
         assert.equal(result.metadata?.body, "Use {args.path}.");
     });
 
-    void it("keeps metadata.arguments as a compatibility fallback", () => {
-        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-"));
-        const skillPath = join(dir, "SKILL.md");
-        writeFileSync(
-            skillPath,
-            `---
-name: legacy-demo
-description: Legacy demo skill
-metadata:
-  arguments:
-    fix:
-      type: boolean
-      default: true
----
-
-Follow the workflow.
-`,
-        );
-
-        const result = readTypedSkillMetadataResult(skillPath);
-
-        assert.equal(result.diagnostics, undefined);
-        assert.equal(result.metadata?.name, "legacy-demo");
-        assert.equal(result.metadata?.args.fix?.type, "boolean");
-        assert.equal(result.metadata?.args.fix?.default, true);
-    });
-
     void it("reports unknown typed placeholders while loading skills", () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-"));
         const skillPath = join(dir, "SKILL.md");
@@ -238,10 +210,6 @@ Use {args.missing} and {args.path}.
         const result = readTypedSkillMetadataResult(skillPath);
 
         assert.equal(result.metadata, undefined);
-        assert.match(
-            result.diagnostics?.messages.join("\n") ?? "",
-            /body: unknown argument placeholder \{args\.missing\}/,
-        );
         assert.match(
             result.diagnostics?.diagnostics.map((diagnostic) => diagnostic.message).join("\n") ??
                 "",
@@ -266,7 +234,6 @@ void describe("typed skill required/default behavior", () => {
                     required: true,
                 },
             },
-            handler: () => {},
             formSymbols,
         };
 
@@ -376,7 +343,6 @@ void describe("renderTypedSkillInvocation", () => {
 
         assert.equal(command.name, "skill:fix-ruff-errors");
         assert.equal(command.source, "skill");
-        assert.equal(command.handler, undefined);
         assert.equal(command.target?.kind, "skill");
         assert.equal(command.skill.filePath, skill.filePath);
     });
