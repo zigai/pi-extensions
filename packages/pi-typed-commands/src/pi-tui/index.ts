@@ -1,4 +1,4 @@
-export { openArgumentForm } from "../form.js";
+export { openArgumentForm } from "../form/open.js";
 export {
     createHeadlessFormModel,
     formatFormIssueMessage,
