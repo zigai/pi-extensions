@@ -12,6 +12,16 @@ interface GoalRuntimeStatusDeps {
   getGoalForDisplay: () => ThreadGoal | null;
   getGoalStatus: () => ThreadGoal["status"] | null;
   getRecoveryAttention: () => GoalRecoveryMachineState["attention"];
+  isProviderLimitAutoResumeScheduled: (goalId: string) => boolean;
+}
+
+function formatFooterStatusForRuntime(deps: GoalRuntimeStatusDeps): string | undefined {
+  const goal = deps.getGoalForDisplay();
+  return formatFooterStatus(
+    goal,
+    deps.getRecoveryAttention(),
+    goal ? deps.isProviderLimitAutoResumeScheduled(goal.goalId) : false,
+  );
 }
 
 export function createGoalRuntimeStatus(deps: GoalRuntimeStatusDeps) {
@@ -34,10 +44,7 @@ export function createGoalRuntimeStatus(deps: GoalRuntimeStatusDeps) {
           stopStatusRefresh();
           return;
         }
-        statusContext.ui.setStatus(
-          "codex-goal",
-          formatFooterStatus(deps.getGoalForDisplay(), deps.getRecoveryAttention()),
-        );
+        statusContext.ui.setStatus("codex-goal", formatFooterStatusForRuntime(deps));
       }, 1_000);
       statusRefreshTimer.unref?.();
       return;
@@ -50,10 +57,7 @@ export function createGoalRuntimeStatus(deps: GoalRuntimeStatusDeps) {
 
   const refreshUi = (ctx: StatusContext): void => {
     statusContext = ctx;
-    ctx.ui.setStatus(
-      "codex-goal",
-      formatFooterStatus(deps.getGoalForDisplay(), deps.getRecoveryAttention()),
-    );
+    ctx.ui.setStatus("codex-goal", formatFooterStatusForRuntime(deps));
     syncStatusRefresh();
   };
 

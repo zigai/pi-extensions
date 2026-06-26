@@ -11,6 +11,7 @@ import {
   isContextOverflowError,
   isErrorAssistantMessage,
   createRecoveryPendingAttention,
+  isProviderLimitError,
   isRetryableTransientError,
   isRecoveryPendingAttention,
   isSuccessfulAssistantTurn,
@@ -109,6 +110,7 @@ const terminalProviderLimitErrors = [
   "GoUsageLimitError",
   "FreeUsageLimitError",
   "Monthly usage limit reached",
+  "usage limit has been reached",
   "out of budget",
 ] as const;
 
@@ -116,6 +118,16 @@ test("terminal provider-limit errors are not retryable transient errors", () => 
   for (const errorMessage of terminalProviderLimitErrors) {
     assert.equal(isRetryableTransientError(errorMessage), false, errorMessage);
   }
+});
+
+test("provider-limit classifier recognizes only quota and usage-limit errors", () => {
+  for (const errorMessage of terminalProviderLimitErrors) {
+    assert.equal(isProviderLimitError(errorMessage), true, errorMessage);
+  }
+  assert.equal(isProviderLimitError("usage limit has been reached for this account"), true);
+  assert.equal(isProviderLimitError("invalid tool call state: malformed function arguments"), false);
+  assert.equal(isProviderLimitError("invalid api key"), false);
+  assert.equal(isProviderLimitError(undefined), false);
 });
 
 test("failure signatures canonicalize context overflow regardless of volatile token counts", () => {

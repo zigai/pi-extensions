@@ -1,7 +1,9 @@
 export const CONTINUATION_RETRY_MS = 50;
+export const PROVIDER_LIMIT_AUTO_RESUME_MS = 5 * 60_000;
 export const RUNTIME_PERSIST_INTERVAL_MS = 60_000;
 
 export const __testHooks = {
   continuationRetryMs: CONTINUATION_RETRY_MS,
+  providerLimitAutoResumeMs: PROVIDER_LIMIT_AUTO_RESUME_MS,
   runtimePersistIntervalMs: RUNTIME_PERSIST_INTERVAL_MS,
 };

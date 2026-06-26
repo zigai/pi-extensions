@@ -10,8 +10,10 @@ import {
 } from "./goal-runtime-event-handlers.js";
 import { registerGoalRuntimeEvents } from "./goal-runtime-events.js";
 import { createGoalRuntimeState } from "./goal-runtime-state.js";
-import { createGoalRuntimeStatus } from "./goal-runtime-status.js";
+import { createGoalRuntimeStatus, type StatusContext } from "./goal-runtime-status.js";
 import { createGoalStateController } from "./goal-state-controller.js";
+import { createProviderLimitAutoResumeScheduler } from "./provider-limit-auto-resume.js";
+import { compactContinuationPrompt } from "./prompts.js";
 import { createGoalRecoveryRuntime } from "./recovery-runtime.js";
 import {
   clearActiveHostOverflowRecovery,
@@ -20,7 +22,7 @@ import {
   setRecoveryPausedAttention,
   type GoalStartTurnStrategy,
 } from "./recovery-machine.js";
-import { goalWithLiveUsage } from "./state.js";
+import { goalWithLiveUsage, updateGoalStatus } from "./state.js";
 import { registerGoalTools } from "./tools.js";
 import type { GoalEntrySource, GoalResult, ThreadGoal } from "./types.js";
 
@@ -30,6 +32,8 @@ export interface GoalRuntimeController extends GoalRuntimeEventHandlers {
   setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: ExtensionContext): void;
   clearGoal(source: GoalEntrySource, ctx: ExtensionContext): void;
   completeGoal(source: GoalEntrySource, ctx: ExtensionContext): GoalResult;
+  cancelProviderLimitAutoResume(goalId: string, ctx: StatusContext): void;
+  resumeGoalWithContinuation(goalId: string, source: GoalEntrySource, ctx: StatusContext): GoalResult;
 }
 
 export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeController {
@@ -52,10 +56,22 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       runtimeState.accounting.lastAccountedAt,
     );
 
+  let autoResumeContext: ExtensionContext | null = null;
+  const providerLimitAutoResume = createProviderLimitAutoResumeScheduler({
+    onTimer(goalId) {
+      if (!autoResumeContext || !autoResumeContext.isIdle() || autoResumeContext.hasPendingMessages()) {
+        return false;
+      }
+      resumeGoalWithContinuation(goalId, "runtime", autoResumeContext);
+      return true;
+    },
+  });
+
   const status = createGoalRuntimeStatus({
     getGoalForDisplay: goalForDisplay,
     getGoalStatus: () => persistence.getGoal()?.status ?? null,
     getRecoveryAttention: () => runtimeState.recoveryState.attention,
+    isProviderLimitAutoResumeScheduled: providerLimitAutoResume.isScheduledFor,
   });
 
   const continuation = createContinuationScheduler({
@@ -110,6 +126,11 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     },
     refreshUi: status.refreshUi,
     maybeContinue: continuation.maybeContinue,
+    scheduleProviderLimitAutoResume(goalId, ctx) {
+      autoResumeContext = ctx;
+      providerLimitAutoResume.schedule(goalId);
+      status.refreshUi(ctx);
+    },
   });
 
   const eventHandlers = createGoalRuntimeEventHandlers({
@@ -120,11 +141,31 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     goalAccounting,
     recoveryRuntime,
     status,
+    providerLimitAutoResume,
     clearActiveAccounting,
     resetErrorRecovery,
   });
 
+  const resumeGoalWithContinuation = (
+    goalId: string,
+    _source: GoalEntrySource,
+    ctx: StatusContext,
+  ): GoalResult => {
+    const result = updateGoalStatus(stateController.getGoal(), "active");
+    if (!result.ok || !result.goal || result.goal.goalId !== goalId) {
+      return result;
+    }
+    providerLimitAutoResume.clear();
+    stateController.resumePausedGoal(ctx);
+    const resumedGoal = stateController.getGoal();
+    if (resumedGoal?.status === "active" && resumedGoal.goalId === goalId) {
+      pi.sendUserMessage(compactContinuationPrompt(resumedGoal), { deliverAs: "followUp" });
+    }
+    return result;
+  };
+
   const completeGoal = (source: GoalEntrySource, ctx: ExtensionContext): GoalResult => {
+    providerLimitAutoResume.clear();
     goalAccounting.accountProgress(ctx, false, 0, true);
     return stateController.completeGoal(source, ctx);
   };
@@ -133,12 +174,19 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     getGoalForDisplay: goalForDisplay,
     getGoalStartTurnStrategy: () => goalStartTurnStrategy(runtimeState.recoveryState.phase),
     setGoal(nextGoal, source, ctx) {
+      providerLimitAutoResume.clear();
       stateController.applyGoalTransition({ kind: "set", nextGoal, source }, ctx);
     },
     clearGoal(source, ctx) {
+      providerLimitAutoResume.clear();
       stateController.applyGoalTransition({ kind: "clear", source }, ctx);
     },
+    cancelProviderLimitAutoResume(_goalId, ctx) {
+      providerLimitAutoResume.clear();
+      status.refreshUi(ctx);
+    },
     completeGoal,
+    resumeGoalWithContinuation,
     ...eventHandlers,
   };
 }
@@ -155,6 +203,8 @@ export function registerGoalRuntimeController(pi: ExtensionAPI): void {
     getGoalStartTurnStrategy: controller.getGoalStartTurnStrategy.bind(controller),
     setGoal: controller.setGoal.bind(controller),
     clearGoal: controller.clearGoal.bind(controller),
+    cancelProviderLimitAutoResume: controller.cancelProviderLimitAutoResume.bind(controller),
+    resumeGoalWithContinuation: controller.resumeGoalWithContinuation.bind(controller),
   });
   registerGoalRuntimeEvents(pi, controller);
 }

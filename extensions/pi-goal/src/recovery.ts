@@ -70,10 +70,14 @@ export function isContextOverflowError(errorMessage: string | undefined): boolea
   );
 }
 
-function isNonRetryableProviderLimitError(errorMessage: string): boolean {
-  return /GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing/i.test(
-    errorMessage,
+export function isProviderLimitError(errorMessage: string | undefined): boolean {
+  return /GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|usage limit has been reached|available balance|insufficient_quota|out of budget|quota exceeded|billing/i.test(
+    errorMessage ?? "",
   );
+}
+
+function isNonRetryableProviderLimitError(errorMessage: string): boolean {
+  return isProviderLimitError(errorMessage);
 }
 
 /**

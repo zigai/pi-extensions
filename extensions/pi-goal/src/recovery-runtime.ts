@@ -8,7 +8,7 @@ import {
   type GoalRecoveryMachineState,
   type RecoveryAction,
 } from "./recovery-machine.js";
-import type { AssistantErrorMessage } from "./recovery.js";
+import { isProviderLimitError, type AssistantErrorMessage } from "./recovery.js";
 import type { ThreadGoal } from "./types.js";
 
 interface RecoveryRuntimeDeps<TContext> {
@@ -18,6 +18,7 @@ interface RecoveryRuntimeDeps<TContext> {
   pauseGoalForRecovery: (ctx: TContext, recoveryReason: string) => void;
   refreshUi: (ctx: TContext) => void;
   maybeContinue: (ctx: TContext) => void;
+  scheduleProviderLimitAutoResume: (goalId: string, ctx: TContext) => void;
 }
 
 export function createGoalRecoveryRuntime<TContext>(deps: RecoveryRuntimeDeps<TContext>) {
@@ -56,7 +57,18 @@ export function createGoalRecoveryRuntime<TContext>(deps: RecoveryRuntimeDeps<TC
       return;
     }
 
-    applyRecoveryAction(planRecoveryForAssistantError(deps.getRecoveryState(), message), ctx);
+    const wasProviderLimit = isProviderLimitError(message.errorMessage);
+    const action = planRecoveryForAssistantError(deps.getRecoveryState(), message);
+    applyRecoveryAction(action, ctx);
+    const currentGoal = deps.getGoal();
+    if (
+      wasProviderLimit &&
+      action.type === "pause" &&
+      currentGoal?.goalId === goal.goalId &&
+      currentGoal.status === "paused"
+    ) {
+      deps.scheduleProviderLimitAutoResume(currentGoal.goalId, ctx);
+    }
   };
 
   const handleSilentContextOverflow = (ctx: TContext): void => {

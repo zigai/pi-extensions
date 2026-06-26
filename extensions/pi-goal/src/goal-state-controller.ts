@@ -61,7 +61,7 @@ export interface GoalStateController {
   pauseForAbort: (ctx: ExtensionContext) => void;
   persistHostOverflowUserReset: (needsReset: boolean) => void;
   reloadFromSession: (ctx: ExtensionContext) => void;
-  resumePausedGoal: (ctx: ExtensionContext) => void;
+  resumePausedGoal: (ctx: StatusContext) => void;
 }
 
 export function createGoalStateController(deps: GoalStateControllerDeps) {
@@ -166,7 +166,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     applyGoalTransition({ kind: "abort_pause" }, ctx);
   };
 
-  const resumePausedGoal = (ctx: ExtensionContext): void => {
+  const resumePausedGoal = (ctx: StatusContext): void => {
     const goal = getGoal();
     if (!goal || goal.status !== "paused") {
       return;

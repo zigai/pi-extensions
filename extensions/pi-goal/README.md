@@ -154,6 +154,7 @@ If an interactive run appears stuck on `Working...` after a built-in `read` tool
 /goal Build the requested feature and verify it end to end
 /goal pause
 /goal resume
+/goal resume cancel
 /goal copy
 /goal clear
 ```
@@ -184,7 +185,7 @@ While a goal is active, the extension:
 - adds completed assistant turn input plus output token usage when the active model reports it
 - coalesces runtime goal custom-entry writes so unchanged status and usage are not appended on every tool completion; live footer usage stays current, and meaningful usage is flushed at turn boundaries, shutdown, compaction, budget crossings, and bounded intervals during long tool-heavy runs
 - pauses when an active assistant turn is aborted, such as when you press Esc
-- recovers from provider assistant errors without immediate hidden continuation loops: context-window overflow triggers automatic compaction and then resumes the active goal, transient errors use bounded backoff retries, and repeated unrecoverable failures pause with a clear `/goal resume` path
+- recovers from provider assistant errors without immediate hidden continuation loops: context-window overflow triggers automatic compaction and then resumes the active goal, transient errors use bounded backoff retries, and recognized provider usage-limit pauses schedule a conservative auto-resume retry; use `/goal resume cancel` to stop the scheduled retry
 - prompts on session resume before reactivating a paused goal, and resumes explicitly with `/goal resume` from paused goals
 - rejects `/goal pause` unless the goal is active and rejects `/goal resume` unless the goal is paused, except when an active goal is waiting for a user-start recovery turn after host overflow recovery; in that recovery state, `/goal resume` sends the required user follow-up instead of changing goal status
 - treats completed goals as terminal for automatic transitions while allowing `/goal <objective>` and explicit `create_goal` replacement to replace goals without extra friction

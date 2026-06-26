@@ -46,6 +46,10 @@ export interface GoalRuntimeStatusPort {
   stopStatusRefresh: () => void;
 }
 
+export interface ProviderLimitAutoResumePort {
+  clear: () => void;
+}
+
 export interface GoalRuntimeContinuationPort {
   bindPassthroughContinuationInputToTurn: (turnIndex: number) => void;
   clearContinuationState: () => void;
@@ -84,6 +88,7 @@ export interface RecoveryRuntimePort {
 export interface StaleQueuedWorkEffectContext {
   status: GoalRuntimeStatusPort;
   clearActiveAccounting: () => void;
+  providerLimitAutoResume: ProviderLimitAutoResumePort;
 }
 
 export interface GoalRuntimeInputContextHandlerContext extends StaleQueuedWorkEffectContext {
@@ -155,6 +160,7 @@ export interface GoalRuntimeEventContext {
   goalAccounting: GoalAccountingPort;
   recoveryRuntime: RecoveryRuntimePort;
   status: GoalRuntimeStatusPort;
+  providerLimitAutoResume: ProviderLimitAutoResumePort;
   clearActiveAccounting: () => void;
   resetErrorRecovery: () => void;
 }

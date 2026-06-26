@@ -54,6 +54,7 @@ test("terminal provider-limit 429 errors pause active goals immediately", async 
     formatFooterStatus(
       harness.snapshot().goal,
       createRecoveryPausedAttention("non-retryable provider error (insufficient_quota 429)"),
+      true,
     ),
   );
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);

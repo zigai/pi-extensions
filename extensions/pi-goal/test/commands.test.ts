@@ -8,6 +8,7 @@ import {
   type GoalCommandPi,
 } from "../src/commands.js";
 import type { GoalStartTurnStrategy } from "../src/recovery-machine.js";
+import { compactContinuationPrompt } from "../src/prompts.js";
 import { applyUsage, updateGoalStatus } from "../src/state.js";
 import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type ThreadGoal } from "../src/types.js";
 
@@ -45,7 +46,16 @@ function createHarness() {
     clearGoal() {
       goal = null;
     },
+    cancelProviderLimitAutoResume() {},
     getGoalStartTurnStrategy: () => "hiddenFollowUp",
+    resumeGoalWithContinuation(goalId: string) {
+      const result = updateGoalStatus(goal, "active");
+      if (result.ok && result.goal?.goalId === goalId) {
+        goal = result.goal;
+        pi.sendUserMessage(compactContinuationPrompt(result.goal), { deliverAs: "followUp" });
+      }
+      return result;
+    },
   };
 
   const ctx: GoalCommandContext = {
@@ -180,7 +190,16 @@ test("/goal objective after overflow recovery sends a user start turn", async ()
     clearGoal() {
       harness.setGoal(null);
     },
+    cancelProviderLimitAutoResume() {},
     getGoalStartTurnStrategy: () => startTurnStrategy,
+    resumeGoalWithContinuation(goalId: string) {
+      const result = updateGoalStatus(harness.goal, "active");
+      if (result.ok && result.goal?.goalId === goalId) {
+        harness.setGoal(result.goal);
+        harness.pi.sendUserMessage(compactContinuationPrompt(result.goal), { deliverAs: "followUp" });
+      }
+      return result;
+    },
   };
 
   await handleGoalCommand(harness.pi, host, "ship the feature", harness.ctx);
@@ -252,7 +271,16 @@ test("/goal resume restarts an active goal waiting for user-start overflow recov
     clearGoal() {
       harness.setGoal(null);
     },
+    cancelProviderLimitAutoResume() {},
     getGoalStartTurnStrategy: () => "userFollowUp",
+    resumeGoalWithContinuation(goalId: string) {
+      const result = updateGoalStatus(harness.goal, "active");
+      if (result.ok && result.goal?.goalId === goalId) {
+        harness.setGoal(result.goal);
+        harness.pi.sendUserMessage(compactContinuationPrompt(result.goal), { deliverAs: "followUp" });
+      }
+      return result;
+    },
   };
 
   await handleGoalCommand(harness.pi, host, "ship the feature", harness.ctx);

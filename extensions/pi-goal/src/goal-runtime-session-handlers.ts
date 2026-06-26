@@ -75,6 +75,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
   return {
     onSessionStart: (async (event, ctx) => {
       clearHostOverflowPostCompactFallback();
+      deps.providerLimitAutoResume.clear();
       stateController.reloadFromSession(ctx);
       goalAccounting.beginAccounting();
       const goal = stateController.getGoal();
@@ -99,6 +100,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
 
     onSessionTree: (async (_event, ctx) => {
       clearHostOverflowPostCompactFallback();
+      deps.providerLimitAutoResume.clear();
       stateController.reloadFromSession(ctx);
       goalAccounting.beginAccounting();
       continuation.maybeContinue(ctx);
@@ -143,6 +145,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
 
     onSessionShutdown: (async (_event, ctx) => {
       clearHostOverflowPostCompactFallback();
+      deps.providerLimitAutoResume.clear();
       continuation.clearPassthroughContinuationInput();
       applyStaleQueuedWorkEffects(runtimeState.staleQueuedWorkGuard.planSessionShutdown().effects, ctx, deps);
 

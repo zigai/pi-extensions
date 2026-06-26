@@ -395,6 +395,10 @@ export function flushContinuationScheduler(): void {
   mock.timers.tick(__testHooks.continuationRetryMs);
 }
 
+export function fireProviderLimitAutoResume(): void {
+  mock.timers.tick(__testHooks.providerLimitAutoResumeMs);
+}
+
 export function countGoalSetEntries(
   entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]>,
   goalId?: string,

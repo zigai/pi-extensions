@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.1.32 - 2026-06-26
+
+- Auto-resume goals paused by recognized provider usage-limit or quota errors with a conservative runtime-only retry timer.
+- Add `/goal resume cancel` to stop a pending provider-limit auto-resume while leaving manual `/goal resume` available.
+- Keep auto-resume safe across busy sessions, user input, session shutdown, goal replacement, completion, and repeated provider-limit failures.
+
+### Validation
+
+- Ran `npm run verify` under pi `0.80.2`: `tsc --noEmit`, 6 platform-smoke checks, and 312 regular tests, all passing.
+- Ran `npm run smoke:platform:all` under pi `0.80.2`; doctor passed and macOS, Ubuntu, and native Windows target suites completed successfully.
+
 ## 0.1.31 - 2026-06-24
 
 - Update the local pi development baseline to `@earendil-works/*` `0.80.2` so typecheck fidelity matches the installed runtime pi release.

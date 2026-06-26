@@ -128,7 +128,11 @@ function compactBudgetUsage(goal: ThreadGoal): string {
   return `${formatCompactTokenValue(goal.usage.tokensUsed)} / ${formatCompactTokenValue(goal.tokenBudget)}`;
 }
 
-export function formatFooterStatus(goal: ThreadGoal | null, recoveryAttention: RecoveryAttention | null = null): string | undefined {
+export function formatFooterStatus(
+  goal: ThreadGoal | null,
+  recoveryAttention: RecoveryAttention | null = null,
+  providerLimitAutoResumeScheduled = false,
+): string | undefined {
   if (!goal) {
     return undefined;
   }
@@ -138,6 +142,10 @@ export function formatFooterStatus(goal: ThreadGoal | null, recoveryAttention: R
       return `Goal unmet (${compactBudgetUsage(goal)} tokens)`;
     }
     return "Goal abandoned";
+  }
+
+  if (goal.status === "paused" && providerLimitAutoResumeScheduled) {
+    return "Goal paused because the provider usage limit was reached. Auto-resume will retry in about 5 minutes. Use /goal resume to resume now or /goal resume cancel to stop auto-resume.";
   }
 
   const recoveryAttentionMessage = formatRecoveryAttention(recoveryAttention);

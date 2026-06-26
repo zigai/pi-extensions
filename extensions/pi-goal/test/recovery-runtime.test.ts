@@ -42,6 +42,7 @@ function createRecoveryTestRuntime(goal: ThreadGoal | null = activeGoal) {
     maybeContinue: () => {
       continueCount += 1;
     },
+    scheduleProviderLimitAutoResume: () => {},
   });
 
   return {
@@ -169,6 +170,7 @@ test("recovery pause delegates reason without clearing continuation in recovery 
       refreshCount += 1;
     },
     maybeContinue: () => {},
+    scheduleProviderLimitAutoResume: () => {},
   });
 
   const ctx = { ui: { setStatus() {} } } satisfies StatusContext;
