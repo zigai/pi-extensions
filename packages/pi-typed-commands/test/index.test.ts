@@ -797,7 +797,7 @@ void describe("typed command live helper", () => {
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await new Promise((resolve) => setImmediate(resolve));
 
-            assert.match(notifications.join("\n"), /form boom/);
+            assert.deepEqual(notifications, ["Typed command form failed."]);
         } finally {
             await firstHandler(handlers, "session_shutdown")({}, ctx);
             unregisterTypedCommandMetadata(command);

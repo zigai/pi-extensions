@@ -69,20 +69,27 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
     await command.target.run(args, commandCtx);
 }
 
-function notifyDetachedError(ctx: ExtensionContext, error: unknown): void {
-    let message = String(error);
+function thrownValueKind(error: unknown): string {
     if (error instanceof Error) {
-        message = error.message;
+        return "Error";
     }
-    ctx.ui.notify(message, "error");
+    return typeof error;
+}
+
+function notifyDetachedError(ctx: ExtensionContext): void {
+    ctx.ui.notify("Typed command form failed.", "error");
 }
 
 function reportDetachedError(ctx: ExtensionContext, error: unknown): void {
     try {
-        notifyDetachedError(ctx, error);
+        notifyDetachedError(ctx);
     } catch (notifyError) {
-        console.error("pi-typed-commands detached form task failed", error);
-        console.error("pi-typed-commands failed to report detached form task error", notifyError);
+        console.error(`pi-typed-commands detached form task failed (${thrownValueKind(error)})`);
+        console.error(
+            `pi-typed-commands failed to report detached form task error (${thrownValueKind(
+                notifyError,
+            )})`,
+        );
     }
 }
 
