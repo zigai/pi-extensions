@@ -18,6 +18,13 @@ const RESERVED_ARGUMENT_NAME_SEGMENTS: ReadonlySet<string> = new Set([
     "constructor",
     "prototype",
 ]);
+const ARGUMENT_TYPES: ReadonlySet<string> = new Set([
+    "string",
+    "number",
+    "boolean",
+    "enum",
+    "multi-enum",
+]);
 
 /** Parser lookup for non-positional flags, keyed by canonical flag name without leading dashes. */
 export type ArgumentLookup = {
@@ -177,6 +184,18 @@ const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "custom",
 ]);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isArgumentType(value: unknown): value is ArgumentDefinition["type"] {
+    return typeof value === "string" && ARGUMENT_TYPES.has(value);
+}
+
+function isRegExp(value: unknown): value is RegExp {
+    return value instanceof RegExp;
+}
+
 function isNonNegativeInteger(value: unknown): value is number {
     return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
@@ -202,6 +221,277 @@ function addArgumentDiagnostic(
     message: string,
 ): void {
     addDefinitionDiagnostic(diagnostics, code, message, [name, ...field.split(".")]);
+}
+
+function validateOptionalStringField(
+    name: string,
+    raw: Record<string, unknown>,
+    field: string,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Object.hasOwn(raw, field) || raw[field] === undefined) {
+        return true;
+    }
+    if (typeof raw[field] === "string") {
+        return true;
+    }
+    addArgumentDiagnostic(
+        diagnostics,
+        name,
+        field,
+        `argument.${field}.invalid`,
+        `${name}.${field} must be a string`,
+    );
+    return false;
+}
+
+function validateOptionalBooleanField(
+    name: string,
+    raw: Record<string, unknown>,
+    field: string,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Object.hasOwn(raw, field) || raw[field] === undefined) {
+        return true;
+    }
+    if (typeof raw[field] === "boolean") {
+        return true;
+    }
+    addArgumentDiagnostic(
+        diagnostics,
+        name,
+        field,
+        `argument.${field}.invalid`,
+        `${name}.${field} must be a boolean`,
+    );
+    return false;
+}
+
+function validateAliasesShape(
+    name: string,
+    raw: Record<string, unknown>,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Object.hasOwn(raw, "aliases") || raw.aliases === undefined) {
+        return true;
+    }
+    if (!Array.isArray(raw.aliases)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "aliases",
+            "argument.aliases.invalid",
+            `${name}.aliases must be a list of strings`,
+        );
+        return false;
+    }
+
+    let valid = true;
+    for (const [index, alias] of raw.aliases.entries()) {
+        if (typeof alias === "string") {
+            continue;
+        }
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.aliases.item.invalid",
+            `${name}.aliases[${index}] must be a string`,
+            [name, "aliases", index],
+        );
+        valid = false;
+    }
+    return valid;
+}
+
+function validateValuesShape(
+    name: string,
+    raw: Record<string, unknown>,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Array.isArray(raw.values)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "values",
+            "argument.values.invalid",
+            `${name}.values must be a list of strings`,
+        );
+        return false;
+    }
+
+    let valid = true;
+    for (const [index, value] of raw.values.entries()) {
+        if (typeof value === "string") {
+            continue;
+        }
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.values.item.invalid",
+            `${name}.values[${index}] must be a string`,
+            [name, "values", index],
+        );
+        valid = false;
+    }
+    return valid;
+}
+
+function validateCustomWidgetShape(
+    name: string,
+    custom: unknown,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (custom === undefined) {
+        return true;
+    }
+    if (!isRecord(custom)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.custom",
+            "argument.ui.custom.invalid",
+            `${name}.ui.custom must be an object`,
+        );
+        return false;
+    }
+
+    let valid = true;
+    for (const field of ["renderValue", "handleInput"] as const) {
+        const value = custom[field];
+        if (value === undefined || typeof value === "function") {
+            continue;
+        }
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            `ui.custom.${field}`,
+            "argument.ui.custom-field.invalid",
+            `${name}.ui.custom.${field} must be a function`,
+        );
+        valid = false;
+    }
+    return valid;
+}
+
+function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagnostic[]): boolean {
+    if (ui === undefined) {
+        return true;
+    }
+    if (!isRecord(ui)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui",
+            "argument.ui.invalid",
+            `${name}.ui must be an object`,
+        );
+        return false;
+    }
+
+    let valid = true;
+    if (ui.title !== undefined && typeof ui.title !== "string") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.title",
+            "argument.ui.title.invalid",
+            `${name}.ui.title must be a string`,
+        );
+        valid = false;
+    }
+    for (const field of ["readOnly", "hidden"] as const) {
+        const value = ui[field];
+        if (value === undefined || typeof value === "boolean" || typeof value === "function") {
+            continue;
+        }
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            `ui.${field}`,
+            "argument.ui.boolean-option.invalid",
+            `${name}.ui.${field} must be a boolean or function`,
+        );
+        valid = false;
+    }
+    if (ui.compute !== undefined && typeof ui.compute !== "function") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.compute",
+            "argument.ui.compute.invalid",
+            `${name}.ui.compute must be a function`,
+        );
+        valid = false;
+    }
+    return validateCustomWidgetShape(name, ui.custom, diagnostics) && valid;
+}
+
+function validateArgumentDefinitionShape(
+    name: string,
+    definition: unknown,
+    diagnostics: DefinitionDiagnostic[],
+): definition is ArgumentDefinition {
+    if (!isRecord(definition)) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.definition.invalid",
+            `${name}: argument definition must be an object`,
+            [name],
+        );
+        return false;
+    }
+
+    let valid = true;
+    if (!isArgumentType(definition.type)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "type",
+            "argument.type.invalid",
+            `${name}.type must be one of: ${[...ARGUMENT_TYPES].join(", ")}`,
+        );
+        valid = false;
+    }
+
+    for (const field of ["description", "flag", "title", "placeholder"] as const) {
+        valid = validateOptionalStringField(name, definition, field, diagnostics) && valid;
+    }
+    for (const field of ["required", "rest"] as const) {
+        valid = validateOptionalBooleanField(name, definition, field, diagnostics) && valid;
+    }
+    valid = validateAliasesShape(name, definition, diagnostics) && valid;
+    valid = validateUiShape(name, definition.ui, diagnostics) && valid;
+
+    if (definition.complete !== undefined && typeof definition.complete !== "function") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "complete",
+            "argument.complete.invalid",
+            `${name}.complete must be a function`,
+        );
+        valid = false;
+    }
+
+    if (definition.type === "string") {
+        const pattern = definition.pattern;
+        if (pattern !== undefined && typeof pattern !== "string" && !isRegExp(pattern)) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "pattern",
+                "argument.string.pattern.invalid",
+                `${name}.pattern must be a string or RegExp`,
+            );
+            valid = false;
+        }
+    }
+    if (definition.type === "number" && definition.integer !== undefined) {
+        valid = validateOptionalBooleanField(name, definition, "integer", diagnostics) && valid;
+    }
+    if (definition.type === "enum" || definition.type === "multi-enum") {
+        valid = validateValuesShape(name, definition, diagnostics) && valid;
+    }
+
+    return valid;
 }
 
 function validateFlagName(
@@ -818,11 +1108,24 @@ function validatePositionals(
  *
  * The function does not throw; returned diagnostics are structured for programmatic handling.
  */
-export function validateArgumentDefinitions(
-    definitions: ArgumentDefinitions,
-): DefinitionDiagnostic[] {
-    const flatDefinitions = flattenGroupedArgumentDefinitions(definitions);
+export function validateArgumentDefinitions(definitions: unknown): DefinitionDiagnostic[] {
     const diagnostics: DefinitionDiagnostic[] = [];
+    if (!isRecord(definitions)) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "arguments.invalid",
+            "arguments must be an object",
+            [],
+        );
+        return diagnostics;
+    }
+
+    // SAFETY: the raw map shape was checked above; each flattened value is still treated as
+    // unknown and parsed by validateArgumentDefinitionShape before compiler code can use it.
+    const flatDefinitions = flattenGroupedArgumentDefinitions(
+        definitions as ArgumentDefinitions,
+    ) as Record<string, unknown>;
+    const validDefinitions: Record<string, ArgumentDefinition> = {};
     const names = Object.keys(flatDefinitions);
     const flags = new Map<string, string>();
 
@@ -859,9 +1162,10 @@ export function validateArgumentDefinitions(
         }
 
         const definition = flatDefinitions[name];
-        if (definition === undefined) {
+        if (!validateArgumentDefinitionShape(name, definition, diagnostics)) {
             continue;
         }
+        validDefinitions[name] = definition;
 
         validateTypeSpecificRules(name, definition, diagnostics);
         if (isPositionalArgument(definition)) {
@@ -881,7 +1185,7 @@ export function validateArgumentDefinitions(
         }
     }
 
-    validatePositionals(flatDefinitions, diagnostics);
+    validatePositionals(validDefinitions, diagnostics);
     return diagnostics;
 }
 

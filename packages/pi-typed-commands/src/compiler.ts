@@ -122,8 +122,7 @@ export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDe
 export function compileTypedCommandDefinition<const TDefinitions extends ArgumentDefinitions>(
     definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
 ): CompileResult<TDefinitions> {
-    const flattenedDefinitions = flattenGroupedArgumentDefinitions(definition.args);
-    const diagnostics = validateArgumentDefinitions(flattenedDefinitions);
+    const diagnostics = validateArgumentDefinitions(definition.args);
     if (diagnostics.length > 0) {
         return { ok: false, diagnostics };
     }

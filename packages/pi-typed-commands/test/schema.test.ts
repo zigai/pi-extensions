@@ -167,4 +167,47 @@ void describe("typed command schema", () => {
             ),
         );
     });
+
+    void it("returns diagnostics for malformed runtime definitions instead of throwing", () => {
+        const compiled = compileTypedCommandDefinition({
+            name: "bad-runtime",
+            description: "Bad runtime definitions",
+            args: {
+                stringValues: { type: "enum", values: "abc" },
+                numericValues: { type: "enum", values: [1, 2] },
+                numericFlag: { type: "string", flag: 123 },
+                stringAliases: { type: "string", aliases: "x" },
+                unknownType: { type: "date" },
+                missingDefinition: null,
+                stringRequired: { type: "string", required: "yes" },
+                stringInteger: { type: "number", integer: "yes" },
+                // SAFETY: this test intentionally bypasses compile-time definition checks to
+                // exercise diagnostics for JavaScript/runtime callers.
+            } as never,
+        });
+
+        assert.equal(compiled.ok, false);
+        if (compiled.ok) {
+            assert.fail("malformed runtime definitions should not compile");
+        }
+        const text = compiled.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+
+        assert.match(text, /stringValues\.values must be a list of strings/);
+        assert.match(text, /numericValues\.values\[0\] must be a string/);
+        assert.match(text, /numericFlag\.flag must be a string/);
+        assert.match(text, /stringAliases\.aliases must be a list of strings/);
+        assert.match(text, /unknownType\.type must be one of/);
+        assert.match(text, /missingDefinition: argument definition must be an object/);
+        assert.match(text, /stringRequired\.required must be a boolean/);
+        assert.match(text, /stringInteger\.integer must be a boolean/);
+
+        assert.deepEqual(validateArgumentDefinitions(null), [
+            {
+                code: "arguments.invalid",
+                message: "arguments must be an object",
+                path: [],
+                severity: "error",
+            },
+        ]);
+    });
 });
