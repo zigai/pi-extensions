@@ -114,6 +114,29 @@ Body
         }
     });
 
+    void it("returns diagnostics for invalid typed frontmatter field types", () => {
+        const parsed = parseSkillMarkdown(`---
+name: 123
+description: false
+form_title:
+  nested: value
+arguments:
+  path:
+    type: string
+---
+
+Body
+`);
+
+        assert.equal(parsed.status, "invalid");
+        if (parsed.status === "invalid") {
+            const messages = diagnosticMessages(parsed);
+            assert.match(messages, /frontmatter\.name must be a string/);
+            assert.match(messages, /frontmatter\.description must be a string/);
+            assert.match(messages, /frontmatter\.form_title must be a string/);
+        }
+    });
+
     void it("reports invalid skill argument metadata", () => {
         const result = normalizeSkillArguments({
             no_cache: {
@@ -184,6 +207,48 @@ Body
 });
 
 void describe("readTypedSkillMetadataResult", () => {
+    void it("returns diagnostics instead of throwing when the skill file cannot be read", () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-missing-"));
+        const result = readTypedSkillMetadataResult(join(dir, "SKILL.md"), {
+            fallbackName: "missing-demo",
+        });
+
+        assert.equal(result.status, "invalid");
+        if (result.status === "invalid") {
+            assert.equal(result.diagnostics.name, "missing-demo");
+            assert.match(diagnosticMessages(result.diagnostics), /failed to read typed arguments/);
+        }
+    });
+
+    void it("reports malformed typed frontmatter instead of treating the skill as absent", () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-invalid-frontmatter-"));
+        const skillPath = join(dir, "SKILL.md");
+        writeFileSync(
+            skillPath,
+            `---
+name: 123
+description: Demo skill
+arguments:
+  path:
+    type: string
+---
+
+Use {args.path}.
+`,
+        );
+
+        const result = readTypedSkillMetadataResult(skillPath, { fallbackName: "demo" });
+
+        assert.equal(result.status, "invalid");
+        if (result.status === "invalid") {
+            assert.equal(result.diagnostics.name, "demo");
+            assert.match(
+                diagnosticMessages(result.diagnostics),
+                /frontmatter\.name must be a string/,
+            );
+        }
+    });
+
     void it("reads top-level arguments from a real SKILL.md file", () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-"));
         const skillPath = join(dir, "SKILL.md");

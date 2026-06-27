@@ -40,12 +40,46 @@ function validateSkillPlaceholders(
     return diagnostics;
 }
 
+function fileReadErrorCode(cause: unknown): string | undefined {
+    if (typeof cause !== "object" || cause === null) {
+        return undefined;
+    }
+
+    const code = Reflect.get(cause, "code");
+    if (typeof code === "string") {
+        return code;
+    }
+    return undefined;
+}
+
+function fileReadErrorMessage(cause: unknown): string {
+    const code = fileReadErrorCode(cause);
+    if (code !== undefined) {
+        return `failed to read typed arguments (${code})`;
+    }
+    return "failed to read typed arguments";
+}
+
 /** Read and validate typed skill metadata from a `SKILL.md` file. */
 export function readTypedSkillMetadataResult(
     filePath: string,
     options: ReadTypedSkillMetadataOptions = {},
 ): ReadTypedSkillMetadataResult {
-    const content = readFileSync(filePath, "utf8");
+    let content: string;
+    try {
+        content = readFileSync(filePath, "utf8");
+    } catch (cause: unknown) {
+        return {
+            status: "invalid",
+            diagnostics: typedSkillDiagnostics(options.fallbackName ?? "unknown", filePath, [
+                skillArgumentDiagnostic({
+                    code: "skill.arguments.read_failed",
+                    message: fileReadErrorMessage(cause),
+                    path: [],
+                }),
+            ]),
+        };
+    }
     const parsedSkill = parseSkillMarkdown(content);
     if (parsedSkill.status === "invalid") {
         const diagnosticName = options.fallbackName ?? "unknown";
