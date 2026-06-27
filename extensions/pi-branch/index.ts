@@ -12,7 +12,7 @@ import {
     type ExtensionAPI,
     type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands/pi";
+import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
