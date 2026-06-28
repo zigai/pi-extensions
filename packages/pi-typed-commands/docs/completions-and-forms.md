@@ -76,6 +76,21 @@ For example:
 
 Set `piTypedCommands.helperPlacement` to `"belowEditor"` in Pi settings, or pass `helperPlacement: "belowEditor"` to `installTypedCommandUx()` when composing a custom extension entrypoint, to render the helper below the user input editor instead.
 
+Inline helper presentation can be customized globally from `~/.pi/agent/settings.json` with `piTypedCommands.appearance.inlineHelp`. For example, enable type-rich tokens without changing command definitions:
+
+```json
+{
+  "piTypedCommands": {
+    "appearance": {
+      "inlineHelp": {
+        "metadata": { "types": true, "aliases": true },
+        "order": "active-required-available"
+      }
+    }
+  }
+}
+```
+
 `Tab` completes unambiguous partial flags before opening the form. For example, `/branch -pro<Tab>` becomes `/branch --prompt `. A completed command such as `/branch<Tab>` opens the dense form.
 
 Inline errors are deferred while the user is still typing the current token. A value-taking flag such as `/branch --prompt ` stays quiet until a value is supplied, another argument is started, or the command is submitted.
@@ -94,18 +109,52 @@ Forms can also open automatically for missing required arguments or invalid valu
 
 The selected field is marked with `›` and accented so users can tell which value arrow keys, space, or typing will edit.
 
+Dense form presentation can be customized globally with `piTypedCommands.appearance.form`. The setting applies to extension commands and typed skills. Project settings and command metadata cannot override global colors or layout.
+
 ## Form configuration
 
-Command-level options:
+Command-level content options:
 
 ```ts
-registerTypedCommand(pi, command, {
+const command = defineTypedCommand({
+  name: "deploy",
+  description: "Deploy",
+  args: {
+    /* ... */
+  },
   formTitle: "Deploy",
   formSymbols: {
     selectedCheckbox: "■",
     unselectedCheckbox: "□",
   },
+  run() {},
 });
+```
+
+Global symbols override command `formSymbols` only when the global symbol is configured; otherwise command-level symbols keep working.
+
+Global form appearance example:
+
+```json
+{
+  "piTypedCommands": {
+    "appearance": {
+      "form": {
+        "symbols": {
+          "focusedField": "»",
+          "selectedCheckbox": "☑",
+          "unselectedCheckbox": "☐"
+        },
+        "layout": {
+          "minNameWidth": 10,
+          "maxNameWidth": 30,
+          "descriptions": "focused",
+          "instructions": "short"
+        }
+      }
+    }
+  }
+}
 ```
 
 Argument-level `ui` metadata:

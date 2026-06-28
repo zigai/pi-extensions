@@ -87,6 +87,25 @@ Or set it in Pi settings:
 { "piTypedCommands": { "helperPlacement": "belowEditor" } }
 ```
 
+Users can also customize presentation globally in `~/.pi/agent/settings.json` without changing extension or skill definitions:
+
+```json
+{
+  "piTypedCommands": {
+    "appearance": {
+      "inlineHelp": {
+        "metadata": { "types": true, "aliases": true },
+        "colors": { "active": "accent", "required": "warning" }
+      },
+      "form": {
+        "symbols": { "focusedField": "»", "selectedCheckbox": "☑" },
+        "layout": { "descriptions": "focused", "instructions": "short" }
+      }
+    }
+  }
+}
+```
+
 ## Supported argument types
 
 | Type         | What it is for                             | Common options                                                     |
