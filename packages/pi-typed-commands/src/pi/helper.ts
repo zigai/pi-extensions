@@ -1,7 +1,10 @@
 import type { ExtensionContext, WidgetPlacement } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
+import { casesHandled } from "../exhaustive.js";
 import { lexTypedArgumentString, parseTypedCommandArgs } from "../parser.js";
 import {
+    argumentFlagNames,
+    argumentTypeHint,
     argumentValueHint,
     formatArgumentFlagName,
     isPositionalArgument,
@@ -18,6 +21,11 @@ import {
     editorTextForInvocation,
     type EditorTypedCommandInvocation,
 } from "./editor-invocation.js";
+import {
+    DEFAULT_PI_TYPED_COMMANDS_APPEARANCE,
+    type InlineHelpOrder,
+    type ResolvedInlineHelpAppearance,
+} from "./presentation-config.js";
 
 /** Widget key used for the typed-command live helper. */
 export const WIDGET_KEY = "pi-typed-commands.helper";
@@ -36,14 +44,37 @@ export function commandArgumentEntries(
     return orderedCommandArgumentEntries(command);
 }
 
-function helperAvailableToken(name: string, definition: ArgumentDefinition): string {
+function helperValueHint(
+    name: string,
+    definition: ArgumentDefinition,
+    appearance: ResolvedInlineHelpAppearance,
+): string {
+    if (
+        appearance.metadata.enumValues === false &&
+        (definition.type === "enum" || definition.type === "multi-enum") &&
+        definition.placeholder === undefined
+    ) {
+        return argumentTypeHint(definition);
+    }
+    return argumentValueHint(definition, name);
+}
+
+function helperAvailableToken(
+    name: string,
+    definition: ArgumentDefinition,
+    appearance: ResolvedInlineHelpAppearance,
+): string {
     if (isPositionalArgument(definition)) {
         return name;
     }
     if (definition.type === "boolean") {
         return formatArgumentFlagName(name, definition);
     }
-    return `${formatArgumentFlagName(name, definition)} <${argumentValueHint(definition, name)}>`;
+    return `${formatArgumentFlagName(name, definition)} <${helperValueHint(
+        name,
+        definition,
+        appearance,
+    )}>`;
 }
 
 function helperHasNamedFlag(rawArgs: string): boolean {
@@ -66,24 +97,42 @@ function formatHelperValue(value: unknown): string {
     return JSON.stringify(value);
 }
 
-function providedHelperToken(name: string, definition: ArgumentDefinition, value: unknown): string {
+function providedHelperToken(
+    name: string,
+    definition: ArgumentDefinition,
+    value: unknown,
+    valueSeparator: string,
+): string {
     if (isPositionalArgument(definition)) {
-        return `${name}=${formatHelperValue(value)}`;
+        return `${name}${valueSeparator}${formatHelperValue(value)}`;
     }
     const flag = formatArgumentFlagName(name, definition);
     if (definition.type === "boolean") {
         if (value === true) {
             return flag;
         }
-        return `${flag}=false`;
+        return `${flag}${valueSeparator}false`;
     }
-    return `${flag}=${formatHelperValue(value)}`;
+    return `${flag}${valueSeparator}${formatHelperValue(value)}`;
 }
 
-type InlineHelperTokens = {
-    active: string[];
-    required: string[];
-    available: string[];
+type InlineHelpDisplayState = "active" | "required" | "available";
+
+type InlineHelpValueSource = "provided" | "default";
+
+type InlineHelpItem = {
+    name: string;
+    definition: ArgumentDefinition;
+    state: InlineHelpDisplayState;
+    valueSource?: InlineHelpValueSource;
+    value?: unknown;
+    index: number;
+};
+
+type InlineTokenCoreSegments = {
+    beforeType: string;
+    typeSuffix: string | undefined;
+    afterType: string;
 };
 
 function shouldDisplayDefaultToken(
@@ -106,46 +155,279 @@ function defaultHelperToken(
     name: string,
     definition: ArgumentDefinition,
     value: ArgumentValue | undefined,
+    valueSeparator: string,
 ): string {
     if (isPositionalArgument(definition)) {
-        return `${name}=${formatHelperValue(value)}`;
+        return `${name}${valueSeparator}${formatHelperValue(value)}`;
     }
     const flag = formatArgumentFlagName(name, definition);
     if (definition.type === "boolean") {
-        return `${flag}=true`;
+        return `${flag}${valueSeparator}true`;
     }
-    return `${flag}=${formatHelperValue(value)}`;
+    return `${flag}${valueSeparator}${formatHelperValue(value)}`;
 }
 
-function collectInlineHelperTokens(invocation: EditorTypedCommandInvocation): InlineHelperTokens {
+function collectInlineHelperItems(
+    invocation: EditorTypedCommandInvocation,
+    appearance: ResolvedInlineHelpAppearance,
+): InlineHelpItem[] {
     const parsed = parseTypedCommandArgs(invocation.command, invocation.rawArgs);
     const hasNamedFlag = helperHasNamedFlag(invocation.rawArgs);
-    const active: string[] = [];
-    const required: string[] = [];
-    const available: string[] = [];
+    const items: InlineHelpItem[] = [];
 
-    for (const [name, definition] of commandArgumentEntries(invocation.command)) {
+    const entries = commandArgumentEntries(invocation.command);
+    for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        if (entry === undefined) {
+            continue;
+        }
+        const [name, definition] = entry;
         const value = parsed.values[name];
         const source = parsed.sources?.get(name);
         if (parsed.provided.has(name)) {
-            active.push(providedHelperToken(name, definition, value));
+            items.push({
+                name,
+                definition,
+                state: "active",
+                value,
+                valueSource: "provided",
+                index,
+            });
             continue;
         }
-        if (source === "default" && shouldDisplayDefaultToken(definition, value)) {
-            active.push(defaultHelperToken(name, definition, value));
+        if (
+            source === "default" &&
+            appearance.metadata.defaults &&
+            shouldDisplayDefaultToken(definition, value)
+        ) {
+            items.push({ name, definition, state: "active", value, valueSource: "default", index });
             continue;
         }
         if (hasNamedFlag && isPositionalArgument(definition)) {
             continue;
         }
         if (definition.required === true) {
-            required.push(helperAvailableToken(name, definition));
+            items.push({ name, definition, state: "required", index });
         } else {
-            available.push(helperAvailableToken(name, definition));
+            items.push({ name, definition, state: "available", index });
         }
     }
 
-    return { active, required, available };
+    return items;
+}
+
+function inlineHelpLabel(name: string, definition: ArgumentDefinition): string {
+    if (isPositionalArgument(definition)) {
+        return name;
+    }
+    return formatArgumentFlagName(name, definition);
+}
+
+function helperTypeSuffix(
+    definition: ArgumentDefinition,
+    appearance: ResolvedInlineHelpAppearance,
+): string | undefined {
+    if (!appearance.metadata.types) {
+        return undefined;
+    }
+    return `${appearance.format.typeSeparator}${argumentTypeHint(definition)}`;
+}
+
+function helperRequiredMarker(
+    definition: ArgumentDefinition,
+    appearance: ResolvedInlineHelpAppearance,
+): string {
+    if (!appearance.metadata.required || definition.required !== true) {
+        return "";
+    }
+    return "!";
+}
+
+function helperAliasesMetadata(name: string, definition: ArgumentDefinition): string | undefined {
+    if (isPositionalArgument(definition)) {
+        return undefined;
+    }
+    const aliases = argumentFlagNames(name, definition)
+        .slice(1)
+        .map((alias) => `--${alias}`);
+    if (aliases.length === 0) {
+        return undefined;
+    }
+    return `aliases ${aliases.join(",")}`;
+}
+
+function helperDefaultMetadata(definition: ArgumentDefinition): string | undefined {
+    if (definition.default === undefined) {
+        return undefined;
+    }
+    return `default ${formatHelperValue(definition.default)}`;
+}
+
+function renderInlineMetadata(parts: string[]): string {
+    if (parts.length === 0) {
+        return "";
+    }
+    return ` (${parts.join(", ")})`;
+}
+
+function inlineTokenSegments(
+    beforeType: string,
+    typeSuffix?: string,
+    afterType = "",
+): InlineTokenCoreSegments {
+    return { beforeType, typeSuffix, afterType };
+}
+
+function inlineTokenCoreSegments(
+    item: InlineHelpItem,
+    appearance: ResolvedInlineHelpAppearance,
+): InlineTokenCoreSegments {
+    if (item.valueSource === "provided") {
+        if (!appearance.metadata.types && !appearance.metadata.required) {
+            return inlineTokenSegments(
+                providedHelperToken(
+                    item.name,
+                    item.definition,
+                    item.value,
+                    appearance.format.valueSeparator,
+                ),
+            );
+        }
+        const label = `${inlineHelpLabel(item.name, item.definition)}${helperRequiredMarker(
+            item.definition,
+            appearance,
+        )}`;
+        const typeSuffix = helperTypeSuffix(item.definition, appearance);
+        if (item.definition.type === "boolean") {
+            if (item.value === true && !appearance.metadata.types) {
+                return inlineTokenSegments(label, typeSuffix);
+            }
+            return inlineTokenSegments(
+                label,
+                typeSuffix,
+                `${appearance.format.valueSeparator}${formatHelperValue(item.value)}`,
+            );
+        }
+        return inlineTokenSegments(
+            label,
+            typeSuffix,
+            `${appearance.format.valueSeparator}${formatHelperValue(item.value)}`,
+        );
+    }
+
+    if (item.valueSource === "default") {
+        if (!appearance.metadata.types && !appearance.metadata.required) {
+            return inlineTokenSegments(
+                defaultHelperToken(
+                    item.name,
+                    item.definition,
+                    item.value as ArgumentValue | undefined,
+                    appearance.format.valueSeparator,
+                ),
+            );
+        }
+        const label = `${inlineHelpLabel(item.name, item.definition)}${helperRequiredMarker(
+            item.definition,
+            appearance,
+        )}`;
+        return inlineTokenSegments(
+            label,
+            helperTypeSuffix(item.definition, appearance),
+            `${appearance.format.valueSeparator}${formatHelperValue(item.value)}`,
+        );
+    }
+
+    if (!appearance.metadata.types && !appearance.metadata.required) {
+        return inlineTokenSegments(helperAvailableToken(item.name, item.definition, appearance));
+    }
+
+    const label = `${inlineHelpLabel(item.name, item.definition)}${helperRequiredMarker(
+        item.definition,
+        appearance,
+    )}`;
+    const typeSuffix = helperTypeSuffix(item.definition, appearance);
+    if (isPositionalArgument(item.definition) || item.definition.type === "boolean") {
+        return inlineTokenSegments(label, typeSuffix);
+    }
+    return inlineTokenSegments(
+        label,
+        typeSuffix,
+        ` <${helperValueHint(item.name, item.definition, appearance)}>`,
+    );
+}
+
+function renderColoredPart(theme: HelperTheme, color: string, text: string): string {
+    if (text.length === 0) {
+        return "";
+    }
+    return theme.fg(color, text);
+}
+
+function renderInlineHelpToken(
+    item: InlineHelpItem,
+    theme: HelperTheme,
+    appearance: ResolvedInlineHelpAppearance,
+): string {
+    const metadataParts: string[] = [];
+    if (
+        appearance.metadata.defaults &&
+        appearance.metadata.types &&
+        item.valueSource !== "default"
+    ) {
+        const defaultMetadata = helperDefaultMetadata(item.definition);
+        if (defaultMetadata !== undefined) {
+            metadataParts.push(defaultMetadata);
+        }
+    }
+    if (appearance.metadata.aliases) {
+        const aliases = helperAliasesMetadata(item.name, item.definition);
+        if (aliases !== undefined) {
+            metadataParts.push(aliases);
+        }
+    }
+    if (appearance.metadata.descriptions && item.definition.description !== undefined) {
+        metadataParts.push(item.definition.description);
+    }
+
+    const metadata = renderInlineMetadata(metadataParts);
+    let renderedMetadata = "";
+    if (metadata.length > 0) {
+        renderedMetadata = theme.fg(appearance.colors.metadata, metadata);
+    }
+    const segments = inlineTokenCoreSegments(item, appearance);
+    const stateColor = appearance.colors[item.state];
+    return (
+        renderColoredPart(theme, stateColor, appearance.format.tokenPrefix + segments.beforeType) +
+        renderColoredPart(theme, appearance.colors.type, segments.typeSuffix ?? "") +
+        renderColoredPart(theme, stateColor, segments.afterType) +
+        renderedMetadata +
+        renderColoredPart(theme, stateColor, appearance.format.tokenSuffix)
+    );
+}
+
+function orderGroups(order: InlineHelpOrder): InlineHelpDisplayState[] {
+    if (order === "definition") {
+        return ["active", "required", "available"];
+    }
+    return order.split("-") as InlineHelpDisplayState[];
+}
+
+function orderedInlineHelpItems(
+    items: InlineHelpItem[],
+    appearance: ResolvedInlineHelpAppearance,
+): InlineHelpItem[][] {
+    if (appearance.order === "definition") {
+        return [[...items].sort((left, right) => left.index - right.index)];
+    }
+
+    const groups: InlineHelpItem[][] = [];
+    for (const state of orderGroups(appearance.order)) {
+        const group = items.filter((item) => item.state === state);
+        if (group.length > 0) {
+            groups.push(group);
+        }
+    }
+    return groups;
 }
 
 type ArgumentToken = { raw: string; value: string };
@@ -264,36 +546,50 @@ type HelperTheme = {
     fg(color: string, text: string): string;
 };
 
+function renderCompactInlineHelper(
+    invocation: EditorTypedCommandInvocation,
+    width: number,
+    theme: HelperTheme,
+    state: HelperRenderState,
+    appearance: ResolvedInlineHelpAppearance,
+): string[] {
+    const commandPrefix = `/${commandDisplayName(invocation.command)}`;
+    const helperIndent = " ".repeat(commandPrefix.length + 2);
+    const items = collectInlineHelperItems(invocation, appearance);
+    const tokenGroups = orderedInlineHelpItems(items, appearance).map((group) =>
+        group
+            .map((item) => renderInlineHelpToken(item, theme, appearance))
+            .join(appearance.format.itemSeparator),
+    );
+    const commandLine = `${helperIndent}${tokenGroups.join(appearance.format.groupSeparator)}`;
+    const rendered = [truncateToWidth(commandLine, width, "")];
+    const issueLine = inlineIssueLine(invocation, state);
+    if (issueLine !== undefined) {
+        rendered.push(
+            truncateToWidth(
+                `${helperIndent}${theme.fg(appearance.colors.issue, issueLine)}`,
+                width,
+                "",
+            ),
+        );
+    }
+    return rendered;
+}
+
 /** Render the inline typed-command helper as TUI lines for the current editor invocation. */
 export function renderInlineHelper(
     invocation: EditorTypedCommandInvocation,
     width: number,
     theme: HelperTheme,
     state: HelperRenderState = {},
+    appearance: ResolvedInlineHelpAppearance = DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp,
 ): string[] {
-    const tokens = collectInlineHelperTokens(invocation);
-    const active = tokens.active.map((token) => `[${token}]`).join(" ");
-    const required = tokens.required.map((token) => `[${token}]`).join(" ");
-    const available = tokens.available.map((token) => `[${token}]`).join(" ");
-    const commandPrefix = `/${commandDisplayName(invocation.command)}`;
-    const helperIndent = " ".repeat(commandPrefix.length + 2);
-    const tokenGroups: string[] = [];
-    if (active.length > 0) {
-        tokenGroups.push(theme.fg("accent", active));
+    switch (appearance.layout) {
+        case "compact":
+            return renderCompactInlineHelper(invocation, width, theme, state, appearance);
+        default:
+            return casesHandled(appearance.layout);
     }
-    if (required.length > 0) {
-        tokenGroups.push(theme.fg("warning", required));
-    }
-    if (available.length > 0) {
-        tokenGroups.push(theme.fg("dim", available));
-    }
-    const commandLine = `${helperIndent}${tokenGroups.join("  ")}`;
-    const rendered = [truncateToWidth(commandLine, width, "")];
-    const issueLine = inlineIssueLine(invocation, state);
-    if (issueLine !== undefined) {
-        rendered.push(truncateToWidth(`${helperIndent}${theme.fg("error", issueLine)}`, width, ""));
-    }
-    return rendered;
 }
 
 /** Set or clear the Pi helper widget for one extension context. */
@@ -302,6 +598,7 @@ export function setHelperWidget(
     invocation: EditorTypedCommandInvocation | undefined,
     placement: WidgetPlacement,
     state: HelperRenderState = {},
+    appearance: ResolvedInlineHelpAppearance = DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp,
 ): void {
     if (invocation === undefined) {
         ctx.ui.setWidget(WIDGET_KEY, undefined, { placement });
@@ -312,7 +609,7 @@ export function setHelperWidget(
         WIDGET_KEY,
         (_tui, theme) => ({
             render(width: number): string[] {
-                return renderInlineHelper(invocation, width, theme, state);
+                return renderInlineHelper(invocation, width, theme, state, appearance);
             },
             invalidate(): void {},
         }),

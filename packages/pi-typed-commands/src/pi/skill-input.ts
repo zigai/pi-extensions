@@ -13,8 +13,9 @@ import { readTypedSkillMetadataResult } from "../skills/metadata.js";
 import { renderTypedSkillInvocation } from "../skills/prompt.js";
 import type { SkillArgumentDiagnostic, TypedSkillDiagnostics } from "../skills/types.js";
 import type { FormMode, ParsedCommandArguments, RegisteredTypedCommand } from "../types.js";
-import { formatDetailedHelp } from "../usage.js";
 import { commandInvocationForEditorText, slashCommandMatch } from "./editor-invocation.js";
+import { notifyDetailedHelp } from "./help.js";
+import type { ResolvedPiTypedCommandsAppearance } from "./presentation-config.js";
 import { notifyIssues, shouldNotifyInsteadOfOpeningForm } from "./register.js";
 
 type SkillParseResult = {
@@ -107,6 +108,7 @@ export async function renderTypedSkillInput(
     trailingBody: string,
     ctx: ExtensionCommandContext,
     formMode: FormMode,
+    appearance?: ResolvedPiTypedCommandsAppearance,
 ): Promise<string | undefined> {
     if (!isTypedSkillCommand(command)) {
         return undefined;
@@ -114,7 +116,7 @@ export async function renderTypedSkillInput(
 
     const { parsed, additionalInput } = parseSkillArguments(command, rawArgs, trailingBody);
     if (parsed.mode === "help") {
-        ctx.ui.notify(formatDetailedHelp(command), "info");
+        notifyDetailedHelp(ctx, command, appearance);
         return undefined;
     }
 

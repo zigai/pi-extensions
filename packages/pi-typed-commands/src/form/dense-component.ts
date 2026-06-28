@@ -19,6 +19,7 @@ import {
 } from "../schema.js";
 import type { FormField, FormState } from "../pi-tui/form-model.js";
 import type { ArgumentDefinition, ArgumentValue, TypedCommandFormSymbols } from "../types.js";
+import type { ResolvedFormAppearance, ResolvedFormSymbols } from "../pi/presentation-config.js";
 import { FORM_MESSAGE_OPTIONS, UNSET_OPTION } from "./constants.js";
 import {
     filterNumberInputData,
@@ -42,13 +43,6 @@ export type FormResult = {
     confirmed: boolean;
     state: FormState;
 };
-
-const LEFT_PADDING = 1;
-const FIELD_GAP = 1;
-const MIN_VALUE_WIDTH = 12;
-const MAX_VALUE_WIDTH = 32;
-const MIN_NAME_WIDTH = 12;
-const MAX_NAME_WIDTH = 24;
 
 function widgetFor(definition: ArgumentDefinition): string {
     if (definition.ui?.widget !== undefined) {
@@ -134,12 +128,17 @@ function paddedCell(text: string, width: number): string {
     return truncated + " ".repeat(padding);
 }
 
-function calculateValueWidth(width: number, nameWidth: number): number {
-    const available = width - LEFT_PADDING - nameWidth - FIELD_GAP * 3 - 6;
-    if (available < MIN_VALUE_WIDTH) {
-        return MIN_VALUE_WIDTH;
+function calculateValueWidth(
+    width: number,
+    nameWidth: number,
+    appearance: ResolvedFormAppearance,
+): number {
+    const { layout } = appearance;
+    const available = width - layout.leftPadding - nameWidth - layout.fieldGap * 3 - 6;
+    if (available < layout.minValueWidth) {
+        return layout.minValueWidth;
     }
-    return Math.min(MAX_VALUE_WIDTH, available);
+    return Math.min(layout.maxValueWidth, available);
 }
 
 function fieldTitle(field: FormField): string {
@@ -168,17 +167,33 @@ function stepValue(
     return values[nextIndex];
 }
 
-function createEditorTheme(theme: FormTheme): TextEditorTheme {
+function createEditorTheme(theme: FormTheme, appearance: ResolvedFormAppearance): TextEditorTheme {
     const selectList = {
-        selectedPrefix: (text: string) => theme.fg("accent", text),
-        selectedText: (text: string) => theme.fg("accent", text),
-        description: (text: string) => theme.fg("muted", text),
-        scrollInfo: (text: string) => theme.fg("dim", text),
-        noMatch: (text: string) => theme.fg("warning", text),
+        selectedPrefix: (text: string) => theme.fg(appearance.colors.selectedOption, text),
+        selectedText: (text: string) => theme.fg(appearance.colors.selectedOption, text),
+        description: (text: string) => theme.fg(appearance.colors.description, text),
+        scrollInfo: (text: string) => theme.fg(appearance.colors.instructions, text),
+        noMatch: (text: string) => theme.fg(appearance.colors.issue, text),
     };
     return {
-        borderColor: (text: string) => theme.fg("accent", text),
+        borderColor: (text: string) => theme.fg(appearance.colors.editorBorder, text),
         selectList,
+    };
+}
+
+function resolveComponentSymbols(
+    commandSymbols: Required<TypedCommandFormSymbols>,
+    appearance: ResolvedFormAppearance,
+): ResolvedFormSymbols {
+    return {
+        focusedField: appearance.symbols.focusedField,
+        selectedCheckbox:
+            appearance.symbolOverrides.selectedCheckbox ?? commandSymbols.selectedCheckbox,
+        unselectedCheckbox:
+            appearance.symbolOverrides.unselectedCheckbox ?? commandSymbols.unselectedCheckbox,
+        selectedRadio: appearance.symbolOverrides.selectedRadio ?? commandSymbols.selectedRadio,
+        unselectedRadio:
+            appearance.symbolOverrides.unselectedRadio ?? commandSymbols.unselectedRadio,
     };
 }
 
@@ -193,7 +208,8 @@ export class ArgumentFormComponent implements Component, Focusable {
     private readonly state: FormState;
     private readonly title: string;
     private readonly theme: FormTheme;
-    private readonly symbols: Required<TypedCommandFormSymbols>;
+    private readonly symbols: ResolvedFormSymbols;
+    private readonly appearance: ResolvedFormAppearance;
     private readonly done: (result: FormResult | undefined) => void;
 
     private _focused = false;
@@ -213,6 +229,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         state: FormState,
         theme: FormTheme,
         symbols: Required<TypedCommandFormSymbols>,
+        appearance: ResolvedFormAppearance,
         done: (result: FormResult | undefined) => void,
         selectedIndex = 0,
     ) {
@@ -220,10 +237,13 @@ export class ArgumentFormComponent implements Component, Focusable {
         this.fields = fields;
         this.state = state;
         this.theme = theme;
-        this.symbols = symbols;
+        this.appearance = appearance;
+        this.symbols = resolveComponentSymbols(symbols, appearance);
         this.done = done;
         this.selectedIndex = selectedIndex;
-        this.editor = new Editor(tui, createEditorTheme(theme), { autocompleteMaxVisible: 6 });
+        this.editor = new Editor(tui, createEditorTheme(theme, appearance), {
+            autocompleteMaxVisible: 6,
+        });
         this.editor.disableSubmit = true;
         this.input.onSubmit = () => {
             this.submit();
@@ -358,7 +378,7 @@ export class ArgumentFormComponent implements Component, Focusable {
     render(width: number): string[] {
         this.applyComputedValues();
         const nameWidth = this.calculateNameWidth(width);
-        const valueWidth = calculateValueWidth(width, nameWidth);
+        const valueWidth = calculateValueWidth(width, nameWidth, this.appearance);
         const lines: string[] = [];
         lines.push(this.renderHeader(width));
         lines.push("");
@@ -370,30 +390,53 @@ export class ArgumentFormComponent implements Component, Focusable {
         const selectedIssue = this.currentIssue();
         if (selectedIssue !== undefined) {
             lines.push("");
-            lines.push(this.fitLine(this.theme.fg("warning", selectedIssue), width));
+            lines.push(
+                this.fitLine(this.theme.fg(this.appearance.colors.issue, selectedIssue), width),
+            );
         }
 
-        lines.push("");
-        lines.push(
-            this.fitLine(
-                this.theme.fg("dim", "enter submit · ↑↓/tab move · ←/→/space cycle · esc cancel"),
-                width,
-            ),
-        );
+        const instructions = this.instructionsText();
+        if (instructions !== undefined) {
+            lines.push("");
+            lines.push(
+                this.fitLine(
+                    this.theme.fg(this.appearance.colors.instructions, instructions),
+                    width,
+                ),
+            );
+        }
         return lines;
     }
 
     private renderHeader(width: number): string {
-        return this.fitLine(this.theme.fg("accent", this.theme.bold(this.title)), width);
+        return this.fitLine(
+            this.theme.fg(this.appearance.colors.title, this.theme.bold(this.title)),
+            width,
+        );
+    }
+
+    private instructionsText(): string | undefined {
+        switch (this.appearance.layout.instructions) {
+            case "full":
+                return "enter submit · ↑↓/tab move · ←/→/space cycle · esc cancel";
+            case "short":
+                return "enter submit · tab move · esc cancel";
+            case "hidden":
+                return undefined;
+            default:
+                return casesHandled(this.appearance.layout.instructions);
+        }
     }
 
     private calculateNameWidth(width: number): number {
+        const { layout } = this.appearance;
         const visibleTitleWidths = this.fields
             .filter((field) => !isHiddenField(field.definition, this.state))
             .map((field) => visibleWidth(fieldTitle(field)));
-        const desired = Math.max(MIN_NAME_WIDTH, ...visibleTitleWidths);
-        const available = width - LEFT_PADDING - FIELD_GAP * 3 - MIN_VALUE_WIDTH - 6;
-        const maxWidth = Math.max(MIN_NAME_WIDTH, Math.min(MAX_NAME_WIDTH, available));
+        const desired = Math.max(layout.minNameWidth, ...visibleTitleWidths);
+        const available =
+            width - layout.leftPadding - layout.fieldGap * 3 - layout.minValueWidth - 6;
+        const maxWidth = Math.max(layout.minNameWidth, Math.min(layout.maxNameWidth, available));
         return Math.min(desired, maxWidth);
     }
 
@@ -416,9 +459,9 @@ export class ArgumentFormComponent implements Component, Focusable {
         const rawName = paddedCell(fieldTitle(field), nameWidth);
         let name = rawName;
         if (selected) {
-            name = this.theme.fg("accent", rawName);
+            name = this.theme.fg(this.appearance.colors.focusedLabel, rawName);
         }
-        const prefix = " ".repeat(LEFT_PADDING) + marker + " ";
+        const prefix = " ".repeat(this.appearance.layout.leftPadding) + marker + " ";
 
         if (isExpandedOptionsWidget(field.definition)) {
             return this.renderExpandedField(
@@ -433,34 +476,57 @@ export class ArgumentFormComponent implements Component, Focusable {
         }
 
         const value = this.renderFieldValue(field, selected, valueWidth);
-        const base = prefix + name + " ".repeat(FIELD_GAP) + value;
-        const lines = [this.renderInlineFieldLine(base, field, width)];
+        const base = prefix + name + " ".repeat(this.appearance.layout.fieldGap) + value;
+        const lines = [this.renderInlineFieldLine(base, field, selected, width)];
 
         if (selected && isTextareaWidget(field.definition)) {
-            const editorWidth = Math.max(20, width - LEFT_PADDING - 2);
+            const editorWidth = Math.max(20, width - this.appearance.layout.leftPadding - 2);
             const rows = field.definition.ui?.rows ?? 4;
             for (const line of this.editor.render(editorWidth).slice(0, rows)) {
-                lines.push(this.fitLine(" ".repeat(LEFT_PADDING + 2) + line, width));
+                lines.push(
+                    this.fitLine(" ".repeat(this.appearance.layout.leftPadding + 2) + line, width),
+                );
             }
         }
 
         return lines;
     }
 
-    private renderInlineFieldLine(base: string, field: FormField, width: number): string {
-        if (field.definition.description === undefined) {
+    private renderInlineFieldLine(
+        base: string,
+        field: FormField,
+        selected: boolean,
+        width: number,
+    ): string {
+        if (field.definition.description === undefined || !this.shouldRenderDescription(selected)) {
             return this.fitLine(base, width);
         }
 
-        const separator = " ".repeat(FIELD_GAP);
+        const separator = " ".repeat(this.appearance.layout.fieldGap);
         const remaining = Math.max(0, width - visibleWidth(base) - visibleWidth(separator));
         const description = truncateToWidth(field.definition.description, remaining, "…");
-        return this.fitLine(base + separator + this.theme.fg("dim", description), width);
+        return this.fitLine(
+            base + separator + this.theme.fg(this.appearance.colors.description, description),
+            width,
+        );
+    }
+
+    private shouldRenderDescription(selected: boolean): boolean {
+        switch (this.appearance.layout.descriptions) {
+            case "inline":
+                return true;
+            case "focused":
+                return selected;
+            case "hidden":
+                return false;
+            default:
+                return casesHandled(this.appearance.layout.descriptions);
+        }
     }
 
     private fieldMarker(selected: boolean): string {
         if (selected) {
-            return this.theme.fg("accent", "›");
+            return this.theme.fg(this.appearance.colors.focusedLabel, this.symbols.focusedField);
         }
         return " ";
     }
@@ -472,7 +538,10 @@ export class ArgumentFormComponent implements Component, Focusable {
         }
 
         if (selected && isTextareaWidget(field.definition)) {
-            return this.theme.fg("accent", paddedCell(formatValue(this.state[field.name]), width));
+            return this.theme.fg(
+                this.appearance.colors.focusedValue,
+                paddedCell(formatValue(this.state[field.name]), width),
+            );
         }
 
         if (selected && isTextWidget(field.definition)) {
@@ -489,10 +558,10 @@ export class ArgumentFormComponent implements Component, Focusable {
             case "enum": {
                 const rawValue = paddedCell(formatValue(this.state[field.name]), width);
                 if (selected) {
-                    return this.theme.fg("accent", rawValue);
+                    return this.theme.fg(this.appearance.colors.focusedValue, rawValue);
                 }
                 if (this.state[field.name] === undefined) {
-                    return this.theme.fg("muted", rawValue);
+                    return this.theme.fg(this.appearance.colors.unsetValue, rawValue);
                 }
                 return rawValue;
             }
@@ -557,7 +626,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         }
         const rawValue = paddedCell(checkbox, width);
         if (selected) {
-            return this.theme.fg("accent", rawValue);
+            return this.theme.fg(this.appearance.colors.focusedValue, rawValue);
         }
         return rawValue;
     }
@@ -577,7 +646,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             }
             const text = `${checkbox} ${value}`;
             if (selected && index === cursor) {
-                return this.theme.fg("accent", text);
+                return this.theme.fg(this.appearance.colors.selectedOption, text);
             }
             return text;
         });
@@ -594,16 +663,19 @@ export class ArgumentFormComponent implements Component, Focusable {
         valueWidth: number,
     ): string[] {
         const parts = this.optionParts(field, selected);
-        const optionsText = parts.join("  ");
-        const fieldPrefix = prefix + name + " ".repeat(FIELD_GAP);
+        const optionGap = " ".repeat(Math.max(1, this.appearance.layout.fieldGap * 2));
+        const optionsText = parts.join(optionGap);
+        const fieldPrefix = prefix + name + " ".repeat(this.appearance.layout.fieldGap);
         if (visibleWidth(optionsText) <= valueWidth) {
             const base = fieldPrefix + paddedCell(optionsText, valueWidth);
-            return [this.renderInlineFieldLine(base, field, width)];
+            return [this.renderInlineFieldLine(base, field, selected, width)];
         }
 
         const base = fieldPrefix + paddedCell("", valueWidth);
-        const lines = [this.renderInlineFieldLine(base, field, width)];
-        const optionPrefix = " ".repeat(LEFT_PADDING + 2 + nameWidth + FIELD_GAP);
+        const lines = [this.renderInlineFieldLine(base, field, selected, width)];
+        const optionPrefix = " ".repeat(
+            this.appearance.layout.leftPadding + 2 + nameWidth + this.appearance.layout.fieldGap,
+        );
         for (const part of parts) {
             lines.push(this.fitLine(optionPrefix + part, width));
         }
@@ -637,7 +709,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             }
             let text = `${radio} ${value}`;
             if (selected && this.state[field.name] === value) {
-                text = this.theme.fg("accent", text);
+                text = this.theme.fg(this.appearance.colors.selectedOption, text);
             }
             return text;
         });
@@ -659,7 +731,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             }
             let text = `${checkbox} ${value}`;
             if (selected && index === cursor) {
-                text = this.theme.fg("accent", text);
+                text = this.theme.fg(this.appearance.colors.selectedOption, text);
             }
             return text;
         });
@@ -687,7 +759,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             cell += CURSOR_MARKER;
         }
         const padding = Math.max(0, width - visibleWidth(cell));
-        return this.theme.fg("accent", cell + " ".repeat(padding));
+        return this.theme.fg(this.appearance.colors.focusedValue, cell + " ".repeat(padding));
     }
 
     private fitLine(line: string, width: number): string {

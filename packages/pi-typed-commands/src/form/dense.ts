@@ -8,6 +8,7 @@ import type {
     RegisteredTypedCommand,
 } from "../types.js";
 import { ArgumentFormComponent, type FormResult } from "./dense-component.js";
+import { resolveTypedCommandAppearance } from "../pi/settings.js";
 
 function resolveFormTitle<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
@@ -31,6 +32,7 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
     ctx: ExtensionCommandContext,
 ): Promise<Record<string, ArgumentValue> | undefined> {
     const { state, fields, initialSelection } = createHeadlessFormModel(command.args, parsed, mode);
+    const appearance = resolveTypedCommandAppearance(ctx).form;
 
     if (fields.length === 0) {
         return state;
@@ -45,6 +47,7 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
                 state,
                 theme,
                 command.formSymbols,
+                appearance,
                 done,
                 initialSelection,
             ),

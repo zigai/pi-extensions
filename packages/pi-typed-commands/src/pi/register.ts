@@ -6,7 +6,6 @@ import { getTypedArgumentCompletions } from "../completions.js";
 import { decideArgumentIssueAction } from "../invocation.js";
 import { parseTypedCommandArgs } from "../parser.js";
 import { registerTypedCommandMetadata } from "../registry.js";
-import { formatDetailedHelp } from "../usage.js";
 import { openArgumentForm } from "../form/open.js";
 import type {
     ArgumentDefinitions,
@@ -20,6 +19,7 @@ import type {
     TypedCommandHandle,
 } from "../types.js";
 import { helperInvocationForEditorText } from "./editor-invocation.js";
+import { notifyDetailedHelp } from "./help.js";
 import { setHelperWidget } from "./helper.js";
 import { markSubmittedInvalidCommand } from "./session-state.js";
 import { resolveTypedCommandUxOptions } from "./settings.js";
@@ -45,7 +45,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
 ): Promise<InferArguments<FlatArgumentDefinitions> | undefined> {
     const parsed = parseTypedCommandArgs(command, rawArgs);
     if (parsed.mode === "help") {
-        ctx.ui.notify(formatDetailedHelp(command), "info");
+        notifyDetailedHelp(ctx, command);
         return undefined;
     }
 
@@ -76,11 +76,13 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
             }
             ctx.ui.setEditorText(editorText);
             if (!markSubmittedInvalidCommand(ctx, editorText)) {
+                const options = resolveTypedCommandUxOptions({}, ctx);
                 setHelperWidget(
                     ctx,
                     helperInvocationForEditorText(editorText),
-                    resolveTypedCommandUxOptions({}, ctx).helperPlacement,
+                    options.helperPlacement,
                     { submittedInvalidEditorText: editorText },
+                    options.appearance.inlineHelp,
                 );
             }
             return undefined;

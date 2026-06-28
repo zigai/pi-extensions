@@ -1,5 +1,6 @@
 import { toKebabCase } from "./names.js";
 import {
+    argumentFlagNames,
     argumentTypeHint,
     argumentValueHint,
     formatArgumentDefault,
@@ -20,6 +21,33 @@ export type CommandUsagePart = {
 
 type UsageFormatOptions = {
     showTypes?: boolean;
+};
+
+/** Metadata switches for detailed help output. */
+export type DetailedHelpMetadataOptions = {
+    types?: boolean;
+    defaults?: boolean;
+    required?: boolean;
+    aliases?: boolean;
+    descriptions?: boolean;
+    enumValues?: boolean;
+};
+
+/** Options for generated detailed help output. */
+export type DetailedHelpFormatOptions = {
+    metadata?: DetailedHelpMetadataOptions;
+    order?: "definition" | "required-first";
+};
+
+type ResolvedDetailedHelpMetadataOptions = Required<DetailedHelpMetadataOptions>;
+
+const DEFAULT_DETAILED_HELP_METADATA: ResolvedDetailedHelpMetadataOptions = {
+    types: true,
+    defaults: true,
+    required: true,
+    aliases: false,
+    descriptions: true,
+    enumValues: true,
 };
 
 function positionalHint(
@@ -148,10 +176,42 @@ export function formatHelperLineParts<TDefinitions extends ArgumentDefinitions>(
     return parts;
 }
 
+function detailedAliasLabels(name: string, definition: ArgumentDefinition): string[] {
+    if (isPositionalArgument(definition)) {
+        return [];
+    }
+    return argumentFlagNames(name, definition)
+        .slice(1)
+        .map((alias) => `--${alias}`);
+}
+
+function detailedArgumentValueHint(
+    name: string,
+    definition: ArgumentDefinition,
+    metadata: ResolvedDetailedHelpMetadataOptions,
+): string | undefined {
+    if (!metadata.types) {
+        return undefined;
+    }
+    if (
+        !metadata.enumValues &&
+        (definition.type === "enum" || definition.type === "multi-enum") &&
+        definition.placeholder === undefined
+    ) {
+        return argumentTypeHint(definition);
+    }
+    return argumentValueHint(definition, name);
+}
+
 /** Format detailed multi-line help for a registered typed command. */
 export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
+    options?: DetailedHelpFormatOptions,
 ): string {
+    const metadata: ResolvedDetailedHelpMetadataOptions = {
+        ...DEFAULT_DETAILED_HELP_METADATA,
+        ...options?.metadata,
+    };
     const lines = [
         `/${command.invocationName ?? command.name}`,
         "",
@@ -161,7 +221,20 @@ export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
         `  ${formatCommandUsage(command)}`,
     ];
 
-    const entries = orderedCommandArgumentEntries(command);
+    let entries = orderedCommandArgumentEntries(command);
+    if (options?.order === "required-first") {
+        entries = [...entries].sort((left, right) => {
+            let leftRequired = 1;
+            if (left[1].required === true) {
+                leftRequired = 0;
+            }
+            let rightRequired = 1;
+            if (right[1].required === true) {
+                rightRequired = 0;
+            }
+            return leftRequired - rightRequired;
+        });
+    }
     if (entries.length > 0) {
         lines.push("", "Arguments:");
         for (const [name, definition] of entries) {
@@ -169,15 +242,24 @@ export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
             if (isPositionalArgument(definition)) {
                 label = `  ${toKebabCase(name)}`;
             }
-            label += `: ${argumentValueHint(definition, name)}`;
-            if (definition.required === true) {
+            const valueHint = detailedArgumentValueHint(name, definition, metadata);
+            if (valueHint !== undefined) {
+                label += `: ${valueHint}`;
+            }
+            if (metadata.required && definition.required === true) {
                 label += ", required";
             }
-            if (definition.default !== undefined) {
+            if (metadata.defaults && definition.default !== undefined) {
                 label += `, default ${String(definition.default)}`;
             }
+            if (metadata.aliases) {
+                const aliases = detailedAliasLabels(name, definition);
+                if (aliases.length > 0) {
+                    label += `, aliases ${aliases.join(", ")}`;
+                }
+            }
             lines.push(label);
-            if (definition.description !== undefined) {
+            if (metadata.descriptions && definition.description !== undefined) {
                 lines.push(`    ${definition.description}`);
             }
         }

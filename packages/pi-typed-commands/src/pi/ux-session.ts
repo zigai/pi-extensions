@@ -10,18 +10,22 @@ import { parseTypedCommandArgs } from "../parser.js";
 import { onTypedCommandsChanged } from "../registry.js";
 import { isTypedSkillCommand } from "../skills/command.js";
 import type { TypedCommandUxOptions } from "../types.js";
-import { formatDetailedHelp } from "../usage.js";
 import {
     commandInvocationForEditorText,
     helperInvocationForEditorText,
 } from "./editor-invocation.js";
+import { notifyDetailedHelp } from "./help.js";
 import { setHelperWidget, WIDGET_KEY } from "./helper.js";
 import { renderTypedSkillInput } from "./skill-input.js";
 import { registerSubmittedInvalidCommandHandler } from "./session-state.js";
-import { resolveTypedCommandUxOptions } from "./settings.js";
+import { resolveTypedCommandUxOptions, type ResolvedTypedCommandUxOptions } from "./settings.js";
 import { completePartialFlagOnTab } from "./tab-completion.js";
 
-async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+async function openEditorCommandForm(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    options: ResolvedTypedCommandUxOptions,
+): Promise<void> {
     const invocation = commandInvocationForEditorText(ctx.ui.getEditorText());
     if (invocation === undefined) {
         return;
@@ -37,6 +41,7 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
             trailingBody,
             commandCtx,
             "all",
+            options.appearance,
         );
         if (transformed === undefined) {
             return;
@@ -48,7 +53,7 @@ async function openEditorCommandForm(pi: ExtensionAPI, ctx: ExtensionContext): P
 
     const parsed = parseTypedCommandArgs(command, rawArgs);
     if (parsed.mode === "help") {
-        ctx.ui.notify(formatDetailedHelp(command), "info");
+        notifyDetailedHelp(commandCtx, command, options.appearance);
         return;
     }
 
@@ -101,7 +106,7 @@ export class TypedCommandUxSession {
     private active = false;
     private formRunId = 0;
     private submittedInvalidEditorText: string | undefined;
-    private options: Required<TypedCommandUxOptions>;
+    private options: ResolvedTypedCommandUxOptions;
 
     constructor(
         private readonly pi: ExtensionAPI,
@@ -163,22 +168,40 @@ export class TypedCommandUxSession {
 
     private refresh(ctx: ExtensionContext): void {
         if (this.openingForm) {
-            setHelperWidget(ctx, undefined, this.options.helperPlacement);
+            setHelperWidget(
+                ctx,
+                undefined,
+                this.options.helperPlacement,
+                {},
+                this.options.appearance.inlineHelp,
+            );
             return;
         }
         const helperInvocation = helperInvocationForEditorText(ctx.ui.getEditorText());
-        setHelperWidget(ctx, helperInvocation, this.options.helperPlacement, {
-            submittedInvalidEditorText: this.submittedInvalidEditorText,
-        });
+        setHelperWidget(
+            ctx,
+            helperInvocation,
+            this.options.helperPlacement,
+            {
+                submittedInvalidEditorText: this.submittedInvalidEditorText,
+            },
+            this.options.appearance.inlineHelp,
+        );
     }
 
     private showSubmittedInvalidCommand(ctx: ExtensionContext, editorText: string): void {
         this.clearRefreshTimer();
         this.submittedInvalidEditorText = editorText;
         const helperInvocation = helperInvocationForEditorText(editorText);
-        setHelperWidget(ctx, helperInvocation, this.options.helperPlacement, {
-            submittedInvalidEditorText: editorText,
-        });
+        setHelperWidget(
+            ctx,
+            helperInvocation,
+            this.options.helperPlacement,
+            {
+                submittedInvalidEditorText: editorText,
+            },
+            this.options.appearance.inlineHelp,
+        );
     }
 
     private scheduleRefresh(ctx: ExtensionContext): void {
@@ -207,7 +230,7 @@ export class TypedCommandUxSession {
 
     private async runOpenEditorCommandForm(ctx: ExtensionContext, runId: number): Promise<void> {
         try {
-            await openEditorCommandForm(this.pi, ctx);
+            await openEditorCommandForm(this.pi, ctx, this.options);
         } catch (error) {
             reportDetachedError(ctx, error);
         }
@@ -228,7 +251,13 @@ export class TypedCommandUxSession {
         ctx: ExtensionContext,
     ): { consume: true } | undefined {
         if (this.openingForm) {
-            setHelperWidget(ctx, undefined, this.options.helperPlacement);
+            setHelperWidget(
+                ctx,
+                undefined,
+                this.options.helperPlacement,
+                {},
+                this.options.appearance.inlineHelp,
+            );
             return undefined;
         }
         if (!matchesKey(data, "tab")) {
