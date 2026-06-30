@@ -1,13 +1,22 @@
+import type { TLocalizedValidationError } from "typebox/error";
+import Schema from "../typebox-schema.js";
 import { validateArgumentDefinitions, validateArgumentValue } from "../schema.js";
+import { createSafeRecord } from "./guards.js";
 import {
-    createSafeRecord,
-    isRecord,
-    optionalBoolean,
-    optionalNonNegativeInteger,
-    optionalNumber,
-    optionalString,
-    optionalStringArray,
-} from "./guards.js";
+    BooleanSkillArgumentYamlSchema,
+    EnumSkillArgumentYamlSchema,
+    MultiEnumSkillArgumentYamlSchema,
+    NumberSkillArgumentYamlSchema,
+    StringSkillArgumentYamlSchema,
+    UnknownRecordYamlSchema,
+    type BooleanSkillArgumentYaml,
+    type EnumSkillArgumentYaml,
+    type MultiEnumSkillArgumentYaml,
+    type NumberSkillArgumentYaml,
+    type SkillArgumentUiYaml,
+    type SkillArgumentYaml,
+    type StringSkillArgumentYaml,
+} from "./schema.js";
 import { skillArgumentDiagnostic, skillArgumentDiagnostics } from "./diagnostics.js";
 import type { DefinitionDiagnostic } from "../types.js";
 import type {
@@ -25,6 +34,13 @@ import type {
 } from "./types.js";
 
 type MutableArgumentDefinitions = Record<string, ArgumentDefinition>;
+type SupportedSkillArgumentType = ArgumentDefinition["type"];
+type SkillArgumentSchema =
+    | typeof StringSkillArgumentYamlSchema
+    | typeof NumberSkillArgumentYamlSchema
+    | typeof BooleanSkillArgumentYamlSchema
+    | typeof EnumSkillArgumentYamlSchema
+    | typeof MultiEnumSkillArgumentYamlSchema;
 
 const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "text",
@@ -40,47 +56,6 @@ const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "computed",
     "confirm",
 ]);
-
-const SHARED_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([
-    "type",
-    "description",
-    "title",
-    "required",
-    "placeholder",
-    "occurrence",
-    "aliases",
-    "position",
-    "rest",
-    "ui",
-    "default",
-]);
-
-const STRING_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([
-    ...SHARED_ARGUMENT_FIELDS,
-    "min_length",
-    "max_length",
-    "pattern",
-]);
-
-const NUMBER_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([
-    ...SHARED_ARGUMENT_FIELDS,
-    "integer",
-    "min",
-    "max",
-]);
-
-const BOOLEAN_ARGUMENT_FIELDS: ReadonlySet<string> = SHARED_ARGUMENT_FIELDS;
-
-const ENUM_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([...SHARED_ARGUMENT_FIELDS, "values"]);
-
-const MULTI_ENUM_ARGUMENT_FIELDS: ReadonlySet<string> = new Set([
-    ...SHARED_ARGUMENT_FIELDS,
-    "values",
-    "min_items",
-    "max_items",
-]);
-
-const UI_FIELDS: ReadonlySet<string> = new Set(["widget", "rows", "title", "custom"]);
 
 type SkillDiagnosticInput = string | DefinitionDiagnostic;
 
@@ -110,20 +85,35 @@ function createSkillDiagnosticSink(): SkillDiagnosticSink {
     };
 }
 
-function warnUnknownFields(
-    name: string,
-    raw: Record<string, unknown>,
-    allowed: ReadonlySet<string>,
-    warnings: SkillDiagnosticSink,
-): void {
-    for (const key of Object.keys(raw)) {
-        if (!allowed.has(key)) {
-            warnings.push(`${name}.${key} is not a supported typed skill argument field`);
-        }
+function pointerSegments(pointer: string): string[] {
+    if (pointer.length === 0) {
+        return [];
     }
+    return pointer
+        .slice(1)
+        .split("/")
+        .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
 }
 
-function normalizeArgumentType(type: unknown): ArgumentDefinition["type"] | undefined {
+function pathLabel(name: string, segments: readonly string[]): string {
+    if (segments.length === 0) {
+        return name;
+    }
+    return `${name}.${segments.join(".")}`;
+}
+
+function valueAtPath(value: unknown, segments: readonly string[]): unknown {
+    let current = value;
+    for (const segment of segments) {
+        if (!Schema.Check(UnknownRecordYamlSchema, current)) {
+            return undefined;
+        }
+        current = current[segment];
+    }
+    return current;
+}
+
+function normalizeArgumentType(type: unknown): SupportedSkillArgumentType | undefined {
     if (type === "string" || type === "number" || type === "boolean" || type === "enum") {
         return type;
     }
@@ -133,134 +123,172 @@ function normalizeArgumentType(type: unknown): ArgumentDefinition["type"] | unde
     return undefined;
 }
 
+function schemaForArgumentType(type: SupportedSkillArgumentType): SkillArgumentSchema {
+    switch (type) {
+        case "string":
+            return StringSkillArgumentYamlSchema;
+        case "number":
+            return NumberSkillArgumentYamlSchema;
+        case "boolean":
+            return BooleanSkillArgumentYamlSchema;
+        case "enum":
+            return EnumSkillArgumentYamlSchema;
+        case "multi-enum":
+            return MultiEnumSkillArgumentYamlSchema;
+    }
+}
+
 function hasTypeKey(raw: Record<string, unknown>): boolean {
     return Object.hasOwn(raw, "type");
 }
 
-function assignOptionalString(
-    target: Record<string, unknown>,
-    targetKey: string,
-    raw: Record<string, unknown>,
-    sourceKey: string,
-    name: string,
-    warnings: SkillDiagnosticSink,
-): void {
-    if (!Object.hasOwn(raw, sourceKey)) {
-        return;
+function unsupportedFieldMessage(name: string, segments: readonly string[]): string {
+    const label = pathLabel(name, segments);
+    const field = segments.join(".");
+    if (field === "aliases") {
+        return `${label} is not supported`;
     }
-    const value = optionalString(raw[sourceKey]);
-    if (value === undefined) {
-        warnings.push(`${name}.${sourceKey} must be a string`);
-        return;
+    if (field === "ui.custom") {
+        return `${label} is not supported in skill YAML`;
     }
-    target[targetKey] = value;
+    return `${label} is not a supported typed skill argument field`;
 }
 
-function assignOptionalBoolean(
-    target: Record<string, unknown>,
-    targetKey: string,
-    raw: Record<string, unknown>,
-    sourceKey: string,
+function fieldTypeMessage(
     name: string,
-    warnings: SkillDiagnosticSink,
-): void {
-    if (!Object.hasOwn(raw, sourceKey)) {
-        return;
+    type: SupportedSkillArgumentType,
+    raw: Record<string, unknown>,
+    segments: readonly string[],
+): string {
+    const field = segments.join(".");
+    const label = pathLabel(name, segments);
+    const value = valueAtPath(raw, segments);
+
+    if (field === "type") {
+        return `${name}.type must be one of: string, number, boolean, enum, multi_enum`;
     }
-    const value = optionalBoolean(raw[sourceKey]);
-    if (value === undefined) {
-        warnings.push(`${name}.${sourceKey} must be a boolean`);
-        return;
+    if (field === "description" || field === "title" || field === "placeholder") {
+        return `${label} must be a string`;
     }
-    target[targetKey] = value;
+    if (field === "required" || field === "integer" || field === "rest") {
+        if (field === "rest" && value === true && type !== "string" && type !== "multi-enum") {
+            return `${label} is only valid for string or multi-enum arguments`;
+        }
+        return `${label} must be a boolean`;
+    }
+    if (field === "position" || field === "min_length" || field === "max_length") {
+        return `${label} must be a non-negative integer`;
+    }
+    if (field === "min_items" || field === "max_items") {
+        return `${label} must be a non-negative integer`;
+    }
+    if (field === "min" || field === "max") {
+        return `${label} must be a finite number`;
+    }
+    if (field === "occurrence") {
+        if (value === "append" && type !== "multi-enum") {
+            return `${label} append is only valid for multi-enum arguments`;
+        }
+        return `${label} must be one of: error, first, last, append`;
+    }
+    if (field === "ui") {
+        return `${label} must be an object`;
+    }
+    if (field === "ui.widget") {
+        if (value === "custom") {
+            return `${label} custom is not supported in skill YAML`;
+        }
+        return `${label} must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`;
+    }
+    if (field === "ui.rows") {
+        return `${label} must be a positive integer`;
+    }
+    if (field === "ui.title") {
+        return `${label} must be a string`;
+    }
+    if (field === "values") {
+        return `${label} must be a non-empty list of strings`;
+    }
+    if (field.startsWith("values.")) {
+        return `${name}.values must be a non-empty list of strings`;
+    }
+    if (field === "default") {
+        if (type === "number") {
+            return `${label} must be a finite number`;
+        }
+        if (type === "boolean") {
+            return `${label} must be a boolean`;
+        }
+        if (type === "multi-enum") {
+            return `${label} must be a list of strings`;
+        }
+        return `${label} must be a string`;
+    }
+    if (field.startsWith("default.")) {
+        if (type === "multi-enum") {
+            return `${name}.default must be a list of strings`;
+        }
+        return `${name}.default must be a string`;
+    }
+
+    return `${label} is invalid`;
 }
 
-function assignOptionalNumber(
-    target: Record<string, unknown>,
-    targetKey: string,
-    raw: Record<string, unknown>,
-    sourceKey: string,
+function schemaErrorMessages(
     name: string,
-    warnings: SkillDiagnosticSink,
-): void {
-    if (!Object.hasOwn(raw, sourceKey)) {
-        return;
+    type: SupportedSkillArgumentType,
+    raw: Record<string, unknown>,
+    error: TLocalizedValidationError,
+): string[] {
+    const baseSegments = pointerSegments(error.instancePath);
+    if (error.keyword === "additionalProperties") {
+        return error.params.additionalProperties.map((property) =>
+            unsupportedFieldMessage(name, [...baseSegments, property]),
+        );
     }
-    const value = optionalNumber(raw[sourceKey]);
-    if (value === undefined) {
-        warnings.push(`${name}.${sourceKey} must be a finite number`);
-        return;
+    if (error.keyword === "not") {
+        return [`${name}: required arguments may not define a default`];
     }
-    target[targetKey] = value;
+    return [fieldTypeMessage(name, type, raw, baseSegments)];
 }
 
-function assignOptionalNonNegativeInteger(
-    target: Record<string, unknown>,
-    targetKey: string,
-    raw: Record<string, unknown>,
-    sourceKey: string,
+function parseSkillArgumentYaml(
     name: string,
+    raw: Record<string, unknown>,
     warnings: SkillDiagnosticSink,
-): void {
-    if (!Object.hasOwn(raw, sourceKey)) {
-        return;
+): SkillArgumentYaml | undefined {
+    const type = normalizeArgumentType(raw.type);
+    if (type === undefined) {
+        warnings.push(`${name}.type must be one of: string, number, boolean, enum, multi_enum`);
+        return undefined;
     }
-    const value = optionalNonNegativeInteger(raw[sourceKey]);
-    if (value === undefined) {
-        warnings.push(`${name}.${sourceKey} must be a non-negative integer`);
-        return;
+
+    const schema = schemaForArgumentType(type);
+    if (Schema.Check(schema, raw)) {
+        return raw;
     }
-    target[targetKey] = value;
+
+    const [, errors] = Schema.Errors(schema, raw);
+    for (const error of errors) {
+        warnings.push(...schemaErrorMessages(name, type, raw, error));
+    }
+    return undefined;
 }
 
-function normalizeUi(
-    name: string,
-    raw: unknown,
-    warnings: SkillDiagnosticSink,
-): ArgumentUi | undefined {
+function normalizeUi(raw: SkillArgumentUiYaml | undefined): ArgumentUi | undefined {
     if (raw === undefined) {
         return undefined;
     }
-    if (!isRecord(raw)) {
-        warnings.push(`${name}.ui must be an object`);
-        return undefined;
-    }
-    warnUnknownFields(`${name}.ui`, raw, UI_FIELDS, warnings);
 
     const ui: ArgumentUi = {};
-    if (Object.hasOwn(raw, "widget")) {
-        const widget = optionalString(raw.widget);
-        if (widget === undefined) {
-            warnings.push(`${name}.ui.widget must be a string`);
-        } else if (widget === "custom") {
-            warnings.push(`${name}.ui.widget custom is not supported in skill YAML`);
-        } else if (!SUPPORTED_WIDGETS.has(widget)) {
-            warnings.push(`${name}.ui.widget must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`);
-        } else {
-            ui.widget = widget as ArgumentWidget;
-        }
+    if (raw.widget !== undefined) {
+        ui.widget = raw.widget as ArgumentWidget;
     }
-
-    if (Object.hasOwn(raw, "rows")) {
-        const rows = optionalNonNegativeInteger(raw.rows);
-        if (rows === undefined || rows === 0) {
-            warnings.push(`${name}.ui.rows must be a positive integer`);
-        } else {
-            ui.rows = rows;
-        }
+    if (raw.rows !== undefined) {
+        ui.rows = raw.rows;
     }
-
-    if (Object.hasOwn(raw, "title")) {
-        const title = optionalString(raw.title);
-        if (title === undefined) {
-            warnings.push(`${name}.ui.title must be a string`);
-        } else {
-            ui.title = title;
-        }
-    }
-
-    if (Object.hasOwn(raw, "custom")) {
-        warnings.push(`${name}.ui.custom is not supported in skill YAML`);
+    if (raw.title !== undefined) {
+        ui.title = raw.title;
     }
 
     if (Object.keys(ui).length > 0) {
@@ -270,46 +298,32 @@ function normalizeUi(
 }
 
 function applySharedFields<TDefinition extends ArgumentDefinition>(
-    name: string,
     definition: TDefinition,
-    raw: Record<string, unknown>,
-    warnings: SkillDiagnosticSink,
+    raw: SkillArgumentYaml,
 ): TDefinition {
-    const target = definition as Record<string, unknown>;
-    assignOptionalString(target, "description", raw, "description", name, warnings);
-    assignOptionalString(target, "title", raw, "title", name, warnings);
-    assignOptionalBoolean(target, "required", raw, "required", name, warnings);
-    assignOptionalString(target, "placeholder", raw, "placeholder", name, warnings);
-    if (Object.hasOwn(raw, "occurrence")) {
-        const occurrence = optionalString(raw.occurrence);
-        if (
-            occurrence !== "error" &&
-            occurrence !== "first" &&
-            occurrence !== "last" &&
-            occurrence !== "append"
-        ) {
-            warnings.push(`${name}.occurrence must be one of: error, first, last, append`);
-        } else {
-            definition.occurrence = occurrence;
-        }
+    if (raw.description !== undefined) {
+        definition.description = raw.description;
+    }
+    if (raw.title !== undefined) {
+        definition.title = raw.title;
+    }
+    if (raw.required !== undefined) {
+        definition.required = raw.required;
+    }
+    if (raw.placeholder !== undefined) {
+        definition.placeholder = raw.placeholder;
+    }
+    if (raw.occurrence !== undefined) {
+        definition.occurrence = raw.occurrence;
+    }
+    if (raw.position !== undefined) {
+        definition.position = raw.position;
+    }
+    if (raw.rest !== undefined) {
+        definition.rest = raw.rest;
     }
 
-    if (Object.hasOwn(raw, "aliases")) {
-        warnings.push(`${name}.aliases is not supported`);
-    }
-
-    if (Object.hasOwn(raw, "position")) {
-        const position = optionalNonNegativeInteger(raw.position);
-        if (position === undefined) {
-            warnings.push(`${name}.position must be a non-negative integer`);
-        } else {
-            definition.position = position;
-        }
-    }
-
-    assignOptionalBoolean(target, "rest", raw, "rest", name, warnings);
-
-    const ui = normalizeUi(name, raw.ui, warnings);
+    const ui = normalizeUi(raw.ui);
     if (ui !== undefined) {
         definition.ui = ui;
     }
@@ -333,12 +347,15 @@ function validateDefault(
 function assignStringConstraints(
     name: string,
     definition: StringArgumentDefinition,
-    raw: Record<string, unknown>,
+    raw: StringSkillArgumentYaml,
     warnings: SkillDiagnosticSink,
 ): void {
-    const target = definition as Record<string, unknown>;
-    assignOptionalNonNegativeInteger(target, "minLength", raw, "min_length", name, warnings);
-    assignOptionalNonNegativeInteger(target, "maxLength", raw, "max_length", name, warnings);
+    if (raw.min_length !== undefined) {
+        definition.minLength = raw.min_length;
+    }
+    if (raw.max_length !== undefined) {
+        definition.maxLength = raw.max_length;
+    }
     if (
         definition.minLength !== undefined &&
         definition.maxLength !== undefined &&
@@ -346,17 +363,12 @@ function assignStringConstraints(
     ) {
         warnings.push(`${name}.min_length must be less than or equal to max_length`);
     }
-    if (Object.hasOwn(raw, "pattern")) {
-        const pattern = optionalString(raw.pattern);
-        if (pattern === undefined) {
-            warnings.push(`${name}.pattern must be a string`);
-        } else {
-            try {
-                new RegExp(pattern);
-                definition.pattern = pattern;
-            } catch {
-                warnings.push(`${name}.pattern must be a valid regular expression`);
-            }
+    if (raw.pattern !== undefined) {
+        try {
+            new RegExp(raw.pattern);
+            definition.pattern = raw.pattern;
+        } catch {
+            warnings.push(`${name}.pattern must be a valid regular expression`);
         }
     }
 }
@@ -364,12 +376,15 @@ function assignStringConstraints(
 function assignMultiEnumConstraints(
     name: string,
     definition: MultiEnumArgumentDefinition,
-    raw: Record<string, unknown>,
+    raw: MultiEnumSkillArgumentYaml,
     warnings: SkillDiagnosticSink,
 ): void {
-    const target = definition as Record<string, unknown>;
-    assignOptionalNonNegativeInteger(target, "minItems", raw, "min_items", name, warnings);
-    assignOptionalNonNegativeInteger(target, "maxItems", raw, "max_items", name, warnings);
+    if (raw.min_items !== undefined) {
+        definition.minItems = raw.min_items;
+    }
+    if (raw.max_items !== undefined) {
+        definition.maxItems = raw.max_items;
+    }
     if (
         definition.minItems !== undefined &&
         definition.maxItems !== undefined &&
@@ -379,150 +394,113 @@ function assignMultiEnumConstraints(
     }
 }
 
-function normalizeOneArgument(
+function normalizeStringArgument(
     name: string,
-    raw: Record<string, unknown>,
+    raw: StringSkillArgumentYaml,
     warnings: SkillDiagnosticSink,
-): ArgumentDefinition | undefined {
-    const type = normalizeArgumentType(raw.type);
-    if (type === undefined) {
-        warnings.push(`${name}.type must be one of: string, number, boolean, enum, multi_enum`);
-        return undefined;
-    }
-
-    if (type === "string") {
-        warnUnknownFields(name, raw, STRING_ARGUMENT_FIELDS, warnings);
-        const definition: StringArgumentDefinition = applySharedFields(
-            name,
-            { type },
-            raw,
-            warnings,
-        );
-        assignStringConstraints(name, definition, raw, warnings);
-        if (Object.hasOwn(raw, "default")) {
-            if (typeof raw.default === "string") {
-                definition.default = raw.default;
-            } else {
-                warnings.push(`${name}.default must be a string`);
-            }
-        }
-        validateDefault(name, definition, warnings);
-        return definition;
-    }
-
-    if (type === "boolean") {
-        warnUnknownFields(name, raw, BOOLEAN_ARGUMENT_FIELDS, warnings);
-        const definition: BooleanArgumentDefinition = applySharedFields(
-            name,
-            { type },
-            raw,
-            warnings,
-        );
-        if (Object.hasOwn(raw, "default")) {
-            if (typeof raw.default === "boolean") {
-                definition.default = raw.default;
-            } else {
-                warnings.push(`${name}.default must be a boolean`);
-            }
-        }
-        validateDefault(name, definition, warnings);
-        return definition;
-    }
-
-    if (type === "number") {
-        warnUnknownFields(name, raw, NUMBER_ARGUMENT_FIELDS, warnings);
-        const definition: NumberArgumentDefinition = applySharedFields(
-            name,
-            { type },
-            raw,
-            warnings,
-        );
-        assignOptionalBoolean(
-            definition as Record<string, unknown>,
-            "integer",
-            raw,
-            "integer",
-            name,
-            warnings,
-        );
-        assignOptionalNumber(
-            definition as Record<string, unknown>,
-            "min",
-            raw,
-            "min",
-            name,
-            warnings,
-        );
-        assignOptionalNumber(
-            definition as Record<string, unknown>,
-            "max",
-            raw,
-            "max",
-            name,
-            warnings,
-        );
-        if (
-            definition.min !== undefined &&
-            definition.max !== undefined &&
-            definition.min > definition.max
-        ) {
-            warnings.push(`${name}.min must be less than or equal to max`);
-        }
-        if (Object.hasOwn(raw, "default")) {
-            const defaultValue = optionalNumber(raw.default);
-            if (defaultValue !== undefined) {
-                definition.default = defaultValue;
-            } else {
-                warnings.push(`${name}.default must be a finite number`);
-            }
-        }
-        validateDefault(name, definition, warnings);
-        return definition;
-    }
-
-    const values = optionalStringArray(raw.values);
-    if (values === undefined || values.length === 0) {
-        warnings.push(`${name}.values must be a non-empty list of strings`);
-        return undefined;
-    }
-
-    if (type === "enum") {
-        warnUnknownFields(name, raw, ENUM_ARGUMENT_FIELDS, warnings);
-        const definition: EnumArgumentDefinition = applySharedFields(
-            name,
-            { type, values },
-            raw,
-            warnings,
-        );
-        if (Object.hasOwn(raw, "default")) {
-            if (typeof raw.default === "string") {
-                definition.default = raw.default;
-            } else {
-                warnings.push(`${name}.default must be a string`);
-            }
-        }
-        validateDefault(name, definition, warnings);
-        return definition;
-    }
-
-    warnUnknownFields(name, raw, MULTI_ENUM_ARGUMENT_FIELDS, warnings);
-    const definition: MultiEnumArgumentDefinition = applySharedFields(
-        name,
-        { type, values },
-        raw,
-        warnings,
-    );
-    assignMultiEnumConstraints(name, definition, raw, warnings);
-    if (Object.hasOwn(raw, "default")) {
-        const defaultValues = optionalStringArray(raw.default);
-        if (defaultValues !== undefined) {
-            definition.default = defaultValues;
-        } else {
-            warnings.push(`${name}.default must be a list of strings`);
-        }
+): StringArgumentDefinition {
+    const definition: StringArgumentDefinition = applySharedFields({ type: "string" }, raw);
+    assignStringConstraints(name, definition, raw, warnings);
+    if (raw.default !== undefined) {
+        definition.default = raw.default;
     }
     validateDefault(name, definition, warnings);
     return definition;
+}
+
+function normalizeBooleanArgument(
+    name: string,
+    raw: BooleanSkillArgumentYaml,
+    warnings: SkillDiagnosticSink,
+): BooleanArgumentDefinition {
+    const definition: BooleanArgumentDefinition = applySharedFields({ type: "boolean" }, raw);
+    if (raw.default !== undefined) {
+        definition.default = raw.default;
+    }
+    validateDefault(name, definition, warnings);
+    return definition;
+}
+
+function normalizeNumberArgument(
+    name: string,
+    raw: NumberSkillArgumentYaml,
+    warnings: SkillDiagnosticSink,
+): NumberArgumentDefinition {
+    const definition: NumberArgumentDefinition = applySharedFields({ type: "number" }, raw);
+    if (raw.integer !== undefined) {
+        definition.integer = raw.integer;
+    }
+    if (raw.min !== undefined) {
+        definition.min = raw.min;
+    }
+    if (raw.max !== undefined) {
+        definition.max = raw.max;
+    }
+    if (
+        definition.min !== undefined &&
+        definition.max !== undefined &&
+        definition.min > definition.max
+    ) {
+        warnings.push(`${name}.min must be less than or equal to max`);
+    }
+    if (raw.default !== undefined) {
+        definition.default = raw.default;
+    }
+    validateDefault(name, definition, warnings);
+    return definition;
+}
+
+function normalizeEnumArgument(
+    name: string,
+    raw: EnumSkillArgumentYaml,
+    warnings: SkillDiagnosticSink,
+): EnumArgumentDefinition {
+    const definition: EnumArgumentDefinition = applySharedFields(
+        { type: "enum", values: raw.values },
+        raw,
+    );
+    if (raw.default !== undefined) {
+        definition.default = raw.default;
+    }
+    validateDefault(name, definition, warnings);
+    return definition;
+}
+
+function normalizeMultiEnumArgument(
+    name: string,
+    raw: MultiEnumSkillArgumentYaml,
+    warnings: SkillDiagnosticSink,
+): MultiEnumArgumentDefinition {
+    const definition: MultiEnumArgumentDefinition = applySharedFields(
+        { type: "multi-enum", values: raw.values },
+        raw,
+    );
+    assignMultiEnumConstraints(name, definition, raw, warnings);
+    if (raw.default !== undefined) {
+        definition.default = raw.default;
+    }
+    validateDefault(name, definition, warnings);
+    return definition;
+}
+
+function normalizeParsedArgument(
+    name: string,
+    raw: SkillArgumentYaml,
+    warnings: SkillDiagnosticSink,
+): ArgumentDefinition {
+    switch (raw.type) {
+        case "string":
+            return normalizeStringArgument(name, raw, warnings);
+        case "boolean":
+            return normalizeBooleanArgument(name, raw, warnings);
+        case "number":
+            return normalizeNumberArgument(name, raw, warnings);
+        case "enum":
+            return normalizeEnumArgument(name, raw, warnings);
+        case "multi_enum":
+        case "multi-enum":
+            return normalizeMultiEnumArgument(name, raw, warnings);
+    }
 }
 
 function flattenRawArguments(
@@ -536,7 +514,7 @@ function flattenRawArguments(
         if (prefix.length > 0) {
             name = `${prefix}.${key}`;
         }
-        if (!isRecord(value)) {
+        if (!Schema.Check(UnknownRecordYamlSchema, value)) {
             warnings.push(`${name}: argument definition must be an object`);
             continue;
         }
@@ -558,7 +536,7 @@ function flattenRawArguments(
 export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNormalizationResult {
     const warnings = createSkillDiagnosticSink();
     const args = createSafeRecord() as MutableArgumentDefinitions;
-    if (!isRecord(rawArguments)) {
+    if (!Schema.Check(UnknownRecordYamlSchema, rawArguments)) {
         const messages = ["arguments must be an object"];
         return {
             args,
@@ -569,10 +547,11 @@ export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNor
     }
 
     for (const [name, raw] of flattenRawArguments(rawArguments, warnings)) {
-        const definition = normalizeOneArgument(name, raw, warnings);
-        if (definition !== undefined) {
-            args[name] = definition;
+        const parsed = parseSkillArgumentYaml(name, raw, warnings);
+        if (parsed === undefined) {
+            continue;
         }
+        args[name] = normalizeParsedArgument(name, parsed, warnings);
     }
 
     warnings.push(...validateArgumentDefinitions(args));

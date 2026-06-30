@@ -1,11 +1,22 @@
 {
+  "type": "object",
+  "properties": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/zigai/pi-typed-commands/schemas/skill-arguments.schema.json",
   "title": "Pi Typed Skill Arguments",
   "description": "Schema for the top-level `arguments` field in SKILL.md frontmatter used by pi-typed-commands.",
-  "type": "object",
   "propertyNames": {
-    "$ref": "#/$defs/argumentName"
+    "type": "string",
+    "allOf": [
+      {
+        "pattern": "^[A-Za-z0-9_.-]+$"
+      },
+      {
+        "not": {
+          "pattern": "(^|\\.)(__proto__|constructor|prototype)(\\.|$)"
+        }
+      }
+    ]
   },
   "additionalProperties": {
     "$ref": "#/$defs/argumentOrNamespace"
@@ -25,12 +36,13 @@
       ]
     },
     "argumentOrNamespace": {
-      "oneOf": [
+      "anyOf": [
         {
           "$ref": "#/$defs/argument"
         },
         {
           "type": "object",
+          "properties": {},
           "propertyNames": {
             "$ref": "#/$defs/argumentName"
           },
@@ -56,7 +68,12 @@
           "type": "string"
         },
         "occurrence": {
-          "enum": ["error", "first", "last", "append"]
+          "enum": [
+            "error",
+            "first",
+            "last",
+            "append"
+          ]
         },
         "position": {
           "type": "integer",
@@ -64,20 +81,22 @@
         },
         "rest": {
           "type": "boolean"
-        },
-        "ui": {
-          "$ref": "#/$defs/ui"
         }
       },
       "allOf": [
         {
           "not": {
-            "required": ["aliases"]
+            "required": [
+              "aliases"
+            ]
           }
         },
         {
           "not": {
-            "required": ["required", "default"],
+            "required": [
+              "required",
+              "default"
+            ],
             "properties": {
               "required": {
                 "const": true
@@ -89,7 +108,6 @@
     },
     "ui": {
       "type": "object",
-      "additionalProperties": false,
       "properties": {
         "widget": {
           "enum": [
@@ -114,215 +132,500 @@
         "title": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "stringArgument": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "occurrence": {
+          "enum": [
+            "error",
+            "first",
+            "last"
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "boolean"
+        },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "enum": [
+                "text",
+                "textarea",
+                "number",
+                "toggle",
+                "select",
+                "radio",
+                "multiselect",
+                "path",
+                "command",
+                "readonly",
+                "computed",
+                "confirm"
+              ]
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "default": {
+          "type": "string"
+        },
+        "min_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
       "allOf": [
         {
-          "$ref": "#/$defs/shared"
-        },
-        {
-          "type": "object",
-          "required": ["type"],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "string"
-            },
-            "description": true,
-            "title": true,
-            "required": true,
-            "default": {
-              "type": "string"
-            },
-            "placeholder": true,
-            "occurrence": {
-              "enum": ["error", "first", "last"]
-            },
-            "position": true,
-            "rest": true,
-            "ui": true,
-            "min_length": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "max_length": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "pattern": {
-              "type": "string"
+          "not": {
+            "required": [
+              "required",
+              "default"
+            ],
+            "properties": {
+              "required": {
+                "const": true
+              }
             }
           }
         }
       ]
     },
     "numberArgument": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "number"
+        },
+        "description": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "occurrence": {
+          "enum": [
+            "error",
+            "first",
+            "last"
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "boolean",
+          "const": false
+        },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "enum": [
+                "text",
+                "textarea",
+                "number",
+                "toggle",
+                "select",
+                "radio",
+                "multiselect",
+                "path",
+                "command",
+                "readonly",
+                "computed",
+                "confirm"
+              ]
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "default": {
+          "type": "number"
+        },
+        "integer": {
+          "type": "boolean"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
       "allOf": [
         {
-          "$ref": "#/$defs/shared"
-        },
-        {
-          "type": "object",
-          "required": ["type"],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "number"
-            },
-            "description": true,
-            "title": true,
-            "required": true,
-            "default": {
-              "type": "number"
-            },
-            "placeholder": true,
-            "occurrence": {
-              "enum": ["error", "first", "last"]
-            },
-            "position": true,
-            "rest": {
-              "const": false
-            },
-            "ui": true,
-            "integer": {
-              "type": "boolean"
-            },
-            "min": {
-              "type": "number"
-            },
-            "max": {
-              "type": "number"
+          "not": {
+            "required": [
+              "required",
+              "default"
+            ],
+            "properties": {
+              "required": {
+                "const": true
+              }
             }
           }
         }
       ]
     },
     "booleanArgument": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "occurrence": {
+          "enum": [
+            "error",
+            "first",
+            "last"
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "boolean",
+          "const": false
+        },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "enum": [
+                "text",
+                "textarea",
+                "number",
+                "toggle",
+                "select",
+                "radio",
+                "multiselect",
+                "path",
+                "command",
+                "readonly",
+                "computed",
+                "confirm"
+              ]
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "default": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
       "allOf": [
         {
-          "$ref": "#/$defs/shared"
-        },
-        {
-          "type": "object",
-          "required": ["type"],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "boolean"
-            },
-            "description": true,
-            "title": true,
-            "required": true,
-            "default": {
-              "type": "boolean"
-            },
-            "placeholder": true,
-            "occurrence": {
-              "enum": ["error", "first", "last"]
-            },
-            "position": true,
-            "rest": {
-              "const": false
-            },
-            "ui": true
+          "not": {
+            "required": [
+              "required",
+              "default"
+            ],
+            "properties": {
+              "required": {
+                "const": true
+              }
+            }
           }
         }
       ]
     },
     "enumArgument": {
+      "type": "object",
+      "required": [
+        "type",
+        "values"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "enum"
+        },
+        "description": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "occurrence": {
+          "enum": [
+            "error",
+            "first",
+            "last"
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "boolean",
+          "const": false
+        },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "enum": [
+                "text",
+                "textarea",
+                "number",
+                "toggle",
+                "select",
+                "radio",
+                "multiselect",
+                "path",
+                "command",
+                "readonly",
+                "computed",
+                "confirm"
+              ]
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "default": {
+          "type": "string"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false,
       "allOf": [
         {
-          "$ref": "#/$defs/shared"
-        },
-        {
-          "type": "object",
-          "required": ["type", "values"],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "enum"
-            },
-            "description": true,
-            "title": true,
-            "required": true,
-            "default": {
-              "type": "string"
-            },
-            "placeholder": true,
-            "occurrence": {
-              "enum": ["error", "first", "last"]
-            },
-            "position": true,
-            "rest": {
-              "const": false
-            },
-            "ui": true,
-            "values": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "minItems": 1,
-              "uniqueItems": true
+          "not": {
+            "required": [
+              "required",
+              "default"
+            ],
+            "properties": {
+              "required": {
+                "const": true
+              }
             }
           }
         }
       ]
     },
     "multiEnumArgument": {
+      "type": "object",
+      "required": [
+        "type",
+        "values"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "multi_enum",
+            "multi-enum"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "occurrence": {
+          "enum": [
+            "error",
+            "first",
+            "last",
+            "append"
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "boolean"
+        },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "enum": [
+                "text",
+                "textarea",
+                "number",
+                "toggle",
+                "select",
+                "radio",
+                "multiselect",
+                "path",
+                "command",
+                "readonly",
+                "computed",
+                "confirm"
+              ]
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "default": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "min_items": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_items": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
       "allOf": [
         {
-          "$ref": "#/$defs/shared"
-        },
-        {
-          "type": "object",
-          "required": ["type", "values"],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "enum": ["multi_enum", "multi-enum"]
-            },
-            "description": true,
-            "title": true,
-            "required": true,
-            "default": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "placeholder": true,
-            "occurrence": true,
-            "position": true,
-            "rest": true,
-            "ui": true,
-            "values": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "minItems": 1,
-              "uniqueItems": true
-            },
-            "min_items": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "max_items": {
-              "type": "integer",
-              "minimum": 0
+          "not": {
+            "required": [
+              "required",
+              "default"
+            ],
+            "properties": {
+              "required": {
+                "const": true
+              }
             }
           }
         }
       ]
     },
     "argument": {
-      "oneOf": [
+      "anyOf": [
         {
           "$ref": "#/$defs/stringArgument"
         },

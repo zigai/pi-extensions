@@ -1,6 +1,8 @@
+import type { TLocalizedValidationError } from "typebox/error";
+import Schema from "../typebox-schema.js";
 import YAML from "yaml";
 import { skillArgumentDiagnostic } from "./diagnostics.js";
-import { isRecord, optionalString } from "./guards.js";
+import { SkillFrontmatterYamlSchema } from "./schema.js";
 import type {
     ParseSkillMarkdownResult,
     SkillArgumentDiagnostic,
@@ -8,6 +10,64 @@ import type {
 } from "./types.js";
 
 const FRONTMATTER_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)([\s\S]*)$/;
+
+function pointerSegments(pointer: string): string[] {
+    if (pointer.length === 0) {
+        return [];
+    }
+    return pointer
+        .slice(1)
+        .split("/")
+        .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+}
+
+function frontmatterFieldError(error: TLocalizedValidationError): SkillArgumentDiagnostic {
+    const field = pointerSegments(error.instancePath)[0];
+    if (field === "name" || field === "description" || field === "form_title") {
+        return skillArgumentDiagnostic({
+            code: `skill.frontmatter.${field}.invalid`,
+            message: `frontmatter.${field} must be a string`,
+            path: ["frontmatter", field],
+        });
+    }
+
+    return skillArgumentDiagnostic({
+        code: "skill.frontmatter.invalid",
+        message: "frontmatter must be an object",
+        path: ["frontmatter"],
+    });
+}
+
+function parseFrontmatterFields(
+    parsed: unknown,
+):
+    | { status: "ok"; frontmatter: SkillFrontmatter }
+    | { status: "invalid"; diagnostics: SkillArgumentDiagnostic[] } {
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return { status: "ok", frontmatter: {} };
+    }
+
+    if (!Schema.Check(SkillFrontmatterYamlSchema, parsed)) {
+        const [, errors] = Schema.Errors(SkillFrontmatterYamlSchema, parsed);
+        return { status: "invalid", diagnostics: errors.map(frontmatterFieldError) };
+    }
+
+    const yaml = parsed;
+    const frontmatter: SkillFrontmatter = {};
+    if (yaml.name !== undefined) {
+        frontmatter.name = yaml.name;
+    }
+    if (yaml.description !== undefined) {
+        frontmatter.description = yaml.description;
+    }
+    if (yaml.form_title !== undefined) {
+        frontmatter.formTitle = yaml.form_title;
+    }
+    if (yaml.arguments !== undefined) {
+        frontmatter.arguments = yaml.arguments;
+    }
+    return { status: "ok", frontmatter };
+}
 
 /** Parse a `SKILL.md` document into frontmatter fields and trimmed Markdown body. */
 export function parseSkillMarkdown(content: string): ParseSkillMarkdownResult {
@@ -38,63 +98,9 @@ export function parseSkillMarkdown(content: string): ParseSkillMarkdownResult {
             ],
         };
     }
-    if (!isRecord(parsed)) {
-        return { status: "ok", frontmatter: {}, body };
+    const frontmatterResult = parseFrontmatterFields(parsed);
+    if (frontmatterResult.status === "invalid") {
+        return { status: "invalid", body, diagnostics: frontmatterResult.diagnostics };
     }
-
-    const frontmatter: SkillFrontmatter = {};
-    const diagnostics: SkillArgumentDiagnostic[] = [];
-    if (Object.hasOwn(parsed, "name")) {
-        const name = optionalString(parsed.name);
-        if (name === undefined) {
-            diagnostics.push(
-                skillArgumentDiagnostic({
-                    code: "skill.frontmatter.name.invalid",
-                    message: "frontmatter.name must be a string",
-                    path: ["frontmatter", "name"],
-                }),
-            );
-        } else {
-            frontmatter.name = name;
-        }
-    }
-
-    if (Object.hasOwn(parsed, "description")) {
-        const description = optionalString(parsed.description);
-        if (description === undefined) {
-            diagnostics.push(
-                skillArgumentDiagnostic({
-                    code: "skill.frontmatter.description.invalid",
-                    message: "frontmatter.description must be a string",
-                    path: ["frontmatter", "description"],
-                }),
-            );
-        } else {
-            frontmatter.description = description;
-        }
-    }
-
-    if (Object.hasOwn(parsed, "form_title")) {
-        const formTitle = optionalString(parsed.form_title);
-        if (formTitle === undefined) {
-            diagnostics.push(
-                skillArgumentDiagnostic({
-                    code: "skill.frontmatter.form_title.invalid",
-                    message: "frontmatter.form_title must be a string",
-                    path: ["frontmatter", "form_title"],
-                }),
-            );
-        } else {
-            frontmatter.formTitle = formTitle;
-        }
-    }
-
-    if (diagnostics.length > 0) {
-        return { status: "invalid", body, diagnostics };
-    }
-
-    if (Object.hasOwn(parsed, "arguments")) {
-        frontmatter.arguments = parsed.arguments;
-    }
-    return { status: "ok", frontmatter, body };
+    return { status: "ok", frontmatter: frontmatterResult.frontmatter, body };
 }

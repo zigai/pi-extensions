@@ -1,4 +1,5 @@
 export { normalizeSkillArguments } from "./argument-normalizer.js";
+export { skillArgumentsJsonSchema } from "./schema.js";
 export {
     isTypedSkillCommand,
     skillPathFromCommand,
