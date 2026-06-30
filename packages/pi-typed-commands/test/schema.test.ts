@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { compileTypedCommandDefinition } from "../src/compiler.js";
 import {
     applyArgumentDefaults,
@@ -39,22 +39,22 @@ const definitions: FlatArgumentDefinitions = {
     },
 };
 
-void describe("typed command schema", () => {
-    void it("orders positional args before flags", () => {
+describe("typed command schema", () => {
+    it("orders positional args before flags", () => {
         assert.deepEqual(
             orderedArgumentEntries(definitions).map(([name]) => name),
             ["action", "branchName", "dryRun", "count"],
         );
     });
 
-    void it("centralizes flag lookup and positional exclusion", () => {
+    it("centralizes flag lookup and positional exclusion", () => {
         const lookup = createArgumentLookup(definitions);
 
         assert.equal(findArgumentName(lookup, "--dry-run"), "dryRun");
         assert.equal(findArgumentName(lookup, "--action"), undefined);
     });
 
-    void it("coerces and validates values consistently", () => {
+    it("coerces and validates values consistently", () => {
         const count = definitions.count;
         assert.equal(count?.type, "number");
         if (count === undefined) {
@@ -90,13 +90,13 @@ void describe("typed command schema", () => {
         );
     });
 
-    void it("applies defaults and derives display hints", () => {
+    it("applies defaults and derives display hints", () => {
         assert.deepEqual(applyArgumentDefaults(definitions, {}), { count: 1 });
         assert.equal(argumentValueHint(definitions.branchName!, "branchName"), "branch-name");
         assert.equal(argumentValueHint(definitions.action!, "action"), "create|delete");
     });
 
-    void it("compiles arguments into immutable behavior objects", () => {
+    it("compiles arguments into immutable behavior objects", () => {
         const compiled = compileTypedCommandDefinition({
             name: "deploy",
             description: "Deploy",
@@ -117,7 +117,7 @@ void describe("typed command schema", () => {
         }
     });
 
-    void it("validates schema constraints before registration", () => {
+    it("validates schema constraints before registration", () => {
         const diagnostics = validateArgumentDefinitions({
             range: { type: "number", min: 10, max: 1 },
             text: { type: "string", minLength: 5, maxLength: 2, pattern: "[" },
@@ -168,7 +168,7 @@ void describe("typed command schema", () => {
         );
     });
 
-    void it("returns diagnostics for malformed runtime definitions instead of throwing", () => {
+    it("returns diagnostics for malformed runtime definitions instead of throwing", () => {
         const compiled = compileTypedCommandDefinition({
             name: "bad-runtime",
             description: "Bad runtime definitions",

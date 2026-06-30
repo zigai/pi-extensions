@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import fc from "fast-check";
 import {
     compileTypedCommandDefinition,
@@ -85,8 +85,8 @@ const roundTripValues = fc.record({
 const boundedString = fc.string({ maxLength: 120 });
 const nonEmptyBoundedString = boundedString.map((value) => `x${value}`);
 
-void describe("parser and serializer properties", () => {
-    void it("round-trips generated valid values through serialize and parse", () => {
+describe("parser and serializer properties", () => {
+    it("round-trips generated valid values through serialize and parse", () => {
         fc.assert(
             fc.property(roundTripValues, (values) => {
                 const raw = roundTripCommand.serialize(values);
@@ -102,7 +102,7 @@ void describe("parser and serializer properties", () => {
         );
     });
 
-    void it("does not throw for arbitrary raw argument text", () => {
+    it("does not throw for arbitrary raw argument text", () => {
         fc.assert(
             fc.property(boundedString, (raw) => {
                 assert.doesNotThrow(() => {
@@ -113,7 +113,7 @@ void describe("parser and serializer properties", () => {
         );
     });
 
-    void it("keeps compiled and uncompiled grammar behavior equivalent", () => {
+    it("keeps compiled and uncompiled grammar behavior equivalent", () => {
         fc.assert(
             fc.property(boundedString, roundTripValues, (raw, values) => {
                 assert.deepEqual(
@@ -130,8 +130,8 @@ void describe("parser and serializer properties", () => {
     });
 });
 
-void describe("typed skill prompt escaping properties", () => {
-    void it("does not let arbitrary user data add skill closing tags or Markdown fences", () => {
+describe("typed skill prompt escaping properties", () => {
+    it("does not let arbitrary user data add skill closing tags or Markdown fences", () => {
         fc.assert(
             fc.property(nonEmptyBoundedString, nonEmptyBoundedString, (path, additionalInput) => {
                 const rendered = renderTypedSkillInvocation({

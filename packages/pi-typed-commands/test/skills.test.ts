@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { parseTypedCommandArgs } from "../src/index.js";
 import {
     expandArgumentObject,
@@ -26,8 +26,8 @@ function diagnosticMessages(result: { diagnostics: readonly { message: string }[
     return result.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
 }
 
-void describe("normalizeSkillArguments", () => {
-    void it("normalizes snake_case skill metadata into argument definitions", () => {
+describe("normalizeSkillArguments", () => {
+    it("normalizes snake_case skill metadata into argument definitions", () => {
         const result = normalizeSkillArguments({
             path: {
                 type: "string",
@@ -74,7 +74,7 @@ void describe("normalizeSkillArguments", () => {
         assert.equal(result.args["config.output_path"]?.required, true);
     });
 
-    void it("parses skill frontmatter metadata", () => {
+    it("parses skill frontmatter metadata", () => {
         const parsed = parseSkillMarkdown(`---
 name: demo
 description: Demo skill
@@ -97,7 +97,7 @@ Use {args.path}.
         }
     });
 
-    void it("returns diagnostics for invalid YAML frontmatter", () => {
+    it("returns diagnostics for invalid YAML frontmatter", () => {
         const parsed = parseSkillMarkdown(`---
 name: [unterminated
 ---
@@ -114,7 +114,7 @@ Body
         }
     });
 
-    void it("returns diagnostics for invalid typed frontmatter field types", () => {
+    it("returns diagnostics for invalid typed frontmatter field types", () => {
         const parsed = parseSkillMarkdown(`---
 name: 123
 description: false
@@ -137,7 +137,7 @@ Body
         }
     });
 
-    void it("reports invalid skill argument metadata", () => {
+    it("reports invalid skill argument metadata", () => {
         const result = normalizeSkillArguments({
             no_cache: {
                 type: "boolean",
@@ -183,7 +183,7 @@ Body
         assert.match(messages, /typo\.minLength is not a supported typed skill argument field/);
     });
 
-    void it("rejects prototype-reserved skill argument path segments", () => {
+    it("rejects prototype-reserved skill argument path segments", () => {
         const raw = JSON.parse(`{
             "__proto__": { "type": "string" },
             "config": {
@@ -206,8 +206,8 @@ Body
     });
 });
 
-void describe("readTypedSkillMetadataResult", () => {
-    void it("returns diagnostics instead of throwing when the skill file cannot be read", () => {
+describe("readTypedSkillMetadataResult", () => {
+    it("returns diagnostics instead of throwing when the skill file cannot be read", () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-missing-"));
         const result = readTypedSkillMetadataResult(join(dir, "SKILL.md"), {
             fallbackName: "missing-demo",
@@ -220,7 +220,7 @@ void describe("readTypedSkillMetadataResult", () => {
         }
     });
 
-    void it("reports malformed typed frontmatter instead of treating the skill as absent", () => {
+    it("reports malformed typed frontmatter instead of treating the skill as absent", () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-invalid-frontmatter-"));
         const skillPath = join(dir, "SKILL.md");
         writeFileSync(
@@ -249,7 +249,7 @@ Use {args.path}.
         }
     });
 
-    void it("reads top-level arguments from a real SKILL.md file", () => {
+    it("reads top-level arguments from a real SKILL.md file", () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-"));
         const skillPath = join(dir, "SKILL.md");
         writeFileSync(
@@ -281,7 +281,7 @@ Use {args.path}.
         }
     });
 
-    void it("reports unknown typed placeholders while loading skills", () => {
+    it("reports unknown typed placeholders while loading skills", () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-"));
         const skillPath = join(dir, "SKILL.md");
         writeFileSync(
@@ -310,8 +310,8 @@ Use {args.missing} and {args.path}.
     });
 });
 
-void describe("typed skill required/default behavior", () => {
-    void it("does not report a required argument as missing when it has a default", () => {
+describe("typed skill required/default behavior", () => {
+    it("does not report a required argument as missing when it has a default", () => {
         const command: RegisteredTypedCommand = {
             name: "skill:demo",
             description: "Demo skill",
@@ -339,7 +339,7 @@ void describe("typed skill required/default behavior", () => {
     });
 });
 
-void describe("renderTypedSkillInvocation", () => {
+describe("renderTypedSkillInvocation", () => {
     const skill: TypedSkillMetadata = {
         name: "fix-ruff-errors",
         description: "Fix Ruff lint errors",
@@ -349,7 +349,7 @@ void describe("renderTypedSkillInvocation", () => {
         args: {},
     };
 
-    void it("renders placeholders as JSON data literals including nested argument paths", () => {
+    it("renders placeholders as JSON data literals including nested argument paths", () => {
         const rendered = renderTypedSkillInvocation({
             skill,
             values: {
@@ -364,7 +364,7 @@ void describe("renderTypedSkillInvocation", () => {
         assert.doesNotMatch(rendered, /ARGUMENTS_JSON/);
     });
 
-    void it("appends fallback arguments and additional input as JSON data blocks", () => {
+    it("appends fallback arguments and additional input as JSON data blocks", () => {
         const rendered = renderTypedSkillInvocation({
             skill: {
                 ...skill,
@@ -391,7 +391,7 @@ void describe("renderTypedSkillInvocation", () => {
         );
     });
 
-    void it("escapes typed values that look like prompt structure", () => {
+    it("escapes typed values that look like prompt structure", () => {
         const rendered = renderTypedSkillInvocation({
             skill,
             values: {
@@ -417,7 +417,7 @@ void describe("renderTypedSkillInvocation", () => {
         assert.equal(fences.length, 2);
     });
 
-    void it("does not pollute object prototypes when expanding dotted argument paths", () => {
+    it("does not pollute object prototypes when expanding dotted argument paths", () => {
         const expanded = expandArgumentObject({
             "__proto__.polluted": "yes",
             "config.path": "report.txt",
@@ -430,7 +430,7 @@ void describe("renderTypedSkillInvocation", () => {
         assert.equal((protoSection as Record<string, unknown>).polluted, "yes");
     });
 
-    void it("creates a typed skill command from metadata", () => {
+    it("creates a typed skill command from metadata", () => {
         const command = typedSkillCommandFromMetadata(skill);
 
         assert.equal(command.name, "skill:fix-ruff-errors");

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
@@ -100,8 +100,8 @@ function helperCommand(): RegisteredTypedCommand {
     };
 }
 
-void describe("global presentation config", () => {
-    void it("parses global appearance settings and safely falls back for invalid values", () => {
+describe("global presentation config", () => {
+    it("parses global appearance settings and safely falls back for invalid values", () => {
         const appearance = parsePiTypedCommandsAppearance({
             form: {
                 colors: {
@@ -141,7 +141,7 @@ void describe("global presentation config", () => {
         assert.equal(appearance.inlineHelp.colors.issue, "error");
     });
 
-    void it("ignores project settings for appearance", () => {
+    it("ignores project settings for appearance", () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
         const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-project-"));
         mkdirSync(join(projectDir, ".pi"));
@@ -169,7 +169,7 @@ void describe("global presentation config", () => {
         });
     });
 
-    void it("keeps default inline helper output unchanged", () => {
+    it("keeps default inline helper output unchanged", () => {
         const command = helperCommand();
         const [line] = renderInlineHelper(
             { command, rawArgs: "1 --panes", trailingBody: "" },
@@ -184,7 +184,7 @@ void describe("global presentation config", () => {
         );
     });
 
-    void it("renders type-rich inline helper tokens and custom ordering", () => {
+    it("renders type-rich inline helper tokens and custom ordering", () => {
         const command = helperCommand();
         const appearance = parsePiTypedCommandsAppearance({
             inlineHelp: {
@@ -210,7 +210,7 @@ void describe("global presentation config", () => {
         assert.ok(activeIndex > requiredIndex, renderedLine);
     });
 
-    void it("honors configured inline helper value separator in compact tokens", () => {
+    it("honors configured inline helper value separator in compact tokens", () => {
         const command = helperCommand();
         const appearance = parsePiTypedCommandsAppearance({
             inlineHelp: {
@@ -233,7 +233,7 @@ void describe("global presentation config", () => {
         );
     });
 
-    void it("applies configured inline helper colour roles", () => {
+    it("applies configured inline helper colour roles", () => {
         const command = helperCommand();
         const appearance = parsePiTypedCommandsAppearance({
             inlineHelp: {
@@ -269,7 +269,7 @@ void describe("global presentation config", () => {
         assert.ok(calls.includes("warning"));
     });
 
-    void it("applies global form marker, symbols, layout, description, and footer modes", async () => {
+    it("applies global form marker, symbols, layout, description, and footer modes", async () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-form-appearance-agent-"));
         const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-form-appearance-project-"));
         writeGlobalSettings(agentDir, {
@@ -367,7 +367,7 @@ void describe("global presentation config", () => {
         assert.ok(colorCalls.includes("syntaxString"));
     });
 
-    void it("uses global appearance for typed skill inline help", async () => {
+    it("uses global appearance for typed skill inline help", async () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-skill-appearance-agent-"));
         writeGlobalSettings(agentDir, {
             piTypedCommands: {
@@ -440,7 +440,7 @@ void describe("global presentation config", () => {
         }
     });
 
-    void it("uses global detailed help settings through registered command help", async () => {
+    it("uses global detailed help settings through registered command help", async () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-help-appearance-agent-"));
         const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-help-appearance-project-"));
         writeGlobalSettings(agentDir, {
@@ -520,7 +520,7 @@ void describe("global presentation config", () => {
         }
     });
 
-    void it("formats detailed help with metadata options", () => {
+    it("formats detailed help with metadata options", () => {
         const command: RegisteredTypedCommand = {
             name: "help-appearance",
             description: "Help appearance",

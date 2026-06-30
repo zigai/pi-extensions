@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
     defineTypedCommand,
@@ -27,8 +27,8 @@ import {
 import { notifySkillDiagnosticsForText, refreshTypedSkills } from "../src/pi/skill-input.js";
 import type { ParseIssue, RegisteredTypedCommand } from "../src/types.js";
 
-void describe("argument issue policy", () => {
-    void it("opens forms for named validation issues but not structural parse issues", () => {
+describe("argument issue policy", () => {
+    it("opens forms for named validation issues but not structural parse issues", () => {
         const missingRequired: ParseIssue = {
             kind: "missing-required",
             name: "path",
@@ -45,8 +45,8 @@ void describe("argument issue policy", () => {
     });
 });
 
-void describe("registerTypedCommand", () => {
-    void it("rejects colliding and reserved TypeScript argument flags", () => {
+describe("registerTypedCommand", () => {
+    it("rejects colliding and reserved TypeScript argument flags", () => {
         const pi = { registerCommand() {} } as unknown as ExtensionAPI;
 
         assert.throws(
@@ -90,7 +90,7 @@ void describe("registerTypedCommand", () => {
         );
     });
 
-    void it("publishes metadata only after Pi registration succeeds", () => {
+    it("publishes metadata only after Pi registration succeeds", () => {
         const pi = {
             registerCommand() {
                 throw new Error("boom");
@@ -110,7 +110,7 @@ void describe("registerTypedCommand", () => {
         assert.equal(getTypedCommand("atomic-failure"), undefined);
     });
 
-    void it("defines commands with typed parse helpers and disposable registration handles", () => {
+    it("defines commands with typed parse helpers and disposable registration handles", () => {
         const deploy = defineTypedCommand({
             name: "typed-deploy-test",
             description: "Deploy a ref",
@@ -147,7 +147,7 @@ void describe("registerTypedCommand", () => {
         assert.equal(getTypedCommand("typed-deploy-test"), undefined);
     });
 
-    void it("parses and serializes grouped arguments as nested handler values", () => {
+    it("parses and serializes grouped arguments as nested handler values", () => {
         const command = defineTypedCommand({
             name: "database-test",
             description: "Database test",
@@ -174,7 +174,7 @@ void describe("registerTypedCommand", () => {
         assert.equal(serialized, "--database-host=localhost --database-port=5432");
     });
 
-    void it("keeps registered command schemas immutable after caller mutation", () => {
+    it("keeps registered command schemas immutable after caller mutation", () => {
         const args = {
             env: { type: "enum" as const, values: ["dev", "prod"], required: true },
         };
@@ -196,7 +196,7 @@ void describe("registerTypedCommand", () => {
         handle.dispose();
     });
 
-    void it("registers duplicate command metadata under invocation suffixes", () => {
+    it("registers duplicate command metadata under invocation suffixes", () => {
         const first = defineTypedCommand({
             name: "duplicate-demo-test",
             description: "First",
@@ -227,7 +227,7 @@ void describe("registerTypedCommand", () => {
         secondHandle.dispose();
     });
 
-    void it("does not delete extension-owned skill-prefixed commands during skill refresh", () => {
+    it("does not delete extension-owned skill-prefixed commands during skill refresh", () => {
         const command = {
             name: "skill:extension-owned-test",
             description: "Extension command",
@@ -256,8 +256,8 @@ void describe("registerTypedCommand", () => {
     });
 });
 
-void describe("slash command text parsing", () => {
-    void it("preserves the body after the first slash-command line", () => {
+describe("slash command text parsing", () => {
+    it("preserves the body after the first slash-command line", () => {
         assert.deepEqual(parseSlashCommandText("/skill:demo src --fix\nline one\nline two"), {
             commandName: "skill:demo",
             rawArgs: "src --fix",
@@ -265,14 +265,14 @@ void describe("slash command text parsing", () => {
         });
     });
 
-    void it("combines unexpected positional leftovers with multi-line skill body text", () => {
+    it("combines unexpected positional leftovers with multi-line skill body text", () => {
         assert.equal(
             combineSkillAdditionalInput("extra words", "line one\nline two"),
             "extra words\nline one\nline two",
         );
     });
 
-    void it("ignores non-command text", () => {
+    it("ignores non-command text", () => {
         assert.equal(parseSlashCommandText("please run skill:demo"), undefined);
     });
 });
@@ -290,8 +290,8 @@ function firstHandler(
     return handler;
 }
 
-void describe("typed skill input transform", () => {
-    void it("preserves dash-prefixed freeform text as additional input", async () => {
+describe("typed skill input transform", () => {
+    it("preserves dash-prefixed freeform text as additional input", async () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-input-"));
         const skillPath = join(dir, "SKILL.md");
         writeFileSync(
@@ -358,7 +358,7 @@ Use {args.path}.
         );
     });
 
-    void it("stores malformed skill frontmatter diagnostics under the Pi skill command name", () => {
+    it("stores malformed skill frontmatter diagnostics under the Pi skill command name", () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-invalid-yaml-"));
         const skillPath = join(dir, "SKILL.md");
         writeFileSync(
@@ -411,8 +411,8 @@ Body
     });
 });
 
-void describe("typed command live helper", () => {
-    void it("pads helper tokens under the command instead of repeating it", async () => {
+describe("typed command live helper", () => {
+    it("pads helper tokens under the command instead of repeating it", async () => {
         const commandName = "branch-helper-align-test";
         const command: RegisteredTypedCommand = {
             name: commandName,
@@ -500,7 +500,7 @@ void describe("typed command live helper", () => {
         }
     });
 
-    void it("aligns inline errors with the helper tokens", async () => {
+    it("aligns inline errors with the helper tokens", async () => {
         const commandName = "branch-helper-error-align-test";
         const command: RegisteredTypedCommand = {
             name: commandName,
@@ -583,7 +583,7 @@ void describe("typed command live helper", () => {
         }
     });
 
-    void it("formats positional inline errors without flag prefixes", async () => {
+    it("formats positional inline errors without flag prefixes", async () => {
         const commandName = "branch-helper-positional-error-test";
         const command: RegisteredTypedCommand = {
             name: commandName,
@@ -658,7 +658,7 @@ void describe("typed command live helper", () => {
         }
     });
 
-    void it("tab-completes ambiguous flags to their shared prefix", async () => {
+    it("tab-completes ambiguous flags to their shared prefix", async () => {
         const commandName = "branch-helper-tab-prefix-test";
         const command: RegisteredTypedCommand = {
             name: commandName,
@@ -732,7 +732,7 @@ void describe("typed command live helper", () => {
         }
     });
 
-    void it("reports detached argument-form failures", async () => {
+    it("reports detached argument-form failures", async () => {
         const commandName = "branch-helper-detached-error-test";
         const command: RegisteredTypedCommand = {
             name: commandName,
@@ -804,7 +804,7 @@ void describe("typed command live helper", () => {
         }
     });
 
-    void it("uses session placement and keeps submitted invalid errors visible", async () => {
+    it("uses session placement and keeps submitted invalid errors visible", async () => {
         const commandName = "branch-helper-invalid-submit-test";
         const handlers = new Map<string, ExtensionEventHandler[]>();
         type RegisteredCommandOptions = {
@@ -904,7 +904,7 @@ void describe("typed command live helper", () => {
         }
     });
 
-    void it("places the helper above the editor by default", async () => {
+    it("places the helper above the editor by default", async () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-helper-default-agent-"));
         const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
         process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -974,7 +974,7 @@ void describe("typed command live helper", () => {
         }
     });
 
-    void it("reads helper placement from Pi settings", async () => {
+    it("reads helper placement from Pi settings", async () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-helper-settings-"));
         mkdirSync(join(dir, ".pi"));
         writeFileSync(

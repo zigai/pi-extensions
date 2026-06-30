@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import {
     type ArgumentDefinitions,
     defineTypedCommand,
@@ -13,8 +13,8 @@ import {
 
 function expectType<T>(_value: T): void {}
 
-void describe("compile-time API inference", () => {
-    void it("preserves enum literals without as const and narrows parse results", () => {
+describe("compile-time API inference", () => {
+    it("preserves enum literals without as const and narrows parse results", () => {
         const command = defineTypedCommand({
             name: "type-demo",
             description: "Type inference demo",
@@ -43,7 +43,7 @@ void describe("compile-time API inference", () => {
         }
     });
 
-    void it("preserves literals in separately declared argument maps", () => {
+    it("preserves literals in separately declared argument maps", () => {
         const args = {
             env: enumArgument(["dev", "prod"], { required: true }),
             ref: stringArgument({ default: "main" }),
@@ -65,7 +65,7 @@ void describe("compile-time API inference", () => {
         assert.equal(parsed.status, "success");
     });
 
-    void it("infers nested grouped handler values", () => {
+    it("infers nested grouped handler values", () => {
         const command = defineTypedCommand({
             name: "grouped-type-demo",
             description: "Grouped type demo",
@@ -89,7 +89,7 @@ void describe("compile-time API inference", () => {
         }
     });
 
-    void it("types required, defaulted, optional, multi, and refinement paths", () => {
+    it("types required, defaulted, optional, multi, and refinement paths", () => {
         const command = defineTypedCommand({
             name: "type-coverage-demo",
             description: "Type coverage demo",
@@ -127,7 +127,7 @@ void describe("compile-time API inference", () => {
         }
     });
 
-    void it("rejects invalid public contracts at compile time", () => {
+    it("rejects invalid public contracts at compile time", () => {
         const assertPublicContracts = (): void => {
             const dynamicRequired = Math.random() > 0.5;
             stringArgument({ required: dynamicRequired });

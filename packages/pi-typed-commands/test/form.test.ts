@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { CURSOR_MARKER, type Component, type TUI } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
@@ -32,8 +32,8 @@ type TestFormComponent = Component & {
     render(width: number): string[];
 };
 
-void describe("dense argument form", () => {
-    void it("shows field names instead of CLI flags in validation messages", async () => {
+describe("dense argument form", () => {
+    it("shows field names instead of CLI flags in validation messages", async () => {
         const definitions = {
             count: { type: "number", integer: true, max: 3, default: 1 },
         } satisfies FlatArgumentDefinitions;
@@ -91,7 +91,7 @@ void describe("dense argument form", () => {
         );
     });
 
-    void it("rejects non-number characters in number fields", async () => {
+    it("rejects non-number characters in number fields", async () => {
         const definitions = {
             count: { type: "number", integer: true, default: 1 },
         } satisfies FlatArgumentDefinitions;
@@ -150,7 +150,7 @@ void describe("dense argument form", () => {
         assert.equal(result?.count, 123);
     });
 
-    void it("uses field titles and whole-form values for custom widgets", async () => {
+    it("uses field titles and whole-form values for custom widgets", async () => {
         const definitions: FlatArgumentDefinitions = {
             source: { type: "string", default: "api" },
             output: {
@@ -206,7 +206,7 @@ void describe("dense argument form", () => {
         assert.ok(renderedLines.some((line) => line.includes("source=api")));
     });
 
-    void it("widens the label column for readable field titles", async () => {
+    it("widens the label column for readable field titles", async () => {
         const definitions: FlatArgumentDefinitions = {
             panes: {
                 type: "boolean",
@@ -261,7 +261,7 @@ void describe("dense argument form", () => {
         );
     });
 
-    void it("marks and highlights the currently selected field", async () => {
+    it("marks and highlights the currently selected field", async () => {
         const definitions: FlatArgumentDefinitions = {
             count: { type: "number", integer: true, default: 1, title: "Count" },
             panes: { type: "boolean", default: false, title: "Current tab panes" },
@@ -315,7 +315,7 @@ void describe("dense argument form", () => {
         );
     });
 
-    void it("computes read-only field values", async () => {
+    it("computes read-only field values", async () => {
         const definitions: FlatArgumentDefinitions = {
             source: { type: "string", default: "api" },
             output: {
@@ -366,7 +366,7 @@ void describe("dense argument form", () => {
         assert.equal(result?.output, "api.txt");
     });
 
-    void it("moves the cursor to the end when tabbing into a defaulted number field", async () => {
+    it("moves the cursor to the end when tabbing into a defaulted number field", async () => {
         const definitions = {
             label: { type: "string" },
             count: { type: "number", integer: true, default: 1 },
@@ -423,8 +423,8 @@ void describe("dense argument form", () => {
     });
 });
 
-void describe("sequential argument form", () => {
-    void it("runs command refinement after collecting form values", async () => {
+describe("sequential argument form", () => {
+    it("runs command refinement after collecting form values", async () => {
         const definitions = {
             start: { type: "number", required: true },
             end: { type: "number", required: true },
@@ -478,7 +478,7 @@ void describe("sequential argument form", () => {
         assert.deepEqual(notifications, ["• end is required", "• start must not exceed end"]);
     });
 
-    void it("prompts for multi-enum values outside TUI mode", async () => {
+    it("prompts for multi-enum values outside TUI mode", async () => {
         const definitions = {
             tags: {
                 type: "multi-enum",

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import {
     getTypedArgumentCompletions,
     getTypedAutocompleteSuggestions,
@@ -83,8 +83,8 @@ const branchCommand: RegisteredTypedCommand = {
     },
 };
 
-void describe("parseTypedCommandArgs", () => {
-    void it("parses named enum, string, boolean, and number args", () => {
+describe("parseTypedCommandArgs", () => {
+    it("parses named enum, string, boolean, and number args", () => {
         const parsed = parseTypedCommandArgs(
             command,
             "--env staging --dry-run --ref feature/test --count 3",
@@ -98,7 +98,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.count, 3);
     });
 
-    void it("applies defaults and reports missing required args", () => {
+    it("applies defaults and reports missing required args", () => {
         const parsed = parseTypedCommandArgs(command, "");
 
         assert.equal(parsed.values.ref, "main");
@@ -107,28 +107,28 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.issues[0]?.name, "env");
     });
 
-    void it("supports no-boolean flags", () => {
+    it("supports no-boolean flags", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --no-dry-run");
 
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.dryRun, false);
     });
 
-    void it("parses multi-enum comma lists and repeated flags", () => {
+    it("parses multi-enum comma lists and repeated flags", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --tags api,web --tags worker");
 
         assert.deepEqual(parsed.issues, []);
         assert.deepEqual(parsed.values.tags, ["api", "web", "worker"]);
     });
 
-    void it("accepts negative numeric flag values", () => {
+    it("accepts negative numeric flag values", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --count -1");
 
         assert.equal(parsed.values.count, undefined);
         assert.equal(parsed.issues[0]?.message, "--count must be at least 1");
     });
 
-    void it("supports -- as an end-of-options marker", () => {
+    it("supports -- as an end-of-options marker", () => {
         const parsed = parseTypedCommandArgs(branchCommand, "create -- --literal-branch");
 
         assert.deepEqual(parsed.issues, []);
@@ -136,7 +136,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.name, "--literal-branch");
     });
 
-    void it("does not treat --help after -- as help mode", () => {
+    it("does not treat --help after -- as help mode", () => {
         const parsed = parseTypedCommandArgs(branchCommand, "create -- --help");
 
         assert.equal(parsed.mode, "run");
@@ -144,7 +144,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.name, "--help");
     });
 
-    void it("parses negative positional numbers when a number positional is expected", () => {
+    it("parses negative positional numbers when a number positional is expected", () => {
         const numericCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -161,7 +161,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.offset, -1);
     });
 
-    void it("parses positional args before named flags", () => {
+    it("parses positional args before named flags", () => {
         const parsed = parseTypedCommandArgs(branchCommand, "create feature/foo --base main");
 
         assert.deepEqual(parsed.issues, []);
@@ -170,7 +170,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.base, "main");
     });
 
-    void it("supports the explicit position field for positional args", () => {
+    it("supports the explicit position field for positional args", () => {
         const positionedCommand: RegisteredTypedCommand = {
             ...branchCommand,
             args: {
@@ -191,7 +191,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.name, "feature/foo");
     });
 
-    void it("consumes rest positional string arguments", () => {
+    it("consumes rest positional string arguments", () => {
         const restCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -207,7 +207,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.body, "this is the body --literal");
     });
 
-    void it("recognizes --help and -h", () => {
+    it("recognizes --help and -h", () => {
         const longHelp = parseTypedCommandArgs(command, "--help");
         const shortHelp = parseTypedCommandArgs(command, "-h");
 
@@ -215,7 +215,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(shortHelp.mode, "help");
     });
 
-    void it("parses quoted and escaped values", () => {
+    it("parses quoted and escaped values", () => {
         const parsed = parseTypedCommandArgs(
             command,
             '--env dev --ref "feature with spaces" --tags api\\,web',
@@ -226,7 +226,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.deepEqual(parsed.values.tags, ["api", "web"]);
     });
 
-    void it("reports unterminated quotes without discarding parsed values", () => {
+    it("reports unterminated quotes without discarding parsed values", () => {
         const parsed = parseTypedCommandArgs(command, '--env dev --ref "feature');
 
         assert.equal(parsed.values.env, "dev");
@@ -234,7 +234,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.issues[0]?.kind, "unterminated-quote");
     });
 
-    void it("parses inline flag values and explicit booleans", () => {
+    it("parses inline flag values and explicit booleans", () => {
         const parsed = parseTypedCommandArgs(command, "--env=prod --dry-run=false");
 
         assert.deepEqual(parsed.issues, []);
@@ -242,7 +242,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.dryRun, false);
     });
 
-    void it("rejects empty inline number values instead of coercing them to zero", () => {
+    it("rejects empty inline number values instead of coercing them to zero", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --count=");
 
         assert.equal(parsed.values.count, undefined);
@@ -252,7 +252,7 @@ void describe("parseTypedCommandArgs", () => {
         );
     });
 
-    void it("clones multi-enum defaults for each parse result", () => {
+    it("clones multi-enum defaults for each parse result", () => {
         const defaultedCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -274,7 +274,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.deepEqual(defaultedCommand.args.tags?.default, ["api"]);
     });
 
-    void it("reports unknown flags, missing values, and invalid no-flags", () => {
+    it("reports unknown flags, missing values, and invalid no-flags", () => {
         const parsed = parseTypedCommandArgs(command, "--unknown --ref --no-ref");
 
         assert.deepEqual(
@@ -283,7 +283,7 @@ void describe("parseTypedCommandArgs", () => {
         );
     });
 
-    void it("preserves Windows paths and empty quoted strings", () => {
+    it("preserves Windows paths and empty quoted strings", () => {
         const pathCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -299,7 +299,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(windowsPath.values.label, "");
     });
 
-    void it("treats quoted help as a literal value", () => {
+    it("treats quoted help as a literal value", () => {
         const pathCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -314,7 +314,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.path, "--help");
     });
 
-    void it("marks invalid provided values without duplicating required diagnostics", () => {
+    it("marks invalid provided values without duplicating required diagnostics", () => {
         const requiredNumberCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -339,7 +339,7 @@ void describe("parseTypedCommandArgs", () => {
         );
     });
 
-    void it("rejects inline values on no-boolean flags", () => {
+    it("rejects inline values on no-boolean flags", () => {
         const parsed = parseTypedCommandArgs(command, "--env dev --no-dry-run=true");
 
         assert.equal(parsed.values.dryRun, undefined);
@@ -349,7 +349,7 @@ void describe("parseTypedCommandArgs", () => {
         );
     });
 
-    void it("supports explicit flag names and aliases", () => {
+    it("supports explicit flag names and aliases", () => {
         const databaseCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -368,7 +368,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.databaseHost, "localhost");
     });
 
-    void it("runs command-level cross-field validation", () => {
+    it("runs command-level cross-field validation", () => {
         const rangeCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -395,7 +395,7 @@ void describe("parseTypedCommandArgs", () => {
         );
     });
 
-    void it("makes duplicate occurrence behavior explicit", () => {
+    it("makes duplicate occurrence behavior explicit", () => {
         const defaultDuplicate = parseTypedCommandArgs(command, "--env dev --env prod");
         const lastWinsCommand: RegisteredTypedCommand = {
             ...command,
@@ -410,7 +410,7 @@ void describe("parseTypedCommandArgs", () => {
         assert.equal(lastWins.values.env, "prod");
     });
 
-    void it("serializes values into parseable command arguments", () => {
+    it("serializes values into parseable command arguments", () => {
         const pathCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -438,15 +438,15 @@ void describe("parseTypedCommandArgs", () => {
     });
 });
 
-void describe("formatCommandUsage", () => {
-    void it("renders positional args before flags", () => {
+describe("formatCommandUsage", () => {
+    it("renders positional args before flags", () => {
         assert.equal(
             formatCommandUsage(branchCommand),
             "/branch action:create | delete | rename name [--base=branch] [--checkout]",
         );
     });
 
-    void it("can render explicit types", () => {
+    it("can render explicit types", () => {
         assert.equal(
             formatCommandUsage(branchCommand, { showTypes: true }),
             "/branch action:create | delete | rename name:string [--base=string] [--checkout]",
@@ -454,8 +454,8 @@ void describe("formatCommandUsage", () => {
     });
 });
 
-void describe("getTypedAutocompleteSuggestions", () => {
-    void it("suggests flags for typed commands", () => {
+describe("getTypedAutocompleteSuggestions", () => {
+    it("suggests flags for typed commands", () => {
         registerTypedCommandMetadata(command);
 
         const suggestions = getTypedAutocompleteSuggestions(["/deploy --e"], 0, 11);
@@ -467,7 +467,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("completes inline enum values", () => {
+    it("completes inline enum values", () => {
         registerTypedCommandMetadata(command);
 
         const suggestions = getTypedAutocompleteSuggestions(["/deploy --env=d"], 0, 15);
@@ -479,7 +479,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("completes values through Pi's command completion entry point", async () => {
+    it("completes values through Pi's command completion entry point", async () => {
         const suggestions = await getTypedArgumentCompletions(command, "--env d");
 
         assert.deepEqual(
@@ -488,7 +488,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("quotes completed values when insertion would need shell quoting", async () => {
+    it("quotes completed values when insertion would need shell quoting", async () => {
         const refCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -515,7 +515,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("honors provider-supplied replacement text", async () => {
+    it("honors provider-supplied replacement text", async () => {
         const refCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -540,7 +540,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("completes positional values", async () => {
+    it("completes positional values", async () => {
         registerTypedCommandMetadata(branchCommand);
 
         const directSuggestions = await getTypedArgumentCompletions(branchCommand, "c");
@@ -556,14 +556,14 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("stops completing flags after the end-of-options marker", async () => {
+    it("stops completing flags after the end-of-options marker", async () => {
         registerTypedCommandMetadata(command);
 
         assert.equal(await getTypedArgumentCompletions(command, "-- --e"), null);
         assert.equal(getTypedAutocompleteSuggestions(["/deploy -- --e"], 0, 14), undefined);
     });
 
-    void it("supports async value completion providers", async () => {
+    it("supports async value completion providers", async () => {
         const asyncCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -585,7 +585,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("contains invalid and throwing completion providers", async () => {
+    it("contains invalid and throwing completion providers", async () => {
         const throwingCommand: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -625,7 +625,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("times out async completion providers and passes an abort signal", async () => {
+    it("times out async completion providers and passes an abort signal", async () => {
         let sawSignal = false;
         let aborted = false;
         const timeoutCommand: RegisteredTypedCommand = {
@@ -650,7 +650,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         assert.equal(aborted, true);
     });
 
-    void it("completes command widget values from typed commands", async () => {
+    it("completes command widget values from typed commands", async () => {
         registerTypedCommandMetadata(command);
         const commandArgument: RegisteredTypedCommand = {
             ...command,
@@ -667,7 +667,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("completes path widget values from the cwd", async () => {
+    it("completes path widget values from the cwd", async () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-path-complete-"));
         mkdirSync(join(dir, "src"));
         writeFileSync(join(dir, "README.md"), "demo");
@@ -691,7 +691,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         }
     });
 
-    void it("keeps repeatable multi-enum flags available", () => {
+    it("keeps repeatable multi-enum flags available", () => {
         registerTypedCommandMetadata(command);
 
         const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags api "], 0, 19);
@@ -702,7 +702,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("completes multi-enum values", () => {
+    it("completes multi-enum values", () => {
         registerTypedCommandMetadata(command);
 
         const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags w"], 0, 16);
@@ -714,7 +714,7 @@ void describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
-    void it("uses quoted source prefixes for editor value completions", () => {
+    it("uses quoted source prefixes for editor value completions", () => {
         const quoteCommand: RegisteredTypedCommand = {
             ...command,
             name: "quote-complete",
