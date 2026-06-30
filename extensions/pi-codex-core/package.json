@@ -32,23 +32,27 @@
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "test": "node --import tsx --test test/*.test.ts",
-    "coverage": "node --experimental-test-coverage --import tsx --test test/*.test.ts",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
     "verify": "npm run check"
+  },
+  "dependencies": {
+    "js-tiktoken": "^1.0.21"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.80.2",
     "@earendil-works/pi-coding-agent": "^0.80.2",
     "@earendil-works/pi-tui": "^0.80.2",
     "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.1.9",
     "oxfmt": "^0.44.0",
     "oxlint": "^1.59.0",
     "oxlint-tsgolint": "^0.23.0",
-    "tsx": "^4.22.3",
     "typebox": "^1.1.38",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
