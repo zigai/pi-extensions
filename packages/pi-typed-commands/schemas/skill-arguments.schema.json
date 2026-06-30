@@ -68,12 +68,7 @@
           "type": "string"
         },
         "occurrence": {
-          "enum": [
-            "error",
-            "first",
-            "last",
-            "append"
-          ]
+          "enum": ["error", "first", "last", "append"]
         },
         "position": {
           "type": "integer",
@@ -86,17 +81,12 @@
       "allOf": [
         {
           "not": {
-            "required": [
-              "aliases"
-            ]
+            "required": ["aliases"]
           }
         },
         {
           "not": {
-            "required": [
-              "required",
-              "default"
-            ],
+            "required": ["required", "default"],
             "properties": {
               "required": {
                 "const": true
@@ -137,9 +127,7 @@
     },
     "stringArgument": {
       "type": "object",
-      "required": [
-        "type"
-      ],
+      "required": ["type"],
       "properties": {
         "type": {
           "type": "string",
@@ -158,11 +146,7 @@
           "type": "string"
         },
         "occurrence": {
-          "enum": [
-            "error",
-            "first",
-            "last"
-          ]
+          "enum": ["error", "first", "last"]
         },
         "position": {
           "type": "integer",
@@ -219,10 +203,7 @@
       "allOf": [
         {
           "not": {
-            "required": [
-              "required",
-              "default"
-            ],
+            "required": ["required", "default"],
             "properties": {
               "required": {
                 "const": true
@@ -234,9 +215,7 @@
     },
     "numberArgument": {
       "type": "object",
-      "required": [
-        "type"
-      ],
+      "required": ["type"],
       "properties": {
         "type": {
           "type": "string",
@@ -255,11 +234,7 @@
           "type": "string"
         },
         "occurrence": {
-          "enum": [
-            "error",
-            "first",
-            "last"
-          ]
+          "enum": ["error", "first", "last"]
         },
         "position": {
           "type": "integer",
@@ -315,10 +290,7 @@
       "allOf": [
         {
           "not": {
-            "required": [
-              "required",
-              "default"
-            ],
+            "required": ["required", "default"],
             "properties": {
               "required": {
                 "const": true
@@ -330,9 +302,7 @@
     },
     "booleanArgument": {
       "type": "object",
-      "required": [
-        "type"
-      ],
+      "required": ["type"],
       "properties": {
         "type": {
           "type": "string",
@@ -351,11 +321,7 @@
           "type": "string"
         },
         "occurrence": {
-          "enum": [
-            "error",
-            "first",
-            "last"
-          ]
+          "enum": ["error", "first", "last"]
         },
         "position": {
           "type": "integer",
@@ -402,10 +368,7 @@
       "allOf": [
         {
           "not": {
-            "required": [
-              "required",
-              "default"
-            ],
+            "required": ["required", "default"],
             "properties": {
               "required": {
                 "const": true
@@ -417,10 +380,7 @@
     },
     "enumArgument": {
       "type": "object",
-      "required": [
-        "type",
-        "values"
-      ],
+      "required": ["type", "values"],
       "properties": {
         "type": {
           "type": "string",
@@ -439,11 +399,7 @@
           "type": "string"
         },
         "occurrence": {
-          "enum": [
-            "error",
-            "first",
-            "last"
-          ]
+          "enum": ["error", "first", "last"]
         },
         "position": {
           "type": "integer",
@@ -499,10 +455,7 @@
       "allOf": [
         {
           "not": {
-            "required": [
-              "required",
-              "default"
-            ],
+            "required": ["required", "default"],
             "properties": {
               "required": {
                 "const": true
@@ -514,16 +467,10 @@
     },
     "multiEnumArgument": {
       "type": "object",
-      "required": [
-        "type",
-        "values"
-      ],
+      "required": ["type", "values"],
       "properties": {
         "type": {
-          "enum": [
-            "multi_enum",
-            "multi-enum"
-          ]
+          "enum": ["multi_enum", "multi-enum"]
         },
         "description": {
           "type": "string"
@@ -538,12 +485,7 @@
           "type": "string"
         },
         "occurrence": {
-          "enum": [
-            "error",
-            "first",
-            "last",
-            "append"
-          ]
+          "enum": ["error", "first", "last", "append"]
         },
         "position": {
           "type": "integer",
@@ -611,10 +553,7 @@
       "allOf": [
         {
           "not": {
-            "required": [
-              "required",
-              "default"
-            ],
+            "required": ["required", "default"],
             "properties": {
               "required": {
                 "const": true
