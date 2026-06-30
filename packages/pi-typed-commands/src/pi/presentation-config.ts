@@ -1,3 +1,5 @@
+import Type, { type Static, type TSchema } from "typebox";
+import Schema from "../typebox-schema.js";
 import type { TypedCommandFormSymbols } from "../types.js";
 
 /** Pi TUI theme colour roles accepted by pi-typed-commands appearance settings. */
@@ -292,8 +294,167 @@ export const DEFAULT_PI_TYPED_COMMANDS_APPEARANCE: ResolvedPiTypedCommandsAppear
     },
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+const WidgetPlacementSettingSchema = Type.Enum(["aboveEditor", "belowEditor"] as const);
+
+const FormColorSettingsSchema = Type.Object(
+    {
+        title: Type.Optional(Type.Unknown()),
+        focusedLabel: Type.Optional(Type.Unknown()),
+        focusedValue: Type.Optional(Type.Unknown()),
+        unsetValue: Type.Optional(Type.Unknown()),
+        description: Type.Optional(Type.Unknown()),
+        instructions: Type.Optional(Type.Unknown()),
+        issue: Type.Optional(Type.Unknown()),
+        editorBorder: Type.Optional(Type.Unknown()),
+        selectedOption: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const FormSymbolSettingsSchema = Type.Object(
+    {
+        focusedField: Type.Optional(Type.Unknown()),
+        selectedCheckbox: Type.Optional(Type.Unknown()),
+        unselectedCheckbox: Type.Optional(Type.Unknown()),
+        selectedRadio: Type.Optional(Type.Unknown()),
+        unselectedRadio: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const FormLayoutSettingsSchema = Type.Object(
+    {
+        leftPadding: Type.Optional(Type.Unknown()),
+        fieldGap: Type.Optional(Type.Unknown()),
+        minNameWidth: Type.Optional(Type.Unknown()),
+        maxNameWidth: Type.Optional(Type.Unknown()),
+        minValueWidth: Type.Optional(Type.Unknown()),
+        maxValueWidth: Type.Optional(Type.Unknown()),
+        descriptions: Type.Optional(Type.Unknown()),
+        instructions: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const FormAppearanceSettingsSchema = Type.Object(
+    {
+        colors: Type.Optional(Type.Unknown()),
+        symbols: Type.Optional(Type.Unknown()),
+        layout: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const HelpMetadataSettingsSchema = Type.Object(
+    {
+        types: Type.Optional(Type.Unknown()),
+        defaults: Type.Optional(Type.Unknown()),
+        required: Type.Optional(Type.Unknown()),
+        aliases: Type.Optional(Type.Unknown()),
+        descriptions: Type.Optional(Type.Unknown()),
+        enumValues: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const InlineHelpColorSettingsSchema = Type.Object(
+    {
+        active: Type.Optional(Type.Unknown()),
+        required: Type.Optional(Type.Unknown()),
+        available: Type.Optional(Type.Unknown()),
+        type: Type.Optional(Type.Unknown()),
+        metadata: Type.Optional(Type.Unknown()),
+        issue: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const InlineHelpFormatSettingsSchema = Type.Object(
+    {
+        tokenPrefix: Type.Optional(Type.Unknown()),
+        tokenSuffix: Type.Optional(Type.Unknown()),
+        groupSeparator: Type.Optional(Type.Unknown()),
+        itemSeparator: Type.Optional(Type.Unknown()),
+        typeSeparator: Type.Optional(Type.Unknown()),
+        valueSeparator: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const InlineHelpAppearanceSettingsSchema = Type.Object(
+    {
+        layout: Type.Optional(Type.Unknown()),
+        order: Type.Optional(Type.Unknown()),
+        metadata: Type.Optional(Type.Unknown()),
+        colors: Type.Optional(Type.Unknown()),
+        format: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const DetailedHelpAppearanceSettingsSchema = Type.Object(
+    {
+        metadata: Type.Optional(Type.Unknown()),
+        order: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+export const PiTypedCommandsAppearanceSettingsSchema = Type.Object(
+    {
+        form: Type.Optional(Type.Unknown()),
+        inlineHelp: Type.Optional(Type.Unknown()),
+        detailedHelp: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+export const PiTypedCommandsSettingsSchema = Type.Object(
+    {
+        helperPlacement: Type.Optional(WidgetPlacementSettingSchema),
+        appearance: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+const PiSettingsSchema = Type.Object(
+    {
+        piTypedCommands: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+type FormColorSettingsInput = Static<typeof FormColorSettingsSchema>;
+type FormSymbolSettingsInput = Static<typeof FormSymbolSettingsSchema>;
+type FormLayoutSettingsInput = Static<typeof FormLayoutSettingsSchema>;
+type FormAppearanceSettingsInput = Static<typeof FormAppearanceSettingsSchema>;
+type HelpMetadataSettingsInput = Static<typeof HelpMetadataSettingsSchema>;
+type InlineHelpColorSettingsInput = Static<typeof InlineHelpColorSettingsSchema>;
+type InlineHelpFormatSettingsInput = Static<typeof InlineHelpFormatSettingsSchema>;
+type InlineHelpAppearanceSettingsInput = Static<typeof InlineHelpAppearanceSettingsSchema>;
+type DetailedHelpAppearanceSettingsInput = Static<typeof DetailedHelpAppearanceSettingsSchema>;
+type PiTypedCommandsAppearanceSettingsInput = Static<
+    typeof PiTypedCommandsAppearanceSettingsSchema
+>;
+type PiSettingsInput = Static<typeof PiSettingsSchema>;
+type PiTypedCommandsSettingsInput = Static<typeof PiTypedCommandsSettingsSchema>;
+
+function parseSettings<T>(schema: TSchema, input: unknown): T | undefined {
+    if (!Schema.Check(schema, input)) {
+        return undefined;
+    }
+    // SAFETY: TypeBox's Check refined input against the requested schema-backed DTO type.
+    return input as T;
+}
+
+export function parsePiSettings(input: unknown): PiSettingsInput | undefined {
+    return parseSettings<PiSettingsInput>(PiSettingsSchema, input);
+}
+
+export function parsePiTypedCommandsSettings(
+    input: unknown,
+): PiTypedCommandsSettingsInput | undefined {
+    return parseSettings<PiTypedCommandsSettingsInput>(PiTypedCommandsSettingsSchema, input);
 }
 
 function cloneDefaultAppearance(): ResolvedPiTypedCommandsAppearance {
@@ -382,52 +543,56 @@ function parseEnum<TValue extends string>(
 }
 
 function mergeMetadata(input: unknown, defaults: ResolvedHelpMetadata): ResolvedHelpMetadata {
-    if (!isRecord(input)) {
+    const settings = parseSettings<HelpMetadataSettingsInput>(HelpMetadataSettingsSchema, input);
+    if (settings === undefined) {
         return { ...defaults };
     }
     return {
-        types: parseBoolean(input.types, defaults.types),
-        defaults: parseBoolean(input.defaults, defaults.defaults),
-        required: parseBoolean(input.required, defaults.required),
-        aliases: parseBoolean(input.aliases, defaults.aliases),
-        descriptions: parseBoolean(input.descriptions, defaults.descriptions),
-        enumValues: parseBoolean(input.enumValues, defaults.enumValues),
+        types: parseBoolean(settings.types, defaults.types),
+        defaults: parseBoolean(settings.defaults, defaults.defaults),
+        required: parseBoolean(settings.required, defaults.required),
+        aliases: parseBoolean(settings.aliases, defaults.aliases),
+        descriptions: parseBoolean(settings.descriptions, defaults.descriptions),
+        enumValues: parseBoolean(settings.enumValues, defaults.enumValues),
     };
 }
 
 function parseFormColors(input: unknown): Record<FormAppearanceColorSlot, PiThemeColorName> {
     const colors = { ...DEFAULT_FORM_COLORS };
-    if (!isRecord(input)) {
+    const settings = parseSettings<FormColorSettingsInput>(FormColorSettingsSchema, input);
+    if (settings === undefined) {
         return colors;
     }
     for (const key of Object.keys(colors) as FormAppearanceColorSlot[]) {
-        colors[key] = parseThemeColor(input[key], colors[key]);
+        colors[key] = parseThemeColor(settings[key], colors[key]);
     }
     return colors;
 }
 
 function parseInlineHelpColors(input: unknown): Record<InlineHelpColorSlot, PiThemeColorName> {
     const colors = { ...DEFAULT_INLINE_HELP_COLORS };
-    if (!isRecord(input)) {
+    const settings = parseSettings<InlineHelpColorSettingsInput>(
+        InlineHelpColorSettingsSchema,
+        input,
+    );
+    if (settings === undefined) {
         return colors;
     }
     for (const key of Object.keys(colors) as InlineHelpColorSlot[]) {
-        colors[key] = parseThemeColor(input[key], colors[key]);
+        colors[key] = parseThemeColor(settings[key], colors[key]);
     }
     return colors;
 }
 
 function parseFormSymbolOverrides(input: unknown): Partial<ResolvedFormSymbols> {
-    if (!isRecord(input)) {
+    const settings = parseSettings<FormSymbolSettingsInput>(FormSymbolSettingsSchema, input);
+    if (settings === undefined) {
         return {};
     }
 
     const overrides: Partial<ResolvedFormSymbols> = {};
     for (const key of Object.keys(DEFAULT_FORM_SYMBOLS) as Array<keyof ResolvedFormSymbols>) {
-        if (!(key in input)) {
-            continue;
-        }
-        const parsed = parseOptionalDisplayString(input[key]);
+        const parsed = parseOptionalDisplayString(settings[key]);
         if (parsed !== undefined) {
             overrides[key] = parsed;
         }
@@ -437,20 +602,26 @@ function parseFormSymbolOverrides(input: unknown): Partial<ResolvedFormSymbols> 
 
 function parseFormLayout(input: unknown): ResolvedFormAppearance["layout"] {
     const layout = { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.form.layout };
-    if (!isRecord(input)) {
+    const settings = parseSettings<FormLayoutSettingsInput>(FormLayoutSettingsSchema, input);
+    if (settings === undefined) {
         return layout;
     }
 
     const descriptionModes = new Set<FormDescriptionMode>(["inline", "focused", "hidden"]);
     const instructionModes = new Set<FormInstructionMode>(["full", "short", "hidden"]);
-    layout.leftPadding = parseBoundedInteger(input.leftPadding, layout.leftPadding, 0, 12);
-    layout.fieldGap = parseBoundedInteger(input.fieldGap, layout.fieldGap, 0, 12);
-    layout.minNameWidth = parseBoundedInteger(input.minNameWidth, layout.minNameWidth, 1, 80);
-    layout.maxNameWidth = parseBoundedInteger(input.maxNameWidth, layout.maxNameWidth, 1, 120);
-    layout.minValueWidth = parseBoundedInteger(input.minValueWidth, layout.minValueWidth, 1, 80);
-    layout.maxValueWidth = parseBoundedInteger(input.maxValueWidth, layout.maxValueWidth, 1, 120);
-    layout.descriptions = parseEnum(input.descriptions, layout.descriptions, descriptionModes);
-    layout.instructions = parseEnum(input.instructions, layout.instructions, instructionModes);
+    layout.leftPadding = parseBoundedInteger(settings.leftPadding, layout.leftPadding, 0, 12);
+    layout.fieldGap = parseBoundedInteger(settings.fieldGap, layout.fieldGap, 0, 12);
+    layout.minNameWidth = parseBoundedInteger(settings.minNameWidth, layout.minNameWidth, 1, 80);
+    layout.maxNameWidth = parseBoundedInteger(settings.maxNameWidth, layout.maxNameWidth, 1, 120);
+    layout.minValueWidth = parseBoundedInteger(settings.minValueWidth, layout.minValueWidth, 1, 80);
+    layout.maxValueWidth = parseBoundedInteger(
+        settings.maxValueWidth,
+        layout.maxValueWidth,
+        1,
+        120,
+    );
+    layout.descriptions = parseEnum(settings.descriptions, layout.descriptions, descriptionModes);
+    layout.instructions = parseEnum(settings.instructions, layout.instructions, instructionModes);
 
     if (layout.maxNameWidth < layout.minNameWidth) {
         layout.maxNameWidth = layout.minNameWidth;
@@ -476,16 +647,28 @@ function parseInlineHelpOrder(value: unknown): InlineHelpOrder {
 
 function parseInlineHelpFormat(input: unknown): ResolvedInlineHelpAppearance["format"] {
     const format = { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.format };
-    if (!isRecord(input)) {
+    const settings = parseSettings<InlineHelpFormatSettingsInput>(
+        InlineHelpFormatSettingsSchema,
+        input,
+    );
+    if (settings === undefined) {
         return format;
     }
 
-    format.tokenPrefix = parseDisplayString(input.tokenPrefix, format.tokenPrefix, true);
-    format.tokenSuffix = parseDisplayString(input.tokenSuffix, format.tokenSuffix, true);
-    format.groupSeparator = parseDisplayString(input.groupSeparator, format.groupSeparator, true);
-    format.itemSeparator = parseDisplayString(input.itemSeparator, format.itemSeparator, true);
-    format.typeSeparator = parseDisplayString(input.typeSeparator, format.typeSeparator, true);
-    format.valueSeparator = parseDisplayString(input.valueSeparator, format.valueSeparator, true);
+    format.tokenPrefix = parseDisplayString(settings.tokenPrefix, format.tokenPrefix, true);
+    format.tokenSuffix = parseDisplayString(settings.tokenSuffix, format.tokenSuffix, true);
+    format.groupSeparator = parseDisplayString(
+        settings.groupSeparator,
+        format.groupSeparator,
+        true,
+    );
+    format.itemSeparator = parseDisplayString(settings.itemSeparator, format.itemSeparator, true);
+    format.typeSeparator = parseDisplayString(settings.typeSeparator, format.typeSeparator, true);
+    format.valueSeparator = parseDisplayString(
+        settings.valueSeparator,
+        format.valueSeparator,
+        true,
+    );
     return format;
 }
 
@@ -493,10 +676,14 @@ function parseFormAppearance(input: unknown): ResolvedFormAppearance {
     let colors = parseFormColors(undefined);
     let symbolOverrides: Partial<ResolvedFormSymbols> = {};
     let layout = parseFormLayout(undefined);
-    if (isRecord(input)) {
-        colors = parseFormColors(input.colors);
-        symbolOverrides = parseFormSymbolOverrides(input.symbols);
-        layout = parseFormLayout(input.layout);
+    const settings = parseSettings<FormAppearanceSettingsInput>(
+        FormAppearanceSettingsSchema,
+        input,
+    );
+    if (settings !== undefined) {
+        colors = parseFormColors(settings.colors);
+        symbolOverrides = parseFormSymbolOverrides(settings.symbols);
+        layout = parseFormLayout(settings.layout);
     }
     return {
         colors,
@@ -509,7 +696,11 @@ function parseFormAppearance(input: unknown): ResolvedFormAppearance {
 function parseInlineHelpAppearance(input: unknown): ResolvedInlineHelpAppearance {
     const layoutModes = new Set<InlineHelpLayout>(["compact"]);
     const defaults = DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp;
-    if (!isRecord(input)) {
+    const settings = parseSettings<InlineHelpAppearanceSettingsInput>(
+        InlineHelpAppearanceSettingsSchema,
+        input,
+    );
+    if (settings === undefined) {
         return {
             layout: defaults.layout,
             order: defaults.order,
@@ -520,17 +711,21 @@ function parseInlineHelpAppearance(input: unknown): ResolvedInlineHelpAppearance
     }
 
     return {
-        layout: parseEnum(input.layout, defaults.layout, layoutModes),
-        order: parseInlineHelpOrder(input.order),
-        metadata: mergeMetadata(input.metadata, DEFAULT_INLINE_METADATA),
-        colors: parseInlineHelpColors(input.colors),
-        format: parseInlineHelpFormat(input.format),
+        layout: parseEnum(settings.layout, defaults.layout, layoutModes),
+        order: parseInlineHelpOrder(settings.order),
+        metadata: mergeMetadata(settings.metadata, DEFAULT_INLINE_METADATA),
+        colors: parseInlineHelpColors(settings.colors),
+        format: parseInlineHelpFormat(settings.format),
     };
 }
 
 function parseDetailedHelpAppearance(input: unknown): ResolvedDetailedHelpAppearance {
     const orderModes = new Set<DetailedHelpOrder>(["definition", "required-first"]);
-    if (!isRecord(input)) {
+    const settings = parseSettings<DetailedHelpAppearanceSettingsInput>(
+        DetailedHelpAppearanceSettingsSchema,
+        input,
+    );
+    if (settings === undefined) {
         return {
             metadata: { ...DEFAULT_DETAILED_METADATA },
             order: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.detailedHelp.order,
@@ -538,9 +733,9 @@ function parseDetailedHelpAppearance(input: unknown): ResolvedDetailedHelpAppear
         };
     }
     return {
-        metadata: mergeMetadata(input.metadata, DEFAULT_DETAILED_METADATA),
+        metadata: mergeMetadata(settings.metadata, DEFAULT_DETAILED_METADATA),
         order: parseEnum(
-            input.order,
+            settings.order,
             DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.detailedHelp.order,
             orderModes,
         ),
@@ -550,14 +745,18 @@ function parseDetailedHelpAppearance(input: unknown): ResolvedDetailedHelpAppear
 
 /** Parse and normalize piTypedCommands.appearance from unknown Pi settings input. */
 export function parsePiTypedCommandsAppearance(input: unknown): ResolvedPiTypedCommandsAppearance {
-    if (!isRecord(input)) {
+    const settings = parseSettings<PiTypedCommandsAppearanceSettingsInput>(
+        PiTypedCommandsAppearanceSettingsSchema,
+        input,
+    );
+    if (settings === undefined) {
         return cloneDefaultAppearance();
     }
 
     return {
-        form: parseFormAppearance(input.form),
-        inlineHelp: parseInlineHelpAppearance(input.inlineHelp),
-        detailedHelp: parseDetailedHelpAppearance(input.detailedHelp),
+        form: parseFormAppearance(settings.form),
+        inlineHelp: parseInlineHelpAppearance(settings.inlineHelp),
+        detailedHelp: parseDetailedHelpAppearance(settings.detailedHelp),
     };
 }
 
@@ -565,11 +764,12 @@ export function parsePiTypedCommandsAppearance(input: unknown): ResolvedPiTypedC
 export function parsePiTypedCommandsAppearanceFromSettings(
     settings: unknown,
 ): ResolvedPiTypedCommandsAppearance {
-    if (!isRecord(settings)) {
+    const rootSettings = parsePiSettings(settings);
+    if (rootSettings === undefined) {
         return cloneDefaultAppearance();
     }
-    const typedCommands = settings.piTypedCommands;
-    if (!isRecord(typedCommands)) {
+    const typedCommands = parsePiTypedCommandsSettings(rootSettings.piTypedCommands);
+    if (typedCommands === undefined) {
         return cloneDefaultAppearance();
     }
     return parsePiTypedCommandsAppearance(typedCommands.appearance);

@@ -1,42 +1,18 @@
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import {
     getAgentDir,
     SettingsManager,
     type ExtensionContext,
     type WidgetPlacement,
 } from "@earendil-works/pi-coding-agent";
-import Type from "typebox";
-import type SchemaModule from "typebox/schema";
 import type { TypedCommandUxOptions } from "../types.js";
 import { DEFAULT_HELPER_PLACEMENT } from "./helper.js";
 import {
     DEFAULT_PI_TYPED_COMMANDS_APPEARANCE,
+    parsePiSettings,
     parsePiTypedCommandsAppearanceFromSettings,
+    parsePiTypedCommandsSettings,
     type ResolvedPiTypedCommandsAppearance,
 } from "./presentation-config.js";
-
-const require = createRequire(import.meta.url);
-const Schema: typeof SchemaModule = await import(
-    pathToFileURL(join(dirname(require.resolve("typebox")), "schema/index.mjs")).href
-);
-
-const PiSettingsSchema = Type.Object(
-    {
-        piTypedCommands: Type.Optional(
-            Type.Object(
-                {
-                    helperPlacement: Type.Optional(
-                        Type.Union([Type.Literal("aboveEditor"), Type.Literal("belowEditor")]),
-                    ),
-                },
-                { additionalProperties: true },
-            ),
-        ),
-    },
-    { additionalProperties: true },
-);
 
 type PiSettingsSnapshot = {
     projectSettings: unknown;
@@ -44,11 +20,9 @@ type PiSettingsSnapshot = {
 };
 
 function helperPlacementFromSettings(settings: unknown): WidgetPlacement | undefined {
-    try {
-        return Schema.Parse(PiSettingsSchema, settings).piTypedCommands?.helperPlacement;
-    } catch {
-        return undefined;
-    }
+    const rootSettings = parsePiSettings(settings);
+    const typedCommands = parsePiTypedCommandsSettings(rootSettings?.piTypedCommands);
+    return typedCommands?.helperPlacement;
 }
 
 function projectTrusted(ctx: ExtensionContext): boolean {
