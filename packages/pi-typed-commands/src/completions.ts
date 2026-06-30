@@ -2,6 +2,8 @@ import { readdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
+import Type, { type Static } from "typebox";
+import Schema from "./typebox-schema.js";
 import { casesHandled } from "./exhaustive.js";
 import {
     lexTypedArgumentString,
@@ -41,6 +43,25 @@ type ValueCompletionItem = AutocompleteItem & {
 };
 
 const DEFAULT_COMPLETION_TIMEOUT_MS = 1000;
+
+const UnknownCompletionItemsSchema = Type.Array(Type.Unknown());
+const ProviderCompletionItemSchema = Type.Object(
+    {
+        value: Type.String(),
+        label: Type.Optional(Type.Unknown()),
+        description: Type.Optional(Type.Unknown()),
+        replacement: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+type ProviderCompletionItemBoundary = Static<typeof ProviderCompletionItemSchema>;
+type ProviderCompletionItem = {
+    value: string;
+    label?: string;
+    description?: string;
+    replacement?: string;
+};
 
 function tokenizeLoose(input: string): Token[] {
     return lexTypedArgumentString(input).tokens;
@@ -144,10 +165,6 @@ function isPromiseLike<T>(value: MaybePromise<T> | undefined): value is Promise<
     return value !== undefined && typeof (value as { then?: unknown }).then === "function";
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function normalizedCompletionTimeoutMs(definition: ArgumentDefinition): number | undefined {
     const timeoutMs = definition.completionTimeoutMs ?? DEFAULT_COMPLETION_TIMEOUT_MS;
     if (timeoutMs <= 0) {
@@ -156,31 +173,25 @@ function normalizedCompletionTimeoutMs(definition: ArgumentDefinition): number |
     return timeoutMs;
 }
 
-type ProviderCompletionItem = {
-    value: string;
-    label?: string;
-    description?: string;
-    replacement?: string;
-};
-
 function normalizeProviderCompletionItems(value: unknown): ProviderCompletionItem[] {
-    if (!Array.isArray(value)) {
+    if (!Schema.Check(UnknownCompletionItemsSchema, value)) {
         return [];
     }
     const items: ProviderCompletionItem[] = [];
     for (const item of value) {
-        if (!isRecord(item) || typeof item.value !== "string") {
+        if (!Schema.Check(ProviderCompletionItemSchema, item)) {
             continue;
         }
-        const normalized: ProviderCompletionItem = { value: item.value };
-        if (typeof item.label === "string") {
-            normalized.label = item.label;
+        const boundaryItem: ProviderCompletionItemBoundary = item;
+        const normalized: ProviderCompletionItem = { value: boundaryItem.value };
+        if (typeof boundaryItem.label === "string") {
+            normalized.label = boundaryItem.label;
         }
-        if (typeof item.description === "string") {
-            normalized.description = item.description;
+        if (typeof boundaryItem.description === "string") {
+            normalized.description = boundaryItem.description;
         }
-        if (typeof item.replacement === "string") {
-            normalized.replacement = item.replacement;
+        if (typeof boundaryItem.replacement === "string") {
+            normalized.replacement = boundaryItem.replacement;
         }
         items.push(normalized);
     }
