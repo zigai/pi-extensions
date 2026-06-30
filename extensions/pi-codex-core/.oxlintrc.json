@@ -32,7 +32,7 @@
     "eqeqeq": "error",
     "no-array-constructor": "error",
     "no-duplicate-imports": "warn",
-    "no-use-before-define": "warn",
+    "no-use-before-define": "off",
     "no-unused-expressions": "error",
     "no-var": "error",
     "oxc/approx-constant": "error",
