@@ -1,12 +1,31 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 import { extractAccountId } from "./codex-auth.ts";
+import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const RESET_CREDITS_CACHE_MS = 5_000;
 
 type RuntimeModel = Model<Api>;
+
+const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
+const StringSchema = compileSchema(Type.String());
+const NumberSchema = compileSchema(Type.Number());
+const ResetCreditSchema = compileSchema(
+    Type.Object({
+        id: Type.Optional(Type.String()),
+        reset_type: Type.Optional(Type.String()),
+        status: Type.Optional(Type.String()),
+        granted_at: Type.Optional(Type.String()),
+        expires_at: Type.Optional(Type.String()),
+        redeem_started_at: Type.Optional(Type.String()),
+        redeemed_at: Type.Optional(Type.String()),
+        title: Type.Optional(Type.String()),
+        description: Type.Optional(Type.String()),
+    }),
+);
 
 export type CodexUsageWindow = {
     readonly usedPercent?: number | undefined;
@@ -92,7 +111,8 @@ export async function fetchCodexUsage(ctx: ExtensionContext): Promise<CodexUsage
         throw new Error(
             `Usage request failed (${response.status}): ${text || response.statusText}`,
         );
-    const snapshot = parseCodexUsagePayload(JSON.parse(text) as unknown);
+    const rawUsagePayload: unknown = JSON.parse(text);
+    const snapshot = parseCodexUsagePayload(rawUsagePayload);
     if (!snapshot.resetCredits || snapshot.resetCredits.availableCount > 0) {
         try {
             const detailedResetCredits = await fetchCodexRateLimitResetCreditsWithHeaders(
@@ -131,14 +151,17 @@ export async function consumeCodexRateLimitResetCredit(
             `Reset request failed (${response.status}): ${text || response.statusText}`,
         );
     resetCreditsCache = undefined;
-    return parseCodexRateLimitResetConsumePayload(JSON.parse(text) as unknown);
+    const rawConsumePayload: unknown = JSON.parse(text);
+    return parseCodexRateLimitResetConsumePayload(rawConsumePayload);
 }
 
 export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
-    const root = isRecord(payload) ? payload : {};
+    const root = parseUsageRecord(payload) ?? {};
     const limits: CodexUsageLimit[] = [];
     const addLimit = (limitId: string, limitName: string | undefined, source: unknown): void => {
-        const rateLimit = isRecord(source) && "rate_limit" in source ? source.rate_limit : source;
+        const sourceRecord = parseUsageRecord(source);
+        const rateLimit =
+            sourceRecord && "rate_limit" in sourceRecord ? sourceRecord.rate_limit : source;
         const parsed = parseRateLimit(rateLimit);
         limits.push({
             limitId,
@@ -151,11 +174,12 @@ export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
     addLimit("codex", undefined, root.rate_limit);
     if (Array.isArray(root.additional_rate_limits)) {
         for (const item of root.additional_rate_limits) {
-            if (!isRecord(item)) continue;
+            const additionalLimit = parseUsageRecord(item);
+            if (!additionalLimit) continue;
             addLimit(
-                parseString(item.metered_feature) ?? "additional",
-                parseString(item.limit_name),
-                item,
+                parseString(additionalLimit.metered_feature) ?? "additional",
+                parseString(additionalLimit.limit_name),
+                additionalLimit,
             );
         }
     }
@@ -171,11 +195,12 @@ export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
 export function parseCodexRateLimitResetCreditsPayload(
     payload: unknown,
 ): CodexRateLimitResetCredits | undefined {
-    if (!isRecord(payload)) return undefined;
-    const availableCount = parseInteger(payload.available_count);
+    const root = parseUsageRecord(payload);
+    if (!root) return undefined;
+    const availableCount = parseInteger(root.available_count);
     if (availableCount === undefined) return undefined;
-    const credits = Array.isArray(payload.credits)
-        ? payload.credits.flatMap((item) => {
+    const credits = Array.isArray(root.credits)
+        ? root.credits.flatMap((item) => {
               const credit = parseResetCredit(item);
               return credit ? [credit] : [];
           })
@@ -247,7 +272,8 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
             ...(signal ? { signal } : {}),
         });
         if (!response.ok) return undefined;
-        return parseCodexRateLimitResetCreditsPayload(JSON.parse(await response.text()) as unknown);
+        const rawCreditsPayload: unknown = JSON.parse(await response.text());
+        return parseCodexRateLimitResetCreditsPayload(rawCreditsPayload);
     })();
     if (cacheKey)
         resetCreditsCache = {
@@ -271,7 +297,7 @@ function requireOpenAICodexModel(model: ExtensionContext["model"]): RuntimeModel
 function parseCodexRateLimitResetConsumePayload(
     payload: unknown,
 ): CodexRateLimitResetConsumeResult {
-    const root = isRecord(payload) ? payload : {};
+    const root = parseUsageRecord(payload) ?? {};
     const code = parseString(root.code);
     const outcome: CodexRateLimitResetConsumeOutcome =
         code === "reset" ||
@@ -286,23 +312,25 @@ function parseCodexRateLimitResetConsumePayload(
 function parseCodexRateLimitResetCreditsSummary(
     value: unknown,
 ): CodexRateLimitResetCredits | undefined {
-    if (!isRecord(value)) return undefined;
-    const availableCount = parseInteger(value.available_count);
+    const summary = parseUsageRecord(value);
+    if (!summary) return undefined;
+    const availableCount = parseInteger(summary.available_count);
     return availableCount === undefined ? undefined : { availableCount, credits: [], raw: value };
 }
 
 function parseResetCredit(value: unknown): CodexRateLimitResetCredit | undefined {
-    if (!isRecord(value)) return undefined;
+    const credit = parseWithSchema(ResetCreditSchema, value);
+    if (!credit) return undefined;
     return {
-        id: parseString(value.id),
-        resetType: parseString(value.reset_type),
-        status: parseString(value.status),
-        grantedAt: parseString(value.granted_at),
-        expiresAt: parseString(value.expires_at),
-        redeemStartedAt: parseString(value.redeem_started_at),
-        redeemedAt: parseString(value.redeemed_at),
-        title: parseString(value.title),
-        description: parseString(value.description),
+        id: credit.id,
+        resetType: credit.reset_type,
+        status: credit.status,
+        grantedAt: credit.granted_at,
+        expiresAt: credit.expires_at,
+        redeemStartedAt: credit.redeem_started_at,
+        redeemedAt: credit.redeemed_at,
+        title: credit.title,
+        description: credit.description,
     };
 }
 
@@ -310,21 +338,23 @@ function parseRateLimit(value: unknown): {
     readonly primary?: CodexUsageWindow | undefined;
     readonly secondary?: CodexUsageWindow | undefined;
 } {
-    if (!isRecord(value)) return {};
+    const rateLimit = parseUsageRecord(value);
+    if (!rateLimit) return {};
     return {
-        primary: parseWindow(value.primary_window) ?? parseWindow(value.primary),
-        secondary: parseWindow(value.secondary_window) ?? parseWindow(value.secondary),
+        primary: parseWindow(rateLimit.primary_window) ?? parseWindow(rateLimit.primary),
+        secondary: parseWindow(rateLimit.secondary_window) ?? parseWindow(rateLimit.secondary),
     };
 }
 
 function parseWindow(value: unknown): CodexUsageWindow | undefined {
-    if (!isRecord(value)) return undefined;
-    const usedPercent = parseNumber(value.used_percent);
-    const limitWindowSeconds = parseNumber(value.limit_window_seconds);
+    const window = parseUsageRecord(value);
+    if (!window) return undefined;
+    const usedPercent = parseNumber(window.used_percent);
+    const limitWindowSeconds = parseNumber(window.limit_window_seconds);
     const windowMinutes =
-        parseNumber(value.window_minutes) ??
+        parseNumber(window.window_minutes) ??
         (limitWindowSeconds === undefined ? undefined : Math.ceil(limitWindowSeconds / 60));
-    const resetsAt = parseNumber(value.resets_at) ?? parseNumber(value.reset_at);
+    const resetsAt = parseNumber(window.resets_at) ?? parseNumber(window.reset_at);
     return usedPercent === undefined && windowMinutes === undefined && resetsAt === undefined
         ? undefined
         : { usedPercent, windowMinutes, resetsAt };
@@ -383,11 +413,14 @@ function extractBearerToken(headers: Headers): string | undefined {
 }
 
 function parseString(value: unknown): string | undefined {
-    return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+    const parsed = parseWithSchema(StringSchema, value);
+    if (parsed === undefined) return undefined;
+    const text = parsed.trim();
+    return text.length > 0 ? text : undefined;
 }
 
 function parseNumber(value: unknown): number | undefined {
-    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    return parseWithSchema(NumberSchema, value);
 }
 
 function parseInteger(value: unknown): number | undefined {
@@ -397,6 +430,6 @@ function parseInteger(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : undefined;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+function parseUsageRecord(value: unknown): Record<string, unknown> | undefined {
+    return parseWithSchema(UnknownRecordSchema, value);
 }

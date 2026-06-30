@@ -1,4 +1,6 @@
 import { Type } from "typebox";
+
+import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import type {
@@ -37,6 +39,16 @@ const IMAGEGEN_PARAMETERS = Type.Object({
         }),
     ),
 });
+
+const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
+const ImagegenResponseSchema = compileSchema(
+    Type.Object({
+        data: Type.Array(Type.Object({ b64_json: Type.Optional(Type.String()) })),
+        background: Type.Optional(Type.String()),
+        quality: Type.Optional(Type.String()),
+        size: Type.Optional(Type.String()),
+    }),
+);
 
 type ImagegenParams = {
     readonly prompt: string;
@@ -149,15 +161,16 @@ export function createImagegenTool(
 }
 
 export function prepareImagegenArguments(args: unknown): ImagegenParams {
-    if (!isRecord(args)) return { prompt: "" };
-    const prompt = typeof args.prompt === "string" ? args.prompt : "";
+    const input = parseWithSchema(UnknownRecordSchema, args);
+    if (!input) return { prompt: "" };
+    const prompt = typeof input.prompt === "string" ? input.prompt : "";
     const referencedPaths =
-        parseStringArray(args.referenced_image_paths) ?? parseStringArray(args.images);
+        parseStringArray(input.referenced_image_paths) ?? parseStringArray(input.images);
     const recentCount =
-        typeof args.num_last_images_to_include === "number"
-            ? args.num_last_images_to_include
+        typeof input.num_last_images_to_include === "number"
+            ? input.num_last_images_to_include
             : undefined;
-    const action = typeof args.action === "string" ? args.action : undefined;
+    const action = typeof input.action === "string" ? input.action : undefined;
     return {
         prompt,
         ...(referencedPaths ? { referenced_image_paths: referencedPaths } : {}),
@@ -260,7 +273,8 @@ async function requestImageGeneration(
         throw new Error(
             `imagegen failed (${response.status}): ${responseText || response.statusText}`,
         );
-    return parseImageResponse(JSON.parse(responseText) as unknown);
+    const rawImagePayload: unknown = JSON.parse(responseText);
+    return parseImageResponse(rawImagePayload);
 }
 
 function parseImageResponse(value: unknown): {
@@ -269,17 +283,15 @@ function parseImageResponse(value: unknown): {
     readonly quality?: string;
     readonly size?: string;
 } {
-    if (!isRecord(value) || !Array.isArray(value.data))
-        throw new Error("imagegen response did not contain image data.");
-    const images = value.data.flatMap((item) =>
-        isRecord(item) && typeof item.b64_json === "string" ? [item.b64_json] : [],
-    );
+    const response = parseWithSchema(ImagegenResponseSchema, value);
+    if (!response) throw new Error("imagegen response did not contain image data.");
+    const images = response.data.flatMap((item) => (item.b64_json ? [item.b64_json] : []));
     if (images.length === 0) throw new Error("imagegen returned no image data.");
     return {
         images,
-        ...(typeof value.background === "string" ? { background: value.background } : {}),
-        ...(typeof value.quality === "string" ? { quality: value.quality } : {}),
-        ...(typeof value.size === "string" ? { size: value.size } : {}),
+        ...(response.background ? { background: response.background } : {}),
+        ...(response.quality ? { quality: response.quality } : {}),
+        ...(response.size ? { size: response.size } : {}),
     };
 }
 
@@ -309,8 +321,4 @@ function parseStringArray(value: unknown): string[] | undefined {
         (item): item is string => typeof item === "string" && item.trim().length > 0,
     );
     return strings.length > 0 ? strings : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

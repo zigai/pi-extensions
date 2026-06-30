@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 
 import { Type } from "typebox";
+
+import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import { StringEnum, type ImageContent } from "@earendil-works/pi-ai";
 import {
     Container,
@@ -17,7 +19,7 @@ import type {
     ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
-import type { CodexCoreConfig } from "../config.ts";
+import { resolveCodexRequestModel, type CodexCoreConfig } from "../config.ts";
 import {
     codexToolProviderHeaders,
     resolveCodexResponsesUrl,
@@ -27,11 +29,42 @@ import {
     imageContentToDataUrl,
     loadImageContent,
     modelSupportsImages,
+    prepareCodexPromptImageContent,
+    type ImageDetail,
     type LoadedImage,
 } from "../image-content.ts";
 
 const IMAGE_DESCRIPTION_PROMPT =
     "Describe this image in detail. Output only the image description, no other commentary.";
+
+const ImageContentBlockSchema = compileSchema(
+    Type.Object({ type: Type.Literal("image"), data: Type.String(), mimeType: Type.String() }),
+);
+const TextContentBlockSchema = compileSchema(
+    Type.Object({ type: Type.Literal("text"), text: Type.String() }),
+);
+const ViewImageArgumentsSchema = compileSchema(
+    Type.Object({
+        path: Type.Optional(Type.String()),
+        file_path: Type.Optional(Type.String()),
+        image_path: Type.Optional(Type.String()),
+        detail: Type.Optional(StringEnum(["auto", "high", "original"] as const)),
+    }),
+);
+const DescriptionResponseSchema = compileSchema(
+    Type.Object({
+        output_text: Type.Optional(Type.String()),
+        output: Type.Optional(
+            Type.Array(
+                Type.Object({
+                    content: Type.Optional(
+                        Type.Array(Type.Object({ text: Type.Optional(Type.String()) })),
+                    ),
+                }),
+            ),
+        ),
+    }),
+);
 
 const VIEW_IMAGE_PARAMETERS = Type.Object({
     path: Type.String({ description: "Path to a local image file." }),
@@ -77,6 +110,7 @@ export function createViewImageTool(
         promptSnippet: "View a local image file by path.",
         promptGuidelines: [
             "Use view_image when the user asks to inspect a local image file; pass the path exactly and do not use it for text files.",
+            "Use read for text files and as a fallback for image files when view_image is unavailable.",
         ],
         parameters: VIEW_IMAGE_PARAMETERS,
         prepareArguments: prepareViewImageArguments,
@@ -135,14 +169,16 @@ export function createViewImageTool(
         },
         async execute(_toolCallId, params, signal, _onUpdate, ctx) {
             const image = await loadImageContent(params.path, ctx.cwd);
+            const detail = params.detail ?? "high";
             if (modelSupportsImages(ctx.model)) {
+                const content = await prepareCodexPromptImageContent(image, detail);
                 return {
-                    content: [image.content],
+                    content: [content],
                     details: {
                         path: params.path,
                         absolutePath: image.absolutePath,
                         described: false,
-                        mimeType: image.content.mimeType,
+                        mimeType: content.mimeType,
                     },
                 };
             }
@@ -154,13 +190,7 @@ export function createViewImageTool(
                 );
             }
 
-            const description = await describeImage(
-                image,
-                params.detail ?? "auto",
-                ctx,
-                config,
-                signal,
-            );
+            const description = await describeImage(image, detail, ctx, config, signal);
             return {
                 content: [{ type: "text", text: description }],
                 details: {
@@ -175,14 +205,10 @@ export function createViewImageTool(
 }
 
 export function prepareViewImageArguments(args: unknown): ViewImageParams {
-    if (!isRecord(args)) return { path: "" };
-    const path =
-        parsePath(args.path) ?? parsePath(args.file_path) ?? parsePath(args.image_path) ?? "";
-    const detail =
-        args.detail === "auto" || args.detail === "high" || args.detail === "original"
-            ? args.detail
-            : undefined;
-    return detail ? { path, detail } : { path };
+    const input = parseWithSchema(ViewImageArgumentsSchema, args);
+    if (!input) return { path: "" };
+    const path = input.path ?? input.file_path ?? input.image_path ?? "";
+    return input.detail ? { path, detail: input.detail } : { path };
 }
 
 type TextContentBlock = {
@@ -205,16 +231,11 @@ function firstTextContent(content: readonly unknown[]): string | undefined {
 }
 
 function isImageContentBlock(value: unknown): value is ImageContent {
-    return (
-        isRecord(value) &&
-        value.type === "image" &&
-        typeof value.data === "string" &&
-        typeof value.mimeType === "string"
-    );
+    return parseWithSchema(ImageContentBlockSchema, value) !== undefined;
 }
 
 function isTextContentBlock(value: unknown): value is TextContentBlock {
-    return isRecord(value) && value.type === "text" && typeof value.text === "string";
+    return parseWithSchema(TextContentBlockSchema, value) !== undefined;
 }
 
 function loadPreviewImage(
@@ -247,22 +268,25 @@ function compactText(value: string, maxCharacters: number): string {
 
 async function describeImage(
     image: LoadedImage,
-    detail: "auto" | "high" | "original",
+    detail: ImageDetail,
     ctx: ExtensionContext,
     config: CodexCoreConfig,
     signal: AbortSignal | undefined,
 ): Promise<string> {
+    const promptImage = await prepareCodexPromptImageContent(image, detail);
     const provider = await resolveCodexToolProvider(ctx);
     const headers = codexToolProviderHeaders(provider);
     headers.set("OpenAI-Beta", "responses=experimental");
     headers.set("accept", "application/json");
+
+    const model = resolveCodexRequestModel(config.openai.imageDescriptionModel, provider.model);
 
     const response = await fetch(resolveCodexResponsesUrl(provider.baseUrl), {
         method: "POST",
         headers,
         ...(signal ? { signal } : {}),
         body: JSON.stringify({
-            model: config.openai.imageDescriptionModel,
+            model,
             store: false,
             stream: false,
             instructions: IMAGE_DESCRIPTION_PROMPT,
@@ -275,7 +299,7 @@ async function describeImage(
                         { type: "input_text", text: "Describe the image." },
                         {
                             type: "input_image",
-                            image_url: imageContentToDataUrl(image.content),
+                            image_url: imageContentToDataUrl(promptImage),
                             detail: detail === "original" ? "high" : detail,
                         },
                     ],
@@ -289,31 +313,23 @@ async function describeImage(
         throw new Error(
             `view_image description failed (${response.status}): ${responseText || response.statusText}`,
         );
-    const description = extractOutputText(JSON.parse(responseText) as unknown);
+    const rawDescriptionPayload: unknown = JSON.parse(responseText);
+    const description = extractOutputText(rawDescriptionPayload);
     if (!description) throw new Error("view_image description returned no text");
     return description;
 }
 
 function extractOutputText(value: unknown): string | undefined {
-    if (!isRecord(value)) return undefined;
-    if (typeof value.output_text === "string" && value.output_text.trim().length > 0)
-        return value.output_text.trim();
-    if (!Array.isArray(value.output)) return undefined;
+    const response = parseWithSchema(DescriptionResponseSchema, value);
+    if (!response) return undefined;
+    if (response.output_text && response.output_text.trim().length > 0)
+        return response.output_text.trim();
     const parts: string[] = [];
-    for (const item of value.output) {
-        if (!isRecord(item) || !Array.isArray(item.content)) continue;
-        for (const content of item.content) {
-            if (isRecord(content) && typeof content.text === "string") parts.push(content.text);
+    for (const item of response.output ?? []) {
+        for (const content of item.content ?? []) {
+            if (content.text) parts.push(content.text);
         }
     }
     const text = parts.join("").trim();
     return text.length > 0 ? text : undefined;
-}
-
-function parsePath(value: unknown): string | undefined {
-    return typeof value === "string" ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

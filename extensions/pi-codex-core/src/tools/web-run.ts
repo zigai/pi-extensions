@@ -8,12 +8,14 @@ import {
     withFileMutationQueue,
     type ExtensionAPI,
     type ExtensionContext,
+    type SessionEntry,
     type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
 import { resolveCodexRequestModel, type CodexCoreConfig } from "../config.ts";
 import { codexToolProviderHeaders, resolveCodexToolProvider } from "../codex-auth.ts";
 import { resolveCodexCoreArtifactPath, sanitizeArtifactPathPart } from "../artifacts.ts";
+import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import { formatWebRunToolOutput } from "./web-run-output.ts";
 
 export const WEB_RUN_TOOL_NAME = "web_run";
@@ -106,6 +108,24 @@ const WEB_RUN_PARAMETERS = Type.Object({
     ),
 });
 
+const WebRunParametersValidator = compileSchema(WEB_RUN_PARAMETERS);
+const TextContentBlockSchema = compileSchema(
+    Type.Object({ type: Type.Literal("text"), text: Type.String() }),
+);
+const SearchOutputSchema = compileSchema(
+    Type.Object({
+        output: Type.Optional(Type.String()),
+        output_text: Type.Optional(Type.String()),
+        text: Type.Optional(Type.String()),
+    }),
+);
+const MessageTextContextSchema = compileSchema(
+    Type.Object({
+        role: Type.Optional(Type.String()),
+        content: Type.Optional(Type.Union([Type.String(), Type.Array(Type.Unknown())])),
+    }),
+);
+
 type WebRunParams = Static<typeof WEB_RUN_PARAMETERS>;
 
 type WebRunDetails = {
@@ -142,7 +162,7 @@ export function createWebRunTool(
             "Use web_run open/click/find with returned ref ids instead of repeating broad searches when drilling into a result.",
         ],
         parameters: WEB_RUN_PARAMETERS,
-        prepareArguments: (args) => (isRecord(args) ? args : {}),
+        prepareArguments: (args) => parseWithSchema(WebRunParametersValidator, args) ?? {},
         renderCall(args, theme, _context) {
             const summary = summarizeWebRunCall(args);
             const summaryColor = summary ? "accent" : "dim";
@@ -188,7 +208,7 @@ export function createWebRunTool(
 }
 
 async function executeWebRun(
-    params: Record<string, unknown>,
+    params: WebRunParams,
     ctx: ExtensionContext,
     config: CodexCoreConfig,
     signal: AbortSignal | undefined,
@@ -218,8 +238,8 @@ async function executeWebRun(
         throw new Error(
             `web_run failed (${response.status}): ${responseText || response.statusText}`,
         );
-    const parsed = JSON.parse(responseText) as unknown;
-    const output = parseSearchOutput(parsed);
+    const rawSearchPayload: unknown = JSON.parse(responseText);
+    const output = parseSearchOutput(rawSearchPayload);
     if (!output) throw new Error("web_run returned no output");
     return { output };
 }
@@ -344,19 +364,13 @@ function findCardUrl(lines: readonly string[], startIndex: number): string | und
 
 function firstTextContent(content: readonly unknown[]): string | undefined {
     for (const item of content) {
-        if (
-            isRecord(item) &&
-            item.type === "text" &&
-            typeof item.text === "string" &&
-            item.text.trim().length > 0
-        ) {
-            return item.text.trim();
-        }
+        const block = parseWithSchema(TextContentBlockSchema, item);
+        if (block && block.text.trim().length > 0) return block.text.trim();
     }
     return undefined;
 }
 
-function splitSearchRequest(params: Record<string, unknown>): {
+function splitSearchRequest(params: WebRunParams): {
     readonly commands: Record<string, unknown>;
     readonly settings?: Record<string, unknown>;
 } {
@@ -365,7 +379,9 @@ function splitSearchRequest(params: Record<string, unknown>): {
         if (value === undefined || key === "settings") continue;
         commands[key] = value;
     }
-    const settings = isRecord(params.settings) ? stripUndefined(params.settings) : undefined;
+    const settings = params.settings?.search_context_size
+        ? { search_context_size: params.settings.search_context_size }
+        : undefined;
     return settings && Object.keys(settings).length > 0 ? { commands, settings } : { commands };
 }
 
@@ -405,55 +421,47 @@ async function saveFullWebRunOutput(
 }
 
 function parseSearchOutput(value: unknown): string | undefined {
-    if (!isRecord(value)) return undefined;
-    if (typeof value.output === "string" && value.output.trim().length > 0) return value.output;
-    if (typeof value.output_text === "string" && value.output_text.trim().length > 0)
-        return value.output_text;
-    if (typeof value.text === "string" && value.text.trim().length > 0) return value.text;
+    const output = parseWithSchema(SearchOutputSchema, value);
+    if (!output) return undefined;
+    if (output.output && output.output.trim().length > 0) return output.output;
+    if (output.output_text && output.output_text.trim().length > 0) return output.output_text;
+    if (output.text && output.text.trim().length > 0) return output.text;
     return undefined;
 }
 
 function recentSearchContext(ctx: ExtensionContext): string | undefined {
     const lines: string[] = [];
-    const branch = ctx.sessionManager.getBranch() as readonly unknown[];
+    const branch = ctx.sessionManager.getBranch();
     for (let index = branch.length - 1; index >= 0 && lines.length < 8; index -= 1) {
-        const text = textFromMessageEntry(branch[index]);
+        const entry = branch[index];
+        if (!entry) continue;
+        const text = textFromMessageEntry(entry);
         if (text) lines.push(text);
     }
     const context = lines.reverse().join("\n\n").slice(-4_000).trim();
     return context.length > 0 ? context : undefined;
 }
 
-function textFromMessageEntry(entry: unknown): string | undefined {
-    if (!isRecord(entry) || entry.type !== "message" || !isRecord(entry.message)) return undefined;
-    const role = typeof entry.message.role === "string" ? entry.message.role : "message";
-    if (role === "toolResult") return undefined;
-    const text = textFromContent(entry.message.content);
+function textFromMessageEntry(entry: SessionEntry): string | undefined {
+    if (entry.type !== "message") return undefined;
+    const message = parseWithSchema(MessageTextContextSchema, entry.message);
+    if (!message || message.role === "toolResult") return undefined;
+    const role = message.role ?? "message";
+    const text = textFromContent(message.content);
     return text ? `[${role}] ${text}` : undefined;
 }
 
-function textFromContent(content: unknown): string | undefined {
+function textFromContent(content: string | readonly unknown[] | undefined): string | undefined {
     if (typeof content === "string") return content.trim() || undefined;
     if (!Array.isArray(content)) return undefined;
-    const parts = content.flatMap((item) =>
-        isRecord(item) && item.type === "text" && typeof item.text === "string" ? [item.text] : [],
-    );
+    const parts = content.flatMap((item) => {
+        const block = parseWithSchema(TextContentBlockSchema, item);
+        return block ? [block.text] : [];
+    });
     const text = parts.join("\n").trim();
     return text.length > 0 ? text : undefined;
 }
 
 function safeSessionId(id: string): string {
     return sanitizeArtifactPathPart(id, "web_run");
-}
-
-function stripUndefined(record: Record<string, unknown>): Record<string, unknown> {
-    const stripped: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(record)) {
-        if (value !== undefined) stripped[key] = value;
-    }
-    return stripped;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

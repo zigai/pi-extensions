@@ -1,28 +1,34 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { formatCodexModelSelection, type CodexCoreConfig } from "./config.ts";
-import { IMAGEGEN_TOOL_NAME } from "./tools/imagegen.ts";
-import { VIEW_IMAGE_TOOL_NAME } from "./tools/view-image.ts";
-import { WEB_RUN_TOOL_NAME } from "./tools/web-run.ts";
+import {
+    formatSkillsForPrompt,
+    getDocsPath,
+    getExamplesPath,
+    getReadmePath,
+    type BuildSystemPromptOptions,
+} from "@earendil-works/pi-coding-agent";
+
+import type { CodexCoreConfig } from "./config.ts";
 
 const CODEX_BASE_PROMPT_PATH = fileURLToPath(
     new URL("./prompt/codex-base-prompt.md", import.meta.url),
 );
 let cachedCodexBasePrompt: string | undefined;
 
-export function buildCodexCoreSystemPrompt(basePrompt: string, config: CodexCoreConfig): string {
-    const notes = buildPiRuntimeNotes(config);
+const DEFAULT_PI_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
+
+export function buildCodexCoreSystemPrompt(
+    basePrompt: string,
+    config: CodexCoreConfig,
+    options?: BuildSystemPromptOptions,
+): string {
     if (config.prompt.mode === "codex") {
-        return [
-            readCodexBasePrompt(),
-            notes,
-            "# Pi Context",
-            "The following Pi-provided context, project instructions, tools, and skills also apply.",
-            basePrompt,
-        ].join("\n\n");
+        return [readCodexBasePrompt(), buildPiCodexContext(basePrompt, options)]
+            .filter((section) => section.length > 0)
+            .join("\n\n");
     }
-    return insertBeforeTrailingContext(basePrompt, notes);
+    return basePrompt;
 }
 
 function readCodexBasePrompt(): string {
@@ -30,41 +36,153 @@ function readCodexBasePrompt(): string {
     return cachedCodexBasePrompt;
 }
 
-function buildPiRuntimeNotes(config: CodexCoreConfig): string {
-    const lines = [
-        "# Pi Codex Core",
-        "Pi is providing a native tool surface with selected Codex-compatible tools.",
-        "Use Pi's built-in file and shell tools normally; use the Codex tools only for capabilities Pi does not already provide.",
-    ];
+function buildPiCodexContext(
+    basePrompt: string,
+    options: BuildSystemPromptOptions | undefined,
+): string {
+    if (!options) return basePrompt;
 
-    const activeTools: string[] = [];
-    if (config.tools.webSearch)
-        activeTools.push(
-            `${WEB_RUN_TOOL_NAME}: Codex-backed web search/open/click/find/current-info access.`,
-        );
-    if (config.tools.imageGeneration)
-        activeTools.push(`${IMAGEGEN_TOOL_NAME}: Codex-backed image generation and image edits.`);
-    if (config.tools.viewImage)
-        activeTools.push(`${VIEW_IMAGE_TOOL_NAME}: local image inspection by path.`);
-    if (activeTools.length > 0) {
-        lines.push("Available Codex-compatible tools:");
-        for (const tool of activeTools) lines.push(`- ${tool}`);
+    return [
+        buildPiToolsSection(options),
+        buildPiGuidelinesSection(options),
+        buildPiDocumentationSection(),
+        buildPiCustomPromptSection(options),
+        buildPiAppendPromptSection(options),
+        buildPiProjectContextSection(options),
+        buildPiSkillsSection(options),
+        buildPiRuntimeContextSection(basePrompt, options),
+    ]
+        .filter((section) => section.length > 0)
+        .join("\n\n");
+}
+
+function buildPiToolsSection(options: BuildSystemPromptOptions): string {
+    const tools = selectedTools(options);
+    const snippets = options.toolSnippets ?? {};
+    const lines = ["Available tools:"];
+
+    if (tools.length === 0) {
+        lines.push("(none)");
+    } else {
+        for (const toolName of tools) {
+            const snippet = snippets[toolName]?.trim();
+            lines.push(
+                `- ${toolName}: ${snippet && snippet.length > 0 ? snippet : "Available Pi tool."}`,
+            );
+        }
     }
 
     lines.push(
-        `Codex tool scope: ${config.scope.tools === "all" ? "available on all models via OpenAI Codex sidecar auth" : "available on Codex-like models only"}.`,
+        "",
+        "In addition to the tools above, you may have access to other custom tools depending on the project.",
     );
-    if (config.compaction.enabled) {
-        lines.push(
-            `Codex native compaction is enabled with ${formatCodexModelSelection(config.openai.compactionModel)}.`,
-        );
-    }
     return lines.join("\n");
 }
 
-function insertBeforeTrailingContext(prompt: string, section: string): string {
-    const currentDateIndex = prompt.lastIndexOf("\nCurrent date:");
-    if (currentDateIndex !== -1)
-        return `${prompt.slice(0, currentDateIndex)}\n\n${section}${prompt.slice(currentDateIndex)}`;
-    return `${prompt}\n\n${section}`;
+function buildPiGuidelinesSection(options: BuildSystemPromptOptions): string {
+    const tools = selectedTools(options);
+    const guidelines: string[] = [];
+    const seenGuidelines = new Set<string>();
+    const addGuideline = (guideline: string): void => {
+        const normalized = guideline.trim();
+        if (normalized.length === 0 || seenGuidelines.has(normalized)) return;
+        seenGuidelines.add(normalized);
+        guidelines.push(normalized);
+    };
+
+    if (
+        tools.includes("bash") &&
+        !tools.includes("grep") &&
+        !tools.includes("find") &&
+        !tools.includes("ls")
+    ) {
+        addGuideline("Use bash for file operations like ls, rg, find");
+    }
+    for (const guideline of options.promptGuidelines ?? []) addGuideline(guideline);
+    addGuideline("Be concise in your responses");
+    addGuideline("Show file paths clearly when working with files");
+
+    if (guidelines.length === 0) return "";
+    return ["Guidelines:", ...guidelines.map((guideline) => `- ${guideline}`)].join("\n");
+}
+
+function buildPiDocumentationSection(): string {
+    return [
+        "Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):",
+        `- Main documentation: ${getReadmePath()}`,
+        `- Additional docs: ${getDocsPath()}`,
+        `- Examples: ${getExamplesPath()} (extensions, custom tools, SDK)`,
+        "- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
+        "- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md)",
+        "- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing",
+        "- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)",
+    ].join("\n");
+}
+
+function buildPiCustomPromptSection(options: BuildSystemPromptOptions): string {
+    const customPrompt = options.customPrompt?.trim();
+    if (!customPrompt) return "";
+    return ["Additional system instructions:", customPrompt].join("\n");
+}
+
+function buildPiAppendPromptSection(options: BuildSystemPromptOptions): string {
+    const appendSystemPrompt = options.appendSystemPrompt?.trim();
+    if (!appendSystemPrompt) return "";
+    return appendSystemPrompt;
+}
+
+function buildPiProjectContextSection(options: BuildSystemPromptOptions): string {
+    const contextFiles = options.contextFiles ?? [];
+    if (contextFiles.length === 0) return "";
+
+    const lines = ["<project_context>", "", "Project-specific instructions and guidelines:", ""];
+    for (const { path: filePath, content } of contextFiles) {
+        lines.push(
+            `<project_instructions path="${filePath}">`,
+            content,
+            "</project_instructions>",
+            "",
+        );
+    }
+    lines.push("</project_context>");
+    return lines.join("\n");
+}
+
+function buildPiSkillsSection(options: BuildSystemPromptOptions): string {
+    if (!selectedTools(options).includes("read")) return "";
+    const skills = options.skills ?? [];
+    if (skills.length === 0) return "";
+    return formatSkillsForPrompt(skills);
+}
+
+function buildPiRuntimeContextSection(
+    basePrompt: string,
+    options: BuildSystemPromptOptions,
+): string {
+    const dateLine = findLastLineStartingWith(basePrompt, "Current date:") ?? currentDateLine();
+    const cwdLine =
+        findLastLineStartingWith(basePrompt, "Current working directory:") ??
+        `Current working directory: ${options.cwd.replace(/\\/g, "/")}`;
+    return [dateLine, cwdLine].join("\n");
+}
+
+function selectedTools(options: BuildSystemPromptOptions): readonly string[] {
+    return options.selectedTools ?? DEFAULT_PI_TOOLS;
+}
+
+function findLastLineStartingWith(text: string, prefix: string): string | undefined {
+    const lines = text.split("\n");
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index];
+        if (line !== undefined && line.startsWith(prefix)) return line;
+    }
+    return undefined;
+}
+
+function currentDateLine(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `Current date: ${year}-${month}-${day}`;
 }

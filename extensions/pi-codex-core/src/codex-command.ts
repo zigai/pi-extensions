@@ -19,6 +19,7 @@ const CODEX_COMMAND_COMPLETIONS = [
     "tools",
     "prompt",
     "compact",
+    "autocompact",
     "fast",
     "verbosity",
 ] as const;
@@ -49,7 +50,7 @@ export function registerCodexCommand(pi: ExtensionAPI, options: CodexCommandOpti
             if (!nextConfig) {
                 notify(
                     ctx,
-                    "Usage: /codex, /codex status|usage|web|imagegen|view|descriptions|tools|prompt|compact|fast|verbosity",
+                    "Usage: /codex, /codex status|usage|web|imagegen|view|descriptions|tools|prompt|compact|autocompact|fast|verbosity",
                     "warning",
                 );
                 return;
@@ -93,8 +94,15 @@ function applyCommand(command: string, config: CodexCoreConfig): CodexCoreConfig
         return { ...config, scope: { tools: config.scope.tools === "codex" ? "all" : "codex" } };
     if (command === "prompt")
         return { ...config, prompt: { mode: config.prompt.mode === "pi" ? "codex" : "pi" } };
-    if (command === "compact")
-        return { ...config, compaction: { enabled: !config.compaction.enabled } };
+    if (command === "compact") {
+        return {
+            ...config,
+            compaction: { ...config.compaction, enabled: !config.compaction.enabled },
+        };
+    }
+    if (command === "autocompact") {
+        return { ...config, compaction: { ...config.compaction, auto: !config.compaction.auto } };
+    }
     if (command === "fast")
         return { ...config, openai: { ...config.openai, fast: !config.openai.fast } };
     if (command === "verbosity")
@@ -159,7 +167,7 @@ function formatConfig(config: CodexCoreConfig): string {
         `- view_image: ${onOff(config.tools.viewImage)}${config.tools.viewImageDescriptions ? " + descriptions" : ""}`,
         `- tool scope: ${config.scope.tools}`,
         `- prompt mode: ${config.prompt.mode}`,
-        `- native compaction: ${onOff(config.compaction.enabled)} (model ${formatCodexModelSelection(config.openai.compactionModel)}, reasoning ${config.openai.compactionReasoning})`,
+        `- native compaction: ${onOff(config.compaction.enabled)} (model ${formatCodexModelSelection(config.openai.compactionModel)}, reasoning ${config.openai.compactionReasoning}, auto ${onOff(config.compaction.auto)} at ${config.compaction.thresholdPercent}%)`,
         `- fast: ${onOff(config.openai.fast)}, verbosity: ${config.openai.verbosity}`,
     ].join("\n");
 }

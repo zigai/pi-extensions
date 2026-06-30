@@ -2,6 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+
+import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 export type CodexPromptMode = "pi" | "codex";
 export type CodexToolScope = "codex" | "all";
@@ -37,6 +40,8 @@ export type CodexCoreConfig = {
     };
     readonly compaction: {
         readonly enabled: boolean;
+        readonly auto: boolean;
+        readonly thresholdPercent: number;
     };
     readonly openai: {
         readonly webSearchModel: string;
@@ -51,6 +56,11 @@ export type CodexCoreConfig = {
 
 export const CODEX_CORE_CONFIG_BASENAME = "pi-codex-core.json";
 
+const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
+const BooleanSchema = compileSchema(Type.Boolean());
+const NumberSchema = compileSchema(Type.Number());
+const StringSchema = compileSchema(Type.String());
+
 export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
     scope: { tools: "codex" },
     tools: {
@@ -60,13 +70,13 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
         viewImageDescriptions: false,
     },
     prompt: { mode: "pi" },
-    compaction: { enabled: false },
+    compaction: { enabled: false, auto: true, thresholdPercent: 80 },
     openai: {
         webSearchModel: CODEX_CURRENT_MODEL_SELECTION,
         imageModel: "gpt-image-2",
-        imageDescriptionModel: "gpt-5.4-mini",
+        imageDescriptionModel: CODEX_CURRENT_MODEL_SELECTION,
         compactionModel: CODEX_CURRENT_MODEL_SELECTION,
-        compactionReasoning: "current",
+        compactionReasoning: "medium",
         verbosity: "low",
         fast: false,
     },
@@ -77,13 +87,13 @@ export function getCodexCoreConfigPath(agentDir: string = getAgentDir()): string
 }
 
 export function parseCodexCoreConfig(value: unknown): CodexCoreConfig {
-    if (!isRecord(value)) return structuredClone(DEFAULT_CODEX_CORE_CONFIG);
+    const root = parseRecord(value);
 
-    const scope = parseRecord(value.scope);
-    const tools = parseRecord(value.tools);
-    const prompt = parseRecord(value.prompt);
-    const compaction = parseRecord(value.compaction);
-    const openai = parseRecord(value.openai);
+    const scope = parseRecord(root.scope);
+    const tools = parseRecord(root.tools);
+    const prompt = parseRecord(root.prompt);
+    const compaction = parseRecord(root.compaction);
+    const openai = parseRecord(root.openai);
 
     return {
         scope: {
@@ -110,6 +120,11 @@ export function parseCodexCoreConfig(value: unknown): CodexCoreConfig {
         },
         compaction: {
             enabled: parseBoolean(compaction.enabled, DEFAULT_CODEX_CORE_CONFIG.compaction.enabled),
+            auto: parseBoolean(compaction.auto, DEFAULT_CODEX_CORE_CONFIG.compaction.auto),
+            thresholdPercent: parsePercent(
+                compaction.thresholdPercent,
+                DEFAULT_CODEX_CORE_CONFIG.compaction.thresholdPercent,
+            ),
         },
         openai: {
             webSearchModel: parseNonEmptyString(
@@ -148,7 +163,8 @@ export function readCodexCoreConfig(
     }
 
     try {
-        return parseCodexCoreConfig(JSON.parse(readFileSync(configPath, "utf8")) as unknown);
+        const rawConfig: unknown = JSON.parse(readFileSync(configPath, "utf8"));
+        return parseCodexCoreConfig(rawConfig);
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
         console.warn(`[pi-codex-core] Failed to read ${configPath}: ${message}`);
@@ -191,27 +207,33 @@ export function writeCodexCoreConfig(
     }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function parseRecord(value: unknown): Record<string, unknown> {
-    return isRecord(value) ? value : {};
+    return parseWithSchema(UnknownRecordSchema, value) ?? {};
 }
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
-    return typeof value === "boolean" ? value : fallback;
+    return parseWithSchema(BooleanSchema, value) ?? fallback;
+}
+
+function parsePercent(value: unknown, fallback: number): number {
+    const parsed = parseWithSchema(NumberSchema, value);
+    if (parsed === undefined) return fallback;
+    return Math.min(99, Math.max(1, Math.trunc(parsed)));
 }
 
 function parseNonEmptyString(value: unknown, fallback: string): string {
-    return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+    const parsed = parseWithSchema(StringSchema, value);
+    if (parsed === undefined) return fallback;
+    const text = parsed.trim();
+    return text.length > 0 ? text : fallback;
 }
 
 function parseStringEnum<const TValue extends string>(
     value: unknown,
     allowed: readonly TValue[],
 ): TValue | undefined {
-    return typeof value === "string" && (allowed as readonly string[]).includes(value)
-        ? (value as TValue)
+    const parsed = parseWithSchema(StringSchema, value);
+    return parsed !== undefined && (allowed as readonly string[]).includes(parsed)
+        ? (parsed as TValue)
         : undefined;
 }

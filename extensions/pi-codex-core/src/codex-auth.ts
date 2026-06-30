@@ -1,5 +1,8 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+
+import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
@@ -21,6 +24,8 @@ export type CodexResponsesProvider = CodexToolProvider & {
 };
 
 type RuntimeModel = Model<Api>;
+
+const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
 
 export function resolveCodexApiProviderBaseUrl(modelBaseUrl: string | undefined): string {
     const trimmedBaseUrl = modelBaseUrl?.trim();
@@ -108,12 +113,13 @@ export function extractAccountId(token: string): string | undefined {
         const parts = token.split(".");
         const payloadPart = parts[1];
         if (parts.length !== 3 || !payloadPart) return undefined;
-        const payload = JSON.parse(
+        const rawPayload: unknown = JSON.parse(
             Buffer.from(payloadPart, "base64url").toString("utf8"),
-        ) as unknown;
-        if (!isRecord(payload)) return undefined;
-        const authClaims = payload[JWT_CLAIM_PATH];
-        if (!isRecord(authClaims)) return undefined;
+        );
+        const payload = parseWithSchema(UnknownRecordSchema, rawPayload);
+        if (!payload) return undefined;
+        const authClaims = parseWithSchema(UnknownRecordSchema, payload[JWT_CLAIM_PATH]);
+        if (!authClaims) return undefined;
         const accountId = authClaims.chatgpt_account_id;
         return typeof accountId === "string" && accountId.trim().length > 0
             ? accountId.trim()
@@ -195,8 +201,4 @@ function headerValue(
         if (key.toLowerCase() === lowerName && value.trim().length > 0) return value;
     }
     return undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -4,12 +4,14 @@ import { syncCodexCoreTools } from "./activation.ts";
 import { registerCodexCommand } from "./codex-command.ts";
 import { readCodexCoreConfig, type CodexCoreConfig } from "./config.ts";
 import {
+    cancelScheduledCodexAutoCompaction,
     handleCodexNativeCompaction,
     isNativeCompactionDetails,
     NATIVE_COMPACTION_MESSAGE_TEXT,
     NATIVE_COMPACTION_MESSAGE_TYPE,
     registerNativeCompactionDisplay,
     rewriteProviderRequestWithNativeCompaction,
+    scheduleCodexAutoCompaction,
 } from "./compaction.ts";
 import { buildCodexCoreSystemPrompt } from "./prompt.ts";
 import { registerImagegenTool } from "./tools/imagegen.ts";
@@ -51,15 +53,29 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("before_agent_start", async (event) => {
-        return { systemPrompt: buildCodexCoreSystemPrompt(event.systemPrompt, config) };
+        return {
+            systemPrompt: buildCodexCoreSystemPrompt(
+                event.systemPrompt,
+                config,
+                event.systemPromptOptions,
+            ),
+        };
     });
 
     pi.on("session_before_compact", async (event, ctx) => {
-        return handleCodexNativeCompaction(event, ctx, config);
+        return handleCodexNativeCompaction(event, ctx, config, pi);
+    });
+
+    pi.on("agent_end", async (_event, ctx) => {
+        scheduleCodexAutoCompaction(ctx, config);
     });
 
     pi.on("before_provider_request", async (event, ctx) => {
-        return rewriteProviderRequestWithNativeCompaction(event.payload, ctx, config);
+        return rewriteProviderRequestWithNativeCompaction(event.payload, ctx, config, pi);
+    });
+
+    pi.on("session_shutdown", async () => {
+        cancelScheduledCodexAutoCompaction();
     });
 
     pi.on("session_compact", async (event) => {

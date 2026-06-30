@@ -224,6 +224,20 @@ function buildItems(
                 currentValue: config.compaction.enabled ? "on" : "off",
                 values: ["off", "on"],
             },
+            {
+                id: "autoCompaction",
+                label: "Native auto compaction",
+                description: "Automatically run native Codex compaction between turns.",
+                currentValue: config.compaction.auto ? "on" : "off",
+                values: ["off", "on"],
+            },
+            {
+                id: "autoThreshold",
+                label: "Auto compaction threshold",
+                description: "Context usage percentage that triggers native auto-compaction.",
+                currentValue: String(config.compaction.thresholdPercent),
+                values: ["80", "85", "90", "95"],
+            },
         ];
     }
 
@@ -285,7 +299,7 @@ function buildItems(
                 "imageDescriptionModel",
                 "Image description model",
                 config.openai.imageDescriptionModel,
-                ["gpt-5.4-mini", "gpt-5.5"],
+                [CODEX_CURRENT_MODEL_SELECTION, "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
             ),
             selectItem("compactionModel", "Compaction model", config.openai.compactionModel, [
                 CODEX_CURRENT_MODEL_SELECTION,
@@ -331,7 +345,18 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
         return { ...config, scope: { tools: value === "all" ? "all" : "codex" } };
     if (id === "promptMode")
         return { ...config, prompt: { mode: value === "codex" ? "codex" : "pi" } };
-    if (id === "nativeCompaction") return { ...config, compaction: { enabled: value === "on" } };
+    if (id === "nativeCompaction") {
+        return { ...config, compaction: { ...config.compaction, enabled: value === "on" } };
+    }
+    if (id === "autoCompaction") {
+        return { ...config, compaction: { ...config.compaction, auto: value === "on" } };
+    }
+    if (id === "autoThreshold") {
+        const thresholdPercent = Number.parseInt(value, 10);
+        return Number.isFinite(thresholdPercent)
+            ? { ...config, compaction: { ...config.compaction, thresholdPercent } }
+            : config;
+    }
     if (id === "webSearch")
         return { ...config, tools: { ...config.tools, webSearch: value === "on" } };
     if (id === "imageGeneration")
