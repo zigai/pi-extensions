@@ -1,0 +1,187 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+import { formatCodexModelSelection, type CodexCoreConfig, writeCodexCoreConfig } from "./config.ts";
+import { openCodexSettingsScreen } from "./codex-settings-ui.ts";
+import { consumeCodexRateLimitResetCredit, fetchCodexUsage, formatCodexUsage } from "./usage.ts";
+
+type CodexCommandOptions = {
+    readonly getConfig: () => CodexCoreConfig;
+    readonly applyConfig: (config: CodexCoreConfig, ctx: ExtensionContext) => void;
+};
+
+const CODEX_COMMAND_COMPLETIONS = [
+    "status",
+    "usage",
+    "web",
+    "imagegen",
+    "view",
+    "descriptions",
+    "tools",
+    "prompt",
+    "compact",
+    "fast",
+    "verbosity",
+] as const;
+
+export function registerCodexCommand(pi: ExtensionAPI, options: CodexCommandOptions): void {
+    pi.registerCommand("codex", {
+        description: "Configure Pi Codex Core tools, prompt, compaction, usage, and resets",
+        getArgumentCompletions: (prefix) =>
+            CODEX_COMMAND_COMPLETIONS.filter((item) =>
+                item.startsWith(prefix.trim().toLowerCase()),
+            ).map((value) => ({ label: value, value })),
+        handler: async (args, ctx) => {
+            const command = args.trim().toLowerCase();
+            if (!command) {
+                await openCodexMenu(ctx, options);
+                return;
+            }
+
+            if (command === "status") {
+                notify(ctx, formatConfig(options.getConfig()), "info");
+                return;
+            }
+            if (command === "usage") {
+                await openUsage(ctx, options);
+                return;
+            }
+            const nextConfig = applyCommand(command, options.getConfig());
+            if (!nextConfig) {
+                notify(
+                    ctx,
+                    "Usage: /codex, /codex status|usage|web|imagegen|view|descriptions|tools|prompt|compact|fast|verbosity",
+                    "warning",
+                );
+                return;
+            }
+            saveAndApply(nextConfig, ctx, options);
+        },
+    });
+}
+
+async function openCodexMenu(ctx: ExtensionContext, options: CodexCommandOptions): Promise<void> {
+    if (!ctx.hasUI) {
+        notify(ctx, formatConfig(options.getConfig()), "info");
+        return;
+    }
+
+    await openCodexSettingsScreen(ctx, {
+        initialConfig: options.getConfig(),
+        onChange: (config) => saveAndApply(config, ctx, options),
+        onConsumeResetCredit: (redeemRequestId) =>
+            consumeCodexRateLimitResetCredit(ctx, redeemRequestId),
+    });
+}
+
+function applyCommand(command: string, config: CodexCoreConfig): CodexCoreConfig | undefined {
+    if (command === "web")
+        return { ...config, tools: { ...config.tools, webSearch: !config.tools.webSearch } };
+    if (command === "imagegen")
+        return {
+            ...config,
+            tools: { ...config.tools, imageGeneration: !config.tools.imageGeneration },
+        };
+    if (command === "view")
+        return { ...config, tools: { ...config.tools, viewImage: !config.tools.viewImage } };
+    if (command === "descriptions") {
+        return {
+            ...config,
+            tools: { ...config.tools, viewImageDescriptions: !config.tools.viewImageDescriptions },
+        };
+    }
+    if (command === "tools")
+        return { ...config, scope: { tools: config.scope.tools === "codex" ? "all" : "codex" } };
+    if (command === "prompt")
+        return { ...config, prompt: { mode: config.prompt.mode === "pi" ? "codex" : "pi" } };
+    if (command === "compact")
+        return { ...config, compaction: { enabled: !config.compaction.enabled } };
+    if (command === "fast")
+        return { ...config, openai: { ...config.openai, fast: !config.openai.fast } };
+    if (command === "verbosity")
+        return {
+            ...config,
+            openai: { ...config.openai, verbosity: nextVerbosity(config.openai.verbosity) },
+        };
+    return undefined;
+}
+
+async function openUsage(ctx: ExtensionContext, options: CodexCommandOptions): Promise<void> {
+    if (!ctx.hasUI) {
+        await showUsage(ctx);
+        return;
+    }
+
+    let initialUsage;
+    try {
+        initialUsage = await fetchCodexUsage(ctx);
+    } catch (cause: unknown) {
+        initialUsage = { error: cause instanceof Error ? cause.message : String(cause) };
+    }
+
+    await openCodexSettingsScreen(ctx, {
+        initialConfig: options.getConfig(),
+        initialTab: "usage",
+        initialUsage,
+        onChange: (config) => saveAndApply(config, ctx, options),
+        onConsumeResetCredit: (redeemRequestId) =>
+            consumeCodexRateLimitResetCredit(ctx, redeemRequestId),
+    });
+}
+
+async function showUsage(ctx: ExtensionContext): Promise<void> {
+    try {
+        notify(ctx, formatCodexUsage(await fetchCodexUsage(ctx)), "info");
+    } catch (cause: unknown) {
+        notify(ctx, cause instanceof Error ? cause.message : String(cause), "error");
+    }
+}
+
+function saveAndApply(
+    config: CodexCoreConfig,
+    ctx: ExtensionContext,
+    options: CodexCommandOptions,
+): boolean {
+    const result = writeCodexCoreConfig(config);
+    if (!result.ok) {
+        notify(ctx, `Failed to save Codex settings: ${result.error}`, "error");
+        return false;
+    }
+    options.applyConfig(config, ctx);
+    notify(ctx, formatConfig(config), "info");
+    return true;
+}
+
+function formatConfig(config: CodexCoreConfig): string {
+    return [
+        "Pi Codex Core:",
+        `- web_run: ${onOff(config.tools.webSearch)} (model ${formatCodexModelSelection(config.openai.webSearchModel)})`,
+        `- imagegen: ${onOff(config.tools.imageGeneration)}`,
+        `- view_image: ${onOff(config.tools.viewImage)}${config.tools.viewImageDescriptions ? " + descriptions" : ""}`,
+        `- tool scope: ${config.scope.tools}`,
+        `- prompt mode: ${config.prompt.mode}`,
+        `- native compaction: ${onOff(config.compaction.enabled)} (model ${formatCodexModelSelection(config.openai.compactionModel)}, reasoning ${config.openai.compactionReasoning})`,
+        `- fast: ${onOff(config.openai.fast)}, verbosity: ${config.openai.verbosity}`,
+    ].join("\n");
+}
+
+function nextVerbosity(
+    value: CodexCoreConfig["openai"]["verbosity"],
+): CodexCoreConfig["openai"]["verbosity"] {
+    if (value === "low") return "medium";
+    if (value === "medium") return "high";
+    return "low";
+}
+
+function onOff(value: boolean): "on" | "off" {
+    return value ? "on" : "off";
+}
+
+function notify(ctx: ExtensionContext, message: string, type: "info" | "warning" | "error"): void {
+    if (ctx.hasUI) {
+        ctx.ui.notify(message, type);
+        return;
+    }
+    if (type === "error") console.error(message);
+    else if (type === "warning") console.warn(message);
+    else console.log(message);
+}
