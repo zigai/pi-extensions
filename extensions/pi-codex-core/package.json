@@ -2,7 +2,7 @@
   "name": "pi-codex-core",
   "version": "0.1.0",
   "private": true,
-  "description": "Pi extension for codex core.",
+  "description": "Slim Pi-native Codex web, image, usage, prompt, and compaction extras.",
   "keywords": [
     "codex-core",
     "pi",
@@ -38,21 +38,35 @@
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
     "verify": "npm run check"
   },
-  "dependencies": {},
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.2",
     "@earendil-works/pi-coding-agent": "^0.80.2",
+    "@earendil-works/pi-tui": "^0.80.2",
     "@types/node": "^24.10.1",
     "oxfmt": "^0.44.0",
     "oxlint": "^1.59.0",
     "oxlint-tsgolint": "^0.23.0",
     "tsx": "^4.22.3",
+    "typebox": "^1.1.38",
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
     "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "typebox": {
       "optional": true
     }
   },
