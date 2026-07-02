@@ -261,6 +261,7 @@ type AutoCompactionSessionState = {
 
 let pendingPiCompactionNativeWindow: PendingPiCompactionNativeWindow | undefined;
 const autoCompactionBySession = new Map<string, AutoCompactionSessionState>();
+const nativeReplayWarningKeys = new Set<string>();
 
 export function registerNativeCompactionDisplay(pi: ExtensionAPI): void {
     pi.registerMessageRenderer(NATIVE_COMPACTION_MESSAGE_TYPE, (message, _options, theme) => {
@@ -425,12 +426,7 @@ export async function rewriteProviderRequestWithNativeCompaction(
     });
     if (replay.ok) return replay.payload;
 
-    if (ctx.hasUI) {
-        ctx.ui.notify(
-            `Codex native compaction replay fell back to lenient rewrite (${replay.reason}).`,
-            "warning",
-        );
-    }
+    notifyNativeReplayFallbackOnce(ctx, latestNativeCompaction.entry.id, replay.reason);
     return buildLenientNativeReplayPayload(
         responsesPayload,
         buildFreshReplacementInput(latestNativeCompaction.entry.details, ctx, pi),
@@ -520,6 +516,7 @@ export function cancelScheduledCodexAutoCompaction(): void {
         if (state.timer) clearTimeout(state.timer);
     }
     autoCompactionBySession.clear();
+    nativeReplayWarningKeys.clear();
 }
 
 export function maybeTriggerCodexAutoCompaction(
@@ -1286,6 +1283,21 @@ function buildLenientNativeReplayPayload(
             ...withoutShim.slice(insertAt),
         ],
     };
+}
+
+function notifyNativeReplayFallbackOnce(
+    ctx: ExtensionContext,
+    compactionEntryId: string,
+    reason: string,
+): void {
+    if (!ctx.hasUI) return;
+    const key = `${ctx.sessionManager.getSessionId()}:${compactionEntryId}:${reason}`;
+    if (nativeReplayWarningKeys.has(key)) return;
+    nativeReplayWarningKeys.add(key);
+    ctx.ui.notify(
+        `Codex native compaction replay fell back to lenient rewrite (${reason}).`,
+        "warning",
+    );
 }
 
 function notifyCompactionFallback(
