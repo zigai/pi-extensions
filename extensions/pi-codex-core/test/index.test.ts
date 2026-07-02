@@ -912,6 +912,46 @@ test("rewrites responses payload with native compaction replay matching", async 
     ]);
 });
 
+test("warns once per native replay fallback mismatch", async () => {
+    const warnings: string[] = [];
+    const ctx = makeCompactionContext({ warnings, sessionId: "mismatch-session" });
+    const payload = {
+        model: "gpt-5.4-mini",
+        input: [
+            { role: "developer", content: "system" },
+            {
+                role: "user",
+                content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
+            },
+            { role: "user", content: [{ type: "input_text", text: "different replay" }] },
+            { role: "user", content: [{ type: "input_text", text: "current payload tail" }] },
+        ],
+    };
+
+    await rewriteProviderRequestWithNativeCompaction(
+        payload,
+        ctx,
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+    );
+    await rewriteProviderRequestWithNativeCompaction(
+        payload,
+        ctx,
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+    );
+
+    assert.deepEqual(warnings, [
+        "Codex native compaction replay fell back to lenient rewrite (expected-pi-replay-mismatch).",
+    ]);
+});
+
 test("rewrites native compaction replay when new-session context is inserted", async () => {
     const ctx = makeCompactionContext();
     const environmentContext = {
@@ -1320,9 +1360,20 @@ function makeAutoCompactionContext(
     return ctx as unknown as ExtensionContext;
 }
 
-function makeCompactionContext(): ExtensionContext {
+function makeCompactionContext(
+    options: { readonly warnings?: string[]; readonly sessionId?: string } = {},
+): ExtensionContext {
     const ctx = {
-        hasUI: false,
+        hasUI: Boolean(options.warnings),
+        ...(options.warnings
+            ? {
+                  ui: {
+                      notify: (message: string) => {
+                          options.warnings?.push(message);
+                      },
+                  },
+              }
+            : {}),
         cwd: "/workspace",
         model: {
             provider: "openai-codex",
@@ -1333,7 +1384,7 @@ function makeCompactionContext(): ExtensionContext {
             contextWindow: 200_000,
         },
         sessionManager: {
-            getSessionId: () => "session-1",
+            getSessionId: () => options.sessionId ?? "session-1",
             getBranch: () => [
                 messageEntry("pre", null, userMessage("pre kept")),
                 nativeCompactionEntry({
@@ -1346,7 +1397,7 @@ function makeCompactionContext(): ExtensionContext {
             ],
         },
     };
-    // SAFETY: This test exercises a function that only reads model and sessionManager.getBranch.
+    // SAFETY: This test exercises a function that only reads model, UI notification, and sessionManager fields.
     return ctx as unknown as ExtensionContext;
 }
 
