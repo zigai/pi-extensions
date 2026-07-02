@@ -1,0 +1,78 @@
+{
+  "name": "pi-codex-look",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Compact Codex-style rendering for Pi read, search, list, and write tools.",
+  "keywords": [
+    "codex-look",
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "rendering"
+  ],
+  "homepage": "https://github.com/zigai/pi-codex-look#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-codex-look/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-codex-look.git"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "oxlint -c ./.oxlintrc.json .",
+    "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "verify": "npm run check"
+  },
+  "dependencies": {
+    "@pierre/diffs": "^1.2.12",
+    "shiki": "^4.3.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "@earendil-works/pi-tui": "^0.80.2",
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.1.9",
+    "oxfmt": "^0.44.0",
+    "oxlint": "^1.59.0",
+    "oxlint-tsgolint": "^0.23.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0 <27"
+  },
+  "packageManager": "npm@11.0.0",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

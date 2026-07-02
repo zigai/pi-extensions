@@ -1,0 +1,232 @@
+import { describe, expect, it } from "vitest";
+import type { CodexRenderTheme } from "../src/rendering.ts";
+import type {
+  ThirdPartyToolRenderer,
+  ThirdPartyToolRendererPlugin,
+} from "../src/third-party-renderers.ts";
+import {
+  installBuiltInWriteRendererPatch,
+  installThirdPartyToolRendererPatch,
+} from "../src/tool-execution-patch.ts";
+
+const plainTheme: CodexRenderTheme = {
+  fg(_token: string, text: string): string {
+    return text;
+  },
+  bg(_token: string, text: string): string {
+    return text;
+  },
+  bold(text: string): string {
+    return text;
+  },
+};
+
+type FakeComponent = {
+  render(width: number): string[];
+  invalidate(): void;
+};
+
+type FakeCallRenderer = ThirdPartyToolRenderer["renderCall"];
+type FakeResultRenderer = ThirdPartyToolRenderer["renderResult"];
+
+type FakeRenderContext = {
+  readonly args: unknown;
+  readonly toolCallId: string;
+  readonly executionStarted: boolean;
+  readonly argsComplete: boolean;
+  readonly isPartial: boolean;
+  readonly expanded: boolean;
+  readonly showImages: boolean;
+  readonly isError: boolean;
+};
+
+type FakeToolExecutionInstance = {
+  readonly toolName: string;
+  readonly builtInToolDefinition?: unknown;
+  readonly toolDefinition?: unknown;
+};
+
+type FakeToolExecutionPrototype = {
+  getCallRenderer(this: object): FakeCallRenderer | undefined;
+  getResultRenderer(this: object): FakeResultRenderer | undefined;
+  getRenderShell(this: object): "default" | "self";
+  hasRendererDefinition(this: object): boolean;
+};
+
+function noop(): void {}
+
+const renderContext: FakeRenderContext = {
+  args: {},
+  toolCallId: "call-1",
+  executionStarted: true,
+  argsComplete: true,
+  isPartial: false,
+  expanded: false,
+  showImages: true,
+  isError: false,
+};
+
+function createPrototype(): FakeToolExecutionPrototype {
+  const existingComponent = (): FakeComponent => ({
+    render(): string[] {
+      return ["existing renderer"];
+    },
+    invalidate(): void {},
+  });
+  const existingCallRenderer: FakeCallRenderer = () => existingComponent();
+  const existingResultRenderer: FakeResultRenderer = () => existingComponent();
+
+  return {
+    getCallRenderer(): FakeCallRenderer | undefined {
+      return existingCallRenderer;
+    },
+    getResultRenderer(): FakeResultRenderer | undefined {
+      return existingResultRenderer;
+    },
+    getRenderShell(): "default" | "self" {
+      return "default";
+    },
+    hasRendererDefinition(): boolean {
+      return false;
+    },
+  };
+}
+
+describe("tool execution patches", () => {
+  it("replaces only the built-in write renderer without registering a write tool override", () => {
+    const prototype = createPrototype();
+    installBuiltInWriteRendererPatch(prototype);
+
+    const writeInstance: FakeToolExecutionInstance = {
+      toolName: "write",
+      builtInToolDefinition: {},
+    };
+    const readInstance: FakeToolExecutionInstance = {
+      toolName: "read",
+      builtInToolDefinition: {},
+    };
+
+    expect(prototype.getRenderShell.call(writeInstance)).toBe("self");
+    expect(prototype.hasRendererDefinition.call(writeInstance)).toBe(true);
+    expect(
+      prototype.getCallRenderer
+        .call(writeInstance)?.(
+          { path: "large.ts", content: "x".repeat(100_000) },
+          plainTheme,
+          renderContext,
+        )
+        .render(80)
+        .join("\n"),
+    ).toContain("Wrote large.ts");
+    expect(
+      prototype.getCallRenderer.call(readInstance)?.({}, plainTheme, renderContext).render(80),
+    ).toEqual(["existing renderer"]);
+  });
+
+  it("leaves built-in tools on their original render path", () => {
+    const prototype = createPrototype();
+    installThirdPartyToolRendererPatch(undefined, prototype);
+
+    const instance: FakeToolExecutionInstance = {
+      toolName: "read",
+      builtInToolDefinition: {},
+      toolDefinition: {},
+    };
+
+    expect(prototype.getRenderShell.call(instance)).toBe("default");
+    expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
+    expect(
+      prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+    ).toEqual(["existing renderer"]);
+  });
+
+  it("auto-converts unknown third-party tools to self-shell Codex rendering", () => {
+    const prototype = createPrototype();
+    installThirdPartyToolRendererPatch(undefined, prototype);
+
+    const instance: FakeToolExecutionInstance = {
+      toolName: "custom_tool",
+      toolDefinition: {},
+    };
+
+    expect(prototype.getRenderShell.call(instance)).toBe("self");
+    expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
+
+    const renderer = prototype.getCallRenderer.call(instance);
+    expect(renderer?.({ value: 1 }, plainTheme, renderContext).render(80).join("\n")).toContain(
+      "Called custom_tool",
+    );
+  });
+
+  it("preserves opted-out third-party tools", () => {
+    const prototype = createPrototype();
+    installThirdPartyToolRendererPatch({ preserveTools: ["rich_tool"] }, prototype);
+
+    const instance: FakeToolExecutionInstance = {
+      toolName: "rich_tool",
+      toolDefinition: {},
+    };
+
+    expect(prototype.getRenderShell.call(instance)).toBe("default");
+    expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
+    expect(
+      prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+    ).toEqual(["existing renderer"]);
+  });
+
+  it("reuses generated third-party renderers between render passes", () => {
+    let createdRenderers = 0;
+    const prototype = createPrototype();
+    const plugin: ThirdPartyToolRendererPlugin = {
+      name: "recording-plugin",
+      matches: (toolName) => toolName === "recorded_tool",
+      createRenderer: (toolName) => {
+        createdRenderers += 1;
+        return {
+          renderCall: () => ({
+            render: () => [`called ${toolName}`],
+            invalidate: noop,
+          }),
+          renderResult: () => ({
+            render: () => [`result ${toolName}`],
+            invalidate: noop,
+          }),
+        };
+      },
+    };
+    installThirdPartyToolRendererPatch({ renderers: [plugin] }, prototype);
+
+    const instance: FakeToolExecutionInstance = {
+      toolName: "recorded_tool",
+      toolDefinition: {},
+    };
+
+    expect(
+      prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+    ).toEqual(["called recorded_tool"]);
+    expect(
+      prototype.getResultRenderer
+        .call(instance)?.(
+          { content: [] },
+          { expanded: false, isPartial: false },
+          plainTheme,
+          renderContext,
+        )
+        .render(80),
+    ).toEqual(["result recorded_tool"]);
+    expect(
+      prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+    ).toEqual(["called recorded_tool"]);
+    expect(createdRenderers).toBe(1);
+  });
+
+  it("is idempotent for a patched prototype", () => {
+    const prototype = createPrototype();
+
+    installThirdPartyToolRendererPatch(undefined, prototype);
+    const patchedGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+    installThirdPartyToolRendererPatch(undefined, prototype);
+
+    expect(Reflect.get(prototype, "getCallRenderer")).toBe(patchedGetCallRenderer);
+  });
+});
