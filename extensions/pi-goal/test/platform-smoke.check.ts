@@ -11,26 +11,28 @@ function run(command: string, args: string[]) {
   });
 }
 
+function readScriptInventory() {
+  const result = run(process.execPath, ["--input-type=module", "-e", String.raw`
+import { platformSmokeCheckTest, platformSmokePackageScripts, platformSmokeSyntaxScripts } from "./scripts/platform-smoke/script-inventory.mjs";
+console.log(JSON.stringify({ platformSmokeCheckTest, platformSmokePackageScripts, platformSmokeSyntaxScripts }));
+`]);
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout) as { platformSmokeCheckTest: string; platformSmokePackageScripts: string[]; platformSmokeSyntaxScripts: string[] };
+}
+
 test("platform smoke scripts have working syntax and help", () => {
-  for (const path of [
-    "scripts/platform-smoke.mjs",
-    "scripts/platform-smoke/artifacts.mjs",
-    "scripts/platform-smoke/crabbox-runner.mjs",
-    "scripts/platform-smoke/doctor.mjs",
-    "scripts/platform-smoke/goal-runtime-smoke.mjs",
-    "scripts/platform-smoke/hygiene.mjs",
-    "scripts/platform-smoke/targets.mjs",
-  ]) {
+  const inventory = readScriptInventory();
+  assert.equal(inventory.platformSmokeCheckTest, "test/platform-smoke.check.ts");
+  assert.ok(inventory.platformSmokeSyntaxScripts.includes("scripts/platform-smoke/platform-build.mjs"));
+  assert.ok(inventory.platformSmokeSyntaxScripts.includes("scripts/platform-smoke/check.mjs"));
+  for (const path of inventory.platformSmokeSyntaxScripts) {
     assert.equal(run(process.execPath, ["--check", path]).status, 0, path);
   }
 
   assert.ok(existsSync("scripts/platform-smoke/platform-build-windows.ps1"));
   const powershellScript = readFileSync("scripts/platform-smoke/platform-build-windows.ps1", "utf8");
-  assert.match(powershellScript, /param\(/);
-  assert.match(powershellScript, /npm run verify/);
-  assert.match(powershellScript, /pi-list\.stdout\.txt/);
-  assert.match(powershellScript, /install -l .*--approve/);
-  assert.match(powershellScript, /list --approve/);
+  assert.match(powershellScript, /platform-build\.mjs/);
+  assert.doesNotMatch(powershellScript, /npm run verify/);
 
   const goalRuntimeScript = readFileSync("scripts/platform-smoke/goal-runtime-smoke.mjs", "utf8");
   assert.match(goalRuntimeScript, /"install", "-l", installPath, "--approve"/);
@@ -72,9 +74,7 @@ test("platform smoke config and package scripts require macOS, Ubuntu, and nativ
   assert.ok(packageJson.files?.includes("scripts"));
   assert.ok(packageJson.files?.includes("platform-smoke.config.mjs"));
   assert.ok(packageJson.files?.includes(".crabboxignore"));
-  assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /node --check scripts\/platform-smoke\.mjs/);
-  assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /scripts\/platform-smoke\/hygiene\.mjs/);
-  assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /test\/platform-smoke\.check\.ts/);
+  assert.equal(packageJson.scripts?.["check:platform-smoke"], "node scripts/platform-smoke/check.mjs");
   assert.match(packageJson.scripts?.["verify"] ?? "", /check:platform-smoke/);
   assert.equal(packageJson.scripts?.["smoke:platform:doctor"], "node scripts/platform-smoke.mjs doctor");
   assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /doctor --skip-windows-disposable-probe/);
@@ -166,14 +166,14 @@ const result = {
   macosPlatform: platformFor("macos"),
   ubuntuPlatform: platformFor("ubuntu"),
   windowsPlatform: platformFor("windows-native"),
-  posixHasVerify: posix.includes("npm run verify"),
-  posixHasPackedInstall: posix.includes("install -l ./node_modules/pi-codex-goal --approve"),
-  posixHasTrustedList: posix.includes("list --approve"),
+  posixUsesOrchestrator: posix.includes("node scripts/platform-smoke/platform-build.mjs"),
+  posixHasPackage: posix.includes("--package-name 'pi-codex-goal'"),
+  posixHasNodeMajor: posix.includes("--node-validation-major 24"),
   posixNoExtensionShortcut: !/\\bpi\\s+(?:-e|--extension)\\s+\\./.test(posix),
-  macosHasVerify: macos.includes("npm run verify"),
-  powershellUsesScript: powershell.includes("platform-build-windows.ps1"),
+  macosUsesSameOrchestrator: macos === posix,
+  powershellUsesWrapper: powershell.includes("platform-build-windows.ps1"),
   powershellHasPackage: powershell.includes("pi-codex-goal"),
-  powershellScriptHasApprove: readFileSync("scripts/platform-smoke/platform-build-windows.ps1", "utf8").includes("--approve"),
+  powershellWrapperIsThin: readFileSync("scripts/platform-smoke/platform-build-windows.ps1", "utf8").includes("platform-build.mjs") && !readFileSync("scripts/platform-smoke/platform-build-windows.ps1", "utf8").includes("npm run verify"),
   powershellNoExtensionShortcut: !/\\bpi\\s+(?:-e|--extension)\\s+\\./.test(powershell),
   goalRuntimeHasDefaultModel: goalRuntime.includes("zai/glm-5.2"),
   goalRuntimeHasPackage: goalRuntime.includes("pi-codex-goal"),
@@ -299,13 +299,7 @@ test("npm pack includes platform smoke docs and scripts", () => {
     "docs/platform-smoke.md",
     ".crabboxignore",
     "platform-smoke.config.mjs",
-    "scripts/platform-smoke.mjs",
-    "scripts/platform-smoke/artifacts.mjs",
-    "scripts/platform-smoke/crabbox-runner.mjs",
-    "scripts/platform-smoke/doctor.mjs",
-    "scripts/platform-smoke/goal-runtime-smoke.mjs",
-    "scripts/platform-smoke/targets.mjs",
-    "scripts/platform-smoke/platform-build-windows.ps1",
+    ...readScriptInventory().platformSmokePackageScripts,
   ]) {
     assert.ok(paths.has(path), `expected npm pack to include ${path}`);
   }

@@ -98,9 +98,10 @@ export function consumeAbortingAgentEnd(
       terminalCleanup.pendingAgentEndObligations.some(
         (obligation) => obligation.phase === "active" && obligation.acceptsAnonymous,
       );
-    const anonymousMatch = consumeAnonymousTerminalForAbortingTurn(
+    const anonymousMatch = consumeAnonymousTerminal(
       terminalCleanup.pendingAgentEndObligations,
       preferActiveAnonymous ? ["active", "older"] : ["older", "active"],
+      { consumeFallbackPhase: true },
     );
     consumedActive ||= anonymousMatch.consumedActive;
     consumedOlder ||= anonymousMatch.consumedOlder;
@@ -243,39 +244,16 @@ function consumeGoalBearingTerminal(
 function consumeAnonymousTerminal(
   obligations: AgentEndObligation[],
   phaseOrder: readonly TerminalObligationPhase[],
+  options: { consumeFallbackPhase?: boolean } = {},
 ): ConsumptionResult {
   const result = emptyConsumptionResult();
+  const fallbackPhase = options.consumeFallbackPhase ? phaseOrder.at(-1) : undefined;
 
   for (const phase of phaseOrder) {
     for (let index = 0; index < obligations.length; index += 1) {
       const obligation = obligations[index]!;
-      if (obligation.phase !== phase || !obligation.acceptsAnonymous) {
-        continue;
-      }
-
-      const consumed = consumeObligationAt(obligations, index);
-      if (consumed) {
-        recordConsumedObligation(result, consumed);
-      }
-      return result;
-    }
-  }
-
-  return result;
-}
-
-function consumeAnonymousTerminalForAbortingTurn(
-  obligations: AgentEndObligation[],
-  phaseOrder: readonly TerminalObligationPhase[],
-): ConsumptionResult {
-  const result = emptyConsumptionResult();
-  const fallbackPhase = phaseOrder.at(-1);
-
-  for (const phase of phaseOrder) {
-    for (let index = 0; index < obligations.length; index += 1) {
-      const obligation = obligations[index]!;
-      const matchesCurrentAbort = obligation.acceptsAnonymous || phase === fallbackPhase;
-      if (obligation.phase !== phase || !matchesCurrentAbort) {
+      const matchesAnonymous = obligation.acceptsAnonymous || phase === fallbackPhase;
+      if (obligation.phase !== phase || !matchesAnonymous) {
         continue;
       }
 

@@ -200,6 +200,17 @@ test("formatters produce Codex-style compact summaries", () => {
   assert.match(formatGoalSummary(created), /Objective: finish/);
   assert.match(formatGoalSummary(created), /Tokens used: 0/);
   assert.match(formatGoalSummary(created), /Token budget: 10/);
+
+  const active = created;
+  const paused = updateGoalStatus(active, "paused").goal;
+  const budgetLimited = applyUsage(active, 10, 0).goal;
+  const complete = updateGoalStatus(active, "complete").goal;
+  assert.ok(paused);
+  assert.ok(budgetLimited);
+  assert.ok(complete);
+  for (const goal of [active, paused, budgetLimited, complete]) {
+    assert.match(formatGoalSummary(goal), /Hint: .*\/goal copy/);
+  }
 });
 
 test("token formatting uses commas and compact abbreviations", () => {

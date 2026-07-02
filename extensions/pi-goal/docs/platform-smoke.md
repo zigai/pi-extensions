@@ -2,6 +2,8 @@
 
 `pi-codex-goal` uses a Crabbox-backed local platform smoke gate to prove the package on macOS, Ubuntu Linux, and native Windows before release-sensitive changes ship.
 
+Ordinary hosted CI only runs `npm run verify` on Node 24 for push and pull request checks. It does not run this Crabbox release matrix, lease targets, secrets, or model-backed platform smoke.
+
 This setup reuses the portable Crabbox platform-testing lessons without copying provider-specific smoke flows from another project. The gate includes a real model-backed pi run so release checks catch platform-specific extension failures before completion is claimed.
 
 ## Required gate
@@ -70,7 +72,7 @@ Each required target runs `platform-build` and `goal-runtime-smoke`.
 
 1. Verify Node major version is at least the configured Node 24 validation baseline.
 2. Run `npm ci` in the synced checkout.
-3. Run `npm run verify`, the repo's local CI command.
+3. Run `npm run verify`, the repo's ordinary local/hosted verification command.
 4. Run `npm pack`.
 5. Create a clean target-local pi project.
 6. Install the packed tarball into that project with `npm install --no-save`.
@@ -137,7 +139,7 @@ The suites record failures as artifacts before reporting failure so the host can
 
 - Treat Crabbox as the lease/sync/run layer; this repo owns the assertions that make a run meaningful.
 - Use Crabbox targets instead of a one-OS local script.
-- Keep platform-specific shell rendering explicit: POSIX for macOS/Ubuntu and PowerShell for native Windows.
+- Keep `platform-build` behavior in the shared Node orchestrator; native Windows may use only a thin PowerShell wrapper to launch it.
 - Run the repository's existing validation command on every required target.
 - Test the packed package, not `pi -e .`.
 - Pass `--approve` for isolated project-local package smoke commands and non-interactive runtime smokes; Pi 0.79+ otherwise skips project-local settings and packages when no saved trust decision exists.
@@ -156,4 +158,5 @@ The suites record failures as artifacts before reporting failure so the host can
 - Sync exclusions: [`.crabboxignore`](../.crabboxignore)
 - CLI: [`scripts/platform-smoke.mjs`](../scripts/platform-smoke.mjs)
 - Target commands: [`scripts/platform-smoke/targets.mjs`](../scripts/platform-smoke/targets.mjs)
-- Windows suite body: [`scripts/platform-smoke/platform-build-windows.ps1`](../scripts/platform-smoke/platform-build-windows.ps1)
+- Platform-build suite body: [`scripts/platform-smoke/platform-build.mjs`](../scripts/platform-smoke/platform-build.mjs)
+- Windows wrapper: [`scripts/platform-smoke/platform-build-windows.ps1`](../scripts/platform-smoke/platform-build-windows.ps1)

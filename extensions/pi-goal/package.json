@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-goal",
-  "version": "0.1.32",
+  "version": "0.1.33",
   "description": "Codex-style goal tracking and continuation for pi.",
   "type": "module",
   "author": "Mitch Fultz (https://github.com/fitchmultz)",
@@ -45,7 +45,7 @@
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check:platform-smoke": "node --check scripts/platform-smoke.mjs && node --check scripts/platform-smoke/artifacts.mjs && node --check scripts/platform-smoke/crabbox-runner.mjs && node --check scripts/platform-smoke/doctor.mjs && node --check scripts/platform-smoke/goal-runtime-smoke.mjs && node --check scripts/platform-smoke/hygiene.mjs && node --check scripts/platform-smoke/targets.mjs && node --import tsx --test test/platform-smoke.check.ts",
+    "check:platform-smoke": "node scripts/platform-smoke/check.mjs",
     "verify": "npm run typecheck && npm run check:platform-smoke && npm test",
     "smoke:platform": "node scripts/platform-smoke.mjs",
     "smoke:platform:doctor": "node scripts/platform-smoke.mjs doctor",
@@ -71,8 +71,8 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.80.2",
-    "@earendil-works/pi-coding-agent": "0.80.2",
+    "@earendil-works/pi-ai": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "^0.80.3",
     "@types/node": "^25.9.1",
     "tsx": "^4.22.3",
     "typebox": "1.1.39",

@@ -18,8 +18,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import type { GoalRuntimeState } from "./goal-runtime-state.js";
+import type { StatusContext } from "./goal-runtime-status.js";
 import type { GoalStateController } from "./goal-state-controller.js";
 import type { AssistantErrorMessage } from "./recovery.js";
+import type { GoalEntrySource, GoalResult } from "./types.js";
 
 export type ContextEventResult = { messages?: ContextEvent["messages"] };
 export type MessageStartEvent = Extract<ExtensionEvent, { type: "message_start" }>;
@@ -129,11 +131,10 @@ export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectCon
 }
 
 export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectContext {
-  pi: Pick<ExtensionAPI, "sendUserMessage">;
   runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "recoveryState" | "staleQueuedWorkGuard">;
   stateController: Pick<
     GoalStateController,
-    "applyGoalTransition" | "flushGoalPersistence" | "getGoal" | "reloadFromSession" | "resumePausedGoal"
+    "applyGoalTransition" | "flushGoalPersistence" | "getGoal" | "reloadFromSession"
   >;
   continuation: Pick<
     GoalRuntimeContinuationPort,
@@ -142,6 +143,7 @@ export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectC
   goalAccounting: GoalAccountingPort;
   recoveryRuntime: Pick<RecoveryRuntimePort, "onSessionCompact">;
   resetErrorRecovery: () => void;
+  resumeGoalWithContinuation: (goalId: string, source: GoalEntrySource, ctx: StatusContext) => GoalResult;
 }
 
 export interface GoalRuntimeOverflowRecoveryContext {
@@ -163,6 +165,7 @@ export interface GoalRuntimeEventContext {
   providerLimitAutoResume: ProviderLimitAutoResumePort;
   clearActiveAccounting: () => void;
   resetErrorRecovery: () => void;
+  resumeGoalWithContinuation: (goalId: string, source: GoalEntrySource, ctx: StatusContext) => GoalResult;
 }
 
 export type QueuedGoalWorkMessage = {

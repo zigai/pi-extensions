@@ -29,15 +29,6 @@ export function noteTerminalEvents(
   }
 }
 
-export function terminalCleanupFromObserving(
-  state: ObservingTurnState,
-): { cleanup: TerminalCleanup; observing: ObservingTurnState } | null {
-  if (state.terminalCleanup === undefined) {
-    return null;
-  }
-  return { cleanup: state.terminalCleanup, observing: state };
-}
-
 export function resolveLifecycleAfterTerminalCleanup(
   cleanup: TerminalCleanup,
   observing: ObservingTurnState | null,

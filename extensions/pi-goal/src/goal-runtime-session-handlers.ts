@@ -8,7 +8,6 @@ import type {
   SessionTreeEvent,
 } from "@earendil-works/pi-coding-agent";
 
-import { compactContinuationPrompt } from "./prompts.js";
 import {
   clearActiveHostOverflowRecovery,
   recoveryPhaseBlocksContinuation,
@@ -22,7 +21,6 @@ import type { ThreadGoal } from "./types.js";
 
 export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContext) {
   const {
-    pi,
     runtimeState,
     stateController,
     continuation,
@@ -30,6 +28,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
     recoveryRuntime,
     status,
     resetErrorRecovery,
+    resumeGoalWithContinuation,
   } = deps;
 
   let hostOverflowPostCompactFallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -86,12 +85,8 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
           `Goal: ${pausedGoal.objective}`,
         );
         if (shouldResume) {
-          stateController.resumePausedGoal(ctx);
+          resumeGoalWithContinuation(pausedGoal.goalId, "runtime", ctx);
           goalAccounting.beginAccounting();
-          const resumedGoal = stateController.getGoal();
-          if (resumedGoal?.status === "active") {
-            pi.sendUserMessage(compactContinuationPrompt(resumedGoal), { deliverAs: "followUp" });
-          }
           return;
         }
       }

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   handleGoalCommand,
+  registerGoalCommand,
   type CommandHost,
   type GoalCommandContext,
   type GoalCommandPi,
@@ -107,6 +108,27 @@ test("/goal objective creates the goal and starts a hidden follow-up turn", asyn
   }
   assert.match(content, /<untrusted_objective>\nship the feature\n<\/untrusted_objective>/);
   assert.deepEqual(sentMessage.options, { triggerTurn: true, deliverAs: "followUp" });
+});
+
+test("/goal completions include resume cancel", () => {
+  const harness = createHarness();
+  let getArgumentCompletions: ((argumentPrefix: string) => unknown) | undefined;
+  const pi: GoalCommandPi = {
+    ...harness.pi,
+    registerCommand(_name, config) {
+      getArgumentCompletions = config.getArgumentCompletions;
+    },
+  };
+
+  registerGoalCommand(pi, harness.host);
+
+  assert.deepEqual(getArgumentCompletions?.("resume c"), [
+    {
+      value: "resume cancel",
+      label: "resume cancel",
+      description: "goal resume cancel",
+    },
+  ]);
 });
 
 test("/goal copy copies the current goal objective", async () => {

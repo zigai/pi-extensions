@@ -43,7 +43,7 @@ The required gate runs the full suite plus a real model-backed goal-tool smoke o
 | Area | Modules |
 |------|---------|
 | Wiring | `src/index.ts`, `goal-runtime-controller.ts` |
-| User / model API | `commands.ts`, `tools.ts`, `prompts.ts`, `format.ts`, `prompts/create-goal.md` |
+| User / model API | `commands.ts`, `tools.ts`, `prompts.ts`, `format.ts`, `clipboard.ts`, `prompts/create-goal.md` |
 | Runtime events | `goal-runtime-event-handlers.ts`, `goal-runtime-*-handlers.ts` |
 | Transitions | `goal-transition.ts`, `goal-transition-effects.ts`, `goal-state-controller.ts` |
 | Stale continuations | `stale-queued-work-*.ts` |

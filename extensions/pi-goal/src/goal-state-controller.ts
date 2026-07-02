@@ -5,7 +5,7 @@ import type { StatusContext } from "./goal-runtime-status.js";
 import {
   applyGoalTransitionEffects,
   planGoalTransition,
-  type GoalTransitionEffect,
+  reloadGoalRuntimeEffects,
   type GoalTransitionEffectHandlers,
   type GoalTransitionRequest,
 } from "./goal-transition.js";
@@ -33,20 +33,6 @@ interface GoalStateControllerDeps {
   refreshUi: (ctx: StatusContext) => void;
 }
 
-function reloadRuntimeEffects(
-  previousGoalId: string | null,
-  reconstructed: ThreadGoal | null,
-): GoalTransitionEffect[] {
-  const effects: GoalTransitionEffect[] = [{ type: "clearContinuation" }];
-  if (reconstructed?.status !== "active") {
-    effects.push({ type: "clearActiveAccounting" });
-  }
-  if ((reconstructed?.goalId ?? null) !== previousGoalId) {
-    effects.push({ type: "resetRecovery" });
-  }
-  return effects;
-}
-
 export interface GoalStateController {
   applyGoalTransition: (
     request: GoalTransitionRequest,
@@ -67,8 +53,10 @@ export interface GoalStateController {
 export function createGoalStateController(deps: GoalStateControllerDeps) {
   const getGoal = (): ThreadGoal | null => deps.persistence.getGoal();
 
-  const isCurrentActiveGoalId = (goalId: string): boolean =>
-    getGoal()?.goalId === goalId && getGoal()?.status === "active";
+  const isCurrentActiveGoalId = (goalId: string): boolean => {
+    const goal = getGoal();
+    return goal?.goalId === goalId && goal.status === "active";
+  };
 
   const applyGoalTransition = (
     request: GoalTransitionRequest,
@@ -151,7 +139,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
       reconstructHostOverflowCapNeedsUserReset(branch),
     );
     applyGoalTransitionEffects(
-      reloadRuntimeEffects(previousGoalId, reconstructed),
+      reloadGoalRuntimeEffects(previousGoalId, reconstructed),
       deps.transitionEffectHandlers,
     );
     deps.refreshUi(ctx);

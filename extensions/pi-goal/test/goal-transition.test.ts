@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   applyGoalTransitionEffects,
   planGoalTransition,
+  reloadGoalRuntimeEffects,
   type GoalTransitionEffect,
   type GoalTransitionPlan,
 } from "../src/goal-transition.js";
@@ -131,6 +132,30 @@ for (const tableCase of commandSetTable) {
     assert.deepEqual(effectTypes(plan.afterPersist), tableCase.after);
   });
 }
+
+test("reloadGoalRuntimeEffects keeps same active goal memory", () => {
+  const goal = createThreadGoal("ship it");
+
+  assert.deepEqual(effectTypes(reloadGoalRuntimeEffects(goal.goalId, goal)), ["clearContinuation"]);
+});
+
+test("reloadGoalRuntimeEffects clears active accounting for non-active reconstructed goal", () => {
+  const goal = { ...createThreadGoal("ship it"), status: "paused" as const };
+
+  assert.deepEqual(effectTypes(reloadGoalRuntimeEffects(goal.goalId, goal)), [
+    "clearContinuation",
+    "clearActiveAccounting",
+  ]);
+});
+
+test("reloadGoalRuntimeEffects resets recovery when reconstructed goal id changes", () => {
+  const goal = createThreadGoal("ship it");
+
+  assert.deepEqual(effectTypes(reloadGoalRuntimeEffects("previous-goal", goal)), [
+    "clearContinuation",
+    "resetRecovery",
+  ]);
+});
 
 test("planGoalTransition clear persists clear with full memory reset", () => {
   const goal = createThreadGoal("ship it");

@@ -231,59 +231,7 @@ export function buildPlatformBuildCommand(targetName, packageName = "pi-codex-go
 	if (platformFor(targetName) === "powershell") {
 		return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\platform-smoke\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}`;
 	}
-
-	const lines = [];
-	lines.push(`echo "Starting platform-build in $(pwd) at $(date -u +%Y-%m-%dT%H:%M:%SZ)"`);
-	lines.push(`RUN_ROOT=".platform-smoke-runs/platform-build-$(date -u +%Y%m%dT%H%M%SZ)-$$"`);
-	lines.push(`SOURCE_ROOT="$(pwd)"`);
-	lines.push(`PACK_DIR="$SOURCE_ROOT/$RUN_ROOT/pack"`);
-	lines.push(`TEST_WORKSPACE="$SOURCE_ROOT/$RUN_ROOT/test-workspace"`);
-	lines.push(`PI_PROJECT="$SOURCE_ROOT/$RUN_ROOT/pi-project"`);
-	lines.push(`mkdir -p "$PACK_DIR" "$TEST_WORKSPACE" "$PI_PROJECT"`);
-	lines.push(`echo "PLATFORM_RUN_ROOT=$RUN_ROOT"`);
-	lines.push(`NODE_VERSION=$(node --version)`);
-	lines.push(`NODE_MAJOR="${"${NODE_VERSION#v}"}"`);
-	lines.push(`NODE_MAJOR="${"${NODE_MAJOR%%.*}"}"`);
-	lines.push(`echo "PLATFORM_NODE_VERSION=$NODE_VERSION"`);
-	lines.push(`if [ "$NODE_MAJOR" -ge ${nodeValidationMajor} ]; then NODE_VERSION_EXIT=0; else NODE_VERSION_EXIT=1; fi`);
-	lines.push(`echo "PLATFORM_NODE_VERSION_EXIT=$NODE_VERSION_EXIT"`);
-	lines.push(`npm ci 2>&1`);
-	lines.push(`NPM_CI_EXIT=$?`);
-	lines.push(`echo "PLATFORM_NPM_CI_EXIT=$NPM_CI_EXIT"`);
-	lines.push(`npm run verify 2>&1`);
-	lines.push(`VERIFY_EXIT=$?`);
-	lines.push(`echo "PLATFORM_VERIFY_EXIT=$VERIFY_EXIT"`);
-	lines.push(`PACK_TARBALL=$(npm pack --silent --pack-destination "$PACK_DIR" 2>"$PACK_DIR/npm-pack.stderr.txt")`);
-	lines.push(`PACK_EXIT=$?`);
-	lines.push(`cat "$PACK_DIR/npm-pack.stderr.txt"`);
-	lines.push(`PACK_FILE="$PACK_DIR/$PACK_TARBALL"`);
-	lines.push(`echo "PLATFORM_NPM_PACK_EXIT=$PACK_EXIT"`);
-	lines.push(`echo "PLATFORM_PACKED_TARBALL=$PACK_FILE"`);
-	lines.push(`cp package.json README.md "$TEST_WORKSPACE"/ 2>"$PACK_DIR/fixture.stderr.txt"`);
-	lines.push(`FIXTURE_COPY_EXIT=$?`);
-	lines.push(`cp -R src prompts "$TEST_WORKSPACE"/ 2>>"$PACK_DIR/fixture.stderr.txt"`);
-	lines.push(`FIXTURE_TREE_EXIT=$?`);
-	lines.push(`if [ "$FIXTURE_COPY_EXIT" -eq 0 ] && [ "$FIXTURE_TREE_EXIT" -eq 0 ]; then FIXTURE_EXIT=0; else FIXTURE_EXIT=1; fi`);
-	lines.push(`echo "PLATFORM_FIXTURE_EXIT=$FIXTURE_EXIT"`);
-	lines.push(`cat "$PACK_DIR/fixture.stderr.txt"`);
-	lines.push(`PI_CLI="$SOURCE_ROOT/node_modules/.bin/pi"`);
-	lines.push(`if [ ! -x "$PI_CLI" ]; then PI_CLI="$(command -v pi || true)"; fi`);
-	lines.push(`echo "PLATFORM_PI_CLI=$PI_CLI"`);
-	lines.push(`if [ -n "$PACK_TARBALL" ] && [ -f "$PACK_FILE" ]; then (cd "$PI_PROJECT" && npm init -y >"$PACK_DIR/packed-node-install.stdout.txt" 2>"$PACK_DIR/packed-node-install.stderr.txt" && npm install --no-save "$PACK_FILE" >>"$PACK_DIR/packed-node-install.stdout.txt" 2>>"$PACK_DIR/packed-node-install.stderr.txt"); PACKED_NODE_INSTALL_EXIT=$?; else echo "missing tarball" >"$PACK_DIR/packed-node-install.stderr.txt"; PACKED_NODE_INSTALL_EXIT=1; fi`);
-	lines.push(`echo "PLATFORM_PACKED_NODE_INSTALL_EXIT=$PACKED_NODE_INSTALL_EXIT"`);
-	lines.push(`echo "--- PACKED_NODE_INSTALL_STDOUT START ---"; cat "$PACK_DIR/packed-node-install.stdout.txt" 2>/dev/null || true; echo "--- PACKED_NODE_INSTALL_STDOUT END ---"`);
-	lines.push(`echo "--- PACKED_NODE_INSTALL_STDERR START ---"; cat "$PACK_DIR/packed-node-install.stderr.txt" 2>/dev/null || true; echo "--- PACKED_NODE_INSTALL_STDERR END ---"`);
-	lines.push(`if [ "$PACKED_NODE_INSTALL_EXIT" -eq 0 ] && [ -n "$PI_CLI" ]; then (cd "$PI_PROJECT" && PI_OFFLINE=1 "$PI_CLI" install -l ./node_modules/${packageName} --approve >"$PACK_DIR/pi-install.stdout.txt" 2>"$PACK_DIR/pi-install.stderr.txt"); PI_INSTALL_EXIT=$?; else echo "missing pi cli or packed install" >"$PACK_DIR/pi-install.stderr.txt"; PI_INSTALL_EXIT=1; fi`);
-	lines.push(`echo "PLATFORM_PI_INSTALL_EXIT=$PI_INSTALL_EXIT"`);
-	lines.push(`echo "--- PI_INSTALL_STDOUT START ---"; cat "$PACK_DIR/pi-install.stdout.txt" 2>/dev/null || true; echo "--- PI_INSTALL_STDOUT END ---"`);
-	lines.push(`echo "--- PI_INSTALL_STDERR START ---"; cat "$PACK_DIR/pi-install.stderr.txt" 2>/dev/null || true; echo "--- PI_INSTALL_STDERR END ---"`);
-	lines.push(`if [ -n "$PI_CLI" ]; then (cd "$PI_PROJECT" && PI_OFFLINE=1 "$PI_CLI" list --approve >"$PACK_DIR/pi-list.stdout.txt" 2>"$PACK_DIR/pi-list.stderr.txt"); PI_LIST_EXIT=$?; else echo "missing pi cli" >"$PACK_DIR/pi-list.stderr.txt"; PI_LIST_EXIT=1; fi`);
-	lines.push(`echo "PLATFORM_PI_LIST_EXIT=$PI_LIST_EXIT"`);
-	lines.push(`echo "--- PI_LIST_STDOUT START ---"; cat "$PACK_DIR/pi-list.stdout.txt" 2>/dev/null || true; echo "--- PI_LIST_STDOUT END ---"`);
-	lines.push(`echo "--- PI_LIST_STDERR START ---"; cat "$PACK_DIR/pi-list.stderr.txt" 2>/dev/null || true; echo "--- PI_LIST_STDERR END ---"`);
-	lines.push(`if [ "$NODE_VERSION_EXIT" -ne 0 ] || [ "$NPM_CI_EXIT" -ne 0 ] || [ "$VERIFY_EXIT" -ne 0 ] || [ "$PACK_EXIT" -ne 0 ] || [ "$FIXTURE_EXIT" -ne 0 ] || [ "$PACKED_NODE_INSTALL_EXIT" -ne 0 ] || [ "$PI_INSTALL_EXIT" -ne 0 ] || [ "$PI_LIST_EXIT" -ne 0 ]; then echo "PLATFORM_BUILD_FAILED"; exit 1; fi`);
-	lines.push(`echo "PLATFORM_BUILD_OK"`);
-	return lines.join("\n");
+	return `node scripts/platform-smoke/platform-build.mjs --package-name ${shellQuote(packageName)} --node-validation-major ${nodeValidationMajor}`;
 }
 
 async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSession) {

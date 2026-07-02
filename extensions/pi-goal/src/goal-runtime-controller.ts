@@ -133,19 +133,6 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     },
   });
 
-  const eventHandlers = createGoalRuntimeEventHandlers({
-    pi,
-    runtimeState,
-    stateController,
-    continuation,
-    goalAccounting,
-    recoveryRuntime,
-    status,
-    providerLimitAutoResume,
-    clearActiveAccounting,
-    resetErrorRecovery,
-  });
-
   const resumeGoalWithContinuation = (
     goalId: string,
     _source: GoalEntrySource,
@@ -163,6 +150,20 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     }
     return result;
   };
+
+  const eventHandlers = createGoalRuntimeEventHandlers({
+    pi,
+    runtimeState,
+    stateController,
+    continuation,
+    goalAccounting,
+    recoveryRuntime,
+    status,
+    providerLimitAutoResume,
+    clearActiveAccounting,
+    resetErrorRecovery,
+    resumeGoalWithContinuation,
+  });
 
   const completeGoal = (source: GoalEntrySource, ctx: ExtensionContext): GoalResult => {
     providerLimitAutoResume.clear();

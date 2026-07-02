@@ -20,7 +20,7 @@ export interface CommandHost {
   ): { ok: boolean; message: string; goal: ThreadGoal | null };
 }
 
-const COMMANDS = ["pause", "resume", "clear", "copy"] as const;
+const COMMANDS = ["pause", "resume", "resume cancel", "clear", "copy"] as const;
 
 type CopyText = (text: string) => Promise<ClipboardCopyResult>;
 

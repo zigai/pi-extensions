@@ -45,7 +45,7 @@ pi install .
 
 On this maintainer machine, the active install is a global/user package that already points at this checkout; do not also leave a project-local install under this repository's `.pi/` settings. Duplicate local and global installs both try to register `get_goal`, `create_goal`, and `update_goal`, which causes tool-registration conflicts. For install-path release checks, use an isolated temp project/config directory or remove the project-local entry immediately after the check.
 
-Compatibility note: this package is tested against the current pi release during each package update. The current source tree targets Pi 0.80.2 on Node 24 for the next package release. The latest published npm artifact remains the reproducible source of truth for its own published version's metadata. Pi-bundled runtime packages remain optional wildcard peers, so npm peer ranges do not hard-block users from trying newer pi releases; runtime behavior is only verified against the tested baseline until a follow-up package release confirms it.
+Compatibility note: this package is tested against the current pi release during each package update. The current source tree targets Pi 0.80.3 on Node 24 for the next package release. The latest published npm artifact remains the reproducible source of truth for its own published version's metadata. Pi-bundled runtime packages remain optional wildcard peers, so npm peer ranges do not hard-block users from trying newer pi releases; runtime behavior is only verified against the tested baseline until a follow-up package release confirms it.
 
 Release note: npm installs and pinned GitHub tags are the reproducible release artifacts. Installing from the repository default branch can include unreleased changes that will ship in a future package release, even when `package.json` still identifies the latest published version.
 
@@ -70,6 +70,8 @@ Validate types and tests before committing or opening a PR:
 npm run verify
 ```
 
+GitHub Actions runs this same ordinary hosted CI gate on Node 24 for `push` and `pull_request`. It does not run the Crabbox platform matrix.
+
 Cross-platform release-sensitive changes should also pass the local Crabbox platform smoke gate:
 
 ```sh
@@ -79,7 +81,7 @@ npm run smoke:platform:all
 
 `smoke:platform:all` runs the doctor before any target suite.
 
-That gate runs `npm run verify`, packs the package, installs the packed package into a clean pi project, checks `pi list`, and runs a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. Pi 0.79+ project trust is handled explicitly with `--approve` inside the isolated smoke projects so project-local package settings and the packed extension load in non-interactive runs. The runtime smoke defaults to `zai/glm-5.2`; override it with `PLATFORM_SMOKE_MODEL` and configure forwarded auth env vars with `PLATFORM_SMOKE_AUTH_ENV`. Setup and artifact details: [docs/platform-smoke.md](docs/platform-smoke.md).
+That local gate runs `npm run verify`, packs the package, installs the packed package into a clean pi project, checks `pi list`, and runs a real model-backed goal-tool smoke on macOS, Ubuntu Linux, and native Windows. Pi 0.79+ project trust is handled explicitly with `--approve` inside the isolated smoke projects so project-local package settings and the packed extension load in non-interactive runs. The runtime smoke defaults to `zai/glm-5.2`; override it with `PLATFORM_SMOKE_MODEL` and configure forwarded auth env vars with `PLATFORM_SMOKE_AUTH_ENV`. Setup and artifact details: [docs/platform-smoke.md](docs/platform-smoke.md).
 
 Project agent notes and module map: [AGENTS.md](AGENTS.md).
 Current structural audit and remediation record: [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md).

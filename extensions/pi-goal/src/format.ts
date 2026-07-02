@@ -90,15 +90,15 @@ function statusLabel(status: GoalStatus): string {
 
 function commandHint(status: GoalStatus): string {
   if (status === "active") {
-    return "/goal pause, /goal clear";
+    return "/goal copy, /goal pause, /goal clear";
   }
   if (status === "paused") {
-    return "/goal resume, /goal clear";
+    return "/goal copy, /goal resume, /goal clear";
   }
   if (status === "complete") {
-    return "/goal <objective> to replace, /goal clear";
+    return "/goal copy, /goal <objective> to replace, /goal clear";
   }
-  return "/goal clear";
+  return "/goal copy, /goal clear";
 }
 
 export function formatGoalSummary(goal: ThreadGoal | null): string {

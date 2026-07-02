@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.1.33 - 2026-07-01
+
+- Execute the structural audit remediation backlog: consolidate runtime reload/resume boundaries, simplify stale queued-work cleanup paths, centralize platform-smoke build orchestration, and reduce prompt/test source-of-truth drift.
+- Add minimal GitHub Actions verification for Node 24 `npm ci` plus `npm run verify` on `push` and `pull_request`, while keeping Crabbox as the local release platform gate.
+- Update the local pi development baseline to `@earendil-works/*` `0.80.3`.
+
+### Validation
+
+- Ran `npm run verify` under pi `0.80.3`: `tsc --noEmit`, 6 platform-smoke checks, and 318 regular tests, all passing.
+- Ran `npm run smoke:platform:all` under pi `0.80.3`; doctor passed and macOS, Ubuntu, and native Windows target suites completed successfully.
+
 ## 0.1.32 - 2026-06-26
 
 - Auto-resume goals paused by recognized provider usage-limit or quota errors with a conservative runtime-only retry timer.

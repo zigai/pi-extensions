@@ -2,55 +2,25 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const EXPECTED_CREATE_GOAL_PROMPT = `---
-description: Convert a plain task into a strict evidence-based pi-codex goal and create it
-argument-hint: "<task>"
----
+const EXPECTED_CREATE_GOAL_COMPLETION_AUDIT_BLOCK = [
+  "5. Completion audit",
+  "   - Before marking the goal complete, map every explicit requirement in the goal to fresh evidence from files, commands, diffs, tests, screenshots, artifacts, or logs.",
+  "   - The goal is not complete if any requirement is unverified, narrowed, deferred, or only probably satisfied.",
+  '   - Phrases like "for the scope this is complete", "good enough", "out of scope", or "remaining tech debt" are not valid completion evidence unless the original user task explicitly allowed that limitation.',
+].join("\n");
 
-User task:
-$@
+function frontmatter(prompt: string): Record<string, string> {
+  const match = /^---\n(?<body>[\s\S]*?)\n---\n/.exec(prompt);
+  assert.ok(match?.groups?.body, "prompt has frontmatter");
 
-Turn the user task into exactly one durable pi-codex-goal objective, then call the goal creation tool with that objective.
-
-This prompt invocation is an explicit user request to set a new goal. When the goal creation tool exposes \`replace_existing\`, pass \`replace_existing: true\` so an existing active, paused, or budget-limited goal is replaced instead of requiring \`/goal clear\` first.
-
-Do not set a token budget limit unless the user explicitly provides a budget/limit in the task. If no explicit budget is provided, omit the token budget field entirely.
-
-The goal must be a completion contract, not a task summary. Preserve the user's full intent. Do not weaken broad acceptance criteria such as "all", "any", "complete", "no tech debt", "do it right", "fully", or "hard acceptance criteria".
-
-The goal must require:
-
-1. Outcome
-   - State what must be true when complete.
-   - Preserve the full requested end state.
-   - Do not narrow scope after the fact unless the original user task explicitly defined that scope.
-
-2. Verification evidence
-   - Name the concrete evidence required before completion.
-   - Include relevant tests, lint, type checks, builds, smoke checks, diffs, docs, generated outputs, rendered UI inspection, or artifact checks when applicable.
-   - If the repo has an existing local CI/validation command, require it unless clearly irrelevant.
-
-3. Constraints
-   - Preserve existing behavior unless the task explicitly changes it.
-   - Do not discard user changes.
-   - Do not leave unapproved shortcuts, compatibility shims, TODO placeholders, dead code, duplicated logic, hidden assumptions, or undocumented behavior changes.
-
-4. Iteration policy
-   - After each attempt, inspect evidence, update the plan, and keep taking the next low-risk useful step.
-   - Do not stop at a plan when implementation or verification remains.
-   - If validation fails, triage and fix the cause rather than reporting partial completion.
-
-5. Completion audit
-   - Before marking the goal complete, map every explicit requirement in the goal to fresh evidence from files, commands, diffs, tests, screenshots, artifacts, or logs.
-   - The goal is not complete if any requirement is unverified, narrowed, deferred, or only probably satisfied.
-   - Phrases like "for the scope this is complete", "good enough", "out of scope", or "remaining tech debt" are not valid completion evidence unless the original user task explicitly allowed that limitation.
-
-6. Blocked stop condition
-   - If completion is impossible with current access, tools, budget, or missing decisions, stop without marking complete.
-   - Report attempted paths, evidence gathered, exact blockers, remaining unmet requirements, and what input would unblock progress.
-
-Use concise imperative language in the goal. If the task is blank or only whitespace, infer the goal based on the conversation context or ask the user to clarify.
-`;
+  return Object.fromEntries(
+    match.groups.body.split("\n").map((line) => {
+      const separator = line.indexOf(":");
+      assert.notEqual(separator, -1, `frontmatter line has key/value: ${line}`);
+      return [line.slice(0, separator), line.slice(separator + 1).trim()];
+    }),
+  );
+}
 
 test("package exposes the create-goal prompt template", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
@@ -60,7 +30,16 @@ test("package exposes the create-goal prompt template", () => {
 
   assert.ok(packageJson.files?.includes("prompts"));
   assert.ok(packageJson.pi?.prompts?.includes("./prompts"));
+});
 
+test("create-goal prompt keeps package frontmatter and expected completion-audit text", () => {
   const prompt = readFileSync("prompts/create-goal.md", "utf8");
-  assert.equal(prompt, EXPECTED_CREATE_GOAL_PROMPT);
+  const metadata = frontmatter(prompt);
+
+  assert.equal(metadata.description, "Convert a plain task into a strict evidence-based pi-codex goal and create it");
+  assert.equal(metadata["argument-hint"], '"<task>"');
+  assert.match(prompt, /Turn the user task into exactly one durable pi-codex-goal objective/);
+  assert.match(prompt, /pass `replace_existing: true`/);
+  assert.match(prompt, /Do not set a token budget limit unless the user explicitly provides a budget\/limit/);
+  assert.ok(prompt.includes(EXPECTED_CREATE_GOAL_COMPLETION_AUDIT_BLOCK));
 });

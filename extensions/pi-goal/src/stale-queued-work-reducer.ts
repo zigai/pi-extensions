@@ -245,24 +245,54 @@ function applyDefaultTransition(
   }
 }
 
+function reduceStartWorkFromIdleOrAwaiting(
+  draft: Extract<StaleQueuedWorkState, { kind: "idle" | "awaitingTerminalCleanup" }>,
+  event: Extract<StaleQueuedWorkEvent, { type: "runnableWorkStarted" | "staleWorkStarted" }>,
+): StaleQueuedWorkTransitionResult {
+  const next = beginObservingFromIdleOrAwaiting(draft);
+  if (event.type === "runnableWorkStarted") {
+    next.hasRunnableWork = true;
+  } else {
+    next.staleGoalIds.add(event.goalId);
+  }
+  return transition(next, emptyPlan());
+}
+
 function reduceIdleState(
   draft: Extract<StaleQueuedWorkState, { kind: "idle" }>,
   event: StaleQueuedWorkEvent,
 ): StaleQueuedWorkTransitionResult {
   switch (event.type) {
-    case "runnableWorkStarted": {
-      const next = beginObservingFromIdleOrAwaiting(draft);
-      next.hasRunnableWork = true;
-      return transition(next, emptyPlan());
-    }
-    case "staleWorkStarted": {
-      const next = beginObservingFromIdleOrAwaiting(draft);
-      next.staleGoalIds.add(event.goalId);
-      return transition(next, emptyPlan());
-    }
+    case "runnableWorkStarted":
+    case "staleWorkStarted":
+      return reduceStartWorkFromIdleOrAwaiting(draft, event);
     default:
       return applyDefaultTransition(draft, event, IDLE_EVENT_DEFAULTS, draft.kind);
   }
+}
+
+function reduceTerminalCleanupEvent(
+  draft: Extract<StaleQueuedWorkState, { kind: "observingTurn" | "awaitingTerminalCleanup" }>,
+  event: Extract<StaleQueuedWorkEvent, { type: "turnEnd" | "agentEnd" }>,
+): StaleQueuedWorkTransitionResult {
+  const cleanup = draft.terminalCleanup;
+  if (cleanup === undefined) {
+    return transition(draft, emptyPlan());
+  }
+
+  const consumed =
+    event.type === "turnEnd"
+      ? consumeCleanupTurnEnd(cleanup, event.turnIndex)
+      : consumeCleanupAgentEnd(cleanup, event.messages);
+
+  if (!consumed) {
+    return transition(draft, emptyPlan());
+  }
+
+  return transition(
+    resolveCleanupAfterTerminalEvent(cleanup, draft.kind === "observingTurn" ? draft : null),
+    skipRefreshPlan(),
+  );
 }
 
 function reduceObservingTurnState(
@@ -279,24 +309,9 @@ function reduceObservingTurnState(
       return reduceObservingContextAbort(draft, event.currentTurnIndex);
     case "turnStart":
       return transition(finishObservingTurn(draft), emptyPlan());
-    case "turnEnd": {
-      if (!draft.terminalCleanup || !consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
-        return transition(draft, emptyPlan());
-      }
-      return transition(
-        resolveCleanupAfterTerminalEvent(draft.terminalCleanup, draft),
-        skipRefreshPlan(),
-      );
-    }
-    case "agentEnd": {
-      if (!draft.terminalCleanup || !consumeCleanupAgentEnd(draft.terminalCleanup, event.messages)) {
-        return transition(draft, emptyPlan());
-      }
-      return transition(
-        resolveCleanupAfterTerminalEvent(draft.terminalCleanup, draft),
-        skipRefreshPlan(),
-      );
-    }
+    case "turnEnd":
+    case "agentEnd":
+      return reduceTerminalCleanupEvent(draft, event);
     case "sessionShutdown":
       return transition({ kind: "idle" }, emptyPlan());
     default:
@@ -356,34 +371,12 @@ function reduceAwaitingTerminalCleanupState(
   event: StaleQueuedWorkEvent,
 ): StaleQueuedWorkTransitionResult {
   switch (event.type) {
-    case "runnableWorkStarted": {
-      const next = beginObservingFromIdleOrAwaiting(draft);
-      next.hasRunnableWork = true;
-      return transition(next, emptyPlan());
-    }
-    case "staleWorkStarted": {
-      const next = beginObservingFromIdleOrAwaiting(draft);
-      next.staleGoalIds.add(event.goalId);
-      return transition(next, emptyPlan());
-    }
-    case "turnEnd": {
-      if (!consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
-        return transition(draft, emptyPlan());
-      }
-      return transition(
-        resolveCleanupAfterTerminalEvent(draft.terminalCleanup, null),
-        skipRefreshPlan(),
-      );
-    }
-    case "agentEnd": {
-      if (!consumeCleanupAgentEnd(draft.terminalCleanup, event.messages)) {
-        return transition(draft, emptyPlan());
-      }
-      return transition(
-        resolveCleanupAfterTerminalEvent(draft.terminalCleanup, null),
-        skipRefreshPlan(),
-      );
-    }
+    case "runnableWorkStarted":
+    case "staleWorkStarted":
+      return reduceStartWorkFromIdleOrAwaiting(draft, event);
+    case "turnEnd":
+    case "agentEnd":
+      return reduceTerminalCleanupEvent(draft, event);
     case "sessionShutdown":
       return transition({ kind: "idle" }, emptyPlan());
     default:

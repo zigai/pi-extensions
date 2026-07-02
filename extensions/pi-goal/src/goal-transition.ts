@@ -50,6 +50,20 @@ export type GoalTransitionPlan =
       nextGoal: null;
     });
 
+export function reloadGoalRuntimeEffects(
+  previousGoalId: string | null,
+  reconstructed: ThreadGoal | null,
+): GoalTransitionEffect[] {
+  const effects: GoalTransitionEffect[] = [{ type: "clearContinuation" }];
+  if (reconstructed?.status !== "active") {
+    effects.push({ type: "clearActiveAccounting" });
+  }
+  if ((reconstructed?.goalId ?? null) !== previousGoalId) {
+    effects.push({ type: "resetRecovery" });
+  }
+  return effects;
+}
+
 function memoryEffectsFromGoalChange(
   previous: ThreadGoal | null,
   next: ThreadGoal,
@@ -258,12 +272,6 @@ function validateRuntimeAccounting(current: ThreadGoal | null, nextGoal: ThreadG
     throw transitionInvariantError(
       kind,
       `current status must be active or budgetLimited (got ${current.status})`,
-    );
-  }
-  if (nextGoal.status === "paused" || nextGoal.status === "complete") {
-    throw transitionInvariantError(
-      kind,
-      `next status must be active or budgetLimited (got ${nextGoal.status})`,
     );
   }
   if (!RUNTIME_ACCOUNTING_STATUSES.has(nextGoal.status)) {
