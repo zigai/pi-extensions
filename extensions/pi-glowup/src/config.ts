@@ -27,6 +27,10 @@ export type CodexLookConfig = {
 
 export type ConfigWarningReporter = (message: string) => void;
 
+export type CodexLookConfigLoadPolicy = {
+    readonly includeProjectConfig?: boolean;
+};
+
 export const CODEX_LOOK_EXTENSION_ID = "pi-codex-look";
 export const CODEX_LOOK_CONFIG_BASENAME = "config.json";
 export const CODEX_LOOK_CONFIG_SCHEMA_BASENAME = "config.schema.json";
@@ -182,12 +186,15 @@ export function readCodexLookConfig(
         readonly agentDir?: string;
         readonly reportWarning?: ConfigWarningReporter;
     } = {},
+    policy: CodexLookConfigLoadPolicy = {},
 ): CodexLookConfig {
     const reportWarning = options.reportWarning ?? defaultConfigWarningReporter;
     ensureCodexLookGlobalConfigFiles(options.agentDir, reportWarning);
     const globalConfigPath = getCodexLookGlobalConfigPath(options.agentDir);
     const projectConfigPath =
-        options.cwd === undefined ? undefined : getCodexLookProjectConfigPath(options.cwd);
+        policy.includeProjectConfig === true && options.cwd !== undefined
+            ? getCodexLookProjectConfigPath(options.cwd)
+            : undefined;
     const globalInput = parseCodexLookConfigInput(
         readConfigInput(globalConfigPath, reportWarning) ?? {},
         { source: globalConfigPath, reportWarning },

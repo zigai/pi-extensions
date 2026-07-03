@@ -124,7 +124,7 @@ describe("codex look config", () => {
         );
     });
 
-    it("merges project config over global config", () => {
+    it("ignores project config unless trusted project config is included", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-codex-look-config-"));
         const agentDir = join(root, "agent");
         const cwd = join(root, "project");
@@ -151,6 +151,43 @@ describe("codex look config", () => {
         );
 
         const config = readCodexLookConfig({ agentDir, cwd });
+
+        expect(config.preserveTools).toEqual(["mcp"]);
+        expect(config.scriptHeaderLayout).toBe("block");
+        expect(config.scriptFormatters.get("python")).toBeUndefined();
+        expect(config.syntaxPreloadOnStartup).toBe(true);
+        expect(config.patches.workingWidgetSpacing).toBe(true);
+        expect(config.patches.markdownSyntax).toBe(true);
+        expect(config.patches.thirdPartyToolRenderers).toBe(true);
+    });
+
+    it("merges trusted project config over global config", () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-config-"));
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        const globalConfigPath = getCodexLookGlobalConfigPath(agentDir);
+        const projectConfigPath = getCodexLookProjectConfigPath(cwd);
+        mkdirSync(join(globalConfigPath, ".."), { recursive: true });
+        mkdirSync(join(projectConfigPath, ".."), { recursive: true });
+        writeFileSync(
+            globalConfigPath,
+            JSON.stringify({
+                $schema: "./config.schema.json",
+                preserveTools: ["mcp"],
+                syntax: { preloadOnStartup: true },
+                patches: { workingWidgetSpacing: true },
+                scriptPreview: { headerLayout: "block" },
+            }),
+        );
+        writeFileSync(
+            projectConfigPath,
+            JSON.stringify({
+                patches: { workingWidgetSpacing: false, markdownSyntax: false },
+                scriptPreview: { formatters: { python: ["black", "-"] } },
+            }),
+        );
+
+        const config = readCodexLookConfig({ agentDir, cwd }, { includeProjectConfig: true });
 
         expect(config.preserveTools).toEqual(["mcp"]);
         expect(config.scriptHeaderLayout).toBe("block");

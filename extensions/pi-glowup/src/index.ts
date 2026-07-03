@@ -360,8 +360,8 @@ function scriptPreviewHeaderLayout(config: CodexLookConfig): ScriptPreviewHeader
 function registerBashTool(
     pi: ExtensionAPI,
     baseTools: BuiltInToolDefinitions,
-    formatter: ScriptBlockFormatter | undefined,
-    headerLayout: ScriptPreviewHeaderLayout,
+    formatter: () => ScriptBlockFormatter | undefined,
+    headerLayout: () => ScriptPreviewHeaderLayout,
 ): void {
     const tool: BuiltInToolDefinitions["bash"] = {
         ...baseTools.bash,
@@ -369,10 +369,11 @@ function registerBashTool(
         renderShell: "self",
         async execute(toolCallId, params, signal, onUpdate, ctx) {
             const script = parseScriptInvocation(params.command);
-            if (script !== undefined && formatter !== undefined) {
+            const currentFormatter = formatter();
+            if (script !== undefined && currentFormatter !== undefined) {
                 const formattedScript = await formatScriptInvocation(
                     script,
-                    formatter,
+                    currentFormatter,
                     signal === undefined ? {} : { signal },
                 );
                 if (formattedScript.code !== script.code) {
@@ -401,7 +402,7 @@ function registerBashTool(
                 state,
                 expanded: context.expanded,
                 maxCodePreviewLines: script.language === "bash" ? 3 : 8,
-                headerLayout,
+                headerLayout: headerLayout(),
             });
         },
         renderResult(result, options, theme, context) {
@@ -412,7 +413,7 @@ function registerBashTool(
                 expanded: options.expanded,
                 mode: "headTail",
                 maxPreviewLines: 5,
-                ...(script !== undefined && headerLayout === "block"
+                ...(script !== undefined && headerLayout() === "block"
                     ? { prefixFirst: theme.fg("dim", "  → "), prefixRest: "    " }
                     : {}),
                 ...(language === undefined ? {} : { syntax: { language } }),
@@ -583,7 +584,21 @@ function scheduleDeferredSyntaxPreload(reportWarning: (message: string) => void)
 export default async function codexLookExtension(pi: ExtensionAPI): Promise<void> {
     const cwd = process.cwd();
     const reportWarning = (message: string): void => console.warn(message);
-    const config = readCodexLookConfig({ cwd, reportWarning });
+    let config = readCodexLookConfig({ reportWarning });
+    let formatter = scriptBlockFormatter(config, reportWarning);
+    let headerLayout = scriptPreviewHeaderLayout(config);
+
+    const applyConfig = (nextConfig: CodexLookConfig): void => {
+        config = nextConfig;
+        formatter = scriptBlockFormatter(config, reportWarning);
+        headerLayout = scriptPreviewHeaderLayout(config);
+        installThirdPartyToolRendererPatch(
+            config.patches.thirdPartyToolRenderers
+                ? thirdPartyToolRenderingOptions(config)
+                : { enabled: false },
+        );
+    };
+
     if (config.syntaxPreloadOnStartup) {
         await initializeSyntaxHighlighting();
     } else {
@@ -607,16 +622,28 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
             : { enabled: false },
     );
     const baseTools = getBuiltInToolDefinitions(cwd);
-    const formatter = scriptBlockFormatter(config, reportWarning);
-    const headerLayout = scriptPreviewHeaderLayout(config);
 
     registerReadTool(pi, baseTools);
-    registerBashTool(pi, baseTools, formatter, headerLayout);
+    registerBashTool(
+        pi,
+        baseTools,
+        () => formatter,
+        () => headerLayout,
+    );
     registerEditTool(pi, baseTools);
     registerWriteTool(pi, baseTools);
     registerFindTool(pi, baseTools);
     registerGrepTool(pi, baseTools);
     registerLsTool(pi, baseTools);
+
+    pi.on("session_start", (_event, ctx) => {
+        applyConfig(
+            readCodexLookConfig(
+                { cwd: ctx.cwd, reportWarning },
+                { includeProjectConfig: ctx.isProjectTrusted() },
+            ),
+        );
+    });
 
     pi.on("turn_start", () => {
         closeExplorationGroup();
