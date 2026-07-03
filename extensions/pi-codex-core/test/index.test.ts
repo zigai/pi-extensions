@@ -662,27 +662,33 @@ test("saves web_run raw output outside workspace", async () => {
     }
 });
 
-test("saves generated images at the workspace root", async () => {
+test("saves generated images outside the workspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-"));
     const cwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
 
     try {
         await mkdir(cwd, { recursive: true });
+        await writeFile(join(cwd, "latest.png"), "do not replace");
         const base64 = Buffer.from("not really a png").toString("base64");
         const saved = await saveGeneratedImage({
-            cwd,
+            sessionId: "session/1",
             toolCallId: "call*1",
             index: 0,
             base64,
+            agentDir,
         });
+        const imagePath = join(agentDir, "pi-codex-core", "imagegen", "session_1", "call_1.png");
+        const latestPath = join(agentDir, "pi-codex-core", "imagegen", "session_1", "latest.png");
 
-        assert.equal(saved.path, join(cwd, "call_1.png"));
-        assert.equal(saved.latestPath, join(cwd, "latest.png"));
+        assert.equal(saved.path, imagePath);
+        assert.equal(saved.latestPath, latestPath);
         assert.equal((await readFile(saved.absolutePath)).toString("utf8"), "not really a png");
         assert.equal(
             (await readFile(saved.latestAbsolutePath)).toString("utf8"),
             "not really a png",
         );
+        assert.equal((await readFile(join(cwd, "latest.png"))).toString("utf8"), "do not replace");
     } finally {
         await rm(root, { recursive: true, force: true });
     }

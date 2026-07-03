@@ -149,7 +149,7 @@ export function createImagegenTool(
             const savedImages = await Promise.all(
                 response.value.images.map((base64, index) =>
                     saveGeneratedImage({
-                        cwd: ctx.cwd,
+                        sessionId: ctx.sessionManager.getSessionId(),
                         toolCallId,
                         index,
                         base64,

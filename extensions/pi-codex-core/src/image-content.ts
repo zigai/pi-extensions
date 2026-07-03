@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { getImageDimensions } from "@earendil-works/pi-tui";
 
-import { sanitizeArtifactPathPart } from "./artifacts.ts";
+import { resolveCodexCoreArtifactPath, sanitizeArtifactPathPart } from "./artifacts.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 const ImageContentSchema = compileSchema(
@@ -123,10 +123,11 @@ export function codexPromptImageTargetDimensions(
 }
 
 export async function saveGeneratedImage(args: {
-    readonly cwd: string;
+    readonly sessionId: string;
     readonly toolCallId: string;
     readonly index: number;
     readonly base64: string;
+    readonly agentDir?: string | undefined;
 }): Promise<{
     readonly path: string;
     readonly absolutePath: string;
@@ -134,13 +135,23 @@ export async function saveGeneratedImage(args: {
     readonly latestAbsolutePath: string;
 }> {
     const fileName = `${sanitizeArtifactPathPart(args.toolCallId, "image")}${args.index > 0 ? `-${args.index + 1}` : ""}.png`;
-    const absolutePath = resolve(args.cwd, fileName);
-    const latestAbsolutePath = resolve(args.cwd, "latest.png");
+    const absolutePath = resolveCodexCoreArtifactPath({
+        category: "imagegen",
+        sessionId: args.sessionId,
+        fileName,
+        agentDir: args.agentDir,
+    });
+    const latestAbsolutePath = resolveCodexCoreArtifactPath({
+        category: "imagegen",
+        sessionId: args.sessionId,
+        fileName: "latest.png",
+        agentDir: args.agentDir,
+    });
     const bytes = Buffer.from(args.base64.trim(), "base64");
     return withFileMutationQueue(latestAbsolutePath, () =>
         withFileMutationQueue(absolutePath, async () => {
             await mkdir(dirname(absolutePath), { recursive: true });
-            await writeFile(absolutePath, bytes);
+            await writeFile(absolutePath, bytes, { flag: "wx" });
             await writeFile(latestAbsolutePath, bytes);
             return {
                 path: absolutePath,
