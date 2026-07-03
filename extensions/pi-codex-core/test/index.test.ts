@@ -1133,7 +1133,7 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
             ],
             firstKeptEntryId: "user-after-tool",
         }),
-        makeNativeCompactionContext({ contextWindow: 180 }),
+        makeNativeCompactionContext({ contextWindow: 600 }),
         {
             ...DEFAULT_CODEX_CORE_CONFIG,
             compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
@@ -1198,6 +1198,52 @@ test("trims oversized non-tool input before remote v2 compaction", async () => {
     const requestMeta = result?.compaction?.details.requestMeta;
     assert.ok(requestMeta?.budgetTokens);
     assert.ok(requestMeta.estimatedTokensAfter <= requestMeta.budgetTokens);
+});
+
+test("does not send remote v2 compaction when protected input cannot fit", async () => {
+    let fetchCalls = 0;
+    const runtime = makeTestRuntime(async () => {
+        fetchCalls += 1;
+        const body = [
+            "event: response.output_item.done",
+            'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"should-not-send"}}',
+            "",
+            "event: response.completed",
+            'data: {"type":"response.completed","response":{"id":"resp_too_large","created_at":123}}',
+            "",
+        ].join("\n");
+        return new Response(body, { status: 200 });
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                messageEntry(
+                    "assistant-huge-call",
+                    null,
+                    assistantMessage([
+                        {
+                            type: "toolCall",
+                            id: "call/huge|item/huge",
+                            name: "read",
+                            arguments: { path: `${"huge/".repeat(8_000)}file.txt` },
+                        },
+                    ]),
+                ),
+            ],
+            firstKeptEntryId: "assistant-huge-call",
+        }),
+        makeNativeCompactionContext({ contextWindow: 180 }),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(result, undefined);
 });
 
 test("retained image-only messages consume compaction budget", async () => {

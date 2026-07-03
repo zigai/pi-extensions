@@ -252,14 +252,23 @@ type BuildPromptInputResult = {
     readonly previousCompactionEntryId?: string | undefined;
 };
 
-type ShrinkRemoteCompactionRequestResult = {
-    readonly request: RemoteCompactionV2Request;
-    readonly promptInput: readonly ResponsesInputItem[];
-    readonly rewrittenToolOutputs: number;
-    readonly estimatedTokensBefore: number;
-    readonly estimatedTokensAfter: number;
-    readonly budgetTokens?: number | undefined;
-};
+type ShrinkRemoteCompactionRequestResult =
+    | {
+          readonly kind: "ok";
+          readonly request: RemoteCompactionV2Request;
+          readonly promptInput: readonly ResponsesInputItem[];
+          readonly rewrittenToolOutputs: number;
+          readonly estimatedTokensBefore: number;
+          readonly estimatedTokensAfter: number;
+          readonly budgetTokens?: number | undefined;
+      }
+    | {
+          readonly kind: "too_large";
+          readonly rewrittenToolOutputs: number;
+          readonly estimatedTokensBefore: number;
+          readonly estimatedTokensAfter: number;
+          readonly budgetTokens: number;
+      };
 
 type NativeReplayResult =
     | { readonly ok: true; readonly payload: ResponsesPayload }
@@ -347,6 +356,15 @@ export async function handleCodexNativeCompaction(
         tools: buildCompactionTools(pi),
     });
     const shrink = shrinkRemoteCompactionRequestForContextWindow(request, ctx.model?.contextWindow);
+    if (shrink.kind === "too_large") {
+        notifyCompactionFallback(
+            ctx,
+            event.branchEntries,
+            match,
+            `Codex remote compaction v2 request is too large for the context window (${shrink.estimatedTokensAfter}/${shrink.budgetTokens} estimated tokens).`,
+        );
+        return undefined;
+    }
 
     try {
         const responseResult = await executeRemoteCompactionV2(
@@ -1069,6 +1087,7 @@ function shrinkRemoteCompactionRequestForContextWindow(
     const promptInput = request.input.filter((item) => item.type !== "compaction_trigger");
     if (budgetTokens === undefined || estimatedTokensBefore <= budgetTokens) {
         return {
+            kind: "ok",
             request,
             promptInput,
             rewrittenToolOutputs: 0,
@@ -1100,8 +1119,19 @@ function shrinkRemoteCompactionRequestForContextWindow(
         estimatedTokensAfter -= estimateTokenCount(item);
     }
 
+    if (estimatedTokensAfter > budgetTokens) {
+        return {
+            kind: "too_large",
+            rewrittenToolOutputs,
+            estimatedTokensBefore,
+            estimatedTokensAfter,
+            budgetTokens,
+        };
+    }
+
     const shrunkRequest = { ...request, input };
     return {
+        kind: "ok",
         request: shrunkRequest,
         promptInput: shrunkRequest.input.filter((item) => item.type !== "compaction_trigger"),
         rewrittenToolOutputs,
