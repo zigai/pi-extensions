@@ -1372,6 +1372,66 @@ test("rewrites responses payload with native compaction replay matching", async 
     ]);
 });
 
+test("rewrites native compaction replay in long payloads", async () => {
+    const keptEntries = Array.from({ length: 80 }, (_unused, index) =>
+        messageEntry(
+            `pre-${index}`,
+            index === 0 ? null : `pre-${index - 1}`,
+            userMessage(`pre kept ${index}`),
+        ),
+    );
+    const branchEntries = [
+        ...keptEntries,
+        nativeCompactionEntry({
+            id: "compact-long",
+            parentId: "pre-79",
+            firstKeptEntryId: "pre-0",
+            model: "gpt-5.4-mini",
+        }),
+        messageEntry("tail", "compact-long", userMessage("post tail")),
+    ];
+    const ctx = makeCompactionContext({ branchEntries });
+    const filler = Array.from({ length: 120 }, (_unused, index) => ({
+        role: "user",
+        content: [{ type: "input_text", text: `inserted context ${index}` }],
+    }));
+    const keptReplay = keptEntries.map((_entry, index) => ({
+        role: "user",
+        content: [{ type: "input_text", text: `pre kept ${index}` }],
+    }));
+    const payload = {
+        model: "gpt-5.4-mini",
+        input: [
+            { role: "developer", content: "system" },
+            {
+                role: "user",
+                content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
+            },
+            ...filler,
+            ...keptReplay,
+            { role: "user", content: [{ type: "input_text", text: "current payload tail" }] },
+        ],
+    };
+
+    const rewritten = await rewriteProviderRequestWithNativeCompaction(
+        payload,
+        ctx,
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+    );
+
+    const rewrittenInput = responseInput(rewritten);
+    assert.deepEqual(rewrittenInput.slice(0, 2), [
+        { role: "developer", content: "system" },
+        { type: "compaction", encrypted_content: "opaque" },
+    ]);
+    assert.doesNotMatch(JSON.stringify(rewrittenInput), /pre kept 0/);
+    assert.match(JSON.stringify(rewrittenInput), /inserted context 119/);
+});
+
 test("handles native replay fallback mismatch silently", async () => {
     const warnings: string[] = [];
     const ctx = makeCompactionContext({ warnings, sessionId: "mismatch-session" });
@@ -1921,7 +1981,11 @@ function makeAutoCompactionContext(
 }
 
 function makeCompactionContext(
-    options: { readonly warnings?: string[]; readonly sessionId?: string } = {},
+    options: {
+        readonly warnings?: string[];
+        readonly sessionId?: string;
+        readonly branchEntries?: readonly Record<string, unknown>[];
+    } = {},
 ): ExtensionContext {
     const ctx = {
         hasUI: Boolean(options.warnings),
@@ -1945,16 +2009,17 @@ function makeCompactionContext(
         },
         sessionManager: {
             getSessionId: () => options.sessionId ?? "session-1",
-            getBranch: () => [
-                messageEntry("pre", null, userMessage("pre kept")),
-                nativeCompactionEntry({
-                    id: "compact",
-                    parentId: "pre",
-                    firstKeptEntryId: "pre",
-                    model: "gpt-5.4-mini",
-                }),
-                messageEntry("tail", "compact", userMessage("post tail")),
-            ],
+            getBranch: () =>
+                options.branchEntries ?? [
+                    messageEntry("pre", null, userMessage("pre kept")),
+                    nativeCompactionEntry({
+                        id: "compact",
+                        parentId: "pre",
+                        firstKeptEntryId: "pre",
+                        model: "gpt-5.4-mini",
+                    }),
+                    messageEntry("tail", "compact", userMessage("post tail")),
+                ],
         },
     };
     // SAFETY: This test exercises a function that only reads model, UI notification, and sessionManager fields.

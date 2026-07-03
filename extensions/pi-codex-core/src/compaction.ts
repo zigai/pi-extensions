@@ -1882,28 +1882,47 @@ function countLeadingInstructionItems(input: readonly ResponsesInputItem[]): num
     return count;
 }
 
-function inputSlicesEqual(
-    actual: readonly ResponsesInputItem[],
-    expected: readonly ResponsesInputItem[],
-): boolean {
-    if (actual.length !== expected.length) return false;
-    for (let index = 0; index < actual.length; index += 1) {
-        if (stableStringify(actual[index]) !== stableStringify(expected[index])) return false;
-    }
-    return true;
-}
-
 function findInputSliceIndex(
     input: readonly ResponsesInputItem[],
     expected: readonly ResponsesInputItem[],
     fromIndex: number,
 ): number {
     if (expected.length === 0) return fromIndex;
-    const lastStartIndex = input.length - expected.length;
-    for (let index = fromIndex; index <= lastStartIndex; index += 1) {
-        if (inputSlicesEqual(input.slice(index, index + expected.length), expected)) return index;
+    const inputKeys = input.map(stableStringify);
+    const expectedKeys = expected.map(stableStringify);
+    return findSubsequenceIndex(inputKeys, expectedKeys, fromIndex);
+}
+
+function findSubsequenceIndex(
+    haystack: readonly string[],
+    needle: readonly string[],
+    fromIndex: number,
+): number {
+    if (needle.length === 0) return fromIndex;
+    const prefixTable = buildPrefixTable(needle);
+    let matched = 0;
+    for (let index = Math.max(0, fromIndex); index < haystack.length; index += 1) {
+        while (matched > 0 && haystack[index] !== needle[matched]) {
+            matched = prefixTable[matched - 1] ?? 0;
+        }
+        if (haystack[index] !== needle[matched]) continue;
+        matched += 1;
+        if (matched === needle.length) return index - needle.length + 1;
     }
     return -1;
+}
+
+function buildPrefixTable(values: readonly string[]): number[] {
+    const table = Array.from({ length: values.length }, () => 0);
+    let prefixLength = 0;
+    for (let index = 1; index < values.length; index += 1) {
+        while (prefixLength > 0 && values[index] !== values[prefixLength]) {
+            prefixLength = table[prefixLength - 1] ?? 0;
+        }
+        if (values[index] === values[prefixLength]) prefixLength += 1;
+        table[index] = prefixLength;
+    }
+    return table;
 }
 
 function stableStringify(value: unknown): string {
