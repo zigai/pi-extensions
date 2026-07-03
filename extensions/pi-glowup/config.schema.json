@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zigai/pi-codex-look/config.schema.json",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "preserveTools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "syntax": {
+      "type": "object",
+      "properties": {
+        "preloadOnStartup": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "preloadOnStartup": false
+      }
+    },
+    "patches": {
+      "type": "object",
+      "properties": {
+        "assistantSeparator": {
+          "type": "boolean"
+        },
+        "workingWidgetSpacing": {
+          "type": "boolean"
+        },
+        "autocompleteCleanup": {
+          "type": "boolean"
+        },
+        "markdownSyntax": {
+          "type": "boolean"
+        },
+        "thirdPartyToolRenderers": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "assistantSeparator": true,
+        "workingWidgetSpacing": false,
+        "autocompleteCleanup": true,
+        "markdownSyntax": true,
+        "thirdPartyToolRenderers": true
+      }
+    },
+    "scriptPreview": {
+      "type": "object",
+      "properties": {
+        "headerLayout": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "auto"
+            },
+            {
+              "type": "string",
+              "const": "inline"
+            },
+            {
+              "type": "string",
+              "const": "block"
+            }
+          ]
+        },
+        "formatters": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "headerLayout": "auto",
+        "formatters": {}
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -23,6 +23,8 @@
   },
   "files": [
     "src",
+    "themes",
+    "config.schema.json",
     "README.md",
     "LICENSE"
   ],
@@ -41,7 +43,9 @@
   },
   "dependencies": {
     "@pierre/diffs": "^1.2.12",
-    "shiki": "^4.3.0"
+    "ansi-styles": "^6.2.3",
+    "shiki": "^4.3.0",
+    "typebox": "^1.1.38"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.2",
