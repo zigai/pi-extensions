@@ -3,14 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
     buildLargeDiffSummaryPayload,
     buildPierreDiffPayload,
     buildUnifiedDiffRows,
     createWriteSnapshot,
 } from "../src/pierre-diff.ts";
-import { renderPierreDiff, shouldRenderSideBySideDiff } from "../src/pierre-diff-renderer.ts";
+import {
+    clearQueuedDiffHighlights,
+    renderPierreDiff,
+    shouldRenderSideBySideDiff,
+} from "../src/pierre-diff-renderer.ts";
 import { loadHighlightedDiff } from "../src/pierre-highlight.ts";
 import { getPierrePalette } from "../src/pierre-theme.ts";
 
@@ -200,6 +204,39 @@ describe("Pierre diff rendering", () => {
         expect(reused).toBe(component);
         expect(secondLines).toBe(firstLines);
         expect(secondLines).toEqual(firstLines);
+    });
+
+    it("clears deferred diff highlight timers during shutdown cleanup", () => {
+        vi.useFakeTimers();
+        try {
+            const payload = buildPierreDiffPayload({
+                path: "src/example.ts",
+                oldContent: "alpha\nold\nomega\n",
+                newContent: "alpha\nnew\nomega\n",
+                oldSizeBytes: 16,
+                newSizeBytes: 16,
+                canBuildPierreDiff: true,
+            });
+            if (payload?.kind !== "renderable") {
+                throw new Error("expected renderable Pierre payload");
+            }
+
+            renderPierreDiff(
+                payload,
+                testTheme,
+                { expanded: false },
+                { lastComponent: undefined, invalidate() {} },
+            );
+
+            expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+            clearQueuedDiffHighlights();
+
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+            clearQueuedDiffHighlights();
+        }
     });
 
     it("renders inline unless expanded width has room for side-by-side", () => {

@@ -35,8 +35,11 @@ const INITIAL_TTY_DIFF_HIGHLIGHT_DEFER_MS = 1_500;
 const DISABLE_INITIAL_DEFER_ENV = "PI_CODEX_LOOK_DISABLE_INITIAL_SYNTAX_DEFER";
 const moduleLoadedAtMs = Date.now();
 
+let highlightGeneration = 0;
 let queuedDiffHighlightRunning = false;
+const activeDiffHighlightTimers = new Set<ReturnType<typeof setTimeout>>();
 const queuedDiffHighlights: Array<{
+    readonly generation: number;
     readonly run: () => Promise<void>;
     readonly resolve: () => void;
 }> = [];
@@ -144,10 +147,7 @@ class PierreDiffComponent implements Component {
         if (previousKey !== nextKey) {
             this.highlighted = emptyHighlightedDiffSet();
             this.refreshPromise = undefined;
-            if (this.refreshTimer !== undefined) {
-                clearTimeout(this.refreshTimer);
-                this.refreshTimer = undefined;
-            }
+            this.clearRefreshTimer();
             this.refreshKey = undefined;
         }
         this.maybeRefreshHighlightedDiff();
@@ -231,17 +231,21 @@ class PierreDiffComponent implements Component {
         }
 
         this.refreshKey = nextKey;
-        this.refreshTimer = setTimeout(() => {
-            if (this.refreshKey !== nextKey) {
+        const generation = highlightGeneration;
+        const timer = setTimeout(() => {
+            activeDiffHighlightTimers.delete(timer);
+            if (this.refreshTimer === timer) {
+                this.refreshTimer = undefined;
+            }
+            if (generation !== highlightGeneration || this.refreshKey !== nextKey) {
                 return;
             }
-            this.refreshTimer = undefined;
             if (hasHighlightedLines(this.highlighted)) {
                 return;
             }
             this.refreshPromise = runQueuedDiffHighlight(() =>
                 loadHighlightedDiff(this.payload.metadata).then((highlighted) => {
-                    if (this.refreshKey !== nextKey) {
+                    if (generation !== highlightGeneration || this.refreshKey !== nextKey) {
                         return;
                     }
                     this.highlighted = highlighted;
@@ -255,6 +259,17 @@ class PierreDiffComponent implements Component {
                     }
                 });
         }, initialDiffHighlightDelayMs());
+        this.refreshTimer = timer;
+        activeDiffHighlightTimers.add(timer);
+    }
+
+    private clearRefreshTimer(): void {
+        if (this.refreshTimer === undefined) {
+            return;
+        }
+        clearTimeout(this.refreshTimer);
+        activeDiffHighlightTimers.delete(this.refreshTimer);
+        this.refreshTimer = undefined;
     }
 }
 
@@ -301,17 +316,24 @@ function formatDiffSize(bytes: number): string {
 
 function runQueuedDiffHighlight(run: () => Promise<void>): Promise<void> {
     return new Promise((resolve) => {
-        queuedDiffHighlights.push({ run, resolve });
+        queuedDiffHighlights.push({ generation: highlightGeneration, run, resolve });
         scheduleQueuedDiffHighlight();
     });
 }
 
 /** Drops pending lazy syntax-highlight work during extension shutdown. */
 export function clearQueuedDiffHighlights(): void {
+    highlightGeneration += 1;
+    for (const timer of activeDiffHighlightTimers) {
+        clearTimeout(timer);
+    }
+    activeDiffHighlightTimers.clear();
+
     const pendingTasks = queuedDiffHighlights.splice(0);
     for (const task of pendingTasks) {
         task.resolve();
     }
+    queuedDiffHighlightRunning = false;
 }
 
 function scheduleQueuedDiffHighlight(): void {
@@ -329,10 +351,21 @@ function processNextQueuedDiffHighlight(): void {
         return;
     }
 
+    if (task.generation !== highlightGeneration) {
+        task.resolve();
+        setTimeout(processNextQueuedDiffHighlight, 0);
+        return;
+    }
+
+    const taskGeneration = task.generation;
     task.run()
         .catch(() => {})
         .finally(() => {
             task.resolve();
+            if (taskGeneration !== highlightGeneration) {
+                queuedDiffHighlightRunning = false;
+                return;
+            }
             setTimeout(processNextQueuedDiffHighlight, 100);
         });
 }
