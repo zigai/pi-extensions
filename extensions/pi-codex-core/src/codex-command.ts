@@ -161,9 +161,9 @@ function saveAndApply(
         notify(ctx, `Failed to save Codex settings: ${result.error}`, "error");
         return false;
     }
-    const effectiveConfig = readCodexCoreConfig({
-        cwd: ctx.isProjectTrusted() ? ctx.cwd : undefined,
-    });
+    const effectiveConfig = ctx.isProjectTrusted()
+        ? readCodexCoreConfig({ cwd: ctx.cwd })
+        : readCodexCoreConfig();
     options.applyConfig(effectiveConfig, ctx);
     notify(ctx, formatConfig(effectiveConfig), "info");
     return true;

@@ -98,23 +98,21 @@ let resetCreditsCache:
       }
     | undefined;
 
-export function buildCodexUsageUrl(modelBaseUrl?: string | undefined): string {
+export function buildCodexUsageUrl(modelBaseUrl?: string): string {
     return `${resolveCodexWhamBaseUrl(modelBaseUrl)}/wham/usage`;
 }
 
-export function buildCodexRateLimitResetCreditsUrl(modelBaseUrl?: string | undefined): string {
+export function buildCodexRateLimitResetCreditsUrl(modelBaseUrl?: string): string {
     return `${resolveCodexWhamBaseUrl(modelBaseUrl)}/wham/rate-limit-reset-credits`;
 }
 
-export function buildCodexRateLimitResetConsumeUrl(modelBaseUrl?: string | undefined): string {
+export function buildCodexRateLimitResetConsumeUrl(modelBaseUrl?: string): string {
     return `${resolveCodexWhamBaseUrl(modelBaseUrl)}/wham/rate-limit-reset-credits/consume`;
 }
 
 function resolveCodexWhamBaseUrl(modelBaseUrl: string | undefined): string {
     const codexBaseUrl = resolveCodexApiProviderBaseUrl(modelBaseUrl);
-    return codexBaseUrl.endsWith("/codex")
-        ? codexBaseUrl.slice(0, -"/codex".length)
-        : codexBaseUrl;
+    return codexBaseUrl.endsWith("/codex") ? codexBaseUrl.slice(0, -"/codex".length) : codexBaseUrl;
 }
 
 export type CodexUsageOptions = {

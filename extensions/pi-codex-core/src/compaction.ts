@@ -1583,12 +1583,10 @@ function drainCompleteServerSentEventBlocks(buffer: string): {
 }
 
 function parseServerSentEvents(text: string): ServerSentEvent[] {
-    return text
-        .split(/\r?\n\r?\n/)
-        .flatMap((block) => {
-            const event = parseServerSentEventBlock(block);
-            return event ? [event] : [];
-        });
+    return text.split(/\r?\n\r?\n/).flatMap((block) => {
+        const event = parseServerSentEventBlock(block);
+        return event ? [event] : [];
+    });
 }
 
 function parseServerSentEventBlock(block: string): ServerSentEvent | undefined {

@@ -657,7 +657,7 @@ test("renders non-inline view_image results without loading a preview file", () 
     assert.ok(viewImageTool.renderResult);
     const args = { path: "image.png" };
     const result = {
-        content: [] as const,
+        content: [],
         details: {
             path: "image.png",
             absolutePath: "/tmp/image.png",
@@ -795,10 +795,9 @@ test("imagegen returns saved paths without inline generated images", async () =>
         const base64 = Buffer.from("generated png bytes").toString("base64");
         const runtime = makeTestRuntime(
             async () =>
-                new Response(
-                    JSON.stringify({ data: [{ b64_json: base64 }], size: "1024x1024" }),
-                    { status: 200 },
-                ),
+                new Response(JSON.stringify({ data: [{ b64_json: base64 }], size: "1024x1024" }), {
+                    status: 200,
+                }),
         );
         const imagegenTool = createImagegenTool({
             getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
@@ -1567,10 +1566,7 @@ test("rewrites native compaction replay when new-session context is inserted", a
 
 const TEST_THEME = makeTestTheme();
 
-type ExtensionSessionStartHandler = (
-    event: unknown,
-    ctx: ExtensionContext,
-) => Promise<void> | void;
+type ExtensionSessionStartHandler = (event: unknown, ctx: ExtensionContext) => Promise<void> | void;
 
 type ExtensionHarness = {
     readonly api: ExtensionAPI;

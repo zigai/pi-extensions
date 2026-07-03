@@ -393,10 +393,18 @@ function formatImagegenOutput(
 
 function parseOptionalStringArray(value: unknown, fieldName: string): string[] | undefined {
     if (value === undefined) return undefined;
-    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    if (!Array.isArray(value)) {
         throw new Error(`imagegen ${fieldName} must be an array of strings.`);
     }
-    return value.map((item) => item.trim()).filter((item) => item.length > 0);
+    const strings: string[] = [];
+    for (const item of value) {
+        if (typeof item !== "string") {
+            throw new Error(`imagegen ${fieldName} must be an array of strings.`);
+        }
+        const text = item.trim();
+        if (text.length > 0) strings.push(text);
+    }
+    return strings;
 }
 
 function parseOptionalNumber(value: unknown, fieldName: string): number | undefined {
