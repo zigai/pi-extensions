@@ -931,6 +931,44 @@ test("saves generated images outside the workspace", async () => {
     }
 });
 
+test("allocates unique generated image artifact names on retry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-imagegen-retry-"));
+    const agentDir = join(root, "agent");
+
+    try {
+        const firstBase64 = Buffer.from("first png").toString("base64");
+        const secondBase64 = Buffer.from("second png").toString("base64");
+        const first = await saveGeneratedImage({
+            sessionId: "session/1",
+            toolCallId: "call/1",
+            index: 0,
+            base64: firstBase64,
+            agentDir,
+        });
+        const second = await saveGeneratedImage({
+            sessionId: "session/1",
+            toolCallId: "call*1",
+            index: 0,
+            base64: secondBase64,
+            agentDir,
+        });
+
+        assert.equal(
+            first.path,
+            join(agentDir, "pi-codex-core", "imagegen", "session_1", "call_1.png"),
+        );
+        assert.equal(
+            second.path,
+            join(agentDir, "pi-codex-core", "imagegen", "session_1", "call_1-2.png"),
+        );
+        assert.equal((await readFile(first.absolutePath)).toString("utf8"), "first png");
+        assert.equal((await readFile(second.absolutePath)).toString("utf8"), "second png");
+        assert.equal((await readFile(second.latestAbsolutePath)).toString("utf8"), "second png");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("creates native compaction using remote compaction v2", async () => {
     let requestUrl = "";
     let requestBody: unknown;

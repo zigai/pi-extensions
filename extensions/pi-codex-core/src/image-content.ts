@@ -1,5 +1,5 @@
 import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 
 import { Type } from "typebox";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -141,12 +141,6 @@ export async function saveGeneratedImage(args: {
     readonly latestAbsolutePath: string;
 }> {
     const fileName = `${sanitizeArtifactPathPart(args.toolCallId, "image")}${args.index > 0 ? `-${args.index + 1}` : ""}.png`;
-    const absolutePath = resolveCodexCoreArtifactPath({
-        category: "imagegen",
-        sessionId: args.sessionId,
-        fileName,
-        agentDir: args.agentDir,
-    });
     const latestAbsolutePath = resolveCodexCoreArtifactPath({
         category: "imagegen",
         sessionId: args.sessionId,
@@ -154,19 +148,63 @@ export async function saveGeneratedImage(args: {
         agentDir: args.agentDir,
     });
     const bytes = Buffer.from(args.base64.trim(), "base64");
-    return withFileMutationQueue(latestAbsolutePath, () =>
-        withFileMutationQueue(absolutePath, async () => {
-            await mkdir(dirname(absolutePath), { recursive: true });
+    return withFileMutationQueue(latestAbsolutePath, async () => {
+        const absolutePath = await writeUniqueGeneratedImage(fileName, bytes, args);
+        await writeFile(latestAbsolutePath, bytes);
+        return {
+            path: absolutePath,
+            absolutePath,
+            latestPath: latestAbsolutePath,
+            latestAbsolutePath,
+        };
+    });
+}
+
+async function writeUniqueGeneratedImage(
+    baseFileName: string,
+    bytes: Buffer,
+    args: { readonly sessionId: string; readonly agentDir?: string | undefined },
+): Promise<string> {
+    const artifactName = parseArtifactName(baseFileName);
+    const firstPath = resolveCodexCoreArtifactPath({
+        category: "imagegen",
+        sessionId: args.sessionId,
+        fileName: baseFileName,
+        agentDir: args.agentDir,
+    });
+    await mkdir(dirname(firstPath), { recursive: true });
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
+        const fileName = `${artifactName.stem}${suffix}${artifactName.ext}`;
+        const absolutePath = resolveCodexCoreArtifactPath({
+            category: "imagegen",
+            sessionId: args.sessionId,
+            fileName,
+            agentDir: args.agentDir,
+        });
+        try {
             await writeFile(absolutePath, bytes, { flag: "wx" });
-            await writeFile(latestAbsolutePath, bytes);
-            return {
-                path: absolutePath,
-                absolutePath,
-                latestPath: latestAbsolutePath,
-                latestAbsolutePath,
-            };
-        }),
-    );
+            return absolutePath;
+        } catch (cause: unknown) {
+            if (!hasNodeErrorCode(cause, "EEXIST")) throw cause;
+        }
+    }
+
+    throw new Error("Unable to allocate a unique image artifact path.");
+}
+
+function parseArtifactName(fileName: string): { readonly stem: string; readonly ext: string } {
+    const ext = extname(fileName);
+    return { stem: fileName.slice(0, fileName.length - ext.length), ext };
+}
+
+function hasNodeErrorCode(cause: unknown, code: string): boolean {
+    return isNodeError(cause) && cause.code === code;
+}
+
+function isNodeError(cause: unknown): cause is NodeJS.ErrnoException {
+    return typeof cause === "object" && cause !== null && "code" in cause;
 }
 
 export function imageContentToDataUrl(content: ImageContent): string {
