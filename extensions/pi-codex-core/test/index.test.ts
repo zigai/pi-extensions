@@ -936,6 +936,40 @@ test("auto compaction defers until Pi is idle after agent_end", async () => {
     assert.equal(compactCalls.length, 1);
 });
 
+test("auto compaction skips after assistant errors so Pi retry can continue", async () => {
+    const compactCalls: unknown[] = [];
+    const idle = { value: true };
+    const ctx = makeAutoCompactionContext(compactCalls, idle);
+    const scheduledTasks: Array<() => void> = [];
+    const runtime = {
+        ...makeTestRuntime(),
+        scheduler: {
+            set(_delayMs: number, task: () => void): ScheduledTask {
+                scheduledTasks.push(task);
+                return { cancel() {} };
+            },
+        },
+    } satisfies CodexRuntime;
+    const config = {
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        compaction: {
+            ...DEFAULT_CODEX_CORE_CONFIG.compaction,
+            enabled: true,
+            auto: true,
+            thresholdPercent: DEFAULT_CODEX_CORE_CONFIG.compaction.thresholdPercent,
+        },
+    };
+
+    assert.equal(
+        scheduleCodexAutoCompaction(ctx, config, runtime, {
+            completedMessages: [{ role: "assistant", stopReason: "error" }],
+        }),
+        false,
+    );
+    assert.equal(scheduledTasks.length, 0);
+    assert.equal(compactCalls.length, 0);
+});
+
 test("rewrites responses payload with native compaction replay matching", async () => {
     const ctx = makeCompactionContext();
     const payload = {

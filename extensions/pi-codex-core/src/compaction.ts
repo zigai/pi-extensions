@@ -272,6 +272,15 @@ type AutoCompactionSessionState = {
     readonly timer?: ScheduledTask | undefined;
 };
 
+type AgentEndCompactionMessage = {
+    readonly role?: string | undefined;
+    readonly stopReason?: string | undefined;
+};
+
+type ScheduleCodexAutoCompactionOptions = {
+    readonly completedMessages?: readonly AgentEndCompactionMessage[] | undefined;
+};
+
 let pendingPiCompactionNativeWindow: PendingPiCompactionNativeWindow | undefined;
 const autoCompactionBySession = new Map<string, AutoCompactionSessionState>();
 const nativeReplayWarningKeys = new Set<string>();
@@ -525,8 +534,10 @@ export function scheduleCodexAutoCompaction(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
     runtime: CodexRuntime = defaultCodexRuntime,
+    options: ScheduleCodexAutoCompactionOptions = {},
 ): boolean {
     if (!config.compaction.enabled || !config.compaction.auto) return false;
+    if (latestAssistantEndedWithError(options.completedMessages)) return false;
     const sessionId = ctx.sessionManager.getSessionId();
     const state = autoCompactionBySession.get(sessionId);
     if (state?.timer || state?.inFlight) return false;
@@ -554,6 +565,17 @@ export function cancelScheduledCodexAutoCompaction(): void {
     }
     autoCompactionBySession.clear();
     nativeReplayWarningKeys.clear();
+}
+
+function latestAssistantEndedWithError(
+    messages: readonly AgentEndCompactionMessage[] | undefined,
+): boolean {
+    if (messages === undefined) return false;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role === "assistant") return message.stopReason === "error";
+    }
+    return false;
 }
 
 export function maybeTriggerCodexAutoCompaction(

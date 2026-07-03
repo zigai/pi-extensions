@@ -63,8 +63,10 @@ export default function extension(pi: ExtensionAPI): void {
         return handleCodexNativeCompaction(event, ctx, config, pi);
     });
 
-    pi.on("agent_end", async (_event, ctx) => {
-        scheduleCodexAutoCompaction(ctx, config);
+    pi.on("agent_end", async (event, ctx) => {
+        scheduleCodexAutoCompaction(ctx, config, undefined, {
+            completedMessages: event.messages,
+        });
     });
 
     pi.on("before_provider_request", async (event, ctx) => {
