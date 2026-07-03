@@ -41,21 +41,33 @@ let initializationPromise: Promise<SyntaxState> | undefined;
 let syntaxGeneration = 0;
 const highlightedCodeCache = new Map<string, string[]>();
 
+export type SyntaxHighlighterFactory = typeof createHighlighter;
+
+export type SyntaxInitializationOptions = {
+    readonly createHighlighter?: SyntaxHighlighterFactory;
+};
+
 /** Initializes the central Shiki highlighter once during extension startup. */
 export async function initializeSyntaxHighlighting(
     env: NodeJS.ProcessEnv = process.env,
+    options: SyntaxInitializationOptions = {},
 ): Promise<SyntaxState> {
     if (initializationPromise) {
         return initializationPromise;
     }
 
     const generation = syntaxGeneration;
-    initializationPromise = initializeSyntaxHighlightingOnce(env).then((state) => {
-        if (generation === syntaxGeneration) {
+    const createSyntaxHighlighter = options.createHighlighter ?? createHighlighter;
+    initializationPromise = initializeSyntaxHighlightingOnce(env, createSyntaxHighlighter).then(
+        (state) => {
+            if (generation !== syntaxGeneration) {
+                disposeReadySyntaxState(state);
+                return disposedSyntaxState(state.config);
+            }
             syntaxState = state;
-        }
-        return state;
-    });
+            return state;
+        },
+    );
     return initializationPromise;
 }
 
@@ -133,13 +145,14 @@ export function getLoadedSyntaxHighlighterForLanguage(
 export async function getSyntaxHighlighterForLanguage(
     language: string | undefined,
 ): Promise<LoadedSyntaxHighlighter | undefined> {
+    const generation = syntaxGeneration;
     const loaded = getLoadedSyntaxHighlighterForLanguage(language);
     if (loaded) {
         return loaded;
     }
 
     const state = syntaxState ?? (await initializeSyntaxHighlighting());
-    if (state.status !== "ready") {
+    if (generation !== syntaxGeneration || state.status !== "ready") {
         return undefined;
     }
 
@@ -149,6 +162,9 @@ export async function getSyntaxHighlighterForLanguage(
             return undefined;
         }
         await state.highlighter.loadLanguage(normalizedLanguage);
+        if (generation !== syntaxGeneration) {
+            return undefined;
+        }
         state.loadedLanguages.add(normalizedLanguage);
     }
 
@@ -176,12 +192,23 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     syntaxState = undefined;
     initializationPromise = undefined;
 
+    disposeReadySyntaxState(state);
+}
+
+function disposeReadySyntaxState(state: SyntaxState | undefined): void {
     if (state?.status === "ready") {
         state.highlighter.dispose();
     }
 }
 
-async function initializeSyntaxHighlightingOnce(env: NodeJS.ProcessEnv): Promise<SyntaxState> {
+function disposedSyntaxState(config: SyntaxConfig): SyntaxState {
+    return { status: "disabled", config, reason: "disposed" };
+}
+
+async function initializeSyntaxHighlightingOnce(
+    env: NodeJS.ProcessEnv,
+    createSyntaxHighlighter: SyntaxHighlighterFactory,
+): Promise<SyntaxState> {
     const config = loadSyntaxConfig(env);
     if (!config.enabled) {
         return { status: "disabled", config, reason: config.reason };
@@ -193,7 +220,7 @@ async function initializeSyntaxHighlightingOnce(env: NodeJS.ProcessEnv): Promise
             return { status: "disabled", config, reason: "syntax theme disabled" };
         }
 
-        const highlighter = await createHighlighter({
+        const highlighter = await createSyntaxHighlighter({
             themes: [theme.registration],
             langs: [...PRELOADED_SYNTAX_LANGUAGES],
         });
