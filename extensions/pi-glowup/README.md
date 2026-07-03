@@ -4,7 +4,7 @@ Compact Codex-style rendering for Pi tool calls and results.
 
 ## Configuration
 
-Use global config at `<Pi agent dir>/pi-codex-look/config.json`.
+Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 
 | Option                            | Default  | Purpose                                                                    |
 | --------------------------------- | -------- | -------------------------------------------------------------------------- |
