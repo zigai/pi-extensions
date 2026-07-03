@@ -1144,7 +1144,6 @@ async function executeRemoteCompactionV2(
             }),
         );
     }
-    const text = await response.text();
     if (!response.ok) {
         return fail(
             new CodexHttpRequestFailed({
@@ -1155,75 +1154,128 @@ async function executeRemoteCompactionV2(
             }),
         );
     }
-    return collectRemoteCompactionV2Output(text);
+    if (!response.body) return collectRemoteCompactionV2Output(await response.text());
+    return collectRemoteCompactionV2OutputFromStream(response.body);
+}
+
+async function collectRemoteCompactionV2OutputFromStream(
+    body: ReadableStream<Uint8Array>,
+): Promise<CodexResult<RemoteCompactionV2Response>> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    const collector = createRemoteCompactionV2Collector();
+    let buffer = "";
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const drained = drainCompleteServerSentEventBlocks(buffer);
+        buffer = drained.tail;
+        for (const block of drained.blocks) {
+            const event = parseServerSentEventBlock(block);
+            if (!event) continue;
+            const consumed = collector.consume(event);
+            if (consumed.isErr()) return fail(consumed.error);
+        }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim().length > 0) {
+        const event = parseServerSentEventBlock(buffer);
+        if (event) {
+            const consumed = collector.consume(event);
+            if (consumed.isErr()) return fail(consumed.error);
+        }
+    }
+    return collector.finish();
 }
 
 function collectRemoteCompactionV2Output(sseText: string): CodexResult<RemoteCompactionV2Response> {
+    const collector = createRemoteCompactionV2Collector();
+    for (const event of parseServerSentEvents(sseText)) {
+        const consumed = collector.consume(event);
+        if (consumed.isErr()) return fail(consumed.error);
+    }
+    return collector.finish();
+}
+
+type ServerSentEvent = {
+    readonly event: string;
+    readonly data: readonly string[];
+};
+
+function createRemoteCompactionV2Collector(): {
+    readonly consume: (event: ServerSentEvent) => CodexResult<void>;
+    readonly finish: () => CodexResult<RemoteCompactionV2Response>;
+} {
     let outputItemCount = 0;
     const compactionItems: ResponsesInputItem[] = [];
     let completed = false;
     let responseId: string | undefined;
     let createdAt: number | string | undefined;
 
-    for (const event of parseServerSentEvents(sseText)) {
-        if (event.event === "response.output_item.done") {
-            const item = parseEventItem(event.data);
-            if (item.isErr()) return item;
-            if (!item.value) continue;
-            outputItemCount += 1;
-            if (item.value.type === "compaction" || item.value.type === "compaction_summary") {
-                compactionItems.push(item.value);
+    return {
+        consume(event: ServerSentEvent): CodexResult<void> {
+            if (event.event === "response.output_item.done") {
+                const item = parseEventItem(event.data);
+                if (item.isErr()) return fail(item.error);
+                if (!item.value) return ok(undefined);
+                outputItemCount += 1;
+                if (item.value.type === "compaction" || item.value.type === "compaction_summary") {
+                    compactionItems.push(item.value);
+                }
+                return ok(undefined);
             }
-            continue;
-        }
-        if (event.event === "response.completed") {
-            const response = parseEventResponse(event.data);
-            if (response.isErr()) return response;
-            completed = true;
-            responseId = typeof response.value?.id === "string" ? response.value.id : undefined;
-            createdAt = parseCreatedAt(response.value);
-            continue;
-        }
-        if (event.event === "response.failed" || event.event === "response.incomplete") {
-            return fail(
-                new CodexUnexpectedResponse({
-                    operation: "nativeCompaction",
-                    provider: "openai-codex",
-                    message: formatResponsesStreamFailure(event.data, event.event),
-                }),
-            );
-        }
-    }
-
-    if (!completed) {
-        return fail(
-            new CodexUnexpectedResponse({
-                operation: "nativeCompaction",
-                provider: "openai-codex",
-                message: "Remote compaction stream closed before response.completed.",
-            }),
-        );
-    }
-    if (compactionItems.length !== 1) {
-        return fail(
-            new CodexUnexpectedResponse({
-                operation: "nativeCompaction",
-                provider: "openai-codex",
-                message: `Remote compaction expected exactly one compaction output item, got ${compactionItems.length} from ${outputItemCount} output items.`,
-            }),
-        );
-    }
-    const [compactionOutput] = compactionItems;
-    if (!compactionOutput) {
-        return fail(
-            new CodexUnexpectedResponse({
-                operation: "nativeCompaction",
-                provider: "openai-codex",
-                message: "Remote compaction output disappeared.",
-            }),
-        );
-    }
-    return ok({ compactionOutput, id: responseId, createdAt });
+            if (event.event === "response.completed") {
+                const response = parseEventResponse(event.data);
+                if (response.isErr()) return fail(response.error);
+                completed = true;
+                responseId = typeof response.value?.id === "string" ? response.value.id : undefined;
+                createdAt = parseCreatedAt(response.value);
+                return ok(undefined);
+            }
+            if (event.event === "response.failed" || event.event === "response.incomplete") {
+                return fail(
+                    new CodexUnexpectedResponse({
+                        operation: "nativeCompaction",
+                        provider: "openai-codex",
+                        message: formatResponsesStreamFailure(event.data, event.event),
+                    }),
+                );
+            }
+            return ok(undefined);
+        },
+        finish(): CodexResult<RemoteCompactionV2Response> {
+            if (!completed) {
+                return fail(
+                    new CodexUnexpectedResponse({
+                        operation: "nativeCompaction",
+                        provider: "openai-codex",
+                        message: "Remote compaction stream closed before response.completed.",
+                    }),
+                );
+            }
+            if (compactionItems.length !== 1) {
+                return fail(
+                    new CodexUnexpectedResponse({
+                        operation: "nativeCompaction",
+                        provider: "openai-codex",
+                        message: `Remote compaction expected exactly one compaction output item, got ${compactionItems.length} from ${outputItemCount} output items.`,
+                    }),
+                );
+            }
+            const [compactionOutput] = compactionItems;
+            if (!compactionOutput) {
+                return fail(
+                    new CodexUnexpectedResponse({
+                        operation: "nativeCompaction",
+                        provider: "openai-codex",
+                        message: "Remote compaction output disappeared.",
+                    }),
+                );
+            }
+            return ok({ compactionOutput, id: responseId, createdAt });
+        },
+    };
 }
 
 function buildRemoteCompactionV2Window(
@@ -1517,20 +1569,37 @@ function isPiCompactionSummarizationPayload(payload: ResponsesPayload): boolean 
     });
 }
 
-function parseServerSentEvents(
-    text: string,
-): Array<{ readonly event: string; readonly data: readonly string[] }> {
-    const events: Array<{ readonly event: string; readonly data: string[] }> = [];
-    for (const block of text.split(/\r?\n\r?\n/)) {
-        let event = "message";
-        const data: string[] = [];
-        for (const line of block.split(/\r?\n/)) {
-            if (line.startsWith("event:")) event = line.slice("event:".length).trim();
-            else if (line.startsWith("data:")) data.push(line.slice("data:".length).trimStart());
-        }
-        if (data.length > 0) events.push({ event, data });
+function drainCompleteServerSentEventBlocks(buffer: string): {
+    readonly blocks: readonly string[];
+    readonly tail: string;
+} {
+    const blocks: string[] = [];
+    let tail = buffer;
+    for (;;) {
+        const separator = /\r?\n\r?\n/.exec(tail);
+        if (!separator) return { blocks, tail };
+        blocks.push(tail.slice(0, separator.index));
+        tail = tail.slice(separator.index + separator[0].length);
     }
-    return events;
+}
+
+function parseServerSentEvents(text: string): ServerSentEvent[] {
+    return text
+        .split(/\r?\n\r?\n/)
+        .flatMap((block) => {
+            const event = parseServerSentEventBlock(block);
+            return event ? [event] : [];
+        });
+}
+
+function parseServerSentEventBlock(block: string): ServerSentEvent | undefined {
+    let event = "message";
+    const data: string[] = [];
+    for (const line of block.split(/\r?\n/)) {
+        if (line.startsWith("event:")) event = line.slice("event:".length).trim();
+        else if (line.startsWith("data:")) data.push(line.slice("data:".length).trimStart());
+    }
+    return data.length > 0 ? { event, data } : undefined;
 }
 
 function parseEventItem(data: readonly string[]): CodexResult<ResponsesInputItem | undefined> {

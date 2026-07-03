@@ -896,6 +896,66 @@ test("creates native compaction using remote compaction v2", async () => {
     assert.match(worldStateText(worldState), /active tools: read/);
 });
 
+test("streams remote compaction SSE without buffering response text", async () => {
+    let textCalled = false;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+            controller.enqueue(
+                encoder.encode(
+                    [
+                        "event: response.output_item.done",
+                        'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"streamed"}}',
+                        "",
+                        "",
+                    ].join("\n"),
+                ),
+            );
+            controller.enqueue(
+                encoder.encode(
+                    [
+                        "event: response.completed",
+                        'data: {"type":"response.completed","response":{"id":"resp_stream","created_at":123}}',
+                        "",
+                        "",
+                    ].join("\n"),
+                ),
+            );
+            controller.close();
+        },
+    });
+    const response = {
+        ok: true,
+        status: 200,
+        body,
+        text: async () => {
+            textCalled = true;
+            throw new Error("response text should not be buffered");
+        },
+    };
+    const runtime = makeTestRuntime(async () => {
+        // SAFETY: This fixture implements the Response members read by remote compaction streaming.
+        return response as unknown as Response;
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent(),
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.equal(textCalled, false);
+    assert.deepEqual(result?.compaction?.details.compactedWindow.at(-1), {
+        type: "compaction",
+        encrypted_content: "streamed",
+    });
+});
+
 test("chains previous native compaction into the next remote v2 request", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
