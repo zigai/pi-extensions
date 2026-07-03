@@ -358,6 +358,30 @@ describe("Codex rendering helpers", () => {
     expect(lines.some((line) => line.includes("  │ rows=[]"))).toBe(true);
   });
 
+  it("renders long non-bash auto script previews as blocks", () => {
+    const component = renderScriptCall(
+      plainTheme,
+      {
+        label: "Python",
+        language: "python",
+        code: [
+          "p=Path('Home/.local/share/browser-bookmarks/helium/Bookmarks.json')",
+          "data=json.loads(p.read_text())",
+          "for key in ['version','checksum']:",
+          "    print(key, data.get(key))",
+          "print(data.keys())",
+        ].join("\n"),
+      },
+      { state: "success", expanded: false },
+    );
+
+    const lines = component.render(120);
+
+    expect(lines[0]).toBe("• Python");
+    expect(lines[1]).toContain("  │ p=Path");
+    expect(lines[1]).not.toContain("• Python p=Path");
+  });
+
   it("keeps bash script previews inline by default", () => {
     const component = renderScriptCall(
       plainTheme,

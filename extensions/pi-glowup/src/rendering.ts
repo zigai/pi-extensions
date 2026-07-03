@@ -1022,7 +1022,7 @@ function resolveScriptHeaderLayout(
   layout: ScriptPreviewHeaderLayout,
   invocation: ScriptInvocation,
   header: string,
-  firstCodeLine: string | undefined,
+  codeLines: ReadonlyArray<string>,
   width: number,
 ): Exclude<ScriptPreviewHeaderLayout, "auto"> {
   if (layout !== "auto") {
@@ -1031,7 +1031,9 @@ function resolveScriptHeaderLayout(
   if (invocation.language === "bash") {
     return "inline";
   }
-  if (firstCodeLine === undefined) {
+
+  const firstCodeLine = codeLines[0];
+  if (firstCodeLine === undefined || codeLines.length > 2) {
     return "block";
   }
   return visibleWidth(`${header} ${firstCodeLine}`) <= width ? "inline" : "block";
@@ -1071,7 +1073,7 @@ export function renderScriptCall(
       options.headerLayout ?? "auto",
       invocation,
       header,
-      highlighted[0],
+      highlighted,
       width,
     );
 
