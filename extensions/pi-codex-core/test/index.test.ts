@@ -542,6 +542,14 @@ test("rejects invalid tool arguments before I/O", () => {
         () => imagegenTool.prepareArguments?.({ prompt: "draw", referenced_image_paths: [123] }),
         /referenced_image_paths must be an array of strings/,
     );
+    assert.deepEqual(
+        imagegenTool.prepareArguments?.({
+            prompt: "draw",
+            referenced_image_paths: [],
+            images: ["input.png"],
+        }),
+        { prompt: "draw", referenced_image_paths: ["input.png"] },
+    );
 
     const viewImageTool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
     assert.ok(viewImageTool.prepareArguments);

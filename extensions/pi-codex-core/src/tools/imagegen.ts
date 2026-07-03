@@ -176,9 +176,10 @@ export function prepareImagegenArguments(args: unknown): ImagegenParams {
     if (!input) throw new Error("Invalid imagegen arguments.");
     const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
     if (prompt.length === 0) throw new Error("imagegen requires a non-empty prompt.");
-    const referencedPaths =
-        parseOptionalStringArray(input.referenced_image_paths, "referenced_image_paths") ??
-        parseOptionalStringArray(input.images, "images");
+    const referencedPaths = [
+        ...(parseOptionalStringArray(input.referenced_image_paths, "referenced_image_paths") ?? []),
+        ...(parseOptionalStringArray(input.images, "images") ?? []),
+    ];
     const recentCount = parseOptionalNumber(
         input.num_last_images_to_include,
         "num_last_images_to_include",
@@ -186,7 +187,7 @@ export function prepareImagegenArguments(args: unknown): ImagegenParams {
     const action = parseOptionalString(input.action, "action");
     return {
         prompt,
-        ...(referencedPaths ? { referenced_image_paths: referencedPaths } : {}),
+        ...(referencedPaths.length > 0 ? { referenced_image_paths: referencedPaths } : {}),
         ...(recentCount !== undefined ? { num_last_images_to_include: recentCount } : {}),
         ...(action ? { action } : {}),
     };
@@ -404,7 +405,7 @@ function parseOptionalStringArray(value: unknown, fieldName: string): string[] |
         const text = item.trim();
         if (text.length > 0) strings.push(text);
     }
-    return strings;
+    return strings.length > 0 ? strings : undefined;
 }
 
 function parseOptionalNumber(value: unknown, fieldName: string): number | undefined {
