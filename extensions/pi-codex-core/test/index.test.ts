@@ -15,7 +15,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getImageDimensions } from "@earendil-works/pi-tui";
 
-import { packageName, extensionName } from "../src/index.ts";
+import extension, { packageName, extensionName } from "../src/index.ts";
 import { buildCodexCoreSystemPrompt } from "../src/prompt.ts";
 import {
     CODEX_CURRENT_MODEL_SELECTION,
@@ -161,6 +161,32 @@ test("merges project codex config over global config", async () => {
         assert.equal(config.prompt.mode, "codex");
         assert.equal(config.tools.webSearch, false);
     } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("ignores project codex config when session cwd is untrusted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        const projectConfigPath = getCodexCoreProjectConfigPath(cwd);
+        await mkdir(join(globalConfigPath, ".."), { recursive: true });
+        await mkdir(join(projectConfigPath, ".."), { recursive: true });
+        await writeFile(globalConfigPath, JSON.stringify({ tools: { webSearch: true } }));
+        await writeFile(projectConfigPath, JSON.stringify({ tools: { webSearch: false } }));
+
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        await harness.startSession(makeExtensionContext(cwd, false));
+
+        assert.ok(harness.activeTools.includes("web_run"));
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -1097,6 +1123,63 @@ test("rewrites native compaction replay when new-session context is inserted", a
 });
 
 const TEST_THEME = makeTestTheme();
+
+type ExtensionSessionStartHandler = (
+    event: unknown,
+    ctx: ExtensionContext,
+) => Promise<void> | void;
+
+type ExtensionHarness = {
+    readonly api: ExtensionAPI;
+    readonly activeTools: readonly string[];
+    readonly startSession: (ctx: ExtensionContext) => Promise<void>;
+};
+
+function makeExtensionHarness(): ExtensionHarness {
+    let activeTools: string[] = [];
+    let sessionStart: ExtensionSessionStartHandler | undefined;
+    const api = {
+        registerTool() {},
+        registerCommand() {},
+        registerMessageRenderer() {},
+        on(eventName: string, handler: ExtensionSessionStartHandler) {
+            if (eventName === "session_start") sessionStart = handler;
+        },
+        getActiveTools: () => activeTools,
+        setActiveTools(tools: readonly string[]) {
+            activeTools = [...tools];
+        },
+        getAllTools: () => [],
+    };
+    return {
+        // SAFETY: This fixture implements the ExtensionAPI members exercised during extension registration and session_start.
+        api: api as unknown as ExtensionAPI,
+        get activeTools() {
+            return activeTools;
+        },
+        async startSession(ctx: ExtensionContext): Promise<void> {
+            assert.ok(sessionStart);
+            await sessionStart({ type: "session_start" }, ctx);
+        },
+    };
+}
+
+function makeExtensionContext(cwd: string, trusted: boolean): ExtensionContext {
+    const ctx = {
+        cwd,
+        hasUI: false,
+        isProjectTrusted: () => trusted,
+        model: {
+            provider: "openai-codex",
+            api: "openai-codex-responses",
+            id: "gpt-5.5",
+            baseUrl: "https://chatgpt.com/backend-api",
+            input: ["text", "image"],
+        },
+    };
+    // SAFETY: This fixture supplies the fields read by session_start tool synchronization.
+    return ctx as unknown as ExtensionContext;
+}
 
 function makeTestRuntime(
     fetch: typeof globalThis.fetch = async () => {

@@ -41,7 +41,7 @@ export default function extension(pi: ExtensionAPI): void {
     registerCodexCommand(pi, { getConfig, applyConfig });
 
     pi.on("session_start", async (_event, ctx) => {
-        config = readCodexCoreConfig({ cwd: ctx.cwd });
+        config = readCodexCoreConfig({ cwd: ctx.isProjectTrusted() ? ctx.cwd : undefined });
         syncCodexCoreTools(pi, ctx, config);
     });
 
