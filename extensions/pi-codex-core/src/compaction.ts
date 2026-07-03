@@ -11,6 +11,19 @@ import { Type } from "typebox";
 
 import { resolveCodexRequestModel, type CodexCoreConfig } from "./config.ts";
 import {
+    CodexHttpRequestFailed,
+    CodexInvalidJson,
+    CodexNetworkUnavailable,
+    CodexRequestCancelled,
+    CodexUnexpectedResponse,
+    fail,
+    isAbortCause as isCodexAbortCause,
+    ok,
+    safeCauseMessage,
+    type CodexResult,
+} from "./failures.ts";
+import { defaultCodexRuntime, type CodexRuntime, type ScheduledTask } from "./runtime.ts";
+import {
     resolveActiveCodexResponsesProvider,
     resolveCodexApiProviderBaseUrl,
 } from "./codex-auth.ts";
@@ -256,7 +269,7 @@ type AutoCompactionSessionState = {
     readonly lastTriggeredEntryId?: string | undefined;
     readonly lastTriggeredAt: number;
     readonly inFlight: boolean;
-    readonly timer?: ReturnType<typeof setTimeout> | undefined;
+    readonly timer?: ScheduledTask | undefined;
 };
 
 let pendingPiCompactionNativeWindow: PendingPiCompactionNativeWindow | undefined;
@@ -283,6 +296,7 @@ export async function handleCodexNativeCompaction(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
     pi: ExtensionAPI,
+    runtimeServices: CodexRuntime = defaultCodexRuntime,
 ): Promise<
     | {
           readonly cancel?: true;
@@ -298,17 +312,20 @@ export async function handleCodexNativeCompaction(
     if (!config.compaction.enabled) return undefined;
     if (event.signal.aborted) return { cancel: true };
     const runtime = await resolveActiveCodexResponsesProvider(ctx);
-    if (!runtime) return undefined;
+    if (runtime.isErr() || !runtime.value) return undefined;
 
     const match: NativeCompactionMatch = {
-        provider: runtime.provider,
-        api: runtime.api,
-        baseUrl: runtime.baseUrl,
+        provider: runtime.value.provider,
+        api: runtime.value.api,
+        baseUrl: runtime.value.baseUrl,
     };
     const latestNativeCompaction = findLatestNativeCompactionEntry(event.branchEntries, match);
     const promptInput = buildRemoteCompactionPromptInput(event, ctx.model, latestNativeCompaction);
     if (promptInput.input.length === 0) return undefined;
-    const compactionModel = resolveCodexRequestModel(config.openai.compactionModel, runtime.model);
+    const compactionModel = resolveCodexRequestModel(
+        config.openai.compactionModel,
+        runtime.value.model,
+    );
 
     const request = buildRemoteCompactionV2Request({
         model: compactionModel,
@@ -323,7 +340,19 @@ export async function handleCodexNativeCompaction(
     const shrink = shrinkRemoteCompactionRequestForContextWindow(request, ctx.model?.contextWindow);
 
     try {
-        const response = await executeRemoteCompactionV2(runtime, shrink.request, event.signal);
+        const responseResult = await executeRemoteCompactionV2(
+            runtime.value,
+            shrink.request,
+            event.signal,
+            runtimeServices,
+        );
+        if (responseResult.isErr()) {
+            notifyCompactionFallback(ctx, event.branchEntries, match, responseResult.error.message);
+            return responseResult.error._tag === "CodexRequestCancelled"
+                ? { cancel: true }
+                : undefined;
+        }
+        const response = responseResult.value;
         const compactedWindow = buildRemoteCompactionV2Window(
             shrink.promptInput,
             response.compactionOutput,
@@ -337,12 +366,13 @@ export async function handleCodexNativeCompaction(
             );
             return undefined;
         }
-        const worldState = captureNativeCompactionWorldState(ctx, pi, event);
+        const worldState = captureNativeCompactionWorldState(ctx, pi, runtimeServices, event);
         const worldStateInput = buildWorldStateInput(worldState);
         const lifecycle = buildWindowLifecycle(
             latestNativeCompaction,
             compactedWindow,
             worldStateInput,
+            runtimeServices,
         );
         pendingPiCompactionNativeWindow = undefined;
         return {
@@ -352,10 +382,10 @@ export async function handleCodexNativeCompaction(
                 tokensBefore: event.preparation.tokensBefore,
                 details: {
                     strategy: NATIVE_COMPACTION_STRATEGY,
-                    provider: runtime.provider,
-                    api: runtime.api,
+                    provider: runtime.value.provider,
+                    api: runtime.value.api,
                     model: compactionModel,
-                    baseUrl: runtime.baseUrl,
+                    baseUrl: runtime.value.baseUrl,
                     compactedWindow,
                     replacementInput: lifecycle.replacementInput,
                     windowNumber: lifecycle.windowNumber,
@@ -365,7 +395,7 @@ export async function handleCodexNativeCompaction(
                     sourceCompactionEntryId: lifecycle.sourceCompactionEntryId,
                     worldState,
                     compactResponseId: response.id,
-                    createdAt: normalizeCreatedAt(response.createdAt),
+                    createdAt: normalizeCreatedAt(response.createdAt, runtimeServices),
                     requestMeta: {
                         previousCompactionEntryId: promptInput.previousCompactionEntryId,
                         retainedInputItems: compactedWindow.length,
@@ -378,8 +408,8 @@ export async function handleCodexNativeCompaction(
             },
         };
     } catch (cause: unknown) {
-        if (isAbortCause(cause)) return { cancel: true };
-        const message = cause instanceof Error ? cause.message : String(cause);
+        if (isCodexAbortCause(cause)) return { cancel: true };
+        const message = safeCauseMessage(cause);
         notifyCompactionFallback(
             ctx,
             event.branchEntries,
@@ -395,6 +425,7 @@ export async function rewriteProviderRequestWithNativeCompaction(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
     pi: ExtensionAPI,
+    runtime: CodexRuntime = defaultCodexRuntime,
 ): Promise<unknown> {
     const responsesPayload = parseResponsesPayload(payload);
     if (!config.compaction.enabled || !responsesPayload) return undefined;
@@ -422,14 +453,19 @@ export async function rewriteProviderRequestWithNativeCompaction(
         model,
         branchEntries,
         compactionEntry: latestNativeCompaction.entry,
-        replacementInput: buildFreshReplacementInput(latestNativeCompaction.entry.details, ctx, pi),
+        replacementInput: buildFreshReplacementInput(
+            latestNativeCompaction.entry.details,
+            ctx,
+            pi,
+            runtime,
+        ),
     });
     if (replay.ok) return replay.payload;
 
     notifyNativeReplayFallbackOnce(ctx, latestNativeCompaction.entry.id, replay.reason);
     return buildLenientNativeReplayPayload(
         responsesPayload,
-        buildFreshReplacementInput(latestNativeCompaction.entry.details, ctx, pi),
+        buildFreshReplacementInput(latestNativeCompaction.entry.details, ctx, pi, runtime),
     );
 }
 
@@ -488,19 +524,20 @@ export function findLatestNativeCompactionDetails(
 export function scheduleCodexAutoCompaction(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
+    runtime: CodexRuntime = defaultCodexRuntime,
 ): boolean {
     if (!config.compaction.enabled || !config.compaction.auto) return false;
     const sessionId = ctx.sessionManager.getSessionId();
     const state = autoCompactionBySession.get(sessionId);
     if (state?.timer || state?.inFlight) return false;
 
-    const timer = setTimeout(() => {
+    const timer = runtime.scheduler.set(0, () => {
         const latestState = autoCompactionBySession.get(sessionId);
         if (latestState?.timer === timer) {
             autoCompactionBySession.set(sessionId, { ...latestState, timer: undefined });
         }
-        maybeTriggerCodexAutoCompaction(ctx, config);
-    }, 0);
+        maybeTriggerCodexAutoCompaction(ctx, config, runtime);
+    });
 
     autoCompactionBySession.set(sessionId, {
         lastTriggeredEntryId: state?.lastTriggeredEntryId,
@@ -513,7 +550,7 @@ export function scheduleCodexAutoCompaction(
 
 export function cancelScheduledCodexAutoCompaction(): void {
     for (const state of autoCompactionBySession.values()) {
-        if (state.timer) clearTimeout(state.timer);
+        if (state.timer) state.timer.cancel();
     }
     autoCompactionBySession.clear();
     nativeReplayWarningKeys.clear();
@@ -522,6 +559,7 @@ export function cancelScheduledCodexAutoCompaction(): void {
 export function maybeTriggerCodexAutoCompaction(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
+    runtime: CodexRuntime = defaultCodexRuntime,
 ): boolean {
     if (!config.compaction.enabled || !config.compaction.auto) return false;
     if (!ctx.isIdle()) return false;
@@ -533,7 +571,7 @@ export function maybeTriggerCodexAutoCompaction(
     const branch = ctx.sessionManager.getBranch();
     const latestEntryId = branch.at(-1)?.id;
     const state = autoCompactionBySession.get(sessionId);
-    const now = Date.now();
+    const now = runtime.clock.nowMs();
     if (state?.inFlight) return false;
     if (state?.lastTriggeredEntryId === latestEntryId) return false;
     if (state && now - state.lastTriggeredAt < AUTO_COMPACTION_MIN_INTERVAL_MS) return false;
@@ -1045,19 +1083,50 @@ async function executeRemoteCompactionV2(
     runtime: { readonly responsesUrl: string; readonly headers: Headers },
     request: RemoteCompactionV2Request,
     signal: AbortSignal,
-): Promise<RemoteCompactionV2Response> {
-    const response = await fetch(runtime.responsesUrl, {
-        method: "POST",
-        headers: runtime.headers,
-        signal,
-        body: JSON.stringify(request),
-    });
+    services: CodexRuntime,
+): Promise<CodexResult<RemoteCompactionV2Response>> {
+    let response: Response;
+    try {
+        response = await services.fetch(runtime.responsesUrl, {
+            method: "POST",
+            headers: runtime.headers,
+            signal,
+            body: JSON.stringify(request),
+        });
+    } catch (cause: unknown) {
+        if (isCodexAbortCause(cause)) {
+            return fail(
+                new CodexRequestCancelled({
+                    operation: "nativeCompaction",
+                    message: "Codex remote compaction request was cancelled.",
+                    cause,
+                }),
+            );
+        }
+        return fail(
+            new CodexNetworkUnavailable({
+                operation: "nativeCompaction",
+                provider: "openai-codex",
+                message: "Codex remote compaction network request failed.",
+                cause,
+            }),
+        );
+    }
     const text = await response.text();
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${text || response.statusText}`);
+    if (!response.ok) {
+        return fail(
+            new CodexHttpRequestFailed({
+                operation: "nativeCompaction",
+                provider: "openai-codex",
+                status: response.status,
+                message: `Codex remote compaction failed with HTTP ${response.status}.`,
+            }),
+        );
+    }
     return collectRemoteCompactionV2Output(text);
 }
 
-function collectRemoteCompactionV2Output(sseText: string): RemoteCompactionV2Response {
+function collectRemoteCompactionV2Output(sseText: string): CodexResult<RemoteCompactionV2Response> {
     let outputItemCount = 0;
     const compactionItems: ResponsesInputItem[] = [];
     let completed = false;
@@ -1067,34 +1136,62 @@ function collectRemoteCompactionV2Output(sseText: string): RemoteCompactionV2Res
     for (const event of parseServerSentEvents(sseText)) {
         if (event.event === "response.output_item.done") {
             const item = parseEventItem(event.data);
-            if (!item) continue;
+            if (item.isErr()) return item;
+            if (!item.value) continue;
             outputItemCount += 1;
-            if (item.type === "compaction" || item.type === "compaction_summary") {
-                compactionItems.push(item);
+            if (item.value.type === "compaction" || item.value.type === "compaction_summary") {
+                compactionItems.push(item.value);
             }
             continue;
         }
         if (event.event === "response.completed") {
             const response = parseEventResponse(event.data);
+            if (response.isErr()) return response;
             completed = true;
-            responseId = typeof response?.id === "string" ? response.id : undefined;
-            createdAt = parseCreatedAt(response);
+            responseId = typeof response.value?.id === "string" ? response.value.id : undefined;
+            createdAt = parseCreatedAt(response.value);
             continue;
         }
         if (event.event === "response.failed" || event.event === "response.incomplete") {
-            throw new Error(formatResponsesStreamFailure(event.data, event.event));
+            return fail(
+                new CodexUnexpectedResponse({
+                    operation: "nativeCompaction",
+                    provider: "openai-codex",
+                    message: formatResponsesStreamFailure(event.data, event.event),
+                }),
+            );
         }
     }
 
-    if (!completed) throw new Error("remote compaction v2 stream closed before response.completed");
+    if (!completed) {
+        return fail(
+            new CodexUnexpectedResponse({
+                operation: "nativeCompaction",
+                provider: "openai-codex",
+                message: "Remote compaction stream closed before response.completed.",
+            }),
+        );
+    }
     if (compactionItems.length !== 1) {
-        throw new Error(
-            `remote compaction v2 expected exactly one compaction output item, got ${compactionItems.length} from ${outputItemCount} output items`,
+        return fail(
+            new CodexUnexpectedResponse({
+                operation: "nativeCompaction",
+                provider: "openai-codex",
+                message: `Remote compaction expected exactly one compaction output item, got ${compactionItems.length} from ${outputItemCount} output items.`,
+            }),
         );
     }
     const [compactionOutput] = compactionItems;
-    if (!compactionOutput) throw new Error("remote compaction v2 compaction output disappeared");
-    return { compactionOutput, id: responseId, createdAt };
+    if (!compactionOutput) {
+        return fail(
+            new CodexUnexpectedResponse({
+                operation: "nativeCompaction",
+                provider: "openai-codex",
+                message: "Remote compaction output disappeared.",
+            }),
+        );
+    }
+    return ok({ compactionOutput, id: responseId, createdAt });
 }
 
 function buildRemoteCompactionV2Window(
@@ -1112,6 +1209,7 @@ function buildWindowLifecycle(
     latestNativeCompaction: FoundNativeCompactionEntry | undefined,
     compactedWindow: readonly ResponsesInputItem[],
     worldStateInput: readonly ResponsesInputItem[],
+    runtime: CodexRuntime,
 ): {
     readonly replacementInput: readonly ResponsesInputItem[];
     readonly windowNumber: number;
@@ -1121,7 +1219,7 @@ function buildWindowLifecycle(
     readonly sourceCompactionEntryId?: string | undefined;
 } {
     const previousDetails = latestNativeCompaction?.entry.details;
-    const windowId = createWindowId();
+    const windowId = createWindowId(runtime);
     const previousWindowId = previousDetails?.windowId;
     return {
         replacementInput: [
@@ -1140,8 +1238,15 @@ function buildFreshReplacementInput(
     details: NativeCompactionDetails,
     ctx: ExtensionContext,
     pi: ExtensionAPI,
+    runtime: CodexRuntime,
 ): ResponsesInputItem[] {
-    const worldState = captureNativeCompactionWorldState(ctx, pi, undefined, details.worldState);
+    const worldState = captureNativeCompactionWorldState(
+        ctx,
+        pi,
+        runtime,
+        undefined,
+        details.worldState,
+    );
     return [
         ...cloneCompactedWindow(details.compactedWindow),
         ...buildWorldStateInput(worldState, details),
@@ -1151,6 +1256,7 @@ function buildFreshReplacementInput(
 function captureNativeCompactionWorldState(
     ctx: ExtensionContext,
     pi: ExtensionAPI,
+    runtime: CodexRuntime,
     event?: SessionBeforeCompactEvent,
     previous?: NativeCompactionWorldState,
 ): NativeCompactionWorldState {
@@ -1167,7 +1273,7 @@ function captureNativeCompactionWorldState(
                   ]),
               ]
             : (previous?.modifiedFiles ?? []),
-        capturedAt: new Date().toISOString(),
+        capturedAt: runtime.clock.nowDate().toISOString(),
     };
 }
 
@@ -1178,7 +1284,7 @@ function buildWorldStateInput(
     const lines = [
         `<${CODEX_CORE_WORLD_STATE_TAG}>`,
         "Fresh Pi context after Codex native compaction.",
-        `Current date: ${new Date().toISOString().slice(0, 10)}`,
+        `Current date: ${worldState.capturedAt.slice(0, 10)}`,
         `cwd: ${worldState.cwd}`,
         `model: ${worldState.model}`,
         `active tools: ${worldState.activeToolNames.length > 0 ? worldState.activeToolNames.join(", ") : "none"}`,
@@ -1203,8 +1309,8 @@ function buildWorldStateInput(
     return [{ role: "user", content: [{ type: "input_text", text: lines.join("\n") }] }];
 }
 
-function createWindowId(): string {
-    return `pi_codex_window_${globalThis.crypto.randomUUID()}`;
+function createWindowId(runtime: CodexRuntime): string {
+    return `pi_codex_window_${runtime.idGenerator.randomUUID()}`;
 }
 
 function rewriteResponsesPayloadWithNativeReplay(input: {
@@ -1290,6 +1396,7 @@ function notifyNativeReplayFallbackOnce(
     compactionEntryId: string,
     reason: string,
 ): void {
+    if (reason === "expected-pi-replay-mismatch") return;
     if (!ctx.hasUI) return;
     const key = `${ctx.sessionManager.getSessionId()}:${compactionEntryId}:${reason}`;
     if (nativeReplayWarningKeys.has(key)) return;
@@ -1394,25 +1501,32 @@ function parseServerSentEvents(
     return events;
 }
 
-function parseEventItem(data: readonly string[]): ResponsesInputItem | undefined {
+function parseEventItem(data: readonly string[]): CodexResult<ResponsesInputItem | undefined> {
     const payload = parseEventPayload(data);
-    return parseJsonObject(payload?.item);
+    if (payload.isErr()) return payload;
+    return ok(parseJsonObject(payload.value?.item));
 }
 
-function parseEventResponse(data: readonly string[]): ResponsesInputItem | undefined {
+function parseEventResponse(data: readonly string[]): CodexResult<ResponsesInputItem | undefined> {
     const payload = parseEventPayload(data);
-    return parseJsonObject(payload?.response);
+    if (payload.isErr()) return payload;
+    return ok(parseJsonObject(payload.value?.response));
 }
 
-function parseEventPayload(data: readonly string[]): JsonObject | undefined {
+function parseEventPayload(data: readonly string[]): CodexResult<JsonObject | undefined> {
     const text = data.join("\n").trim();
-    if (text.length === 0 || text === "[DONE]") return undefined;
+    if (text.length === 0 || text === "[DONE]") return ok(undefined);
     try {
         const rawPayload: unknown = JSON.parse(text);
-        return parseJsonObject(rawPayload);
+        return ok(parseJsonObject(rawPayload));
     } catch (cause: unknown) {
-        throw new Error(
-            `failed to parse remote compaction v2 stream event: ${cause instanceof Error ? cause.message : String(cause)}`,
+        return fail(
+            new CodexInvalidJson({
+                operation: "nativeCompaction",
+                provider: "openai-codex",
+                message: "Remote compaction stream event was not valid JSON.",
+                cause,
+            }),
         );
     }
 }
@@ -1424,7 +1538,8 @@ function parseCreatedAt(response: ResponsesInputItem | undefined): number | stri
 
 function formatResponsesStreamFailure(data: readonly string[], event: string): string {
     const response = parseEventResponse(data);
-    const error = response?.error;
+    if (response.isErr()) return response.error.message;
+    const error = response.value?.error;
     if (isJsonObject(error) && typeof error.message === "string" && error.message.trim().length > 0)
         return `${event}: ${error.message.trim()}`;
     return `${event} event received during remote compaction v2`;
@@ -1639,25 +1754,18 @@ function inputImageCount(item: ResponsesInputItem): number {
     return content.filter((part) => isJsonObject(part) && part.type === "input_image").length;
 }
 
-function normalizeCreatedAt(value: unknown): string {
+function normalizeCreatedAt(value: unknown, runtime: CodexRuntime): string {
     if (typeof value === "number" && Number.isFinite(value))
         return new Date(value > 1_000_000_000_000 ? value : value * 1000).toISOString();
     if (typeof value === "string" && value.trim().length > 0) {
         const parsed = Date.parse(value);
         return Number.isNaN(parsed) ? value : new Date(parsed).toISOString();
     }
-    return new Date().toISOString();
+    return runtime.clock.nowDate().toISOString();
 }
 
 function safePromptCacheKey(value: string): string {
     return Array.from(value).slice(0, 64).join("");
-}
-
-function isAbortCause(cause: unknown): boolean {
-    return (
-        (cause instanceof DOMException && cause.name === "AbortError") ||
-        (cause instanceof Error && (cause.name === "AbortError" || cause.name === "ABORT_ERR"))
-    );
 }
 
 function cloneCompactedWindow(window: readonly ResponsesInputItem[]): ResponsesInputItem[] {

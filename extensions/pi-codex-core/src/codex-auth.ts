@@ -2,6 +2,14 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+import {
+    CodexAuthUnavailable,
+    CodexUnsupportedModel,
+    fail,
+    ok,
+    type CodexResult,
+} from "./failures.ts";
+import { Redacted } from "./redacted.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -12,7 +20,7 @@ const OPENAI_CODEX_PROVIDER = "openai-codex";
 export type CodexToolProvider = {
     readonly baseUrl: string;
     readonly model: string;
-    readonly token: string;
+    readonly token: Redacted<string>;
     readonly accountId: string;
 };
 
@@ -53,7 +61,7 @@ export function resolveCodexResponsesUrl(providerBaseUrl: string): string {
 
 export function codexToolProviderHeaders(provider: CodexToolProvider): Headers {
     const headers = new Headers();
-    headers.set("Authorization", `Bearer ${provider.token}`);
+    headers.set("Authorization", `Bearer ${provider.token.reveal()}`);
     headers.set("ChatGPT-Account-ID", provider.accountId);
     headers.set("originator", CODEX_ORIGINATOR);
     headers.set("User-Agent", codexUserAgent(CODEX_ORIGINATOR));
@@ -80,8 +88,12 @@ export function codexUserAgent(originator: string = CODEX_ORIGINATOR): string {
     return `${originator}/0.0.0 (${platform} unknown; ${process.arch}) ${terminal}`;
 }
 
-export async function resolveCodexToolProvider(ctx: ExtensionContext): Promise<CodexToolProvider> {
-    return resolveCodexProviderForModel(ctx, resolveCodexToolAuthModel(ctx), {
+export async function resolveCodexToolProvider(
+    ctx: ExtensionContext,
+): Promise<CodexResult<CodexToolProvider>> {
+    const model = resolveCodexToolAuthModel(ctx);
+    if (model.isErr()) return model;
+    return resolveCodexProviderForModel(ctx, model.value, {
         tokenUnavailableMessage:
             "Codex tools require /login openai-codex or an OpenAI Codex-compatible token.",
     });
@@ -90,22 +102,23 @@ export async function resolveCodexToolProvider(ctx: ExtensionContext): Promise<C
 /** Resolve the active OpenAI Codex responses provider and prepared response headers. */
 export async function resolveActiveCodexResponsesProvider(
     ctx: ExtensionContext,
-): Promise<CodexResponsesProvider | undefined> {
+): Promise<CodexResult<CodexResponsesProvider | undefined>> {
     const model = ctx.model;
-    if (!isUsableOpenAICodexModel(model)) return undefined;
+    if (!isUsableOpenAICodexModel(model)) return ok(undefined);
     const provider = await resolveCodexProviderForModel(ctx, model, {
         tokenUnavailableMessage: "OpenAI Codex auth is unavailable.",
         requireAccountId: true,
     });
-    const headers = codexToolProviderHeaders(provider);
+    if (provider.isErr()) return provider;
+    const headers = codexToolProviderHeaders(provider.value);
     headers.set("OpenAI-Beta", "responses=experimental");
-    return {
-        ...provider,
+    return ok({
+        ...provider.value,
         provider: model.provider,
         api: model.api,
-        responsesUrl: resolveCodexResponsesUrl(provider.baseUrl),
+        responsesUrl: resolveCodexResponsesUrl(provider.value.baseUrl),
         headers,
-    };
+    });
 }
 
 export function extractAccountId(token: string): string | undefined {
@@ -133,28 +146,49 @@ async function resolveCodexProviderForModel(
     ctx: ExtensionContext,
     model: RuntimeModel,
     options: { readonly tokenUnavailableMessage: string; readonly requireAccountId?: boolean },
-): Promise<CodexToolProvider> {
+): Promise<CodexResult<CodexToolProvider>> {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) throw new Error(auth.error);
+    if (!auth.ok) {
+        return fail(
+            new CodexAuthUnavailable({
+                operation: "codexAuth",
+                message: "OpenAI Codex auth is unavailable.",
+                cause: auth.error,
+            }),
+        );
+    }
 
     const token =
         auth.apiKey ?? headerValue(auth.headers, "Authorization")?.replace(/^Bearer\s+/i, "");
-    if (!token) throw new Error(options.tokenUnavailableMessage);
+    if (!token) {
+        return fail(
+            new CodexAuthUnavailable({
+                operation: "codexAuth",
+                message: options.tokenUnavailableMessage,
+            }),
+        );
+    }
 
     const accountId = headerValue(auth.headers, "chatgpt-account-id") ?? extractAccountId(token);
-    if (options.requireAccountId && !accountId)
-        throw new Error("OpenAI Codex account id is unavailable.");
+    if (options.requireAccountId && !accountId) {
+        return fail(
+            new CodexAuthUnavailable({
+                operation: "codexAuth",
+                message: "OpenAI Codex account id is unavailable.",
+            }),
+        );
+    }
 
-    return {
+    return ok({
         baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
         model: model.id,
-        token,
+        token: Redacted.of(token),
         accountId: accountId ?? "",
-    };
+    });
 }
 
-function resolveCodexToolAuthModel(ctx: ExtensionContext): RuntimeModel {
-    if (isUsableOpenAICodexModel(ctx.model)) return ctx.model as RuntimeModel;
+function resolveCodexToolAuthModel(ctx: ExtensionContext): CodexResult<RuntimeModel> {
+    if (isUsableOpenAICodexModel(ctx.model)) return ok(ctx.model as RuntimeModel);
 
     const registry = ctx.modelRegistry as {
         readonly find?: (provider: string, modelId: string) => RuntimeModel | undefined;
@@ -164,21 +198,25 @@ function resolveCodexToolAuthModel(ctx: ExtensionContext): RuntimeModel {
 
     const currentId = ctx.model?.id;
     const direct = currentId ? registry.find?.(OPENAI_CODEX_PROVIDER, currentId) : undefined;
-    if (isUsableOpenAICodexModel(direct)) return direct;
+    if (isUsableOpenAICodexModel(direct)) return ok(direct);
 
     for (const modelId of ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"]) {
         const model = registry.find?.(OPENAI_CODEX_PROVIDER, modelId);
-        if (isUsableOpenAICodexModel(model)) return model;
+        if (isUsableOpenAICodexModel(model)) return ok(model);
     }
 
     const availableModel = registry.getAvailable?.().find(isUsableOpenAICodexModel);
-    if (availableModel) return availableModel;
+    if (availableModel) return ok(availableModel);
 
     const registeredModel = registry.getAll?.().find(isUsableOpenAICodexModel);
-    if (registeredModel) return registeredModel;
+    if (registeredModel) return ok(registeredModel);
 
-    throw new Error(
-        "Codex tools require /login openai-codex or an available OpenAI Codex Responses model.",
+    return fail(
+        new CodexUnsupportedModel({
+            operation: "codexAuth",
+            message:
+                "Codex tools require /login openai-codex or an available OpenAI Codex Responses model.",
+        }),
     );
 }
 

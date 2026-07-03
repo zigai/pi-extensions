@@ -8,9 +8,10 @@ export function resolveCodexCoreArtifactPath(args: {
     readonly category: string;
     readonly sessionId: string;
     readonly fileName: string;
+    readonly agentDir?: string | undefined;
 }): string {
     return join(
-        getAgentDir(),
+        args.agentDir ?? getAgentDir(),
         ARTIFACT_ROOT_DIR,
         sanitizeArtifactPathPart(args.category, "artifacts"),
         sanitizeArtifactPathPart(args.sessionId, "session"),

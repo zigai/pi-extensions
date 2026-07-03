@@ -1,10 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 
 import { Type } from "typebox";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import {
-    getAgentDir,
     resizeImage,
     withFileMutationQueue,
     type ExtensionContext,
@@ -12,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { getImageDimensions } from "@earendil-works/pi-tui";
 
-import { resolveCodexCoreArtifactPath, sanitizeArtifactPathPart } from "./artifacts.ts";
+import { sanitizeArtifactPathPart } from "./artifacts.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 const ImageContentSchema = compileSchema(
@@ -124,7 +123,7 @@ export function codexPromptImageTargetDimensions(
 }
 
 export async function saveGeneratedImage(args: {
-    readonly sessionId: string;
+    readonly cwd: string;
     readonly toolCallId: string;
     readonly index: number;
     readonly base64: string;
@@ -133,41 +132,23 @@ export async function saveGeneratedImage(args: {
     readonly absolutePath: string;
     readonly latestPath: string;
     readonly latestAbsolutePath: string;
-    readonly archivePath: string;
-    readonly archiveAbsolutePath: string;
 }> {
-    const sessionPathPart = sanitizeArtifactPathPart(args.sessionId, "session");
     const fileName = `${sanitizeArtifactPathPart(args.toolCallId, "image")}${args.index > 0 ? `-${args.index + 1}` : ""}.png`;
-    const absolutePath = resolveCodexCoreArtifactPath({
-        category: "imagegen",
-        sessionId: args.sessionId,
-        fileName,
-    });
-    const latestAbsolutePath = resolveCodexCoreArtifactPath({
-        category: "imagegen",
-        sessionId: args.sessionId,
-        fileName: "latest.png",
-    });
-    const archiveAbsolutePath = join(getAgentDir(), "generated_images", sessionPathPart, fileName);
+    const absolutePath = resolve(args.cwd, fileName);
+    const latestAbsolutePath = resolve(args.cwd, "latest.png");
     const bytes = Buffer.from(args.base64.trim(), "base64");
     return withFileMutationQueue(latestAbsolutePath, () =>
-        withFileMutationQueue(archiveAbsolutePath, () =>
-            withFileMutationQueue(absolutePath, async () => {
-                await mkdir(dirname(absolutePath), { recursive: true });
-                await mkdir(dirname(archiveAbsolutePath), { recursive: true });
-                await writeFile(absolutePath, bytes);
-                await writeFile(latestAbsolutePath, bytes);
-                await writeFile(archiveAbsolutePath, bytes);
-                return {
-                    path: absolutePath,
-                    absolutePath,
-                    latestPath: latestAbsolutePath,
-                    latestAbsolutePath,
-                    archivePath: archiveAbsolutePath,
-                    archiveAbsolutePath,
-                };
-            }),
-        ),
+        withFileMutationQueue(absolutePath, async () => {
+            await mkdir(dirname(absolutePath), { recursive: true });
+            await writeFile(absolutePath, bytes);
+            await writeFile(latestAbsolutePath, bytes);
+            return {
+                path: absolutePath,
+                absolutePath,
+                latestPath: latestAbsolutePath,
+                latestAbsolutePath,
+            };
+        }),
     );
 }
 

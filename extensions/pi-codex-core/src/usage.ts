@@ -3,6 +3,19 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { extractAccountId } from "./codex-auth.ts";
+import {
+    CodexAuthUnavailable,
+    CodexHttpRequestFailed,
+    CodexInvalidJson,
+    CodexNetworkUnavailable,
+    CodexRequestCancelled,
+    CodexUnsupportedModel,
+    fail,
+    isAbortCause,
+    ok,
+    type CodexResult,
+} from "./failures.ts";
+import { defaultCodexRuntime, type CodexRuntime, type IdGenerator } from "./runtime.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -61,7 +74,7 @@ export type CodexRateLimitResetCredits = {
 export type CodexUsageSnapshot = {
     readonly planType?: string | undefined;
     readonly limits: readonly CodexUsageLimit[];
-    resetCredits?: CodexRateLimitResetCredits | undefined;
+    readonly resetCredits?: CodexRateLimitResetCredits | undefined;
     readonly raw: unknown;
 };
 
@@ -82,7 +95,7 @@ let resetCreditsCache:
     | {
           readonly key: string;
           readonly expiresAt: number;
-          readonly promise: Promise<CodexRateLimitResetCredits | undefined>;
+          readonly promise: Promise<CodexResult<CodexRateLimitResetCredits | undefined>>;
       }
     | undefined;
 
@@ -98,61 +111,92 @@ export function buildCodexRateLimitResetConsumeUrl(): string {
     return `${DEFAULT_CODEX_BASE_URL}/wham/rate-limit-reset-credits/consume`;
 }
 
-export async function fetchCodexUsage(ctx: ExtensionContext): Promise<CodexUsageSnapshot> {
+export type CodexUsageOptions = {
+    readonly runtime?: CodexRuntime | undefined;
+};
+
+export async function fetchCodexUsage(
+    ctx: ExtensionContext,
+    options: CodexUsageOptions = {},
+): Promise<CodexResult<CodexUsageSnapshot>> {
+    const runtime = options.runtime ?? defaultCodexRuntime;
     const model = requireOpenAICodexModel(ctx.model);
-    const headers = await buildCodexUsageHeaders(ctx, model);
-    const response = await fetch(buildCodexUsageUrl(), {
+    if (model.isErr()) return model;
+    const headers = await buildCodexUsageHeaders(ctx, model.value);
+    if (headers.isErr()) return headers;
+
+    const response = await fetchUsageResponse(runtime, buildCodexUsageUrl(), {
         method: "GET",
-        headers,
+        headers: headers.value,
         ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
-    const text = await response.text();
-    if (!response.ok)
-        throw new Error(
-            `Usage request failed (${response.status}): ${text || response.statusText}`,
+    if (response.isErr()) return response;
+    if (!response.value.ok) {
+        return fail(
+            new CodexHttpRequestFailed({
+                operation: "codexUsage",
+                provider: "openai-codex",
+                status: response.value.status,
+                message: `Codex usage request failed with HTTP ${response.value.status}.`,
+            }),
         );
-    const rawUsagePayload: unknown = JSON.parse(text);
-    const snapshot = parseCodexUsagePayload(rawUsagePayload);
-    if (!snapshot.resetCredits || snapshot.resetCredits.availableCount > 0) {
-        try {
-            const detailedResetCredits = await fetchCodexRateLimitResetCreditsWithHeaders(
-                headers,
-                ctx.signal,
-            );
-            if (detailedResetCredits) snapshot.resetCredits = detailedResetCredits;
-        } catch {
-            // Detailed reset-credit metadata is additive; usage still renders if this endpoint fails.
-        }
     }
-    return snapshot;
+
+    const rawUsagePayload = await parseJsonResponse(response.value, "codexUsage");
+    if (rawUsagePayload.isErr()) return rawUsagePayload;
+    const snapshot = parseCodexUsagePayload(rawUsagePayload.value);
+    if (snapshot.resetCredits && snapshot.resetCredits.availableCount <= 0) return ok(snapshot);
+
+    const detailedResetCredits = await fetchCodexRateLimitResetCreditsWithHeaders(
+        headers.value,
+        ctx.signal,
+        runtime,
+    );
+    if (detailedResetCredits.isErr() || !detailedResetCredits.value) return ok(snapshot);
+    return ok({ ...snapshot, resetCredits: detailedResetCredits.value });
 }
 
-export function createCodexRateLimitResetRedeemRequestId(): string {
-    return globalThis.crypto.randomUUID();
+export function createCodexRateLimitResetRedeemRequestId(
+    idGenerator: IdGenerator = defaultCodexRuntime.idGenerator,
+): string {
+    return idGenerator.randomUUID();
 }
 
 export async function consumeCodexRateLimitResetCredit(
     ctx: ExtensionContext,
     redeemRequestId = createCodexRateLimitResetRedeemRequestId(),
-): Promise<CodexRateLimitResetConsumeResult> {
+    options: CodexUsageOptions = {},
+): Promise<CodexResult<CodexRateLimitResetConsumeResult>> {
+    const runtime = options.runtime ?? defaultCodexRuntime;
     const model = requireOpenAICodexModel(ctx.model);
-    const headers = await buildCodexUsageHeaders(ctx, model);
-    headers.set("content-type", "application/json");
+    if (model.isErr()) return model;
+    const headers = await buildCodexUsageHeaders(ctx, model.value);
+    if (headers.isErr()) return headers;
+    headers.value.set("content-type", "application/json");
     resetCreditsCache = undefined;
-    const response = await fetch(buildCodexRateLimitResetConsumeUrl(), {
+
+    const response = await fetchUsageResponse(runtime, buildCodexRateLimitResetConsumeUrl(), {
         method: "POST",
-        headers,
+        headers: headers.value,
         body: JSON.stringify({ redeem_request_id: redeemRequestId }),
         ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
-    const text = await response.text();
-    if (!response.ok)
-        throw new Error(
-            `Reset request failed (${response.status}): ${text || response.statusText}`,
+    if (response.isErr()) return response;
+    if (!response.value.ok) {
+        return fail(
+            new CodexHttpRequestFailed({
+                operation: "codexResetCredit",
+                provider: "openai-codex",
+                status: response.value.status,
+                message: `Codex reset request failed with HTTP ${response.value.status}.`,
+            }),
         );
+    }
+
     resetCreditsCache = undefined;
-    const rawConsumePayload: unknown = JSON.parse(text);
-    return parseCodexRateLimitResetConsumePayload(rawConsumePayload);
+    const rawConsumePayload = await parseJsonResponse(response.value, "codexResetCredit");
+    if (rawConsumePayload.isErr()) return rawConsumePayload;
+    return ok(parseCodexRateLimitResetConsumePayload(rawConsumePayload.value));
 }
 
 export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
@@ -236,9 +280,17 @@ export function formatResetConsumeResult(result: CodexRateLimitResetConsumeResul
 async function buildCodexUsageHeaders(
     ctx: ExtensionContext,
     model: RuntimeModel,
-): Promise<Headers> {
+): Promise<CodexResult<Headers>> {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) throw new Error(auth.error);
+    if (!auth.ok) {
+        return fail(
+            new CodexAuthUnavailable({
+                operation: "codexAuth",
+                message: "OpenAI Codex auth is unavailable.",
+                cause: auth.error,
+            }),
+        );
+    }
     const headers = new Headers(model.headers);
     for (const [key, value] of Object.entries(auth.headers ?? {})) headers.set(key, value);
     if (auth.apiKey) headers.set("authorization", `Bearer ${auth.apiKey}`);
@@ -248,50 +300,111 @@ async function buildCodexUsageHeaders(
     headers.set("accept", "application/json");
     headers.set("OAI-Language", "en");
     headers.set("originator", "pi");
-    return headers;
+    return ok(headers);
 }
 
 async function fetchCodexRateLimitResetCreditsWithHeaders(
     headers: Headers,
-    signal?: AbortSignal,
-): Promise<CodexRateLimitResetCredits | undefined> {
+    signal: AbortSignal | undefined,
+    runtime: CodexRuntime,
+): Promise<CodexResult<CodexRateLimitResetCredits | undefined>> {
     const accountId = headers.get("chatgpt-account-id")?.trim();
     const cacheKey = accountId && accountId.length > 0 ? accountId : undefined;
     if (
         cacheKey &&
         resetCreditsCache &&
         resetCreditsCache.key === cacheKey &&
-        resetCreditsCache.expiresAt > Date.now()
+        resetCreditsCache.expiresAt > runtime.clock.nowMs()
     ) {
         return resetCreditsCache.promise;
     }
-    const promise = (async () => {
-        const response = await fetch(buildCodexRateLimitResetCreditsUrl(), {
+    const promise = (async (): Promise<CodexResult<CodexRateLimitResetCredits | undefined>> => {
+        const response = await fetchUsageResponse(runtime, buildCodexRateLimitResetCreditsUrl(), {
             method: "GET",
             headers,
             ...(signal ? { signal } : {}),
         });
-        if (!response.ok) return undefined;
-        const rawCreditsPayload: unknown = JSON.parse(await response.text());
-        return parseCodexRateLimitResetCreditsPayload(rawCreditsPayload);
+        if (response.isErr()) return response;
+        if (!response.value.ok) return ok(undefined);
+        const rawCreditsPayload = await parseJsonResponse(response.value, "codexResetCredits");
+        if (rawCreditsPayload.isErr()) return rawCreditsPayload;
+        return ok(parseCodexRateLimitResetCreditsPayload(rawCreditsPayload.value));
     })();
     if (cacheKey)
         resetCreditsCache = {
             key: cacheKey,
-            expiresAt: Date.now() + RESET_CREDITS_CACHE_MS,
+            expiresAt: runtime.clock.nowMs() + RESET_CREDITS_CACHE_MS,
             promise,
         };
     return promise;
 }
 
-function requireOpenAICodexModel(model: ExtensionContext["model"]): RuntimeModel {
-    if (!model) throw new Error("No active model selected.");
-    if (model.provider !== "openai-codex") {
-        throw new Error(
-            "Codex usage and reset credits are only available for OpenAI Codex subscription models.",
+async function fetchUsageResponse(
+    runtime: CodexRuntime,
+    url: string,
+    init: RequestInit,
+): Promise<CodexResult<Response>> {
+    try {
+        return ok(await runtime.fetch(url, init));
+    } catch (cause: unknown) {
+        if (isAbortCause(cause)) {
+            return fail(
+                new CodexRequestCancelled({
+                    operation: "codexUsage",
+                    message: "Codex usage request was cancelled.",
+                    cause,
+                }),
+            );
+        }
+        return fail(
+            new CodexNetworkUnavailable({
+                operation: "codexUsage",
+                provider: "openai-codex",
+                message: "Codex usage network request failed.",
+                cause,
+            }),
         );
     }
-    return model as RuntimeModel;
+}
+
+async function parseJsonResponse(
+    response: Response,
+    operation: "codexUsage" | "codexResetCredit" | "codexResetCredits",
+): Promise<CodexResult<unknown>> {
+    const text = await response.text();
+    try {
+        return ok(JSON.parse(text) as unknown);
+    } catch (cause: unknown) {
+        return fail(
+            new CodexInvalidJson({
+                operation,
+                provider: "openai-codex",
+                message: "Codex response was not valid JSON.",
+                cause,
+            }),
+        );
+    }
+}
+
+function requireOpenAICodexModel(model: ExtensionContext["model"]): CodexResult<RuntimeModel> {
+    if (!model) {
+        return fail(
+            new CodexUnsupportedModel({
+                operation: "codexUsage",
+                message: "No active model selected.",
+            }),
+        );
+    }
+    if (model.provider !== "openai-codex") {
+        return fail(
+            new CodexUnsupportedModel({
+                operation: "codexUsage",
+                message:
+                    "Codex usage and reset credits are only available for OpenAI Codex subscription models.",
+            }),
+        );
+    }
+    return ok(model as RuntimeModel);
 }
 
 function parseCodexRateLimitResetConsumePayload(
@@ -400,7 +513,10 @@ function formatUsageTitleWord(value: string): string {
 
 function formatReset(timestampSeconds: number | undefined): string {
     if (!timestampSeconds) return "reset unknown";
-    const minutes = Math.max(0, Math.round((timestampSeconds * 1000 - Date.now()) / 60000));
+    const minutes = Math.max(
+        0,
+        Math.round((timestampSeconds * 1000 - defaultCodexRuntime.clock.nowMs()) / 60000),
+    );
     return minutes < 90
         ? `resets in ~${minutes}m`
         : `resets ${new Date(timestampSeconds * 1000).toLocaleString()}`;

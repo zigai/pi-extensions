@@ -6,9 +6,6 @@ import { readCodexCoreConfig, type CodexCoreConfig } from "./config.ts";
 import {
     cancelScheduledCodexAutoCompaction,
     handleCodexNativeCompaction,
-    isNativeCompactionDetails,
-    NATIVE_COMPACTION_MESSAGE_TEXT,
-    NATIVE_COMPACTION_MESSAGE_TYPE,
     registerNativeCompactionDisplay,
     rewriteProviderRequestWithNativeCompaction,
     scheduleCodexAutoCompaction,
@@ -44,7 +41,7 @@ export default function extension(pi: ExtensionAPI): void {
     registerCodexCommand(pi, { getConfig, applyConfig });
 
     pi.on("session_start", async (_event, ctx) => {
-        config = readCodexCoreConfig();
+        config = readCodexCoreConfig({ cwd: ctx.cwd });
         syncCodexCoreTools(pi, ctx, config);
     });
 
@@ -76,20 +73,6 @@ export default function extension(pi: ExtensionAPI): void {
 
     pi.on("session_shutdown", async () => {
         cancelScheduledCodexAutoCompaction();
-    });
-
-    pi.on("session_compact", async (event) => {
-        if (!event.fromExtension || !isNativeCompactionDetails(event.compactionEntry.details))
-            return;
-        pi.sendMessage(
-            {
-                customType: NATIVE_COMPACTION_MESSAGE_TYPE,
-                content: NATIVE_COMPACTION_MESSAGE_TEXT,
-                display: true,
-                details: { compactionEntryId: event.compactionEntry.id },
-            },
-            { triggerTurn: false },
-        );
     });
 }
 

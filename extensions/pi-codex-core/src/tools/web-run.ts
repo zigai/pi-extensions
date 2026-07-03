@@ -15,6 +15,19 @@ import {
 import { resolveCodexRequestModel, type CodexCoreConfig } from "../config.ts";
 import { codexToolProviderHeaders, resolveCodexToolProvider } from "../codex-auth.ts";
 import { resolveCodexCoreArtifactPath, sanitizeArtifactPathPart } from "../artifacts.ts";
+import {
+    CodexHttpRequestFailed,
+    CodexInvalidJson,
+    CodexNetworkUnavailable,
+    CodexRequestCancelled,
+    CodexUnexpectedResponse,
+    codexFailureToError,
+    fail,
+    isAbortCause,
+    ok,
+    type CodexResult,
+} from "../failures.ts";
+import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
 import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import { formatWebRunToolOutput } from "./web-run-output.ts";
 
@@ -141,6 +154,8 @@ type WebRunSourceCard = {
 
 type WebRunOptions = {
     readonly getConfig: () => CodexCoreConfig;
+    readonly runtime?: CodexRuntime | undefined;
+    readonly agentDir?: string | undefined;
 };
 
 export function registerWebRunTool(pi: ExtensionAPI, options: WebRunOptions): void {
@@ -193,13 +208,25 @@ export function createWebRunTool(
             return new Text(lines.join("\n"), 0, 0);
         },
         async execute(toolCallId, params, signal, _onUpdate, ctx) {
-            const response = await executeWebRun(params, ctx, options.getConfig(), signal);
-            const output = await prepareWebRunOutput(response.output, toolCallId, ctx);
+            const response = await executeWebRun(
+                params,
+                ctx,
+                options.getConfig(),
+                signal,
+                options.runtime ?? defaultCodexRuntime,
+            );
+            if (response.isErr()) throw codexFailureToError(response.error);
+            const output = await prepareWebRunOutput(
+                response.value.output,
+                toolCallId,
+                ctx,
+                options.agentDir,
+            );
             return {
                 content: [{ type: "text", text: output.text }],
                 details: {
                     fullOutputPath: output.fullOutputPath,
-                    outputCharacters: response.output.length,
+                    outputCharacters: response.value.output.length,
                     sourceCount: output.sourceCount,
                 },
             };
@@ -212,36 +239,85 @@ async function executeWebRun(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
     signal: AbortSignal | undefined,
-): Promise<{ readonly output: string }> {
+    runtime: CodexRuntime,
+): Promise<CodexResult<{ readonly output: string }>> {
     const provider = await resolveCodexToolProvider(ctx);
-    const headers = codexToolProviderHeaders(provider);
+    if (provider.isErr()) return provider;
+    const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
     const { settings, commands } = splitSearchRequest(params);
     const input = recentSearchContext(ctx);
-    const model = resolveCodexRequestModel(config.openai.webSearchModel, provider.model);
+    const model = resolveCodexRequestModel(config.openai.webSearchModel, provider.value.model);
 
-    const response = await fetch(`${provider.baseUrl}/alpha/search`, {
-        method: "POST",
-        headers,
-        ...(signal ? { signal } : {}),
-        body: JSON.stringify({
-            id: safeSessionId(ctx.sessionManager.getSessionId()),
-            model,
-            ...(input ? { input } : {}),
-            commands,
-            ...(settings ? { settings } : {}),
-        }),
-    });
+    let response: Response;
+    try {
+        response = await runtime.fetch(`${provider.value.baseUrl}/alpha/search`, {
+            method: "POST",
+            headers,
+            ...(signal ? { signal } : {}),
+            body: JSON.stringify({
+                id: safeSessionId(ctx.sessionManager.getSessionId()),
+                model,
+                ...(input ? { input } : {}),
+                commands,
+                ...(settings ? { settings } : {}),
+            }),
+        });
+    } catch (cause: unknown) {
+        if (isAbortCause(cause)) {
+            return fail(
+                new CodexRequestCancelled({
+                    operation: "webRun",
+                    message: "web_run request was cancelled.",
+                    cause,
+                }),
+            );
+        }
+        return fail(
+            new CodexNetworkUnavailable({
+                operation: "webRun",
+                provider: "openai-codex",
+                message: "web_run network request failed.",
+                cause,
+            }),
+        );
+    }
 
     const responseText = await response.text();
-    if (!response.ok)
-        throw new Error(
-            `web_run failed (${response.status}): ${responseText || response.statusText}`,
+    if (!response.ok) {
+        return fail(
+            new CodexHttpRequestFailed({
+                operation: "webRun",
+                provider: "openai-codex",
+                status: response.status,
+                message: `web_run failed with HTTP ${response.status}.`,
+            }),
         );
-    const rawSearchPayload: unknown = JSON.parse(responseText);
+    }
+    let rawSearchPayload: unknown;
+    try {
+        rawSearchPayload = JSON.parse(responseText) as unknown;
+    } catch (cause: unknown) {
+        return fail(
+            new CodexInvalidJson({
+                operation: "webRun",
+                provider: "openai-codex",
+                message: "web_run response was not valid JSON.",
+                cause,
+            }),
+        );
+    }
     const output = parseSearchOutput(rawSearchPayload);
-    if (!output) throw new Error("web_run returned no output");
-    return { output };
+    if (!output) {
+        return fail(
+            new CodexUnexpectedResponse({
+                operation: "webRun",
+                provider: "openai-codex",
+                message: "web_run returned no output.",
+            }),
+        );
+    }
+    return ok({ output });
 }
 
 function summarizeWebRunCall(args: WebRunParams): string {
@@ -389,6 +465,7 @@ async function prepareWebRunOutput(
     output: string,
     toolCallId: string,
     ctx: ExtensionContext,
+    agentDir: string | undefined,
 ): Promise<{
     readonly text: string;
     readonly fullOutputPath: string;
@@ -398,6 +475,7 @@ async function prepareWebRunOutput(
         output,
         toolCallId,
         ctx.sessionManager.getSessionId(),
+        agentDir,
     );
     const formatted = formatWebRunToolOutput(output, fullOutputPath);
     return { text: formatted.text, fullOutputPath, sourceCount: formatted.sourceCount };
@@ -407,11 +485,13 @@ async function saveFullWebRunOutput(
     output: string,
     toolCallId: string,
     sessionId: string,
+    agentDir: string | undefined,
 ): Promise<string> {
     const absolutePath = resolveCodexCoreArtifactPath({
         category: "web-run",
         sessionId,
         fileName: `${sanitizeArtifactPathPart(toolCallId, "web_run")}.txt`,
+        agentDir,
     });
     await withFileMutationQueue(absolutePath, async () => {
         await mkdir(dirname(absolutePath), { recursive: true });

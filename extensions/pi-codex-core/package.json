@@ -22,6 +22,7 @@
   },
   "files": [
     "src",
+    "config.schema.json",
     "README.md",
     "LICENSE"
   ],
@@ -39,6 +40,7 @@
     "verify": "npm run check"
   },
   "dependencies": {
+    "better-result": "^2.9.2",
     "js-tiktoken": "^1.0.21"
   },
   "devDependencies": {

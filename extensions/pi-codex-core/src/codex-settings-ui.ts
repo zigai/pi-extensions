@@ -4,6 +4,9 @@ import {
     type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { SettingsList, truncateToWidth, type SettingItem } from "@earendil-works/pi-tui";
+import { Result, type Result as ResultType } from "better-result";
+
+import type { CodexFailure } from "./failures.ts";
 
 import { CODEX_CURRENT_MODEL_SELECTION, type CodexCoreConfig } from "./config.ts";
 import {
@@ -25,7 +28,7 @@ export type CodexSettingsScreenOptions = {
     readonly onChange: (config: CodexCoreConfig) => boolean;
     readonly onConsumeResetCredit?: (
         redeemRequestId: string,
-    ) => Promise<CodexRateLimitResetConsumeResult>;
+    ) => Promise<ResultType<CodexRateLimitResetConsumeResult, CodexFailure>>;
 };
 
 const TAB_ORDER: readonly CodexSettingsTab[] = ["general", "tools", "openai", "usage"];
@@ -50,7 +53,7 @@ export async function openCodexSettingsScreen(
             tui.requestRender();
             fetchCodexUsage(ctx)
                 .then((usage) => {
-                    usageState = usage;
+                    usageState = Result.isOk(usage) ? usage.value : { error: usage.error.message };
                 })
                 .catch((cause: unknown) => {
                     usageState = { error: cause instanceof Error ? cause.message : String(cause) };
@@ -80,12 +83,17 @@ export async function openCodexSettingsScreen(
                 redeemRequestId,
             )
                 .then((result) => {
+                    if (Result.isError(result)) {
+                        resetMessage = { kind: "error", text: result.error.message };
+                        return;
+                    }
                     resetMessage = {
                         kind:
-                            result.outcome === "reset" || result.outcome === "already_redeemed"
+                            result.value.outcome === "reset" ||
+                            result.value.outcome === "already_redeemed"
                                 ? "info"
                                 : "error",
-                        text: formatResetConsumeResult(result),
+                        text: formatResetConsumeResult(result.value),
                     };
                 })
                 .catch((cause: unknown) => {

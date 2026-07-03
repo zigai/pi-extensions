@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zigai/pi-codex-core/config.schema.json",
+  "type": "object",
+  "required": ["scope", "tools", "prompt", "compaction", "openai"],
+  "properties": {
+    "scope": {
+      "type": "object",
+      "required": ["tools"],
+      "properties": {
+        "tools": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "codex"
+            },
+            {
+              "type": "string",
+              "const": "all"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "tools": "codex"
+      }
+    },
+    "tools": {
+      "type": "object",
+      "required": ["webSearch", "imageGeneration", "viewImage", "viewImageDescriptions"],
+      "properties": {
+        "webSearch": {
+          "type": "boolean",
+          "default": true
+        },
+        "imageGeneration": {
+          "type": "boolean",
+          "default": true
+        },
+        "viewImage": {
+          "type": "boolean",
+          "default": true
+        },
+        "viewImageDescriptions": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "prompt": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "pi"
+            },
+            {
+              "type": "string",
+              "const": "codex"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "mode": "pi"
+      }
+    },
+    "compaction": {
+      "type": "object",
+      "required": ["enabled", "auto", "thresholdPercent"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "auto": {
+          "type": "boolean",
+          "default": true
+        },
+        "thresholdPercent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99,
+          "default": 80
+        }
+      },
+      "additionalProperties": false
+    },
+    "openai": {
+      "type": "object",
+      "required": [
+        "webSearchModel",
+        "imageModel",
+        "imageDescriptionModel",
+        "compactionModel",
+        "compactionReasoning",
+        "verbosity",
+        "fast"
+      ],
+      "properties": {
+        "webSearchModel": {
+          "type": "string",
+          "default": "current"
+        },
+        "imageModel": {
+          "type": "string",
+          "default": "gpt-image-2"
+        },
+        "imageDescriptionModel": {
+          "type": "string",
+          "default": "current"
+        },
+        "compactionModel": {
+          "type": "string",
+          "default": "current"
+        },
+        "compactionReasoning": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "current"
+            },
+            {
+              "type": "string",
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "xhigh"
+            }
+          ]
+        },
+        "verbosity": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            }
+          ]
+        },
+        "fast": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

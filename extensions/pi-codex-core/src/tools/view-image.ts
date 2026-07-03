@@ -6,12 +6,12 @@ import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import { StringEnum, type ImageContent } from "@earendil-works/pi-ai";
 import {
     Container,
-    getCapabilities,
     getImageDimensions,
     Image,
     imageFallback,
     Spacer,
     Text,
+    type Component,
 } from "@earendil-works/pi-tui";
 import type {
     ExtensionAPI,
@@ -19,12 +19,25 @@ import type {
     ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
+import { defaultCapabilitiesProvider, type CapabilitiesProvider } from "../capabilities.ts";
 import { resolveCodexRequestModel, type CodexCoreConfig } from "../config.ts";
 import {
     codexToolProviderHeaders,
     resolveCodexResponsesUrl,
     resolveCodexToolProvider,
 } from "../codex-auth.ts";
+import {
+    CodexHttpRequestFailed,
+    CodexInvalidJson,
+    CodexNetworkUnavailable,
+    CodexRequestCancelled,
+    CodexUnexpectedResponse,
+    codexFailureToError,
+    fail,
+    isAbortCause,
+    ok,
+    type CodexResult,
+} from "../failures.ts";
 import {
     imageContentToDataUrl,
     loadImageContent,
@@ -33,6 +46,7 @@ import {
     type ImageDetail,
     type LoadedImage,
 } from "../image-content.ts";
+import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
 
 const IMAGE_DESCRIPTION_PROMPT =
     "Describe this image in detail. Output only the image description, no other commentary.";
@@ -89,8 +103,17 @@ type ViewImageRenderState = {
     preview?: ImageContent | null;
 };
 
+type ViewImageComponentFactory = (args: {
+    readonly image: ImageContent;
+    readonly path: string;
+    readonly theme: { fg(color: "toolOutput", text: string): string };
+}) => Component;
+
 type ViewImageToolOptions = {
     readonly getConfig: () => CodexCoreConfig;
+    readonly runtime?: CodexRuntime | undefined;
+    readonly capabilities?: CapabilitiesProvider | undefined;
+    readonly imageComponentFactory?: ViewImageComponentFactory | undefined;
 };
 
 export const VIEW_IMAGE_TOOL_NAME = "view_image";
@@ -130,7 +153,9 @@ export function createViewImageTool(
                 ? undefined
                 : loadPreviewImage(result.details, context.state);
             const displayedImage = inlineImage ?? previewImage;
-            const capabilities = getCapabilities();
+            const capabilities = (
+                options.capabilities ?? defaultCapabilitiesProvider
+            ).getCapabilities();
             const lines: string[] = [];
             if (displayedImage && (!capabilities.images || !context.showImages)) {
                 const dimensions =
@@ -158,12 +183,11 @@ export function createViewImageTool(
                 container.addChild(new Spacer(1));
             }
             container.addChild(
-                new Image(
-                    displayedImage.data,
-                    displayedImage.mimeType,
-                    { fallbackColor: (value: string) => theme.fg("toolOutput", value) },
-                    { maxWidthCells: 60, filename: path },
-                ),
+                (options.imageComponentFactory ?? defaultViewImageComponentFactory)({
+                    image: displayedImage,
+                    path,
+                    theme,
+                }),
             );
             return container;
         },
@@ -190,9 +214,17 @@ export function createViewImageTool(
                 );
             }
 
-            const description = await describeImage(image, detail, ctx, config, signal);
+            const description = await describeImage(
+                image,
+                detail,
+                ctx,
+                config,
+                signal,
+                options.runtime ?? defaultCodexRuntime,
+            );
+            if (description.isErr()) throw codexFailureToError(description.error);
             return {
-                content: [{ type: "text", text: description }],
+                content: [{ type: "text", text: description.value }],
                 details: {
                     path: params.path,
                     absolutePath: image.absolutePath,
@@ -202,6 +234,19 @@ export function createViewImageTool(
             };
         },
     };
+}
+
+function defaultViewImageComponentFactory(args: {
+    readonly image: ImageContent;
+    readonly path: string;
+    readonly theme: { fg(color: "toolOutput", text: string): string };
+}): Component {
+    return new Image(
+        args.image.data,
+        args.image.mimeType,
+        { fallbackColor: (value: string) => args.theme.fg("toolOutput", value) },
+        { maxWidthCells: 60, filename: args.path },
+    );
 }
 
 export function prepareViewImageArguments(args: unknown): ViewImageParams {
@@ -272,51 +317,103 @@ async function describeImage(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
     signal: AbortSignal | undefined,
-): Promise<string> {
+    runtime: CodexRuntime,
+): Promise<CodexResult<string>> {
     const promptImage = await prepareCodexPromptImageContent(image, detail);
     const provider = await resolveCodexToolProvider(ctx);
-    const headers = codexToolProviderHeaders(provider);
+    if (provider.isErr()) return provider;
+    const headers = codexToolProviderHeaders(provider.value);
     headers.set("OpenAI-Beta", "responses=experimental");
     headers.set("accept", "application/json");
 
-    const model = resolveCodexRequestModel(config.openai.imageDescriptionModel, provider.model);
+    const model = resolveCodexRequestModel(
+        config.openai.imageDescriptionModel,
+        provider.value.model,
+    );
 
-    const response = await fetch(resolveCodexResponsesUrl(provider.baseUrl), {
-        method: "POST",
-        headers,
-        ...(signal ? { signal } : {}),
-        body: JSON.stringify({
-            model,
-            store: false,
-            stream: false,
-            instructions: IMAGE_DESCRIPTION_PROMPT,
-            text: { verbosity: "low" },
-            reasoning: { effort: "low", summary: "auto" },
-            input: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "input_text", text: "Describe the image." },
-                        {
-                            type: "input_image",
-                            image_url: imageContentToDataUrl(promptImage),
-                            detail: detail === "original" ? "high" : detail,
-                        },
-                    ],
-                },
-            ],
-        }),
-    });
+    let response: Response;
+    try {
+        response = await runtime.fetch(resolveCodexResponsesUrl(provider.value.baseUrl), {
+            method: "POST",
+            headers,
+            ...(signal ? { signal } : {}),
+            body: JSON.stringify({
+                model,
+                store: false,
+                stream: false,
+                instructions: IMAGE_DESCRIPTION_PROMPT,
+                text: { verbosity: "low" },
+                reasoning: { effort: "low", summary: "auto" },
+                input: [
+                    {
+                        role: "user",
+                        content: [
+                            { type: "input_text", text: "Describe the image." },
+                            {
+                                type: "input_image",
+                                image_url: imageContentToDataUrl(promptImage),
+                                detail: detail === "original" ? "high" : detail,
+                            },
+                        ],
+                    },
+                ],
+            }),
+        });
+    } catch (cause: unknown) {
+        if (isAbortCause(cause)) {
+            return fail(
+                new CodexRequestCancelled({
+                    operation: "viewImageDescription",
+                    message: "view_image description request was cancelled.",
+                    cause,
+                }),
+            );
+        }
+        return fail(
+            new CodexNetworkUnavailable({
+                operation: "viewImageDescription",
+                provider: "openai-codex",
+                message: "view_image description network request failed.",
+                cause,
+            }),
+        );
+    }
 
     const responseText = await response.text();
-    if (!response.ok)
-        throw new Error(
-            `view_image description failed (${response.status}): ${responseText || response.statusText}`,
+    if (!response.ok) {
+        return fail(
+            new CodexHttpRequestFailed({
+                operation: "viewImageDescription",
+                provider: "openai-codex",
+                status: response.status,
+                message: `view_image description failed with HTTP ${response.status}.`,
+            }),
         );
-    const rawDescriptionPayload: unknown = JSON.parse(responseText);
+    }
+    let rawDescriptionPayload: unknown;
+    try {
+        rawDescriptionPayload = JSON.parse(responseText) as unknown;
+    } catch (cause: unknown) {
+        return fail(
+            new CodexInvalidJson({
+                operation: "viewImageDescription",
+                provider: "openai-codex",
+                message: "view_image description response was not valid JSON.",
+                cause,
+            }),
+        );
+    }
     const description = extractOutputText(rawDescriptionPayload);
-    if (!description) throw new Error("view_image description returned no text");
-    return description;
+    if (!description) {
+        return fail(
+            new CodexUnexpectedResponse({
+                operation: "viewImageDescription",
+                provider: "openai-codex",
+                message: "view_image description returned no text.",
+            }),
+        );
+    }
+    return ok(description);
 }
 
 function extractOutputText(value: unknown): string | undefined {

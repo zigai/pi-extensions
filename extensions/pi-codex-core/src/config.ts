@@ -1,9 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+import {
+    makeConfigDiagnostic,
+    type CodexConfigDiagnostic,
+    type CodexCoreConfigParseResult,
+} from "./config-diagnostics.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 export type CodexPromptMode = "pi" | "codex";
@@ -54,7 +59,71 @@ export type CodexCoreConfig = {
     };
 };
 
-export const CODEX_CORE_CONFIG_BASENAME = "pi-codex-core.json";
+export const CODEX_CORE_EXTENSION_ID = "pi-codex-core";
+export const CODEX_CORE_CONFIG_BASENAME = "config.json";
+export const CODEX_CORE_CONFIG_SCHEMA_BASENAME = "config.schema.json";
+export const CODEX_CORE_CONFIG_SCHEMA_REFERENCE = `./${CODEX_CORE_CONFIG_SCHEMA_BASENAME}`;
+
+const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
+const CODEX_CORE_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-core/config.schema.json";
+
+const CodexToolScopeSchema = Type.Union([Type.Literal("codex"), Type.Literal("all")]);
+const CodexPromptModeSchema = Type.Union([Type.Literal("pi"), Type.Literal("codex")]);
+const CodexVerbositySchema = Type.Union([
+    Type.Literal("low"),
+    Type.Literal("medium"),
+    Type.Literal("high"),
+]);
+const CodexCompactionReasoningSchema = Type.Union([
+    Type.Literal("current"),
+    Type.Literal("minimal"),
+    Type.Literal("low"),
+    Type.Literal("medium"),
+    Type.Literal("high"),
+    Type.Literal("xhigh"),
+]);
+const CodexCoreConfigJsonSchema = Type.Object(
+    {
+        scope: Type.Object(
+            { tools: CodexToolScopeSchema },
+            { additionalProperties: false, default: { tools: "codex" } },
+        ),
+        tools: Type.Object(
+            {
+                webSearch: Type.Boolean({ default: true }),
+                imageGeneration: Type.Boolean({ default: true }),
+                viewImage: Type.Boolean({ default: true }),
+                viewImageDescriptions: Type.Boolean({ default: false }),
+            },
+            { additionalProperties: false },
+        ),
+        prompt: Type.Object(
+            { mode: CodexPromptModeSchema },
+            { additionalProperties: false, default: { mode: "pi" } },
+        ),
+        compaction: Type.Object(
+            {
+                enabled: Type.Boolean({ default: false }),
+                auto: Type.Boolean({ default: true }),
+                thresholdPercent: Type.Integer({ minimum: 1, maximum: 99, default: 80 }),
+            },
+            { additionalProperties: false },
+        ),
+        openai: Type.Object(
+            {
+                webSearchModel: Type.String({ default: CODEX_CURRENT_MODEL_SELECTION }),
+                imageModel: Type.String({ default: "gpt-image-2" }),
+                imageDescriptionModel: Type.String({ default: CODEX_CURRENT_MODEL_SELECTION }),
+                compactionModel: Type.String({ default: CODEX_CURRENT_MODEL_SELECTION }),
+                compactionReasoning: CodexCompactionReasoningSchema,
+                verbosity: CodexVerbositySchema,
+                fast: Type.Boolean({ default: false }),
+            },
+            { additionalProperties: false },
+        ),
+    },
+    { additionalProperties: true },
+);
 
 const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
 const BooleanSchema = compileSchema(Type.Boolean());
@@ -82,109 +151,236 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
     },
 };
 
-export function getCodexCoreConfigPath(agentDir: string = getAgentDir()): string {
-    return join(agentDir, CODEX_CORE_CONFIG_BASENAME);
+export const DEFAULT_CODEX_CORE_CONFIG_JSON = {
+    $schema: CODEX_CORE_CONFIG_SCHEMA_REFERENCE,
+    ...DEFAULT_CODEX_CORE_CONFIG,
+} as const;
+
+export function getCodexCoreGlobalConfigPath(agentDir: string = getAgentDir()): string {
+    return join(agentDir, CODEX_CORE_EXTENSION_ID, CODEX_CORE_CONFIG_BASENAME);
 }
 
-export function parseCodexCoreConfig(value: unknown): CodexCoreConfig {
-    const root = parseRecord(value);
+export function getCodexCoreProjectConfigPath(cwd: string): string {
+    return join(cwd, CONFIG_DIR_NAME, CODEX_CORE_EXTENSION_ID, CODEX_CORE_CONFIG_BASENAME);
+}
 
-    const scope = parseRecord(root.scope);
-    const tools = parseRecord(root.tools);
-    const prompt = parseRecord(root.prompt);
-    const compaction = parseRecord(root.compaction);
-    const openai = parseRecord(root.openai);
+export function getCodexCoreGlobalConfigSchemaPath(agentDir: string = getAgentDir()): string {
+    return join(agentDir, CODEX_CORE_EXTENSION_ID, CODEX_CORE_CONFIG_SCHEMA_BASENAME);
+}
 
+export function getCodexCoreConfigPath(agentDir: string = getAgentDir()): string {
+    return getCodexCoreGlobalConfigPath(agentDir);
+}
+
+export function codexCoreConfigJsonSchema(): unknown {
+    const schema = structuredClone(CodexCoreConfigJsonSchema);
+    if (!isPlainRecord(schema)) return schema;
     return {
-        scope: {
-            tools:
-                parseStringEnum(scope.tools, CODEX_TOOL_SCOPES) ??
-                DEFAULT_CODEX_CORE_CONFIG.scope.tools,
-        },
-        tools: {
-            webSearch: parseBoolean(tools.webSearch, DEFAULT_CODEX_CORE_CONFIG.tools.webSearch),
-            imageGeneration: parseBoolean(
-                tools.imageGeneration,
-                DEFAULT_CODEX_CORE_CONFIG.tools.imageGeneration,
-            ),
-            viewImage: parseBoolean(tools.viewImage, DEFAULT_CODEX_CORE_CONFIG.tools.viewImage),
-            viewImageDescriptions: parseBoolean(
-                tools.viewImageDescriptions,
-                DEFAULT_CODEX_CORE_CONFIG.tools.viewImageDescriptions,
-            ),
-        },
-        prompt: {
-            mode:
-                parseStringEnum(prompt.mode, CODEX_PROMPT_MODES) ??
-                DEFAULT_CODEX_CORE_CONFIG.prompt.mode,
-        },
-        compaction: {
-            enabled: parseBoolean(compaction.enabled, DEFAULT_CODEX_CORE_CONFIG.compaction.enabled),
-            auto: parseBoolean(compaction.auto, DEFAULT_CODEX_CORE_CONFIG.compaction.auto),
-            thresholdPercent: parsePercent(
-                compaction.thresholdPercent,
-                DEFAULT_CODEX_CORE_CONFIG.compaction.thresholdPercent,
-            ),
-        },
-        openai: {
-            webSearchModel: parseNonEmptyString(
-                openai.webSearchModel,
-                DEFAULT_CODEX_CORE_CONFIG.openai.webSearchModel,
-            ),
-            imageModel: parseNonEmptyString(
-                openai.imageModel,
-                DEFAULT_CODEX_CORE_CONFIG.openai.imageModel,
-            ),
-            imageDescriptionModel: parseNonEmptyString(
-                openai.imageDescriptionModel,
-                DEFAULT_CODEX_CORE_CONFIG.openai.imageDescriptionModel,
-            ),
-            compactionModel: parseNonEmptyString(
-                openai.compactionModel,
-                DEFAULT_CODEX_CORE_CONFIG.openai.compactionModel,
-            ),
-            compactionReasoning:
-                parseStringEnum(openai.compactionReasoning, CODEX_COMPACTION_REASONING_LEVELS) ??
-                DEFAULT_CODEX_CORE_CONFIG.openai.compactionReasoning,
-            verbosity:
-                parseStringEnum(openai.verbosity, CODEX_VERBOSITY_LEVELS) ??
-                DEFAULT_CODEX_CORE_CONFIG.openai.verbosity,
-            fast: parseBoolean(openai.fast, DEFAULT_CODEX_CORE_CONFIG.openai.fast),
-        },
+        $schema: JSON_SCHEMA_DRAFT_URI,
+        $id: CODEX_CORE_CONFIG_SCHEMA_ID,
+        ...schema,
     };
 }
 
-export function readCodexCoreConfig(
-    configPath: string = getCodexCoreConfigPath(),
-): CodexCoreConfig {
-    if (!existsSync(configPath)) {
-        writeCodexCoreConfig(DEFAULT_CODEX_CORE_CONFIG, configPath);
-        return structuredClone(DEFAULT_CODEX_CORE_CONFIG);
-    }
-
-    try {
-        const rawConfig: unknown = JSON.parse(readFileSync(configPath, "utf8"));
-        return parseCodexCoreConfig(rawConfig);
-    } catch (cause: unknown) {
-        const message = cause instanceof Error ? cause.message : String(cause);
-        console.warn(`[pi-codex-core] Failed to read ${configPath}: ${message}`);
-        return structuredClone(DEFAULT_CODEX_CORE_CONFIG);
-    }
+export function ensureCodexCoreGlobalConfigFiles(agentDir: string = getAgentDir()): void {
+    writeJsonFileIfMissing(getCodexCoreGlobalConfigPath(agentDir), DEFAULT_CODEX_CORE_CONFIG_JSON);
+    writeJsonFileIfChanged(
+        getCodexCoreGlobalConfigSchemaPath(agentDir),
+        codexCoreConfigJsonSchema(),
+    );
 }
 
-/** Resolves `current` model selections to the active Codex request model. */
-export function resolveCodexRequestModel(configuredModel: string, currentModel: string): string {
-    const configured = configuredModel.trim();
+export function parseCodexCoreConfig(value: unknown): CodexCoreConfig {
+    return parseCodexCoreConfigWithDiagnostics(value).config;
+}
+
+export function parseCodexCoreConfigWithDiagnostics(
+    value: unknown,
+): CodexCoreConfigParseResult<CodexCoreConfig> {
+    const diagnostics: CodexConfigDiagnostic[] = [];
+    const root = parseRecord(value, "$", diagnostics);
+
+    const scope = parseRecord(root.scope, "$.scope", diagnostics);
+    const tools = parseRecord(root.tools, "$.tools", diagnostics);
+    const prompt = parseRecord(root.prompt, "$.prompt", diagnostics);
+    const compaction = parseRecord(root.compaction, "$.compaction", diagnostics);
+    const openai = parseRecord(root.openai, "$.openai", diagnostics);
+
+    return {
+        config: {
+            scope: {
+                tools: parseStringEnum(
+                    scope.tools,
+                    CODEX_TOOL_SCOPES,
+                    DEFAULT_CODEX_CORE_CONFIG.scope.tools,
+                    "$.scope.tools",
+                    diagnostics,
+                ),
+            },
+            tools: {
+                webSearch: parseBoolean(
+                    tools.webSearch,
+                    DEFAULT_CODEX_CORE_CONFIG.tools.webSearch,
+                    "$.tools.webSearch",
+                    diagnostics,
+                ),
+                imageGeneration: parseBoolean(
+                    tools.imageGeneration,
+                    DEFAULT_CODEX_CORE_CONFIG.tools.imageGeneration,
+                    "$.tools.imageGeneration",
+                    diagnostics,
+                ),
+                viewImage: parseBoolean(
+                    tools.viewImage,
+                    DEFAULT_CODEX_CORE_CONFIG.tools.viewImage,
+                    "$.tools.viewImage",
+                    diagnostics,
+                ),
+                viewImageDescriptions: parseBoolean(
+                    tools.viewImageDescriptions,
+                    DEFAULT_CODEX_CORE_CONFIG.tools.viewImageDescriptions,
+                    "$.tools.viewImageDescriptions",
+                    diagnostics,
+                ),
+            },
+            prompt: {
+                mode: parseStringEnum(
+                    prompt.mode,
+                    CODEX_PROMPT_MODES,
+                    DEFAULT_CODEX_CORE_CONFIG.prompt.mode,
+                    "$.prompt.mode",
+                    diagnostics,
+                ),
+            },
+            compaction: {
+                enabled: parseBoolean(
+                    compaction.enabled,
+                    DEFAULT_CODEX_CORE_CONFIG.compaction.enabled,
+                    "$.compaction.enabled",
+                    diagnostics,
+                ),
+                auto: parseBoolean(
+                    compaction.auto,
+                    DEFAULT_CODEX_CORE_CONFIG.compaction.auto,
+                    "$.compaction.auto",
+                    diagnostics,
+                ),
+                thresholdPercent: parsePercent(
+                    compaction.thresholdPercent,
+                    DEFAULT_CODEX_CORE_CONFIG.compaction.thresholdPercent,
+                    "$.compaction.thresholdPercent",
+                    diagnostics,
+                ),
+            },
+            openai: {
+                webSearchModel: parseNonEmptyString(
+                    openai.webSearchModel,
+                    DEFAULT_CODEX_CORE_CONFIG.openai.webSearchModel,
+                    "$.openai.webSearchModel",
+                    diagnostics,
+                ),
+                imageModel: parseNonEmptyString(
+                    openai.imageModel,
+                    DEFAULT_CODEX_CORE_CONFIG.openai.imageModel,
+                    "$.openai.imageModel",
+                    diagnostics,
+                ),
+                imageDescriptionModel: parseNonEmptyString(
+                    openai.imageDescriptionModel,
+                    DEFAULT_CODEX_CORE_CONFIG.openai.imageDescriptionModel,
+                    "$.openai.imageDescriptionModel",
+                    diagnostics,
+                ),
+                compactionModel: parseNonEmptyString(
+                    openai.compactionModel,
+                    DEFAULT_CODEX_CORE_CONFIG.openai.compactionModel,
+                    "$.openai.compactionModel",
+                    diagnostics,
+                ),
+                compactionReasoning: parseStringEnum(
+                    openai.compactionReasoning,
+                    CODEX_COMPACTION_REASONING_LEVELS,
+                    DEFAULT_CODEX_CORE_CONFIG.openai.compactionReasoning,
+                    "$.openai.compactionReasoning",
+                    diagnostics,
+                ),
+                verbosity: parseStringEnum(
+                    openai.verbosity,
+                    CODEX_VERBOSITY_LEVELS,
+                    DEFAULT_CODEX_CORE_CONFIG.openai.verbosity,
+                    "$.openai.verbosity",
+                    diagnostics,
+                ),
+                fast: parseBoolean(
+                    openai.fast,
+                    DEFAULT_CODEX_CORE_CONFIG.openai.fast,
+                    "$.openai.fast",
+                    diagnostics,
+                ),
+            },
+        },
+        diagnostics,
+    };
+}
+
+export type CodexCoreConfigReadOptions = {
+    readonly cwd?: string;
+    readonly agentDir?: string;
+    readonly configPath?: string;
+};
+
+export function readCodexCoreConfig(
+    options: string | CodexCoreConfigReadOptions = {},
+): CodexCoreConfig {
+    return readCodexCoreConfigWithDiagnostics(options).config;
+}
+
+export function readCodexCoreConfigWithDiagnostics(
+    options: string | CodexCoreConfigReadOptions = {},
+): CodexCoreConfigParseResult<CodexCoreConfig> {
+    if (typeof options === "string") {
+        return parseCodexCoreConfigWithDiagnostics(readConfigInput(options) ?? {});
+    }
+
+    if (options.configPath !== undefined) {
+        return parseCodexCoreConfigWithDiagnostics(readConfigInput(options.configPath) ?? {});
+    }
+
+    ensureCodexCoreGlobalConfigFiles(options.agentDir);
+    const globalInput = readConfigInput(getCodexCoreGlobalConfigPath(options.agentDir));
+    const projectInput =
+        options.cwd === undefined
+            ? undefined
+            : readConfigInput(getCodexCoreProjectConfigPath(options.cwd));
+    return parseCodexCoreConfigWithDiagnostics(
+        mergeConfigInputs(globalInput ?? {}, projectInput ?? {}),
+    );
+}
+
+/** Resolves `current` or missing model selections to the active Codex request model. */
+export function resolveCodexRequestModel(
+    configuredModel: string | undefined,
+    currentModel: string | undefined,
+): string {
+    const configuredText = configuredModel?.trim();
+    const configured =
+        configuredText === undefined || configuredText.length === 0
+            ? CODEX_CURRENT_MODEL_SELECTION
+            : configuredText;
     if (configured !== CODEX_CURRENT_MODEL_SELECTION) return configured;
-    const activeModel = currentModel.trim();
+    const activeModel = currentModel?.trim() ?? "";
     if (activeModel.length === 0)
         throw new Error("Codex current model selection requires an active Codex model.");
     return activeModel;
 }
 
 /** Formats model selections for user-facing Pi settings/status text. */
-export function formatCodexModelSelection(configuredModel: string): string {
-    const configured = configuredModel.trim();
+export function formatCodexModelSelection(configuredModel: string | undefined): string {
+    const configuredText = configuredModel?.trim();
+    const configured =
+        configuredText === undefined || configuredText.length === 0
+            ? CODEX_CURRENT_MODEL_SELECTION
+            : configuredText;
     return configured === CODEX_CURRENT_MODEL_SELECTION ? "current model" : configured;
 }
 
@@ -196,7 +392,7 @@ export function writeCodexCoreConfig(
         mkdirSync(dirname(configPath), { recursive: true });
         writeFileSync(
             configPath,
-            `${JSON.stringify(parseCodexCoreConfig(config), null, 2)}\n`,
+            `${JSON.stringify({ $schema: CODEX_CORE_CONFIG_SCHEMA_REFERENCE, ...parseCodexCoreConfig(config) }, null, 2)}\n`,
             "utf8",
         );
         return { ok: true };
@@ -207,33 +403,140 @@ export function writeCodexCoreConfig(
     }
 }
 
-function parseRecord(value: unknown): Record<string, unknown> {
-    return parseWithSchema(UnknownRecordSchema, value) ?? {};
+function serializeJson(value: unknown): string {
+    return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function parseBoolean(value: unknown, fallback: boolean): boolean {
-    return parseWithSchema(BooleanSchema, value) ?? fallback;
+function writeJsonFileIfMissing(filePath: string, value: unknown): void {
+    if (existsSync(filePath)) return;
+
+    try {
+        mkdirSync(dirname(filePath), { recursive: true });
+        writeFileSync(filePath, serializeJson(value), {
+            encoding: "utf8",
+            flag: "wx",
+        });
+    } catch (cause: unknown) {
+        if (hasNodeErrorCode(cause, "EEXIST")) return;
+        const message = cause instanceof Error ? cause.message : String(cause);
+        console.warn(`[pi-codex-core] Failed to create ${filePath}: ${message}`);
+    }
 }
 
-function parsePercent(value: unknown, fallback: number): number {
+function writeJsonFileIfChanged(filePath: string, value: unknown): void {
+    const nextContent = serializeJson(value);
+
+    try {
+        if (existsSync(filePath) && readFileSync(filePath, "utf8") === nextContent) return;
+        mkdirSync(dirname(filePath), { recursive: true });
+        writeFileSync(filePath, nextContent, "utf8");
+    } catch (cause: unknown) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        console.warn(`[pi-codex-core] Failed to write ${filePath}: ${message}`);
+    }
+}
+
+function readConfigInput(configPath: string): unknown {
+    if (!existsSync(configPath)) return undefined;
+
+    try {
+        const rawConfig: unknown = JSON.parse(readFileSync(configPath, "utf8"));
+        return rawConfig;
+    } catch (cause: unknown) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        console.warn(`[pi-codex-core] Failed to read ${configPath}: ${message}`);
+        return undefined;
+    }
+}
+
+function mergeConfigInputs(base: unknown, override: unknown): unknown {
+    if (!isPlainRecord(base)) return override ?? base;
+    if (!isPlainRecord(override)) return base;
+
+    const merged: Record<string, unknown> = { ...base };
+    for (const [key, value] of Object.entries(override)) {
+        merged[key] = mergeConfigInputs(merged[key], value);
+    }
+    return merged;
+}
+
+function parseRecord(
+    value: unknown,
+    path: string,
+    diagnostics: CodexConfigDiagnostic[],
+): Record<string, unknown> {
+    if (value === undefined) return {};
+    const parsed = parseWithSchema(UnknownRecordSchema, value);
+    if (parsed !== undefined) return parsed;
+    diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected an object."));
+    return {};
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasNodeErrorCode(cause: unknown, code: string): boolean {
+    return isPlainRecord(cause) && cause.code === code;
+}
+
+function parseBoolean(
+    value: unknown,
+    fallback: boolean,
+    path: string,
+    diagnostics: CodexConfigDiagnostic[],
+): boolean {
+    if (value === undefined) return fallback;
+    const parsed = parseWithSchema(BooleanSchema, value);
+    if (parsed !== undefined) return parsed;
+    diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a boolean."));
+    return fallback;
+}
+
+function parsePercent(
+    value: unknown,
+    fallback: number,
+    path: string,
+    diagnostics: CodexConfigDiagnostic[],
+): number {
+    if (value === undefined) return fallback;
     const parsed = parseWithSchema(NumberSchema, value);
-    if (parsed === undefined) return fallback;
-    return Math.min(99, Math.max(1, Math.trunc(parsed)));
+    if (parsed === undefined || parsed < 1 || parsed > 99) {
+        diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a number from 1 to 99."));
+        return fallback;
+    }
+    return Math.trunc(parsed);
 }
 
-function parseNonEmptyString(value: unknown, fallback: string): string {
+function parseNonEmptyString(
+    value: unknown,
+    fallback: string,
+    path: string,
+    diagnostics: CodexConfigDiagnostic[],
+): string {
+    if (value === undefined) return fallback;
     const parsed = parseWithSchema(StringSchema, value);
-    if (parsed === undefined) return fallback;
-    const text = parsed.trim();
-    return text.length > 0 ? text : fallback;
+    const text = parsed?.trim() ?? "";
+    if (text.length > 0) return text;
+    diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a non-empty string."));
+    return fallback;
 }
 
 function parseStringEnum<const TValue extends string>(
     value: unknown,
     allowed: readonly TValue[],
-): TValue | undefined {
+    fallback: TValue,
+    path: string,
+    diagnostics: CodexConfigDiagnostic[],
+): TValue {
+    if (value === undefined) return fallback;
     const parsed = parseWithSchema(StringSchema, value);
-    return parsed !== undefined && (allowed as readonly string[]).includes(parsed)
-        ? (parsed as TValue)
-        : undefined;
+    if (parsed !== undefined && (allowed as readonly string[]).includes(parsed)) {
+        // SAFETY: The allowed-list membership check establishes TValue.
+        return parsed as TValue;
+    }
+    diagnostics.push(
+        makeConfigDiagnostic(path, "invalid", `Expected one of: ${allowed.join(", ")}.`),
+    );
+    return fallback;
 }

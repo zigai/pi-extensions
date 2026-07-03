@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { CodexCoreConfig } from "./config.ts";
+import { defaultCodexRuntime, type Clock } from "./runtime.ts";
 
 const CODEX_BASE_PROMPT_PATH = fileURLToPath(
     new URL("./prompt/codex-base-prompt.md", import.meta.url),
@@ -22,9 +23,10 @@ export function buildCodexCoreSystemPrompt(
     basePrompt: string,
     config: CodexCoreConfig,
     options?: BuildSystemPromptOptions,
+    clock: Clock = defaultCodexRuntime.clock,
 ): string {
     if (config.prompt.mode === "codex") {
-        return [readCodexBasePrompt(), buildPiCodexContext(basePrompt, options)]
+        return [readCodexBasePrompt(), buildPiCodexContext(basePrompt, options, clock)]
             .filter((section) => section.length > 0)
             .join("\n\n");
     }
@@ -39,6 +41,7 @@ function readCodexBasePrompt(): string {
 function buildPiCodexContext(
     basePrompt: string,
     options: BuildSystemPromptOptions | undefined,
+    clock: Clock,
 ): string {
     if (!options) return basePrompt;
 
@@ -50,7 +53,7 @@ function buildPiCodexContext(
         buildPiAppendPromptSection(options),
         buildPiProjectContextSection(options),
         buildPiSkillsSection(options),
-        buildPiRuntimeContextSection(basePrompt, options),
+        buildPiRuntimeContextSection(basePrompt, options, clock),
     ]
         .filter((section) => section.length > 0)
         .join("\n\n");
@@ -158,8 +161,10 @@ function buildPiSkillsSection(options: BuildSystemPromptOptions): string {
 function buildPiRuntimeContextSection(
     basePrompt: string,
     options: BuildSystemPromptOptions,
+    clock: Clock,
 ): string {
-    const dateLine = findLastLineStartingWith(basePrompt, "Current date:") ?? currentDateLine();
+    const dateLine =
+        findLastLineStartingWith(basePrompt, "Current date:") ?? currentDateLine(clock);
     const cwdLine =
         findLastLineStartingWith(basePrompt, "Current working directory:") ??
         `Current working directory: ${options.cwd.replace(/\\/g, "/")}`;
@@ -179,8 +184,8 @@ function findLastLineStartingWith(text: string, prefix: string): string | undefi
     return undefined;
 }
 
-function currentDateLine(): string {
-    const now = new Date();
+function currentDateLine(clock: Clock): string {
+    const now = clock.nowDate();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");

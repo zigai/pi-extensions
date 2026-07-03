@@ -12,6 +12,19 @@ import type {
 import type { CodexCoreConfig } from "../config.ts";
 import { codexToolProviderHeaders, resolveCodexToolProvider } from "../codex-auth.ts";
 import {
+    CodexHttpRequestFailed,
+    CodexInvalidJson,
+    CodexNetworkUnavailable,
+    CodexRequestCancelled,
+    CodexUnexpectedResponse,
+    codexFailureToError,
+    fail,
+    isAbortCause,
+    ok,
+    type CodexResult,
+} from "../failures.ts";
+import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
+import {
     imageContentToDataUrl,
     loadImageContent,
     recentImageContents,
@@ -63,8 +76,6 @@ type SavedImage = {
     readonly absolutePath: string;
     readonly latestPath: string;
     readonly latestAbsolutePath: string;
-    readonly archivePath: string;
-    readonly archiveAbsolutePath: string;
 };
 
 type ImagegenDetails = {
@@ -76,6 +87,7 @@ type ImagegenDetails = {
 
 type ImagegenOptions = {
     readonly getConfig: () => CodexCoreConfig;
+    readonly runtime?: CodexRuntime | undefined;
 };
 
 export function registerImagegenTool(pi: ExtensionAPI, options: ImagegenOptions): void {
@@ -118,7 +130,6 @@ export function createImagegenTool(
                 for (const image of images) {
                     text += `\n${theme.fg("dim", `image: ${image.path}`)}`;
                     text += `\n${theme.fg("dim", `latest: ${image.latestPath}`)}`;
-                    text += `\n${theme.fg("dim", `archive: ${image.archivePath}`)}`;
                 }
             }
             return new Text(text, 0, 0);
@@ -132,28 +143,30 @@ export function createImagegenTool(
                 config,
                 ctx,
                 signal,
+                options.runtime ?? defaultCodexRuntime,
             );
+            if (response.isErr()) throw codexFailureToError(response.error);
             const savedImages = await Promise.all(
-                response.images.map((base64, index) =>
+                response.value.images.map((base64, index) =>
                     saveGeneratedImage({
-                        sessionId: ctx.sessionManager.getSessionId(),
+                        cwd: ctx.cwd,
                         toolCallId,
                         index,
                         base64,
                     }),
                 ),
             );
-            const imageContent = response.images.map(
+            const imageContent = response.value.images.map(
                 (data): ImageContent => ({ type: "image", data, mimeType: "image/png" }),
             );
-            const text = formatImagegenOutput(savedImages, response);
+            const text = formatImagegenOutput(savedImages, response.value);
             return {
                 content: [{ type: "text", text }, ...imageContent],
                 details: {
                     images: savedImages,
-                    background: response.background,
-                    quality: response.quality,
-                    size: response.size,
+                    background: response.value.background,
+                    quality: response.value.quality,
+                    size: response.value.size,
                 },
             };
         },
@@ -234,14 +247,18 @@ async function requestImageGeneration(
     config: CodexCoreConfig,
     ctx: ExtensionContext,
     signal: AbortSignal | undefined,
-): Promise<{
-    readonly images: readonly string[];
-    readonly background?: string;
-    readonly quality?: string;
-    readonly size?: string;
-}> {
+    runtime: CodexRuntime,
+): Promise<
+    CodexResult<{
+        readonly images: readonly string[];
+        readonly background?: string;
+        readonly quality?: string;
+        readonly size?: string;
+    }>
+> {
     const provider = await resolveCodexToolProvider(ctx);
-    const headers = codexToolProviderHeaders(provider);
+    if (provider.isErr()) return provider;
+    const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
     const isEdit = editImages.length > 0;
     const path = isEdit ? "images/edits" : "images/generations";
@@ -262,37 +279,93 @@ async function requestImageGeneration(
               size: "auto",
           };
 
-    const response = await fetch(`${provider.baseUrl}/${path}`, {
-        method: "POST",
-        headers,
-        ...(signal ? { signal } : {}),
-        body: JSON.stringify(body),
-    });
-    const responseText = await response.text();
-    if (!response.ok)
-        throw new Error(
-            `imagegen failed (${response.status}): ${responseText || response.statusText}`,
+    let response: Response;
+    try {
+        response = await runtime.fetch(`${provider.value.baseUrl}/${path}`, {
+            method: "POST",
+            headers,
+            ...(signal ? { signal } : {}),
+            body: JSON.stringify(body),
+        });
+    } catch (cause: unknown) {
+        if (isAbortCause(cause)) {
+            return fail(
+                new CodexRequestCancelled({
+                    operation: "imagegen",
+                    message: "imagegen request was cancelled.",
+                    cause,
+                }),
+            );
+        }
+        return fail(
+            new CodexNetworkUnavailable({
+                operation: "imagegen",
+                provider: "openai-codex",
+                message: "imagegen network request failed.",
+                cause,
+            }),
         );
-    const rawImagePayload: unknown = JSON.parse(responseText);
+    }
+
+    const responseText = await response.text();
+    if (!response.ok) {
+        return fail(
+            new CodexHttpRequestFailed({
+                operation: "imagegen",
+                provider: "openai-codex",
+                status: response.status,
+                message: `imagegen failed with HTTP ${response.status}.`,
+            }),
+        );
+    }
+    let rawImagePayload: unknown;
+    try {
+        rawImagePayload = JSON.parse(responseText) as unknown;
+    } catch (cause: unknown) {
+        return fail(
+            new CodexInvalidJson({
+                operation: "imagegen",
+                provider: "openai-codex",
+                message: "imagegen response was not valid JSON.",
+                cause,
+            }),
+        );
+    }
     return parseImageResponse(rawImagePayload);
 }
 
-function parseImageResponse(value: unknown): {
+function parseImageResponse(value: unknown): CodexResult<{
     readonly images: readonly string[];
     readonly background?: string;
     readonly quality?: string;
     readonly size?: string;
-} {
+}> {
     const response = parseWithSchema(ImagegenResponseSchema, value);
-    if (!response) throw new Error("imagegen response did not contain image data.");
+    if (!response) {
+        return fail(
+            new CodexUnexpectedResponse({
+                operation: "imagegen",
+                provider: "openai-codex",
+                message: "imagegen response did not contain image data.",
+            }),
+        );
+    }
     const images = response.data.flatMap((item) => (item.b64_json ? [item.b64_json] : []));
-    if (images.length === 0) throw new Error("imagegen returned no image data.");
-    return {
+    if (images.length === 0) {
+        return fail(
+            new CodexUnexpectedResponse({
+                operation: "imagegen",
+                provider: "openai-codex",
+                message: "imagegen returned no image data.",
+            }),
+        );
+    }
+    return ok({
         images,
         ...(response.background ? { background: response.background } : {}),
         ...(response.quality ? { quality: response.quality } : {}),
         ...(response.size ? { size: response.size } : {}),
-    };
+    });
 }
 
 function formatImagegenOutput(
@@ -303,7 +376,6 @@ function formatImagegenOutput(
     for (const image of savedImages) {
         lines.push(`- image: ${image.path}`);
         lines.push(`- latest image: ${image.latestPath}`);
-        lines.push(`- Codex-style archive: ${image.archivePath}`);
     }
     const metadata = [
         response.size ? `size=${response.size}` : undefined,

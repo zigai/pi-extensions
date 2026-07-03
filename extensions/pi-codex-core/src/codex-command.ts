@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Result } from "better-result";
 
 import { formatCodexModelSelection, type CodexCoreConfig, writeCodexCoreConfig } from "./config.ts";
 import { openCodexSettingsScreen } from "./codex-settings-ui.ts";
@@ -119,12 +120,10 @@ async function openUsage(ctx: ExtensionContext, options: CodexCommandOptions): P
         return;
     }
 
-    let initialUsage;
-    try {
-        initialUsage = await fetchCodexUsage(ctx);
-    } catch (cause: unknown) {
-        initialUsage = { error: cause instanceof Error ? cause.message : String(cause) };
-    }
+    const initialUsageResult = await fetchCodexUsage(ctx);
+    const initialUsage = Result.isOk(initialUsageResult)
+        ? initialUsageResult.value
+        : { error: initialUsageResult.error.message };
 
     await openCodexSettingsScreen(ctx, {
         initialConfig: options.getConfig(),
@@ -137,11 +136,12 @@ async function openUsage(ctx: ExtensionContext, options: CodexCommandOptions): P
 }
 
 async function showUsage(ctx: ExtensionContext): Promise<void> {
-    try {
-        notify(ctx, formatCodexUsage(await fetchCodexUsage(ctx)), "info");
-    } catch (cause: unknown) {
-        notify(ctx, cause instanceof Error ? cause.message : String(cause), "error");
+    const result = await fetchCodexUsage(ctx);
+    if (Result.isOk(result)) {
+        notify(ctx, formatCodexUsage(result.value), "info");
+        return;
     }
+    notify(ctx, result.error.message, "error");
 }
 
 function saveAndApply(
