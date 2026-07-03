@@ -5,6 +5,7 @@ import type {
     ThirdPartyToolRendererPlugin,
 } from "../src/third-party-renderers.ts";
 import {
+    installBuiltInToolRendererPatch,
     installBuiltInWriteRendererPatch,
     installThirdPartyToolRendererPatch,
 } from "../src/tool-execution-patch.ts";
@@ -93,6 +94,49 @@ function createPrototype(): FakeToolExecutionPrototype {
 }
 
 describe("tool execution patches", () => {
+    it("renders built-in tool names through a render-only patch", () => {
+        const prototype = createPrototype();
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: (toolName) => ({
+                    render: () => [`called ${toolName}`],
+                    invalidate: noop,
+                }),
+                renderResult: (toolName) => ({
+                    render: () => [`result ${toolName}`],
+                    invalidate: noop,
+                }),
+            },
+            prototype,
+        );
+
+        const readInstance: FakeToolExecutionInstance = {
+            toolName: "read",
+            builtInToolDefinition: {},
+        };
+        const customInstance: FakeToolExecutionInstance = {
+            toolName: "custom_tool",
+            toolDefinition: {},
+        };
+
+        expect(prototype.getRenderShell.call(readInstance)).toBe("self");
+        expect(prototype.hasRendererDefinition.call(readInstance)).toBe(true);
+        expect(
+            prototype.getCallRenderer.call(readInstance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["called read"]);
+        expect(
+            prototype.getResultRenderer
+                .call(readInstance)?.(
+                    { content: [] },
+                    { expanded: false, isPartial: false },
+                    plainTheme,
+                    renderContext,
+                )
+                .render(80),
+        ).toEqual(["result read"]);
+        expect(prototype.getRenderShell.call(customInstance)).toBe("default");
+    });
+
     it("replaces only the built-in write renderer without registering a write tool override", () => {
         const prototype = createPrototype();
         installBuiltInWriteRendererPatch(prototype);

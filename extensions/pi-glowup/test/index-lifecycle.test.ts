@@ -22,8 +22,11 @@ type SessionStartHandler = (
 
 class FakeExtensionApi {
     private readonly sessionStartHandlers: SessionStartHandler[] = [];
+    registeredToolCount = 0;
 
-    registerTool(): void {}
+    registerTool(): void {
+        this.registeredToolCount += 1;
+    }
 
     on(eventName: string, handler: unknown): void {
         if (eventName !== "session_start") {
@@ -72,6 +75,7 @@ describe("extension lifecycle", () => {
 
         await codexLookExtension(pi as unknown as ExtensionAPI);
 
+        expect(pi.registeredToolCount).toBe(0);
         expect(vi.getTimerCount()).toBe(0);
 
         await pi.startSession(join(root, "project"), false);

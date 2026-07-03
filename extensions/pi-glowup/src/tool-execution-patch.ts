@@ -1,13 +1,24 @@
-import { ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { formatPathTarget, renderCodexCall, renderCodexOutput } from "./rendering.ts";
+import {
+    ToolExecutionComponent,
+    type Theme,
+    type ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
+import { emptyComponent, formatPathTarget, renderCodexCall, renderCodexOutput } from "./rendering.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
 import {
     createThirdPartyToolRenderer,
     shouldPreserveThirdPartyToolRenderer,
     type ThirdPartyToolRenderer,
+    type ThirdPartyToolRenderContext,
     type ThirdPartyToolRenderingOptions,
+    type ThirdPartyToolResult,
 } from "./third-party-renderers.ts";
 
+const BUILT_IN_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.built-in-renderers");
+const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for(
+    "zigai.pi-codex-look.built-in-renderer-state",
+);
 const THIRD_PARTY_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.third-party-renderers");
 const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-codex-look.third-party-renderer-state",
@@ -19,20 +30,57 @@ type RenderShellMode = "default" | "self";
 
 type ToolExecutionInstance = object;
 
+export type BuiltInToolName = "read" | "bash" | "edit" | "write" | "find" | "grep" | "ls";
+
+export type BuiltInToolRenderContext = ThirdPartyToolRenderContext & {
+    readonly invalidate: () => void;
+    readonly lastComponent: Component | undefined;
+    readonly state: unknown;
+    readonly cwd: string;
+};
+
+type ToolCallRenderer = (args: unknown, theme: Theme, context: BuiltInToolRenderContext) => Component;
+type ToolResultRenderer = (
+    result: ThirdPartyToolResult,
+    options: ToolRenderResultOptions,
+    theme: Theme,
+    context: BuiltInToolRenderContext,
+) => Component;
+
+export type BuiltInToolRendererOptions = {
+    readonly renderCall: (
+        toolName: BuiltInToolName,
+        args: unknown,
+        theme: Theme,
+        context: BuiltInToolRenderContext,
+    ) => Component | undefined;
+    readonly renderResult: (
+        toolName: BuiltInToolName,
+        result: ThirdPartyToolResult,
+        options: ToolRenderResultOptions,
+        theme: Theme,
+        context: BuiltInToolRenderContext,
+    ) => Component | undefined;
+};
+
+type BuiltInRendererPatchState = {
+    renderingOptions: BuiltInToolRendererOptions;
+};
+
 type ThirdPartyRendererPatchState = {
     renderingOptions: ThirdPartyToolRenderingOptions | undefined;
     readonly rendererCache: Map<string, ThirdPartyToolRenderer>;
 };
 
+const BUILT_IN_TOOL_NAMES = new Set<string>(["read", "bash", "edit", "write", "find", "grep", "ls"]);
+
 type ToolExecutionPrototype = {
-    getCallRenderer?: (
-        this: ToolExecutionInstance,
-    ) => ThirdPartyToolRenderer["renderCall"] | undefined;
-    getResultRenderer?: (
-        this: ToolExecutionInstance,
-    ) => ThirdPartyToolRenderer["renderResult"] | undefined;
+    getCallRenderer?: (this: ToolExecutionInstance) => ToolCallRenderer | undefined;
+    getResultRenderer?: (this: ToolExecutionInstance) => ToolResultRenderer | undefined;
     getRenderShell?: (this: ToolExecutionInstance) => RenderShellMode;
     hasRendererDefinition?: (this: ToolExecutionInstance) => boolean;
+    [BUILT_IN_RENDERER_PATCH_KEY]?: true;
+    [BUILT_IN_RENDERER_PATCH_STATE_KEY]?: BuiltInRendererPatchState;
     [THIRD_PARTY_RENDERER_PATCH_KEY]?: true;
     [THIRD_PARTY_RENDERER_PATCH_STATE_KEY]?: ThirdPartyRendererPatchState;
     [WRITE_RENDERER_PATCH_KEY]?: true;
@@ -53,6 +101,18 @@ function getNonEmptyStringField(
 
 function hasBuiltInToolDefinition(instance: ToolExecutionInstance): boolean {
     return Reflect.get(instance, "builtInToolDefinition") !== undefined;
+}
+
+function builtInToolName(instance: ToolExecutionInstance): BuiltInToolName | undefined {
+    const toolName = getNonEmptyStringField(instance, "toolName");
+    if (toolName === undefined || !hasBuiltInToolDefinition(instance)) {
+        return undefined;
+    }
+    return isBuiltInToolName(toolName) ? toolName : undefined;
+}
+
+function isBuiltInToolName(toolName: string): toolName is BuiltInToolName {
+    return BUILT_IN_TOOL_NAMES.has(toolName);
 }
 
 function toolDefinition(instance: ToolExecutionInstance): unknown {
@@ -172,6 +232,74 @@ const writeResultRenderer: ThirdPartyToolRenderer["renderResult"] = (result, opt
         ...(language === undefined ? {} : { syntax: { language } }),
     });
 };
+
+/** Installs render-only Codex-look renderers for built-in tool names. */
+export function installBuiltInToolRendererPatch(
+    options: BuiltInToolRendererOptions,
+    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
+): void {
+    const existingState = prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
+    if (prototype[BUILT_IN_RENDERER_PATCH_KEY] === true && existingState !== undefined) {
+        existingState.renderingOptions = options;
+        return;
+    }
+    if (prototype[BUILT_IN_RENDERER_PATCH_KEY] === true) {
+        return;
+    }
+
+    const originalGetCallRenderer = prototype.getCallRenderer;
+    const originalGetResultRenderer = prototype.getResultRenderer;
+    const originalGetRenderShell = prototype.getRenderShell;
+    const originalHasRendererDefinition = prototype.hasRendererDefinition;
+    const state: BuiltInRendererPatchState = { renderingOptions: options };
+    prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY] = state;
+
+    prototype.getCallRenderer = function getCodexLookBuiltInCallRenderer(
+        this: ToolExecutionInstance,
+    ) {
+        const toolName = builtInToolName(this);
+        const originalRenderer = originalGetCallRenderer?.call(this);
+        if (toolName === undefined) {
+            return originalRenderer;
+        }
+        return (args, theme, context) =>
+            state.renderingOptions.renderCall(toolName, args, theme, context) ??
+            originalRenderer?.(args, theme, context) ??
+            emptyComponent();
+    };
+
+    prototype.getResultRenderer = function getCodexLookBuiltInResultRenderer(
+        this: ToolExecutionInstance,
+    ) {
+        const toolName = builtInToolName(this);
+        const originalRenderer = originalGetResultRenderer?.call(this);
+        if (toolName === undefined) {
+            return originalRenderer;
+        }
+        return (result, options, theme, context) =>
+            state.renderingOptions.renderResult(toolName, result, options, theme, context) ??
+            originalRenderer?.(result, options, theme, context) ??
+            emptyComponent();
+    };
+
+    prototype.getRenderShell = function getCodexLookBuiltInRenderShell(
+        this: ToolExecutionInstance,
+    ) {
+        return builtInToolName(this) === undefined
+            ? (originalGetRenderShell?.call(this) ?? "default")
+            : "self";
+    };
+
+    prototype.hasRendererDefinition = function hasCodexLookBuiltInRendererDefinition(
+        this: ToolExecutionInstance,
+    ) {
+        return builtInToolName(this) === undefined
+            ? (originalHasRendererDefinition?.call(this) ?? false)
+            : true;
+    };
+
+    prototype[BUILT_IN_RENDERER_PATCH_KEY] = true;
+}
 
 /** Installs an idempotent compact renderer for Pi's built-in write tool only. */
 export function installBuiltInWriteRendererPatch(
