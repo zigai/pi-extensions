@@ -5,7 +5,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
     createCommandScriptFormatter,
-    formatScriptInvocation,
     parseScriptFormatterCommands,
     type ScriptBlockFormatter,
     type ScriptFormatterCommands,
@@ -51,7 +50,7 @@ import {
     type ThirdPartyToolRenderingOptions,
 } from "./third-party-renderers.ts";
 import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
-import { boundedScriptPreview, createScriptPreviewStore } from "./script-preview-store.ts";
+import { createScriptPreviewStore } from "./script-preview-store.ts";
 import {
     installBuiltInToolRendererPatch,
     installThirdPartyToolRendererPatch,
@@ -61,6 +60,10 @@ import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
 import { disposeSyntaxHighlighting, initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
 import { configureMarkdownSyntaxPatch } from "./syntax/markdown-patch.ts";
 import { renderSuccessfulWriteResultFallback, renderWriteCallPreview } from "./write-rendering.ts";
+import {
+    rememberRawScriptPreview,
+    scheduleFormattedScriptPreview,
+} from "./script-preview-events.ts";
 
 type TextResult = {
     readonly content?: unknown;
@@ -469,27 +472,6 @@ function renderEditResult(
     });
 }
 
-async function rememberFormattedScriptPreview(
-    toolCallId: string,
-    command: string,
-    formatter: ScriptBlockFormatter | undefined,
-    signal: AbortSignal | undefined,
-): Promise<void> {
-    const script = parseScriptInvocation(command);
-    if (script === undefined || formatter === undefined) {
-        return;
-    }
-
-    const formattedScript = await formatScriptInvocation(
-        script,
-        formatter,
-        signal === undefined ? {} : { signal },
-    );
-    if (formattedScript.code !== script.code) {
-        scriptPreviews.set(toolCallId, boundedScriptPreview(formattedScript));
-    }
-}
-
 let deferredSyntaxPreload: ReturnType<typeof setTimeout> | undefined;
 
 function scheduleDeferredSyntaxPreload(reportWarning: (message: string) => void): void {
@@ -552,19 +534,28 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
 
     applyConfig(config);
 
-    pi.on("tool_call", async (event, ctx) => {
+    pi.on("tool_call", (event) => {
         if (!isToolCallEventType("bash", event)) {
             return;
         }
-        await rememberFormattedScriptPreview(
-            event.toolCallId,
-            event.input.command,
-            formatter,
-            ctx.signal,
-        );
+        rememberRawScriptPreview(scriptPreviews, event.toolCallId, event.input.command);
     });
 
-    pi.on("tool_result", (event) => {
+    pi.on("tool_result", (event, ctx) => {
+        if (event.toolName === "bash") {
+            const command = stringField(event.input, "command");
+            if (command !== undefined) {
+                rememberRawScriptPreview(scriptPreviews, event.toolCallId, command);
+                scheduleFormattedScriptPreview({
+                    sink: scriptPreviews,
+                    toolCallId: event.toolCallId,
+                    command,
+                    formatter,
+                    ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
+                });
+            }
+        }
+
         if (!isEditToolResult(event) || event.isError || typeof event.details?.diff !== "string") {
             return;
         }
