@@ -229,7 +229,7 @@ export function createViewImageTool(
                     path: params.path,
                     absolutePath: image.absolutePath,
                     described: true,
-                    mimeType: image.content.mimeType,
+                    mimeType: image.mimeType,
                 },
             };
         },

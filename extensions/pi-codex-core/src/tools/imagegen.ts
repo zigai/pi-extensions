@@ -27,6 +27,7 @@ import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
 import {
     imageContentToDataUrl,
     loadImageContent,
+    prepareCodexPromptImageContent,
     recentImageContents,
     saveGeneratedImage,
 } from "../image-content.ts";
@@ -230,8 +231,12 @@ async function resolveEditImages(
     }
     if (paths.length > 5) throw new Error("imagegen supports at most 5 edit images.");
     if (paths.length > 0) {
-        const loaded = await Promise.all(paths.map((path) => loadImageContent(path, ctx.cwd)));
-        return loaded.map((image) => image.content);
+        const editImages: ImageContent[] = [];
+        for (const path of paths) {
+            const image = await loadImageContent(path, ctx.cwd);
+            editImages.push(await prepareCodexPromptImageContent(image));
+        }
+        return editImages;
     }
     if (params.num_last_images_to_include === undefined) return [];
     const count = Math.trunc(params.num_last_images_to_include);

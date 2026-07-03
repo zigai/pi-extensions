@@ -36,7 +36,12 @@ import {
     rewriteProviderRequestWithNativeCompaction,
     scheduleCodexAutoCompaction,
 } from "../src/compaction.ts";
-import { codexPromptImageTargetDimensions, saveGeneratedImage } from "../src/image-content.ts";
+import {
+    MAX_INPUT_IMAGE_BYTES,
+    codexPromptImageTargetDimensions,
+    loadImageContent,
+    saveGeneratedImage,
+} from "../src/image-content.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createViewImageTool } from "../src/tools/view-image.ts";
 import { formatWebRunToolOutput } from "../src/tools/web-run-output.ts";
@@ -456,6 +461,26 @@ test("computes Codex prompt image target dimensions", () => {
         width: 1600,
         height: 1600,
     });
+});
+
+test("rejects oversized and mislabeled image files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-image-load-"));
+    try {
+        await writeFile(join(root, "fake.png"), "not actually an image");
+        await assert.rejects(
+            loadImageContent("fake.png", root),
+            /Unsupported or invalid image file/,
+        );
+
+        const oversized = Buffer.concat([
+            Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+            Buffer.alloc(MAX_INPUT_IMAGE_BYTES),
+        ]);
+        await writeFile(join(root, "oversized.png"), oversized);
+        await assert.rejects(loadImageContent("oversized.png", root), /Image is too large/);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 test("view_image resizes default detail with Codex patch budget", async () => {

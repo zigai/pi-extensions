@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, extname, resolve } from "node:path";
+import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 import { Type } from "typebox";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -24,9 +24,9 @@ const MessageWithArrayContentSchema = compileSchema(
 export type ImageDetail = "auto" | "high" | "original";
 
 export type LoadedImage = {
-    readonly content: ImageContent;
     readonly absolutePath: string;
     readonly bytes: Buffer;
+    readonly mimeType: string;
 };
 
 type ImageDimensions = {
@@ -39,6 +39,9 @@ type CodexPromptImageResizeLimits = {
     readonly maxPatches: number;
 };
 
+export const MAX_INPUT_IMAGE_BYTES = 25 * 1024 * 1024;
+
+const IMAGE_HEADER_BYTE_COUNT = 32;
 const CODEX_PROMPT_IMAGE_PATCH_SIZE = 32;
 const CODEX_PROMPT_IMAGE_MAX_BYTES = 1024 * 1024 * 1024;
 const CODEX_HIGH_DETAIL_LIMITS: CodexPromptImageResizeLimits = {
@@ -52,17 +55,20 @@ const CODEX_ORIGINAL_DETAIL_LIMITS: CodexPromptImageResizeLimits = {
 
 export async function loadImageContent(path: string, cwd: string): Promise<LoadedImage> {
     const absolutePath = resolve(cwd, stripAtPrefix(path));
-    const bytes = await readFile(absolutePath);
-    const mimeType = detectImageMimeType(bytes, absolutePath);
-    if (!mimeType) throw new Error(`Unsupported image type: ${path}`);
+    const fileStat = await stat(absolutePath);
+    if (!fileStat.isFile()) throw new Error(`Image path is not a file: ${path}`);
+    if (fileStat.size > MAX_INPUT_IMAGE_BYTES) {
+        throw new Error(
+            `Image is too large: ${path} (${fileStat.size} bytes; max ${MAX_INPUT_IMAGE_BYTES} bytes).`,
+        );
+    }
+    const header = await readFirstBytes(absolutePath, IMAGE_HEADER_BYTE_COUNT);
+    const mimeType = detectImageMimeType(header);
+    if (!mimeType) throw new Error(`Unsupported or invalid image file: ${path}`);
     return {
-        content: {
-            type: "image",
-            data: bytes.toString("base64"),
-            mimeType,
-        },
         absolutePath,
-        bytes,
+        bytes: await readFile(absolutePath),
+        mimeType,
     };
 }
 
@@ -71,13 +77,13 @@ export async function prepareCodexPromptImageContent(
     detail: ImageDetail = "high",
 ): Promise<ImageContent> {
     const limits = codexPromptImageResizeLimits(detail);
-    const dimensions = imageDimensions(image.content);
+    const dimensions = imageDimensionsFromBytes(image.bytes, image.mimeType);
     const target = codexPromptImageTargetDimensions(dimensions.width, dimensions.height, limits);
     if (target.width === dimensions.width && target.height === dimensions.height) {
-        return image.content;
+        return imageContentFromBytes(image.bytes, image.mimeType);
     }
 
-    const resized = await resizeImage(image.bytes, image.content.mimeType, {
+    const resized = await resizeImage(image.bytes, image.mimeType, {
         maxWidth: target.width,
         maxHeight: target.height,
         maxBytes: CODEX_PROMPT_IMAGE_MAX_BYTES,
@@ -175,9 +181,13 @@ function codexPromptImageResizeLimits(detail: ImageDetail): CodexPromptImageResi
     return detail === "original" ? CODEX_ORIGINAL_DETAIL_LIMITS : CODEX_HIGH_DETAIL_LIMITS;
 }
 
-function imageDimensions(content: ImageContent): ImageDimensions {
-    const dimensions = getImageDimensions(content.data, content.mimeType);
-    if (!dimensions) throw new Error(`Unable to read image dimensions for ${content.mimeType}`);
+function imageContentFromBytes(bytes: Buffer, mimeType: string): ImageContent {
+    return { type: "image", data: bytes.toString("base64"), mimeType };
+}
+
+function imageDimensionsFromBytes(bytes: Buffer, mimeType: string): ImageDimensions {
+    const dimensions = getImageDimensions(bytes.toString("base64"), mimeType);
+    if (!dimensions) throw new Error(`Unable to read image dimensions for ${mimeType}`);
     return { width: dimensions.widthPx, height: dimensions.heightPx };
 }
 
@@ -219,7 +229,18 @@ function isImageContent(value: unknown): value is ImageContent {
     return parseWithSchema(ImageContentSchema, value) !== undefined;
 }
 
-function detectImageMimeType(bytes: Buffer, absolutePath: string): string | undefined {
+async function readFirstBytes(path: string, byteCount: number): Promise<Buffer> {
+    const file = await open(path, "r");
+    try {
+        const buffer = Buffer.alloc(byteCount);
+        const result = await file.read(buffer, 0, byteCount, 0);
+        return buffer.subarray(0, result.bytesRead);
+    } finally {
+        await file.close();
+    }
+}
+
+function detectImageMimeType(bytes: Buffer): string | undefined {
     if (
         bytes.length >= 8 &&
         bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
@@ -239,19 +260,7 @@ function detectImageMimeType(bytes: Buffer, absolutePath: string): string | unde
     ) {
         return "image/webp";
     }
-    switch (extname(absolutePath).toLowerCase()) {
-        case ".png":
-            return "image/png";
-        case ".jpg":
-        case ".jpeg":
-            return "image/jpeg";
-        case ".gif":
-            return "image/gif";
-        case ".webp":
-            return "image/webp";
-        default:
-            return undefined;
-    }
+    return undefined;
 }
 
 function stripAtPrefix(path: string): string {
