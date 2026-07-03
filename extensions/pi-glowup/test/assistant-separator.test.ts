@@ -213,4 +213,42 @@ describe("assistant separator patch", () => {
         expect(Reflect.get(prototype, "updateContent")).toBe(originalUpdateContent);
         expect(Reflect.get(containerPrototype, "addChild")).toBe(originalAddChild);
     });
+
+    it("does not clobber assistant and chat wrappers installed later", () => {
+        const prototype = createPrototypeWithContentUpdates();
+        const addedChildren: Component[] = [];
+        const containerPrototype = {
+            addChild(component: Component): void {
+                addedChildren.push(component);
+            },
+        };
+        configureAssistantSeparatorPatch(true, prototype, containerPrototype);
+        const codexRender = Reflect.get(prototype, "render");
+        const codexAddChild = Reflect.get(containerPrototype, "addChild");
+        if (typeof codexRender !== "function" || typeof codexAddChild !== "function") {
+            throw new Error("expected Codex-look assistant wrappers");
+        }
+        prototype.render = function renderWithLaterWrapper(
+            this: FakeAssistantInstance,
+            width: number,
+        ): string[] {
+            return codexRender.call(this, width);
+        };
+        containerPrototype.addChild = function addChildWithLaterWrapper(
+            this: object,
+            component: Component,
+        ): void {
+            codexAddChild.call(this, component);
+        };
+        const laterRender = Reflect.get(prototype, "render");
+        const laterAddChild = Reflect.get(containerPrototype, "addChild");
+
+        configureAssistantSeparatorPatch(false, prototype, containerPrototype);
+
+        expect(Reflect.get(prototype, "render")).toBe(laterRender);
+        expect(Reflect.get(containerPrototype, "addChild")).toBe(laterAddChild);
+        expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([]);
+        containerPrototype.addChild(new LabelComponent("child"));
+        expect(addedChildren.flatMap((child) => child.render(20))).toEqual(["child"]);
+    });
 });

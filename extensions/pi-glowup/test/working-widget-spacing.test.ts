@@ -82,4 +82,26 @@ describe("working widget spacing patch", () => {
 
         expect(Reflect.get(prototype, "render")).toBe(originalRender);
     });
+
+    it("does not clobber container render wrappers installed later", () => {
+        const prototype: { render(width: number): string[] } = {
+            render(_width: number): string[] {
+                return ["original"];
+            },
+        };
+        configureWorkingWidgetSpacingPatch(true, prototype);
+        const codexRender = Reflect.get(prototype, "render");
+        if (typeof codexRender !== "function") {
+            throw new Error("expected Codex-look working-widget wrapper");
+        }
+        prototype.render = function renderWithLaterWrapper(width: number): string[] {
+            return codexRender.call(this, width) as string[];
+        };
+        const laterRender = Reflect.get(prototype, "render");
+
+        configureWorkingWidgetSpacingPatch(false, prototype);
+
+        expect(Reflect.get(prototype, "render")).toBe(laterRender);
+        expect(prototype.render(80)).toEqual(["original"]);
+    });
 });

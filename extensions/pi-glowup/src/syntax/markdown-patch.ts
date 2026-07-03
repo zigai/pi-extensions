@@ -8,7 +8,9 @@ const MARKDOWN_THEME_CACHE = new WeakMap<MarkdownTheme, MarkdownTheme>();
 type MarkdownInstance = object;
 
 type MarkdownPatchState = {
+    enabled: boolean;
     readonly originalRender: MarkdownPrototype["render"];
+    readonly wrapperRender: NonNullable<MarkdownPrototype["render"]>;
 };
 
 type MarkdownPrototype = {
@@ -33,23 +35,34 @@ export function configureMarkdownSyntaxPatch(
 
     if (!enabled) {
         if (state !== undefined) {
-            restoreMarkdownRender(prototype, state.originalRender);
-            delete prototype[MARKDOWN_PATCH_STATE_KEY];
-            delete prototype[MARKDOWN_PATCH_KEY];
+            state.enabled = false;
+            if (prototype.render === state.wrapperRender) {
+                restoreMarkdownRender(prototype, state.originalRender);
+                delete prototype[MARKDOWN_PATCH_STATE_KEY];
+                delete prototype[MARKDOWN_PATCH_KEY];
+            }
         }
         return;
     }
 
     if (state !== undefined) {
+        state.enabled = true;
         return;
     }
 
     const originalRender = prototype.render;
-    prototype.render = function renderWithCodexLookSyntax(this: MarkdownInstance, width: number) {
-        injectSyntaxTheme(this);
+    const wrapperRender = function renderWithCodexLookSyntax(
+        this: MarkdownInstance,
+        width: number,
+    ) {
+        const currentState = prototype[MARKDOWN_PATCH_STATE_KEY];
+        if (currentState?.enabled !== false) {
+            injectSyntaxTheme(this);
+        }
         return originalRender?.call(this, width) ?? [];
     };
-    prototype[MARKDOWN_PATCH_STATE_KEY] = { originalRender };
+    prototype.render = wrapperRender;
+    prototype[MARKDOWN_PATCH_STATE_KEY] = { enabled: true, originalRender, wrapperRender };
     prototype[MARKDOWN_PATCH_KEY] = true;
 }
 

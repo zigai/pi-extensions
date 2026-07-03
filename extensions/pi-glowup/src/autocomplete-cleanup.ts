@@ -6,7 +6,9 @@ const AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY = Symbol.for(
 );
 
 type AutocompleteCleanupPatchState = {
+    enabled: boolean;
     readonly originalClearAutocompleteUi: (this: RuntimeEditor) => void;
+    readonly wrapperClearAutocompleteUi: (this: RuntimeEditor) => void;
 };
 
 type PatchableEditorPrototype = {
@@ -57,14 +59,18 @@ export function configureAutocompleteCleanupPatch(
 
     if (!enabled) {
         if (state !== undefined) {
-            editorPrototype.clearAutocompleteUi = state.originalClearAutocompleteUi;
-            delete editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY];
-            delete editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY];
+            state.enabled = false;
+            if (editorPrototype.clearAutocompleteUi === state.wrapperClearAutocompleteUi) {
+                editorPrototype.clearAutocompleteUi = state.originalClearAutocompleteUi;
+                delete editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY];
+                delete editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY];
+            }
         }
         return;
     }
 
     if (state !== undefined) {
+        state.enabled = true;
         return;
     }
 
@@ -73,16 +79,23 @@ export function configureAutocompleteCleanupPatch(
         return;
     }
 
-    editorPrototype.clearAutocompleteUi = function clearAutocompleteUiWithCleanup(
+    let nextState: AutocompleteCleanupPatchState;
+    const wrapperClearAutocompleteUi = function clearAutocompleteUiWithCleanup(
         this: RuntimeEditor,
     ): void {
-        const forceCleanupRender = shouldForceCleanupRender(this);
+        const forceCleanupRender = nextState.enabled && shouldForceCleanupRender(this);
         originalClearAutocompleteUi.call(this);
         if (forceCleanupRender) {
             this.tui?.requestRender(true);
         }
     };
 
-    editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY] = { originalClearAutocompleteUi };
+    nextState = {
+        enabled: true,
+        originalClearAutocompleteUi,
+        wrapperClearAutocompleteUi,
+    };
+    editorPrototype.clearAutocompleteUi = wrapperClearAutocompleteUi;
+    editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY] = nextState;
     editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY] = true;
 }

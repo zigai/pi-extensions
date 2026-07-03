@@ -93,11 +93,34 @@ describe("autocomplete cleanup patch", () => {
 
     it("restores the original autocomplete cleanup method when disabled", () => {
         const prototype = createPrototype();
-        const originalClearAutocompleteUi = prototype.clearAutocompleteUi;
+        const originalClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
 
         configureAutocompleteCleanupPatch(true, prototype);
         configureAutocompleteCleanupPatch(false, prototype);
 
-        expect(prototype.clearAutocompleteUi).toBe(originalClearAutocompleteUi);
+        expect(Reflect.get(prototype, "clearAutocompleteUi")).toBe(originalClearAutocompleteUi);
+    });
+
+    it("does not clobber autocomplete cleanup wrappers installed later", () => {
+        const prototype = createPrototype();
+        configureAutocompleteCleanupPatch(true, prototype);
+        const codexClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
+        if (typeof codexClearAutocompleteUi !== "function") {
+            throw new Error("expected Codex-look autocomplete wrapper");
+        }
+        prototype.clearAutocompleteUi = function clearAutocompleteUiWithLaterWrapper(
+            this: FakeEditor,
+        ): void {
+            codexClearAutocompleteUi.call(this);
+        };
+        const laterClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
+        const editor = createEditor({ prefix: "/set", active: true, clearOnShrink: true });
+
+        configureAutocompleteCleanupPatch(false, prototype);
+        prototype.clearAutocompleteUi.call(editor);
+
+        expect(Reflect.get(prototype, "clearAutocompleteUi")).toBe(laterClearAutocompleteUi);
+        expect(editor.active).toBe(false);
+        expect(editor.tui.requestRender).not.toHaveBeenCalled();
     });
 });

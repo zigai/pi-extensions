@@ -6,7 +6,9 @@ const WORKING_WIDGET_SPACING_PATCH_STATE_KEY = Symbol.for(
 );
 
 type WorkingWidgetSpacingPatchState = {
+    enabled: boolean;
     readonly originalRender: typeof Container.prototype.render;
+    readonly wrapperRender: typeof Container.prototype.render;
 };
 
 type PatchableContainerPrototype = typeof Container.prototype & {
@@ -61,14 +63,18 @@ export function configureWorkingWidgetSpacingPatch(
 
     if (!enabled) {
         if (state !== undefined) {
-            containerPrototype.render = state.originalRender;
-            delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
-            delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY];
+            state.enabled = false;
+            if (containerPrototype.render === state.wrapperRender) {
+                containerPrototype.render = state.originalRender;
+                delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
+                delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY];
+            }
         }
         return;
     }
 
     if (state !== undefined) {
+        state.enabled = true;
         return;
     }
 
@@ -77,10 +83,15 @@ export function configureWorkingWidgetSpacingPatch(
         return;
     }
 
-    containerPrototype.render = function renderWithWorkingWidgetSpacing(
+    let nextState: WorkingWidgetSpacingPatchState;
+    const wrapperRender = function renderWithWorkingWidgetSpacing(
         this: Container,
         width: number,
     ): string[] {
+        if (!nextState.enabled) {
+            return originalRender.call(this, width) as string[];
+        }
+
         const lines: string[] = [];
         let previousChild: Component | undefined;
 
@@ -100,8 +111,12 @@ export function configureWorkingWidgetSpacingPatch(
         return lines;
     };
 
-    containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY] = {
+    nextState = {
+        enabled: true,
         originalRender: originalRender as typeof Container.prototype.render,
+        wrapperRender,
     };
+    containerPrototype.render = wrapperRender;
+    containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY] = nextState;
     containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY] = true;
 }

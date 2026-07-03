@@ -42,8 +42,11 @@ type AssistantRenderInstance = {
 };
 
 type AssistantSeparatorPatchState = {
+    enabled: boolean;
     readonly originalRender: AssistantRenderPrototype["render"];
     readonly originalUpdateContent: AssistantRenderPrototype["updateContent"];
+    readonly wrapperRender?: NonNullable<AssistantRenderPrototype["render"]>;
+    readonly wrapperUpdateContent?: NonNullable<AssistantRenderPrototype["updateContent"]>;
 };
 
 type AssistantRenderPrototype = {
@@ -58,7 +61,9 @@ type ChatComponentKind = "assistant" | "tool" | "user";
 type ChatContainerInstance = object;
 
 type ChatTransitionPatchState = {
+    enabled: boolean;
     readonly originalAddChild: ChatContainerPrototype["addChild"];
+    readonly wrapperAddChild?: NonNullable<ChatContainerPrototype["addChild"]>;
 };
 
 type ChatContainerPrototype = {
@@ -195,14 +200,19 @@ function markAssistantSeparator(component: Component, shouldRender: boolean): vo
     Reflect.set(component, ASSISTANT_SEPARATOR_RENDER_KEY, shouldRender);
 }
 
-function installChatTransitionSeparatorPatch(
-    prototype: ChatContainerPrototype,
+function createChatTransitionSeparatorWrapper(
     originalAddChild: (this: ChatContainerInstance, component: Component) => void,
-): void {
-    prototype.addChild = function addChildWithChatTransitionSeparator(
+    isEnabled: () => boolean,
+): NonNullable<ChatContainerPrototype["addChild"]> {
+    return function addChildWithChatTransitionSeparator(
         this: ChatContainerInstance,
         component: Component,
     ): void {
+        if (!isEnabled()) {
+            originalAddChild.call(this, component);
+            return;
+        }
+
         const kind = componentKind(component);
         if (kind === "assistant") {
             markAssistantSeparator(
@@ -219,14 +229,19 @@ function installChatTransitionSeparatorPatch(
     };
 }
 
-function installThinkingBlockSpacingPatch(
-    prototype: AssistantRenderPrototype,
+function createThinkingBlockSpacingWrapper(
     originalUpdateContent: (this: AssistantRenderInstance, message: AssistantMessageLike) => void,
-): void {
-    prototype.updateContent = function updateContentWithThinkingSpacing(
+    isEnabled: () => boolean,
+): NonNullable<AssistantRenderPrototype["updateContent"]> {
+    return function updateContentWithThinkingSpacing(
         this: AssistantRenderInstance,
         message: AssistantMessageLike,
     ): void {
+        if (!isEnabled()) {
+            originalUpdateContent.call(this, message);
+            return;
+        }
+
         const contentContainer = this.contentContainer;
         if (contentContainer === undefined) {
             originalUpdateContent.call(this, message);
@@ -300,46 +315,77 @@ export function configureAssistantSeparatorPatch(
 }
 
 function installAssistantPrototypePatch(assistantPrototype: AssistantRenderPrototype): void {
-    if (assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] !== undefined) {
+    const existingState = assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
+    if (existingState !== undefined) {
+        existingState.enabled = true;
         return;
     }
 
     const originalRender = assistantPrototype.render;
     const originalUpdateContent = assistantPrototype.updateContent;
-    if (typeof originalRender === "function") {
-        assistantPrototype.render = function renderWithAssistantSeparator(
-            this: AssistantRenderInstance,
-            width: number,
-        ): string[] {
-            const lines = originalRender.call(this, width);
-            if (lines.length === 0 || this[ASSISTANT_SEPARATOR_RENDER_KEY] !== true) {
-                return lines;
-            }
-            return linesWithSeparatorSpacing(lines, width);
-        };
+    let nextState: AssistantSeparatorPatchState;
+    const wrapperRender =
+        typeof originalRender === "function"
+            ? function renderWithAssistantSeparator(
+                  this: AssistantRenderInstance,
+                  width: number,
+              ): string[] {
+                  const lines = originalRender.call(this, width);
+                  if (
+                      !nextState.enabled ||
+                      lines.length === 0 ||
+                      this[ASSISTANT_SEPARATOR_RENDER_KEY] !== true
+                  ) {
+                      return lines;
+                  }
+                  return linesWithSeparatorSpacing(lines, width);
+              }
+            : undefined;
+    const wrapperUpdateContent =
+        typeof originalUpdateContent === "function"
+            ? createThinkingBlockSpacingWrapper(originalUpdateContent, () => nextState.enabled)
+            : undefined;
+
+    if (wrapperRender !== undefined) {
+        assistantPrototype.render = wrapperRender;
+    }
+    if (wrapperUpdateContent !== undefined) {
+        assistantPrototype.updateContent = wrapperUpdateContent;
     }
 
-    if (typeof originalUpdateContent === "function") {
-        installThinkingBlockSpacingPatch(assistantPrototype, originalUpdateContent);
-    }
-
-    assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] = {
+    nextState = {
+        enabled: true,
         originalRender,
         originalUpdateContent,
+        ...(wrapperRender === undefined ? {} : { wrapperRender }),
+        ...(wrapperUpdateContent === undefined ? {} : { wrapperUpdateContent }),
     };
+    assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] = nextState;
     assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY] = true;
 }
 
 function installChatPrototypePatch(container: ChatContainerPrototype): void {
-    if (container[CHAT_TRANSITION_PATCH_STATE_KEY] !== undefined) {
+    const existingState = container[CHAT_TRANSITION_PATCH_STATE_KEY];
+    if (existingState !== undefined) {
+        existingState.enabled = true;
         return;
     }
 
     const originalAddChild = container.addChild;
-    if (typeof originalAddChild === "function") {
-        installChatTransitionSeparatorPatch(container, originalAddChild);
+    let nextState: ChatTransitionPatchState;
+    const wrapperAddChild =
+        typeof originalAddChild === "function"
+            ? createChatTransitionSeparatorWrapper(originalAddChild, () => nextState.enabled)
+            : undefined;
+    if (wrapperAddChild !== undefined) {
+        container.addChild = wrapperAddChild;
     }
-    container[CHAT_TRANSITION_PATCH_STATE_KEY] = { originalAddChild };
+    nextState = {
+        enabled: true,
+        originalAddChild,
+        ...(wrapperAddChild === undefined ? {} : { wrapperAddChild }),
+    };
+    container[CHAT_TRANSITION_PATCH_STATE_KEY] = nextState;
     container[CHAT_TRANSITION_PATCH_KEY] = true;
 }
 
@@ -349,10 +395,31 @@ function restoreAssistantSeparatorPatch(assistantPrototype: AssistantRenderProto
         return;
     }
 
-    restoreAssistantMethod(assistantPrototype, "render", state.originalRender);
-    restoreAssistantMethod(assistantPrototype, "updateContent", state.originalUpdateContent);
-    delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
-    delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY];
+    state.enabled = false;
+    let restoredOwnWrappers = true;
+    if (state.wrapperRender !== undefined) {
+        if (assistantPrototype.render === state.wrapperRender) {
+            restoreAssistantMethod(assistantPrototype, "render", state.originalRender);
+        } else {
+            restoredOwnWrappers = false;
+        }
+    }
+    if (state.wrapperUpdateContent !== undefined) {
+        if (assistantPrototype.updateContent === state.wrapperUpdateContent) {
+            restoreAssistantMethod(
+                assistantPrototype,
+                "updateContent",
+                state.originalUpdateContent,
+            );
+        } else {
+            restoredOwnWrappers = false;
+        }
+    }
+
+    if (restoredOwnWrappers) {
+        delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
+        delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY];
+    }
 }
 
 function restoreChatTransitionPatch(container: ChatContainerPrototype): void {
@@ -361,10 +428,16 @@ function restoreChatTransitionPatch(container: ChatContainerPrototype): void {
         return;
     }
 
-    if (state.originalAddChild === undefined) {
-        delete container.addChild;
-    } else {
-        container.addChild = state.originalAddChild;
+    state.enabled = false;
+    if (state.wrapperAddChild !== undefined) {
+        if (container.addChild !== state.wrapperAddChild) {
+            return;
+        }
+        if (state.originalAddChild === undefined) {
+            delete container.addChild;
+        } else {
+            container.addChild = state.originalAddChild;
+        }
     }
     delete container[CHAT_TRANSITION_PATCH_STATE_KEY];
     delete container[CHAT_TRANSITION_PATCH_KEY];
