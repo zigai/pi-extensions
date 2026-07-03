@@ -121,6 +121,19 @@ const WEB_RUN_PARAMETERS = Type.Object({
     ),
 });
 
+const WEB_RUN_COMMAND_KEYS = [
+    "search_query",
+    "image_query",
+    "open",
+    "click",
+    "find",
+    "screenshot",
+    "finance",
+    "weather",
+    "sports",
+    "time",
+] as const;
+
 const WebRunParametersValidator = compileSchema(WEB_RUN_PARAMETERS);
 const TextContentBlockSchema = compileSchema(
     Type.Object({ type: Type.Literal("text"), text: Type.String() }),
@@ -237,12 +250,7 @@ export function createWebRunTool(
 function prepareWebRunArguments(args: unknown): WebRunParams {
     const params = parseWithSchema(WebRunParametersValidator, args);
     if (!params) throw new Error("Invalid web_run arguments.");
-    const { commands } = splitSearchRequest(params);
-    if (Object.keys(commands).length === 0) {
-        throw new Error(
-            "web_run requires at least one search, open, click, find, screenshot, finance, weather, sports, or time command.",
-        );
-    }
+    splitSearchRequest(params);
     return params;
 }
 
@@ -257,7 +265,7 @@ async function executeWebRun(
     if (provider.isErr()) return provider;
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
-    const { settings, commands } = splitSearchRequest(params);
+    const { settings, commands, responseLength } = splitSearchRequest(params);
     const input = recentSearchContext(ctx);
     const model = resolveCodexRequestModel(config.openai.webSearchModel, provider.value.model);
 
@@ -272,6 +280,7 @@ async function executeWebRun(
                 model,
                 ...(input ? { input } : {}),
                 commands,
+                ...(responseLength ? { response_length: responseLength } : {}),
                 ...(settings ? { settings } : {}),
             }),
         });
@@ -460,17 +469,35 @@ function firstTextContent(content: readonly unknown[]): string | undefined {
 
 function splitSearchRequest(params: WebRunParams): {
     readonly commands: Record<string, unknown>;
+    readonly responseLength?: WebRunParams["response_length"] | undefined;
     readonly settings?: Record<string, unknown>;
 } {
+    if (!hasRealWebRunCommand(params)) {
+        throw new Error("web_run requires at least one non-empty command.");
+    }
+
     const commands: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(params)) {
-        if (value === undefined || key === "settings") continue;
+    for (const key of WEB_RUN_COMMAND_KEYS) {
+        const value = params[key];
+        if (value === undefined) continue;
+        if (Array.isArray(value) && value.length === 0) continue;
         commands[key] = value;
     }
     const settings = params.settings?.search_context_size
         ? { search_context_size: params.settings.search_context_size }
         : undefined;
-    return settings && Object.keys(settings).length > 0 ? { commands, settings } : { commands };
+    return {
+        commands,
+        ...(params.response_length ? { responseLength: params.response_length } : {}),
+        ...(settings && Object.keys(settings).length > 0 ? { settings } : {}),
+    };
+}
+
+function hasRealWebRunCommand(params: WebRunParams): boolean {
+    return WEB_RUN_COMMAND_KEYS.some((key) => {
+        const value = params[key];
+        return Array.isArray(value) ? value.length > 0 : value !== undefined;
+    });
 }
 
 async function prepareWebRunOutput(

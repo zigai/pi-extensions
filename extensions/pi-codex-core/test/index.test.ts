@@ -479,6 +479,18 @@ test("rejects invalid tool arguments before I/O", () => {
         /Invalid web_run arguments/,
     );
     assert.throws(() => webRunTool.prepareArguments?.({}), /web_run requires at least one/);
+    assert.throws(
+        () => webRunTool.prepareArguments?.({ response_length: "short" }),
+        /at least one non-empty command/,
+    );
+    assert.throws(
+        () =>
+            webRunTool.prepareArguments?.({
+                search_query: [],
+                settings: { search_context_size: "low" },
+            }),
+        /at least one non-empty command/,
+    );
 
     const imagegenTool = createImagegenTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
     assert.ok(imagegenTool.prepareArguments);
@@ -748,12 +760,13 @@ test("saves web_run raw output outside workspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
-    const runtime = makeTestRuntime(
-        async () =>
-            new Response(JSON.stringify({ output: "1. Pi\n   URL: https://pi.dev/" }), {
-                status: 200,
-            }),
-    );
+    let requestBody: unknown;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as unknown;
+        return new Response(JSON.stringify({ output: "1. Pi\n   URL: https://pi.dev/" }), {
+            status: 200,
+        });
+    });
 
     try {
         await mkdir(cwd, { recursive: true });
@@ -764,13 +777,16 @@ test("saves web_run raw output outside workspace", async () => {
         });
         const result = await webRunTool.execute(
             "call/1",
-            { search_query: [{ q: "Pi docs" }] },
+            { search_query: [{ q: "Pi docs" }], response_length: "short" },
             undefined,
             undefined,
             makeWebRunContext(cwd),
         );
         const rawOutputPath = join(agentDir, "pi-codex-core", "web-run", "session_1", "call_1.txt");
 
+        assert.ok(isRecord(requestBody));
+        assert.deepEqual(requestBody.commands, { search_query: [{ q: "Pi docs" }] });
+        assert.equal(requestBody.response_length, "short");
         assert.equal(result.details.fullOutputPath, rawOutputPath);
         assert.equal(
             (await readFile(rawOutputPath)).toString("utf8"),
