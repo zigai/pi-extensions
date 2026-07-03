@@ -15,7 +15,7 @@ export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | und
 /** Detects small structured third-party output that is safe and useful to syntax-highlight. */
 export function detectStructuredOutputLanguage(text: string | undefined): string | undefined {
   const trimmed = text?.trim();
-  if (!trimmed) {
+  if (trimmed === undefined || trimmed.length === 0) {
     return undefined;
   }
 

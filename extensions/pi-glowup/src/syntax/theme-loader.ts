@@ -1,15 +1,12 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import type { ThemeRegistration } from "shiki";
+import { bundledSyntaxThemePath, SYNTAX_THEME_NAME } from "./theme-assets.ts";
 
-export const SYNTAX_THEME_NAME = "pi-codex-look-darker-modern";
+export { SYNTAX_THEME_NAME } from "./theme-assets.ts";
+
 const SYNTAX_OFF_VALUE = "off";
 const SYNTAX_ENV = "PI_CODEX_LOOK_SYNTAX";
 const SYNTAX_THEME_ENV = "PI_CODEX_LOOK_SYNTAX_THEME";
-const SYNTAX_THEME_VARIANT_ENV = "PI_CODEX_LOOK_SYNTAX_THEME_VARIANT";
-const DEFAULT_THEME_DIRECTORY = "/home/zigai/Projects/vscode-darker-plus/themes";
-const DEFAULT_THEME_FILE = "darker-modern-theme.json";
-const BLACK_THEME_FILE = "darker-modern-black-theme.json";
 
 type UnknownRecord = {
   readonly [key: string]: unknown;
@@ -40,9 +37,9 @@ export function loadSyntaxConfig(env: NodeJS.ProcessEnv = process.env): SyntaxCo
 
   const configuredThemePath = env[SYNTAX_THEME_ENV]?.trim();
   const themePath =
-    configuredThemePath && configuredThemePath.length > 0
+    configuredThemePath !== undefined && configuredThemePath.length > 0
       ? configuredThemePath
-      : defaultThemePath(env);
+      : defaultThemePath();
   return {
     enabled: true,
     themePath,
@@ -68,10 +65,8 @@ export async function loadSyntaxTheme(
   };
 }
 
-function defaultThemePath(env: NodeJS.ProcessEnv): string {
-  const variant = env[SYNTAX_THEME_VARIANT_ENV]?.trim().toLowerCase();
-  const fileName = variant === "black" ? BLACK_THEME_FILE : DEFAULT_THEME_FILE;
-  return path.join(DEFAULT_THEME_DIRECTORY, fileName);
+function defaultThemePath(): string {
+  return bundledSyntaxThemePath();
 }
 
 function parseThemeRegistration(value: unknown, themeName: string): ThemeRegistration {
@@ -81,7 +76,7 @@ function parseThemeRegistration(value: unknown, themeName: string): ThemeRegistr
 
   const colors = isRecord(value.colors) ? stringRecord(value.colors) : undefined;
   const tokenColors = Array.isArray(value.tokenColors) ? value.tokenColors : undefined;
-  if (!tokenColors) {
+  if (tokenColors === undefined) {
     throw new Error("Syntax theme JSON must include tokenColors");
   }
 

@@ -1,11 +1,12 @@
 import type { ThemedToken } from "shiki";
+import { SYNTAX_ACCENT_COLORS } from "./palette.ts";
 
-const BRACKET_PAIR_COLORS = ["#FFD700", "#DA70D6", "#179FFF"] as const;
-const BRACKET_COLORABLE_FOREGROUNDS = new Set(["#d4d4d4", "#eeffff"]);
-const PYTHON_IMPORT_IDENTIFIER_COLOR = "#4EC9B0";
-const PYTHON_CONSTANT_IDENTIFIER_COLOR = "#4EC9B0";
-const PYTHON_VARIABLE_IDENTIFIER_COLOR = "#9CDCFE";
-const PYTHON_FUNCTION_IDENTIFIER_COLOR = "#DCDCAA";
+const BRACKET_PAIR_COLORS = SYNTAX_ACCENT_COLORS.bracketPair;
+const BRACKET_COLORABLE_FOREGROUNDS = new Set<string>(SYNTAX_ACCENT_COLORS.neutralForegrounds);
+const PYTHON_IMPORT_IDENTIFIER_COLOR = SYNTAX_ACCENT_COLORS.pythonImportIdentifier;
+const PYTHON_CONSTANT_IDENTIFIER_COLOR = SYNTAX_ACCENT_COLORS.pythonConstantIdentifier;
+const PYTHON_VARIABLE_IDENTIFIER_COLOR = SYNTAX_ACCENT_COLORS.pythonVariableIdentifier;
+const PYTHON_FUNCTION_IDENTIFIER_COLOR = SYNTAX_ACCENT_COLORS.pythonFunctionIdentifier;
 const OPEN_BRACKETS = new Set(["(", "[", "{"]);
 const CLOSE_BRACKETS = new Set([")", "]", "}"]);
 

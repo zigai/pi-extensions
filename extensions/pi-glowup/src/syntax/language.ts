@@ -118,7 +118,7 @@ export function normalizeSyntaxLanguage(
   language: string | undefined | null,
 ): BundledLanguage | "text" | undefined {
   const raw = language?.trim().toLowerCase();
-  if (!raw) {
+  if (raw === undefined || raw.length === 0) {
     return undefined;
   }
 
@@ -134,13 +134,13 @@ export function normalizeSyntaxLanguage(
 export function syntaxLanguageFromPath(
   filePath: string | undefined,
 ): BundledLanguage | "text" | undefined {
-  if (!filePath) {
+  if (filePath === undefined || filePath.length === 0) {
     return undefined;
   }
 
   const basename = path.basename(filePath).toLowerCase();
   const special = SPECIAL_FILE_LANGUAGES.get(basename);
-  if (special) {
+  if (special !== undefined) {
     return normalizeSyntaxLanguage(special);
   }
 

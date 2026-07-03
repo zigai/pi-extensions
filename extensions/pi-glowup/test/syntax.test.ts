@@ -18,17 +18,22 @@ import {
 import { createThirdPartyToolRenderer } from "../src/third-party-renderers.ts";
 import { highlightSyntaxCode, initializeSyntaxHighlighting } from "../src/syntax/highlighter.ts";
 import { installMarkdownSyntaxPatch } from "../src/syntax/markdown-patch.ts";
+import { SYNTAX_ACCENT_COLORS } from "../src/syntax/palette.ts";
 import { loadSyntaxConfig } from "../src/syntax/theme-loader.ts";
 
 const ANSI_ESCAPE = "\u001b[";
 const TYPESCRIPT_KEYWORD_RGB_CODE = "38;2;86;156;214";
 const TYPESCRIPT_KEYWORD_COLOR = `\u001b[${TYPESCRIPT_KEYWORD_RGB_CODE}m`;
-const BRACKET_PAIR_1_RGB_CODE = "38;2;255;215;0";
-const BRACKET_PAIR_2_RGB_CODE = "38;2;218;112;214";
 const STRING_RGB_CODE = "38;2;206;145;120";
-const TYPE_RGB_CODE = "38;2;78;201;176";
-const VARIABLE_RGB_CODE = "38;2;156;220;254";
-const FUNCTION_RGB_CODE = "38;2;220;220;170";
+const TYPE_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.pythonImportIdentifier);
+const VARIABLE_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.pythonVariableIdentifier);
+const FUNCTION_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.pythonFunctionIdentifier);
+const BRACKET_PAIR_1_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.bracketPair[0]);
+const BRACKET_PAIR_2_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.bracketPair[1]);
+
+function ansiRgbCode(hex: string): string {
+  return `38;2;${Number.parseInt(hex.slice(1, 3), 16)};${Number.parseInt(hex.slice(3, 5), 16)};${Number.parseInt(hex.slice(5, 7), 16)}`;
+}
 
 type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
 
@@ -95,27 +100,23 @@ const renderContext = {
   showImages: true,
   isError: false,
 };
+const bundledThemePath = join(process.cwd(), "themes", "darker-modern-theme.json");
 
 describe("central syntax highlighting", () => {
   beforeAll(async () => {
     await initializeSyntaxHighlighting();
   });
 
-  it("loads syntax env config including default, custom, black variant, and off switch", () => {
+  it("loads syntax env config including default, custom override, and off switch", () => {
     expect(loadSyntaxConfig()).toEqual({
       enabled: true,
       themeName: "pi-codex-look-darker-modern",
-      themePath: "/home/zigai/Projects/vscode-darker-plus/themes/darker-modern-theme.json",
+      themePath: bundledThemePath,
     });
     expect(loadSyntaxConfig({ PI_CODEX_LOOK_SYNTAX_THEME: "/tmp/theme.json" })).toEqual({
       enabled: true,
       themeName: "pi-codex-look-darker-modern",
       themePath: "/tmp/theme.json",
-    });
-    expect(loadSyntaxConfig({ PI_CODEX_LOOK_SYNTAX_THEME_VARIANT: "black" })).toEqual({
-      enabled: true,
-      themeName: "pi-codex-look-darker-modern",
-      themePath: "/home/zigai/Projects/vscode-darker-plus/themes/darker-modern-black-theme.json",
     });
     expect(loadSyntaxConfig({ PI_CODEX_LOOK_SYNTAX: "off" })).toEqual({
       enabled: false,
@@ -128,6 +129,14 @@ describe("central syntax highlighting", () => {
 
     expect(lines.join("\n")).toContain(TYPESCRIPT_KEYWORD_COLOR);
     expect(lines.join("\n")).toContain("const");
+  });
+
+  it("does not reset surrounding backgrounds after highlighted lines", () => {
+    const rendered = highlightSyntaxCode('const value = "ok";', "typescript").join("\n");
+
+    expect(rendered).not.toContain("\u001b[0m");
+    expect(rendered).not.toContain("\u001b[49m");
+    expect(rendered).not.toContain("\u001b[48;");
   });
 
   it("colors Python import identifiers like VS Code semantic highlighting", () => {
@@ -207,6 +216,30 @@ describe("central syntax highlighting", () => {
     expect(rendered).toContain("const");
   });
 
+  it("highlights embedded Python heredocs inside bash previews as Python", () => {
+    const command = [
+      'for f in /tmp/*.json; do [ -f "$f" ] || continue;',
+      "printf '%s: ' \"$f\"; python3 - <<'PY' \"$f\"",
+      "import json, sys",
+      "path = sys.argv[1]",
+      "print(json.load(open(path)).get('$schema'))",
+      "PY",
+      "done",
+    ].join("\n");
+
+    const rendered = renderScriptCall(
+      plainTheme,
+      { label: "Bash", language: "bash", code: command },
+      { state: "success", expanded: true },
+    )
+      .render(160)
+      .join("\n");
+
+    expect(rendered).toContain(`${TYPE_RGB_CODE}mjson`);
+    expect(rendered).toContain(`${TYPE_RGB_CODE}msys`);
+    expect(rendered).not.toContain(`${STRING_RGB_CODE}mimport json, sys`);
+  });
+
   it("highlights code output previews when a path is known", () => {
     const rendered = renderCodexOutput(plainTheme, "const value = 1;", {
       expanded: false,
@@ -283,8 +316,6 @@ describe("central syntax highlighting", () => {
           invalidate() {},
         },
       );
-      component.render(120);
-      await new Promise((resolve) => setTimeout(resolve, 25));
       const rendered = component.render(120).join("\n");
 
       expect(rendered).toContain(TYPESCRIPT_KEYWORD_RGB_CODE);

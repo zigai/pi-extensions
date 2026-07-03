@@ -1,21 +1,9 @@
+import ansiStyles from "ansi-styles";
 import type { ThemedToken } from "shiki";
 import { colorBracketPairsInTokenRows } from "./brackets.ts";
 
-const ANSI_RESET = "\u001b[0m";
-const ANSI_FG_RESET = "\u001b[39m";
-const ANSI_BG_RESET = "\u001b[49m";
-const ANSI_BOLD = "\u001b[1m";
-const ANSI_BOLD_RESET = "\u001b[22m";
-const ANSI_ITALIC = "\u001b[3m";
-const ANSI_ITALIC_RESET = "\u001b[23m";
-const ANSI_UNDERLINE = "\u001b[4m";
-const ANSI_UNDERLINE_RESET = "\u001b[24m";
-const ANSI_STRIKETHROUGH = "\u001b[9m";
-const ANSI_STRIKETHROUGH_RESET = "\u001b[29m";
-
 type AnsiTokenStyle = {
   readonly color: string | undefined;
-  readonly bgColor: string | undefined;
   readonly bold: boolean;
   readonly italic: boolean;
   readonly underline: boolean;
@@ -24,7 +12,6 @@ type AnsiTokenStyle = {
 
 const EMPTY_STYLE: AnsiTokenStyle = {
   color: undefined,
-  bgColor: undefined,
   bold: false,
   italic: false,
   underline: false,
@@ -53,14 +40,13 @@ function tokensToAnsiLine(tokens: ReadonlyArray<ThemedToken>): string {
   if (rendered.length === 0) {
     return "";
   }
-  return `${rendered}${ANSI_RESET}`;
+  return `${rendered}${resetAnsi(active)}`;
 }
 
 function styleFromToken(token: ThemedToken): AnsiTokenStyle {
   const fontStyle = token.fontStyle ?? 0;
   return {
     color: normalizeHexColor(token.color),
-    bgColor: normalizeHexColor(token.bgColor),
     bold: (fontStyle & 2) !== 0,
     italic: (fontStyle & 1) !== 0,
     underline: (fontStyle & 4) !== 0,
@@ -68,47 +54,50 @@ function styleFromToken(token: ThemedToken): AnsiTokenStyle {
   };
 }
 
+function resetAnsi(style: AnsiTokenStyle): string {
+  return transitionAnsi(style, EMPTY_STYLE);
+}
+
 function transitionAnsi(previous: AnsiTokenStyle, next: AnsiTokenStyle): string {
   let ansi = "";
 
   if (previous.bold !== next.bold) {
-    ansi += next.bold ? ANSI_BOLD : ANSI_BOLD_RESET;
+    ansi += next.bold ? ansiStyles.modifier.bold.open : ansiStyles.modifier.bold.close;
   }
   if (previous.italic !== next.italic) {
-    ansi += next.italic ? ANSI_ITALIC : ANSI_ITALIC_RESET;
+    ansi += next.italic ? ansiStyles.modifier.italic.open : ansiStyles.modifier.italic.close;
   }
   if (previous.underline !== next.underline) {
-    ansi += next.underline ? ANSI_UNDERLINE : ANSI_UNDERLINE_RESET;
+    ansi += next.underline
+      ? ansiStyles.modifier.underline.open
+      : ansiStyles.modifier.underline.close;
   }
   if (previous.strikethrough !== next.strikethrough) {
-    ansi += next.strikethrough ? ANSI_STRIKETHROUGH : ANSI_STRIKETHROUGH_RESET;
+    ansi += next.strikethrough
+      ? ansiStyles.modifier.strikethrough.open
+      : ansiStyles.modifier.strikethrough.close;
   }
   if (previous.color !== next.color) {
-    ansi += next.color ? fgAnsi(next.color) : ANSI_FG_RESET;
-  }
-  if (previous.bgColor !== next.bgColor) {
-    ansi += next.bgColor ? bgAnsi(next.bgColor) : ANSI_BG_RESET;
+    ansi += next.color === undefined ? ansiStyles.color.close : fgAnsi(next.color);
   }
 
   return ansi;
 }
 
 function fgAnsi(hex: string): string {
-  const rgb = hexToRgb(hex);
-  return rgb ? `\u001b[38;2;${rgb.red};${rgb.green};${rgb.blue}m` : "";
-}
-
-function bgAnsi(hex: string): string {
-  const rgb = hexToRgb(hex);
-  return rgb ? `\u001b[48;2;${rgb.red};${rgb.green};${rgb.blue}m` : "";
+  const [red, green, blue] = ansiStyles.hexToRgb(hex);
+  return ansiStyles.color.ansi16m(red, green, blue);
 }
 
 function normalizeHexColor(color: string | undefined): string | undefined {
-  if (!color) {
+  if (color === undefined) {
     return undefined;
   }
 
   const hex = color.trim();
+  if (hex.length === 0) {
+    return undefined;
+  }
   if (/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/iu.test(hex)) {
     return hex.slice(0, 7);
   }
@@ -117,19 +106,4 @@ function normalizeHexColor(color: string | undefined): string | undefined {
     return `#${red}${red}${green}${green}${blue}${blue}`;
   }
   return undefined;
-}
-
-function hexToRgb(
-  hex: string,
-): { readonly red: number; readonly green: number; readonly blue: number } | undefined {
-  const match = /^#(?<red>[0-9a-f]{2})(?<green>[0-9a-f]{2})(?<blue>[0-9a-f]{2})$/iu.exec(hex);
-  if (!match?.groups) {
-    return undefined;
-  }
-
-  return {
-    red: Number.parseInt(match.groups.red ?? "0", 16),
-    green: Number.parseInt(match.groups.green ?? "0", 16),
-    blue: Number.parseInt(match.groups.blue ?? "0", 16),
-  };
 }

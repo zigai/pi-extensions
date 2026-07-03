@@ -12,10 +12,10 @@ import {
   type SyntaxConfig,
 } from "./theme-loader.ts";
 
-const MAX_CODE_BYTES = 160 * 1024;
-const MAX_LINE_LENGTH = 4_000;
+const MAX_CODE_BYTES = 40 * 1024;
+const MAX_LINE_LENGTH = 2_000;
 const TOKENIZE_MAX_LINE_LENGTH = 1_000;
-const CACHE_LIMIT = 300;
+const CACHE_LIMIT = 100;
 
 type SyntaxState =
   | {
@@ -155,6 +155,10 @@ export async function getSyntaxHighlighterForLanguage(
 
 export function currentSyntaxThemeName(): string | undefined {
   return syntaxState?.status === "ready" ? syntaxState.theme.name : undefined;
+}
+
+export function clearSyntaxHighlightCache(): void {
+  highlightedCodeCache.clear();
 }
 
 async function initializeSyntaxHighlightingOnce(env: NodeJS.ProcessEnv): Promise<SyntaxState> {
