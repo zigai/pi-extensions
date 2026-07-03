@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEditPreview, EditPreviewStore } from "../src/edit-preview.ts";
+import { buildEditPreview, EditPreviewStore, PreviewStore } from "../src/edit-preview.ts";
 
 describe("edit previews", () => {
     it("builds display-only diff metadata", () => {
@@ -41,5 +41,21 @@ describe("edit previews", () => {
         expect(store.get("first")).toBeUndefined();
         expect(store.get("second")).toBe(second);
         expect(store.get("third")).toBe(third);
+    });
+
+    it("bounds previews by measured bytes", () => {
+        const store = new PreviewStore<string>({
+            maxEntries: 10,
+            maxBytes: 7,
+            measureBytes: (preview) => Buffer.byteLength(preview, "utf8"),
+        });
+
+        store.set("first", "abcd");
+        store.set("second", "efg");
+        store.set("third", "hijk");
+
+        expect(store.get("first")).toBeUndefined();
+        expect(store.get("second")).toBe("efg");
+        expect(store.get("third")).toBe("hijk");
     });
 });

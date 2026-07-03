@@ -37,10 +37,9 @@ import {
     renderScriptCall,
     type CodexRenderTheme,
     type MutationSummary,
-    type ScriptInvocation,
     type ScriptPreviewHeaderLayout,
 } from "./rendering.ts";
-import { buildEditPreview, EditPreviewStore, PreviewStore } from "./edit-preview.ts";
+import { buildEditPreview, EditPreviewStore } from "./edit-preview.ts";
 import { summarizeEditCall } from "./edit-call-rendering.ts";
 import {
     buildLargeDiffSummaryPayload,
@@ -59,6 +58,7 @@ import {
     type ThirdPartyToolRenderingOptions,
 } from "./third-party-renderers.ts";
 import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
+import { boundedScriptPreview, createScriptPreviewStore } from "./script-preview-store.ts";
 import { installThirdPartyToolRendererPatch } from "./tool-execution-patch.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
 import { clearSyntaxHighlightCache, initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
@@ -75,7 +75,7 @@ type TextResult = {
 };
 
 const editPreviews = new EditPreviewStore(300);
-const scriptPreviews = new PreviewStore<ScriptInvocation>(300);
+const scriptPreviews = createScriptPreviewStore();
 const explorationGroups = new ExplorationGroupStore();
 const toolCache = new Map<string, BuiltInToolDefinitions>();
 const MAX_CACHED_TOOL_DIRECTORIES = 25;
@@ -376,7 +376,7 @@ function registerBashTool(
                     signal === undefined ? {} : { signal },
                 );
                 if (formattedScript.code !== script.code) {
-                    scriptPreviews.set(toolCallId, formattedScript);
+                    scriptPreviews.set(toolCallId, boundedScriptPreview(formattedScript));
                 }
             }
 
