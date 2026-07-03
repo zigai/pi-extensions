@@ -5,6 +5,7 @@ import { deflateSync } from "node:zlib";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import type {
     BuildSystemPromptOptions,
     ExtensionAPI,
@@ -18,6 +19,7 @@ import { getImageDimensions } from "@earendil-works/pi-tui";
 import extension, { packageName, extensionName } from "../src/index.ts";
 import { codexToolProviderHeaders, resolveCodexToolProvider } from "../src/codex-auth.ts";
 import { registerCodexCommand } from "../src/codex-command.ts";
+import { openCodexSettingsScreen } from "../src/codex-settings-ui.ts";
 import { buildCodexCoreSystemPrompt } from "../src/prompt.ts";
 import {
     CODEX_CURRENT_MODEL_SELECTION,
@@ -244,6 +246,47 @@ test("codex command saves only changed global config values", async () => {
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         await rm(root, { recursive: true, force: true });
     }
+});
+
+test("settings screen refreshes draft from effective config after save", async () => {
+    const initialConfig = {
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        tools: { ...DEFAULT_CODEX_CORE_CONFIG.tools, webSearch: false },
+    };
+    initTheme(undefined, false);
+    let rendered = "";
+    const ctx = {
+        ui: {
+            custom: async (
+                factory: (
+                    tui: unknown,
+                    theme: Theme,
+                    keybindings: unknown,
+                    done: () => void,
+                ) => {
+                    readonly render: (width: number) => readonly string[];
+                    readonly handleInput?: (data: string) => void;
+                },
+            ) => {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                component.handleInput?.("\t");
+                component.handleInput?.(" ");
+                rendered = component.render(120).join("\n");
+            },
+        },
+    };
+
+    await openCodexSettingsScreen(ctx as unknown as ExtensionContext, {
+        initialConfig,
+        onChange: (nextConfig) => {
+            assert.equal(nextConfig.tools.webSearch, true);
+            return { ok: true, effectiveConfig: initialConfig };
+        },
+    });
+
+    const plainRendered = rendered.replace(/\x1b\[[0-9;]*m/g, "");
+    assert.match(plainRendered, /Web search\s+off/);
+    assert.doesNotMatch(plainRendered, /Web search\s+on/);
 });
 
 test("resolves current Codex model selections", () => {

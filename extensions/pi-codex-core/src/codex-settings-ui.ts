@@ -21,11 +21,15 @@ import {
 
 export type CodexSettingsTab = "general" | "tools" | "openai" | "usage";
 
+export type CodexSettingsSaveResult =
+    | { readonly ok: true; readonly effectiveConfig: CodexCoreConfig }
+    | { readonly ok: false };
+
 export type CodexSettingsScreenOptions = {
     readonly initialConfig: CodexCoreConfig;
     readonly initialTab?: CodexSettingsTab | undefined;
     readonly initialUsage?: CodexUsageSnapshot | { readonly error: string } | undefined;
-    readonly onChange: (config: CodexCoreConfig) => boolean;
+    readonly onChange: (config: CodexCoreConfig) => CodexSettingsSaveResult;
     readonly onConsumeResetCredit?: (
         redeemRequestId: string,
     ) => Promise<ResultType<CodexRateLimitResetConsumeResult, CodexFailure>>;
@@ -133,8 +137,9 @@ export async function openCodexSettingsScreen(
                     }
                     const nextDraft = applySettingChange(id, value, draft);
                     if (nextDraft === draft) return;
-                    if (options.onChange(nextDraft)) draft = nextDraft;
-                    else settingsList = createSettingsList();
+                    const saveResult = options.onChange(nextDraft);
+                    if (saveResult.ok) draft = saveResult.effectiveConfig;
+                    settingsList = createSettingsList();
                     tui.requestRender();
                 },
                 () => done(undefined),

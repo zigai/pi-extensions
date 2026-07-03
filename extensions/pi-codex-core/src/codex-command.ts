@@ -7,7 +7,7 @@ import {
     type CodexCoreConfig,
     writeCodexCoreConfig,
 } from "./config.ts";
-import { openCodexSettingsScreen } from "./codex-settings-ui.ts";
+import { openCodexSettingsScreen, type CodexSettingsSaveResult } from "./codex-settings-ui.ts";
 import { consumeCodexRateLimitResetCredit, fetchCodexUsage, formatCodexUsage } from "./usage.ts";
 
 type CodexCommandOptions = {
@@ -153,20 +153,20 @@ function saveAndApply(
     config: CodexCoreConfig,
     ctx: ExtensionContext,
     options: CodexCommandOptions,
-): boolean {
+): CodexSettingsSaveResult {
     const globalConfig = readCodexCoreConfig();
     const configToPersist = applyChangedConfigValues(globalConfig, options.getConfig(), config);
     const result = writeCodexCoreConfig(configToPersist);
     if (!result.ok) {
         notify(ctx, `Failed to save Codex settings: ${result.error}`, "error");
-        return false;
+        return { ok: false };
     }
     const effectiveConfig = ctx.isProjectTrusted()
         ? readCodexCoreConfig({ cwd: ctx.cwd })
         : readCodexCoreConfig();
     options.applyConfig(effectiveConfig, ctx);
     notify(ctx, formatConfig(effectiveConfig), "info");
-    return true;
+    return { ok: true, effectiveConfig };
 }
 
 function applyChangedConfigValues(
