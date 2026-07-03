@@ -1,6 +1,9 @@
 import { Container, Loader, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { installWorkingWidgetSpacingPatch } from "../src/working-widget-spacing.ts";
+import {
+    configureWorkingWidgetSpacingPatch,
+    installWorkingWidgetSpacingPatch,
+} from "../src/working-widget-spacing.ts";
 
 function createStaticLoader(message = "Working..."): Loader {
     // SAFETY: Loader only uses requestRender from the TUI instance in this test.
@@ -64,5 +67,19 @@ describe("working widget spacing patch", () => {
         installWorkingWidgetSpacingPatch();
 
         expect(Reflect.get(Container.prototype, "render")).toBe(patchedRender);
+    });
+
+    it("restores the original container render method when disabled", () => {
+        const prototype = {
+            render(): string[] {
+                return ["original"];
+            },
+        };
+        const originalRender = prototype.render;
+
+        configureWorkingWidgetSpacingPatch(true, prototype);
+        configureWorkingWidgetSpacingPatch(false, prototype);
+
+        expect(prototype.render).toBe(originalRender);
     });
 });

@@ -2,20 +2,45 @@ import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { highlightSyntaxCode } from "./highlighter.ts";
 
 const MARKDOWN_PATCH_KEY = Symbol.for("zigai.pi-codex-look.syntax-markdown");
+const MARKDOWN_PATCH_STATE_KEY = Symbol.for("zigai.pi-codex-look.syntax-markdown.state");
 const MARKDOWN_THEME_CACHE = new WeakMap<MarkdownTheme, MarkdownTheme>();
 
 type MarkdownInstance = object;
 
+type MarkdownPatchState = {
+    readonly originalRender: MarkdownPrototype["render"];
+};
+
 type MarkdownPrototype = {
     render?: (this: MarkdownInstance, width: number) => string[];
     [MARKDOWN_PATCH_KEY]?: true;
+    [MARKDOWN_PATCH_STATE_KEY]?: MarkdownPatchState;
 };
 
 /** Installs an idempotent Markdown render patch that injects the central syntax highlighter. */
 export function installMarkdownSyntaxPatch(
     prototype: MarkdownPrototype = Markdown.prototype as unknown as MarkdownPrototype,
 ): void {
-    if (prototype[MARKDOWN_PATCH_KEY] === true) {
+    configureMarkdownSyntaxPatch(true, prototype);
+}
+
+/** Enables or disables the Markdown syntax prototype patch. */
+export function configureMarkdownSyntaxPatch(
+    enabled: boolean,
+    prototype: MarkdownPrototype = Markdown.prototype as unknown as MarkdownPrototype,
+): void {
+    const state = prototype[MARKDOWN_PATCH_STATE_KEY];
+
+    if (!enabled) {
+        if (state !== undefined) {
+            restoreMarkdownRender(prototype, state.originalRender);
+            delete prototype[MARKDOWN_PATCH_STATE_KEY];
+            delete prototype[MARKDOWN_PATCH_KEY];
+        }
+        return;
+    }
+
+    if (state !== undefined) {
         return;
     }
 
@@ -24,7 +49,19 @@ export function installMarkdownSyntaxPatch(
         injectSyntaxTheme(this);
         return originalRender?.call(this, width) ?? [];
     };
+    prototype[MARKDOWN_PATCH_STATE_KEY] = { originalRender };
     prototype[MARKDOWN_PATCH_KEY] = true;
+}
+
+function restoreMarkdownRender(
+    prototype: MarkdownPrototype,
+    originalRender: MarkdownPrototype["render"],
+): void {
+    if (originalRender === undefined) {
+        delete prototype.render;
+        return;
+    }
+    prototype.render = originalRender;
 }
 
 function injectSyntaxTheme(instance: MarkdownInstance): void {

@@ -16,9 +16,9 @@ import {
     type ScriptFormatterCommands,
 } from "./script-formatters.ts";
 import { readCodexLookConfig, type CodexLookConfig } from "./config.ts";
-import { installAssistantSeparatorPatch } from "./assistant-separator.ts";
-import { installWorkingWidgetSpacingPatch } from "./working-widget-spacing.ts";
-import { installAutocompleteCleanupPatch } from "./autocomplete-cleanup.ts";
+import { configureAssistantSeparatorPatch } from "./assistant-separator.ts";
+import { configureWorkingWidgetSpacingPatch } from "./working-widget-spacing.ts";
+import { configureAutocompleteCleanupPatch } from "./autocomplete-cleanup.ts";
 import { ExplorationGroupStore, type ExplorationRenderContext } from "./exploration-groups.ts";
 import {
     emptyComponent,
@@ -62,7 +62,7 @@ import { boundedScriptPreview, createScriptPreviewStore } from "./script-preview
 import { installThirdPartyToolRendererPatch } from "./tool-execution-patch.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
 import { disposeSyntaxHighlighting, initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
-import { installMarkdownSyntaxPatch } from "./syntax/markdown-patch.ts";
+import { configureMarkdownSyntaxPatch } from "./syntax/markdown-patch.ts";
 
 type ToolTextContent = {
     readonly type: string;
@@ -611,6 +611,10 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         config = nextConfig;
         formatter = scriptBlockFormatter(config, reportWarning);
         headerLayout = scriptPreviewHeaderLayout(config);
+        configureAssistantSeparatorPatch(config.patches.assistantSeparator);
+        configureWorkingWidgetSpacingPatch(config.patches.workingWidgetSpacing);
+        configureAutocompleteCleanupPatch(config.patches.autocompleteCleanup);
+        configureMarkdownSyntaxPatch(config.patches.markdownSyntax);
         installThirdPartyToolRendererPatch(
             config.patches.thirdPartyToolRenderers
                 ? thirdPartyToolRenderingOptions(config)
@@ -618,23 +622,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         );
     };
 
-    if (config.patches.assistantSeparator) {
-        installAssistantSeparatorPatch();
-    }
-    if (config.patches.workingWidgetSpacing) {
-        installWorkingWidgetSpacingPatch();
-    }
-    if (config.patches.autocompleteCleanup) {
-        installAutocompleteCleanupPatch();
-    }
-    if (config.patches.markdownSyntax) {
-        installMarkdownSyntaxPatch();
-    }
-    installThirdPartyToolRendererPatch(
-        config.patches.thirdPartyToolRenderers
-            ? thirdPartyToolRenderingOptions(config)
-            : { enabled: false },
-    );
+    applyConfig(config);
     const baseTools = getBuiltInToolDefinitions(cwd);
 
     registerReadTool(pi, baseTools);
@@ -678,6 +666,10 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         explorationGroups.clear();
         toolCache.clear();
         clearQueuedDiffHighlights();
+        configureAssistantSeparatorPatch(false);
+        configureWorkingWidgetSpacingPatch(false);
+        configureAutocompleteCleanupPatch(false);
+        configureMarkdownSyntaxPatch(false);
         await disposeSyntaxHighlighting();
     });
 }

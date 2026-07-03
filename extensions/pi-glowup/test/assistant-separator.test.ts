@@ -1,6 +1,9 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { installAssistantSeparatorPatch } from "../src/assistant-separator.ts";
+import {
+    configureAssistantSeparatorPatch,
+    installAssistantSeparatorPatch,
+} from "../src/assistant-separator.ts";
 
 const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator.render");
 
@@ -192,5 +195,22 @@ describe("assistant separator patch", () => {
         installAssistantSeparatorPatch(prototype);
 
         expect(Reflect.get(prototype, "render")).toBe(patchedRender);
+    });
+
+    it("restores original assistant and chat container methods when disabled", () => {
+        const prototype = createPrototypeWithContentUpdates();
+        const containerPrototype = {
+            addChild(_component: Component): void {},
+        };
+        const originalRender = prototype.render;
+        const originalUpdateContent = prototype.updateContent;
+        const originalAddChild = containerPrototype.addChild;
+
+        configureAssistantSeparatorPatch(true, prototype, containerPrototype);
+        configureAssistantSeparatorPatch(false, prototype, containerPrototype);
+
+        expect(prototype.render).toBe(originalRender);
+        expect(prototype.updateContent).toBe(originalUpdateContent);
+        expect(containerPrototype.addChild).toBe(originalAddChild);
     });
 });

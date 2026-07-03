@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { installAutocompleteCleanupPatch } from "../src/autocomplete-cleanup.ts";
+import {
+    configureAutocompleteCleanupPatch,
+    installAutocompleteCleanupPatch,
+} from "../src/autocomplete-cleanup.ts";
 
 type FakeTui = {
     readonly getClearOnShrink: () => boolean;
@@ -86,5 +89,15 @@ describe("autocomplete cleanup patch", () => {
         installAutocompleteCleanupPatch(prototype);
 
         expect(prototype.clearAutocompleteUi).toBe(patchedClearAutocompleteUi);
+    });
+
+    it("restores the original autocomplete cleanup method when disabled", () => {
+        const prototype = createPrototype();
+        const originalClearAutocompleteUi = prototype.clearAutocompleteUi;
+
+        configureAutocompleteCleanupPatch(true, prototype);
+        configureAutocompleteCleanupPatch(false, prototype);
+
+        expect(prototype.clearAutocompleteUi).toBe(originalClearAutocompleteUi);
     });
 });

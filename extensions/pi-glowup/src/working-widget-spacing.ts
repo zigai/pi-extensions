@@ -1,9 +1,17 @@
 import { Container, Loader, Spacer, type Component } from "@earendil-works/pi-tui";
 
 const WORKING_WIDGET_SPACING_PATCH_KEY = Symbol.for("zigai.pi-codex-look.working-widget-spacing");
+const WORKING_WIDGET_SPACING_PATCH_STATE_KEY = Symbol.for(
+    "zigai.pi-codex-look.working-widget-spacing.state",
+);
+
+type WorkingWidgetSpacingPatchState = {
+    readonly originalRender: typeof Container.prototype.render;
+};
 
 type PatchableContainerPrototype = typeof Container.prototype & {
     [WORKING_WIDGET_SPACING_PATCH_KEY]?: true;
+    [WORKING_WIDGET_SPACING_PATCH_STATE_KEY]?: WorkingWidgetSpacingPatchState;
 };
 
 function isSingleLineSpacer(component: Component): boolean {
@@ -40,11 +48,31 @@ function isLoaderContainer(component: Component | undefined): boolean {
  * leaves an extra blank line directly above the input box during streaming.
  */
 export function installWorkingWidgetSpacingPatch(prototype: object = Container.prototype): void {
+    configureWorkingWidgetSpacingPatch(true, prototype);
+}
+
+/** Enables or disables the working-widget spacing prototype patch. */
+export function configureWorkingWidgetSpacingPatch(
+    enabled: boolean,
+    prototype: object = Container.prototype,
+): void {
     const containerPrototype = prototype as PatchableContainerPrototype;
-    if (containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY] === true) {
+    const state = containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
+
+    if (!enabled) {
+        if (state !== undefined) {
+            containerPrototype.render = state.originalRender;
+            delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
+            delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY];
+        }
         return;
     }
 
+    if (state !== undefined) {
+        return;
+    }
+
+    const originalRender = containerPrototype.render;
     containerPrototype.render = function renderWithWorkingWidgetSpacing(
         this: Container,
         width: number,
@@ -68,5 +96,6 @@ export function installWorkingWidgetSpacingPatch(prototype: object = Container.p
         return lines;
     };
 
+    containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY] = { originalRender };
     containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY] = true;
 }

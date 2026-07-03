@@ -1,9 +1,17 @@
 import { Editor, type TUI } from "@earendil-works/pi-tui";
 
 const AUTOCOMPLETE_CLEANUP_PATCH_KEY = Symbol.for("zigai.pi-codex-look.autocomplete-cleanup");
+const AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY = Symbol.for(
+    "zigai.pi-codex-look.autocomplete-cleanup.state",
+);
+
+type AutocompleteCleanupPatchState = {
+    readonly originalClearAutocompleteUi: (this: RuntimeEditor) => void;
+};
 
 type PatchableEditorPrototype = {
     [AUTOCOMPLETE_CLEANUP_PATCH_KEY]?: true;
+    [AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY]?: AutocompleteCleanupPatchState;
     clearAutocompleteUi?: (this: RuntimeEditor) => void;
 };
 
@@ -36,8 +44,27 @@ function shouldForceCleanupRender(editor: RuntimeEditor): boolean {
 export function installAutocompleteCleanupPatch(
     prototype: object = Editor.prototype as unknown as object,
 ): void {
+    configureAutocompleteCleanupPatch(true, prototype);
+}
+
+/** Enables or disables the autocomplete cleanup prototype patch. */
+export function configureAutocompleteCleanupPatch(
+    enabled: boolean,
+    prototype: object = Editor.prototype as unknown as object,
+): void {
     const editorPrototype = prototype as PatchableEditorPrototype;
-    if (editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY] === true) {
+    const state = editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY];
+
+    if (!enabled) {
+        if (state !== undefined) {
+            editorPrototype.clearAutocompleteUi = state.originalClearAutocompleteUi;
+            delete editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY];
+            delete editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY];
+        }
+        return;
+    }
+
+    if (state !== undefined) {
         return;
     }
 
@@ -56,5 +83,6 @@ export function installAutocompleteCleanupPatch(
         }
     };
 
+    editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY] = { originalClearAutocompleteUi };
     editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY] = true;
 }

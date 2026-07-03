@@ -9,7 +9,13 @@ import { Container, Spacer, type Component, visibleWidth } from "@earendil-works
 import ansiStyles from "ansi-styles";
 
 const ASSISTANT_SEPARATOR_PATCH_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator");
+const ASSISTANT_SEPARATOR_PATCH_STATE_KEY = Symbol.for(
+    "zigai.pi-codex-look.assistant-separator.state",
+);
 const CHAT_TRANSITION_PATCH_KEY = Symbol.for("zigai.pi-codex-look.chat-transition-separator");
+const CHAT_TRANSITION_PATCH_STATE_KEY = Symbol.for(
+    "zigai.pi-codex-look.chat-transition-separator.state",
+);
 const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator.render");
 
 type AssistantContent = {
@@ -35,19 +41,30 @@ type AssistantRenderInstance = {
     [ASSISTANT_SEPARATOR_RENDER_KEY]?: boolean;
 };
 
+type AssistantSeparatorPatchState = {
+    readonly originalRender: AssistantRenderPrototype["render"];
+    readonly originalUpdateContent: AssistantRenderPrototype["updateContent"];
+};
+
 type AssistantRenderPrototype = {
     render?: (this: AssistantRenderInstance, width: number) => string[];
     updateContent?: (this: AssistantRenderInstance, message: AssistantMessageLike) => void;
     [ASSISTANT_SEPARATOR_PATCH_KEY]?: true;
+    [ASSISTANT_SEPARATOR_PATCH_STATE_KEY]?: AssistantSeparatorPatchState;
 };
 
 type ChatComponentKind = "assistant" | "tool" | "user";
 
 type ChatContainerInstance = object;
 
+type ChatTransitionPatchState = {
+    readonly originalAddChild: ChatContainerPrototype["addChild"];
+};
+
 type ChatContainerPrototype = {
     addChild?: (this: ChatContainerInstance, component: Component) => void;
     [CHAT_TRANSITION_PATCH_KEY]?: true;
+    [CHAT_TRANSITION_PATCH_STATE_KEY]?: ChatTransitionPatchState;
 };
 
 function renderSeparator(width: number): string {
@@ -258,38 +275,109 @@ export function installAssistantSeparatorPatch(
     prototype: object = assistantMessagePrototype,
     containerPrototype: object = chatContainerPrototype,
 ): void {
+    configureAssistantSeparatorPatch(true, prototype, containerPrototype);
+}
+
+/** Enables or disables the assistant separator prototype patches. */
+export function configureAssistantSeparatorPatch(
+    enabled: boolean,
+    prototype: object = assistantMessagePrototype,
+    containerPrototype: object = chatContainerPrototype,
+): void {
     // SAFETY: This installer accepts test doubles and Pi's concrete prototype. All patched
     // members are runtime-guarded before use, and the symbol marker is local to this module.
     const assistantPrototype = prototype as AssistantRenderPrototype;
-    if (assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY] !== true) {
-        const originalRender = assistantPrototype.render;
-        if (typeof originalRender === "function") {
-            assistantPrototype.render = function renderWithAssistantSeparator(
-                this: AssistantRenderInstance,
-                width: number,
-            ): string[] {
-                const lines = originalRender.call(this, width);
-                if (lines.length === 0 || this[ASSISTANT_SEPARATOR_RENDER_KEY] !== true) {
-                    return lines;
-                }
-                return linesWithSeparatorSpacing(lines, width);
-            };
-        }
-
-        const originalUpdateContent = assistantPrototype.updateContent;
-        if (typeof originalUpdateContent === "function") {
-            installThinkingBlockSpacingPatch(assistantPrototype, originalUpdateContent);
-        }
-
-        assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY] = true;
-    }
-
     const container = containerPrototype as ChatContainerPrototype;
-    if (container[CHAT_TRANSITION_PATCH_KEY] !== true) {
-        const originalAddChild = container.addChild;
-        if (typeof originalAddChild === "function") {
-            installChatTransitionSeparatorPatch(container, originalAddChild);
-        }
-        container[CHAT_TRANSITION_PATCH_KEY] = true;
+
+    if (!enabled) {
+        restoreAssistantSeparatorPatch(assistantPrototype);
+        restoreChatTransitionPatch(container);
+        return;
     }
+
+    installAssistantPrototypePatch(assistantPrototype);
+    installChatPrototypePatch(container);
+}
+
+function installAssistantPrototypePatch(assistantPrototype: AssistantRenderPrototype): void {
+    if (assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] !== undefined) {
+        return;
+    }
+
+    const originalRender = assistantPrototype.render;
+    const originalUpdateContent = assistantPrototype.updateContent;
+    if (typeof originalRender === "function") {
+        assistantPrototype.render = function renderWithAssistantSeparator(
+            this: AssistantRenderInstance,
+            width: number,
+        ): string[] {
+            const lines = originalRender.call(this, width);
+            if (lines.length === 0 || this[ASSISTANT_SEPARATOR_RENDER_KEY] !== true) {
+                return lines;
+            }
+            return linesWithSeparatorSpacing(lines, width);
+        };
+    }
+
+    if (typeof originalUpdateContent === "function") {
+        installThinkingBlockSpacingPatch(assistantPrototype, originalUpdateContent);
+    }
+
+    assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] = {
+        originalRender,
+        originalUpdateContent,
+    };
+    assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY] = true;
+}
+
+function installChatPrototypePatch(container: ChatContainerPrototype): void {
+    if (container[CHAT_TRANSITION_PATCH_STATE_KEY] !== undefined) {
+        return;
+    }
+
+    const originalAddChild = container.addChild;
+    if (typeof originalAddChild === "function") {
+        installChatTransitionSeparatorPatch(container, originalAddChild);
+    }
+    container[CHAT_TRANSITION_PATCH_STATE_KEY] = { originalAddChild };
+    container[CHAT_TRANSITION_PATCH_KEY] = true;
+}
+
+function restoreAssistantSeparatorPatch(assistantPrototype: AssistantRenderPrototype): void {
+    const state = assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
+    if (state === undefined) {
+        return;
+    }
+
+    restoreAssistantMethod(assistantPrototype, "render", state.originalRender);
+    restoreAssistantMethod(assistantPrototype, "updateContent", state.originalUpdateContent);
+    delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
+    delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY];
+}
+
+function restoreChatTransitionPatch(container: ChatContainerPrototype): void {
+    const state = container[CHAT_TRANSITION_PATCH_STATE_KEY];
+    if (state === undefined) {
+        return;
+    }
+
+    if (state.originalAddChild === undefined) {
+        delete container.addChild;
+    } else {
+        container.addChild = state.originalAddChild;
+    }
+    delete container[CHAT_TRANSITION_PATCH_STATE_KEY];
+    delete container[CHAT_TRANSITION_PATCH_KEY];
+}
+
+function restoreAssistantMethod<TName extends "render" | "updateContent">(
+    prototype: AssistantRenderPrototype,
+    methodName: TName,
+    method: AssistantRenderPrototype[TName],
+): void {
+    if (method === undefined) {
+        delete prototype[methodName];
+        return;
+    }
+    prototype[methodName] = method;
 }
