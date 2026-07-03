@@ -72,7 +72,11 @@ export function configureWorkingWidgetSpacingPatch(
         return;
     }
 
-    const originalRender = containerPrototype.render;
+    const originalRender = Reflect.get(containerPrototype, "render");
+    if (typeof originalRender !== "function") {
+        return;
+    }
+
     containerPrototype.render = function renderWithWorkingWidgetSpacing(
         this: Container,
         width: number,
@@ -96,6 +100,8 @@ export function configureWorkingWidgetSpacingPatch(
         return lines;
     };
 
-    containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY] = { originalRender };
+    containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY] = {
+        originalRender: originalRender as typeof Container.prototype.render,
+    };
     containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY] = true;
 }

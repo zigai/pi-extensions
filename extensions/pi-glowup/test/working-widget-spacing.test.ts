@@ -75,11 +75,11 @@ describe("working widget spacing patch", () => {
                 return ["original"];
             },
         };
-        const originalRender = prototype.render;
+        const originalRender = Reflect.get(prototype, "render");
 
         configureWorkingWidgetSpacingPatch(true, prototype);
         configureWorkingWidgetSpacingPatch(false, prototype);
 
-        expect(prototype.render).toBe(originalRender);
+        expect(Reflect.get(prototype, "render")).toBe(originalRender);
     });
 });

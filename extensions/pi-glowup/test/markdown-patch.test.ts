@@ -8,11 +8,11 @@ describe("markdown syntax patch", () => {
                 return ["original"];
             },
         };
-        const originalRender = prototype.render;
+        const originalRender = Reflect.get(prototype, "render");
 
         configureMarkdownSyntaxPatch(true, prototype);
         configureMarkdownSyntaxPatch(false, prototype);
 
-        expect(prototype.render).toBe(originalRender);
+        expect(Reflect.get(prototype, "render")).toBe(originalRender);
     });
 });

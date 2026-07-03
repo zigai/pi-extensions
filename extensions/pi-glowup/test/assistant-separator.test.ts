@@ -202,15 +202,15 @@ describe("assistant separator patch", () => {
         const containerPrototype = {
             addChild(_component: Component): void {},
         };
-        const originalRender = prototype.render;
-        const originalUpdateContent = prototype.updateContent;
-        const originalAddChild = containerPrototype.addChild;
+        const originalRender = Reflect.get(prototype, "render");
+        const originalUpdateContent = Reflect.get(prototype, "updateContent");
+        const originalAddChild = Reflect.get(containerPrototype, "addChild");
 
         configureAssistantSeparatorPatch(true, prototype, containerPrototype);
         configureAssistantSeparatorPatch(false, prototype, containerPrototype);
 
-        expect(prototype.render).toBe(originalRender);
-        expect(prototype.updateContent).toBe(originalUpdateContent);
-        expect(containerPrototype.addChild).toBe(originalAddChild);
+        expect(Reflect.get(prototype, "render")).toBe(originalRender);
+        expect(Reflect.get(prototype, "updateContent")).toBe(originalUpdateContent);
+        expect(Reflect.get(containerPrototype, "addChild")).toBe(originalAddChild);
     });
 });

@@ -177,7 +177,7 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     initializationPromise = undefined;
 
     if (state?.status === "ready") {
-        await state.highlighter.dispose();
+        state.highlighter.dispose();
     }
 }
 
