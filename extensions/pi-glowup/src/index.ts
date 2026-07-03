@@ -575,10 +575,29 @@ function scheduleDeferredSyntaxPreload(reportWarning: (message: string) => void)
     deferredSyntaxPreload = setTimeout(() => {
         deferredSyntaxPreload = undefined;
         void initializeSyntaxHighlighting().catch((cause: unknown) => {
-            const message = cause instanceof Error ? cause.message : String(cause);
-            reportWarning(`[pi-codex-look] Deferred syntax preload failed: ${message}`);
+            reportWarning(`[pi-codex-look] Deferred syntax preload failed: ${errorMessage(cause)}`);
         });
     }, 1_500);
+}
+
+async function startSyntaxPreload(
+    config: CodexLookConfig,
+    reportWarning: (message: string) => void,
+): Promise<void> {
+    if (!config.syntaxPreloadOnStartup) {
+        scheduleDeferredSyntaxPreload(reportWarning);
+        return;
+    }
+
+    try {
+        await initializeSyntaxHighlighting();
+    } catch (cause: unknown) {
+        reportWarning(`[pi-codex-look] Syntax preload failed: ${errorMessage(cause)}`);
+    }
+}
+
+function errorMessage(cause: unknown): string {
+    return cause instanceof Error ? cause.message : String(cause);
 }
 
 export default async function codexLookExtension(pi: ExtensionAPI): Promise<void> {
@@ -599,11 +618,6 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         );
     };
 
-    if (config.syntaxPreloadOnStartup) {
-        await initializeSyntaxHighlighting();
-    } else {
-        scheduleDeferredSyntaxPreload(reportWarning);
-    }
     if (config.patches.assistantSeparator) {
         installAssistantSeparatorPatch();
     }
@@ -636,13 +650,14 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     registerGrepTool(pi, baseTools);
     registerLsTool(pi, baseTools);
 
-    pi.on("session_start", (_event, ctx) => {
+    pi.on("session_start", async (_event, ctx) => {
         applyConfig(
             readCodexLookConfig(
                 { cwd: ctx.cwd, reportWarning },
                 { includeProjectConfig: ctx.isProjectTrusted() },
             ),
         );
+        await startSyntaxPreload(config, reportWarning);
     });
 
     pi.on("turn_start", () => {
