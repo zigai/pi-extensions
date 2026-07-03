@@ -76,10 +76,8 @@ const diffLinePattern = /^([+\- ])(\s*\d*)\s(.*)$/;
 const ellipsisLinePattern = /^\s+\.\.\.$/;
 const addCountPattern = /^\+\s*\d+\s/;
 const removeCountPattern = /^-\s*\d+\s/;
-const completeHeredocPattern =
-    /^(?<prefix>.+?)<<-?\s*["']?(?<marker>[A-Za-z_][A-Za-z0-9_]*)["']?\s*\n(?<code>[\s\S]*)\n(?<closing>[A-Za-z_][A-Za-z0-9_]*)\s*$/;
-const partialHeredocPattern =
-    /^(?<prefix>.+?)<<-?\s*["']?(?<marker>[A-Za-z_][A-Za-z0-9_]*)["']?\s*(?:\n(?<code>[\s\S]*))?$/;
+const heredocOpenPattern =
+    /<<-?\s*(?:"(?<doubleMarker>[A-Za-z_][A-Za-z0-9_]*)"|'(?<singleMarker>[A-Za-z_][A-Za-z0-9_]*)'|(?<bareMarker>[A-Za-z_][A-Za-z0-9_]*))/u;
 
 function fg(theme: CodexRenderTheme, token: ThemeColor, text: string): string {
     return theme.fg(token, text);
@@ -871,66 +869,162 @@ function normalizeCodeForDisplay(code: string): string {
     return code.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\t/g, "  ");
 }
 
-function parseCompleteScriptInvocation(displayCommand: string): ScriptInvocation | undefined {
-    const match = completeHeredocPattern.exec(displayCommand);
-    const groups = match?.groups;
-    if (!groups) {
+type HeredocOpening = {
+    readonly prefix: string;
+    readonly marker: string;
+    readonly bodyStart: number;
+};
+
+type HeredocClosing =
+    | {
+          readonly code: string;
+          readonly hasTrailingShell: false;
+      }
+    | {
+          readonly hasTrailingShell: true;
+      };
+
+function parseHeredocScriptInvocation(displayCommand: string): ScriptInvocation | undefined {
+    const opening = parseHeredocOpening(displayCommand);
+    if (opening === undefined) {
         return undefined;
     }
 
-    const marker = groups.marker ?? "";
-    const closing = groups.closing ?? "";
-    if (marker !== closing) {
+    const body = displayCommand.slice(opening.bodyStart);
+    const closing = findHeredocClosing(body, opening.marker);
+    if (closing?.hasTrailingShell === true) {
         return undefined;
     }
 
-    return buildScriptInvocation(groups.prefix ?? "", groups.code ?? "");
+    return buildScriptInvocation(opening.prefix, closing?.code ?? body);
 }
 
-function parsePartialScriptInvocation(displayCommand: string): ScriptInvocation | undefined {
-    const match = partialHeredocPattern.exec(displayCommand);
+function parseHeredocOpening(displayCommand: string): HeredocOpening | undefined {
+    const firstLineEnd = firstLineEndIndex(displayCommand);
+    const firstLine = displayCommand.slice(0, firstLineEnd);
+    const match = heredocOpenPattern.exec(firstLine);
     const groups = match?.groups;
-    if (!groups) {
+    if (match === null || groups === undefined) {
         return undefined;
     }
 
-    const marker = groups.marker ?? "";
-    const code = groups.code ?? "";
-    if (hasHeredocClosingMarkerLine(code, marker)) {
+    const suffix = firstLine.slice(match.index + match[0].length);
+    if (hasShellControlOperator(suffix)) {
         return undefined;
     }
 
-    return buildScriptInvocation(groups.prefix ?? "", code);
+    return {
+        prefix: firstLine.slice(0, match.index),
+        marker: groups.doubleMarker ?? groups.singleMarker ?? groups.bareMarker ?? "",
+        bodyStart: nextLineStartIndex(displayCommand, firstLineEnd),
+    };
 }
 
-function hasHeredocClosingMarkerLine(code: string, marker: string): boolean {
+function firstLineEndIndex(text: string): number {
+    for (let index = 0; index < text.length; index += 1) {
+        const charCode = text.charCodeAt(index);
+        if (charCode === 10 || charCode === 13) {
+            return index;
+        }
+    }
+    return text.length;
+}
+
+function nextLineStartIndex(text: string, lineEnd: number): number {
+    if (lineEnd >= text.length) {
+        return text.length;
+    }
+    if (text.charCodeAt(lineEnd) === 13 && text.charCodeAt(lineEnd + 1) === 10) {
+        return lineEnd + 2;
+    }
+    return lineEnd + 1;
+}
+
+function hasShellControlOperator(text: string): boolean {
+    let quote: "'" | '"' | undefined;
+    let escaped = false;
+
+    for (const char of text) {
+        if (quote !== undefined) {
+            if (quote === '"' && escaped) {
+                escaped = false;
+                continue;
+            }
+            if (quote === '"' && char === "\\") {
+                escaped = true;
+                continue;
+            }
+            if (char === quote) {
+                quote = undefined;
+            }
+            continue;
+        }
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === "\\") {
+            escaped = true;
+            continue;
+        }
+        if (char === "'" || char === '"') {
+            quote = char;
+            continue;
+        }
+        if (["|", ";", "&", "<", ">"].includes(char)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function findHeredocClosing(body: string, marker: string): HeredocClosing | undefined {
     if (marker.length === 0) {
-        return false;
+        return undefined;
     }
 
     let lineStart = 0;
-    for (let index = 0; index <= code.length; index += 1) {
-        if (index < code.length) {
-            const charCode = code.charCodeAt(index);
+    for (let index = 0; index <= body.length; index += 1) {
+        if (index < body.length) {
+            const charCode = body.charCodeAt(index);
             if (charCode !== 10 && charCode !== 13) {
                 continue;
             }
         }
 
-        if (trimmedRangeEquals(code, lineStart, index, marker)) {
-            return true;
+        if (trimmedRangeEquals(body, lineStart, index, marker)) {
+            const trailingStart = nextLineStartIndex(body, index);
+            if (hasNonWhitespaceText(body.slice(trailingStart))) {
+                return { hasTrailingShell: true };
+            }
+            return {
+                code: body.slice(0, heredocCodeEndIndex(body, lineStart)),
+                hasTrailingShell: false,
+            };
         }
         if (
-            index < code.length &&
-            code.charCodeAt(index) === 13 &&
-            code.charCodeAt(index + 1) === 10
+            index < body.length &&
+            body.charCodeAt(index) === 13 &&
+            body.charCodeAt(index + 1) === 10
         ) {
             index += 1;
         }
         lineStart = index + 1;
     }
 
-    return false;
+    return undefined;
+}
+
+function heredocCodeEndIndex(body: string, closingLineStart: number): number {
+    if (closingLineStart === 0) {
+        return 0;
+    }
+    if (body.charCodeAt(closingLineStart - 2) === 13) {
+        return closingLineStart - 2;
+    }
+    return closingLineStart - 1;
 }
 
 function trimmedRangeEquals(text: string, start: number, end: number, expected: string): boolean {
@@ -1194,9 +1288,7 @@ function highlightScriptPreviewLines(lines: ReadonlyArray<string>, language: str
 export function parseScriptInvocation(command: string | undefined): ScriptInvocation | undefined {
     const displayCommand = stripShellWrapper(command);
     return (
-        parseCompleteScriptInvocation(displayCommand) ??
-        parsePartialScriptInvocation(displayCommand) ??
-        parseInlineScriptInvocation(displayCommand)
+        parseHeredocScriptInvocation(displayCommand) ?? parseInlineScriptInvocation(displayCommand)
     );
 }
 

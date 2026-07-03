@@ -341,6 +341,24 @@ describe("Codex rendering helpers", () => {
         });
     });
 
+    it("parses heredoc scripts with trailing command args after the marker", () => {
+        expect(
+            parseScriptInvocation(
+                "python - <<'PY' \"$target\"\nimport sys\nprint(sys.argv[1])\nPY",
+            ),
+        ).toEqual({
+            label: "Python",
+            language: "python",
+            code: "import sys\nprint(sys.argv[1])",
+        });
+    });
+
+    it("does not parse heredocs with chained commands after the marker", () => {
+        expect(
+            parseScriptInvocation("python - <<'PY' && rm -f tmp/demo.py\nprint('hi')\nPY"),
+        ).toBeUndefined();
+    });
+
     it("rejects partial heredocs once a closing marker line appears before trailing shell", () => {
         expect(
             parseScriptInvocation(
