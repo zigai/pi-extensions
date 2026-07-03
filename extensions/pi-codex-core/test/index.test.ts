@@ -51,7 +51,12 @@ import { formatWebRunToolOutput } from "../src/tools/web-run-output.ts";
 import { createWebRunTool } from "../src/tools/web-run.ts";
 import { Redacted } from "../src/redacted.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
-import { fetchCodexUsage, formatCodexUsage, parseCodexUsagePayload } from "../src/usage.ts";
+import {
+    fetchCodexUsage,
+    formatCodexUsage,
+    parseCodexRateLimitResetCreditsPayload,
+    parseCodexUsagePayload,
+} from "../src/usage.ts";
 
 test("exports extension metadata", () => {
     assert.equal(packageName, "pi-codex-core");
@@ -425,6 +430,70 @@ test("formats codex usage payloads", () => {
     assert.match(lines[2] ?? "", /^- GPT-5\.3-Codex-Spark: 5h: 100% left \(/);
     assert.equal(lines.at(-1), "- Resets available: 2");
     assert.doesNotMatch(formatted, /\b300m\b|\b10080m\b/);
+});
+
+test("formats Codex reset credit expiration metadata", () => {
+    const explicitExpiration = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    const grantedAt = new Date().toISOString();
+    const credits = parseCodexRateLimitResetCreditsPayload({
+        available_count: "2",
+        credits: [
+            {
+                id: "RateLimitResetCredit_1",
+                status: "available",
+                granted_at: grantedAt,
+                expires_at: explicitExpiration,
+                redeem_started_at: null,
+                redeemed_at: null,
+            },
+            {
+                id: "RateLimitResetCredit_2",
+                status: "available",
+                granted_at: grantedAt,
+                redeem_started_at: null,
+                redeemed_at: null,
+            },
+            {
+                id: "RateLimitResetCredit_3",
+                status: "redeemed",
+                granted_at: grantedAt,
+                expires_at: new Date(Date.now() + 60_000).toISOString(),
+                redeemed_at: new Date().toISOString(),
+            },
+        ],
+    });
+
+    assert.ok(credits);
+    assert.equal(credits.credits.length, 3);
+    const firstCredit = credits.credits[0];
+    assert.ok(firstCredit);
+    assert.equal(firstCredit.expiresAt, explicitExpiration);
+    assert.equal(firstCredit.redeemStartedAt, undefined);
+    const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} });
+
+    assert.match(formatted, /- Resets available: 2 \(next expires in ~5d \(/);
+    assert.doesNotMatch(formatted, /~1m/);
+});
+
+test("formats Codex reset credit expiration from granted time", () => {
+    const grantedAt = new Date().toISOString();
+    const credits = parseCodexRateLimitResetCreditsPayload({
+        available_count: 1,
+        credits: [
+            {
+                id: "RateLimitResetCredit_1",
+                status: "available",
+                granted_at: grantedAt,
+                redeem_started_at: null,
+                redeemed_at: null,
+            },
+        ],
+    });
+
+    assert.ok(credits);
+    const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} });
+
+    assert.match(formatted, /- Resets available: 1 \(expires in ~30d \(/);
 });
 
 test("fetches Codex usage from the selected provider base URL", async () => {
