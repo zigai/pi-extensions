@@ -122,7 +122,9 @@ describe("tool execution patches", () => {
         expect(prototype.getRenderShell.call(readInstance)).toBe("self");
         expect(prototype.hasRendererDefinition.call(readInstance)).toBe(true);
         expect(
-            prototype.getCallRenderer.call(readInstance)?.({}, plainTheme, renderContext).render(80),
+            prototype.getCallRenderer
+                .call(readInstance)?.({}, plainTheme, renderContext)
+                .render(80),
         ).toEqual(["called read"]);
         expect(
             prototype.getResultRenderer

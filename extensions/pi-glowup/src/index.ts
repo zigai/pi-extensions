@@ -233,7 +233,10 @@ function lsActionArgs(args: unknown): LsActionArgs {
 }
 
 function hasImageContent(result: TextResult): boolean {
-    return Array.isArray(result.content) && result.content.some((item) => isRecord(item) && item.type === "image");
+    return (
+        Array.isArray(result.content) &&
+        result.content.some((item) => isRecord(item) && item.type === "image")
+    );
 }
 
 function scriptFormatterCommands(
@@ -263,17 +266,35 @@ function scriptPreviewHeaderLayout(config: CodexLookConfig): ScriptPreviewHeader
         : parseScriptPreviewHeaderLayout(headerLayoutFromEnv);
 }
 
-function renderBuiltInToolCall(headerLayout: () => ScriptPreviewHeaderLayout): BuiltInToolRendererOptions["renderCall"] {
+function renderBuiltInToolCall(
+    headerLayout: () => ScriptPreviewHeaderLayout,
+): BuiltInToolRendererOptions["renderCall"] {
     return (toolName, args, theme, context) => {
         switch (toolName) {
             case "read":
-                return renderExplorationCall(theme, context, formatReadAction(theme, readActionArgs(args)));
+                return renderExplorationCall(
+                    theme,
+                    context,
+                    formatReadAction(theme, readActionArgs(args)),
+                );
             case "find":
-                return renderExplorationCall(theme, context, formatFindAction(theme, findActionArgs(args)));
+                return renderExplorationCall(
+                    theme,
+                    context,
+                    formatFindAction(theme, findActionArgs(args)),
+                );
             case "grep":
-                return renderExplorationCall(theme, context, formatGrepAction(theme, grepActionArgs(args)));
+                return renderExplorationCall(
+                    theme,
+                    context,
+                    formatGrepAction(theme, grepActionArgs(args)),
+                );
             case "ls":
-                return renderExplorationCall(theme, context, formatLsAction(theme, lsActionArgs(args)));
+                return renderExplorationCall(
+                    theme,
+                    context,
+                    formatLsAction(theme, lsActionArgs(args)),
+                );
             case "bash":
                 return renderBashCall(args, theme, context, headerLayout);
             case "write":
@@ -284,7 +305,9 @@ function renderBuiltInToolCall(headerLayout: () => ScriptPreviewHeaderLayout): B
     };
 }
 
-function renderBuiltInToolResult(headerLayout: () => ScriptPreviewHeaderLayout): BuiltInToolRendererOptions["renderResult"] {
+function renderBuiltInToolResult(
+    headerLayout: () => ScriptPreviewHeaderLayout,
+): BuiltInToolRendererOptions["renderResult"] {
     return (toolName, result, options, theme, context) => {
         switch (toolName) {
             case "read":
@@ -351,11 +374,7 @@ function renderBashResult(
     });
 }
 
-function renderWriteCall(
-    args: unknown,
-    theme: BuiltInRenderTheme,
-    context: BuiltInRenderContext,
-) {
+function renderWriteCall(args: unknown, theme: BuiltInRenderTheme, context: BuiltInRenderContext) {
     closeExplorationGroup();
     return renderCodexCall(theme, {
         state: context.isError ? "error" : context.isPartial ? "muted" : "success",
@@ -370,7 +389,9 @@ function renderWriteResult(
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
 ) {
-    const pierrePayload = !context.isError ? getPierreDiffPayloadFromDetails(result.details) : undefined;
+    const pierrePayload = !context.isError
+        ? getPierreDiffPayloadFromDetails(result.details)
+        : undefined;
     if (pierrePayload) {
         return renderPierreDiff(pierrePayload, theme, { expanded: options.expanded }, context);
     }
@@ -381,11 +402,7 @@ function renderWriteResult(
     });
 }
 
-function renderEditCall(
-    args: unknown,
-    theme: BuiltInRenderTheme,
-    context: BuiltInRenderContext,
-) {
+function renderEditCall(args: unknown, theme: BuiltInRenderTheme, context: BuiltInRenderContext) {
     closeExplorationGroup();
     const preview = editPreviews.get(context.toolCallId);
     if (!context.isPartial && preview) {
@@ -415,7 +432,9 @@ function renderEditResult(
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
 ) {
-    const pierrePayload = !context.isError ? getPierreDiffPayloadFromDetails(result.details) : undefined;
+    const pierrePayload = !context.isError
+        ? getPierreDiffPayloadFromDetails(result.details)
+        : undefined;
     if (pierrePayload) {
         return renderPierreDiff(pierrePayload, theme, { expanded: options.expanded }, context);
     }

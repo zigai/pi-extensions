@@ -21,15 +21,11 @@ describe("syntax highlighter lifecycle", () => {
         await disposeSyntaxHighlighting();
 
         expect(isSyntaxHighlightingReady()).toBe(false);
-        expect(highlightSyntaxCode("const value = 1;", "typescript")).toEqual([
-            "const value = 1;",
-        ]);
+        expect(highlightSyntaxCode("const value = 1;", "typescript")).toEqual(["const value = 1;"]);
 
         await initializeSyntaxHighlighting({ PI_CODEX_LOOK_SYNTAX: "off" });
 
         expect(isSyntaxHighlightingReady()).toBe(false);
-        expect(highlightSyntaxCode("const value = 1;", "typescript")).toEqual([
-            "const value = 1;",
-        ]);
+        expect(highlightSyntaxCode("const value = 1;", "typescript")).toEqual(["const value = 1;"]);
     });
 });

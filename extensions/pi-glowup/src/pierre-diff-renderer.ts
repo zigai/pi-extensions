@@ -282,11 +282,7 @@ function renderPierreDiffSummary(payload: PierreSummaryDiffPayload, theme: Theme
             const hint = "Use git diff or read the file directly to inspect the full change.";
             return [
                 truncateToWidth(headline, safeWidth, ""),
-                truncateToWidth(
-                    `  └ ${theme.fg("muted", summaryDetail(payload))}`,
-                    safeWidth,
-                    "",
-                ),
+                truncateToWidth(`  └ ${theme.fg("muted", summaryDetail(payload))}`, safeWidth, ""),
                 truncateToWidth(`    ${theme.fg("muted", hint)}`, safeWidth, ""),
             ];
         },

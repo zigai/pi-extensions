@@ -4,7 +4,12 @@ import {
     type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import { emptyComponent, formatPathTarget, renderCodexCall, renderCodexOutput } from "./rendering.ts";
+import {
+    emptyComponent,
+    formatPathTarget,
+    renderCodexCall,
+    renderCodexOutput,
+} from "./rendering.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
 import {
     createThirdPartyToolRenderer,
@@ -16,9 +21,7 @@ import {
 } from "./third-party-renderers.ts";
 
 const BUILT_IN_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.built-in-renderers");
-const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for(
-    "zigai.pi-codex-look.built-in-renderer-state",
-);
+const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for("zigai.pi-codex-look.built-in-renderer-state");
 const THIRD_PARTY_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.third-party-renderers");
 const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-codex-look.third-party-renderer-state",
@@ -39,7 +42,11 @@ export type BuiltInToolRenderContext = ThirdPartyToolRenderContext & {
     readonly cwd: string;
 };
 
-type ToolCallRenderer = (args: unknown, theme: Theme, context: BuiltInToolRenderContext) => Component;
+type ToolCallRenderer = (
+    args: unknown,
+    theme: Theme,
+    context: BuiltInToolRenderContext,
+) => Component;
 type ToolResultRenderer = (
     result: ThirdPartyToolResult,
     options: ToolRenderResultOptions,
@@ -72,7 +79,15 @@ type ThirdPartyRendererPatchState = {
     readonly rendererCache: Map<string, ThirdPartyToolRenderer>;
 };
 
-const BUILT_IN_TOOL_NAMES = new Set<string>(["read", "bash", "edit", "write", "find", "grep", "ls"]);
+const BUILT_IN_TOOL_NAMES = new Set<string>([
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "find",
+    "grep",
+    "ls",
+]);
 
 type ToolExecutionPrototype = {
     getCallRenderer?: (this: ToolExecutionInstance) => ToolCallRenderer | undefined;
