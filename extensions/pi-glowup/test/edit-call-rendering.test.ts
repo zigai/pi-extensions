@@ -17,9 +17,10 @@ describe("edit call rendering", () => {
     );
 
     expect(summary).toEqual({
-      statusText: "Edit Invalid",
+      statusText: "Edit",
       path: "src/rendering.ts",
       suffix: " (2 valid, 2 invalid)",
+      hasInvalidEdits: true,
     });
   });
 
@@ -33,6 +34,7 @@ describe("edit call rendering", () => {
       statusText: "Edit Pending",
       path: "src/rendering.ts",
       suffix: "",
+      hasInvalidEdits: false,
     });
   });
 
@@ -52,6 +54,7 @@ describe("edit call rendering", () => {
       statusText: "Edit Failed",
       path: "src/rendering.ts",
       suffix: " (2 edits)",
+      hasInvalidEdits: false,
     });
   });
 });

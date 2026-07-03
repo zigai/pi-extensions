@@ -416,7 +416,9 @@ function normalizeDiffMetadataLanguage(
   pathValue: string,
 ): FileDiffMetadata {
   const language = metadata.lang ?? getFiletypeFromFileName(pathValue);
-  return language ? setLanguageOverride(metadata, language) : metadata;
+  return language === undefined || language.length === 0
+    ? metadata
+    : setLanguageOverride(metadata, language);
 }
 
 function diffStats(metadata: FileDiffMetadata, snapshot: DiffSnapshot): PierreDiffStats {

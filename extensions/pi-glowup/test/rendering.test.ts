@@ -327,17 +327,97 @@ describe("Codex rendering helpers", () => {
     expect(text).not.toContain("<<'PY'");
   });
 
-  it("renders the final script preview line as a branch before output", () => {
+  it("renders script previews inline by default when the first line fits", () => {
     const component = renderScriptCall(
       plainTheme,
-      { label: "Node", language: "javascript", code: "const first = 1;\nconsole.log(first);" },
+      { label: "Python", language: "python", code: "print('hi')\nprint('bye')" },
       { state: "success", expanded: false },
     );
 
     const lines = component.render(100);
 
-    expect(lines[1]).toContain("  │ ");
-    expect(lines[2]).toContain("  └ ");
+    expect(lines[0]).toContain("• Python print('hi')");
+    expect(lines[1]).toContain("  │ print('bye')");
+  });
+
+  it("renders non-bash script previews with block headers when the first line does not fit", () => {
+    const component = renderScriptCall(
+      plainTheme,
+      {
+        label: "Python",
+        language: "python",
+        code: "root=Path.home()/'.pi/agent/debug-runs/live-session-with-a-long-name'\nrows=[]",
+      },
+      { state: "success", expanded: false },
+    );
+
+    const lines = component.render(48);
+
+    expect(lines[0]).toBe("• Python");
+    expect(lines[1]).toContain("  │ root=Path.home()");
+    expect(lines.some((line) => line.includes("  │ rows=[]"))).toBe(true);
+  });
+
+  it("keeps bash script previews inline by default", () => {
+    const component = renderScriptCall(
+      plainTheme,
+      {
+        label: "Bash",
+        language: "bash",
+        code: "printf 'config: '; if [ -f \"$HOME/.pi/agent/pi-debug/config.json\" ]; then echo ok; fi",
+      },
+      { state: "success", expanded: false },
+    );
+
+    const lines = component.render(48);
+
+    expect(lines[0]).toContain("• Bash printf");
+    expect(lines[1]).toContain("  │   ");
+    expect(lines[1]).not.toContain("↳");
+  });
+
+  it("renders inline script previews when configured", () => {
+    const component = renderScriptCall(
+      plainTheme,
+      { label: "Node", language: "javascript", code: "const first = 1;\nconsole.log(first);" },
+      { state: "success", expanded: false, headerLayout: "inline" },
+    );
+
+    const lines = component.render(100);
+
+    expect(lines[0]).toContain("• Node const first = 1;");
+    expect(lines[1]).toContain("  │ console.log(first);");
+  });
+
+  it("indents wrapped script preview continuations without a glyph marker", () => {
+    const code =
+      "markers = {'pyproject.toml','setup.py','setup.cfg','requirements.txt','Pipfile','poetry.lock','uv.lock','tox.ini'}";
+    const component = renderScriptCall(
+      plainTheme,
+      { label: "Python", language: "python", code },
+      { state: "success", expanded: false },
+    );
+
+    const lines = component.render(48);
+
+    expectLinesWithinWidth(lines, 48);
+    expect(lines.some((line) => line.includes("markers ="))).toBe(true);
+    expect(lines.some((line) => line.includes("│ ↳"))).toBe(false);
+    expect(lines.some((line) => line.includes("│   {'pyproject"))).toBe(true);
+    expect(lines.some((line) => line.includes("│ {'pyproject"))).toBe(false);
+  });
+
+  it("renders already-formatted script previews without render-time formatting", () => {
+    const component = renderScriptCall(
+      plainTheme,
+      { label: "Python", language: "python", code: "print(2)" },
+      { state: "success", expanded: false },
+    );
+
+    const rendered = component.render(80).join("\n");
+
+    expect(rendered).toContain("print(2)");
+    expect(rendered).not.toContain("print(1)");
   });
 
   it("renders script output with an arrow prefix", () => {

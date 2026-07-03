@@ -3,6 +3,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import { buildPierreDiffPayload, buildUnifiedDiffRows } from "../src/pierre-diff.ts";
 import { renderPierreDiff, shouldRenderSideBySideDiff } from "../src/pierre-diff-renderer.ts";
+import { loadHighlightedDiff } from "../src/pierre-highlight.ts";
 import { getPierrePalette } from "../src/pierre-theme.ts";
 
 type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
@@ -65,6 +66,39 @@ describe("Pierre diff rendering", () => {
     expect(shouldRenderSideBySideDiff(139)).toBe(false);
     expect(shouldRenderSideBySideDiff(140)).toBe(true);
     expect(shouldRenderSideBySideDiff(180, false)).toBe(false);
+  });
+
+  it("keeps cached rendered lines across identical component updates", () => {
+    const payload = buildPierreDiffPayload({
+      path: "src/example.ts",
+      oldContent: "alpha\nold\nomega\n",
+      newContent: "alpha\nnew\nomega\n",
+      oldSizeBytes: 16,
+      newSizeBytes: 16,
+      canBuildPierreDiff: true,
+    });
+    if (!payload) {
+      throw new Error("expected Pierre payload");
+    }
+
+    const component = renderPierreDiff(
+      payload,
+      testTheme,
+      { expanded: false },
+      { lastComponent: undefined, invalidate() {} },
+    );
+    const firstLines = component.render(80);
+    const reused = renderPierreDiff(
+      payload,
+      testTheme,
+      { expanded: false },
+      { lastComponent: component },
+    );
+    const secondLines = reused.render(80);
+
+    expect(reused).toBe(component);
+    expect(secondLines).toBe(firstLines);
+    expect(secondLines).toEqual(firstLines);
   });
 
   it("renders inline unless expanded width has room for side-by-side", () => {
@@ -138,14 +172,13 @@ describe("Pierre diff rendering", () => {
       throw new Error("expected Pierre payload");
     }
 
+    await loadHighlightedDiff(payload.metadata);
     const component = renderPierreDiff(
       payload,
       testTheme,
       { expanded: false },
       { lastComponent: undefined, invalidate() {} },
     );
-    component.render(100);
-    await new Promise((resolve) => setTimeout(resolve, 25));
     const plainLines = component.render(100).map((line) => stripAnsi(line).trimEnd());
 
     expect(plainLines).toContain("+  2");

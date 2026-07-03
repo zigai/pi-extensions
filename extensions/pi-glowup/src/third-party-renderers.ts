@@ -1,4 +1,3 @@
-import { closeSync, openSync, readSync } from "node:fs";
 import type { Component } from "@earendil-works/pi-tui";
 import {
   emptyComponent,
@@ -9,6 +8,7 @@ import {
   type CodexRenderTheme,
 } from "./rendering.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
+import { RENDER_THEME_TOKENS } from "./syntax/palette.ts";
 
 /** Optional property third-party tools can set to preserve their own renderer. */
 export const CODEX_LOOK_RENDERING_PROPERTY = "codexLookRendering";
@@ -97,7 +97,6 @@ type GoalRecord = {
 };
 
 const MAX_PREVIEW_CHARACTERS = 700;
-const MAX_WEB_RUN_FILE_BYTES = 64 * 1024;
 const MAX_WEB_RUN_HIGHLIGHTS = 3;
 const WEB_RUN_COLLAPSED_SOURCE_LIMIT = 4;
 const NAMESPACED_TOOL_PREFIX_PATTERN = /^[A-Za-z0-9_-]+__(?<name>.+)$/;
@@ -108,6 +107,7 @@ const WEB_RUN_CONTENT_TYPE_PATTERN = /Content type:\s*(?<type>[^;]+)/u;
 const WEB_RUN_SOURCE_PATTERN = /Source:\s*(?<source>[^;]+)/u;
 const WEB_RUN_LINE_PATTERN = /^L\d+:\s*(?<text>.*)$/u;
 const WEB_RUN_CITATION_PATTERN = /cite[^]*/gu;
+const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/gu;
 
 const BROWSER_COMMAND_LABELS = new Map<string, string>([
   ["open", "Browser Open"],
@@ -161,14 +161,32 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isDefined<T>(value: T | undefined): value is T {
+  return value !== undefined;
+}
+
+function isNonEmptyString(value: string | undefined): value is string {
+  return value !== undefined && value.length > 0;
+}
+
 function getString(record: UnknownRecord, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
 }
 
+function getNonEmptyString(record: UnknownRecord, key: string): string | undefined {
+  const value = getString(record, key);
+  return isNonEmptyString(value) ? value : undefined;
+}
+
 function getNumber(record: UnknownRecord, key: string): number | undefined {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function getBoolean(record: UnknownRecord, key: string): boolean | undefined {
+  const value = record[key];
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function getArray(record: UnknownRecord, key: string): ReadonlyArray<unknown> | undefined {
@@ -177,7 +195,7 @@ function getArray(record: UnknownRecord, key: string): ReadonlyArray<unknown> | 
 }
 
 function displayToolName(toolName: string): string {
-  return toolName || "tool";
+  return toolName.length > 0 ? toolName : "tool";
 }
 
 function baseToolName(toolName: string): string {
@@ -220,10 +238,12 @@ function stringifyPreview(value: unknown): string | undefined {
     return `${value.toString()}n`;
   }
   if (typeof value === "symbol") {
-    return value.description ? `Symbol(${value.description})` : "Symbol";
+    return value.description === undefined || value.description.length === 0
+      ? "Symbol"
+      : `Symbol(${value.description})`;
   }
   if (typeof value === "function") {
-    return value.name ? `[Function ${value.name}]` : "[Function]";
+    return value.name.length > 0 ? `[Function ${value.name}]` : "[Function]";
   }
 
   const seen = new WeakSet<object>();
@@ -235,10 +255,12 @@ function stringifyPreview(value: unknown): string | undefined {
           return `${nestedValue.toString()}n`;
         }
         if (typeof nestedValue === "function") {
-          return nestedValue.name ? `[Function ${nestedValue.name}]` : "[Function]";
+          return nestedValue.name.length > 0 ? `[Function ${nestedValue.name}]` : "[Function]";
         }
         if (typeof nestedValue === "symbol") {
-          return nestedValue.description ? `Symbol(${nestedValue.description})` : "Symbol";
+          return nestedValue.description === undefined || nestedValue.description.length === 0
+            ? "Symbol"
+            : `Symbol(${nestedValue.description})`;
         }
         if (typeof nestedValue === "object" && nestedValue !== null) {
           if (seen.has(nestedValue)) {
@@ -250,15 +272,21 @@ function stringifyPreview(value: unknown): string | undefined {
       },
       2,
     );
-    return json ?? String(value);
+    return json;
   } catch (cause: unknown) {
-    return String(cause);
+    if (cause instanceof Error) {
+      return cause.message;
+    }
+    if (typeof cause === "string") {
+      return cause;
+    }
+    return undefined;
   }
 }
 
 function previewValue(value: unknown): string | undefined {
   const preview = stringifyPreview(value)?.trim();
-  if (!preview || preview === "{}" || preview === "[]") {
+  if (preview === undefined || preview.length === 0 || preview === "{}" || preview === "[]") {
     return undefined;
   }
   return truncateText(preview, MAX_PREVIEW_CHARACTERS);
@@ -292,11 +320,11 @@ function textOutput(result: ThirdPartyToolResult): string | undefined {
 }
 
 function compactQuotedText(text: string | undefined, maxCharacters = 96): string | undefined {
-  if (!text) {
+  if (text === undefined || text.length === 0) {
     return undefined;
   }
   const compact = text.replace(/\s+/g, " ").trim();
-  if (!compact) {
+  if (compact.length === 0) {
     return undefined;
   }
   return `"${truncateText(compact, maxCharacters)}"`;
@@ -306,7 +334,7 @@ function countedSummary(
   label: string,
   values: ReadonlyArray<unknown> | undefined,
 ): string | undefined {
-  if (!values || values.length === 0) {
+  if (values === undefined || values.length === 0) {
     return undefined;
   }
   const prefix = label.length > 0 ? `${label} ` : "";
@@ -314,7 +342,7 @@ function countedSummary(
   if (isRecord(first)) {
     const query = getString(first, "q") ?? getString(first, "ref_id") ?? getString(first, "url");
     const quoted = compactQuotedText(query);
-    if (quoted) {
+    if (quoted !== undefined) {
       return values.length === 1
         ? `${prefix}${quoted}`
         : `${prefix}${quoted} +${values.length - 1}`;
@@ -335,7 +363,7 @@ function renderSimpleResult(
     mode: "headTail",
     maxPreviewLines: 4,
     noOutputLabel: null,
-    ...(language ? { syntax: { language } } : {}),
+    ...(language === undefined ? {} : { syntax: { language } }),
   });
 }
 
@@ -394,11 +422,13 @@ function summarizeBrowserArgs(args: unknown): CallSummary {
   }
 
   if (isRecord(args.electron)) {
-    const action = getString(args.electron, "action");
-    const appName = getString(args.electron, "appName") ?? getString(args.electron, "bundleId");
+    const action = getNonEmptyString(args.electron, "action");
+    const appName =
+      getNonEmptyString(args.electron, "appName") ?? getNonEmptyString(args.electron, "bundleId");
+    const summary = [action, appName].filter(isDefined).join(" ");
     return {
       label: BROWSER_COMMAND_LABELS.get("electron") ?? "Electron",
-      body: [action, appName].filter(Boolean).join(" ") || previewArgs(args.electron),
+      body: summary.length > 0 ? summary : previewArgs(args.electron),
     };
   }
 
@@ -415,8 +445,9 @@ function summarizeBrowserArgs(args: unknown): CallSummary {
   }
 
   const commandArgs = getArray(args, "args");
-  const command = typeof commandArgs?.[0] === "string" ? commandArgs[0] : undefined;
-  if (command && commandArgs) {
+  const rawCommand = commandArgs?.[0];
+  const command = typeof rawCommand === "string" && rawCommand.length > 0 ? rawCommand : undefined;
+  if (command !== undefined && commandArgs !== undefined) {
     return {
       label: BROWSER_COMMAND_LABELS.get(command) ?? `Browser ${command}`,
       body: previewArgs(commandArgs.slice(1)),
@@ -431,16 +462,19 @@ function summarizeMcpArgs(args: unknown): CallSummary {
     return { label: "MCP", body: previewArgs(args) };
   }
 
-  const tool = getString(args, "tool") ?? getString(args, "describe") ?? getString(args, "search");
-  if (tool) {
+  const tool =
+    getNonEmptyString(args, "tool") ??
+    getNonEmptyString(args, "describe") ??
+    getNonEmptyString(args, "search");
+  if (tool !== undefined) {
     return {
       label: MCP_COMMAND_LABELS.get(tool) ?? `MCP ${tool}`,
       body: previewArgs(args.args ?? args),
     };
   }
 
-  const connect = getString(args, "connect") ?? getString(args, "server");
-  if (connect) {
+  const connect = getNonEmptyString(args, "connect") ?? getNonEmptyString(args, "server");
+  if (connect !== undefined) {
     return { label: "MCP Connect", body: connect };
   }
 
@@ -496,9 +530,9 @@ function parseGoalRecord(value: unknown): GoalRecord | null | undefined {
     return undefined;
   }
 
-  const objective = getString(value, "objective");
-  const status = getString(value, "status");
-  if (!objective || !status) {
+  const objective = getNonEmptyString(value, "objective");
+  const status = getNonEmptyString(value, "status");
+  if (objective === undefined || status === undefined) {
     return undefined;
   }
 
@@ -519,7 +553,7 @@ function parseGoalFromResult(result: ThirdPartyToolResult): GoalRecord | null | 
   }
 
   const output = textOutput(result);
-  if (!output) {
+  if (output === undefined || output.length === 0) {
     return undefined;
   }
 
@@ -532,6 +566,66 @@ function parseGoalFromResult(result: ThirdPartyToolResult): GoalRecord | null | 
     return undefined;
   }
   return undefined;
+}
+
+function getBracketOpener(closingBracket: string): string {
+  if (closingBracket === ")") {
+    return "(";
+  }
+  if (closingBracket === "]") {
+    return "[";
+  }
+  return "{";
+}
+
+function trimUrlEnd(text: string): string {
+  let result = text.replace(/[.,;:!?]+$/u, "");
+  while (result.length > 0) {
+    const last = result.at(-1);
+    if (last !== ")" && last !== "]" && last !== "}") {
+      break;
+    }
+
+    const opener = getBracketOpener(last);
+    const openingCount = result.split(opener).length - 1;
+    const closingCount = result.split(last).length - 1;
+    if (closingCount <= openingCount) {
+      break;
+    }
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+
+function styleUrlText(theme: CodexRenderTheme, text: string): string {
+  return theme.fg(RENDER_THEME_TOKENS.url, text);
+}
+
+function highlightUrlText(theme: CodexRenderTheme, text: string): string {
+  let output = "";
+  let cursor = 0;
+  for (const match of text.matchAll(URL_PATTERN)) {
+    if (match.index === undefined) {
+      continue;
+    }
+
+    const rawUrl = match[0];
+    const url = trimUrlEnd(rawUrl);
+    if (url.length === 0) {
+      continue;
+    }
+
+    const start = match.index;
+    const end = start + url.length;
+    output += text.slice(cursor, start);
+    output += styleUrlText(theme, url);
+    cursor = end;
+  }
+
+  if (cursor === 0) {
+    return text;
+  }
+  return `${output}${text.slice(cursor)}`;
 }
 
 function compactInteger(value: number): string {
@@ -605,7 +699,7 @@ function createGoalRenderer(toolName: string): ThirdPartyToolRenderer {
     },
     renderResult(result, options, theme) {
       const formatted = formatGoalResult(parseGoalFromResult(result));
-      if (formatted) {
+      if (formatted !== undefined && formatted.length > 0) {
         return renderCodexOutput(theme, formatted, {
           expanded: options.expanded,
           mode: "head",
@@ -618,7 +712,7 @@ function createGoalRenderer(toolName: string): ThirdPartyToolRenderer {
   };
 }
 
-function summarizeWebRunArgs(args: unknown): string | undefined {
+function summarizeWebRunArgs(args: unknown, theme: CodexRenderTheme): string | undefined {
   if (!isRecord(args)) {
     return previewArgs(args);
   }
@@ -642,8 +736,8 @@ function summarizeWebRunArgs(args: unknown): string | undefined {
         action.values,
       ),
     )
-    .filter(Boolean);
-  return parts.length > 0 ? parts.join(" • ") : previewArgs(args);
+    .filter(isDefined);
+  return parts.length > 0 ? highlightUrlText(theme, parts.join(" • ")) : previewArgs(args);
 }
 
 function summarizeImagegenArgs(args: unknown): string | undefined {
@@ -654,10 +748,11 @@ function summarizeImagegenArgs(args: unknown): string | undefined {
   const referenced = getArray(args, "referenced_image_paths") ?? getArray(args, "images");
   const recentCount = getNumber(args, "num_last_images_to_include");
   const metadata = [
-    referenced && referenced.length > 0 ? `${referenced.length} refs` : undefined,
+    referenced !== undefined && referenced.length > 0 ? `${referenced.length} refs` : undefined,
     recentCount === undefined ? undefined : `${recentCount} recent`,
-  ].filter(Boolean);
-  return [prompt, metadata.join(" • ")].filter(Boolean).join("\n") || undefined;
+  ].filter(isDefined);
+  const summary = [prompt, metadata.join(" • ")].filter(isNonEmptyString).join("\n");
+  return summary.length > 0 ? summary : undefined;
 }
 
 function summarizeViewImageArgs(args: unknown, theme: CodexRenderTheme): string | undefined {
@@ -667,9 +762,10 @@ function summarizeViewImageArgs(args: unknown, theme: CodexRenderTheme): string 
   const path =
     getString(args, "path") ?? getString(args, "file_path") ?? getString(args, "image_path");
   const detail = getString(args, "detail");
-  const pathText = path ? formatPathTarget(theme, path) : undefined;
-  const detailText = detail ? `detail: ${detail}` : undefined;
-  return [pathText, detailText].filter(Boolean).join(" · ") || undefined;
+  const pathText = isNonEmptyString(path) ? formatPathTarget(theme, path) : undefined;
+  const detailText = isNonEmptyString(detail) ? `detail: ${detail}` : undefined;
+  const summary = [pathText, detailText].filter(isDefined).join(" · ");
+  return summary.length > 0 ? summary : undefined;
 }
 
 function imagegenResultSummary(result: ThirdPartyToolResult): string | undefined {
@@ -677,34 +773,14 @@ function imagegenResultSummary(result: ThirdPartyToolResult): string | undefined
     return undefined;
   }
   const images = getArray(result.details, "images");
-  if (!images || images.length === 0) {
+  if (images === undefined || images.length === 0) {
     return undefined;
   }
   const first = images[0];
   const path = isRecord(first)
     ? (getString(first, "latestPath") ?? getString(first, "path"))
     : undefined;
-  return `Generated ${images.length} image${images.length === 1 ? "" : "s"}${path ? ` → ${path}` : ""}`;
-}
-
-function readBoundedFileText(path: string): string | undefined {
-  let descriptor: number | undefined;
-  try {
-    descriptor = openSync(path, "r");
-    const buffer = Buffer.alloc(MAX_WEB_RUN_FILE_BYTES);
-    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } catch {
-    return undefined;
-  } finally {
-    if (descriptor !== undefined) {
-      try {
-        closeSync(descriptor);
-      } catch {
-        descriptor = undefined;
-      }
-    }
-  }
+  return `Generated ${images.length} image${images.length === 1 ? "" : "s"}${isNonEmptyString(path) ? ` → ${path}` : ""}`;
 }
 
 function normalizeWebRunText(text: string): string {
@@ -731,7 +807,7 @@ function isUsefulWebRunTitle(title: string): boolean {
   return normalized.length > 2 && !/^\d+[.)]?$/u.test(normalized);
 }
 
-function formatWebRunSourceLabel(text: string): string | undefined {
+function formatWebRunSourceLabel(theme: CodexRenderTheme, text: string): string | undefined {
   const match = WEB_RUN_TITLE_URL_PATTERN.exec(text.trim());
   const groups = match?.groups;
   if (!groups) {
@@ -739,18 +815,19 @@ function formatWebRunSourceLabel(text: string): string | undefined {
   }
 
   const url = groups.url ?? "";
+  const sourceUrl = styleUrlText(theme, compactUrl(url));
   if (!isUsefulWebRunTitle(groups.title ?? "")) {
-    return compactUrl(url);
+    return sourceUrl;
   }
-  return `${truncateText(normalizeWebRunText(groups.title ?? ""), 72)} — ${compactUrl(url)}`;
+  return `${truncateText(normalizeWebRunText(groups.title ?? ""), 72)} — ${sourceUrl}`;
 }
 
-function webRunSourceLabels(lines: ReadonlyArray<string>): string[] {
+function webRunSourceLabels(theme: CodexRenderTheme, lines: ReadonlyArray<string>): string[] {
   const labels: string[] = [];
   const seen = new Set<string>();
   for (const line of lines) {
-    const label = formatWebRunSourceLabel(line);
-    if (!label || seen.has(label.toLowerCase())) {
+    const label = formatWebRunSourceLabel(theme, line);
+    if (label === undefined || label.length === 0 || seen.has(label.toLowerCase())) {
       continue;
     }
     seen.add(label.toLowerCase());
@@ -777,17 +854,17 @@ function formatWebRunSummary(options: {
   if (remainingSourceCount > 0) {
     details.push(`… +${remainingSourceCount} sources`);
   }
-  if (options.expanded && options.metadata) {
+  if (options.expanded && isNonEmptyString(options.metadata)) {
     details.push(`metadata: ${options.metadata}`);
   }
-  if (options.expanded && options.highlights) {
+  if (options.expanded && isNonEmptyString(options.highlights)) {
     details.push(`preview: ${options.highlights}`);
   }
 
-  if (!headline && details.length === 0) {
+  if (headline === undefined && details.length === 0) {
     return undefined;
   }
-  return [headline, ...details].filter(Boolean).join("\n");
+  return [headline, ...details].filter(isDefined).join("\n");
 }
 
 function compactWebRunSource(source: string): string {
@@ -800,7 +877,7 @@ function compactWebRunSource(source: string): string {
 
 function webRunMetadataLine(lines: ReadonlyArray<string>): string | undefined {
   const metadata = lines.find((line) => WEB_RUN_CONTENT_TYPE_PATTERN.test(line));
-  if (!metadata) {
+  if (metadata === undefined || metadata.length === 0) {
     return undefined;
   }
 
@@ -808,10 +885,10 @@ function webRunMetadataLine(lines: ReadonlyArray<string>): string | undefined {
   const source = WEB_RUN_SOURCE_PATTERN.exec(metadata)?.groups?.source?.trim();
   const totalLines = WEB_RUN_TOTAL_LINES_PATTERN.exec(metadata)?.groups?.lines;
   const parts = [
-    source ? compactWebRunSource(source) : undefined,
+    isNonEmptyString(source) ? compactWebRunSource(source) : undefined,
     contentType,
-    totalLines ? `${totalLines} lines` : undefined,
-  ].filter(Boolean);
+    isNonEmptyString(totalLines) ? `${totalLines} lines` : undefined,
+  ].filter(isDefined);
   return parts.length > 0 ? parts.join(" • ") : undefined;
 }
 
@@ -859,7 +936,11 @@ function webRunHighlightLine(lines: ReadonlyArray<string>): string | undefined {
       continue;
     }
     const normalized = normalizeWebRunText(rawText);
-    if (!normalized || isWebRunBoilerplate(normalized) || seen.has(normalized.toLowerCase())) {
+    if (
+      normalized.length === 0 ||
+      isWebRunBoilerplate(normalized) ||
+      seen.has(normalized.toLowerCase())
+    ) {
       continue;
     }
     seen.add(normalized.toLowerCase());
@@ -881,20 +962,21 @@ function webRunHighlightLine(lines: ReadonlyArray<string>): string | undefined {
 }
 
 function webRunOutputSummary(
+  theme: CodexRenderTheme,
   output: string | undefined,
   sourceCount: number | undefined,
   options: { readonly expanded: boolean },
 ): string | undefined {
   const normalizedOutput = output?.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-  if (!normalizedOutput) {
+  if (normalizedOutput === undefined || normalizedOutput.length === 0) {
     return undefined;
   }
 
   const lines = normalizedOutput.split("\n").filter((line) => line.trim().length > 0);
-  const sources = webRunSourceLabels(lines);
+  const sources = webRunSourceLabels(theme, lines);
   const metadata = webRunMetadataLine(lines);
   const highlights = webRunHighlightLine(lines);
-  if (sources.length === 0 && !metadata && !highlights) {
+  if (sources.length === 0 && !isNonEmptyString(metadata) && !isNonEmptyString(highlights)) {
     return undefined;
   }
 
@@ -908,6 +990,7 @@ function webRunOutputSummary(
 }
 
 function webRunResultSummary(
+  theme: CodexRenderTheme,
   result: ThirdPartyToolResult,
   options: { readonly expanded: boolean },
 ): string | undefined {
@@ -916,25 +999,20 @@ function webRunResultSummary(
   }
   const sourceCount = getNumber(result.details, "sourceCount");
   const outputPath = getString(result.details, "fullOutputPath");
-  if (sourceCount === undefined && !outputPath) {
+  if (sourceCount === undefined && outputPath === undefined) {
     return undefined;
   }
 
-  const inlineSummary = webRunOutputSummary(textOutput(result), sourceCount, options);
-  if (inlineSummary) {
+  const inlineSummary = webRunOutputSummary(theme, textOutput(result), sourceCount, options);
+  if (inlineSummary !== undefined) {
     return inlineSummary;
   }
 
-  const fileSummary = outputPath
-    ? webRunOutputSummary(readBoundedFileText(outputPath), sourceCount, options)
-    : undefined;
-  if (fileSummary) {
-    return fileSummary;
+  if (sourceCount !== undefined) {
+    return `${sourceCount} source${sourceCount === 1 ? "" : "s"}`;
   }
 
-  return sourceCount === undefined
-    ? undefined
-    : `${sourceCount} source${sourceCount === 1 ? "" : "s"}`;
+  return outputPath === undefined ? undefined : "Full output saved";
 }
 
 function coreCallLabel(toolName: string): string {
@@ -948,7 +1026,7 @@ function coreCallBody(
 ): string | undefined {
   const normalized = baseToolName(toolName);
   if (normalized === "web_run") {
-    return summarizeWebRunArgs(args);
+    return summarizeWebRunArgs(args, theme);
   }
   if (normalized === "imagegen") {
     return summarizeImagegenArgs(args);
@@ -962,11 +1040,12 @@ function coreCallBody(
 function coreResultSummary(
   toolName: string,
   result: ThirdPartyToolResult,
+  theme: CodexRenderTheme,
   options: { readonly expanded: boolean },
 ): string | undefined {
   const normalized = baseToolName(toolName);
   if (normalized === "web_run") {
-    return webRunResultSummary(result, options);
+    return webRunResultSummary(theme, result, options);
   }
   if (normalized === "imagegen") {
     return imagegenResultSummary(result);
@@ -1015,8 +1094,8 @@ function createCoreRenderer(toolName: string): ThirdPartyToolRenderer {
       });
     },
     renderResult(result, options, theme) {
-      const summary = coreResultSummary(toolName, result, { expanded: options.expanded });
-      if (summary) {
+      const summary = coreResultSummary(toolName, result, theme, { expanded: options.expanded });
+      if (summary !== undefined && summary.length > 0) {
         return renderCodexOutput(theme, summary, {
           expanded: options.expanded,
           mode: "head",
@@ -1029,8 +1108,198 @@ function createCoreRenderer(toolName: string): ThirdPartyToolRenderer {
   };
 }
 
+function agentCallLabel(toolName: string): string {
+  return AGENT_TOOL_LABELS.get(baseToolName(toolName)) ?? `Called ${displayToolName(toolName)}`;
+}
+
+function displaySubagentType(value: string | undefined): string | undefined {
+  if (!isNonEmptyString(value) || value === ".") {
+    return undefined;
+  }
+  return value;
+}
+
+function summarizeAgentLaunchArgs(args: unknown): string | undefined {
+  if (!isRecord(args)) {
+    return previewArgs(args);
+  }
+
+  const description = getNonEmptyString(args, "description");
+  const prompt = compactQuotedText(getString(args, "prompt"), 120);
+  const subagentType = displaySubagentType(getString(args, "subagent_type"));
+  const isolation = getNonEmptyString(args, "isolation");
+  const model = getNonEmptyString(args, "model");
+  const thinking = getNonEmptyString(args, "thinking");
+  const schedule = getNonEmptyString(args, "schedule");
+  const maxTurns = getNumber(args, "max_turns");
+  const metadata = [
+    isNonEmptyString(subagentType) ? `${subagentType} agent` : undefined,
+    getBoolean(args, "run_in_background") === true ? "running in background" : undefined,
+    getBoolean(args, "inherit_context") === true ? "inherits context" : undefined,
+    isolation === "worktree" ? "isolated worktree" : undefined,
+    isNonEmptyString(isolation) && isolation !== "worktree" ? `isolation: ${isolation}` : undefined,
+    isNonEmptyString(model) ? `model: ${model}` : undefined,
+    isNonEmptyString(thinking) ? `thinking: ${thinking}` : undefined,
+    maxTurns === undefined ? undefined : `max ${compactInteger(maxTurns)} turns`,
+    isNonEmptyString(schedule) ? `scheduled ${schedule}` : undefined,
+  ].filter(isDefined);
+
+  const summary = [description ?? prompt, metadata.join(" · ")].filter(isNonEmptyString).join("\n");
+  return summary.length > 0 ? summary : previewArgs(args);
+}
+
+function summarizeSubagentLookupArgs(args: unknown): string | undefined {
+  if (!isRecord(args)) {
+    return previewArgs(args);
+  }
+
+  const agentId = getNonEmptyString(args, "agent_id") ?? getNonEmptyString(args, "agentId");
+  const metadata = [
+    getBoolean(args, "wait") === true ? "wait" : undefined,
+    getBoolean(args, "verbose") === true ? "verbose" : undefined,
+  ].filter(isDefined);
+  const summary = [agentId, metadata.join(" · ")].filter(isNonEmptyString).join(" · ");
+  return summary.length > 0 ? summary : previewArgs(args);
+}
+
+function summarizeSubagentSteerArgs(args: unknown): string | undefined {
+  if (!isRecord(args)) {
+    return previewArgs(args);
+  }
+
+  const agentId = getNonEmptyString(args, "agent_id") ?? getNonEmptyString(args, "agentId");
+  const message = compactQuotedText(getString(args, "message"), 140);
+  const summary = [agentId, message].filter(isNonEmptyString).join("\n");
+  return summary.length > 0 ? summary : previewArgs(args);
+}
+
+function agentCallBody(toolName: string, args: unknown): string | undefined {
+  const normalized = baseToolName(toolName);
+  if (normalized === "Agent" || normalized === "agent") {
+    return summarizeAgentLaunchArgs(args);
+  }
+  if (normalized === "get_subagent_result") {
+    return summarizeSubagentLookupArgs(args);
+  }
+  if (normalized === "steer_subagent") {
+    return summarizeSubagentSteerArgs(args);
+  }
+  return previewArgs(args);
+}
+
+function normalizeAgentResultLine(line: string): string {
+  return line.replace(/^\s*[└│]\s*/u, "").trim();
+}
+
+function formatAgentStatusMetric(metric: string): string | undefined {
+  const [rawLabel, ...rawValueParts] = metric.split(":");
+  const label = rawLabel?.trim();
+  const value = rawValueParts.join(":").trim();
+  if (label === undefined || label.length === 0 || value.length === 0) {
+    const trimmed = metric.trim();
+    return trimmed.length > 0 ? trimmed.replace(/\s+tokens?$/iu, " tok") : undefined;
+  }
+
+  const normalizedLabel = label.toLowerCase();
+  if (normalizedLabel === "tool uses") {
+    return `${value} tools`;
+  }
+  if (normalizedLabel === "duration") {
+    return value;
+  }
+  if (normalizedLabel === "context") {
+    return `context ${value}`;
+  }
+  if (normalizedLabel === "tokens" || normalizedLabel === "token") {
+    return `${value} tok`;
+  }
+  return `${normalizedLabel} ${value}`;
+}
+
+function subagentCompletionSummary(output: string): string | undefined {
+  const lines = output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const agentLine = lines.map(normalizeAgentResultLine).find((line) => line.startsWith("Agent:"));
+  const statusLine = lines.map(normalizeAgentResultLine).find((line) => line.startsWith("Type:"));
+  if (!isNonEmptyString(agentLine) && !isNonEmptyString(statusLine)) {
+    return undefined;
+  }
+
+  const agentId = agentLine?.replace(/^Agent:\s*/u, "").trim();
+  const statusParts =
+    statusLine
+      ?.split("|")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0) ?? [];
+  const type = statusParts[0]?.replace(/^Type:\s*/u, "").trim();
+  const status = statusParts[1]?.replace(/^Status:\s*/u, "").trim();
+  const metrics = statusParts.slice(2).map(formatAgentStatusMetric).filter(isDefined);
+  const headline = [status, type, agentId].filter(isNonEmptyString).join(" · ");
+  const metadata = metrics.length > 0 ? metrics.join(" · ") : undefined;
+  const bullets = lines
+    .map(normalizeAgentResultLine)
+    .filter((line) => /^[-•]\s+/u.test(line))
+    .slice(0, 4);
+
+  return [headline, metadata, ...bullets].filter(isNonEmptyString).join("\n");
+}
+
+function subagentLaunchSummary(output: string): string | undefined {
+  const normalized = output.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const startMatch = /Agent started(?<mode>[^.\n]*)\./iu.exec(normalized);
+  const agentId = /Agent ID:\s*(?<agentId>\S+)/iu.exec(normalized)?.groups?.agentId;
+  if (startMatch === null && !isNonEmptyString(agentId)) {
+    return undefined;
+  }
+
+  const mode = startMatch?.groups?.mode?.trim();
+  const headline = [`started${isNonEmptyString(mode) ? ` ${mode}` : ""}`, agentId]
+    .filter(isNonEmptyString)
+    .join(" · ");
+  const notes = normalized
+    .split("\n")
+    .map(normalizeAgentResultLine)
+    .filter(
+      (line) =>
+        line.startsWith("Do not duplicate") ||
+        line.startsWith("Worktree:") ||
+        line.startsWith("Branch:"),
+    )
+    .slice(0, 3);
+  return [headline, ...notes].filter(isNonEmptyString).join("\n");
+}
+
+function agentResultSummary(result: ThirdPartyToolResult): string | undefined {
+  const output = textOutput(result);
+  if (output === undefined || output.length === 0) {
+    return undefined;
+  }
+  return subagentCompletionSummary(output) ?? subagentLaunchSummary(output);
+}
+
 function createAgentRenderer(toolName: string): ThirdPartyToolRenderer {
-  return createGenericRenderer(toolName, AGENT_TOOL_LABELS.get(baseToolName(toolName)));
+  return {
+    renderCall(args, theme, context) {
+      return renderThirdPartyCall(theme, {
+        state: callState(context),
+        statusText: agentCallLabel(toolName),
+        body: agentCallBody(toolName, args),
+        maxRenderedLines: 4,
+        expanded: context.expanded,
+      });
+    },
+    renderResult(result, options, theme) {
+      const summary = agentResultSummary(result);
+      if (summary !== undefined && summary.length > 0) {
+        return renderCodexOutput(theme, summary, {
+          expanded: options.expanded,
+          mode: "head",
+          maxPreviewLines: 6,
+          noOutputLabel: null,
+        });
+      }
+      return renderSimpleResult(theme, result, options);
+    },
+  };
 }
 
 function isGoalTool(toolName: string): boolean {
@@ -1098,7 +1367,7 @@ function hasPreservePreference(toolDefinition: unknown): boolean {
 
 /** Parses comma-separated tool names for `PI_CODEX_LOOK_PRESERVE_TOOLS`. */
 export function parsePreservedThirdPartyToolNames(value: string | undefined): string[] {
-  if (!value) {
+  if (value === undefined || value.length === 0) {
     return [];
   }
   return value

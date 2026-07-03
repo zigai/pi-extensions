@@ -31,7 +31,7 @@ export function buildEditPreview(options: {
 }
 
 /** Bounded in-memory previews keyed by Pi tool call id. */
-class PreviewStore<TPreview> {
+export class PreviewStore<TPreview> {
   private readonly maxEntries: number;
   private readonly previewsByToolCallId = new Map<string, TPreview>();
 

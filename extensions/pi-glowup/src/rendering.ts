@@ -5,8 +5,12 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import ansiStyles from "ansi-styles";
 import { highlightCodeOutput, type CodeOutputSyntax } from "./syntax/code-component.ts";
 import { highlightSyntaxCode } from "./syntax/highlighter.ts";
+
+const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
+const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
 
 type CodexRenderBg = "toolSuccessBg" | "toolErrorBg";
 
@@ -62,6 +66,8 @@ export type ScriptInvocation = {
   readonly code: string;
 };
 
+export type ScriptPreviewHeaderLayout = "auto" | "inline" | "block";
+
 type ScriptPreview = {
   readonly code: string;
 };
@@ -80,7 +86,7 @@ function fg(theme: CodexRenderTheme, token: ThemeColor, text: string): string {
 }
 
 function bg(theme: CodexRenderTheme, token: CodexRenderBg, text: string): string {
-  if (!theme.bg) {
+  if (theme.bg === undefined) {
     return text;
   }
   return theme.bg(token, text);
@@ -91,7 +97,7 @@ function actionText(
   text: string,
   options?: { readonly bold?: boolean },
 ): string {
-  const styled = options?.bold ? theme.bold(text) : text;
+  const styled = options?.bold === true ? theme.bold(text) : text;
   return fg(theme, "toolTitle", styled);
 }
 
@@ -145,7 +151,7 @@ function success(theme: CodexRenderTheme, text: string): string {
 
 export function collapseHome(path: string): string {
   const home = process.env.HOME ?? process.env.USERPROFILE;
-  if (home && path.startsWith(home)) {
+  if (home !== undefined && home.length > 0 && path.startsWith(home)) {
     return `~${path.slice(home.length)}`;
   }
   return path;
@@ -202,12 +208,24 @@ function wrapSinglePhysicalLine(
   firstPrefix: string,
   restPrefix: string,
 ): string[] {
-  const firstAvailable = Math.max(1, width - visibleWidth(firstPrefix));
-  const segments = wrapStyledText(line, firstAvailable);
+  return wrapSinglePhysicalLineWithContinuation(line, width, firstPrefix, restPrefix);
+}
+
+function wrapSinglePhysicalLineWithContinuation(
+  line: string,
+  width: number,
+  firstPrefix: string,
+  continuationPrefix: string,
+): string[] {
+  const contentWidth = Math.max(
+    1,
+    width - Math.max(visibleWidth(firstPrefix), visibleWidth(continuationPrefix)),
+  );
+  const segments = wrapStyledText(line, contentWidth);
   const rendered: string[] = [];
 
   for (const [index, segment] of segments.entries()) {
-    const prefix = index === 0 ? firstPrefix : restPrefix;
+    const prefix = index === 0 ? firstPrefix : continuationPrefix;
     rendered.push(truncateToWidth(`${prefix}${segment}`, width, ""));
   }
 
@@ -849,6 +867,81 @@ function parseInlineScriptInvocation(displayCommand: string): ScriptInvocation |
   return undefined;
 }
 
+type BashHeredocHighlight = {
+  readonly marker: string;
+  readonly language: string;
+};
+
+function detectHeredocInterpreter(prefix: string): ScriptInterpreter | undefined {
+  const words = tokenizeShellWords(prefix);
+  for (let index = words.length - 1; index >= 0; index -= 1) {
+    const word = words[index];
+    if (word === undefined) {
+      continue;
+    }
+
+    const interpreter = scriptInterpreterForWord(word);
+    if (interpreter && interpreter.language !== "bash") {
+      return interpreter;
+    }
+  }
+
+  return undefined;
+}
+
+function bashHeredocHighlightFromLine(line: string): BashHeredocHighlight | undefined {
+  const match = /<<-?\s*["']?(?<marker>[A-Za-z_][A-Za-z0-9_]*)["']?/u.exec(line);
+  const marker = match?.groups?.marker;
+  if (match === null || marker === undefined) {
+    return undefined;
+  }
+
+  const interpreter = detectHeredocInterpreter(line.slice(0, match.index));
+  if (!interpreter) {
+    return undefined;
+  }
+
+  return { marker, language: interpreter.language };
+}
+
+function highlightBashScriptPreviewLines(lines: ReadonlyArray<string>): string[] {
+  const highlighted: string[] = [];
+  let heredoc: BashHeredocHighlight | undefined;
+
+  for (const line of lines) {
+    if (line.startsWith("… +")) {
+      highlighted.push(line);
+      continue;
+    }
+
+    if (heredoc !== undefined) {
+      if (line.trim() === heredoc.marker) {
+        highlighted.push(highlightSyntaxCode(line, "bash")[0] ?? line);
+        heredoc = undefined;
+        continue;
+      }
+
+      highlighted.push(highlightSyntaxCode(line, heredoc.language)[0] ?? line);
+      continue;
+    }
+
+    highlighted.push(highlightSyntaxCode(line, "bash")[0] ?? line);
+    heredoc = bashHeredocHighlightFromLine(line);
+  }
+
+  return highlighted;
+}
+
+function highlightScriptPreviewLines(lines: ReadonlyArray<string>, language: string): string[] {
+  if (language === "bash") {
+    return highlightBashScriptPreviewLines(lines);
+  }
+
+  return lines.map((line) =>
+    line.startsWith("… +") ? line : (highlightSyntaxCode(line, language)[0] ?? line),
+  );
+}
+
 export function parseScriptInvocation(command: string | undefined): ScriptInvocation | undefined {
   const displayCommand = stripShellWrapper(command);
   return (
@@ -912,6 +1005,38 @@ function scriptPreviewForRender(invocation: ScriptInvocation, expanded: boolean)
   return collapsedScriptPreview(invocation);
 }
 
+function wrapScriptLine(
+  theme: CodexRenderTheme,
+  line: string,
+  width: number,
+  firstPrefix: string,
+): string[] {
+  return wrapSinglePhysicalLineWithContinuation(line, width, firstPrefix, dim(theme, "  │   "));
+}
+
+function renderScriptHeader(theme: CodexRenderTheme, state: CodexCallState, label: string): string {
+  return `${renderBullet(theme, state)} ${actionText(theme, label, { bold: true })}`;
+}
+
+function resolveScriptHeaderLayout(
+  layout: ScriptPreviewHeaderLayout,
+  invocation: ScriptInvocation,
+  header: string,
+  firstCodeLine: string | undefined,
+  width: number,
+): Exclude<ScriptPreviewHeaderLayout, "auto"> {
+  if (layout !== "auto") {
+    return layout;
+  }
+  if (invocation.language === "bash") {
+    return "inline";
+  }
+  if (firstCodeLine === undefined) {
+    return "block";
+  }
+  return visibleWidth(`${header} ${firstCodeLine}`) <= width ? "inline" : "block";
+}
+
 export function renderScriptCall(
   theme: CodexRenderTheme,
   invocation: ScriptInvocation,
@@ -920,43 +1045,45 @@ export function renderScriptCall(
     readonly expanded: boolean;
     readonly maxCodePreviewLines?: number;
     readonly omittedHint?: string;
+    readonly headerLayout?: ScriptPreviewHeaderLayout;
   },
 ): Component {
   return makeComponent((width) => {
-    const bullet = renderBullet(theme, options.state);
-    const header = `${bullet} ${actionText(theme, invocation.label, { bold: true })}`;
-    const rendered = wrapPrefixedLine("", width, header, "  ");
+    const header = renderScriptHeader(theme, options.state, invocation.label);
     const maxCodePreviewLines = options.maxCodePreviewLines ?? 8;
     const preview = scriptPreviewForRender(invocation, options.expanded);
 
-    if (preview.code.length > 0) {
-      const rawLines = trimEdgeBlankLines(preview.code.split("\n"));
-      const visible = previewLines(
-        rawLines,
-        options.expanded,
-        maxCodePreviewLines,
-        "head",
-        options.omittedHint ?? "truncated",
-      );
-      const highlighted = options.expanded
-        ? previewLines(
-            highlightSyntaxCode(preview.code, invocation.language),
-            true,
-            maxCodePreviewLines,
-            "head",
-            options.omittedHint ?? "truncated",
-          )
-        : visible.map((line) =>
-            line.startsWith("… +")
-              ? line
-              : (highlightSyntaxCode(line, invocation.language)[0] ?? line),
-          );
-      for (const [index, line] of highlighted.entries()) {
-        const styled = line.startsWith("… +") ? muted(theme, line) : line;
-        const firstPrefix =
-          index === highlighted.length - 1 ? dim(theme, "  └ ") : dim(theme, "  │ ");
-        rendered.push(...wrapPrefixedLine(styled, width, firstPrefix, dim(theme, "  │ ")));
-      }
+    if (preview.code.length === 0) {
+      return wrapPrefixedLine("", width, header, "  ");
+    }
+
+    const rawLines = trimEdgeBlankLines(preview.code.split("\n"));
+    const visible = previewLines(
+      rawLines,
+      options.expanded,
+      maxCodePreviewLines,
+      "head",
+      options.omittedHint ?? "truncated",
+    );
+    const highlighted = highlightScriptPreviewLines(visible, invocation.language);
+    const rendered: string[] = [];
+    const headerLayout = resolveScriptHeaderLayout(
+      options.headerLayout ?? "auto",
+      invocation,
+      header,
+      highlighted[0],
+      width,
+    );
+
+    if (headerLayout === "block") {
+      rendered.push(...wrapPrefixedLine("", width, header, "  "));
+    }
+
+    for (const [index, line] of highlighted.entries()) {
+      const styled = line.startsWith("… +") ? muted(theme, line) : line;
+      const firstPrefix =
+        headerLayout === "inline" && index === 0 ? `${header} ` : dim(theme, "  │ ");
+      rendered.push(...wrapScriptLine(theme, styled, width, firstPrefix));
     }
 
     return rendered;
@@ -1057,7 +1184,7 @@ function previewShellCommandForHighlight(command: string): string {
 export function formatReadAction(theme: CodexRenderTheme, args: ReadActionArgs): string {
   const target = formatPathTarget(theme, args.path);
   const range = formatLineRange(args.offset, args.limit);
-  if (range) {
+  if (range !== undefined) {
     return `${actionText(theme, "Read")} ${target}${muted(theme, range)}`;
   }
   return `${actionText(theme, "Read")} ${target}`;
@@ -1065,7 +1192,7 @@ export function formatReadAction(theme: CodexRenderTheme, args: ReadActionArgs):
 
 export function formatFindAction(theme: CodexRenderTheme, args: FindActionArgs): string {
   const parts = [`${actionText(theme, "Find")} ${args.pattern ?? "*"}`];
-  if (args.path) {
+  if (args.path !== undefined && args.path.length > 0) {
     parts.push(`in ${pathText(theme, collapseHome(args.path))}`);
   }
   if (typeof args.limit === "number") {
@@ -1076,10 +1203,10 @@ export function formatFindAction(theme: CodexRenderTheme, args: FindActionArgs):
 
 export function formatGrepAction(theme: CodexRenderTheme, args: GrepActionArgs): string {
   const parts = [`${actionText(theme, "Search")} ${args.pattern ?? ""}`.trim()];
-  if (args.path) {
+  if (args.path !== undefined && args.path.length > 0) {
     parts.push(`in ${pathText(theme, collapseHome(args.path))}`);
   }
-  if (args.glob) {
+  if (args.glob !== undefined && args.glob.length > 0) {
     parts.push(muted(theme, `(${args.glob})`));
   }
   if (typeof args.limit === "number") {
@@ -1121,7 +1248,7 @@ export function parseDiffSections(diffText: string, fallbackPath?: string): Diff
   let currentLines: string[] = [];
 
   function flush(): void {
-    if (!currentPath && currentLines.length === 0) {
+    if (currentPath === undefined && currentLines.length === 0) {
       return;
     }
     const lines = currentLines.filter((line) => line.length > 0);
@@ -1307,12 +1434,12 @@ function highlightDiffContent(content: string, filePath: string | undefined): st
 
 function preserveRowBackground(text: string): string {
   return text
-    .replaceAll("\u001b[0m", "\u001b[22m\u001b[23m\u001b[24m\u001b[29m\u001b[39m")
-    .replaceAll("\u001b[49m", "");
+    .replaceAll(ansiStyles.modifier.reset.open, ROW_BACKGROUND_SAFE_RESET)
+    .replaceAll(ansiStyles.bgColor.close, "");
 }
 
 function hasAnsi(text: string): boolean {
-  return text.includes("\u001b[");
+  return text.includes(ANSI_SEQUENCE_PREFIX);
 }
 
 function styleDiffGutter(

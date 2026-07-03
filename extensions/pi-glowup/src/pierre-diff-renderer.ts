@@ -5,6 +5,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import ansiStyles from "ansi-styles";
 import {
   buildSplitDiffRows,
   buildUnifiedDiffRows,
@@ -24,7 +25,9 @@ import type {
   UnifiedDiffRow,
 } from "./pierre-diff-types.ts";
 import { getPierrePalette, type PierreTerminalPalette } from "./pierre-theme.ts";
-const ANSI_RESET = "\u001b[22m\u001b[39m\u001b[49m";
+
+const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
+const DIFF_STYLE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.color.close}${ansiStyles.bgColor.close}`;
 const SIDE_BY_SIDE_MIN_WIDTH = 140;
 const INITIAL_TTY_DIFF_HIGHLIGHT_DEFER_MS = 1_500;
 const DISABLE_INITIAL_DEFER_ENV = "PI_CODEX_LOOK_DISABLE_INITIAL_SYNTAX_DEFER";
@@ -115,14 +118,23 @@ class PierreDiffComponent implements Component {
     maxVisibleLines: number,
     expanded: boolean,
   ): void {
-    const previousKey = refreshKeyFor(this.payload);
+    const previousPayload = this.payload;
+    const previousKey = refreshKeyFor(previousPayload);
     const nextKey = refreshKeyFor(payload);
+    const nextPalette = getPierrePalette(theme);
+    const canReuseRenderedCache =
+      previousPayload === payload &&
+      this.maxVisibleLines === maxVisibleLines &&
+      this.expanded === expanded &&
+      pierrePalettesEqual(this.palette, nextPalette);
+
     this.payload = payload;
-    this.palette = getPierrePalette(theme);
+    this.palette = nextPalette;
     this.maxVisibleLines = maxVisibleLines;
     this.expanded = expanded;
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
+    if (!canReuseRenderedCache) {
+      this.invalidate();
+    }
     if (previousKey !== nextKey) {
       this.highlighted = emptyHighlightedDiffSet();
       this.refreshPromise = undefined;
@@ -321,7 +333,7 @@ function renderUnifiedRow(
   if (visibleWidth(content) === 0) {
     const prefix = renderDiffPrefix(firstPrefix, row.rowFg, row.lineNumberFg, row.rowBg);
     if (row.lineType === "context") {
-      return [`${prefix}${ANSI_RESET}`];
+      return [`${prefix}${DIFF_STYLE_RESET}`];
     }
     return [padRenderedLine(prefix, width, baseStyle({ fg: row.rowFg, bg: row.rowBg }))];
   }
@@ -390,7 +402,7 @@ function renderSplitCell(cell: SplitDiffCell, width: number, lineNumberWidth: nu
   if (visibleWidth(content) === 0) {
     const prefix = renderDiffPrefix(firstPrefix, cell.rowFg, cell.lineNumberFg, cell.rowBg);
     if (cell.lineType === "context" || cell.lineType === "empty") {
-      return [`${prefix}${ANSI_RESET}`];
+      return [`${prefix}${DIFF_STYLE_RESET}`];
     }
     return [padRenderedLine(prefix, width, baseStyle({ fg: cell.rowFg, bg: cell.rowBg }))];
   }
@@ -448,7 +460,7 @@ function padRenderedLine(line: string, width: number, base: AnsiStyle): string {
   const targetWidth = Math.max(1, width - 1);
   const truncated = truncateToWidth(line, targetWidth, "");
   const padding = Math.max(0, targetWidth - visibleWidth(truncated));
-  return `${truncated}${openAnsi(base)}${" ".repeat(padding)}${ANSI_RESET}`;
+  return `${truncated}${openAnsi(base)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;
 }
 
 function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle): string {
@@ -468,22 +480,26 @@ function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle)
 }
 
 function openAnsi(style: AnsiStyle): string {
-  const codes: string[] = [style.bold ? "1" : "22"];
   const fg = toRgb(style.fg);
   const bg = toRgb(style.bg);
 
-  if (!isAnsiStyle(style.fg)) {
-    codes.push(fg ? `38;2;${fg.red};${fg.green};${fg.blue}` : "39");
-  }
-  if (!isAnsiStyle(style.bg)) {
-    codes.push(bg ? `48;2;${bg.red};${bg.green};${bg.blue}` : "49");
-  }
-
-  return `${style.fg && isAnsiStyle(style.fg) ? style.fg : ""}${style.bg && isAnsiStyle(style.bg) ? style.bg : ""}\u001b[${codes.join(";")}m`;
+  return [
+    style.bold === true ? ansiStyles.modifier.bold.open : ansiStyles.modifier.bold.close,
+    isAnsiStyle(style.fg)
+      ? style.fg
+      : fg === undefined
+        ? ansiStyles.color.close
+        : ansiStyles.color.ansi16m(fg.red, fg.green, fg.blue),
+    isAnsiStyle(style.bg)
+      ? style.bg
+      : bg === undefined
+        ? ansiStyles.bgColor.close
+        : ansiStyles.bgColor.ansi16m(bg.red, bg.green, bg.blue),
+  ].join("");
 }
 
 function isAnsiStyle(value: string | undefined): boolean {
-  return value?.startsWith("\u001b[") ?? false;
+  return value?.startsWith(ANSI_SEQUENCE_PREFIX) ?? false;
 }
 
 function baseStyle(input: {
@@ -506,7 +522,7 @@ function toRgb(hex: string | undefined):
     }
   | undefined {
   const normalized = hex?.trim();
-  if (!normalized || !/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+  if (normalized === undefined || !/^#[0-9a-fA-F]{6}$/.test(normalized)) {
     return undefined;
   }
 
@@ -551,6 +567,25 @@ function hasHighlightedLines(highlighted: HighlightedDiffSet): boolean {
 
 function refreshKeyFor(payload: PierreDiffPayload): string {
   return `${payload.path}\u0000${payload.metadata.cacheKey ?? ""}\u0000${payload.stats.lineCount}\u0000${payload.stats.added}\u0000${payload.stats.removed}\u0000${payload.metadata.lang ?? ""}`;
+}
+
+function pierrePalettesEqual(left: PierreTerminalPalette, right: PierreTerminalPalette): boolean {
+  return (
+    left.appearance === right.appearance &&
+    left.contextFg === right.contextFg &&
+    left.contextRowBg === right.contextRowBg &&
+    left.additionFg === right.additionFg &&
+    left.additionRowBg === right.additionRowBg &&
+    left.deletionFg === right.deletionFg &&
+    left.deletionRowBg === right.deletionRowBg &&
+    left.emptyFg === right.emptyFg &&
+    left.emptyRowBg === right.emptyRowBg &&
+    left.lineNumberFg === right.lineNumberFg &&
+    left.metadataFg === right.metadataFg &&
+    left.metadataBg === right.metadataBg &&
+    left.dividerFg === right.dividerFg &&
+    left.dividerBg === right.dividerBg
+  );
 }
 
 function maxVisibleDiffLines(expanded: boolean): number {

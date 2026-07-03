@@ -33,6 +33,14 @@ function getStringField(instance: ToolExecutionInstance, fieldName: string): str
   return typeof value === "string" ? value : undefined;
 }
 
+function getNonEmptyStringField(
+  instance: ToolExecutionInstance,
+  fieldName: string,
+): string | undefined {
+  const value = getStringField(instance, fieldName);
+  return value === undefined || value.length === 0 ? undefined : value;
+}
+
 function hasBuiltInToolDefinition(instance: ToolExecutionInstance): boolean {
   return Reflect.get(instance, "builtInToolDefinition") !== undefined;
 }
@@ -45,8 +53,8 @@ function shouldUseThirdPartyRenderer(
   instance: ToolExecutionInstance,
   options: ThirdPartyToolRenderingOptions | undefined,
 ): boolean {
-  const toolName = getStringField(instance, "toolName");
-  if (!toolName || hasBuiltInToolDefinition(instance)) {
+  const toolName = getNonEmptyStringField(instance, "toolName");
+  if (toolName === undefined || hasBuiltInToolDefinition(instance)) {
     return false;
   }
 
@@ -63,13 +71,13 @@ function rendererForInstance(
   options: ThirdPartyToolRenderingOptions | undefined,
   cache?: Map<string, ThirdPartyToolRenderer>,
 ): ThirdPartyToolRenderer | undefined {
-  const toolName = getStringField(instance, "toolName");
-  if (!toolName) {
+  const toolName = getNonEmptyStringField(instance, "toolName");
+  if (toolName === undefined) {
     return undefined;
   }
 
   const cachedRenderer = cache?.get(toolName);
-  if (cachedRenderer) {
+  if (cachedRenderer !== undefined) {
     return cachedRenderer;
   }
 
@@ -120,7 +128,7 @@ const writeResultRenderer: ThirdPartyToolRenderer["renderResult"] = (result, opt
     expanded: options.expanded,
     mode: "head",
     maxPreviewLines: 5,
-    ...(language ? { syntax: { language } } : {}),
+    ...(language === undefined ? {} : { syntax: { language } }),
   });
 };
 

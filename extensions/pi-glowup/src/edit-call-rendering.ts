@@ -12,6 +12,7 @@ export type EditCallSummary = {
   readonly statusText: string;
   readonly path: string | undefined;
   readonly suffix: string;
+  readonly hasInvalidEdits: boolean;
 };
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -56,9 +57,10 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
 
   if (invalidEdits > 0) {
     return {
-      statusText: "Edit Invalid",
+      statusText: "Edit",
       path,
       suffix: formatInvalidEditCount(validEdits, invalidEdits),
+      hasInvalidEdits: true,
     };
   }
 
@@ -67,6 +69,7 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
       statusText: "Edit Failed",
       path,
       suffix: formatEditCount(validEdits),
+      hasInvalidEdits: false,
     };
   }
 
@@ -75,6 +78,7 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
       statusText: "Edit Pending",
       path,
       suffix: formatEditCount(validEdits),
+      hasInvalidEdits: false,
     };
   }
 
@@ -82,5 +86,6 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
     statusText: "Editing",
     path,
     suffix: formatEditCount(validEdits),
+    hasInvalidEdits: false,
   };
 }

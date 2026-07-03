@@ -8,7 +8,17 @@ import {
   createWriteToolDefinition,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
+import {
+  createCommandScriptFormatter,
+  formatScriptInvocation,
+  parseScriptFormatterCommands,
+  type ScriptBlockFormatter,
+  type ScriptFormatterCommands,
+} from "./script-formatters.ts";
+import { readCodexLookConfig, type CodexLookConfig } from "./config.ts";
 import { installAssistantSeparatorPatch } from "./assistant-separator.ts";
+import { installWorkingWidgetSpacingPatch } from "./working-widget-spacing.ts";
+import { installAutocompleteCleanupPatch } from "./autocomplete-cleanup.ts";
 import { ExplorationGroupStore, type ExplorationRenderContext } from "./exploration-groups.ts";
 import {
   emptyComponent,
@@ -17,7 +27,6 @@ import {
   formatLsAction,
   formatPathTarget,
   formatReadAction,
-  highlightShell,
   parseDiffSections,
   parseScriptInvocation,
   renderCodexCall,
@@ -28,8 +37,10 @@ import {
   renderScriptCall,
   type CodexRenderTheme,
   type MutationSummary,
+  type ScriptInvocation,
+  type ScriptPreviewHeaderLayout,
 } from "./rendering.ts";
-import { buildEditPreview, EditPreviewStore } from "./edit-preview.ts";
+import { buildEditPreview, EditPreviewStore, PreviewStore } from "./edit-preview.ts";
 import { summarizeEditCall } from "./edit-call-rendering.ts";
 import { buildPierreDiffPayload, createEditSnapshot, createWriteSnapshot } from "./pierre-diff.ts";
 import type { PierreDiffPayload } from "./pierre-diff-types.ts";
@@ -38,9 +49,10 @@ import {
   parsePreservedThirdPartyToolNames,
   type ThirdPartyToolRenderingOptions,
 } from "./third-party-renderers.ts";
+import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
 import { installThirdPartyToolRendererPatch } from "./tool-execution-patch.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
-import { initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
+import { clearSyntaxHighlightCache, initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
 import { installMarkdownSyntaxPatch } from "./syntax/markdown-patch.ts";
 
 type ToolTextContent = {
@@ -54,9 +66,12 @@ type TextResult = {
 };
 
 const editPreviews = new EditPreviewStore(300);
+const scriptPreviews = new PreviewStore<ScriptInvocation>(300);
 const explorationGroups = new ExplorationGroupStore();
 const toolCache = new Map<string, BuiltInToolDefinitions>();
 const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
+const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
+const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
 
 type BuiltInToolDefinitions = ReturnType<typeof createBuiltInToolDefinitions>;
 
@@ -88,11 +103,15 @@ function textOutput(result: TextResult): string | undefined {
   return content?.text;
 }
 
+function syntaxPathFromToolArg(path: string | undefined): string | undefined {
+  return path === undefined || path.length === 0 ? undefined : path;
+}
+
 function renderExplorationResult(
   result: TextResult,
   expanded: boolean,
   theme: CodexRenderTheme,
-  options?: { readonly path?: string },
+  options?: { readonly syntaxPath: string | undefined },
 ) {
   const output = textOutput(result);
   if (output === undefined) {
@@ -104,7 +123,7 @@ function renderExplorationResult(
     prefixFirst: "",
     prefixRest: "",
     noOutputLabel: null,
-    ...(options?.path ? { syntax: { path: options.path } } : {}),
+    ...(options?.syntaxPath === undefined ? {} : { syntax: { path: options.syntaxPath } }),
   });
 }
 
@@ -159,9 +178,13 @@ function closeExplorationGroup(): void {
   explorationGroups.closeActiveGroup();
 }
 
-function thirdPartyToolRenderingOptions(): ThirdPartyToolRenderingOptions {
+function thirdPartyToolRenderingOptions(config: CodexLookConfig): ThirdPartyToolRenderingOptions {
+  const preservedFromEnv = process.env[PRESERVE_TOOLS_ENV];
   return {
-    preserveTools: parsePreservedThirdPartyToolNames(process.env[PRESERVE_TOOLS_ENV]),
+    preserveTools:
+      preservedFromEnv === undefined
+        ? config.preserveTools
+        : parsePreservedThirdPartyToolNames(preservedFromEnv),
   };
 }
 
@@ -191,7 +214,9 @@ function registerReadTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): 
         }
         return emptyComponent();
       }
-      return renderExplorationResult(result, options.expanded, theme, { path: context.args.path });
+      return renderExplorationResult(result, options.expanded, theme, {
+        syntaxPath: syntaxPathFromToolArg(context.args.path),
+      });
     },
   };
   pi.registerTool(tool);
@@ -269,12 +294,58 @@ function registerLsTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): vo
   pi.registerTool(tool);
 }
 
-function registerBashTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): void {
+function scriptFormatterCommands(
+  config: CodexLookConfig,
+  reportWarning: (message: string) => void,
+): ScriptFormatterCommands {
+  const formattersFromEnv = process.env[SCRIPT_FORMATTERS_ENV];
+  return formattersFromEnv === undefined
+    ? config.scriptFormatters
+    : parseScriptFormatterCommands(formattersFromEnv, {
+        source: SCRIPT_FORMATTERS_ENV,
+        reportWarning,
+      });
+}
+
+function scriptBlockFormatter(
+  config: CodexLookConfig,
+  reportWarning: (message: string) => void,
+): ScriptBlockFormatter | undefined {
+  return createCommandScriptFormatter(scriptFormatterCommands(config, reportWarning));
+}
+
+function scriptPreviewHeaderLayout(config: CodexLookConfig): ScriptPreviewHeaderLayout {
+  const headerLayoutFromEnv = process.env[SCRIPT_HEADER_LAYOUT_ENV];
+  return headerLayoutFromEnv === undefined
+    ? config.scriptHeaderLayout
+    : parseScriptPreviewHeaderLayout(headerLayoutFromEnv);
+}
+
+function registerBashTool(
+  pi: ExtensionAPI,
+  baseTools: BuiltInToolDefinitions,
+  formatter: ScriptBlockFormatter | undefined,
+  headerLayout: ScriptPreviewHeaderLayout,
+): void {
   const tool: BuiltInToolDefinitions["bash"] = {
     ...baseTools.bash,
     label: "Bash",
     renderShell: "self",
     async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const script = parseScriptInvocation(params.command);
+      if (script !== undefined) {
+        scriptPreviews.set(
+          toolCallId,
+          formatter === undefined
+            ? script
+            : await formatScriptInvocation(
+                script,
+                formatter,
+                signal === undefined ? {} : { signal },
+              ),
+        );
+      }
+
       return getBuiltInToolDefinitions(ctx.cwd).bash.execute(
         toolCallId,
         params,
@@ -286,20 +357,17 @@ function registerBashTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): 
     renderCall(args, theme, context) {
       closeExplorationGroup();
       const state = context.isError ? "error" : context.isPartial ? "running" : "success";
-      const script = parseScriptInvocation(args.command);
-      if (script) {
-        return renderScriptCall(theme, script, {
-          state,
-          expanded: context.expanded,
-          maxCodePreviewLines: 8,
-        });
-      }
-
-      return renderCodexCall(theme, {
+      const script = scriptPreviews.get(context.toolCallId) ??
+        parseScriptInvocation(args.command) ?? {
+          label: "Bash",
+          language: "bash",
+          code: args.command ?? "",
+        };
+      return renderScriptCall(theme, script, {
         state,
-        statusText: "Bash",
-        body: highlightShell(theme, args.command),
-        maxRenderedLines: 3,
+        expanded: context.expanded,
+        maxCodePreviewLines: script.language === "bash" ? 3 : 8,
+        headerLayout,
       });
     },
     renderResult(result, options, theme, context) {
@@ -310,8 +378,10 @@ function registerBashTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): 
         expanded: options.expanded,
         mode: "headTail",
         maxPreviewLines: 5,
-        ...(script ? { prefixFirst: theme.fg("dim", "  → "), prefixRest: "    " } : {}),
-        ...(language ? { syntax: { language } } : {}),
+        ...(script !== undefined && headerLayout === "block"
+          ? { prefixFirst: theme.fg("dim", "  → "), prefixRest: "    " }
+          : {}),
+        ...(language === undefined ? {} : { syntax: { language } }),
       });
     },
   };
@@ -332,9 +402,6 @@ function registerWriteTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions):
         onUpdate,
         ctx,
       );
-      if (textOutput(result)?.startsWith("Error")) {
-        return result;
-      }
       return attachPierreDiffPayload(result, buildPierreDiffPayload(snapshot));
     },
     renderCall(args, theme, context) {
@@ -385,10 +452,6 @@ function registerEditTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): 
           }),
         );
       }
-      if (textOutput(result)?.startsWith("Error")) {
-        return result;
-      }
-
       const snapshot = await snapshotState.finish();
       return attachPierreDiffPayload(result, buildPierreDiffPayload(snapshot));
     },
@@ -408,7 +471,7 @@ function registerEditTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): 
       }
 
       const summary = summarizeEditCall(args, context);
-      const state = summary.statusText === "Edit Invalid" || context.isError ? "error" : "muted";
+      const state = summary.hasInvalidEdits || context.isError ? "error" : "muted";
       return renderCodexCall(theme, {
         state,
         statusText: summary.statusText,
@@ -445,15 +508,52 @@ function registerEditTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): 
   pi.registerTool(tool);
 }
 
+let deferredSyntaxPreload: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleDeferredSyntaxPreload(reportWarning: (message: string) => void): void {
+  if (deferredSyntaxPreload !== undefined) {
+    clearTimeout(deferredSyntaxPreload);
+  }
+
+  deferredSyntaxPreload = setTimeout(() => {
+    deferredSyntaxPreload = undefined;
+    void initializeSyntaxHighlighting().catch((cause: unknown) => {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      reportWarning(`[pi-codex-look] Deferred syntax preload failed: ${message}`);
+    });
+  }, 1_500);
+}
+
 export default async function codexLookExtension(pi: ExtensionAPI): Promise<void> {
-  await initializeSyntaxHighlighting();
-  installAssistantSeparatorPatch();
-  installMarkdownSyntaxPatch();
-  installThirdPartyToolRendererPatch(thirdPartyToolRenderingOptions());
-  const baseTools = getBuiltInToolDefinitions(process.cwd());
+  const cwd = process.cwd();
+  const reportWarning = (message: string): void => console.warn(message);
+  const config = readCodexLookConfig({ cwd, reportWarning });
+  if (config.syntaxPreloadOnStartup) {
+    await initializeSyntaxHighlighting();
+  } else {
+    scheduleDeferredSyntaxPreload(reportWarning);
+  }
+  if (config.patches.assistantSeparator) {
+    installAssistantSeparatorPatch();
+  }
+  if (config.patches.workingWidgetSpacing) {
+    installWorkingWidgetSpacingPatch();
+  }
+  if (config.patches.autocompleteCleanup) {
+    installAutocompleteCleanupPatch();
+  }
+  if (config.patches.markdownSyntax) {
+    installMarkdownSyntaxPatch();
+  }
+  if (config.patches.thirdPartyToolRenderers) {
+    installThirdPartyToolRendererPatch(thirdPartyToolRenderingOptions(config));
+  }
+  const baseTools = getBuiltInToolDefinitions(cwd);
+  const formatter = scriptBlockFormatter(config, reportWarning);
+  const headerLayout = scriptPreviewHeaderLayout(config);
 
   registerReadTool(pi, baseTools);
-  registerBashTool(pi, baseTools);
+  registerBashTool(pi, baseTools, formatter, headerLayout);
   registerEditTool(pi, baseTools);
   registerWriteTool(pi, baseTools);
   registerFindTool(pi, baseTools);
@@ -469,7 +569,13 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
   });
 
   pi.on("session_shutdown", () => {
+    if (deferredSyntaxPreload !== undefined) {
+      clearTimeout(deferredSyntaxPreload);
+      deferredSyntaxPreload = undefined;
+    }
     editPreviews.clear();
+    scriptPreviews.clear();
     explorationGroups.clear();
+    clearSyntaxHighlightCache();
   });
 }

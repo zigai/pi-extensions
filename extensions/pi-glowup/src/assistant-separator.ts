@@ -6,12 +6,11 @@ import {
   UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, type Component, visibleWidth } from "@earendil-works/pi-tui";
+import ansiStyles from "ansi-styles";
 
 const ASSISTANT_SEPARATOR_PATCH_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator");
 const CHAT_TRANSITION_PATCH_KEY = Symbol.for("zigai.pi-codex-look.chat-transition-separator");
 const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator.render");
-const ANSI_DIM = "\u001b[2m";
-const ANSI_RESET = "\u001b[0m";
 
 type AssistantContent = {
   readonly type: string;
@@ -52,7 +51,7 @@ type ChatContainerPrototype = {
 };
 
 function renderSeparator(width: number): string {
-  return `${ANSI_DIM}${"─".repeat(Math.max(1, Math.floor(width)))}${ANSI_RESET}`;
+  return `${ansiStyles.modifier.dim.open}${"─".repeat(Math.max(1, Math.floor(width)))}${ansiStyles.modifier.reset.open}`;
 }
 
 function startsWithBlankLine(lines: readonly string[]): boolean {

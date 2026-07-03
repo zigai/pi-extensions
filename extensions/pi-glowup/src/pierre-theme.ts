@@ -21,7 +21,7 @@ export type PierreTerminalPalette = {
 
 /** Resolves the closest Pierre syntax-highlighting appearance for the active Pi theme. */
 export function getPierreAppearance(theme: Theme): PierreAppearance {
-  return theme.name?.toLowerCase().includes("light") ? "light" : "dark";
+  return theme.name?.toLowerCase().includes("light") === true ? "light" : "dark";
 }
 
 /** Resolves diff terminal styling from Pi theme tokens. */
