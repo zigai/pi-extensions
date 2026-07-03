@@ -572,6 +572,17 @@ test("computes Codex prompt image target dimensions", () => {
     });
 });
 
+test("reads image dimensions without full-buffer base64 conversion", async () => {
+    const source = await readFile("src/image-content.ts", "utf8");
+    const dimensionsBlock =
+        /function imageDimensionsFromBytes[\s\S]*?function codexPromptImageDimensionsFit/.exec(
+            source,
+        );
+
+    assert.ok(dimensionsBlock);
+    assert.doesNotMatch(dimensionsBlock[0], /getImageDimensions|toString\("base64"\)/);
+});
+
 test("rejects oversized and mislabeled image files", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-image-load-"));
     try {
