@@ -20,6 +20,11 @@ const ImageContentSchema = compileSchema(
 const MessageWithArrayContentSchema = compileSchema(
     Type.Object({ content: Type.Array(Type.Unknown()) }),
 );
+const ImagegenArtifactDetailsSchema = compileSchema(
+    Type.Object({
+        details: Type.Object({ images: Type.Array(Type.Object({ path: Type.String() })) }),
+    }),
+);
 
 export type ImageDetail = "auto" | "high" | "original";
 
@@ -243,24 +248,62 @@ function codexPromptImageDimensionsFit(
     );
 }
 
-export function recentImageContents(ctx: ExtensionContext, count: number): ImageContent[] {
-    const images: ImageContent[] = [];
+type RecentImageRef =
+    | { readonly kind: "inline"; readonly content: ImageContent }
+    | { readonly kind: "artifact"; readonly path: string };
+
+export async function recentImageContents(
+    ctx: ExtensionContext,
+    count: number,
+): Promise<ImageContent[]> {
+    const imageRefs: RecentImageRef[] = [];
     const branch = ctx.sessionManager.getBranch();
-    for (let index = branch.length - 1; index >= 0 && images.length < count; index -= 1) {
+    for (let index = branch.length - 1; index >= 0 && imageRefs.length < count; index -= 1) {
         const entry = branch[index];
         if (!entry) continue;
-        for (const image of extractImagesFromEntry(entry).reverse()) {
-            images.push(image);
-            if (images.length >= count) break;
+        for (const imageRef of extractImageRefsFromEntry(entry).reverse()) {
+            imageRefs.push(imageRef);
+            if (imageRefs.length >= count) break;
         }
     }
-    return images.reverse();
+
+    const images: ImageContent[] = [];
+    for (const imageRef of imageRefs.reverse()) {
+        if (imageRef.kind === "inline") {
+            images.push(imageRef.content);
+            continue;
+        }
+        images.push(
+            await prepareCodexPromptImageContent(await loadImageContent(imageRef.path, ctx.cwd)),
+        );
+    }
+    return images;
 }
 
-function extractImagesFromEntry(entry: SessionEntry): ImageContent[] {
+function extractImageRefsFromEntry(entry: SessionEntry): RecentImageRef[] {
     if (entry.type !== "message") return [];
-    const message = parseWithSchema(MessageWithArrayContentSchema, entry.message);
-    return message ? message.content.filter(isImageContent) : [];
+    return [
+        ...extractInlineImageRefs(entry.message),
+        ...extractImagegenArtifactRefs(entry.message),
+    ];
+}
+
+function extractInlineImageRefs(message: unknown): RecentImageRef[] {
+    const parsed = parseWithSchema(MessageWithArrayContentSchema, message);
+    return parsed
+        ? parsed.content
+              .filter(isImageContent)
+              .map((content): RecentImageRef => ({ kind: "inline", content }))
+        : [];
+}
+
+function extractImagegenArtifactRefs(message: unknown): RecentImageRef[] {
+    const parsed = parseWithSchema(ImagegenArtifactDetailsSchema, message);
+    return parsed
+        ? parsed.details.images.map(
+              (image): RecentImageRef => ({ kind: "artifact", path: image.path }),
+          )
+        : [];
 }
 
 function isImageContent(value: unknown): value is ImageContent {

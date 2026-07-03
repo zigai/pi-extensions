@@ -240,7 +240,7 @@ async function resolveEditImages(
     const count = Math.trunc(params.num_last_images_to_include);
     if (count < 1 || count > 5)
         throw new Error("num_last_images_to_include must be between 1 and 5.");
-    const recent = recentImageContents(ctx, count);
+    const recent = await recentImageContents(ctx, count);
     if (recent.length !== count)
         throw new Error(`Requested ${count} recent image(s), but only found ${recent.length}.`);
     return recent;

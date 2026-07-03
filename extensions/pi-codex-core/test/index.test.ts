@@ -899,6 +899,76 @@ test("imagegen returns saved paths without inline generated images", async () =>
     }
 });
 
+test("imagegen edits recent generated image artifacts from tool details", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-imagegen-recent-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const cwd = join(root, "workspace");
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const previousImagePath = join(root, "previous.png");
+        await mkdir(cwd, { recursive: true });
+        await writeFile(previousImagePath, solidPngBytes(1, 1, [0, 0, 255, 255]));
+        const editedBase64 = Buffer.from("edited png bytes").toString("base64");
+        let requestUrl = "";
+        let requestBody: unknown;
+        const runtime = makeTestRuntime(async (input, init) => {
+            requestUrl = String(input);
+            requestBody = JSON.parse(String(init?.body)) as unknown;
+            return new Response(JSON.stringify({ data: [{ b64_json: editedBase64 }] }), {
+                status: 200,
+            });
+        });
+        const imagegenTool = createImagegenTool({
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            runtime,
+        });
+        const ctx = makeWebRunContextWithBranch(cwd, [
+            messageEntry("imagegen-result", null, {
+                role: "toolResult",
+                content: [
+                    {
+                        type: "text",
+                        text: `Generated image output:\n- image: ${previousImagePath}`,
+                    },
+                ],
+                details: {
+                    images: [
+                        {
+                            path: previousImagePath,
+                            absolutePath: previousImagePath,
+                            latestPath: previousImagePath,
+                            latestAbsolutePath: previousImagePath,
+                        },
+                    ],
+                },
+            }),
+        ]);
+
+        await imagegenTool.execute(
+            "call/2",
+            { prompt: "Make the recent image red", num_last_images_to_include: 1 },
+            undefined,
+            undefined,
+            ctx,
+        );
+
+        assert.match(requestUrl, /\/images\/edits$/);
+        assert.ok(isRecord(requestBody));
+        assert.ok(Array.isArray(requestBody.images));
+        const [editImage] = requestBody.images;
+        assert.ok(isRecord(editImage));
+        assert.equal(
+            editImage.image_url,
+            `data:image/png;base64,${solidPngBytes(1, 1, [0, 0, 255, 255]).toString("base64")}`,
+        );
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("saves generated images outside the workspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-"));
     const cwd = join(root, "workspace");
@@ -2167,6 +2237,22 @@ function makeWebRunContext(cwd: string): ExtensionContext {
         },
     };
     // SAFETY: This test exercises web_run execution fields only.
+    return ctx as unknown as ExtensionContext;
+}
+
+function makeWebRunContextWithBranch(
+    cwd: string,
+    branchEntries: readonly Record<string, unknown>[],
+): ExtensionContext {
+    const base = makeWebRunContext(cwd);
+    const ctx = {
+        ...base,
+        sessionManager: {
+            getSessionId: () => "session/1",
+            getBranch: () => branchEntries,
+        },
+    };
+    // SAFETY: This test context changes only the session branch fixture used by image lookup.
     return ctx as unknown as ExtensionContext;
 }
 
