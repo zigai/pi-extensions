@@ -1206,6 +1206,65 @@ test("preserves previous native window when falling back to Pi compaction", asyn
     ]);
 });
 
+test("keeps pending Pi fallback windows isolated by session", async () => {
+    const runtime = makeTestRuntime(async () => new Response("limit", { status: 429 }));
+    const sessionA = makeNativeCompactionContext({ sessionId: "session-a" });
+    const sessionB = makeNativeCompactionContext({ sessionId: "session-b" });
+    const config = {
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+    };
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
+                messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
+            ],
+            firstKeptEntryId: "entry-tail",
+        }),
+        sessionA,
+        config,
+        makeCompactionApi(),
+        runtime,
+    );
+    assert.equal(result, undefined);
+
+    const fallbackPayload = {
+        model: "gpt-5.5",
+        instructions: "compact this conversation",
+        input: [
+            { role: "developer", content: "summarize compact" },
+            {
+                role: "user",
+                content: [{ type: "input_text", text: "<conversation>tail</conversation>" }],
+            },
+        ],
+    };
+
+    const sessionBRewrite = await rewriteProviderRequestWithNativeCompaction(
+        fallbackPayload,
+        sessionB,
+        config,
+        makeCompactionApi(),
+        runtime,
+    );
+    assert.equal(sessionBRewrite, undefined);
+
+    const sessionARewrite = await rewriteProviderRequestWithNativeCompaction(
+        fallbackPayload,
+        sessionA,
+        config,
+        makeCompactionApi(),
+        runtime,
+    );
+    const rewrittenInput = responseInput(sessionARewrite);
+    assert.deepEqual(rewrittenInput.slice(0, 2), [
+        { role: "developer", content: "summarize compact" },
+        { type: "compaction", encrypted_content: "opaque" },
+    ]);
+});
+
 test("auto compaction defers until Pi is idle after agent_end", async () => {
     const compactCalls: unknown[] = [];
     const idle = { value: false };
@@ -1807,7 +1866,7 @@ function makeCompactionApi(): ExtensionAPI {
 }
 
 function makeNativeCompactionContext(
-    options: { readonly contextWindow?: number } = {},
+    options: { readonly contextWindow?: number; readonly sessionId?: string } = {},
 ): ExtensionContext {
     const ctx = {
         hasUI: false,
@@ -1828,7 +1887,7 @@ function makeNativeCompactionContext(
             }),
         },
         sessionManager: {
-            getSessionId: () => "session-1",
+            getSessionId: () => options.sessionId ?? "session-1",
             getBranch: () => [],
         },
         getSystemPrompt: () => "system prompt",

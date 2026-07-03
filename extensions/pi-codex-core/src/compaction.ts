@@ -281,7 +281,7 @@ type ScheduleCodexAutoCompactionOptions = {
     readonly completedMessages?: readonly AgentEndCompactionMessage[] | undefined;
 };
 
-let pendingPiCompactionNativeWindow: PendingPiCompactionNativeWindow | undefined;
+const pendingPiCompactionNativeWindows = new Map<string, PendingPiCompactionNativeWindow>();
 const autoCompactionBySession = new Map<string, AutoCompactionSessionState>();
 const nativeReplayWarningKeys = new Set<string>();
 
@@ -383,7 +383,7 @@ export async function handleCodexNativeCompaction(
             worldStateInput,
             runtimeServices,
         );
-        pendingPiCompactionNativeWindow = undefined;
+        pendingPiCompactionNativeWindows.delete(ctx.sessionManager.getSessionId());
         return {
             compaction: {
                 summary: NATIVE_COMPACTION_SHIM_SUMMARY,
@@ -1511,18 +1511,19 @@ function stashLatestNativeWindowForPiCompactionFallback(
     branchEntries: readonly SessionEntry[],
     match: NativeCompactionMatch,
 ): boolean {
-    pendingPiCompactionNativeWindow = undefined;
+    const sessionId = ctx.sessionManager.getSessionId();
+    pendingPiCompactionNativeWindows.delete(sessionId);
     const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
     if (!latestNativeCompaction) return false;
     const replacementInput = cloneCompactedWindow(
         latestNativeCompaction.entry.details.replacementInput,
     );
     if (replacementInput.length === 0) return false;
-    pendingPiCompactionNativeWindow = {
+    pendingPiCompactionNativeWindows.set(sessionId, {
         ...match,
-        sessionId: ctx.sessionManager.getSessionId(),
+        sessionId,
         replacementInput,
-    };
+    });
     return true;
 }
 
@@ -1531,13 +1532,11 @@ function injectPendingNativeWindowIntoPiCompactionRequest(
     ctx: ExtensionContext,
     match: NativeCompactionMatch,
 ): ResponsesPayload | undefined {
-    const pending = pendingPiCompactionNativeWindow;
-    if (!pending || pending.sessionId !== ctx.sessionManager.getSessionId()) {
-        pendingPiCompactionNativeWindow = undefined;
-        return undefined;
-    }
+    const sessionId = ctx.sessionManager.getSessionId();
+    const pending = pendingPiCompactionNativeWindows.get(sessionId);
+    if (!pending) return undefined;
     if (!nativeCompactionMatches(pending, match)) {
-        pendingPiCompactionNativeWindow = undefined;
+        pendingPiCompactionNativeWindows.delete(sessionId);
         return undefined;
     }
     if (!isPiCompactionSummarizationPayload(payload)) return undefined;
@@ -1545,7 +1544,7 @@ function injectPendingNativeWindowIntoPiCompactionRequest(
     const input = cloneResponsesInputSlice(payload.input);
     let insertAt = 0;
     while (insertAt < input.length && isInstructionItem(input[insertAt])) insertAt += 1;
-    pendingPiCompactionNativeWindow = undefined;
+    pendingPiCompactionNativeWindows.delete(sessionId);
     return {
         ...payload,
         input: [
