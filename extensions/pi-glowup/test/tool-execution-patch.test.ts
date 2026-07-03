@@ -5,6 +5,8 @@ import type {
     ThirdPartyToolRendererPlugin,
 } from "../src/third-party-renderers.ts";
 import {
+    configureBuiltInToolRendererPatch,
+    configureThirdPartyToolRendererPatch,
     installBuiltInToolRendererPatch,
     installBuiltInWriteRendererPatch,
     installThirdPartyToolRendererPatch,
@@ -139,6 +141,42 @@ describe("tool execution patches", () => {
         expect(prototype.getRenderShell.call(customInstance)).toBe("default");
     });
 
+    it("restores built-in tool renderers when disabled", () => {
+        const prototype = createPrototype();
+        const originalGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+        const originalGetResultRenderer = Reflect.get(prototype, "getResultRenderer");
+        const originalGetRenderShell = Reflect.get(prototype, "getRenderShell");
+        const originalHasRendererDefinition = Reflect.get(prototype, "hasRendererDefinition");
+        const readInstance: FakeToolExecutionInstance = {
+            toolName: "read",
+            builtInToolDefinition: {},
+        };
+
+        configureBuiltInToolRendererPatch(
+            true,
+            {
+                renderCall: (toolName) => ({
+                    render: () => [`called ${toolName}`],
+                    invalidate: noop,
+                }),
+                renderResult: (toolName) => ({
+                    render: () => [`result ${toolName}`],
+                    invalidate: noop,
+                }),
+            },
+            prototype,
+        );
+        expect(prototype.getRenderShell.call(readInstance)).toBe("self");
+
+        configureBuiltInToolRendererPatch(false, undefined, prototype);
+
+        expect(Reflect.get(prototype, "getCallRenderer")).toBe(originalGetCallRenderer);
+        expect(Reflect.get(prototype, "getResultRenderer")).toBe(originalGetResultRenderer);
+        expect(Reflect.get(prototype, "getRenderShell")).toBe(originalGetRenderShell);
+        expect(Reflect.get(prototype, "hasRendererDefinition")).toBe(originalHasRendererDefinition);
+        expect(prototype.getRenderShell.call(readInstance)).toBe("default");
+    });
+
     it("replaces only the built-in write renderer without registering a write tool override", () => {
         const prototype = createPrototype();
         installBuiltInWriteRendererPatch(prototype);
@@ -217,6 +255,54 @@ describe("tool execution patches", () => {
 
         expect(prototype.getRenderShell.call(instance)).toBe("default");
         expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
+        expect(
+            prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["existing renderer"]);
+    });
+
+    it("restores third-party renderers when disabled", () => {
+        const prototype = createPrototype();
+        const originalGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+        const originalGetResultRenderer = Reflect.get(prototype, "getResultRenderer");
+        const originalGetRenderShell = Reflect.get(prototype, "getRenderShell");
+        const originalHasRendererDefinition = Reflect.get(prototype, "hasRendererDefinition");
+        const instance: FakeToolExecutionInstance = {
+            toolName: "custom_tool",
+            toolDefinition: {},
+        };
+
+        configureThirdPartyToolRendererPatch(true, undefined, prototype);
+        expect(prototype.getRenderShell.call(instance)).toBe("self");
+
+        configureThirdPartyToolRendererPatch(false, undefined, prototype);
+
+        expect(Reflect.get(prototype, "getCallRenderer")).toBe(originalGetCallRenderer);
+        expect(Reflect.get(prototype, "getResultRenderer")).toBe(originalGetResultRenderer);
+        expect(Reflect.get(prototype, "getRenderShell")).toBe(originalGetRenderShell);
+        expect(Reflect.get(prototype, "hasRendererDefinition")).toBe(originalHasRendererDefinition);
+        expect(prototype.getRenderShell.call(instance)).toBe("default");
+    });
+
+    it("disables third-party behavior without clobbering later wrappers", () => {
+        const prototype = createPrototype();
+        const instance: FakeToolExecutionInstance = {
+            toolName: "custom_tool",
+            toolDefinition: {},
+        };
+
+        configureThirdPartyToolRendererPatch(true, undefined, prototype);
+        const codexGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+        if (typeof codexGetCallRenderer !== "function") {
+            throw new Error("expected Codex-look call renderer wrapper");
+        }
+        prototype.getCallRenderer = function getLaterCallRenderer(this: object) {
+            return codexGetCallRenderer.call(this);
+        };
+        const laterGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+
+        configureThirdPartyToolRendererPatch(false, undefined, prototype);
+
+        expect(Reflect.get(prototype, "getCallRenderer")).toBe(laterGetCallRenderer);
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["existing renderer"]);

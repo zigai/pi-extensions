@@ -70,13 +70,32 @@ export type BuiltInToolRendererOptions = {
     ) => Component | undefined;
 };
 
+type RendererPatchWrappers = {
+    readonly getCallRenderer: NonNullable<ToolExecutionPrototype["getCallRenderer"]>;
+    readonly getResultRenderer: NonNullable<ToolExecutionPrototype["getResultRenderer"]>;
+    readonly getRenderShell: NonNullable<ToolExecutionPrototype["getRenderShell"]>;
+    readonly hasRendererDefinition: NonNullable<ToolExecutionPrototype["hasRendererDefinition"]>;
+};
+
 type BuiltInRendererPatchState = {
+    enabled: boolean;
     renderingOptions: BuiltInToolRendererOptions;
+    readonly originalGetCallRenderer: ToolExecutionPrototype["getCallRenderer"];
+    readonly originalGetResultRenderer: ToolExecutionPrototype["getResultRenderer"];
+    readonly originalGetRenderShell: ToolExecutionPrototype["getRenderShell"];
+    readonly originalHasRendererDefinition: ToolExecutionPrototype["hasRendererDefinition"];
+    readonly wrappers: RendererPatchWrappers;
 };
 
 type ThirdPartyRendererPatchState = {
+    enabled: boolean;
     renderingOptions: ThirdPartyToolRenderingOptions | undefined;
     readonly rendererCache: Map<string, ThirdPartyToolRenderer>;
+    readonly originalGetCallRenderer: ToolExecutionPrototype["getCallRenderer"];
+    readonly originalGetResultRenderer: ToolExecutionPrototype["getResultRenderer"];
+    readonly originalGetRenderShell: ToolExecutionPrototype["getRenderShell"];
+    readonly originalHasRendererDefinition: ToolExecutionPrototype["hasRendererDefinition"];
+    readonly wrappers: RendererPatchWrappers;
 };
 
 const BUILT_IN_TOOL_NAMES = new Set<string>([
@@ -248,17 +267,27 @@ const writeResultRenderer: ThirdPartyToolRenderer["renderResult"] = (result, opt
     });
 };
 
-/** Installs render-only Codex-look renderers for built-in tool names. */
-export function installBuiltInToolRendererPatch(
-    options: BuiltInToolRendererOptions,
+/** Enables, updates, or disables render-only Codex-look renderers for built-in tool names. */
+export function configureBuiltInToolRendererPatch(
+    enabled: boolean,
+    options?: BuiltInToolRendererOptions,
     prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
 ): void {
     const existingState = prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
-    if (prototype[BUILT_IN_RENDERER_PATCH_KEY] === true && existingState !== undefined) {
-        existingState.renderingOptions = options;
+    if (!enabled) {
+        if (existingState !== undefined) {
+            restoreBuiltInRendererPatch(prototype, existingState);
+        }
         return;
     }
-    if (prototype[BUILT_IN_RENDERER_PATCH_KEY] === true) {
+
+    if (options === undefined) {
+        return;
+    }
+
+    if (existingState !== undefined) {
+        existingState.enabled = true;
+        existingState.renderingOptions = options;
         return;
     }
 
@@ -266,54 +295,159 @@ export function installBuiltInToolRendererPatch(
     const originalGetResultRenderer = prototype.getResultRenderer;
     const originalGetRenderShell = prototype.getRenderShell;
     const originalHasRendererDefinition = prototype.hasRendererDefinition;
-    const state: BuiltInRendererPatchState = { renderingOptions: options };
+    let state: BuiltInRendererPatchState;
+
+    const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
+        function getCodexLookBuiltInCallRenderer(this: ToolExecutionInstance) {
+            const toolName = builtInToolName(this);
+            const originalRenderer = originalGetCallRenderer?.call(this);
+            if (!state.enabled || toolName === undefined) {
+                return originalRenderer;
+            }
+            return (args, theme, context) =>
+                state.renderingOptions.renderCall(toolName, args, theme, context) ??
+                originalRenderer?.(args, theme, context) ??
+                emptyComponent();
+        };
+
+    const getResultRenderer: RendererPatchWrappers["getResultRenderer"] =
+        function getCodexLookBuiltInResultRenderer(this: ToolExecutionInstance) {
+            const toolName = builtInToolName(this);
+            const originalRenderer = originalGetResultRenderer?.call(this);
+            if (!state.enabled || toolName === undefined) {
+                return originalRenderer;
+            }
+            return (result, renderOptions, theme, context) =>
+                state.renderingOptions.renderResult(
+                    toolName,
+                    result,
+                    renderOptions,
+                    theme,
+                    context,
+                ) ??
+                originalRenderer?.(result, renderOptions, theme, context) ??
+                emptyComponent();
+        };
+
+    const getRenderShell: RendererPatchWrappers["getRenderShell"] =
+        function getCodexLookBuiltInRenderShell(this: ToolExecutionInstance) {
+            return state.enabled && builtInToolName(this) !== undefined
+                ? "self"
+                : (originalGetRenderShell?.call(this) ?? "default");
+        };
+
+    const hasRendererDefinition: RendererPatchWrappers["hasRendererDefinition"] =
+        function hasCodexLookBuiltInRendererDefinition(this: ToolExecutionInstance) {
+            return state.enabled && builtInToolName(this) !== undefined
+                ? true
+                : (originalHasRendererDefinition?.call(this) ?? false);
+        };
+
+    state = {
+        enabled: true,
+        renderingOptions: options,
+        originalGetCallRenderer,
+        originalGetResultRenderer,
+        originalGetRenderShell,
+        originalHasRendererDefinition,
+        wrappers: {
+            getCallRenderer,
+            getResultRenderer,
+            getRenderShell,
+            hasRendererDefinition,
+        },
+    };
     prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY] = state;
-
-    prototype.getCallRenderer = function getCodexLookBuiltInCallRenderer(
-        this: ToolExecutionInstance,
-    ) {
-        const toolName = builtInToolName(this);
-        const originalRenderer = originalGetCallRenderer?.call(this);
-        if (toolName === undefined) {
-            return originalRenderer;
-        }
-        return (args, theme, context) =>
-            state.renderingOptions.renderCall(toolName, args, theme, context) ??
-            originalRenderer?.(args, theme, context) ??
-            emptyComponent();
-    };
-
-    prototype.getResultRenderer = function getCodexLookBuiltInResultRenderer(
-        this: ToolExecutionInstance,
-    ) {
-        const toolName = builtInToolName(this);
-        const originalRenderer = originalGetResultRenderer?.call(this);
-        if (toolName === undefined) {
-            return originalRenderer;
-        }
-        return (result, options, theme, context) =>
-            state.renderingOptions.renderResult(toolName, result, options, theme, context) ??
-            originalRenderer?.(result, options, theme, context) ??
-            emptyComponent();
-    };
-
-    prototype.getRenderShell = function getCodexLookBuiltInRenderShell(
-        this: ToolExecutionInstance,
-    ) {
-        return builtInToolName(this) === undefined
-            ? (originalGetRenderShell?.call(this) ?? "default")
-            : "self";
-    };
-
-    prototype.hasRendererDefinition = function hasCodexLookBuiltInRendererDefinition(
-        this: ToolExecutionInstance,
-    ) {
-        return builtInToolName(this) === undefined
-            ? (originalHasRendererDefinition?.call(this) ?? false)
-            : true;
-    };
-
+    prototype.getCallRenderer = getCallRenderer;
+    prototype.getResultRenderer = getResultRenderer;
+    prototype.getRenderShell = getRenderShell;
+    prototype.hasRendererDefinition = hasRendererDefinition;
     prototype[BUILT_IN_RENDERER_PATCH_KEY] = true;
+}
+
+/** Installs render-only Codex-look renderers for built-in tool names. */
+export function installBuiltInToolRendererPatch(
+    options: BuiltInToolRendererOptions,
+    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
+): void {
+    configureBuiltInToolRendererPatch(true, options, prototype);
+}
+
+function restoreGetCallRenderer(
+    prototype: ToolExecutionPrototype,
+    method: ToolExecutionPrototype["getCallRenderer"],
+): void {
+    if (method === undefined) {
+        delete prototype.getCallRenderer;
+        return;
+    }
+    prototype.getCallRenderer = method;
+}
+
+function restoreGetResultRenderer(
+    prototype: ToolExecutionPrototype,
+    method: ToolExecutionPrototype["getResultRenderer"],
+): void {
+    if (method === undefined) {
+        delete prototype.getResultRenderer;
+        return;
+    }
+    prototype.getResultRenderer = method;
+}
+
+function restoreGetRenderShell(
+    prototype: ToolExecutionPrototype,
+    method: ToolExecutionPrototype["getRenderShell"],
+): void {
+    if (method === undefined) {
+        delete prototype.getRenderShell;
+        return;
+    }
+    prototype.getRenderShell = method;
+}
+
+function restoreHasRendererDefinition(
+    prototype: ToolExecutionPrototype,
+    method: ToolExecutionPrototype["hasRendererDefinition"],
+): void {
+    if (method === undefined) {
+        delete prototype.hasRendererDefinition;
+        return;
+    }
+    prototype.hasRendererDefinition = method;
+}
+
+function restoreBuiltInRendererPatch(
+    prototype: ToolExecutionPrototype,
+    state: BuiltInRendererPatchState,
+): void {
+    state.enabled = false;
+    let restoredOwnWrappers = true;
+    if (prototype.getCallRenderer === state.wrappers.getCallRenderer) {
+        restoreGetCallRenderer(prototype, state.originalGetCallRenderer);
+    } else {
+        restoredOwnWrappers = false;
+    }
+    if (prototype.getResultRenderer === state.wrappers.getResultRenderer) {
+        restoreGetResultRenderer(prototype, state.originalGetResultRenderer);
+    } else {
+        restoredOwnWrappers = false;
+    }
+    if (prototype.getRenderShell === state.wrappers.getRenderShell) {
+        restoreGetRenderShell(prototype, state.originalGetRenderShell);
+    } else {
+        restoredOwnWrappers = false;
+    }
+    if (prototype.hasRendererDefinition === state.wrappers.hasRendererDefinition) {
+        restoreHasRendererDefinition(prototype, state.originalHasRendererDefinition);
+    } else {
+        restoredOwnWrappers = false;
+    }
+
+    if (restoredOwnWrappers) {
+        delete prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
+        delete prototype[BUILT_IN_RENDERER_PATCH_KEY];
+    }
 }
 
 /** Installs an idempotent compact renderer for Pi's built-in write tool only. */
@@ -366,18 +500,24 @@ export function installBuiltInWriteRendererPatch(
     prototype[WRITE_RENDERER_PATCH_KEY] = true;
 }
 
-/** Installs an idempotent Codex-look fallback renderer for non-native tools. */
-export function installThirdPartyToolRendererPatch(
+/** Enables, updates, or disables Codex-look fallback renderers for non-native tools. */
+export function configureThirdPartyToolRendererPatch(
+    enabled: boolean,
     options?: ThirdPartyToolRenderingOptions,
     prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
 ): void {
     const existingState = prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
-    if (prototype[THIRD_PARTY_RENDERER_PATCH_KEY] === true && existingState !== undefined) {
-        existingState.renderingOptions = options;
-        existingState.rendererCache.clear();
+    if (!enabled) {
+        if (existingState !== undefined) {
+            restoreThirdPartyRendererPatch(prototype, existingState);
+        }
         return;
     }
-    if (prototype[THIRD_PARTY_RENDERER_PATCH_KEY] === true) {
+
+    if (existingState !== undefined) {
+        existingState.enabled = true;
+        existingState.renderingOptions = options;
+        existingState.rendererCache.clear();
         return;
     }
 
@@ -385,43 +525,103 @@ export function installThirdPartyToolRendererPatch(
     const originalGetResultRenderer = prototype.getResultRenderer;
     const originalGetRenderShell = prototype.getRenderShell;
     const originalHasRendererDefinition = prototype.hasRendererDefinition;
-    const state: ThirdPartyRendererPatchState = {
+    let state: ThirdPartyRendererPatchState;
+
+    const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
+        function getCodexLookCallRenderer(this: ToolExecutionInstance) {
+            if (state.enabled && shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+                return rendererForInstance(this, state.renderingOptions, state.rendererCache)
+                    ?.renderCall;
+            }
+            return originalGetCallRenderer?.call(this);
+        };
+
+    const getResultRenderer: RendererPatchWrappers["getResultRenderer"] =
+        function getCodexLookResultRenderer(this: ToolExecutionInstance) {
+            if (state.enabled && shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+                return rendererForInstance(this, state.renderingOptions, state.rendererCache)
+                    ?.renderResult;
+            }
+            return originalGetResultRenderer?.call(this);
+        };
+
+    const getRenderShell: RendererPatchWrappers["getRenderShell"] =
+        function getCodexLookRenderShell(this: ToolExecutionInstance) {
+            if (state.enabled && shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+                return "self";
+            }
+            return originalGetRenderShell?.call(this) ?? "default";
+        };
+
+    const hasRendererDefinition: RendererPatchWrappers["hasRendererDefinition"] =
+        function hasCodexLookRendererDefinition(this: ToolExecutionInstance) {
+            if (state.enabled && shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+                return true;
+            }
+            return originalHasRendererDefinition?.call(this) ?? false;
+        };
+
+    state = {
+        enabled: true,
         renderingOptions: options,
         rendererCache: new Map<string, ThirdPartyToolRenderer>(),
+        originalGetCallRenderer,
+        originalGetResultRenderer,
+        originalGetRenderShell,
+        originalHasRendererDefinition,
+        wrappers: {
+            getCallRenderer,
+            getResultRenderer,
+            getRenderShell,
+            hasRendererDefinition,
+        },
     };
     prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY] = state;
-
-    prototype.getCallRenderer = function getCodexLookCallRenderer(this: ToolExecutionInstance) {
-        if (shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
-            return rendererForInstance(this, state.renderingOptions, state.rendererCache)
-                ?.renderCall;
-        }
-        return originalGetCallRenderer?.call(this);
-    };
-
-    prototype.getResultRenderer = function getCodexLookResultRenderer(this: ToolExecutionInstance) {
-        if (shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
-            return rendererForInstance(this, state.renderingOptions, state.rendererCache)
-                ?.renderResult;
-        }
-        return originalGetResultRenderer?.call(this);
-    };
-
-    prototype.getRenderShell = function getCodexLookRenderShell(this: ToolExecutionInstance) {
-        if (shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
-            return "self";
-        }
-        return originalGetRenderShell?.call(this) ?? "default";
-    };
-
-    prototype.hasRendererDefinition = function hasCodexLookRendererDefinition(
-        this: ToolExecutionInstance,
-    ) {
-        if (shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
-            return true;
-        }
-        return originalHasRendererDefinition?.call(this) ?? false;
-    };
-
+    prototype.getCallRenderer = getCallRenderer;
+    prototype.getResultRenderer = getResultRenderer;
+    prototype.getRenderShell = getRenderShell;
+    prototype.hasRendererDefinition = hasRendererDefinition;
     prototype[THIRD_PARTY_RENDERER_PATCH_KEY] = true;
+}
+
+/** Installs an idempotent Codex-look fallback renderer for non-native tools. */
+export function installThirdPartyToolRendererPatch(
+    options?: ThirdPartyToolRenderingOptions,
+    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
+): void {
+    configureThirdPartyToolRendererPatch(true, options, prototype);
+}
+
+function restoreThirdPartyRendererPatch(
+    prototype: ToolExecutionPrototype,
+    state: ThirdPartyRendererPatchState,
+): void {
+    state.enabled = false;
+    state.rendererCache.clear();
+    let restoredOwnWrappers = true;
+    if (prototype.getCallRenderer === state.wrappers.getCallRenderer) {
+        restoreGetCallRenderer(prototype, state.originalGetCallRenderer);
+    } else {
+        restoredOwnWrappers = false;
+    }
+    if (prototype.getResultRenderer === state.wrappers.getResultRenderer) {
+        restoreGetResultRenderer(prototype, state.originalGetResultRenderer);
+    } else {
+        restoredOwnWrappers = false;
+    }
+    if (prototype.getRenderShell === state.wrappers.getRenderShell) {
+        restoreGetRenderShell(prototype, state.originalGetRenderShell);
+    } else {
+        restoredOwnWrappers = false;
+    }
+    if (prototype.hasRendererDefinition === state.wrappers.hasRendererDefinition) {
+        restoreHasRendererDefinition(prototype, state.originalHasRendererDefinition);
+    } else {
+        restoredOwnWrappers = false;
+    }
+
+    if (restoredOwnWrappers) {
+        delete prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
+        delete prototype[THIRD_PARTY_RENDERER_PATCH_KEY];
+    }
 }

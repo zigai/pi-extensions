@@ -52,8 +52,8 @@ import {
 import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
 import { createScriptPreviewStore } from "./script-preview-store.ts";
 import {
-    installBuiltInToolRendererPatch,
-    installThirdPartyToolRendererPatch,
+    configureBuiltInToolRendererPatch,
+    configureThirdPartyToolRendererPatch,
     type BuiltInToolRendererOptions,
 } from "./tool-execution-patch.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
@@ -521,12 +521,13 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         configureWorkingWidgetSpacingPatch(config.patches.workingWidgetSpacing);
         configureAutocompleteCleanupPatch(config.patches.autocompleteCleanup);
         configureMarkdownSyntaxPatch(config.patches.markdownSyntax);
-        installThirdPartyToolRendererPatch(
+        configureThirdPartyToolRendererPatch(
+            true,
             config.patches.thirdPartyToolRenderers
                 ? thirdPartyToolRenderingOptions(config)
                 : { enabled: false },
         );
-        installBuiltInToolRendererPatch({
+        configureBuiltInToolRendererPatch(true, {
             renderCall: renderBuiltInToolCall(() => headerLayout),
             renderResult: renderBuiltInToolResult(() => headerLayout),
         });
@@ -599,6 +600,8 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         configureWorkingWidgetSpacingPatch(false);
         configureAutocompleteCleanupPatch(false);
         configureMarkdownSyntaxPatch(false);
+        configureThirdPartyToolRendererPatch(false);
+        configureBuiltInToolRendererPatch(false);
         await disposeSyntaxHighlighting();
     });
 }
