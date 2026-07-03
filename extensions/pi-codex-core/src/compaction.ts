@@ -1090,6 +1090,16 @@ function shrinkRemoteCompactionRequestForContextWindow(
         estimatedTokensAfter += estimateTokenCount(rewrittenItem) - estimateTokenCount(item);
     }
 
+    for (let index = 0; index < input.length && estimatedTokensAfter > budgetTokens; ) {
+        const item = input[index];
+        if (!item || !isTrimCandidateForCompactionRequest(item)) {
+            index += 1;
+            continue;
+        }
+        input.splice(index, 1);
+        estimatedTokensAfter -= estimateTokenCount(item);
+    }
+
     const shrunkRequest = { ...request, input };
     return {
         request: shrunkRequest,
@@ -1845,6 +1855,15 @@ function compactRequestBudget(contextWindow: number | null | undefined): number 
 
 function isRewritableToolOutputItem(item: ResponsesInputItem): boolean {
     return item.type === "function_call_output" && item.output !== TRUNCATED_TOOL_OUTPUT_MESSAGE;
+}
+
+function isTrimCandidateForCompactionRequest(item: ResponsesInputItem): boolean {
+    return (
+        item.type !== "compaction_trigger" &&
+        item.type !== "function_call" &&
+        item.type !== "function_call_output" &&
+        !isInstructionItem(item)
+    );
 }
 
 function estimateTokenCount(value: unknown): number {

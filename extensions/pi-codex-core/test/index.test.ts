@@ -1012,6 +1012,45 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
     assert.equal(result?.compaction?.details.requestMeta?.rewrittenToolOutputs, 1);
 });
 
+test("trims oversized non-tool input before remote v2 compaction", async () => {
+    let requestBody: unknown;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as unknown;
+        const body = [
+            "event: response.output_item.done",
+            'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-trimmed"}}',
+            "",
+            "event: response.completed",
+            'data: {"type":"response.completed","response":{"id":"resp_trimmed","created_at":123}}',
+            "",
+        ].join("\n");
+        return new Response(body, { status: 200 });
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                messageEntry("old", null, userMessage(`old ${"x ".repeat(6_000)}`)),
+                messageEntry("recent", "old", userMessage("please keep working")),
+            ],
+            firstKeptEntryId: "old",
+        }),
+        makeNativeCompactionContext({ contextWindow: 700 }),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.ok(isRecord(requestBody));
+    assert.doesNotMatch(JSON.stringify(requestBody.input), /old x/);
+    const requestMeta = result?.compaction?.details.requestMeta;
+    assert.ok(requestMeta?.budgetTokens);
+    assert.ok(requestMeta.estimatedTokensAfter <= requestMeta.budgetTokens);
+});
+
 test("retained image-only messages consume compaction budget", async () => {
     const runtime = makeTestRuntime(async () => {
         const body = [
