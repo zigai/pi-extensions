@@ -49,7 +49,7 @@ import { formatWebRunToolOutput } from "../src/tools/web-run-output.ts";
 import { createWebRunTool } from "../src/tools/web-run.ts";
 import { Redacted } from "../src/redacted.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
-import { formatCodexUsage, parseCodexUsagePayload } from "../src/usage.ts";
+import { fetchCodexUsage, formatCodexUsage, parseCodexUsagePayload } from "../src/usage.ts";
 
 test("exports extension metadata", () => {
     assert.equal(packageName, "pi-codex-core");
@@ -381,6 +381,35 @@ test("formats codex usage payloads", () => {
     assert.match(lines[2] ?? "", /^- GPT-5\.3-Codex-Spark: 5h: 100% left \(/);
     assert.equal(lines.at(-1), "- Resets available: 2");
     assert.doesNotMatch(formatted, /\b300m\b|\b10080m\b/);
+});
+
+test("fetches Codex usage from the selected provider base URL", async () => {
+    const urls: string[] = [];
+    const runtime = makeTestRuntime(async (input) => {
+        urls.push(String(input));
+        if (String(input).endsWith("/wham/usage")) {
+            return new Response(
+                JSON.stringify({ rate_limit_reset_credits: { available_count: 1 } }),
+                { status: 200 },
+            );
+        }
+        if (String(input).endsWith("/wham/rate-limit-reset-credits")) {
+            return new Response(JSON.stringify({ available_count: 1, credits: [] }), {
+                status: 200,
+            });
+        }
+        return new Response("not found", { status: 404 });
+    });
+
+    const result = await fetchCodexUsage(makeUsageContext("https://proxy.example/backend-api"), {
+        runtime,
+    });
+
+    assert.ok(result.isOk());
+    assert.deepEqual(urls, [
+        "https://proxy.example/backend-api/wham/usage",
+        "https://proxy.example/backend-api/wham/rate-limit-reset-credits",
+    ]);
 });
 
 test("Codex tool auth requires account ids and omits empty account headers", async () => {
@@ -1877,6 +1906,27 @@ function makeImageContext(cwd: string): ExtensionContext {
         },
     };
     // SAFETY: This test only exercises cwd and model image support.
+    return ctx as unknown as ExtensionContext;
+}
+
+function makeUsageContext(modelBaseUrl: string): ExtensionContext {
+    const ctx = {
+        model: {
+            provider: "openai-codex",
+            api: "openai-codex-responses",
+            id: "gpt-5.5",
+            baseUrl: modelBaseUrl,
+            headers: {},
+        },
+        modelRegistry: {
+            getApiKeyAndHeaders: async () => ({
+                ok: true,
+                apiKey: "usage-token",
+                headers: { "chatgpt-account-id": "usage-account" },
+            }),
+        },
+    };
+    // SAFETY: This test context supplies the model and auth fields read by Codex usage.
     return ctx as unknown as ExtensionContext;
 }
 

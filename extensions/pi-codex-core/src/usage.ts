@@ -2,7 +2,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { extractAccountId } from "./codex-auth.ts";
+import { extractAccountId, resolveCodexApiProviderBaseUrl } from "./codex-auth.ts";
 import {
     CodexAuthUnavailable,
     CodexHttpRequestFailed,
@@ -18,7 +18,6 @@ import {
 import { defaultCodexRuntime, type CodexRuntime, type IdGenerator } from "./runtime.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
-const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const RESET_CREDITS_CACHE_MS = 5_000;
 
 type RuntimeModel = Model<Api>;
@@ -99,16 +98,23 @@ let resetCreditsCache:
       }
     | undefined;
 
-export function buildCodexUsageUrl(): string {
-    return `${DEFAULT_CODEX_BASE_URL}/wham/usage`;
+export function buildCodexUsageUrl(modelBaseUrl?: string | undefined): string {
+    return `${resolveCodexWhamBaseUrl(modelBaseUrl)}/wham/usage`;
 }
 
-export function buildCodexRateLimitResetCreditsUrl(): string {
-    return `${DEFAULT_CODEX_BASE_URL}/wham/rate-limit-reset-credits`;
+export function buildCodexRateLimitResetCreditsUrl(modelBaseUrl?: string | undefined): string {
+    return `${resolveCodexWhamBaseUrl(modelBaseUrl)}/wham/rate-limit-reset-credits`;
 }
 
-export function buildCodexRateLimitResetConsumeUrl(): string {
-    return `${DEFAULT_CODEX_BASE_URL}/wham/rate-limit-reset-credits/consume`;
+export function buildCodexRateLimitResetConsumeUrl(modelBaseUrl?: string | undefined): string {
+    return `${resolveCodexWhamBaseUrl(modelBaseUrl)}/wham/rate-limit-reset-credits/consume`;
+}
+
+function resolveCodexWhamBaseUrl(modelBaseUrl: string | undefined): string {
+    const codexBaseUrl = resolveCodexApiProviderBaseUrl(modelBaseUrl);
+    return codexBaseUrl.endsWith("/codex")
+        ? codexBaseUrl.slice(0, -"/codex".length)
+        : codexBaseUrl;
 }
 
 export type CodexUsageOptions = {
@@ -125,7 +131,7 @@ export async function fetchCodexUsage(
     const headers = await buildCodexUsageHeaders(ctx, model.value);
     if (headers.isErr()) return headers;
 
-    const response = await fetchUsageResponse(runtime, buildCodexUsageUrl(), {
+    const response = await fetchUsageResponse(runtime, buildCodexUsageUrl(model.value.baseUrl), {
         method: "GET",
         headers: headers.value,
         ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -149,6 +155,7 @@ export async function fetchCodexUsage(
 
     const detailedResetCredits = await fetchCodexRateLimitResetCreditsWithHeaders(
         headers.value,
+        model.value.baseUrl,
         ctx.signal,
         runtime,
     );
@@ -175,12 +182,16 @@ export async function consumeCodexRateLimitResetCredit(
     headers.value.set("content-type", "application/json");
     resetCreditsCache = undefined;
 
-    const response = await fetchUsageResponse(runtime, buildCodexRateLimitResetConsumeUrl(), {
-        method: "POST",
-        headers: headers.value,
-        body: JSON.stringify({ redeem_request_id: redeemRequestId }),
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
-    });
+    const response = await fetchUsageResponse(
+        runtime,
+        buildCodexRateLimitResetConsumeUrl(model.value.baseUrl),
+        {
+            method: "POST",
+            headers: headers.value,
+            body: JSON.stringify({ redeem_request_id: redeemRequestId }),
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+        },
+    );
     if (response.isErr()) return response;
     if (!response.value.ok) {
         return fail(
@@ -305,11 +316,13 @@ async function buildCodexUsageHeaders(
 
 async function fetchCodexRateLimitResetCreditsWithHeaders(
     headers: Headers,
+    modelBaseUrl: string | undefined,
     signal: AbortSignal | undefined,
     runtime: CodexRuntime,
 ): Promise<CodexResult<CodexRateLimitResetCredits | undefined>> {
+    const creditsUrl = buildCodexRateLimitResetCreditsUrl(modelBaseUrl);
     const accountId = headers.get("chatgpt-account-id")?.trim();
-    const cacheKey = accountId && accountId.length > 0 ? accountId : undefined;
+    const cacheKey = accountId && accountId.length > 0 ? `${creditsUrl}:${accountId}` : undefined;
     if (
         cacheKey &&
         resetCreditsCache &&
@@ -319,7 +332,7 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
         return resetCreditsCache.promise;
     }
     const promise = (async (): Promise<CodexResult<CodexRateLimitResetCredits | undefined>> => {
-        const response = await fetchUsageResponse(runtime, buildCodexRateLimitResetCreditsUrl(), {
+        const response = await fetchUsageResponse(runtime, creditsUrl, {
             method: "GET",
             headers,
             ...(signal ? { signal } : {}),
