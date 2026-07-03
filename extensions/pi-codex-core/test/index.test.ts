@@ -1050,6 +1050,50 @@ test("chains previous native compaction into the next remote v2 request", async 
     ]);
 });
 
+test("preserves previous native compaction anchor while trimming next request", async () => {
+    let requestBody: unknown;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as unknown;
+        const body = [
+            "event: response.output_item.done",
+            'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-after-trim"}}',
+            "",
+            "event: response.completed",
+            'data: {"type":"response.completed","response":{"id":"resp_anchor_trim","created_at":123}}',
+            "",
+        ].join("\n");
+        return new Response(body, { status: 200 });
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
+                messageEntry(
+                    "entry-huge-tail",
+                    "compact-1",
+                    userMessage(`huge ${"x ".repeat(8_000)}`),
+                ),
+                messageEntry("entry-recent-tail", "entry-huge-tail", userMessage("new live tail")),
+            ],
+            firstKeptEntryId: "entry-huge-tail",
+        }),
+        makeNativeCompactionContext({ contextWindow: 2_000 }),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.ok(isRecord(requestBody));
+    const requestInput = responseInput(requestBody);
+    assert.deepEqual(requestInput.at(0), { type: "compaction", encrypted_content: "opaque" });
+    assert.doesNotMatch(JSON.stringify(requestInput), /huge x/);
+    assert.equal(result?.compaction?.details.requestMeta?.previousCompactionEntryId, "compact-1");
+});
+
 test("shrinks oversized tool outputs before remote v2 compaction", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {

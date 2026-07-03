@@ -1944,10 +1944,19 @@ function isRewritableToolOutputItem(item: ResponsesInputItem): boolean {
 
 function isTrimCandidateForCompactionRequest(item: ResponsesInputItem): boolean {
     return (
+        !isNativeCompactionAnchor(item) &&
         item.type !== "compaction_trigger" &&
         item.type !== "function_call" &&
         item.type !== "function_call_output" &&
         !isInstructionItem(item)
+    );
+}
+
+function isNativeCompactionAnchor(item: ResponsesInputItem): boolean {
+    return (
+        item.type === "compaction" ||
+        item.type === "compaction_summary" ||
+        item.type === "context_compaction"
     );
 }
 
