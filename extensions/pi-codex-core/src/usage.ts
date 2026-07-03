@@ -19,25 +19,13 @@ import { defaultCodexRuntime, type CodexRuntime, type IdGenerator } from "./runt
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 const RESET_CREDITS_CACHE_MS = 5_000;
+const RESET_CREDIT_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 type RuntimeModel = Model<Api>;
 
 const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
 const StringSchema = compileSchema(Type.String());
 const NumberSchema = compileSchema(Type.Number());
-const ResetCreditSchema = compileSchema(
-    Type.Object({
-        id: Type.Optional(Type.String()),
-        reset_type: Type.Optional(Type.String()),
-        status: Type.Optional(Type.String()),
-        granted_at: Type.Optional(Type.String()),
-        expires_at: Type.Optional(Type.String()),
-        redeem_started_at: Type.Optional(Type.String()),
-        redeemed_at: Type.Optional(Type.String()),
-        title: Type.Optional(Type.String()),
-        description: Type.Optional(Type.String()),
-    }),
-);
 
 export type CodexUsageWindow = {
     readonly usedPercent?: number | undefined;
@@ -273,8 +261,12 @@ export function formatCodexUsage(snapshot: CodexUsageSnapshot): string {
     for (const row of rows) {
         lines.push(`- ${`${row.title}:`.padEnd(titleWidth + 1)} ${row.usage}`);
     }
-    if (snapshot.resetCredits)
-        lines.push(`- Resets available: ${snapshot.resetCredits.availableCount}`);
+    if (snapshot.resetCredits) {
+        const expiration = formatResetCreditExpiration(snapshot.resetCredits);
+        lines.push(
+            `- Resets available: ${snapshot.resetCredits.availableCount}${expiration ? ` (${expiration})` : ""}`,
+        );
+    }
     return lines.join("\n");
 }
 
@@ -284,6 +276,52 @@ export function formatResetConsumeResult(result: CodexRateLimitResetConsumeResul
     if (result.outcome === "nothing_to_reset") return "No active Codex limit to reset.";
     if (result.outcome === "no_credit") return "No banked resets available.";
     return "Reset response was not recognized; refresh usage before trying again.";
+}
+
+function formatResetCreditExpiration(resetCredits: CodexRateLimitResetCredits): string | undefined {
+    if (resetCredits.availableCount <= 0) return undefined;
+    const expirations = resetCredits.credits
+        .filter(isAvailableResetCredit)
+        .flatMap((credit) => {
+            const expirationMs = resetCreditExpirationMs(credit);
+            return expirationMs === undefined ? [] : [expirationMs];
+        })
+        .sort((left, right) => left - right);
+    const nextExpirationMs = expirations[0];
+    if (nextExpirationMs === undefined) return undefined;
+    const label = resetCredits.availableCount === 1 ? "expires" : "next expires";
+    return `${label} ${formatExpiration(nextExpirationMs)}`;
+}
+
+function isAvailableResetCredit(credit: CodexRateLimitResetCredit): boolean {
+    const status = credit.status?.toLowerCase();
+    if (status !== undefined && status !== "available") return false;
+    return credit.redeemedAt === undefined;
+}
+
+function resetCreditExpirationMs(credit: CodexRateLimitResetCredit): number | undefined {
+    const explicitExpirationMs = parseTimestampMs(credit.expiresAt);
+    if (explicitExpirationMs !== undefined) return explicitExpirationMs;
+    const grantedAtMs = parseTimestampMs(credit.grantedAt);
+    return grantedAtMs === undefined ? undefined : grantedAtMs + RESET_CREDIT_LIFETIME_MS;
+}
+
+function parseTimestampMs(value: string | undefined): number | undefined {
+    if (value === undefined) return undefined;
+    const timestampMs = Date.parse(value);
+    return Number.isFinite(timestampMs) ? timestampMs : undefined;
+}
+
+function formatExpiration(timestampMs: number): string {
+    const absolute = new Date(timestampMs).toLocaleString();
+    const remainingMs = timestampMs - defaultCodexRuntime.clock.nowMs();
+    if (remainingMs < 0) return `expired ${absolute}`;
+    const minutes = Math.round(remainingMs / 60000);
+    if (minutes < 90) return `in ~${minutes}m (${absolute})`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `in ~${hours}h (${absolute})`;
+    const days = Math.round(hours / 24);
+    return `in ~${days}d (${absolute})`;
 }
 
 async function buildCodexUsageHeaders(
@@ -443,18 +481,18 @@ function parseCodexRateLimitResetCreditsSummary(
 }
 
 function parseResetCredit(value: unknown): CodexRateLimitResetCredit | undefined {
-    const credit = parseWithSchema(ResetCreditSchema, value);
+    const credit = parseUsageRecord(value);
     if (!credit) return undefined;
     return {
-        id: credit.id,
-        resetType: credit.reset_type,
-        status: credit.status,
-        grantedAt: credit.granted_at,
-        expiresAt: credit.expires_at,
-        redeemStartedAt: credit.redeem_started_at,
-        redeemedAt: credit.redeemed_at,
-        title: credit.title,
-        description: credit.description,
+        id: parseString(credit.id),
+        resetType: parseString(credit.reset_type),
+        status: parseString(credit.status),
+        grantedAt: parseString(credit.granted_at),
+        expiresAt: parseString(credit.expires_at),
+        redeemStartedAt: parseString(credit.redeem_started_at),
+        redeemedAt: parseString(credit.redeemed_at),
+        title: parseString(credit.title),
+        description: parseString(credit.description),
     };
 }
 
