@@ -16,6 +16,7 @@ import type {
 import { getImageDimensions } from "@earendil-works/pi-tui";
 
 import extension, { packageName, extensionName } from "../src/index.ts";
+import { codexToolProviderHeaders, resolveCodexToolProvider } from "../src/codex-auth.ts";
 import { registerCodexCommand } from "../src/codex-command.ts";
 import { buildCodexCoreSystemPrompt } from "../src/prompt.ts";
 import {
@@ -46,6 +47,7 @@ import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createViewImageTool } from "../src/tools/view-image.ts";
 import { formatWebRunToolOutput } from "../src/tools/web-run-output.ts";
 import { createWebRunTool } from "../src/tools/web-run.ts";
+import { Redacted } from "../src/redacted.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
 import { formatCodexUsage, parseCodexUsagePayload } from "../src/usage.ts";
 
@@ -379,6 +381,21 @@ test("formats codex usage payloads", () => {
     assert.match(lines[2] ?? "", /^- GPT-5\.3-Codex-Spark: 5h: 100% left \(/);
     assert.equal(lines.at(-1), "- Resets available: 2");
     assert.doesNotMatch(formatted, /\b300m\b|\b10080m\b/);
+});
+
+test("Codex tool auth requires account ids and omits empty account headers", async () => {
+    const headers = codexToolProviderHeaders({
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        model: "gpt-5.5",
+        token: Redacted.of("token"),
+        accountId: "",
+    });
+    assert.equal(headers.has("ChatGPT-Account-ID"), false);
+
+    const result = await resolveCodexToolProvider(makeToolAuthContext({ apiKey: "token" }));
+
+    assert.ok(result.isErr());
+    assert.match(result.error.message, /account id is unavailable/);
 });
 
 test("renders compact invocation summaries for Codex tools", () => {
@@ -1860,6 +1877,30 @@ function makeImageContext(cwd: string): ExtensionContext {
         },
     };
     // SAFETY: This test only exercises cwd and model image support.
+    return ctx as unknown as ExtensionContext;
+}
+
+function makeToolAuthContext(auth: {
+    readonly apiKey?: string | undefined;
+    readonly headers?: Record<string, string> | undefined;
+}): ExtensionContext {
+    const ctx = {
+        cwd: "/workspace",
+        model: {
+            provider: "openai-codex",
+            api: "openai-codex-responses",
+            id: "gpt-5.5",
+            baseUrl: "https://chatgpt.com/backend-api",
+        },
+        modelRegistry: {
+            getApiKeyAndHeaders: async () => ({
+                ok: true,
+                apiKey: auth.apiKey,
+                headers: auth.headers ?? {},
+            }),
+        },
+    };
+    // SAFETY: This test context supplies only the model registry fields read by Codex auth.
     return ctx as unknown as ExtensionContext;
 }
 

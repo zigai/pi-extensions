@@ -62,7 +62,9 @@ export function resolveCodexResponsesUrl(providerBaseUrl: string): string {
 export function codexToolProviderHeaders(provider: CodexToolProvider): Headers {
     const headers = new Headers();
     headers.set("Authorization", `Bearer ${provider.token.reveal()}`);
-    headers.set("ChatGPT-Account-ID", provider.accountId);
+    if (provider.accountId.trim().length > 0) {
+        headers.set("ChatGPT-Account-ID", provider.accountId);
+    }
     headers.set("originator", CODEX_ORIGINATOR);
     headers.set("User-Agent", codexUserAgent(CODEX_ORIGINATOR));
     headers.set("version", "0.0.0");
@@ -94,6 +96,7 @@ export async function resolveCodexToolProvider(
     const model = resolveCodexToolAuthModel(ctx);
     if (model.isErr()) return model;
     return resolveCodexProviderForModel(ctx, model.value, {
+        requireAccountId: true,
         tokenUnavailableMessage:
             "Codex tools require /login openai-codex or an OpenAI Codex-compatible token.",
     });
