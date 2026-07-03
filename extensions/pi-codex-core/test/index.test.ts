@@ -606,6 +606,34 @@ test("renders viewed image fallback when inline images are hidden", () => {
     assert.match(rendered, /\[Image: image\.png \[image\/png\] 1x1\]/);
 });
 
+test("renders non-inline view_image results without loading a preview file", () => {
+    const viewImageTool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(viewImageTool.renderResult);
+    const args = { path: "image.png" };
+    const result = {
+        content: [] as const,
+        details: {
+            path: "image.png",
+            absolutePath: "/tmp/image.png",
+            described: true,
+            mimeType: "image/png",
+        },
+    };
+    const state = {};
+
+    const rendered = renderComponent(
+        viewImageTool.renderResult(
+            result,
+            { expanded: false, isPartial: false },
+            TEST_THEME,
+            makeRenderContext(args, state),
+        ),
+    );
+
+    assert.equal(rendered.trimEnd(), "Image saved at image.png");
+    assert.deepEqual(state, {});
+});
+
 test("renders viewed inline images when terminal images are available", () => {
     const viewImageTool = createViewImageTool({
         getConfig: () => DEFAULT_CODEX_CORE_CONFIG,

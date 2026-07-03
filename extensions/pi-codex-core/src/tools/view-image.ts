@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { Type } from "typebox";
 
 import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
@@ -148,15 +146,12 @@ export function createViewImageTool(
         renderResult(result, { expanded, isPartial }, theme, context) {
             if (isPartial) return new Text(theme.fg("warning", "Loading image..."), 0, 0);
             const path = result.details.path || context.args.path || "image";
-            const inlineImage = firstImageContent(result.content);
-            const previewImage = inlineImage
-                ? undefined
-                : loadPreviewImage(result.details, context.state);
-            const displayedImage = inlineImage ?? previewImage;
+            const displayedImage = firstImageContent(result.content);
             const capabilities = (
                 options.capabilities ?? defaultCapabilitiesProvider
             ).getCapabilities();
             const lines: string[] = [];
+            if (!displayedImage) lines.push(theme.fg("toolOutput", `Image saved at ${path}`));
             if (displayedImage && (!capabilities.images || !context.showImages)) {
                 const dimensions =
                     getImageDimensions(displayedImage.data, displayedImage.mimeType) ?? undefined;
@@ -282,28 +277,6 @@ function isImageContentBlock(value: unknown): value is ImageContent {
 
 function isTextContentBlock(value: unknown): value is TextContentBlock {
     return parseWithSchema(TextContentBlockSchema, value) !== undefined;
-}
-
-function loadPreviewImage(
-    details: ViewImageDetails,
-    state: ViewImageRenderState,
-): ImageContent | undefined {
-    if (state.preview !== undefined) return state.preview ?? undefined;
-    if (!details.mimeType) {
-        state.preview = null;
-        return undefined;
-    }
-    try {
-        state.preview = {
-            type: "image",
-            data: readFileSync(details.absolutePath).toString("base64"),
-            mimeType: details.mimeType,
-        };
-        return state.preview;
-    } catch {
-        state.preview = null;
-        return undefined;
-    }
 }
 
 function compactText(value: string, maxCharacters: number): string {
