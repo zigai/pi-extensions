@@ -738,6 +738,55 @@ test("saves web_run raw output outside workspace", async () => {
     }
 });
 
+test("imagegen returns saved paths without inline generated images", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-imagegen-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const cwd = join(root, "workspace");
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        await mkdir(cwd, { recursive: true });
+        const base64 = Buffer.from("generated png bytes").toString("base64");
+        const runtime = makeTestRuntime(
+            async () =>
+                new Response(
+                    JSON.stringify({ data: [{ b64_json: base64 }], size: "1024x1024" }),
+                    { status: 200 },
+                ),
+        );
+        const imagegenTool = createImagegenTool({
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            runtime,
+        });
+
+        const result = await imagegenTool.execute(
+            "call/1",
+            { prompt: "Draw a blue robot" },
+            undefined,
+            undefined,
+            makeWebRunContext(cwd),
+        );
+        const imagePath = join(agentDir, "pi-codex-core", "imagegen", "session_1", "call_1.png");
+        const latestPath = join(agentDir, "pi-codex-core", "imagegen", "session_1", "latest.png");
+
+        assert.equal(result.content.length, 1);
+        assert.deepEqual(result.content[0], {
+            type: "text",
+            text: [
+                "Generated image output:",
+                `- image: ${imagePath}`,
+                `- latest image: ${latestPath}`,
+                "- size=1024x1024",
+            ].join("\n"),
+        });
+        assert.equal((await readFile(imagePath)).toString("utf8"), "generated png bytes");
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("saves generated images outside the workspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-"));
     const cwd = join(root, "workspace");

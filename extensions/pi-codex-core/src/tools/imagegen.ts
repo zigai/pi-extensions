@@ -157,12 +157,9 @@ export function createImagegenTool(
                     }),
                 ),
             );
-            const imageContent = response.value.images.map(
-                (data): ImageContent => ({ type: "image", data, mimeType: "image/png" }),
-            );
             const text = formatImagegenOutput(savedImages, response.value);
             return {
-                content: [{ type: "text", text }, ...imageContent],
+                content: [{ type: "text", text }],
                 details: {
                     images: savedImages,
                     background: response.value.background,
