@@ -60,6 +60,7 @@ import {
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
 import { disposeSyntaxHighlighting, initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
 import { configureMarkdownSyntaxPatch } from "./syntax/markdown-patch.ts";
+import { renderSuccessfulWriteResultFallback, renderWriteCallPreview } from "./write-rendering.ts";
 
 type TextResult = {
     readonly content?: unknown;
@@ -376,11 +377,7 @@ function renderBashResult(
 
 function renderWriteCall(args: unknown, theme: BuiltInRenderTheme, context: BuiltInRenderContext) {
     closeExplorationGroup();
-    return renderCodexCall(theme, {
-        state: context.isError ? "error" : context.isPartial ? "muted" : "success",
-        statusText: context.isPartial ? "Write" : "Wrote",
-        body: formatPathTarget(theme, stringField(args, "path")),
-    });
+    return renderWriteCallPreview(args, theme, context);
 }
 
 function renderWriteResult(
@@ -394,6 +391,12 @@ function renderWriteResult(
         : undefined;
     if (pierrePayload) {
         return renderPierreDiff(pierrePayload, theme, { expanded: options.expanded }, context);
+    }
+    if (!context.isError) {
+        const fallback = renderSuccessfulWriteResultFallback(context.args);
+        if (fallback !== undefined) {
+            return fallback;
+        }
     }
     return renderCodexOutput(theme, textOutput(result), {
         expanded: options.expanded,

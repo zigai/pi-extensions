@@ -539,12 +539,19 @@ export function renderCodexExplore(
     });
 }
 
-export function renderMutationCall(theme: CodexRenderTheme, summary: MutationSummary): Component {
+export function renderMutationCall(
+    theme: CodexRenderTheme,
+    summary: MutationSummary,
+    options: { readonly body?: Component } = {},
+): Component {
     return makeComponent((width) => {
         const stats = `(${green(theme, `+${summary.added}`)} ${red(theme, `-${summary.removed}`)})`;
         const body = `${formatPathTarget(theme, summary.path)} ${stats}`;
         const prefix = `${dim(theme, "• ")}${actionText(theme, summary.label, { bold: true })} `;
-        return wrapPrefixedLine(body, width, prefix, "  ");
+        return [
+            ...wrapPrefixedLine(body, width, prefix, "  "),
+            ...(options.body?.render(width) ?? []),
+        ];
     });
 }
 
