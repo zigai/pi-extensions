@@ -167,10 +167,10 @@ describe("Pierre diff rendering", () => {
         }
     });
 
-    it("switches side-by-side rendering only for expanded wide terminals", () => {
+    it("switches side-by-side rendering for wide terminals", () => {
         expect(shouldRenderSideBySideDiff(139)).toBe(false);
         expect(shouldRenderSideBySideDiff(140)).toBe(true);
-        expect(shouldRenderSideBySideDiff(180, false)).toBe(false);
+        expect(shouldRenderSideBySideDiff(180)).toBe(true);
     });
 
     it("keeps cached rendered lines across identical component updates", () => {
@@ -206,6 +206,34 @@ describe("Pierre diff rendering", () => {
         expect(secondLines).toEqual(firstLines);
     });
 
+    it("rerenders a cached collapsed diff side-by-side after the terminal widens", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "alpha\nold\nomega\n",
+            newContent: "alpha\nnew\nomega\n",
+            oldSizeBytes: 16,
+            newSizeBytes: 16,
+            canBuildPierreDiff: true,
+        });
+        if (!payload) {
+            throw new Error("expected Pierre payload");
+        }
+
+        const component = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined, invalidate() {} },
+        );
+        const narrow = component.render(80);
+        const wide = component.render(180);
+
+        expect(stripAnsi(narrow.join("\n"))).not.toContain(" │ ");
+        expect(stripAnsi(wide.join("\n"))).toContain(" │ ");
+        expectLinesWithinWidth(narrow, 80);
+        expectLinesWithinWidth(wide, 180);
+    });
+
     it("clears deferred diff highlight timers during shutdown cleanup", () => {
         vi.useFakeTimers();
         try {
@@ -239,7 +267,7 @@ describe("Pierre diff rendering", () => {
         }
     });
 
-    it("renders inline unless expanded width has room for side-by-side", () => {
+    it("renders side-by-side whenever width has room", () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
             oldContent: "alpha\nold\nomega\n",
@@ -268,7 +296,7 @@ describe("Pierre diff rendering", () => {
         ).render(180);
 
         expect(stripAnsi(narrow.join("\n"))).not.toContain(" │ ");
-        expect(stripAnsi(collapsedWide.join("\n"))).not.toContain(" │ ");
+        expect(stripAnsi(collapsedWide.join("\n"))).toContain(" │ ");
         expect(stripAnsi(expandedWide.join("\n"))).toContain(" │ ");
         expectLinesWithinWidth(narrow, 80);
         expectLinesWithinWidth(collapsedWide, 180);

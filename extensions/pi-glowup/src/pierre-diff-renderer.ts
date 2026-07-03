@@ -61,9 +61,9 @@ export type PierreDiffRenderContext = {
     readonly toolCallId?: string;
 };
 
-/** Returns whether a terminal width is wide enough for expanded side-by-side diffs. */
-export function shouldRenderSideBySideDiff(width: number, expanded = true): boolean {
-    return expanded && width >= SIDE_BY_SIDE_MIN_WIDTH;
+/** Returns whether a terminal width is wide enough for side-by-side diffs. */
+export function shouldRenderSideBySideDiff(width: number): boolean {
+    return width >= SIDE_BY_SIDE_MIN_WIDTH;
 }
 
 /** Renders a replayable Pierre diff payload with lazy syntax highlighting. */
@@ -161,7 +161,7 @@ class PierreDiffComponent implements Component {
         }
 
         const highlighted = this.highlighted[this.palette.appearance];
-        const bodyLines = shouldRenderSideBySideDiff(safeWidth, this.expanded)
+        const bodyLines = shouldRenderSideBySideDiff(safeWidth)
             ? this.renderSplitBody(safeWidth, highlighted)
             : this.renderUnifiedBody(safeWidth, highlighted);
         const lines = bodyLines;
