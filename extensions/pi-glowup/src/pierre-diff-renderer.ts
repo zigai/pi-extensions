@@ -20,6 +20,8 @@ import type {
     DiffSpan,
     HighlightedDiffSet,
     PierreDiffPayload,
+    PierreRenderableDiffPayload,
+    PierreSummaryDiffPayload,
     SplitDiffCell,
     SplitDiffRow,
     UnifiedDiffRow,
@@ -68,6 +70,10 @@ export function renderPierreDiff(
     options: { readonly expanded: boolean },
     context: PierreDiffRenderContext,
 ): Component {
+    if (payload.kind === "summary") {
+        return renderPierreDiffSummary(payload, theme);
+    }
+
     const maxVisibleLines = maxVisibleDiffLines(options.expanded);
     const component =
         context.lastComponent instanceof PierreDiffComponent
@@ -87,7 +93,7 @@ export function getPierreDiffPayloadFromDetails(details: unknown): PierreDiffPay
 }
 
 class PierreDiffComponent implements Component {
-    private payload: PierreDiffPayload;
+    private payload: PierreRenderableDiffPayload;
     private palette: PierreTerminalPalette;
     private highlighted: HighlightedDiffSet;
     private maxVisibleLines: number;
@@ -99,7 +105,7 @@ class PierreDiffComponent implements Component {
     private cachedLines: string[] | undefined;
 
     constructor(
-        payload: PierreDiffPayload,
+        payload: PierreRenderableDiffPayload,
         theme: Theme,
         maxVisibleLines: number,
         expanded: boolean,
@@ -113,7 +119,7 @@ class PierreDiffComponent implements Component {
     }
 
     update(
-        payload: PierreDiffPayload,
+        payload: PierreRenderableDiffPayload,
         theme: Theme,
         maxVisibleLines: number,
         expanded: boolean,
@@ -252,6 +258,34 @@ class PierreDiffComponent implements Component {
     }
 }
 
+function renderPierreDiffSummary(payload: PierreSummaryDiffPayload, theme: Theme): Component {
+    return {
+        render(width: number): string[] {
+            const safeWidth = Math.max(24, Math.floor(width));
+            const changeStats = `${payload.stats.added.toLocaleString("en-US")} + / ${payload.stats.removed.toLocaleString("en-US")} -`;
+            const headline = `${theme.fg("toolDiffContext", payload.path)} ${theme.fg("muted", changeStats)}`;
+            const detail = `Large diff omitted: ${formatDiffSize(payload.stats.sizeBytes)} / ${payload.stats.lineCount.toLocaleString("en-US")} lines exceeds ${formatDiffSize(payload.summary.maxBytes)} or ${payload.summary.maxLines.toLocaleString("en-US")} lines`;
+            const hint = "Use git diff or read the file directly to inspect the full change.";
+            return [
+                truncateToWidth(headline, safeWidth, ""),
+                truncateToWidth(`  └ ${theme.fg("muted", detail)}`, safeWidth, ""),
+                truncateToWidth(`    ${theme.fg("muted", hint)}`, safeWidth, ""),
+            ];
+        },
+        invalidate() {},
+    };
+}
+
+function formatDiffSize(bytes: number): string {
+    if (bytes < 1024) {
+        return `${bytes}B`;
+    }
+    if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)}KB`;
+    }
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 function runQueuedDiffHighlight(run: () => Promise<void>): Promise<void> {
     return new Promise((resolve) => {
         queuedDiffHighlights.push({ run, resolve });
@@ -309,7 +343,7 @@ function isLikelySessionRestore(): boolean {
 
 function renderUnifiedRow(
     row: UnifiedDiffRow,
-    metadata: PierreDiffPayload["metadata"],
+    metadata: PierreRenderableDiffPayload["metadata"],
     width: number,
 ): string[] {
     if (row.kind !== "line") {
@@ -355,7 +389,7 @@ function renderUnifiedRow(
 
 function renderSplitRow(
     row: SplitDiffRow,
-    metadata: PierreDiffPayload["metadata"],
+    metadata: PierreRenderableDiffPayload["metadata"],
     width: number,
     palette: PierreTerminalPalette,
 ): string[] {
@@ -555,7 +589,7 @@ function markerForLineType(lineType: SplitDiffCell["lineType"] | UnifiedDiffRowL
 
 type UnifiedDiffRowLineType = Extract<UnifiedDiffRow, { readonly kind: "line" }>["lineType"];
 
-function lineNumberWidthFor(metadata: PierreDiffPayload["metadata"]): number {
+function lineNumberWidthFor(metadata: PierreRenderableDiffPayload["metadata"]): number {
     return Math.max(
         3,
         String(Math.max(metadata.deletionLines.length, metadata.additionLines.length, 1)).length,
@@ -571,7 +605,7 @@ function hasHighlightedLines(highlighted: HighlightedDiffSet): boolean {
     );
 }
 
-function refreshKeyFor(payload: PierreDiffPayload): string {
+function refreshKeyFor(payload: PierreRenderableDiffPayload): string {
     return `${payload.path}\u0000${payload.metadata.cacheKey ?? ""}\u0000${payload.stats.lineCount}\u0000${payload.stats.added}\u0000${payload.stats.removed}\u0000${payload.metadata.lang ?? ""}`;
 }
 

@@ -49,7 +49,7 @@ describe("Pierre diff rendering", () => {
         expect(JSON.stringify(payload)).not.toContain("newContent");
     });
 
-    it("skips Pierre payloads when snapshot capture was not safe", () => {
+    it("summarizes Pierre payloads when snapshot capture was not safe", () => {
         const payload = buildPierreDiffPayload({
             path: "large.txt",
             oldContent: "",
@@ -57,9 +57,41 @@ describe("Pierre diff rendering", () => {
             oldSizeBytes: 800_000,
             newSizeBytes: 7,
             canBuildPierreDiff: false,
+            summaryReason: "too-large",
         });
 
-        expect(payload).toBeUndefined();
+        expect(payload?.kind).toBe("summary");
+        expect(payload?.path).toBe("large.txt");
+        expect(payload?.stats.sizeBytes).toBe(800_007);
+    });
+
+    it("renders oversized Pierre payloads as compact summaries", () => {
+        const payload = buildPierreDiffPayload({
+            path: "large.txt",
+            oldContent: "",
+            newContent: `${"x".repeat(80)}\n`.repeat(5_001),
+            oldSizeBytes: 0,
+            newSizeBytes: 405_081,
+            canBuildPierreDiff: true,
+        });
+        if (payload === undefined) {
+            throw new Error("expected Pierre summary payload");
+        }
+
+        const rendered = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, invalidate() {} },
+        )
+            .render(120)
+            .map(stripAnsi)
+            .join("\n");
+
+        expect(payload.kind).toBe("summary");
+        expect(rendered).toContain("large.txt");
+        expect(rendered).toContain("Large diff omitted");
+        expect(rendered).toContain("5,001 lines");
     });
 
     it("switches side-by-side rendering only for expanded wide terminals", () => {
@@ -150,8 +182,8 @@ describe("Pierre diff rendering", () => {
             newSizeBytes: newLines.join("\n").length + 1,
             canBuildPierreDiff: true,
         });
-        if (!payload) {
-            throw new Error("expected Pierre payload");
+        if (payload?.kind !== "renderable") {
+            throw new Error("expected renderable Pierre payload");
         }
 
         const rows = buildUnifiedDiffRows(
@@ -174,8 +206,8 @@ describe("Pierre diff rendering", () => {
             newSizeBytes: 58,
             canBuildPierreDiff: true,
         });
-        if (!payload) {
-            throw new Error("expected Pierre payload");
+        if (payload?.kind !== "renderable") {
+            throw new Error("expected renderable Pierre payload");
         }
 
         await loadHighlightedDiff(payload.metadata);

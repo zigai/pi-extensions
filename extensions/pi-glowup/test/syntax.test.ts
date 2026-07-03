@@ -300,8 +300,8 @@ describe("central syntax highlighting", () => {
             );
             const payload = buildPierreDiffPayload(snapshot);
             expect(payload).toBeDefined();
-            if (!payload) {
-                throw new Error("expected Pierre diff payload");
+            if (payload?.kind !== "renderable") {
+                throw new Error("expected renderable Pierre diff payload");
             }
 
             const highlighted = await loadHighlightedDiff(payload.metadata);

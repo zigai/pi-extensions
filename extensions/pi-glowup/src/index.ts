@@ -42,7 +42,12 @@ import {
 } from "./rendering.ts";
 import { buildEditPreview, EditPreviewStore, PreviewStore } from "./edit-preview.ts";
 import { summarizeEditCall } from "./edit-call-rendering.ts";
-import { buildPierreDiffPayload, createEditSnapshot, createWriteSnapshot } from "./pierre-diff.ts";
+import {
+    buildLargeDiffSummaryPayload,
+    buildPierreDiffPayload,
+    createEditSnapshot,
+    createWriteSnapshot,
+} from "./pierre-diff.ts";
 import type { PierreDiffPayload } from "./pierre-diff-types.ts";
 import { getPierreDiffPayloadFromDetails, renderPierreDiff } from "./pierre-diff-renderer.ts";
 import {
@@ -500,8 +505,20 @@ function registerEditTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): 
                 !context.isError &&
                 isRecord(result.details) &&
                 typeof result.details.diff === "string" &&
-                result.details.diff.trim()
+                result.details.diff.trim().length > 0
             ) {
+                const summaryPayload = buildLargeDiffSummaryPayload({
+                    path: context.args.path,
+                    diffText: result.details.diff,
+                });
+                if (summaryPayload !== undefined) {
+                    return renderPierreDiff(
+                        summaryPayload,
+                        theme,
+                        { expanded: options.expanded },
+                        context,
+                    );
+                }
                 return renderCodexDiff(
                     theme,
                     parseDiffSections(result.details.diff, context.args.path),

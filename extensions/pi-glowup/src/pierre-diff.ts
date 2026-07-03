@@ -12,20 +12,24 @@ import type {
     HighlightedDiffCode,
     PierreDiffPayload,
     PierreDiffStats,
+    PierreDiffSummary,
     SplitDiffCell,
     SplitDiffRow,
     UnifiedDiffRow,
 } from "./pierre-diff-types.ts";
 import type { PierreTerminalPalette } from "./pierre-theme.ts";
 
-const MAX_CAPTURE_BYTES = 500 * 1024;
+export const MAX_DIFF_RENDER_BYTES = 512 * 1024;
+export const MAX_DIFF_RENDER_LINES = 5_000;
+
+const MAX_CAPTURE_BYTES = MAX_DIFF_RENDER_BYTES;
 const MAX_METADATA_BYTES = 750 * 1024;
-const MAX_RENDER_ROWS = 4_000;
 
 type FileSnapshot = {
     readonly exists: boolean;
     readonly content: string;
     readonly sizeBytes: number;
+    readonly lineCount: number;
     readonly skippedReason?: "too-large" | "not-readable";
 };
 
@@ -41,7 +45,10 @@ type DiffSnapshot = {
     readonly newContent: string;
     readonly oldSizeBytes: number;
     readonly newSizeBytes: number;
+    readonly oldLineCount?: number;
+    readonly newLineCount?: number;
     readonly canBuildPierreDiff: boolean;
+    readonly summaryReason?: PierreDiffSummary["reason"];
 };
 
 /** Resolves a tool path against a tool execution working directory. */
@@ -62,13 +69,17 @@ export async function createEditSnapshot(
     return {
         async finish() {
             const after = await readTextSnapshot(absolutePath);
+            const summaryReason = summaryReasonForSnapshots(before, after);
             return {
                 path: relativePath,
                 oldContent: before.content,
                 newContent: after.content,
                 oldSizeBytes: before.sizeBytes,
                 newSizeBytes: after.sizeBytes,
+                oldLineCount: before.lineCount,
+                newLineCount: after.lineCount,
                 canBuildPierreDiff: canDiffSnapshots(before, after),
+                ...(summaryReason === undefined ? {} : { summaryReason }),
             };
         },
     };
@@ -83,71 +94,117 @@ export async function createWriteSnapshot(
     const absolutePath = resolveToolPath(cwd, relativePath);
     const before = await readTextSnapshot(absolutePath);
     const newSizeBytes = Buffer.byteLength(newContent, "utf8");
+    const newLineCount = countContentLines(newContent);
     const after: FileSnapshot =
         newSizeBytes <= MAX_CAPTURE_BYTES
-            ? { exists: true, content: newContent, sizeBytes: newSizeBytes }
-            : { exists: true, content: "", sizeBytes: newSizeBytes, skippedReason: "too-large" };
+            ? {
+                  exists: true,
+                  content: newContent,
+                  sizeBytes: newSizeBytes,
+                  lineCount: newLineCount,
+              }
+            : {
+                  exists: true,
+                  content: "",
+                  sizeBytes: newSizeBytes,
+                  lineCount: newLineCount,
+                  skippedReason: "too-large",
+              };
 
+    const summaryReason = summaryReasonForSnapshots(before, after);
     return {
         path: relativePath,
         oldContent: before.content,
         newContent: after.content,
         oldSizeBytes: before.sizeBytes,
         newSizeBytes: after.sizeBytes,
+        oldLineCount: before.lineCount,
+        newLineCount: after.lineCount,
         canBuildPierreDiff: canDiffSnapshots(before, after),
+        ...(summaryReason === undefined ? {} : { summaryReason }),
     };
 }
 
 /** Builds compact, replayable Pierre diff details from bounded snapshots. */
 export function buildPierreDiffPayload(snapshot: DiffSnapshot): PierreDiffPayload | undefined {
-    if (!snapshot.canBuildPierreDiff || snapshot.oldContent === snapshot.newContent) {
+    if (snapshot.oldContent === snapshot.newContent && snapshot.summaryReason === undefined) {
         return undefined;
+    }
+
+    const estimatedStats = estimatedDiffStats(snapshot);
+    if (snapshot.summaryReason !== undefined || !snapshot.canBuildPierreDiff) {
+        return buildPierreSummaryPayload(
+            snapshot.path,
+            estimatedStats,
+            snapshot.summaryReason ?? "too-large",
+        );
+    }
+    if (exceedsDiffRenderLimits(estimatedStats)) {
+        return buildPierreSummaryPayload(snapshot.path, estimatedStats, "too-large");
     }
 
     try {
         const metadata = buildDiffMetadata(snapshot);
         const stats = diffStats(metadata, snapshot);
-        if (stats.lineCount > MAX_RENDER_ROWS || metadataSizeBytes(metadata) > MAX_METADATA_BYTES) {
-            return undefined;
+        if (stats.lineCount > MAX_DIFF_RENDER_LINES) {
+            return buildPierreSummaryPayload(snapshot.path, stats, "too-large");
+        }
+        if (metadataSizeBytes(metadata) > MAX_METADATA_BYTES) {
+            return buildPierreSummaryPayload(snapshot.path, stats, "metadata-too-large");
         }
 
         return {
             version: 1,
+            kind: "renderable",
             path: snapshot.path,
             metadata,
             stats,
         };
     } catch {
-        return undefined;
+        return buildPierreSummaryPayload(snapshot.path, estimatedStats, "metadata-too-large");
     }
 }
 
 /** Normalizes untrusted result details into a renderable Pierre diff payload. */
 export function normalizePierreDiffPayload(payload: unknown): PierreDiffPayload | undefined {
-    if (!isRecord(payload) || payload.version !== 1) {
+    if (!isRecord(payload) || payload.version !== 1 || typeof payload.path !== "string") {
         return undefined;
     }
-    if (
-        typeof payload.path !== "string" ||
-        !isRecord(payload.metadata) ||
-        !isRecord(payload.stats)
-    ) {
+
+    const stats = isRecord(payload.stats) ? normalizeStats(payload.stats) : undefined;
+    if (!stats) {
+        return undefined;
+    }
+
+    if (payload.kind === "summary") {
+        const summary = isRecord(payload.summary) ? normalizeSummary(payload.summary) : undefined;
+        return summary === undefined
+            ? undefined
+            : {
+                  version: 1,
+                  kind: "summary",
+                  path: payload.path,
+                  stats,
+                  summary,
+              };
+    }
+
+    if (payload.kind !== "renderable" || !isRecord(payload.metadata)) {
         return undefined;
     }
 
     const metadata = parseFileDiffMetadata(payload.metadata);
-    const stats = normalizeStats(payload.stats);
     if (
         !metadata ||
-        !stats ||
-        stats.lineCount > MAX_RENDER_ROWS ||
+        stats.lineCount > MAX_DIFF_RENDER_LINES ||
         metadataSizeBytes(metadata) > MAX_METADATA_BYTES
     ) {
-        return undefined;
+        return buildPierreSummaryPayload(payload.path, stats, "metadata-too-large");
     }
 
     return {
         version: 1,
+        kind: "renderable",
         path: payload.path,
         metadata: normalizeDiffMetadataLanguage(metadata, payload.path),
         stats,
@@ -407,24 +464,88 @@ async function readTextSnapshot(absolutePath: string): Promise<FileSnapshot> {
     try {
         const info = await stat(absolutePath);
         if (!info.isFile()) {
-            return { exists: false, content: "", sizeBytes: 0, skippedReason: "not-readable" };
+            return {
+                exists: false,
+                content: "",
+                sizeBytes: 0,
+                lineCount: 0,
+                skippedReason: "not-readable",
+            };
         }
         if (info.size > MAX_CAPTURE_BYTES) {
-            return { exists: true, content: "", sizeBytes: info.size, skippedReason: "too-large" };
+            return {
+                exists: true,
+                content: "",
+                sizeBytes: info.size,
+                lineCount: 0,
+                skippedReason: "too-large",
+            };
         }
 
+        const content = await readFile(absolutePath, "utf8");
         return {
             exists: true,
-            content: await readFile(absolutePath, "utf8"),
+            content,
             sizeBytes: info.size,
+            lineCount: countContentLines(content),
         };
     } catch {
-        return { exists: false, content: "", sizeBytes: 0 };
+        return { exists: false, content: "", sizeBytes: 0, lineCount: 0 };
     }
 }
 
 function canDiffSnapshots(before: FileSnapshot, after: FileSnapshot): boolean {
     return before.skippedReason === undefined && after.skippedReason === undefined;
+}
+
+function summaryReasonForSnapshots(
+    before: FileSnapshot,
+    after: FileSnapshot,
+): PierreDiffSummary["reason"] | undefined {
+    const reason = before.skippedReason ?? after.skippedReason;
+    if (reason === "not-readable") {
+        return "not-readable";
+    }
+    if (reason === "too-large") {
+        return "too-large";
+    }
+    return undefined;
+}
+
+function countContentLines(content: string): number {
+    if (content.length === 0) {
+        return 0;
+    }
+    const lines = content.split("\n");
+    return content.endsWith("\n") ? lines.length - 1 : lines.length;
+}
+
+export function buildLargeDiffSummaryPayload(options: {
+    readonly path: string;
+    readonly diffText: string;
+}): PierreDiffPayload | undefined {
+    const stats = diffTextStats(options.diffText);
+    return exceedsDiffRenderLimits(stats)
+        ? buildPierreSummaryPayload(options.path, stats, "too-large")
+        : undefined;
+}
+
+export function buildPierreSummaryPayload(
+    pathValue: string,
+    stats: PierreDiffStats,
+    reason: PierreDiffSummary["reason"],
+): PierreDiffPayload {
+    return {
+        version: 1,
+        kind: "summary",
+        path: pathValue,
+        stats,
+        summary: {
+            reason,
+            maxLines: MAX_DIFF_RENDER_LINES,
+            maxBytes: MAX_DIFF_RENDER_BYTES,
+        },
+    };
 }
 
 function buildDiffMetadata(snapshot: DiffSnapshot): FileDiffMetadata {
@@ -451,6 +572,31 @@ function normalizeDiffMetadataLanguage(
     return language === undefined || language.length === 0
         ? metadata
         : setLanguageOverride(metadata, language);
+}
+
+function estimatedDiffStats(snapshot: DiffSnapshot): PierreDiffStats {
+    const oldLineCount = snapshot.oldLineCount ?? countContentLines(snapshot.oldContent);
+    const newLineCount = snapshot.newLineCount ?? countContentLines(snapshot.newContent);
+    return {
+        added: newLineCount,
+        removed: oldLineCount,
+        lineCount: oldLineCount + newLineCount,
+        sizeBytes: snapshot.oldSizeBytes + snapshot.newSizeBytes,
+    };
+}
+
+function diffTextStats(diffText: string): PierreDiffStats {
+    const lines = diffText.length === 0 ? [] : diffText.split("\n");
+    return {
+        added: lines.filter((line) => /^\+\s*\d+\s/u.test(line)).length,
+        removed: lines.filter((line) => /^-\s*\d+\s/u.test(line)).length,
+        lineCount: lines.length,
+        sizeBytes: Buffer.byteLength(diffText, "utf8"),
+    };
+}
+
+function exceedsDiffRenderLimits(stats: PierreDiffStats): boolean {
+    return stats.lineCount > MAX_DIFF_RENDER_LINES || stats.sizeBytes > MAX_DIFF_RENDER_BYTES;
 }
 
 function diffStats(metadata: FileDiffMetadata, snapshot: DiffSnapshot): PierreDiffStats {
@@ -492,6 +638,20 @@ function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
     // The runtime shape checks above cover the arrays and counters used before handing it
     // back to Pierre's own helper functions.
     return value as unknown as FileDiffMetadata;
+}
+
+function normalizeSummary(summary: Record<string, unknown>): PierreDiffSummary | undefined {
+    const reason = summary.reason;
+    const maxLines = finiteNonNegativeInteger(summary.maxLines);
+    const maxBytes = finiteNonNegativeInteger(summary.maxBytes);
+    if (
+        (reason !== "too-large" && reason !== "not-readable" && reason !== "metadata-too-large") ||
+        maxLines === undefined ||
+        maxBytes === undefined
+    ) {
+        return undefined;
+    }
+    return { reason, maxLines, maxBytes };
 }
 
 function normalizeStats(stats: Record<string, unknown>): PierreDiffStats | undefined {

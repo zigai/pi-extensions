@@ -9,11 +9,24 @@ export type PierreDiffDetails = {
 };
 
 /** Replayable Pierre diff payload. Does not store original file snapshots or highlighted HAST. */
-export type PierreDiffPayload = {
+export type PierreDiffPayload = PierreRenderableDiffPayload | PierreSummaryDiffPayload;
+
+/** Full replayable Pierre diff payload for bounded diffs. */
+export type PierreRenderableDiffPayload = {
     readonly version: 1;
+    readonly kind: "renderable";
     readonly path: string;
     readonly metadata: FileDiffMetadata;
     readonly stats: PierreDiffStats;
+};
+
+/** Compact payload for diffs that are too large to safely render inline. */
+export type PierreSummaryDiffPayload = {
+    readonly version: 1;
+    readonly kind: "summary";
+    readonly path: string;
+    readonly stats: PierreDiffStats;
+    readonly summary: PierreDiffSummary;
 };
 
 /** Summary values used for mutation call labels and guardrails. */
@@ -22,6 +35,13 @@ export type PierreDiffStats = {
     readonly removed: number;
     readonly lineCount: number;
     readonly sizeBytes: number;
+};
+
+/** Reason a diff is summarized rather than rendered inline. */
+export type PierreDiffSummary = {
+    readonly reason: "too-large" | "not-readable" | "metadata-too-large";
+    readonly maxLines: number;
+    readonly maxBytes: number;
 };
 
 /** Highlighted line trees returned by Pierre/Shiki, kept only in renderer state. */
