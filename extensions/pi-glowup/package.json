@@ -44,8 +44,7 @@
   "dependencies": {
     "@pierre/diffs": "^1.2.12",
     "ansi-styles": "^6.2.3",
-    "shiki": "^4.3.0",
-    "typebox": "^1.1.38"
+    "shiki": "^4.3.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.2",
@@ -55,18 +54,23 @@
     "oxfmt": "^0.44.0",
     "oxlint": "^1.59.0",
     "oxlint-tsgolint": "^0.23.0",
+    "typebox": "^1.1.38",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
       "optional": true
     },
     "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "typebox": {
       "optional": true
     }
   },
