@@ -3,26 +3,26 @@ import { Editor, type TUI } from "@earendil-works/pi-tui";
 const AUTOCOMPLETE_CLEANUP_PATCH_KEY = Symbol.for("zigai.pi-codex-look.autocomplete-cleanup");
 
 type PatchableEditorPrototype = {
-  [AUTOCOMPLETE_CLEANUP_PATCH_KEY]?: true;
-  clearAutocompleteUi?: (this: RuntimeEditor) => void;
+    [AUTOCOMPLETE_CLEANUP_PATCH_KEY]?: true;
+    clearAutocompleteUi?: (this: RuntimeEditor) => void;
 };
 
 type RuntimeEditor = {
-  readonly tui?: TUI;
-  readonly autocompletePrefix?: unknown;
-  isShowingAutocomplete?: () => boolean;
+    readonly tui?: TUI;
+    readonly autocompletePrefix?: unknown;
+    isShowingAutocomplete?: () => boolean;
 };
 
 function isSlashAutocompleteClosing(editor: RuntimeEditor): boolean {
-  return (
-    editor.isShowingAutocomplete?.() === true &&
-    typeof editor.autocompletePrefix === "string" &&
-    editor.autocompletePrefix.startsWith("/")
-  );
+    return (
+        editor.isShowingAutocomplete?.() === true &&
+        typeof editor.autocompletePrefix === "string" &&
+        editor.autocompletePrefix.startsWith("/")
+    );
 }
 
 function shouldForceCleanupRender(editor: RuntimeEditor): boolean {
-  return isSlashAutocompleteClosing(editor) && editor.tui?.getClearOnShrink() === true;
+    return isSlashAutocompleteClosing(editor) && editor.tui?.getClearOnShrink() === true;
 }
 
 /**
@@ -34,27 +34,27 @@ function shouldForceCleanupRender(editor: RuntimeEditor): boolean {
  * a normal differential repaint can leave stale rows in the blank area above it.
  */
 export function installAutocompleteCleanupPatch(
-  prototype: object = Editor.prototype as unknown as object,
+    prototype: object = Editor.prototype as unknown as object,
 ): void {
-  const editorPrototype = prototype as PatchableEditorPrototype;
-  if (editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY] === true) {
-    return;
-  }
-
-  const originalClearAutocompleteUi = editorPrototype.clearAutocompleteUi;
-  if (originalClearAutocompleteUi === undefined) {
-    return;
-  }
-
-  editorPrototype.clearAutocompleteUi = function clearAutocompleteUiWithCleanup(
-    this: RuntimeEditor,
-  ): void {
-    const forceCleanupRender = shouldForceCleanupRender(this);
-    originalClearAutocompleteUi.call(this);
-    if (forceCleanupRender) {
-      this.tui?.requestRender(true);
+    const editorPrototype = prototype as PatchableEditorPrototype;
+    if (editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY] === true) {
+        return;
     }
-  };
 
-  editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY] = true;
+    const originalClearAutocompleteUi = editorPrototype.clearAutocompleteUi;
+    if (originalClearAutocompleteUi === undefined) {
+        return;
+    }
+
+    editorPrototype.clearAutocompleteUi = function clearAutocompleteUiWithCleanup(
+        this: RuntimeEditor,
+    ): void {
+        const forceCleanupRender = shouldForceCleanupRender(this);
+        originalClearAutocompleteUi.call(this);
+        if (forceCleanupRender) {
+            this.tui?.requestRender(true);
+        }
+    };
+
+    editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY] = true;
 }
