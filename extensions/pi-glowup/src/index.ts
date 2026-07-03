@@ -61,7 +61,7 @@ import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
 import { boundedScriptPreview, createScriptPreviewStore } from "./script-preview-store.ts";
 import { installThirdPartyToolRendererPatch } from "./tool-execution-patch.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
-import { clearSyntaxHighlightCache, initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
+import { disposeSyntaxHighlighting, initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
 import { installMarkdownSyntaxPatch } from "./syntax/markdown-patch.ts";
 
 type ToolTextContent = {
@@ -668,7 +668,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         closeExplorationGroup();
     });
 
-    pi.on("session_shutdown", () => {
+    pi.on("session_shutdown", async () => {
         if (deferredSyntaxPreload !== undefined) {
             clearTimeout(deferredSyntaxPreload);
             deferredSyntaxPreload = undefined;
@@ -678,6 +678,6 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         explorationGroups.clear();
         toolCache.clear();
         clearQueuedDiffHighlights();
-        clearSyntaxHighlightCache();
+        await disposeSyntaxHighlighting();
     });
 }

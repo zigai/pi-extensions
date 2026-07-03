@@ -38,6 +38,7 @@ type SyntaxState =
 
 let syntaxState: SyntaxState | undefined;
 let initializationPromise: Promise<SyntaxState> | undefined;
+let syntaxGeneration = 0;
 const highlightedCodeCache = new Map<string, string[]>();
 
 /** Initializes the central Shiki highlighter once during extension startup. */
@@ -48,9 +49,14 @@ export async function initializeSyntaxHighlighting(
         return initializationPromise;
     }
 
-    initializationPromise = initializeSyntaxHighlightingOnce(env);
-    syntaxState = await initializationPromise;
-    return syntaxState;
+    const generation = syntaxGeneration;
+    initializationPromise = initializeSyntaxHighlightingOnce(env).then((state) => {
+        if (generation === syntaxGeneration) {
+            syntaxState = state;
+        }
+        return state;
+    });
+    return initializationPromise;
 }
 
 /** Returns true when syntax highlighting is available for synchronous render calls. */
@@ -159,6 +165,20 @@ export function currentSyntaxThemeName(): string | undefined {
 
 export function clearSyntaxHighlightCache(): void {
     highlightedCodeCache.clear();
+}
+
+/** Disposes the central highlighter and resets syntax state for reloads or shutdown. */
+export async function disposeSyntaxHighlighting(): Promise<void> {
+    highlightedCodeCache.clear();
+    syntaxGeneration += 1;
+
+    const state = syntaxState;
+    syntaxState = undefined;
+    initializationPromise = undefined;
+
+    if (state?.status === "ready") {
+        await state.highlighter.dispose();
+    }
 }
 
 async function initializeSyntaxHighlightingOnce(env: NodeJS.ProcessEnv): Promise<SyntaxState> {
