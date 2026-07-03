@@ -13,14 +13,20 @@ import type {
     Skill,
     Theme,
 } from "@earendil-works/pi-coding-agent";
-import { getCapabilities, getImageDimensions, setCapabilities } from "@earendil-works/pi-tui";
+import { getImageDimensions } from "@earendil-works/pi-tui";
 
 import { packageName, extensionName } from "../src/index.ts";
 import { buildCodexCoreSystemPrompt } from "../src/prompt.ts";
 import {
     CODEX_CURRENT_MODEL_SELECTION,
     DEFAULT_CODEX_CORE_CONFIG,
+    DEFAULT_CODEX_CORE_CONFIG_JSON,
+    codexCoreConfigJsonSchema,
+    getCodexCoreConfigPath,
+    getCodexCoreGlobalConfigSchemaPath,
+    getCodexCoreProjectConfigPath,
     parseCodexCoreConfig,
+    readCodexCoreConfig,
     resolveCodexRequestModel,
 } from "../src/config.ts";
 import {
@@ -34,6 +40,7 @@ import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createViewImageTool } from "../src/tools/view-image.ts";
 import { formatWebRunToolOutput } from "../src/tools/web-run-output.ts";
 import { createWebRunTool } from "../src/tools/web-run.ts";
+import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
 import { formatCodexUsage, parseCodexUsagePayload } from "../src/usage.ts";
 
 test("exports extension metadata", () => {
@@ -60,6 +67,10 @@ test("parses codex config with safe defaults", () => {
     assert.equal(config.compaction.thresholdPercent, 90);
     assert.equal(parseCodexCoreConfig({}).compaction.thresholdPercent, 80);
     assert.equal(parseCodexCoreConfig({}).openai.compactionReasoning, "medium");
+    assert.equal(
+        parseCodexCoreConfig({ openai: { verbosity: "high" } }).openai.compactionModel,
+        CODEX_CURRENT_MODEL_SELECTION,
+    );
     assert.equal(config.openai.webSearchModel, CODEX_CURRENT_MODEL_SELECTION);
     assert.equal(config.openai.imageDescriptionModel, CODEX_CURRENT_MODEL_SELECTION);
     assert.equal(config.openai.compactionModel, CODEX_CURRENT_MODEL_SELECTION);
@@ -67,8 +78,97 @@ test("parses codex config with safe defaults", () => {
     assert.equal(config.openai.compactionReasoning, "low");
 });
 
+test("reads codex config as optional defaults and scaffolds global files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const agentDir = join(root, "agent");
+        const config = readCodexCoreConfig({ agentDir });
+
+        assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
+        assert.deepEqual(
+            JSON.parse(await readFile(getCodexCoreConfigPath(agentDir), "utf8")),
+            DEFAULT_CODEX_CORE_CONFIG_JSON,
+        );
+        assert.deepEqual(
+            JSON.parse(await readFile(getCodexCoreGlobalConfigSchemaPath(agentDir), "utf8")),
+            codexCoreConfigJsonSchema(),
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("does not overwrite malformed existing codex config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const agentDir = join(root, "agent");
+        const configPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(join(configPath, ".."), { recursive: true });
+        await writeFile(configPath, "{not json");
+
+        const config = readCodexCoreConfig({ agentDir });
+
+        assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
+        assert.equal(await readFile(configPath, "utf8"), "{not json");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("refreshes stale codex config schema without rewriting user config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const agentDir = join(root, "agent");
+        const configPath = getCodexCoreConfigPath(agentDir);
+        const schemaPath = getCodexCoreGlobalConfigSchemaPath(agentDir);
+        await mkdir(join(configPath, ".."), { recursive: true });
+        await writeFile(configPath, "{not json");
+        await writeFile(schemaPath, "{}\n");
+
+        const config = readCodexCoreConfig({ agentDir });
+
+        assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
+        assert.equal(await readFile(configPath, "utf8"), "{not json");
+        assert.deepEqual(
+            JSON.parse(await readFile(schemaPath, "utf8")),
+            codexCoreConfigJsonSchema(),
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("keeps codex config schema file aligned with TypeBox source", async () => {
+    const schema = JSON.parse(await readFile("config.schema.json", "utf8"));
+
+    assert.deepEqual(schema, codexCoreConfigJsonSchema());
+});
+
+test("merges project codex config over global config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        const projectConfigPath = getCodexCoreProjectConfigPath(cwd);
+        await mkdir(join(globalConfigPath, ".."), { recursive: true });
+        await mkdir(join(projectConfigPath, ".."), { recursive: true });
+        await writeFile(globalConfigPath, JSON.stringify({ prompt: { mode: "codex" } }));
+        await writeFile(projectConfigPath, JSON.stringify({ tools: { webSearch: false } }));
+
+        const config = readCodexCoreConfig({ agentDir, cwd });
+
+        assert.equal(config.prompt.mode, "codex");
+        assert.equal(config.tools.webSearch, false);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("resolves current Codex model selections", () => {
     assert.equal(resolveCodexRequestModel("current", "gpt-5.5"), "gpt-5.5");
+    assert.equal(resolveCodexRequestModel(undefined, "gpt-5.5"), "gpt-5.5");
+    assert.equal(resolveCodexRequestModel("", "gpt-5.5"), "gpt-5.5");
     assert.equal(resolveCodexRequestModel("gpt-5.4-mini", "gpt-5.5"), "gpt-5.4-mini");
 });
 
@@ -385,42 +485,44 @@ test("renders viewed image fallback when inline images are hidden", () => {
 });
 
 test("renders viewed inline images when terminal images are available", () => {
-    const previousCapabilities = getCapabilities();
-    setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
-
-    try {
-        const viewImageTool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
-        assert.ok(viewImageTool.renderResult);
-        const args = { path: "image.png" };
-        const result = {
-            content: [
-                {
-                    type: "image" as const,
-                    data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-                    mimeType: "image/png",
-                },
-            ],
-            details: {
-                path: "image.png",
-                absolutePath: "/tmp/image.png",
-                described: false,
+    const viewImageTool = createViewImageTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+        capabilities: {
+            getCapabilities: () => ({ images: "kitty", trueColor: true, hyperlinks: true }),
+        },
+        imageComponentFactory: () => ({
+            invalidate() {},
+            render: () => ["\u001B_Gfake-inline-image"],
+        }),
+    });
+    assert.ok(viewImageTool.renderResult);
+    const args = { path: "image.png" };
+    const result = {
+        content: [
+            {
+                type: "image" as const,
+                data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
                 mimeType: "image/png",
             },
-        };
+        ],
+        details: {
+            path: "image.png",
+            absolutePath: "/tmp/image.png",
+            described: false,
+            mimeType: "image/png",
+        },
+    };
 
-        const rendered = renderComponent(
-            viewImageTool.renderResult(
-                result,
-                { expanded: false, isPartial: false },
-                TEST_THEME,
-                makeRenderContext(args, { preview: null }),
-            ),
-        );
+    const rendered = renderComponent(
+        viewImageTool.renderResult(
+            result,
+            { expanded: false, isPartial: false },
+            TEST_THEME,
+            makeRenderContext(args, { preview: null }),
+        ),
+    );
 
-        assert.ok(rendered.includes("\u001B_G"));
-    } finally {
-        setCapabilities(previousCapabilities);
-    }
+    assert.ok(rendered.includes("\u001B_G"));
 });
 
 test("formats web_run output without Codex citation markers", () => {
@@ -450,17 +552,20 @@ test("saves web_run raw output outside workspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
-    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const previousFetch = globalThis.fetch;
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    globalThis.fetch = async () =>
-        new Response(JSON.stringify({ output: "1. Pi\n   URL: https://pi.dev/" }), {
-            status: 200,
-        });
+    const runtime = makeTestRuntime(
+        async () =>
+            new Response(JSON.stringify({ output: "1. Pi\n   URL: https://pi.dev/" }), {
+                status: 200,
+            }),
+    );
 
     try {
         await mkdir(cwd, { recursive: true });
-        const webRunTool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+        const webRunTool = createWebRunTool({
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            runtime,
+            agentDir,
+        });
         const result = await webRunTool.execute(
             "call/1",
             { search_query: [{ q: "Pi docs" }] },
@@ -479,67 +584,41 @@ test("saves web_run raw output outside workspace", async () => {
             code: "ENOENT",
         });
     } finally {
-        globalThis.fetch = previousFetch;
-        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         await rm(root, { recursive: true, force: true });
     }
 });
 
-test("saves generated images outside workspace and to Codex-style archive", async () => {
+test("saves generated images at the workspace root", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-"));
     const cwd = join(root, "workspace");
-    const agentDir = join(root, "agent");
-    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    process.env.PI_CODING_AGENT_DIR = agentDir;
 
     try {
         await mkdir(cwd, { recursive: true });
         const base64 = Buffer.from("not really a png").toString("base64");
         const saved = await saveGeneratedImage({
-            sessionId: "session/1",
+            cwd,
             toolCallId: "call*1",
             index: 0,
             base64,
         });
 
-        assert.equal(
-            saved.path,
-            join(agentDir, "pi-codex-core", "imagegen", "session_1", "call_1.png"),
-        );
-        assert.equal(
-            saved.latestPath,
-            join(agentDir, "pi-codex-core", "imagegen", "session_1", "latest.png"),
-        );
-        assert.equal(
-            saved.archivePath,
-            join(agentDir, "generated_images", "session_1", "call_1.png"),
-        );
+        assert.equal(saved.path, join(cwd, "call_1.png"));
+        assert.equal(saved.latestPath, join(cwd, "latest.png"));
         assert.equal((await readFile(saved.absolutePath)).toString("utf8"), "not really a png");
         assert.equal(
             (await readFile(saved.latestAbsolutePath)).toString("utf8"),
             "not really a png",
         );
-        assert.equal(
-            (await readFile(saved.archiveAbsolutePath)).toString("utf8"),
-            "not really a png",
-        );
-        await assert.rejects(readFile(join(cwd, "output", "imagegen", "call_1.png")), {
-            code: "ENOENT",
-        });
     } finally {
-        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         await rm(root, { recursive: true, force: true });
     }
 });
 
 test("creates native compaction using remote compaction v2", async () => {
-    const previousFetch = globalThis.fetch;
     let requestUrl = "";
     let requestBody: unknown;
     let requestAccountId: string | null = null;
-    globalThis.fetch = async (input, init) => {
+    const runtime = makeTestRuntime(async (input, init) => {
         requestUrl = String(input);
         requestBody = JSON.parse(String(init?.body)) as unknown;
         requestAccountId = new Headers(init?.headers).get("ChatGPT-Account-ID");
@@ -552,76 +631,69 @@ test("creates native compaction using remote compaction v2", async () => {
             "",
         ].join("\n");
         return new Response(body, { status: 200 });
-    };
+    });
 
-    try {
-        const result = await handleCodexNativeCompaction(
-            makeBeforeCompactEvent(),
-            makeNativeCompactionContext(),
-            {
-                ...DEFAULT_CODEX_CORE_CONFIG,
-                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
-            },
-            makeCompactionApi(),
-        );
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent(),
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
 
-        assert.equal(requestUrl, "https://chatgpt.com/backend-api/codex/responses");
-        assert.equal(requestAccountId, "account");
-        assert.ok(isRecord(requestBody));
-        assert.equal(requestBody.model, "gpt-5.5");
-        assert.deepEqual((requestBody.input as unknown[]).at(-1), {
-            type: "compaction_trigger",
-        });
-        assert.deepEqual(requestBody.tools, [
-            {
-                type: "function",
-                name: "read",
-                description: "Read a file.",
-                parameters: {
-                    type: "object",
-                    properties: { path: { type: "string" } },
-                    required: ["path"],
-                },
-                strict: null,
+    assert.equal(requestUrl, "https://chatgpt.com/backend-api/codex/responses");
+    assert.equal(requestAccountId, "account");
+    assert.ok(isRecord(requestBody));
+    assert.equal(requestBody.model, "gpt-5.5");
+    assert.deepEqual((requestBody.input as unknown[]).at(-1), {
+        type: "compaction_trigger",
+    });
+    assert.deepEqual(requestBody.tools, [
+        {
+            type: "function",
+            name: "read",
+            description: "Read a file.",
+            parameters: {
+                type: "object",
+                properties: { path: { type: "string" } },
+                required: ["path"],
             },
-        ]);
-        assert.equal(result?.compaction?.details.strategy, "pi-codex-core-remote-compaction-v2");
-        assert.equal(result?.compaction?.details.model, "gpt-5.5");
-        assert.deepEqual(result?.compaction?.details.compactedWindow, [
-            {
-                role: "user",
-                content: [{ type: "input_text", text: "keep this request" }],
-            },
-            { type: "compaction", encrypted_content: "sealed" },
-        ]);
-        assert.equal(result?.compaction?.details.windowNumber, 1);
-        assert.equal(
-            result?.compaction?.details.firstWindowId,
-            result?.compaction?.details.windowId,
-        );
-        assert.equal(result?.compaction?.details.previousWindowId, undefined);
-        assert.deepEqual(result?.compaction?.details.replacementInput.slice(0, 2), [
-            {
-                role: "user",
-                content: [{ type: "input_text", text: "keep this request" }],
-            },
-            { type: "compaction", encrypted_content: "sealed" },
-        ]);
-        const worldState = result?.compaction?.details.replacementInput.at(2);
-        assert.ok(isRecord(worldState));
-        assert.match(worldStateText(worldState), /<codex_core_world_state>/);
-        assert.match(worldStateText(worldState), /cwd: \/workspace/);
-        assert.match(worldStateText(worldState), /model: openai-codex\/gpt-5\.5/);
-        assert.match(worldStateText(worldState), /active tools: read/);
-    } finally {
-        globalThis.fetch = previousFetch;
-    }
+            strict: null,
+        },
+    ]);
+    assert.equal(result?.compaction?.details.strategy, "pi-codex-core-remote-compaction-v2");
+    assert.equal(result?.compaction?.details.model, "gpt-5.5");
+    assert.deepEqual(result?.compaction?.details.compactedWindow, [
+        {
+            role: "user",
+            content: [{ type: "input_text", text: "keep this request" }],
+        },
+        { type: "compaction", encrypted_content: "sealed" },
+    ]);
+    assert.equal(result?.compaction?.details.windowNumber, 1);
+    assert.equal(result?.compaction?.details.firstWindowId, result?.compaction?.details.windowId);
+    assert.equal(result?.compaction?.details.previousWindowId, undefined);
+    assert.deepEqual(result?.compaction?.details.replacementInput.slice(0, 2), [
+        {
+            role: "user",
+            content: [{ type: "input_text", text: "keep this request" }],
+        },
+        { type: "compaction", encrypted_content: "sealed" },
+    ]);
+    const worldState = result?.compaction?.details.replacementInput.at(2);
+    assert.ok(isRecord(worldState));
+    assert.match(worldStateText(worldState), /<codex_core_world_state>/);
+    assert.match(worldStateText(worldState), /cwd: \/workspace/);
+    assert.match(worldStateText(worldState), /model: openai-codex\/gpt-5\.5/);
+    assert.match(worldStateText(worldState), /active tools: read/);
 });
 
 test("chains previous native compaction into the next remote v2 request", async () => {
-    const previousFetch = globalThis.fetch;
     let requestBody: unknown;
-    globalThis.fetch = async (_input, init) => {
+    const runtime = makeTestRuntime(async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as unknown;
         const body = [
             "event: response.output_item.done",
@@ -632,52 +704,45 @@ test("chains previous native compaction into the next remote v2 request", async 
             "",
         ].join("\n");
         return new Response(body, { status: 200 });
-    };
+    });
 
-    try {
-        const result = await handleCodexNativeCompaction(
-            makeBeforeCompactEvent({
-                branchEntries: [
-                    nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
-                    messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
-                ],
-                firstKeptEntryId: "entry-tail",
-            }),
-            makeNativeCompactionContext(),
-            {
-                ...DEFAULT_CODEX_CORE_CONFIG,
-                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
-            },
-            makeCompactionApi(),
-        );
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
+                messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
+            ],
+            firstKeptEntryId: "entry-tail",
+        }),
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
 
-        assert.ok(isRecord(requestBody));
-        assert.deepEqual((requestBody.input as unknown[]).slice(0, 3), [
-            { type: "compaction", encrypted_content: "opaque" },
-            { role: "user", content: [{ type: "input_text", text: "new live tail" }] },
-            { type: "compaction_trigger" },
-        ]);
-        assert.equal(
-            result?.compaction?.details.requestMeta?.previousCompactionEntryId,
-            "compact-1",
-        );
-        assert.equal(result?.compaction?.details.windowNumber, 2);
-        assert.equal(result?.compaction?.details.previousWindowId, "window-1");
-        assert.equal(result?.compaction?.details.firstWindowId, "window-1");
-        assert.equal(result?.compaction?.details.sourceCompactionEntryId, "compact-1");
-        assert.deepEqual(result?.compaction?.details.compactedWindow, [
-            { role: "user", content: [{ type: "input_text", text: "new live tail" }] },
-            { type: "compaction", encrypted_content: "sealed-new" },
-        ]);
-    } finally {
-        globalThis.fetch = previousFetch;
-    }
+    assert.ok(isRecord(requestBody));
+    assert.deepEqual((requestBody.input as unknown[]).slice(0, 3), [
+        { type: "compaction", encrypted_content: "opaque" },
+        { role: "user", content: [{ type: "input_text", text: "new live tail" }] },
+        { type: "compaction_trigger" },
+    ]);
+    assert.equal(result?.compaction?.details.requestMeta?.previousCompactionEntryId, "compact-1");
+    assert.equal(result?.compaction?.details.windowNumber, 2);
+    assert.equal(result?.compaction?.details.previousWindowId, "window-1");
+    assert.equal(result?.compaction?.details.firstWindowId, "window-1");
+    assert.equal(result?.compaction?.details.sourceCompactionEntryId, "compact-1");
+    assert.deepEqual(result?.compaction?.details.compactedWindow, [
+        { role: "user", content: [{ type: "input_text", text: "new live tail" }] },
+        { type: "compaction", encrypted_content: "sealed-new" },
+    ]);
 });
 
 test("shrinks oversized tool outputs before remote v2 compaction", async () => {
-    const previousFetch = globalThis.fetch;
     let requestBody: unknown;
-    globalThis.fetch = async (_input, init) => {
+    const runtime = makeTestRuntime(async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as unknown;
         const body = [
             "event: response.output_item.done",
@@ -688,66 +753,62 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
             "",
         ].join("\n");
         return new Response(body, { status: 200 });
-    };
+    });
 
-    try {
-        const result = await handleCodexNativeCompaction(
-            makeBeforeCompactEvent({
-                branchEntries: [
-                    messageEntry(
-                        "assistant-tool",
-                        null,
-                        assistantMessage([
-                            {
-                                type: "toolCall",
-                                id: "call/1|item/1",
-                                name: "read",
-                                arguments: { path: "big.txt" },
-                            },
-                        ]),
-                    ),
-                    messageEntry(
-                        "tool-result",
-                        "assistant-tool",
-                        toolResultMessage("call/1|item/1", "x ".repeat(2_000)),
-                    ),
-                    messageEntry("user-after-tool", "tool-result", userMessage("please continue")),
-                ],
-                firstKeptEntryId: "user-after-tool",
-            }),
-            makeNativeCompactionContext({ contextWindow: 180 }),
-            {
-                ...DEFAULT_CODEX_CORE_CONFIG,
-                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
-            },
-            makeCompactionApi(),
-        );
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                messageEntry(
+                    "assistant-tool",
+                    null,
+                    assistantMessage([
+                        {
+                            type: "toolCall",
+                            id: "call/1|item/1",
+                            name: "read",
+                            arguments: { path: "big.txt" },
+                        },
+                    ]),
+                ),
+                messageEntry(
+                    "tool-result",
+                    "assistant-tool",
+                    toolResultMessage("call/1|item/1", "x ".repeat(2_000)),
+                ),
+                messageEntry("user-after-tool", "tool-result", userMessage("please continue")),
+            ],
+            firstKeptEntryId: "user-after-tool",
+        }),
+        makeNativeCompactionContext({ contextWindow: 180 }),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
 
-        assert.ok(isRecord(requestBody));
-        const callItem = (requestBody.input as unknown[]).find(
-            (item) => isRecord(item) && item.type === "function_call",
-        );
-        assert.deepEqual(callItem, {
-            type: "function_call",
-            id: "fc_item_1",
-            call_id: "call_1",
-            name: "read",
-            arguments: JSON.stringify({ path: "big.txt" }),
-        });
-        const outputItem = (requestBody.input as unknown[]).find(
-            (item) => isRecord(item) && item.type === "function_call_output",
-        );
-        assert.ok(isRecord(outputItem));
-        assert.equal(outputItem.output, "[truncated]");
-        assert.equal(result?.compaction?.details.requestMeta?.rewrittenToolOutputs, 1);
-    } finally {
-        globalThis.fetch = previousFetch;
-    }
+    assert.ok(isRecord(requestBody));
+    const callItem = (requestBody.input as unknown[]).find(
+        (item) => isRecord(item) && item.type === "function_call",
+    );
+    assert.deepEqual(callItem, {
+        type: "function_call",
+        id: "fc_item_1",
+        call_id: "call_1",
+        name: "read",
+        arguments: JSON.stringify({ path: "big.txt" }),
+    });
+    const outputItem = (requestBody.input as unknown[]).find(
+        (item) => isRecord(item) && item.type === "function_call_output",
+    );
+    assert.ok(isRecord(outputItem));
+    assert.equal(outputItem.output, "[truncated]");
+    assert.equal(result?.compaction?.details.requestMeta?.rewrittenToolOutputs, 1);
 });
 
 test("retained image-only messages consume compaction budget", async () => {
-    const previousFetch = globalThis.fetch;
-    globalThis.fetch = async () => {
+    const runtime = makeTestRuntime(async () => {
         const body = [
             "event: response.output_item.done",
             'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-images"}}',
@@ -757,102 +818,104 @@ test("retained image-only messages consume compaction budget", async () => {
             "",
         ].join("\n");
         return new Response(body, { status: 200 });
-    };
+    });
 
-    try {
-        const branchEntries = Array.from({ length: 80 }, (_unused, index) =>
-            messageEntry(
-                `image-${index}`,
-                index === 0 ? null : `image-${index - 1}`,
-                imageOnlyUserMessage(index),
-            ),
-        );
-        const result = await handleCodexNativeCompaction(
-            makeBeforeCompactEvent({ branchEntries, firstKeptEntryId: "image-79" }),
-            makeNativeCompactionContext(),
-            {
-                ...DEFAULT_CODEX_CORE_CONFIG,
-                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
-            },
-            makeCompactionApi(),
-        );
+    const branchEntries = Array.from({ length: 80 }, (_unused, index) =>
+        messageEntry(
+            `image-${index}`,
+            index === 0 ? null : `image-${index - 1}`,
+            imageOnlyUserMessage(index),
+        ),
+    );
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({ branchEntries, firstKeptEntryId: "image-79" }),
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
 
-        const retainedImageUrls = (result?.compaction?.details.compactedWindow ?? []).flatMap(
-            imageUrlsFromResponseItem,
-        );
-        assert.ok(retainedImageUrls.length > 0);
-        assert.ok(retainedImageUrls.length < 80);
-    } finally {
-        globalThis.fetch = previousFetch;
-    }
+    const retainedImageUrls = (result?.compaction?.details.compactedWindow ?? []).flatMap(
+        imageUrlsFromResponseItem,
+    );
+    assert.ok(retainedImageUrls.length > 0);
+    assert.ok(retainedImageUrls.length < 80);
 });
 
 test("preserves previous native window when falling back to Pi compaction", async () => {
-    const previousFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response("limit", { status: 429 });
+    const runtime = makeTestRuntime(async () => new Response("limit", { status: 429 }));
     const ctx = makeNativeCompactionContext();
 
-    try {
-        const result = await handleCodexNativeCompaction(
-            makeBeforeCompactEvent({
-                branchEntries: [
-                    nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
-                    messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
-                ],
-                firstKeptEntryId: "entry-tail",
-            }),
-            ctx,
-            {
-                ...DEFAULT_CODEX_CORE_CONFIG,
-                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
-            },
-            makeCompactionApi(),
-        );
-        assert.equal(result, undefined);
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
+                messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
+            ],
+            firstKeptEntryId: "entry-tail",
+        }),
+        ctx,
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+    assert.equal(result, undefined);
 
-        const rewritten = await rewriteProviderRequestWithNativeCompaction(
-            {
-                model: "gpt-5.5",
-                instructions: "compact this conversation",
-                input: [
-                    { role: "developer", content: "summarize compact" },
-                    {
-                        role: "user",
-                        content: [
-                            { type: "input_text", text: "<conversation>tail</conversation>" },
-                        ],
-                    },
-                ],
-            },
-            ctx,
-            {
-                ...DEFAULT_CODEX_CORE_CONFIG,
-                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
-            },
-            makeCompactionApi(),
-        );
+    const rewritten = await rewriteProviderRequestWithNativeCompaction(
+        {
+            model: "gpt-5.5",
+            instructions: "compact this conversation",
+            input: [
+                { role: "developer", content: "summarize compact" },
+                {
+                    role: "user",
+                    content: [{ type: "input_text", text: "<conversation>tail</conversation>" }],
+                },
+            ],
+        },
+        ctx,
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
 
-        const rewrittenInput = responseInput(rewritten);
-        assert.deepEqual(rewrittenInput.slice(0, 2), [
-            { role: "developer", content: "summarize compact" },
-            { type: "compaction", encrypted_content: "opaque" },
-        ]);
-        assert.match(worldStateText(rewrittenInput[2]), /<codex_core_world_state>/);
-        assert.deepEqual(rewrittenInput.slice(3), [
-            {
-                role: "user",
-                content: [{ type: "input_text", text: "<conversation>tail</conversation>" }],
-            },
-        ]);
-    } finally {
-        globalThis.fetch = previousFetch;
-    }
+    const rewrittenInput = responseInput(rewritten);
+    assert.deepEqual(rewrittenInput.slice(0, 2), [
+        { role: "developer", content: "summarize compact" },
+        { type: "compaction", encrypted_content: "opaque" },
+    ]);
+    assert.match(worldStateText(rewrittenInput[2]), /<codex_core_world_state>/);
+    assert.deepEqual(rewrittenInput.slice(3), [
+        {
+            role: "user",
+            content: [{ type: "input_text", text: "<conversation>tail</conversation>" }],
+        },
+    ]);
 });
 
 test("auto compaction defers until Pi is idle after agent_end", async () => {
     const compactCalls: unknown[] = [];
     const idle = { value: false };
     const ctx = makeAutoCompactionContext(compactCalls, idle);
+    const scheduledTasks: Array<() => void> = [];
+    const runtime = {
+        ...makeTestRuntime(),
+        scheduler: {
+            set(_delayMs: number, task: () => void): ScheduledTask {
+                scheduledTasks.push(task);
+                return { cancel() {} };
+            },
+        },
+    } satisfies CodexRuntime;
     const config = {
         ...DEFAULT_CODEX_CORE_CONFIG,
         compaction: {
@@ -863,13 +926,13 @@ test("auto compaction defers until Pi is idle after agent_end", async () => {
         },
     };
 
-    assert.equal(scheduleCodexAutoCompaction(ctx, config), true);
+    assert.equal(scheduleCodexAutoCompaction(ctx, config, runtime), true);
     assert.equal(compactCalls.length, 0);
     idle.value = true;
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    scheduledTasks.shift()?.();
     assert.equal(compactCalls.length, 1);
-    assert.equal(scheduleCodexAutoCompaction(ctx, config), true);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(scheduleCodexAutoCompaction(ctx, config, runtime), true);
+    scheduledTasks.shift()?.();
     assert.equal(compactCalls.length, 1);
 });
 
@@ -912,7 +975,7 @@ test("rewrites responses payload with native compaction replay matching", async 
     ]);
 });
 
-test("warns once per native replay fallback mismatch", async () => {
+test("handles native replay fallback mismatch silently", async () => {
     const warnings: string[] = [];
     const ctx = makeCompactionContext({ warnings, sessionId: "mismatch-session" });
     const payload = {
@@ -947,9 +1010,7 @@ test("warns once per native replay fallback mismatch", async () => {
         makeCompactionApi(),
     );
 
-    assert.deepEqual(warnings, [
-        "Codex native compaction replay fell back to lenient rewrite (expected-pi-replay-mismatch).",
-    ]);
+    assert.deepEqual(warnings, []);
 });
 
 test("rewrites native compaction replay when new-session context is inserted", async () => {
@@ -1002,6 +1063,27 @@ test("rewrites native compaction replay when new-session context is inserted", a
 });
 
 const TEST_THEME = makeTestTheme();
+
+function makeTestRuntime(
+    fetch: typeof globalThis.fetch = async () => {
+        throw new Error("Unexpected test fetch.");
+    },
+): CodexRuntime {
+    return {
+        fetch,
+        clock: {
+            nowMs: () => 1_700_000_000_000,
+            nowDate: () => new Date("2026-01-01T00:00:00.000Z"),
+        },
+        idGenerator: { randomUUID: () => "test-uuid" },
+        scheduler: {
+            set(_delayMs, task) {
+                task();
+                return { cancel() {} } satisfies ScheduledTask;
+            },
+        },
+    };
+}
 
 type RenderContextOptions = {
     readonly expanded?: boolean;
