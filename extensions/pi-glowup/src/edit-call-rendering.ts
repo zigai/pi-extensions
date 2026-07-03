@@ -73,7 +73,7 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
         };
     }
 
-    if (context.isPartial || context.argsComplete === false) {
+    if (context.isPartial) {
         return {
             statusText: "Edit Pending",
             path,

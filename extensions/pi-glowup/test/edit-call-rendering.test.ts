@@ -38,6 +38,20 @@ describe("edit call rendering", () => {
         });
     });
 
+    it("marks restored completed edit calls as no longer pending", () => {
+        const summary = summarizeEditCall(
+            { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
+            { isError: false, isPartial: false, argsComplete: false },
+        );
+
+        expect(summary).toEqual({
+            statusText: "Editing",
+            path: "src/rendering.ts",
+            suffix: "",
+            hasInvalidEdits: false,
+        });
+    });
+
     it("marks completed errored edit calls as failed", () => {
         const summary = summarizeEditCall(
             {
