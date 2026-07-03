@@ -5,14 +5,14 @@ import { deflateSync } from "node:zlib";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { initTheme } from "@earendil-works/pi-coding-agent";
-import type {
-    BuildSystemPromptOptions,
-    ExtensionAPI,
-    ExtensionContext,
-    SessionBeforeCompactEvent,
-    Skill,
-    Theme,
+import {
+    initTheme,
+    type BuildSystemPromptOptions,
+    type ExtensionAPI,
+    type ExtensionContext,
+    type SessionBeforeCompactEvent,
+    type Skill,
+    type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { getImageDimensions } from "@earendil-works/pi-tui";
 
@@ -284,9 +284,10 @@ test("settings screen refreshes draft from effective config after save", async (
         },
     });
 
-    const plainRendered = rendered.replace(/\x1b\[[0-9;]*m/g, "");
-    assert.match(plainRendered, /Web search\s+off/);
-    assert.doesNotMatch(plainRendered, /Web search\s+on/);
+    const webSearchLine = rendered.split("\n").find((line) => line.includes("Web search"));
+    assert.ok(webSearchLine);
+    assert.ok(webSearchLine.includes("off"));
+    assert.equal(webSearchLine.includes("on"), false);
 });
 
 test("resolves current Codex model selections", () => {
