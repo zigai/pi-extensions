@@ -1176,6 +1176,45 @@ test("streams remote compaction SSE without buffering response text", async () =
     });
 });
 
+test("cancels remote compaction streams with oversized pending SSE events", async () => {
+    let streamCancelled = false;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+            controller.enqueue(encoder.encode(`data: ${"x".repeat(1_000_001)}`));
+        },
+        cancel() {
+            streamCancelled = true;
+        },
+    });
+    const response = {
+        ok: true,
+        status: 200,
+        body,
+        text: async () => {
+            throw new Error("response text should not be buffered");
+        },
+    };
+    const runtime = makeTestRuntime(async () => {
+        // SAFETY: This fixture implements the Response members read by remote compaction streaming.
+        return response as unknown as Response;
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent(),
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.equal(result, undefined);
+    assert.equal(streamCancelled, true);
+});
+
 test("chains previous native compaction into the next remote v2 request", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {

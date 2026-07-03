@@ -51,6 +51,8 @@ const BRANCH_SUMMARY_PREFIX =
 const BRANCH_SUMMARY_SUFFIX = "</summary>";
 const CODEX_CORE_WORLD_STATE_TAG = "codex_core_world_state";
 const AUTO_COMPACTION_MIN_INTERVAL_MS = 30_000;
+const MAX_SSE_TAIL_CHARS = 1_000_000;
+const MAX_SSE_EVENT_CHARS = 2_000_000;
 
 const tokenEncoding = getEncoding("o200k_base");
 
@@ -1199,9 +1201,17 @@ async function collectRemoteCompactionV2OutputFromStream(
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
+        if (buffer.length > MAX_SSE_TAIL_CHARS && !hasCompleteServerSentEventDelimiter(buffer)) {
+            await reader.cancel();
+            return fail(createOversizedRemoteCompactionStreamError());
+        }
         const drained = drainCompleteServerSentEventBlocks(buffer);
         buffer = drained.tail;
         for (const block of drained.blocks) {
+            if (block.length > MAX_SSE_EVENT_CHARS) {
+                await reader.cancel();
+                return fail(createOversizedRemoteCompactionStreamError());
+            }
             const event = parseServerSentEventBlock(block);
             if (!event) continue;
             const consumed = collector.consume(event);
@@ -1210,6 +1220,8 @@ async function collectRemoteCompactionV2OutputFromStream(
     }
     buffer += decoder.decode();
     if (buffer.trim().length > 0) {
+        if (buffer.length > MAX_SSE_EVENT_CHARS)
+            return fail(createOversizedRemoteCompactionStreamError());
         const event = parseServerSentEventBlock(buffer);
         if (event) {
             const consumed = collector.consume(event);
@@ -1595,6 +1607,18 @@ function isPiCompactionSummarizationPayload(payload: ResponsesPayload): boolean 
         if ((role === "system" || role === "developer") && /compact|summar/i.test(text))
             return true;
         return role === "user" && /<conversation>|previous compaction summary|summary/i.test(text);
+    });
+}
+
+function hasCompleteServerSentEventDelimiter(buffer: string): boolean {
+    return /\r?\n\r?\n/.test(buffer);
+}
+
+function createOversizedRemoteCompactionStreamError(): CodexUnexpectedResponse {
+    return new CodexUnexpectedResponse({
+        operation: "nativeCompaction",
+        provider: "openai-codex",
+        message: "Remote compaction stream event exceeded maximum size.",
     });
 }
 
