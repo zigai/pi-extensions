@@ -175,15 +175,17 @@ export function createImagegenTool(
 
 export function prepareImagegenArguments(args: unknown): ImagegenParams {
     const input = parseWithSchema(UnknownRecordSchema, args);
-    if (!input) return { prompt: "" };
-    const prompt = typeof input.prompt === "string" ? input.prompt : "";
+    if (!input) throw new Error("Invalid imagegen arguments.");
+    const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+    if (prompt.length === 0) throw new Error("imagegen requires a non-empty prompt.");
     const referencedPaths =
-        parseStringArray(input.referenced_image_paths) ?? parseStringArray(input.images);
-    const recentCount =
-        typeof input.num_last_images_to_include === "number"
-            ? input.num_last_images_to_include
-            : undefined;
-    const action = typeof input.action === "string" ? input.action : undefined;
+        parseOptionalStringArray(input.referenced_image_paths, "referenced_image_paths") ??
+        parseOptionalStringArray(input.images, "images");
+    const recentCount = parseOptionalNumber(
+        input.num_last_images_to_include,
+        "num_last_images_to_include",
+    );
+    const action = parseOptionalString(input.action, "action");
     return {
         prompt,
         ...(referencedPaths ? { referenced_image_paths: referencedPaths } : {}),
@@ -387,10 +389,23 @@ function formatImagegenOutput(
     return lines.join("\n");
 }
 
-function parseStringArray(value: unknown): string[] | undefined {
-    if (!Array.isArray(value)) return undefined;
-    const strings = value.filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
-    );
-    return strings.length > 0 ? strings : undefined;
+function parseOptionalStringArray(value: unknown, fieldName: string): string[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+        throw new Error(`imagegen ${fieldName} must be an array of strings.`);
+    }
+    return value.map((item) => item.trim()).filter((item) => item.length > 0);
+}
+
+function parseOptionalNumber(value: unknown, fieldName: string): number | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "number") throw new Error(`imagegen ${fieldName} must be a number.`);
+    return value;
+}
+
+function parseOptionalString(value: unknown, fieldName: string): string | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string") throw new Error(`imagegen ${fieldName} must be a string.`);
+    const text = value.trim();
+    return text.length > 0 ? text : undefined;
 }

@@ -251,8 +251,9 @@ function defaultViewImageComponentFactory(args: {
 
 export function prepareViewImageArguments(args: unknown): ViewImageParams {
     const input = parseWithSchema(ViewImageArgumentsSchema, args);
-    if (!input) return { path: "" };
+    if (!input) throw new Error("Invalid view_image arguments.");
     const path = input.path ?? input.file_path ?? input.image_path ?? "";
+    if (path.trim().length === 0) throw new Error("view_image requires a path.");
     return input.detail ? { path, detail: input.detail } : { path };
 }
 

@@ -177,7 +177,7 @@ export function createWebRunTool(
             "Use web_run open/click/find with returned ref ids instead of repeating broad searches when drilling into a result.",
         ],
         parameters: WEB_RUN_PARAMETERS,
-        prepareArguments: (args) => parseWithSchema(WebRunParametersValidator, args) ?? {},
+        prepareArguments: prepareWebRunArguments,
         renderCall(args, theme, _context) {
             const summary = summarizeWebRunCall(args);
             const summaryColor = summary ? "accent" : "dim";
@@ -232,6 +232,18 @@ export function createWebRunTool(
             };
         },
     };
+}
+
+function prepareWebRunArguments(args: unknown): WebRunParams {
+    const params = parseWithSchema(WebRunParametersValidator, args);
+    if (!params) throw new Error("Invalid web_run arguments.");
+    const { commands } = splitSearchRequest(params);
+    if (Object.keys(commands).length === 0) {
+        throw new Error(
+            "web_run requires at least one search, open, click, find, screenshot, finance, weather, sports, or time command.",
+        );
+    }
+    return params;
 }
 
 async function executeWebRun(

@@ -420,6 +420,29 @@ test("renders compact invocation summaries for Codex tools", () => {
     );
 });
 
+test("rejects invalid tool arguments before I/O", () => {
+    const webRunTool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(webRunTool.prepareArguments);
+    assert.throws(
+        () => webRunTool.prepareArguments?.({ search_query: [{ q: 42 }] }),
+        /Invalid web_run arguments/,
+    );
+    assert.throws(() => webRunTool.prepareArguments?.({}), /web_run requires at least one/);
+
+    const imagegenTool = createImagegenTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(imagegenTool.prepareArguments);
+    assert.throws(() => imagegenTool.prepareArguments?.({}), /non-empty prompt/);
+    assert.throws(
+        () => imagegenTool.prepareArguments?.({ prompt: "draw", referenced_image_paths: [123] }),
+        /referenced_image_paths must be an array of strings/,
+    );
+
+    const viewImageTool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.ok(viewImageTool.prepareArguments);
+    assert.throws(() => viewImageTool.prepareArguments?.({ file_path: 123 }), /Invalid view_image/);
+    assert.throws(() => viewImageTool.prepareArguments?.({}), /view_image requires a path/);
+});
+
 test("computes Codex prompt image target dimensions", () => {
     assert.deepEqual(codexPromptImageTargetDimensions(2304, 864), {
         width: 2048,
