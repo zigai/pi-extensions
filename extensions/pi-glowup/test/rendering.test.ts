@@ -378,6 +378,27 @@ describe("Codex rendering helpers", () => {
         ).toBeUndefined();
     });
 
+    it("does not treat space-indented heredoc markers as ordinary closing delimiters", () => {
+        expect(parseScriptInvocation("python - <<'PY'\nprint('hi')\n  PY")).toEqual({
+            label: "Python",
+            language: "python",
+            code: "print('hi')\n  PY",
+        });
+    });
+
+    it("treats only leading tabs as stripped heredoc delimiter indentation", () => {
+        expect(parseScriptInvocation("python - <<-'PY'\nprint('hi')\n\tPY")).toEqual({
+            label: "Python",
+            language: "python",
+            code: "print('hi')",
+        });
+        expect(parseScriptInvocation("python - <<-'PY'\nprint('hi')\n  PY")).toEqual({
+            label: "Python",
+            language: "python",
+            code: "print('hi')\n  PY",
+        });
+    });
+
     it("parses node eval scripts as executable language blocks", () => {
         expect(
             parseScriptInvocation(

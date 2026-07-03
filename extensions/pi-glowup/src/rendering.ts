@@ -77,7 +77,7 @@ const ellipsisLinePattern = /^\s+\.\.\.$/;
 const addCountPattern = /^\+\s*\d+\s/;
 const removeCountPattern = /^-\s*\d+\s/;
 const heredocOpenPattern =
-    /<<-?\s*(?:"(?<doubleMarker>[A-Za-z_][A-Za-z0-9_]*)"|'(?<singleMarker>[A-Za-z_][A-Za-z0-9_]*)'|(?<bareMarker>[A-Za-z_][A-Za-z0-9_]*))/u;
+    /(?<operator><<-?)\s*(?:"(?<doubleMarker>[A-Za-z_][A-Za-z0-9_]*)"|'(?<singleMarker>[A-Za-z_][A-Za-z0-9_]*)'|(?<bareMarker>[A-Za-z_][A-Za-z0-9_]*))/u;
 
 function fg(theme: CodexRenderTheme, token: ThemeColor, text: string): string {
     return theme.fg(token, text);
@@ -880,6 +880,7 @@ type HeredocOpening = {
     readonly prefix: string;
     readonly marker: string;
     readonly bodyStart: number;
+    readonly stripLeadingTabs: boolean;
 };
 
 type HeredocClosing =
@@ -898,7 +899,7 @@ function parseHeredocScriptInvocation(displayCommand: string): ScriptInvocation 
     }
 
     const body = displayCommand.slice(opening.bodyStart);
-    const closing = findHeredocClosing(body, opening.marker);
+    const closing = findHeredocClosing(body, opening.marker, opening.stripLeadingTabs);
     if (closing?.hasTrailingShell === true) {
         return undefined;
     }
@@ -924,6 +925,7 @@ function parseHeredocOpening(displayCommand: string): HeredocOpening | undefined
         prefix: firstLine.slice(0, match.index),
         marker: groups.doubleMarker ?? groups.singleMarker ?? groups.bareMarker ?? "",
         bodyStart: nextLineStartIndex(displayCommand, firstLineEnd),
+        stripLeadingTabs: groups.operator === "<<-",
     };
 }
 
@@ -987,7 +989,11 @@ function hasShellControlOperator(text: string): boolean {
     return false;
 }
 
-function findHeredocClosing(body: string, marker: string): HeredocClosing | undefined {
+function findHeredocClosing(
+    body: string,
+    marker: string,
+    stripLeadingTabs: boolean,
+): HeredocClosing | undefined {
     if (marker.length === 0) {
         return undefined;
     }
@@ -1001,7 +1007,7 @@ function findHeredocClosing(body: string, marker: string): HeredocClosing | unde
             }
         }
 
-        if (trimmedRangeEquals(body, lineStart, index, marker)) {
+        if (heredocDelimiterMatches(body, lineStart, index, marker, stripLeadingTabs)) {
             const trailingStart = nextLineStartIndex(body, index);
             if (hasNonWhitespaceText(body.slice(trailingStart))) {
                 return { hasTrailingShell: true };
@@ -1034,20 +1040,25 @@ function heredocCodeEndIndex(body: string, closingLineStart: number): number {
     return closingLineStart - 1;
 }
 
-function trimmedRangeEquals(text: string, start: number, end: number, expected: string): boolean {
-    let trimmedStart = start;
-    let trimmedEnd = end;
-    while (trimmedStart < trimmedEnd && text.charAt(trimmedStart).trim().length === 0) {
-        trimmedStart += 1;
+function heredocDelimiterMatches(
+    text: string,
+    start: number,
+    end: number,
+    expected: string,
+    stripLeadingTabs: boolean,
+): boolean {
+    let markerStart = start;
+    if (stripLeadingTabs) {
+        while (markerStart < end && text.charCodeAt(markerStart) === 9) {
+            markerStart += 1;
+        }
     }
-    while (trimmedEnd > trimmedStart && text.charAt(trimmedEnd - 1).trim().length === 0) {
-        trimmedEnd -= 1;
-    }
-    if (trimmedEnd - trimmedStart !== expected.length) {
+
+    if (end - markerStart !== expected.length) {
         return false;
     }
     for (let index = 0; index < expected.length; index += 1) {
-        if (text.charCodeAt(trimmedStart + index) !== expected.charCodeAt(index)) {
+        if (text.charCodeAt(markerStart + index) !== expected.charCodeAt(index)) {
             return false;
         }
     }
