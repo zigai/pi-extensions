@@ -1,7 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Result } from "better-result";
 
-import { formatCodexModelSelection, type CodexCoreConfig, writeCodexCoreConfig } from "./config.ts";
+import {
+    formatCodexModelSelection,
+    readCodexCoreConfig,
+    type CodexCoreConfig,
+    writeCodexCoreConfig,
+} from "./config.ts";
 import { openCodexSettingsScreen } from "./codex-settings-ui.ts";
 import { consumeCodexRateLimitResetCredit, fetchCodexUsage, formatCodexUsage } from "./usage.ts";
 
@@ -149,14 +154,126 @@ function saveAndApply(
     ctx: ExtensionContext,
     options: CodexCommandOptions,
 ): boolean {
-    const result = writeCodexCoreConfig(config);
+    const globalConfig = readCodexCoreConfig();
+    const configToPersist = applyChangedConfigValues(globalConfig, options.getConfig(), config);
+    const result = writeCodexCoreConfig(configToPersist);
     if (!result.ok) {
         notify(ctx, `Failed to save Codex settings: ${result.error}`, "error");
         return false;
     }
-    options.applyConfig(config, ctx);
-    notify(ctx, formatConfig(config), "info");
+    const effectiveConfig = readCodexCoreConfig({
+        cwd: ctx.isProjectTrusted() ? ctx.cwd : undefined,
+    });
+    options.applyConfig(effectiveConfig, ctx);
+    notify(ctx, formatConfig(effectiveConfig), "info");
     return true;
+}
+
+function applyChangedConfigValues(
+    globalConfig: CodexCoreConfig,
+    previousEffectiveConfig: CodexCoreConfig,
+    nextEffectiveConfig: CodexCoreConfig,
+): CodexCoreConfig {
+    return {
+        scope: {
+            tools: changedValue(
+                globalConfig.scope.tools,
+                previousEffectiveConfig.scope.tools,
+                nextEffectiveConfig.scope.tools,
+            ),
+        },
+        tools: {
+            webSearch: changedValue(
+                globalConfig.tools.webSearch,
+                previousEffectiveConfig.tools.webSearch,
+                nextEffectiveConfig.tools.webSearch,
+            ),
+            imageGeneration: changedValue(
+                globalConfig.tools.imageGeneration,
+                previousEffectiveConfig.tools.imageGeneration,
+                nextEffectiveConfig.tools.imageGeneration,
+            ),
+            viewImage: changedValue(
+                globalConfig.tools.viewImage,
+                previousEffectiveConfig.tools.viewImage,
+                nextEffectiveConfig.tools.viewImage,
+            ),
+            viewImageDescriptions: changedValue(
+                globalConfig.tools.viewImageDescriptions,
+                previousEffectiveConfig.tools.viewImageDescriptions,
+                nextEffectiveConfig.tools.viewImageDescriptions,
+            ),
+        },
+        prompt: {
+            mode: changedValue(
+                globalConfig.prompt.mode,
+                previousEffectiveConfig.prompt.mode,
+                nextEffectiveConfig.prompt.mode,
+            ),
+        },
+        compaction: {
+            enabled: changedValue(
+                globalConfig.compaction.enabled,
+                previousEffectiveConfig.compaction.enabled,
+                nextEffectiveConfig.compaction.enabled,
+            ),
+            auto: changedValue(
+                globalConfig.compaction.auto,
+                previousEffectiveConfig.compaction.auto,
+                nextEffectiveConfig.compaction.auto,
+            ),
+            thresholdPercent: changedValue(
+                globalConfig.compaction.thresholdPercent,
+                previousEffectiveConfig.compaction.thresholdPercent,
+                nextEffectiveConfig.compaction.thresholdPercent,
+            ),
+        },
+        openai: {
+            webSearchModel: changedValue(
+                globalConfig.openai.webSearchModel,
+                previousEffectiveConfig.openai.webSearchModel,
+                nextEffectiveConfig.openai.webSearchModel,
+            ),
+            imageModel: changedValue(
+                globalConfig.openai.imageModel,
+                previousEffectiveConfig.openai.imageModel,
+                nextEffectiveConfig.openai.imageModel,
+            ),
+            imageDescriptionModel: changedValue(
+                globalConfig.openai.imageDescriptionModel,
+                previousEffectiveConfig.openai.imageDescriptionModel,
+                nextEffectiveConfig.openai.imageDescriptionModel,
+            ),
+            compactionModel: changedValue(
+                globalConfig.openai.compactionModel,
+                previousEffectiveConfig.openai.compactionModel,
+                nextEffectiveConfig.openai.compactionModel,
+            ),
+            compactionReasoning: changedValue(
+                globalConfig.openai.compactionReasoning,
+                previousEffectiveConfig.openai.compactionReasoning,
+                nextEffectiveConfig.openai.compactionReasoning,
+            ),
+            verbosity: changedValue(
+                globalConfig.openai.verbosity,
+                previousEffectiveConfig.openai.verbosity,
+                nextEffectiveConfig.openai.verbosity,
+            ),
+            fast: changedValue(
+                globalConfig.openai.fast,
+                previousEffectiveConfig.openai.fast,
+                nextEffectiveConfig.openai.fast,
+            ),
+        },
+    };
+}
+
+function changedValue<TValue>(
+    globalValue: TValue,
+    previousEffectiveValue: TValue,
+    nextEffectiveValue: TValue,
+): TValue {
+    return Object.is(previousEffectiveValue, nextEffectiveValue) ? globalValue : nextEffectiveValue;
 }
 
 function formatConfig(config: CodexCoreConfig): string {

@@ -16,6 +16,7 @@ import type {
 import { getImageDimensions } from "@earendil-works/pi-tui";
 
 import extension, { packageName, extensionName } from "../src/index.ts";
+import { registerCodexCommand } from "../src/codex-command.ts";
 import { buildCodexCoreSystemPrompt } from "../src/prompt.ts";
 import {
     CODEX_CURRENT_MODEL_SELECTION,
@@ -184,6 +185,53 @@ test("ignores project codex config when session cwd is untrusted", async () => {
         await harness.startSession(makeExtensionContext(cwd, false));
 
         assert.ok(harness.activeTools.includes("web_run"));
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("codex command saves only changed global config values", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-command-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        const projectConfigPath = getCodexCoreProjectConfigPath(cwd);
+        await mkdir(join(globalConfigPath, ".."), { recursive: true });
+        await mkdir(join(projectConfigPath, ".."), { recursive: true });
+        await writeFile(
+            globalConfigPath,
+            JSON.stringify({ tools: { webSearch: true }, prompt: { mode: "pi" } }),
+        );
+        await writeFile(projectConfigPath, JSON.stringify({ tools: { webSearch: false } }));
+
+        const effectiveConfig = readCodexCoreConfig({ agentDir, cwd });
+        let appliedConfig = effectiveConfig;
+        const command = makeCodexCommandHarness();
+        registerCodexCommand(command.api, {
+            getConfig: () => appliedConfig,
+            applyConfig: (config) => {
+                appliedConfig = config;
+            },
+        });
+
+        await command.run("prompt", makeExtensionContext(cwd, true));
+
+        const savedConfig = JSON.parse(await readFile(globalConfigPath, "utf8")) as unknown;
+        assert.ok(isRecord(savedConfig));
+        assert.deepEqual(savedConfig.tools, {
+            webSearch: true,
+            imageGeneration: true,
+            viewImage: true,
+            viewImageDescriptions: false,
+        });
+        assert.deepEqual(savedConfig.prompt, { mode: "codex" });
+        assert.equal(appliedConfig.tools.webSearch, false);
+        assert.equal(appliedConfig.prompt.mode, "codex");
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -1160,6 +1208,30 @@ function makeExtensionHarness(): ExtensionHarness {
         async startSession(ctx: ExtensionContext): Promise<void> {
             assert.ok(sessionStart);
             await sessionStart({ type: "session_start" }, ctx);
+        },
+    };
+}
+
+type CodexCommandHandler = (args: string, ctx: ExtensionContext) => Promise<void> | void;
+
+type CodexCommandHarness = {
+    readonly api: ExtensionAPI;
+    readonly run: (args: string, ctx: ExtensionContext) => Promise<void>;
+};
+
+function makeCodexCommandHarness(): CodexCommandHarness {
+    let handler: CodexCommandHandler | undefined;
+    const api = {
+        registerCommand(name: string, command: { readonly handler: CodexCommandHandler }) {
+            if (name === "codex") handler = command.handler;
+        },
+    };
+    return {
+        // SAFETY: This fixture implements the ExtensionAPI member exercised by registerCodexCommand.
+        api: api as unknown as ExtensionAPI,
+        async run(args: string, ctx: ExtensionContext): Promise<void> {
+            assert.ok(handler);
+            await handler(args, ctx);
         },
     };
 }
