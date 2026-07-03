@@ -1,3 +1,6 @@
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
@@ -5,6 +8,7 @@ import {
     buildLargeDiffSummaryPayload,
     buildPierreDiffPayload,
     buildUnifiedDiffRows,
+    createWriteSnapshot,
 } from "../src/pierre-diff.ts";
 import { renderPierreDiff, shouldRenderSideBySideDiff } from "../src/pierre-diff-renderer.ts";
 import { loadHighlightedDiff } from "../src/pierre-highlight.ts";
@@ -113,6 +117,50 @@ describe("Pierre diff rendering", () => {
         expect(rendered).toContain("large.txt");
         expect(rendered).toContain("Large diff omitted");
         expect(rendered).toContain("5,001 lines");
+    });
+
+    it("keeps unreadable existing files out of create-style write diffs", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-diff-"));
+        const filePath = join(root, "secret.txt");
+        writeFileSync(filePath, "secret\n");
+        chmodSync(filePath, 0);
+
+        try {
+            try {
+                readFileSync(filePath, "utf8");
+                return;
+            } catch {
+                // Expected on platforms that enforce the chmod above.
+            }
+
+            const payload = buildPierreDiffPayload(
+                await createWriteSnapshot(root, "secret.txt", "replacement\n"),
+            );
+            const rendered = renderPierreDiff(
+                payload ?? {
+                    version: 1,
+                    kind: "summary",
+                    path: "secret.txt",
+                    stats: { added: 0, removed: 0, lineCount: 0, sizeBytes: 0 },
+                    summary: { reason: "not-readable", maxLines: 1, maxBytes: 1 },
+                },
+                testTheme,
+                { expanded: true },
+                { lastComponent: undefined, invalidate() {} },
+            )
+                .render(120)
+                .map(stripAnsi)
+                .join("\n");
+
+            expect(payload?.kind).toBe("summary");
+            expect(payload?.kind === "summary" ? payload.summary.reason : undefined).toBe(
+                "not-readable",
+            );
+            expect(rendered).toContain("could not be read safely");
+            expect(rendered).not.toContain("Large diff omitted");
+        } finally {
+            chmodSync(filePath, 0o600);
+        }
     });
 
     it("switches side-by-side rendering only for expanded wide terminals", () => {

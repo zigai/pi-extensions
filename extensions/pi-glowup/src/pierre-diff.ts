@@ -461,27 +461,42 @@ function trimEdgeCollapsedRows<TRow extends { readonly kind: string }>(
 }
 
 async function readTextSnapshot(absolutePath: string): Promise<FileSnapshot> {
+    let info: Awaited<ReturnType<typeof stat>>;
     try {
-        const info = await stat(absolutePath);
-        if (!info.isFile()) {
-            return {
-                exists: false,
-                content: "",
-                sizeBytes: 0,
-                lineCount: 0,
-                skippedReason: "not-readable",
-            };
+        info = await stat(absolutePath);
+    } catch (cause: unknown) {
+        if (hasNodeErrorCode(cause, "ENOENT")) {
+            return { exists: false, content: "", sizeBytes: 0, lineCount: 0 };
         }
-        if (info.size > MAX_CAPTURE_BYTES) {
-            return {
-                exists: true,
-                content: "",
-                sizeBytes: info.size,
-                lineCount: 0,
-                skippedReason: "too-large",
-            };
-        }
+        return {
+            exists: true,
+            content: "",
+            sizeBytes: 0,
+            lineCount: 0,
+            skippedReason: "not-readable",
+        };
+    }
 
+    if (!info.isFile()) {
+        return {
+            exists: true,
+            content: "",
+            sizeBytes: info.size,
+            lineCount: 0,
+            skippedReason: "not-readable",
+        };
+    }
+    if (info.size > MAX_CAPTURE_BYTES) {
+        return {
+            exists: true,
+            content: "",
+            sizeBytes: info.size,
+            lineCount: 0,
+            skippedReason: "too-large",
+        };
+    }
+
+    try {
         const content = await readFile(absolutePath, "utf8");
         return {
             exists: true,
@@ -490,7 +505,13 @@ async function readTextSnapshot(absolutePath: string): Promise<FileSnapshot> {
             lineCount: countContentLines(content),
         };
     } catch {
-        return { exists: false, content: "", sizeBytes: 0, lineCount: 0 };
+        return {
+            exists: true,
+            content: "",
+            sizeBytes: info.size,
+            lineCount: 0,
+            skippedReason: "not-readable",
+        };
     }
 }
 
@@ -510,6 +531,10 @@ function summaryReasonForSnapshots(
         return "too-large";
     }
     return undefined;
+}
+
+function hasNodeErrorCode(cause: unknown, code: string): boolean {
+    return typeof cause === "object" && cause !== null && Reflect.get(cause, "code") === code;
 }
 
 function countContentLines(content: string): number {

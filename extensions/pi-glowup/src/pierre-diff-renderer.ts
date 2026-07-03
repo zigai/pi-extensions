@@ -264,16 +264,29 @@ function renderPierreDiffSummary(payload: PierreSummaryDiffPayload, theme: Theme
             const safeWidth = Math.max(24, Math.floor(width));
             const changeStats = `${payload.stats.added.toLocaleString("en-US")} + / ${payload.stats.removed.toLocaleString("en-US")} -`;
             const headline = `${theme.fg("toolDiffContext", payload.path)} ${theme.fg("muted", changeStats)}`;
-            const detail = `Large diff omitted: ${formatDiffSize(payload.stats.sizeBytes)} / ${payload.stats.lineCount.toLocaleString("en-US")} lines exceeds ${formatDiffSize(payload.summary.maxBytes)} or ${payload.summary.maxLines.toLocaleString("en-US")} lines`;
             const hint = "Use git diff or read the file directly to inspect the full change.";
             return [
                 truncateToWidth(headline, safeWidth, ""),
-                truncateToWidth(`  └ ${theme.fg("muted", detail)}`, safeWidth, ""),
+                truncateToWidth(
+                    `  └ ${theme.fg("muted", summaryDetail(payload))}`,
+                    safeWidth,
+                    "",
+                ),
                 truncateToWidth(`    ${theme.fg("muted", hint)}`, safeWidth, ""),
             ];
         },
         invalidate() {},
     };
+}
+
+function summaryDetail(payload: PierreSummaryDiffPayload): string {
+    if (payload.summary.reason === "not-readable") {
+        return `Diff omitted: ${payload.path} could not be read safely.`;
+    }
+    if (payload.summary.reason === "metadata-too-large") {
+        return "Diff omitted: generated diff metadata exceeded the render budget.";
+    }
+    return `Large diff omitted: ${formatDiffSize(payload.stats.sizeBytes)} / ${payload.stats.lineCount.toLocaleString("en-US")} lines exceeds ${formatDiffSize(payload.summary.maxBytes)} or ${payload.summary.maxLines.toLocaleString("en-US")} lines`;
 }
 
 function formatDiffSize(bytes: number): string {
