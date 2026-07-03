@@ -34,6 +34,7 @@ describe("script formatter settings", () => {
                 python: ["black", "-"],
                 javascript: [],
                 typescript: [""],
+                ruby: ["ruby\0"],
             },
             {
                 source: "config.scriptPreview.formatters",
@@ -44,8 +45,9 @@ describe("script formatter settings", () => {
         expect(commands.get("python")).toEqual(["black", "-"]);
         expect(commands.has("javascript")).toBe(false);
         expect(commands.has("typescript")).toBe(false);
+        expect(commands.has("ruby")).toBe(false);
         expect(warnings).toEqual([
-            "[pi-codex-look] Ignoring invalid formatter command entries in config.scriptPreview.formatters: javascript, typescript",
+            "[pi-codex-look] Ignoring invalid formatter command entries in config.scriptPreview.formatters: javascript, typescript, ruby",
         ]);
     });
 
@@ -81,5 +83,16 @@ describe("script formatter settings", () => {
                 formatter,
             ),
         ).resolves.toEqual({ label: "Node", language: "javascript", code: "console.log(1)" });
+    });
+
+    it("falls back to the original script when a formatter throws", async () => {
+        await expect(
+            formatScriptInvocation(
+                { label: "Python", language: "python", code: "print(1)" },
+                async () => {
+                    throw new Error("formatter failed");
+                },
+            ),
+        ).resolves.toEqual({ label: "Python", language: "python", code: "print(1)" });
     });
 });

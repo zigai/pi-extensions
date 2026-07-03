@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import type { ScriptInvocation } from "./rendering.ts";
 
 export type ScriptBlockFormatterInput = {
@@ -36,12 +37,12 @@ function formatterSource(options: ScriptFormatterParseOptions): string {
     return options.source ?? "script formatter config";
 }
 
+function isSafeFormatterCommandPart(value: unknown): value is string {
+    return typeof value === "string" && value.trim().length > 0 && !value.includes("\0");
+}
+
 function isFormatterCommand(value: unknown): value is readonly string[] {
-    return (
-        Array.isArray(value) &&
-        value.length > 0 &&
-        value.every((item) => typeof item === "string" && item.trim().length > 0)
-    );
+    return Array.isArray(value) && value.length > 0 && value.every(isSafeFormatterCommandPart);
 }
 
 function normalizeCode(code: string): string {
@@ -135,11 +136,17 @@ function runFormatterCommand(
         const state = { settled: false };
         let stdout = "";
         let stdoutBytes = 0;
-        const child = spawn(executable, [...args], {
-            shell: false,
-            signal: options.signal,
-            stdio: ["pipe", "pipe", "ignore"],
-        });
+        let child: ChildProcessByStdio<Writable, Readable, null>;
+        try {
+            child = spawn(executable, [...args], {
+                shell: false,
+                signal: options.signal,
+                stdio: ["pipe", "pipe", "ignore"],
+            });
+        } catch {
+            resolve(undefined);
+            return;
+        }
         const timeout = setTimeout(() => {
             child.kill();
             finishFormatterCommand(resolve, undefined, state, timeout);
@@ -201,14 +208,19 @@ export async function formatScriptInvocation(
     formatter: ScriptBlockFormatter | undefined,
     options: ScriptBlockFormatterOptions = {},
 ): Promise<ScriptInvocation> {
-    const code = await formatter?.(
-        {
-            label: invocation.label,
-            language: invocation.language,
-            code: invocation.code,
-        },
-        options,
-    );
+    let code: string | undefined;
+    try {
+        code = await formatter?.(
+            {
+                label: invocation.label,
+                language: invocation.language,
+                code: invocation.code,
+            },
+            options,
+        );
+    } catch {
+        return invocation;
+    }
 
     if (code === undefined) {
         return invocation;
