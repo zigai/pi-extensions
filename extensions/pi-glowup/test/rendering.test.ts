@@ -257,6 +257,78 @@ describe("Codex rendering helpers", () => {
         }
     });
 
+    it("keeps collapsed output compact without rendering middle lines", () => {
+        const component = renderCodexOutput(
+            plainTheme,
+            [
+                "start",
+                ...Array.from({ length: 2_000 }, (_value, index) => `middle ${index + 1}`),
+                "end",
+            ].join("\n"),
+            {
+                expanded: false,
+                maxPreviewLines: 5,
+                omittedHint: "hint",
+            },
+        );
+
+        const rendered = component.render(100).join("\n");
+
+        expect(rendered).toContain("start");
+        expect(rendered).toContain("middle 1");
+        expect(rendered).toContain("… +1998 lines (hint)");
+        expect(rendered).toContain("middle 2000");
+        expect(rendered).toContain("end");
+        expect(rendered).not.toContain("middle 1000");
+    });
+
+    it("keeps collapsed output compact across huge internal blank runs", () => {
+        const component = renderCodexOutput(plainTheme, `start${"\n".repeat(2_000)}end`, {
+            expanded: false,
+            maxPreviewLines: 5,
+            omittedHint: "hint",
+        });
+
+        const rendered = component.render(100).join("\n");
+
+        expect(rendered).toContain("start");
+        expect(rendered).toContain("… +1997 lines (hint)");
+        expect(rendered).toContain("end");
+    });
+
+    it("keeps hidden collapsed output previews hidden without treating output as empty", () => {
+        const component = renderCodexOutput(plainTheme, "secret\noutput", {
+            expanded: false,
+            mode: "hidden",
+            maxPreviewLines: 5,
+        });
+
+        expect(component.render(100)).toEqual([]);
+    });
+
+    it("keeps collapsed output compact when one raw line wraps many rows", () => {
+        const hugeLine = `rollout.jsonl:648:${JSON.stringify({
+            timestamp: "2026-05-03T12:52:02.179Z",
+            payload: {
+                command: "cat > /tmp/game.ts <<'EOF'\\n" + "const value = 1;\\n".repeat(200),
+            },
+        })}`;
+        const component = renderCodexOutput(plainTheme, [hugeLine, "done"].join("\n"), {
+            expanded: false,
+            maxPreviewLines: 5,
+            omittedHint: "hint",
+        });
+
+        const lines = component.render(80);
+        const rendered = lines.join("\n");
+
+        expect(lines.length).toBeLessThanOrEqual(5);
+        expectLinesWithinWidth(lines, 80);
+        expect(rendered).toContain("rollout.jsonl:648");
+        expect(rendered).toContain("… +");
+        expect(rendered).toContain("rows (hint)");
+    });
+
     it("strips shell wrappers before command highlighting", () => {
         expect(highlightShell(plainTheme, "bash -lc 'npm run check'")).toBe("npm run check");
     });
@@ -267,6 +339,19 @@ describe("Codex rendering helpers", () => {
             language: "python",
             code: "print('hi')",
         });
+    });
+
+    it("rejects partial heredocs once a closing marker line appears before trailing shell", () => {
+        expect(
+            parseScriptInvocation(
+                [
+                    "python - <<'PY'",
+                    ...Array.from({ length: 1_000 }, (_value, index) => `print(${index})`),
+                    "PY",
+                    "rm -f tmp/demo.py",
+                ].join("\n"),
+            ),
+        ).toBeUndefined();
     });
 
     it("does not parse completed heredocs with trailing shell commands as executable blocks", () => {
@@ -502,6 +587,27 @@ describe("Codex rendering helpers", () => {
         expect(collapsed).toContain("root");
         expect(collapsed).not.toContain("pathlib");
         expect(expanded).toContain("pathlib");
+    });
+
+    it("keeps huge collapsed script previews compact", () => {
+        const component = renderScriptCall(
+            plainTheme,
+            {
+                label: "Python",
+                language: "python",
+                code: Array.from({ length: 2_000 }, (_value, index) => `print(${index + 1})`).join(
+                    "\n",
+                ),
+            },
+            { state: "success", expanded: false, maxCodePreviewLines: 5 },
+        );
+
+        const rendered = component.render(100).join("\n");
+
+        expect(rendered).toContain("print(1)");
+        expect(rendered).toContain("print(4)");
+        expect(rendered).toContain("… +1996 lines (truncated)");
+        expect(rendered).not.toContain("print(1000)");
     });
 
     it("marks collapsed script call previews as truncated instead of expandable", () => {

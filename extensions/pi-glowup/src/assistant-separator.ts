@@ -64,9 +64,28 @@ function linesWithSeparatorSpacing(lines: readonly string[], width: number): str
     return ["", renderSeparator(width), ...contentLines];
 }
 
+function hasNonWhitespaceText(text: string): boolean {
+    for (let index = 0; index < text.length; index += 1) {
+        const charCode = text.charCodeAt(index);
+        if (
+            charCode !== 9 &&
+            charCode !== 10 &&
+            charCode !== 11 &&
+            charCode !== 12 &&
+            charCode !== 13 &&
+            charCode !== 32
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function isVisibleTextContent(content: AssistantContent): boolean {
     return (
-        content.type === "text" && typeof content.text === "string" && content.text.trim() !== ""
+        content.type === "text" &&
+        typeof content.text === "string" &&
+        hasNonWhitespaceText(content.text)
     );
 }
 
@@ -74,7 +93,7 @@ function isVisibleThinkingContent(content: AssistantContent): boolean {
     return (
         content.type === "thinking" &&
         typeof content.thinking === "string" &&
-        content.thinking.trim() !== ""
+        hasNonWhitespaceText(content.thinking)
     );
 }
 
@@ -88,32 +107,42 @@ function visibleContentKind(content: AssistantContent): AssistantContentKind | u
     return undefined;
 }
 
-function hasVisibleAssistantContentAfter(
+function visibleContentKinds(
     contentItems: ReadonlyArray<AssistantContent>,
-    startIndex: number,
-): boolean {
-    return contentItems
-        .slice(startIndex + 1)
-        .some((content) => visibleContentKind(content) !== undefined);
+): ReadonlyArray<AssistantContentKind | undefined> {
+    return contentItems.map(visibleContentKind);
+}
+
+function hasVisibleContentAfterByIndex(
+    kinds: ReadonlyArray<AssistantContentKind | undefined>,
+): ReadonlyArray<boolean> {
+    const hasVisibleAfter = Array.from({ length: kinds.length }, () => false);
+    let hasLaterVisibleContent = false;
+    for (let index = kinds.length - 1; index >= 0; index -= 1) {
+        hasVisibleAfter[index] = hasLaterVisibleContent;
+        if (kinds[index] !== undefined) {
+            hasLaterVisibleContent = true;
+        }
+    }
+    return hasVisibleAfter;
 }
 
 function assistantAddChildCalls(message: AssistantMessageLike): AssistantAddChildCall[] {
     const calls: AssistantAddChildCall[] = [];
-    const hasVisibleContent = message.content.some(
-        (content) => visibleContentKind(content) !== undefined,
-    );
+    const kinds = visibleContentKinds(message.content);
+    const hasVisibleContent = kinds.some((kind) => kind !== undefined);
+    const hasVisibleAfter = hasVisibleContentAfterByIndex(kinds);
     if (hasVisibleContent) {
         calls.push("other");
     }
 
-    for (const [index, content] of message.content.entries()) {
-        const kind = visibleContentKind(content);
+    for (const [index, kind] of kinds.entries()) {
         if (kind === undefined) {
             continue;
         }
 
         calls.push(kind);
-        if (kind === "thinking" && hasVisibleAssistantContentAfter(message.content, index)) {
+        if (kind === "thinking" && hasVisibleAfter[index] === true) {
             calls.push("other");
         }
     }

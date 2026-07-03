@@ -6,6 +6,8 @@ export type CodeOutputSyntax = {
     readonly path?: string;
 };
 
+const MAX_STRUCTURED_OUTPUT_DETECTION_CHARS = 64 * 1024;
+
 /** Highlights code-like output when a language or path is known; otherwise returns normalized plain lines. */
 export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | undefined): string[] {
     const language = syntax?.language ?? syntaxLanguageFromPath(syntax?.path);
@@ -14,8 +16,12 @@ export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | und
 
 /** Detects small structured third-party output that is safe and useful to syntax-highlight. */
 export function detectStructuredOutputLanguage(text: string | undefined): string | undefined {
-    const trimmed = text?.trim();
-    if (trimmed === undefined || trimmed.length === 0) {
+    if (text === undefined || text.length > MAX_STRUCTURED_OUTPUT_DETECTION_CHARS) {
+        return undefined;
+    }
+
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
         return undefined;
     }
 

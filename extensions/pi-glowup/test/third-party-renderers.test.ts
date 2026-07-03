@@ -46,6 +46,22 @@ describe("third-party tool renderers", () => {
         expect(lines.join("\n")).toContain('"action": "run"');
     });
 
+    it("bounds huge generic third-party tool call argument previews", () => {
+        const renderer = createThirdPartyToolRenderer("custom_tool");
+        const args = {
+            lines: Array.from({ length: 10_000 }, (_value, index) => `line ${index + 1}`),
+        };
+
+        const rendered = renderer
+            .renderCall(args, plainTheme, { ...renderContext, expanded: true })
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain('"lines":');
+        expect(rendered).toContain("… +9980 items");
+        expect(rendered).not.toContain("line 10000");
+    });
+
     it("expands long third-party tool call arguments", () => {
         const renderer = createThirdPartyToolRenderer("custom_tool");
         const args = { lines: Array.from({ length: 10 }, (_value, index) => `line ${index + 1}`) };
@@ -149,6 +165,25 @@ describe("third-party tool renderers", () => {
         expect(rendered).not.toContain("prompt");
     });
 
+    it("bounds huge subagent steering messages", () => {
+        const renderer = createThirdPartyToolRenderer("steer_subagent");
+        const message = `  ${Array.from({ length: 10_000 }, (_value, index) => `word${index}`).join(
+            "\n",
+        )}  `;
+
+        const rendered = renderer
+            .renderCall({ agent_id: "0811c123-dcbe-4d3", message }, plainTheme, renderContext)
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("Steered Agent");
+        expect(rendered).toContain("0811c123-dcbe-4d3");
+        expect(rendered).toContain("word0 word1");
+        expect(rendered).toContain("…");
+        expect(rendered).not.toContain("word9999");
+        expect(rendered).not.toContain("message");
+    });
+
     it("summarizes subagent result checks without dumping JSON", () => {
         const renderer = createThirdPartyToolRenderer("get_subagent_result");
 
@@ -196,6 +231,36 @@ describe("third-party tool renderers", () => {
         expect(rendered).toContain("20 tools · 63.1k tok · context 11% · 57.0s");
         expect(rendered).toContain("Confirmed `/home/zigai/Projects/config` has no modifications.");
         expect(rendered).not.toContain("Type: Agent | Status");
+    });
+
+    it("summarizes completed subagent results from large output", () => {
+        const renderer = createThirdPartyToolRenderer("get_subagent_result");
+        const output = [
+            ...Array.from({ length: 2_000 }, (_value, index) => `noise ${index}`),
+            "Agent: 0811c123-dcbe-4d3",
+            "Type: Agent | Status: completed | Tool uses: 20 | 63.1k token | Context: 11% | Duration: 57.0s",
+            "- First useful note",
+            "- Second useful note",
+            "- Third useful note",
+            "- Fourth useful note",
+            "- Fifth hidden note",
+        ].join("\n");
+
+        const rendered = renderer
+            .renderResult(
+                { content: [{ type: "text", text: output }] },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("completed · Agent · 0811c123-dcbe-4d3");
+        expect(rendered).toContain("First useful note");
+        expect(rendered).toContain("Fourth useful note");
+        expect(rendered).not.toContain("Fifth hidden note");
+        expect(rendered).not.toContain("noise 1999");
     });
 
     it("summarizes background subagent launch results", () => {
@@ -418,6 +483,57 @@ describe("third-party tool renderers", () => {
         expect(visibleExpanded).toContain("Ripgrep Crate — crates.io/crates/ripgrep");
         expect(visibleExpanded).toContain("GNU Grep — gnu.org/software/grep");
         expect(visibleExpanded).not.toContain("… +2 sources");
+    });
+
+    it("summarizes large web_run output without dumping the body", () => {
+        const renderer = createThirdPartyToolRenderer("web_run");
+        const output = [
+            ...Array.from({ length: 2_000 }, (_value, index) => `L${index}: menu`),
+            "Pi Documentation (https://pi.example/docs)",
+            "L2001: # Important Result",
+            "L2002: This paragraph is intentionally useful and long enough to be selected as a highlight for the compact summary.",
+        ].join("\n");
+
+        const rendered = renderer
+            .renderResult(
+                { content: [{ type: "text", text: output }], details: { sourceCount: 1 } },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(120)
+            .join("\n");
+
+        expect(stripAccentStyle(rendered)).toContain("1 source");
+        expect(stripAccentStyle(rendered)).toContain("Pi Documentation — pi.example/docs");
+        expect(stripAccentStyle(rendered)).not.toContain("Important Result");
+        expect(stripAccentStyle(rendered)).not.toContain("L1999");
+    });
+
+    it("bounds web_run source and highlight tracking for huge outputs", () => {
+        const renderer = createThirdPartyToolRenderer("web_run");
+        const output = Array.from(
+            { length: 1_000 },
+            (_value, index) =>
+                `Unique Source ${index + 1} (https://example.com/source-${index + 1})\nL${index + 1}: # Unique Highlight ${index + 1}`,
+        ).join("\n");
+
+        const rendered = renderer
+            .renderResult(
+                { content: [{ type: "text", text: output }], details: { sourceCount: 1_000 } },
+                { expanded: true, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(120)
+            .join("\n");
+        const visible = stripAccentStyle(rendered);
+
+        expect(visible).toContain("1000 sources");
+        expect(visible).toContain("Unique Source 100 — example.com/source-100");
+        expect(visible).toContain("… +900 sources");
+        expect(visible).not.toContain("Unique Source 101 — example.com/source-101");
+        expect(visible).not.toContain("Unique Highlight 500");
     });
 
     it("renders numeric-only web_run source titles as urls", () => {

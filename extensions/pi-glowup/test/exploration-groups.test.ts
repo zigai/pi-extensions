@@ -86,4 +86,41 @@ describe("exploration groups", () => {
 
         expect(second).toEqual({ kind: "owner", actions: ["Read b.ts"] });
     });
+
+    it("does not retain closed group invalidation callbacks", () => {
+        let invalidations = 0;
+        const store = new ExplorationGroupStore();
+
+        store.register(
+            {
+                toolCallId: "first",
+                invalidate: () => {
+                    invalidations += 1;
+                },
+            },
+            "Read a.ts",
+        );
+        store.register({ toolCallId: "second", invalidate: noop }, "Search needle");
+        store.closeActiveGroup();
+        store.register({ toolCallId: "second", invalidate: noop }, "Search haystack");
+
+        expect(invalidations).toBe(1);
+    });
+
+    it("evicts the oldest closed group when retained tool calls exceed the limit", () => {
+        const store = new ExplorationGroupStore(2);
+
+        store.register({ toolCallId: "first", invalidate: noop }, "Read a.ts");
+        store.register({ toolCallId: "first-child", invalidate: noop }, "Search needle");
+        store.closeActiveGroup();
+        store.register({ toolCallId: "second", invalidate: noop }, "Read b.ts");
+        store.closeActiveGroup();
+
+        const firstChildAgain = store.register(
+            { toolCallId: "first-child", invalidate: noop },
+            "Search needle",
+        );
+
+        expect(firstChildAgain).toEqual({ kind: "owner", actions: ["Search needle"] });
+    });
 });

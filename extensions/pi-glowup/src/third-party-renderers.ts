@@ -97,8 +97,11 @@ type GoalRecord = {
 };
 
 const MAX_PREVIEW_CHARACTERS = 700;
+const MAX_PREVIEW_ARRAY_ITEMS = 20;
+const MAX_PREVIEW_OBJECT_PROPERTIES = 30;
 const MAX_WEB_RUN_HIGHLIGHTS = 3;
 const WEB_RUN_COLLAPSED_SOURCE_LIMIT = 4;
+const WEB_RUN_EXPANDED_SOURCE_LIMIT = 100;
 const NAMESPACED_TOOL_PREFIX_PATTERN = /^[A-Za-z0-9_-]+__(?<name>.+)$/;
 const CHROME_DEVTOOLS_PREFIX_PATTERN = /(?:^|__)chrome[-_]?devtools(?:__|_|$)/i;
 const WEB_RUN_TITLE_URL_PATTERN = /^(?<title>.+?)\s+\((?<url>https?:\/\/[^)]+)\)$/u;
@@ -251,27 +254,7 @@ function stringifyPreview(value: unknown): string | undefined {
         const json = JSON.stringify(
             value,
             (_key, nestedValue: unknown) => {
-                if (typeof nestedValue === "bigint") {
-                    return `${nestedValue.toString()}n`;
-                }
-                if (typeof nestedValue === "function") {
-                    return nestedValue.name.length > 0
-                        ? `[Function ${nestedValue.name}]`
-                        : "[Function]";
-                }
-                if (typeof nestedValue === "symbol") {
-                    return nestedValue.description === undefined ||
-                        nestedValue.description.length === 0
-                        ? "Symbol"
-                        : `Symbol(${nestedValue.description})`;
-                }
-                if (typeof nestedValue === "object" && nestedValue !== null) {
-                    if (seen.has(nestedValue)) {
-                        return "[Circular]";
-                    }
-                    seen.add(nestedValue);
-                }
-                return nestedValue;
+                return boundedPreviewValue(nestedValue, seen);
             },
             2,
         );
@@ -287,7 +270,89 @@ function stringifyPreview(value: unknown): string | undefined {
     }
 }
 
+function boundedPreviewValue(value: unknown, seen: WeakSet<object>): unknown {
+    if (typeof value === "string") {
+        return truncateText(value, MAX_PREVIEW_CHARACTERS);
+    }
+    if (typeof value === "bigint") {
+        return `${value.toString()}n`;
+    }
+    if (typeof value === "function") {
+        return value.name.length > 0 ? `[Function ${value.name}]` : "[Function]";
+    }
+    if (typeof value === "symbol") {
+        return value.description === undefined || value.description.length === 0
+            ? "Symbol"
+            : `Symbol(${value.description})`;
+    }
+    if (typeof value !== "object" || value === null) {
+        return value;
+    }
+    if (seen.has(value)) {
+        return "[Circular]";
+    }
+    seen.add(value);
+
+    if (Array.isArray(value) && value.length > MAX_PREVIEW_ARRAY_ITEMS) {
+        return [
+            ...value.slice(0, MAX_PREVIEW_ARRAY_ITEMS),
+            `… +${value.length - MAX_PREVIEW_ARRAY_ITEMS} items`,
+        ];
+    }
+    if (!Array.isArray(value)) {
+        return boundedPreviewObject(value);
+    }
+    return value;
+}
+
+function boundedPreviewObject(value: object): object {
+    const output: Record<string, unknown> = {};
+    let copied = 0;
+    let omitted = 0;
+
+    for (const key in value) {
+        if (!Object.prototype.propertyIsEnumerable.call(value, key)) {
+            continue;
+        }
+        if (copied < MAX_PREVIEW_OBJECT_PROPERTIES) {
+            output[key] = Reflect.get(value, key);
+            copied += 1;
+        } else {
+            omitted += 1;
+        }
+    }
+
+    if (omitted === 0) {
+        return value;
+    }
+
+    output["…"] = `+${omitted} properties`;
+    return output;
+}
+
+function trimAndTruncateText(text: string, maxCharacters: number): string | undefined {
+    let start = 0;
+    let end = text.length;
+    while (start < end && text.charAt(start).trim().length === 0) {
+        start += 1;
+    }
+    while (end > start && text.charAt(end - 1).trim().length === 0) {
+        end -= 1;
+    }
+    if (start === end) {
+        return undefined;
+    }
+    if (end - start <= maxCharacters) {
+        return text.slice(start, end);
+    }
+    return `${text.slice(start, start + Math.max(0, maxCharacters - 1))}…`;
+}
+
 function previewValue(value: unknown): string | undefined {
+    if (typeof value === "string") {
+        return trimAndTruncateText(value, MAX_PREVIEW_CHARACTERS);
+    }
+
     const preview = stringifyPreview(value)?.trim();
     if (preview === undefined || preview.length === 0 || preview === "{}" || preview === "[]") {
         return undefined;
@@ -305,32 +370,59 @@ function textOutput(result: ThirdPartyToolResult): string | undefined {
         return undefined;
     }
 
-    const texts: string[] = [];
+    let firstText: string | undefined;
+    let texts: string[] | undefined;
     for (const item of content) {
         if (!isRecord(item)) {
             continue;
         }
         const contentItem: TextContent = item;
-        if (contentItem.type === "text" && typeof contentItem.text === "string") {
-            texts.push(contentItem.text);
+        if (contentItem.type !== "text" || typeof contentItem.text !== "string") {
+            continue;
         }
+        if (firstText === undefined) {
+            firstText = contentItem.text;
+            continue;
+        }
+        texts ??= [firstText];
+        texts.push(contentItem.text);
     }
 
-    if (texts.length === 0) {
-        return undefined;
+    return texts === undefined ? firstText : texts.join("\n");
+}
+
+function compactWhitespaceText(text: string, maxCharacters: number): string | undefined {
+    let output = "";
+    let pendingWhitespace = false;
+
+    for (let index = 0; index < text.length; index += 1) {
+        const char = text[index] ?? "";
+        if (char.trim().length === 0) {
+            pendingWhitespace = output.length > 0;
+            continue;
+        }
+        if (pendingWhitespace) {
+            if (output.length >= maxCharacters - 1) {
+                return `${output.slice(0, Math.max(0, maxCharacters - 1))}…`;
+            }
+            output += " ";
+            pendingWhitespace = false;
+        }
+        if (output.length >= maxCharacters) {
+            return `${output.slice(0, Math.max(0, maxCharacters - 1))}…`;
+        }
+        output += char;
     }
-    return texts.join("\n");
+
+    return output.length > 0 ? output : undefined;
 }
 
 function compactQuotedText(text: string | undefined, maxCharacters = 96): string | undefined {
     if (text === undefined || text.length === 0) {
         return undefined;
     }
-    const compact = text.replace(/\s+/g, " ").trim();
-    if (compact.length === 0) {
-        return undefined;
-    }
-    return `"${truncateText(compact, maxCharacters)}"`;
+    const compact = compactWhitespaceText(text, maxCharacters);
+    return compact === undefined ? undefined : `"${compact}"`;
 }
 
 function countedSummary(
@@ -793,6 +885,46 @@ function imagegenResultSummary(result: ThirdPartyToolResult): string | undefined
     return `Generated ${images.length} image${images.length === 1 ? "" : "s"}${isNonEmptyString(path) ? ` → ${path}` : ""}`;
 }
 
+function hasNonWhitespaceText(text: string): boolean {
+    for (let index = 0; index < text.length; index += 1) {
+        if (text.charAt(index).trim().length > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function visitNormalizedOutputLines(text: string, visit: (line: string) => void): boolean {
+    let lineStart = 0;
+    let sawLine = false;
+
+    for (let index = 0; index <= text.length; index += 1) {
+        if (index < text.length) {
+            const charCode = text.charCodeAt(index);
+            if (charCode !== 10 && charCode !== 13) {
+                continue;
+            }
+        }
+
+        const line = text.slice(lineStart, index);
+        if (hasNonWhitespaceText(line)) {
+            sawLine = true;
+            visit(line);
+        }
+
+        if (
+            index < text.length &&
+            text.charCodeAt(index) === 13 &&
+            text.charCodeAt(index + 1) === 10
+        ) {
+            index += 1;
+        }
+        lineStart = index + 1;
+    }
+
+    return sawLine;
+}
+
 function normalizeWebRunText(text: string): string {
     return text
         .replace(WEB_RUN_CITATION_PATTERN, "")
@@ -832,18 +964,42 @@ function formatWebRunSourceLabel(theme: CodexRenderTheme, text: string): string 
     return `${truncateText(normalizeWebRunText(groups.title ?? ""), 72)} — ${sourceUrl}`;
 }
 
-function webRunSourceLabels(theme: CodexRenderTheme, lines: ReadonlyArray<string>): string[] {
-    const labels: string[] = [];
-    const seen = new Set<string>();
-    for (const line of lines) {
-        const label = formatWebRunSourceLabel(theme, line);
-        if (label === undefined || label.length === 0 || seen.has(label.toLowerCase())) {
-            continue;
-        }
-        seen.add(label.toLowerCase());
-        labels.push(label);
+type WebRunSourceCollection = {
+    readonly labels: string[];
+    readonly seenLabels: Set<string>;
+    readonly maxLabels: number | undefined;
+    readonly sourceCountKnown: boolean;
+    count: number;
+};
+
+function collectWebRunSourceLabel(
+    theme: CodexRenderTheme,
+    line: string,
+    collection: WebRunSourceCollection,
+): void {
+    const label = formatWebRunSourceLabel(theme, line);
+    if (label === undefined || label.length === 0) {
+        return;
     }
-    return labels;
+
+    if (
+        collection.sourceCountKnown &&
+        collection.maxLabels !== undefined &&
+        collection.labels.length >= collection.maxLabels
+    ) {
+        return;
+    }
+
+    const key = label.toLowerCase();
+    if (collection.seenLabels.has(key)) {
+        return;
+    }
+
+    collection.seenLabels.add(key);
+    collection.count += 1;
+    if (collection.maxLabels === undefined || collection.labels.length < collection.maxLabels) {
+        collection.labels.push(label);
+    }
 }
 
 function formatWebRunSummary(options: {
@@ -885,15 +1041,14 @@ function compactWebRunSource(source: string): string {
     return truncateText(normalized, 48);
 }
 
-function webRunMetadataLine(lines: ReadonlyArray<string>): string | undefined {
-    const metadata = lines.find((line) => WEB_RUN_CONTENT_TYPE_PATTERN.test(line));
-    if (metadata === undefined || metadata.length === 0) {
+function webRunMetadataFromLine(line: string): string | undefined {
+    if (!WEB_RUN_CONTENT_TYPE_PATTERN.test(line)) {
         return undefined;
     }
 
-    const contentType = WEB_RUN_CONTENT_TYPE_PATTERN.exec(metadata)?.groups?.type?.trim();
-    const source = WEB_RUN_SOURCE_PATTERN.exec(metadata)?.groups?.source?.trim();
-    const totalLines = WEB_RUN_TOTAL_LINES_PATTERN.exec(metadata)?.groups?.lines;
+    const contentType = WEB_RUN_CONTENT_TYPE_PATTERN.exec(line)?.groups?.type?.trim();
+    const source = WEB_RUN_SOURCE_PATTERN.exec(line)?.groups?.source?.trim();
+    const totalLines = WEB_RUN_TOTAL_LINES_PATTERN.exec(line)?.groups?.lines;
     const parts = [
         isNonEmptyString(source) ? compactWebRunSource(source) : undefined,
         contentType,
@@ -935,40 +1090,59 @@ function webRunHighlightScore(text: string): number {
     return 2;
 }
 
-function webRunHighlightLine(lines: ReadonlyArray<string>): string | undefined {
-    const highlights: string[] = [];
-    const seen = new Set<string>();
+type WebRunHighlightCandidate = {
+    readonly text: string;
+    readonly index: number;
+    readonly score: number;
+};
 
-    for (const line of lines) {
-        const match = WEB_RUN_LINE_PATTERN.exec(line);
-        const rawText = match?.groups?.text;
-        if (rawText === undefined) {
-            continue;
-        }
-        const normalized = normalizeWebRunText(rawText);
-        if (
-            normalized.length === 0 ||
-            isWebRunBoilerplate(normalized) ||
-            seen.has(normalized.toLowerCase())
-        ) {
-            continue;
-        }
-        seen.add(normalized.toLowerCase());
-        highlights.push(normalized);
+type WebRunHighlightCollection = {
+    readonly candidates: WebRunHighlightCandidate[];
+    nextIndex: number;
+};
+
+function collectWebRunHighlight(line: string, collection: WebRunHighlightCollection): void {
+    const match = WEB_RUN_LINE_PATTERN.exec(line.trim());
+    const rawText = match?.groups?.text;
+    if (rawText === undefined) {
+        return;
     }
 
-    if (highlights.length === 0) {
+    const normalized = normalizeWebRunText(rawText);
+    const key = normalized.toLowerCase();
+    if (
+        normalized.length === 0 ||
+        isWebRunBoilerplate(normalized) ||
+        collection.candidates.some((candidate) => candidate.text.toLowerCase() === key)
+    ) {
+        return;
+    }
+
+    collection.candidates.push({
+        text: normalized,
+        index: collection.nextIndex,
+        score: webRunHighlightScore(normalized),
+    });
+    collection.nextIndex += 1;
+    collection.candidates.sort(
+        (left, right) => right.score - left.score || left.index - right.index,
+    );
+    if (collection.candidates.length > MAX_WEB_RUN_HIGHLIGHTS) {
+        collection.candidates.pop();
+    }
+}
+
+function formatWebRunHighlights(
+    candidates: ReadonlyArray<WebRunHighlightCandidate>,
+): string | undefined {
+    if (candidates.length === 0) {
         return undefined;
     }
 
-    const selected = highlights
-        .map((text, index) => ({ text, index, score: webRunHighlightScore(text) }))
-        .sort((left, right) => right.score - left.score || left.index - right.index)
-        .slice(0, MAX_WEB_RUN_HIGHLIGHTS)
+    return [...candidates]
         .sort((left, right) => left.index - right.index)
-        .map((highlight) => truncateText(highlight.text, 115));
-
-    return selected.join(" · ");
+        .map((highlight) => truncateText(highlight.text, 115))
+        .join(" · ");
 }
 
 function webRunOutputSummary(
@@ -977,22 +1151,46 @@ function webRunOutputSummary(
     sourceCount: number | undefined,
     options: { readonly expanded: boolean },
 ): string | undefined {
-    const normalizedOutput = output?.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-    if (normalizedOutput === undefined || normalizedOutput.length === 0) {
+    if (output === undefined || output.length === 0) {
         return undefined;
     }
 
-    const lines = normalizedOutput.split("\n").filter((line) => line.trim().length > 0);
-    const sources = webRunSourceLabels(theme, lines);
-    const metadata = webRunMetadataLine(lines);
-    const highlights = webRunHighlightLine(lines);
-    if (sources.length === 0 && !isNonEmptyString(metadata) && !isNonEmptyString(highlights)) {
+    const sourceCollection: WebRunSourceCollection = {
+        labels: [],
+        seenLabels: new Set<string>(),
+        maxLabels: options.expanded
+            ? WEB_RUN_EXPANDED_SOURCE_LIMIT
+            : WEB_RUN_COLLAPSED_SOURCE_LIMIT,
+        sourceCountKnown: sourceCount !== undefined,
+        count: 0,
+    };
+    const highlightCollection: WebRunHighlightCollection = {
+        candidates: [],
+        nextIndex: 0,
+    };
+    let metadata: string | undefined;
+
+    const sawOutput = visitNormalizedOutputLines(output, (line) => {
+        collectWebRunSourceLabel(theme, line, sourceCollection);
+        metadata ??= webRunMetadataFromLine(line);
+        collectWebRunHighlight(line, highlightCollection);
+    });
+    if (!sawOutput) {
+        return undefined;
+    }
+
+    const highlights = formatWebRunHighlights(highlightCollection.candidates);
+    if (
+        sourceCollection.count === 0 &&
+        !isNonEmptyString(metadata) &&
+        !isNonEmptyString(highlights)
+    ) {
         return undefined;
     }
 
     return formatWebRunSummary({
-        sourceCount,
-        sources,
+        sourceCount: sourceCount ?? sourceCollection.count,
+        sources: sourceCollection.labels,
         metadata,
         highlights,
         expanded: options.expanded,
@@ -1203,8 +1401,26 @@ function agentCallBody(toolName: string, args: unknown): string | undefined {
     return previewArgs(args);
 }
 
+function isWhitespaceChar(text: string, index: number): boolean {
+    return text.charAt(index).trim().length === 0;
+}
+
 function normalizeAgentResultLine(line: string): string {
-    return line.replace(/^\s*[└│]\s*/u, "").trim();
+    let start = 0;
+    let end = line.length;
+    while (start < end && isWhitespaceChar(line, start)) {
+        start += 1;
+    }
+    if (line[start] === "└" || line[start] === "│") {
+        start += 1;
+        while (start < end && isWhitespaceChar(line, start)) {
+            start += 1;
+        }
+    }
+    while (end > start && isWhitespaceChar(line, end - 1)) {
+        end -= 1;
+    }
+    return start === 0 && end === line.length ? line : line.slice(start, end);
 }
 
 function formatAgentStatusMetric(metric: string): string | undefined {
@@ -1233,9 +1449,23 @@ function formatAgentStatusMetric(metric: string): string | undefined {
 }
 
 function subagentCompletionSummary(output: string): string | undefined {
-    const lines = output.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-    const agentLine = lines.map(normalizeAgentResultLine).find((line) => line.startsWith("Agent:"));
-    const statusLine = lines.map(normalizeAgentResultLine).find((line) => line.startsWith("Type:"));
+    let agentLine: string | undefined;
+    let statusLine: string | undefined;
+    const bullets: string[] = [];
+
+    visitNormalizedOutputLines(output, (line) => {
+        const normalized = normalizeAgentResultLine(line);
+        if (agentLine === undefined && normalized.startsWith("Agent:")) {
+            agentLine = normalized;
+        }
+        if (statusLine === undefined && normalized.startsWith("Type:")) {
+            statusLine = normalized;
+        }
+        if (bullets.length < 4 && /^[-•]\s+/u.test(normalized)) {
+            bullets.push(normalized);
+        }
+    });
+
     if (!isNonEmptyString(agentLine) && !isNonEmptyString(statusLine)) {
         return undefined;
     }
@@ -1251,36 +1481,41 @@ function subagentCompletionSummary(output: string): string | undefined {
     const metrics = statusParts.slice(2).map(formatAgentStatusMetric).filter(isDefined);
     const headline = [status, type, agentId].filter(isNonEmptyString).join(" · ");
     const metadata = metrics.length > 0 ? metrics.join(" · ") : undefined;
-    const bullets = lines
-        .map(normalizeAgentResultLine)
-        .filter((line) => /^[-•]\s+/u.test(line))
-        .slice(0, 4);
 
     return [headline, metadata, ...bullets].filter(isNonEmptyString).join("\n");
 }
 
 function subagentLaunchSummary(output: string): string | undefined {
-    const normalized = output.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const startMatch = /Agent started(?<mode>[^.\n]*)\./iu.exec(normalized);
-    const agentId = /Agent ID:\s*(?<agentId>\S+)/iu.exec(normalized)?.groups?.agentId;
-    if (startMatch === null && !isNonEmptyString(agentId)) {
+    let sawAgentStart = false;
+    let mode: string | undefined;
+    let agentId: string | undefined;
+    const notes: string[] = [];
+
+    visitNormalizedOutputLines(output, (line) => {
+        const normalized = normalizeAgentResultLine(line);
+        const startMatch = /Agent started(?<mode>[^.\n]*)\./iu.exec(normalized);
+        if (startMatch !== null) {
+            sawAgentStart = true;
+            mode ??= startMatch.groups?.mode?.trim();
+        }
+        agentId ??= /Agent ID:\s*(?<nextAgentId>\S+)/iu.exec(normalized)?.groups?.nextAgentId;
+        if (
+            notes.length < 3 &&
+            (normalized.startsWith("Do not duplicate") ||
+                normalized.startsWith("Worktree:") ||
+                normalized.startsWith("Branch:"))
+        ) {
+            notes.push(normalized);
+        }
+    });
+
+    if (!sawAgentStart && !isNonEmptyString(agentId)) {
         return undefined;
     }
 
-    const mode = startMatch?.groups?.mode?.trim();
     const headline = [`started${isNonEmptyString(mode) ? ` ${mode}` : ""}`, agentId]
         .filter(isNonEmptyString)
         .join(" · ");
-    const notes = normalized
-        .split("\n")
-        .map(normalizeAgentResultLine)
-        .filter(
-            (line) =>
-                line.startsWith("Do not duplicate") ||
-                line.startsWith("Worktree:") ||
-                line.startsWith("Branch:"),
-        )
-        .slice(0, 3);
     return [headline, ...notes].filter(isNonEmptyString).join("\n");
 }
 

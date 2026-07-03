@@ -160,6 +160,22 @@ describe("tool execution patches", () => {
         );
     });
 
+    it("leaves third-party tools on their original render path when disabled", () => {
+        const prototype = createPrototype();
+        installThirdPartyToolRendererPatch({ enabled: false }, prototype);
+
+        const instance: FakeToolExecutionInstance = {
+            toolName: "custom_tool",
+            toolDefinition: {},
+        };
+
+        expect(prototype.getRenderShell.call(instance)).toBe("default");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
+        expect(
+            prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["existing renderer"]);
+    });
+
     it("preserves opted-out third-party tools", () => {
         const prototype = createPrototype();
         installThirdPartyToolRendererPatch({ preserveTools: ["rich_tool"] }, prototype);
@@ -230,5 +246,110 @@ describe("tool execution patches", () => {
         installThirdPartyToolRendererPatch(undefined, prototype);
 
         expect(Reflect.get(prototype, "getCallRenderer")).toBe(patchedGetCallRenderer);
+    });
+
+    it("refreshes preserve-tool options on repeat installs without stacking wrappers", () => {
+        const prototype = createPrototype();
+        const instance: FakeToolExecutionInstance = {
+            toolName: "custom_tool",
+            toolDefinition: {},
+        };
+
+        installThirdPartyToolRendererPatch(undefined, prototype);
+        const patchedGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+        expect(prototype.getRenderShell.call(instance)).toBe("self");
+
+        installThirdPartyToolRendererPatch({ preserveTools: ["custom_tool"] }, prototype);
+
+        expect(Reflect.get(prototype, "getCallRenderer")).toBe(patchedGetCallRenderer);
+        expect(prototype.getRenderShell.call(instance)).toBe("default");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
+        expect(
+            prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["existing renderer"]);
+    });
+
+    it("bounds generated renderers by least-recent insertion", () => {
+        const prototype = createPrototype();
+        let createdRenderers = 0;
+        const plugin: ThirdPartyToolRendererPlugin = {
+            name: "counting-plugin",
+            matches: () => true,
+            createRenderer: (toolName) => {
+                createdRenderers += 1;
+                return {
+                    renderCall: () => ({
+                        render: () => [`called ${toolName}`],
+                        invalidate: noop,
+                    }),
+                    renderResult: () => ({
+                        render: () => [`result ${toolName}`],
+                        invalidate: noop,
+                    }),
+                };
+            },
+        };
+        installThirdPartyToolRendererPatch({ renderers: [plugin] }, prototype);
+
+        for (let index = 0; index < 101; index += 1) {
+            prototype.getCallRenderer.call({
+                toolName: `tool_${index}`,
+                toolDefinition: {},
+            })?.({}, plainTheme, renderContext);
+        }
+        prototype.getCallRenderer.call({ toolName: "tool_0", toolDefinition: {} })?.(
+            {},
+            plainTheme,
+            renderContext,
+        );
+
+        expect(createdRenderers).toBe(102);
+    });
+
+    it("clears generated renderer cache when renderer plugins change", () => {
+        const prototype = createPrototype();
+        const instance: FakeToolExecutionInstance = {
+            toolName: "recorded_tool",
+            toolDefinition: {},
+        };
+        const firstPlugin: ThirdPartyToolRendererPlugin = {
+            name: "first-plugin",
+            matches: (toolName) => toolName === "recorded_tool",
+            createRenderer: () => ({
+                renderCall: () => ({
+                    render: () => ["first renderer"],
+                    invalidate: noop,
+                }),
+                renderResult: () => ({
+                    render: () => ["first result"],
+                    invalidate: noop,
+                }),
+            }),
+        };
+        const secondPlugin: ThirdPartyToolRendererPlugin = {
+            name: "second-plugin",
+            matches: (toolName) => toolName === "recorded_tool",
+            createRenderer: () => ({
+                renderCall: () => ({
+                    render: () => ["second renderer"],
+                    invalidate: noop,
+                }),
+                renderResult: () => ({
+                    render: () => ["second result"],
+                    invalidate: noop,
+                }),
+            }),
+        };
+
+        installThirdPartyToolRendererPatch({ renderers: [firstPlugin] }, prototype);
+        expect(
+            prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["first renderer"]);
+
+        installThirdPartyToolRendererPatch({ renderers: [secondPlugin] }, prototype);
+
+        expect(
+            prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["second renderer"]);
     });
 });

@@ -12,6 +12,8 @@ export type ExplorationGroupDecision =
           readonly kind: "child";
       };
 
+const DEFAULT_MAX_RETAINED_TOOL_CALLS = 300;
+
 type ExplorationGroup = {
     readonly ownerToolCallId: string;
     readonly actionsByToolCallId: Map<string, string>;
@@ -22,6 +24,12 @@ type ExplorationGroup = {
 export class ExplorationGroupStore {
     private activeGroup: ExplorationGroup | undefined;
     private readonly groupsByToolCallId = new Map<string, ExplorationGroup>();
+    private readonly groupsInInsertionOrder: ExplorationGroup[] = [];
+    private readonly maxRetainedToolCalls: number;
+
+    constructor(maxRetainedToolCalls = DEFAULT_MAX_RETAINED_TOOL_CALLS) {
+        this.maxRetainedToolCalls = Math.max(1, Math.floor(maxRetainedToolCalls));
+    }
 
     register(context: ExplorationRenderContext, action: string): ExplorationGroupDecision {
         const existingGroup = this.groupsByToolCallId.get(context.toolCallId);
@@ -33,6 +41,7 @@ export class ExplorationGroupStore {
             if (actionChanged && existingGroup.ownerToolCallId !== context.toolCallId) {
                 existingGroup.ownerInvalidate?.();
             }
+            this.trimRetainedGroups();
             return this.decisionFor(context.toolCallId, existingGroup);
         }
 
@@ -44,16 +53,21 @@ export class ExplorationGroupStore {
             group.ownerInvalidate?.();
         }
 
+        this.trimRetainedGroups();
         return this.decisionFor(context.toolCallId, group);
     }
 
     closeActiveGroup(): void {
+        if (this.activeGroup !== undefined) {
+            this.activeGroup.ownerInvalidate = undefined;
+        }
         this.activeGroup = undefined;
     }
 
     clear(): void {
         this.activeGroup = undefined;
         this.groupsByToolCallId.clear();
+        this.groupsInInsertionOrder.length = 0;
     }
 
     private createGroup(context: ExplorationRenderContext): ExplorationGroup {
@@ -64,7 +78,40 @@ export class ExplorationGroupStore {
             ownerInvalidate: context.invalidate,
         };
         this.activeGroup = group;
+        this.groupsInInsertionOrder.push(group);
         return group;
+    }
+
+    private trimRetainedGroups(): void {
+        while (this.retainedToolCallCount() > this.maxRetainedToolCalls) {
+            const evictedGroup = this.groupsInInsertionOrder.find(
+                (group) => group !== this.activeGroup,
+            );
+            if (evictedGroup === undefined) {
+                return;
+            }
+            this.evictGroup(evictedGroup);
+        }
+    }
+
+    private retainedToolCallCount(): number {
+        let retainedToolCalls = 0;
+        for (const group of this.groupsInInsertionOrder) {
+            retainedToolCalls += group.actionsByToolCallId.size;
+        }
+        return retainedToolCalls;
+    }
+
+    private evictGroup(group: ExplorationGroup): void {
+        group.ownerInvalidate = undefined;
+        for (const toolCallId of group.actionsByToolCallId.keys()) {
+            this.groupsByToolCallId.delete(toolCallId);
+        }
+
+        const groupIndex = this.groupsInInsertionOrder.indexOf(group);
+        if (groupIndex >= 0) {
+            this.groupsInInsertionOrder.splice(groupIndex, 1);
+        }
     }
 
     private updateAction(group: ExplorationGroup, toolCallId: string, action: string): boolean {

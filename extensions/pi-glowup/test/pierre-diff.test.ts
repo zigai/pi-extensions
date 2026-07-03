@@ -1,7 +1,11 @@
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { buildPierreDiffPayload, buildUnifiedDiffRows } from "../src/pierre-diff.ts";
+import {
+    buildLargeDiffSummaryPayload,
+    buildPierreDiffPayload,
+    buildUnifiedDiffRows,
+} from "../src/pierre-diff.ts";
 import { renderPierreDiff, shouldRenderSideBySideDiff } from "../src/pierre-diff-renderer.ts";
 import { loadHighlightedDiff } from "../src/pierre-highlight.ts";
 import { getPierrePalette } from "../src/pierre-theme.ts";
@@ -63,6 +67,23 @@ describe("Pierre diff rendering", () => {
         expect(payload?.kind).toBe("summary");
         expect(payload?.path).toBe("large.txt");
         expect(payload?.stats.sizeBytes).toBe(800_007);
+    });
+
+    it("summarizes large built-in diff text with exact stats", () => {
+        const diffText =
+            [
+                "+1 added",
+                "-2 removed",
+                ...Array.from({ length: 4_998 }, (_value, index) => ` ${index + 3} context`),
+            ].join("\n") + "\n";
+
+        const payload = buildLargeDiffSummaryPayload({ path: "large.patch", diffText });
+
+        expect(payload?.kind).toBe("summary");
+        expect(payload?.stats.added).toBe(1);
+        expect(payload?.stats.removed).toBe(1);
+        expect(payload?.stats.lineCount).toBe(5_001);
+        expect(payload?.stats.sizeBytes).toBe(Buffer.byteLength(diffText, "utf8"));
     });
 
     it("renders oversized Pierre payloads as compact summaries", () => {

@@ -516,8 +516,14 @@ function countContentLines(content: string): number {
     if (content.length === 0) {
         return 0;
     }
-    const lines = content.split("\n");
-    return content.endsWith("\n") ? lines.length - 1 : lines.length;
+
+    let lineCount = content.endsWith("\n") ? 0 : 1;
+    for (let index = 0; index < content.length; index += 1) {
+        if (content.charCodeAt(index) === 10) {
+            lineCount += 1;
+        }
+    }
+    return lineCount;
 }
 
 export function buildLargeDiffSummaryPayload(options: {
@@ -586,13 +592,73 @@ function estimatedDiffStats(snapshot: DiffSnapshot): PierreDiffStats {
 }
 
 function diffTextStats(diffText: string): PierreDiffStats {
-    const lines = diffText.length === 0 ? [] : diffText.split("\n");
+    if (diffText.length === 0) {
+        return { added: 0, removed: 0, lineCount: 0, sizeBytes: 0 };
+    }
+
+    let added = 0;
+    let removed = 0;
+    let lineCount = 0;
+    let lineStart = 0;
+
+    for (let index = 0; index <= diffText.length; index += 1) {
+        if (index < diffText.length && diffText.charCodeAt(index) !== 10) {
+            continue;
+        }
+
+        lineCount += 1;
+        if (matchesDiffStatLine(diffText, lineStart, index, 43)) {
+            added += 1;
+        } else if (matchesDiffStatLine(diffText, lineStart, index, 45)) {
+            removed += 1;
+        }
+        lineStart = index + 1;
+    }
+
     return {
-        added: lines.filter((line) => /^\+\s*\d+\s/u.test(line)).length,
-        removed: lines.filter((line) => /^-\s*\d+\s/u.test(line)).length,
-        lineCount: lines.length,
+        added,
+        removed,
+        lineCount,
         sizeBytes: Buffer.byteLength(diffText, "utf8"),
     };
+}
+
+function matchesDiffStatLine(
+    text: string,
+    start: number,
+    end: number,
+    markerCode: number,
+): boolean {
+    if (start >= end || text.charCodeAt(start) !== markerCode) {
+        return false;
+    }
+
+    let index = start + 1;
+    while (index < end && isWhitespace(text.charCodeAt(index))) {
+        index += 1;
+    }
+
+    const digitStart = index;
+    while (index < end && isDigit(text.charCodeAt(index))) {
+        index += 1;
+    }
+
+    return index > digitStart && index < end && isWhitespace(text.charCodeAt(index));
+}
+
+function isDigit(charCode: number): boolean {
+    return charCode >= 48 && charCode <= 57;
+}
+
+function isWhitespace(charCode: number): boolean {
+    return (
+        charCode === 9 ||
+        charCode === 10 ||
+        charCode === 11 ||
+        charCode === 12 ||
+        charCode === 13 ||
+        charCode === 32
+    );
 }
 
 function exceedsDiffRenderLimits(stats: PierreDiffStats): boolean {

@@ -293,6 +293,14 @@ function runQueuedDiffHighlight(run: () => Promise<void>): Promise<void> {
     });
 }
 
+/** Drops pending lazy syntax-highlight work during extension shutdown. */
+export function clearQueuedDiffHighlights(): void {
+    const pendingTasks = queuedDiffHighlights.splice(0);
+    for (const task of pendingTasks) {
+        task.resolve();
+    }
+}
+
 function scheduleQueuedDiffHighlight(): void {
     if (queuedDiffHighlightRunning) {
         return;

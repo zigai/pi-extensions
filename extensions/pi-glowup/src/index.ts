@@ -49,7 +49,11 @@ import {
     createWriteSnapshot,
 } from "./pierre-diff.ts";
 import type { PierreDiffPayload } from "./pierre-diff-types.ts";
-import { getPierreDiffPayloadFromDetails, renderPierreDiff } from "./pierre-diff-renderer.ts";
+import {
+    clearQueuedDiffHighlights,
+    getPierreDiffPayloadFromDetails,
+    renderPierreDiff,
+} from "./pierre-diff-renderer.ts";
 import {
     parsePreservedThirdPartyToolNames,
     type ThirdPartyToolRenderingOptions,
@@ -74,6 +78,7 @@ const editPreviews = new EditPreviewStore(300);
 const scriptPreviews = new PreviewStore<ScriptInvocation>(300);
 const explorationGroups = new ExplorationGroupStore();
 const toolCache = new Map<string, BuiltInToolDefinitions>();
+const MAX_CACHED_TOOL_DIRECTORIES = 25;
 const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
@@ -95,17 +100,43 @@ function createBuiltInToolDefinitions(cwd: string) {
 function getBuiltInToolDefinitions(cwd: string): BuiltInToolDefinitions {
     const cachedTools = toolCache.get(cwd);
     if (cachedTools) {
+        toolCache.delete(cwd);
+        toolCache.set(cwd, cachedTools);
         return cachedTools;
     }
 
     const tools = createBuiltInToolDefinitions(cwd);
     toolCache.set(cwd, tools);
+    while (toolCache.size > MAX_CACHED_TOOL_DIRECTORIES) {
+        const oldestCwd = toolCache.keys().next().value;
+        if (typeof oldestCwd !== "string") {
+            break;
+        }
+        toolCache.delete(oldestCwd);
+    }
     return tools;
 }
 
 function textOutput(result: TextResult): string | undefined {
     const content = result.content.find((item) => item.type === "text");
     return content?.text;
+}
+
+function hasNonWhitespaceText(text: string): boolean {
+    for (let index = 0; index < text.length; index += 1) {
+        const charCode = text.charCodeAt(index);
+        if (
+            charCode !== 9 &&
+            charCode !== 10 &&
+            charCode !== 11 &&
+            charCode !== 12 &&
+            charCode !== 13 &&
+            charCode !== 32
+        ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function syntaxPathFromToolArg(path: string | undefined): string | undefined {
@@ -338,17 +369,15 @@ function registerBashTool(
         renderShell: "self",
         async execute(toolCallId, params, signal, onUpdate, ctx) {
             const script = parseScriptInvocation(params.command);
-            if (script !== undefined) {
-                scriptPreviews.set(
-                    toolCallId,
-                    formatter === undefined
-                        ? script
-                        : await formatScriptInvocation(
-                              script,
-                              formatter,
-                              signal === undefined ? {} : { signal },
-                          ),
+            if (script !== undefined && formatter !== undefined) {
+                const formattedScript = await formatScriptInvocation(
+                    script,
+                    formatter,
+                    signal === undefined ? {} : { signal },
                 );
+                if (formattedScript.code !== script.code) {
+                    scriptPreviews.set(toolCallId, formattedScript);
+                }
             }
 
             return getBuiltInToolDefinitions(ctx.cwd).bash.execute(
@@ -505,7 +534,7 @@ function registerEditTool(pi: ExtensionAPI, baseTools: BuiltInToolDefinitions): 
                 !context.isError &&
                 isRecord(result.details) &&
                 typeof result.details.diff === "string" &&
-                result.details.diff.trim().length > 0
+                hasNonWhitespaceText(result.details.diff)
             ) {
                 const summaryPayload = buildLargeDiffSummaryPayload({
                     path: context.args.path,
@@ -572,9 +601,11 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     if (config.patches.markdownSyntax) {
         installMarkdownSyntaxPatch();
     }
-    if (config.patches.thirdPartyToolRenderers) {
-        installThirdPartyToolRendererPatch(thirdPartyToolRenderingOptions(config));
-    }
+    installThirdPartyToolRendererPatch(
+        config.patches.thirdPartyToolRenderers
+            ? thirdPartyToolRenderingOptions(config)
+            : { enabled: false },
+    );
     const baseTools = getBuiltInToolDefinitions(cwd);
     const formatter = scriptBlockFormatter(config, reportWarning);
     const headerLayout = scriptPreviewHeaderLayout(config);
@@ -603,6 +634,8 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         editPreviews.clear();
         scriptPreviews.clear();
         explorationGroups.clear();
+        toolCache.clear();
+        clearQueuedDiffHighlights();
         clearSyntaxHighlightCache();
     });
 }

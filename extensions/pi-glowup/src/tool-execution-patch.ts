@@ -9,11 +9,20 @@ import {
 } from "./third-party-renderers.ts";
 
 const THIRD_PARTY_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.third-party-renderers");
+const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
+    "zigai.pi-codex-look.third-party-renderer-state",
+);
 const WRITE_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.write-renderer");
+const MAX_THIRD_PARTY_RENDERERS = 100;
 
 type RenderShellMode = "default" | "self";
 
 type ToolExecutionInstance = object;
+
+type ThirdPartyRendererPatchState = {
+    renderingOptions: ThirdPartyToolRenderingOptions | undefined;
+    readonly rendererCache: Map<string, ThirdPartyToolRenderer>;
+};
 
 type ToolExecutionPrototype = {
     getCallRenderer?: (
@@ -25,6 +34,7 @@ type ToolExecutionPrototype = {
     getRenderShell?: (this: ToolExecutionInstance) => RenderShellMode;
     hasRendererDefinition?: (this: ToolExecutionInstance) => boolean;
     [THIRD_PARTY_RENDERER_PATCH_KEY]?: true;
+    [THIRD_PARTY_RENDERER_PATCH_STATE_KEY]?: ThirdPartyRendererPatchState;
     [WRITE_RENDERER_PATCH_KEY]?: true;
 };
 
@@ -83,7 +93,22 @@ function rendererForInstance(
 
     const renderer = createThirdPartyToolRenderer(toolName, options);
     cache?.set(toolName, renderer);
+    trimRendererCache(cache);
     return renderer;
+}
+
+function trimRendererCache(cache: Map<string, ThirdPartyToolRenderer> | undefined): void {
+    if (cache === undefined) {
+        return;
+    }
+
+    while (cache.size > MAX_THIRD_PARTY_RENDERERS) {
+        const oldestToolName = cache.keys().next().value;
+        if (typeof oldestToolName !== "string") {
+            return;
+        }
+        cache.delete(oldestToolName);
+    }
 }
 
 type TextContent = {
@@ -96,15 +121,31 @@ function resultText(result: { readonly content?: unknown }): string | undefined 
     if (!Array.isArray(content)) {
         return undefined;
     }
-    const textItems = content.filter(
-        (item): item is TextContent =>
-            typeof item === "object" && item !== null && "type" in item && item.type === "text",
-    );
-    const text = textItems
-        .map((item) => (typeof item.text === "string" ? item.text : ""))
-        .filter((item) => item.length > 0)
-        .join("\n");
-    return text.length > 0 ? text : undefined;
+
+    let firstText: string | undefined;
+    let texts: string[] | undefined;
+    for (const item of content) {
+        if (
+            typeof item !== "object" ||
+            item === null ||
+            !("type" in item) ||
+            item.type !== "text"
+        ) {
+            continue;
+        }
+        const contentItem: TextContent = item;
+        if (typeof contentItem.text !== "string" || contentItem.text.length === 0) {
+            continue;
+        }
+        if (firstText === undefined) {
+            firstText = contentItem.text;
+            continue;
+        }
+        texts ??= [firstText];
+        texts.push(contentItem.text);
+    }
+
+    return texts === undefined ? firstText : texts.join("\n");
 }
 
 function isWriteToolInstance(instance: ToolExecutionInstance): boolean {
@@ -187,6 +228,12 @@ export function installThirdPartyToolRendererPatch(
     options?: ThirdPartyToolRenderingOptions,
     prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
 ): void {
+    const existingState = prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
+    if (prototype[THIRD_PARTY_RENDERER_PATCH_KEY] === true && existingState !== undefined) {
+        existingState.renderingOptions = options;
+        existingState.rendererCache.clear();
+        return;
+    }
     if (prototype[THIRD_PARTY_RENDERER_PATCH_KEY] === true) {
         return;
     }
@@ -195,24 +242,30 @@ export function installThirdPartyToolRendererPatch(
     const originalGetResultRenderer = prototype.getResultRenderer;
     const originalGetRenderShell = prototype.getRenderShell;
     const originalHasRendererDefinition = prototype.hasRendererDefinition;
-    const rendererCache = new Map<string, ThirdPartyToolRenderer>();
+    const state: ThirdPartyRendererPatchState = {
+        renderingOptions: options,
+        rendererCache: new Map<string, ThirdPartyToolRenderer>(),
+    };
+    prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY] = state;
 
     prototype.getCallRenderer = function getCodexLookCallRenderer(this: ToolExecutionInstance) {
-        if (shouldUseThirdPartyRenderer(this, options)) {
-            return rendererForInstance(this, options, rendererCache)?.renderCall;
+        if (shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+            return rendererForInstance(this, state.renderingOptions, state.rendererCache)
+                ?.renderCall;
         }
         return originalGetCallRenderer?.call(this);
     };
 
     prototype.getResultRenderer = function getCodexLookResultRenderer(this: ToolExecutionInstance) {
-        if (shouldUseThirdPartyRenderer(this, options)) {
-            return rendererForInstance(this, options, rendererCache)?.renderResult;
+        if (shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+            return rendererForInstance(this, state.renderingOptions, state.rendererCache)
+                ?.renderResult;
         }
         return originalGetResultRenderer?.call(this);
     };
 
     prototype.getRenderShell = function getCodexLookRenderShell(this: ToolExecutionInstance) {
-        if (shouldUseThirdPartyRenderer(this, options)) {
+        if (shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
             return "self";
         }
         return originalGetRenderShell?.call(this) ?? "default";
@@ -221,7 +274,7 @@ export function installThirdPartyToolRendererPatch(
     prototype.hasRendererDefinition = function hasCodexLookRendererDefinition(
         this: ToolExecutionInstance,
     ) {
-        if (shouldUseThirdPartyRenderer(this, options)) {
+        if (shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
             return true;
         }
         return originalHasRendererDefinition?.call(this) ?? false;
