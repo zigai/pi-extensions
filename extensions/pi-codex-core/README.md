@@ -5,7 +5,7 @@ Slim Pi-native Codex extras for Pi coding agent.
 ## Features
 
 - `web_run` — Codex-backed web search via the OpenAI Codex search endpoint. Tool output is compacted into readable source cards, with raw Codex output saved outside the active workspace under `<Pi agent dir>/pi-codex-core/web-run/<session>/`.
-- `imagegen` — Codex image generation/editing. Images are saved at the active workspace root as `<tool-call-id>.png` and `latest.png`.
+- `imagegen` — Codex image generation/editing. Images are saved outside the active workspace under `~/.pi/agent/pi-codex-core/imagegen/<session>/`, with `latest.png` kept in that artifact directory.
 - `view_image` — native image return for local files, plus optional Codex-backed descriptions.
 - `/codex` — Pi-native tabbed settings UI for tools, prompt mode, OpenAI options, usage, and reset spending.
 - Optional Codex-style prompt mode using the bundled Codex base prompt.
