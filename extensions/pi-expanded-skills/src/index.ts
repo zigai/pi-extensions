@@ -259,7 +259,7 @@ export function parseOpenAiAllowImplicitInvocation(rawContent: string): boolean 
             continue;
         }
 
-        const match = trimmed.match(/^allow_implicit_invocation\s*:\s*(true|false)\s*$/);
+        const match = /^allow_implicit_invocation\s*:\s*(true|false)\s*$/.exec(trimmed);
         if (match) {
             return match[1] === "true";
         }
@@ -399,7 +399,7 @@ function isKnownSkillPath(commands: readonly SlashCommandInfo[], filePath: strin
 function parseSkillInvocation(
     text: string,
 ): { readonly name: string; readonly args: string } | undefined {
-    const match = text.match(/^\/skill:([^\s]+)(?:\s+([\s\S]*))?$/);
+    const match = /^\/skill:([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
     if (!match) {
         return undefined;
     }
