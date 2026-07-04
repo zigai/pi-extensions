@@ -6,7 +6,6 @@ import type {
     SessionEntry,
     ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { getEncoding } from "js-tiktoken";
 import { Type } from "typebox";
 
 import { resolveCodexRequestModel, type CodexCoreConfig } from "./config.ts";
@@ -27,16 +26,18 @@ import {
     resolveActiveCodexResponsesProvider,
     resolveCodexApiProviderBaseUrl,
 } from "./codex-auth.ts";
+import {
+    NATIVE_COMPACTION_SHIM_SUMMARY,
+    NATIVE_COMPACTION_STRATEGY,
+} from "./compaction-messages.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
+import { countCodexTextTokens, truncateCodexTextToTokenBudget } from "./tokenizer.ts";
 
-export const NATIVE_COMPACTION_STRATEGY = "pi-codex-core-remote-compaction-v2";
-export const NATIVE_COMPACTION_SHIM_SUMMARY = "[Codex native compaction checkpoint]";
-export const NATIVE_COMPACTION_MESSAGE_TYPE = "pi-codex-core-native-compaction";
-export const NATIVE_COMPACTION_MESSAGE_TEXT = [
-    "Codex remote compaction v2 was used for this checkpoint.",
-    "The compacted context is provider-specific and not human-readable in Pi.",
-    "Avoid disabling native compaction or switching providers mid-session if this checkpoint matters.",
-].join("\n");
+export {
+    NATIVE_COMPACTION_MESSAGE_TYPE,
+    NATIVE_COMPACTION_SHIM_SUMMARY,
+    NATIVE_COMPACTION_STRATEGY,
+} from "./compaction-messages.ts";
 
 const RETAINED_MESSAGE_TOKEN_BUDGET = 64_000;
 const RETAINED_INPUT_IMAGE_MIN_TOKEN_COST = 4_096;
@@ -53,8 +54,6 @@ const CODEX_CORE_WORLD_STATE_TAG = "codex_core_world_state";
 const AUTO_COMPACTION_MIN_INTERVAL_MS = 30_000;
 const MAX_SSE_TAIL_CHARS = 1_000_000;
 const MAX_SSE_EVENT_CHARS = 2_000_000;
-
-const tokenEncoding = getEncoding("o200k_base");
 
 const JsonObjectSchema = Type.Record(Type.String(), Type.Unknown());
 const StringArraySchema = Type.Array(Type.String());
@@ -296,21 +295,6 @@ const pendingPiCompactionNativeWindows = new Map<string, PendingPiCompactionNati
 const autoCompactionBySession = new Map<string, AutoCompactionSessionState>();
 const nativeReplayWarningKeys = new Set<string>();
 
-export function registerNativeCompactionDisplay(pi: ExtensionAPI): void {
-    pi.registerMessageRenderer(NATIVE_COMPACTION_MESSAGE_TYPE, (message, _options, theme) => {
-        return {
-            render(width: number): string[] {
-                const text =
-                    typeof message.content === "string"
-                        ? message.content
-                        : NATIVE_COMPACTION_MESSAGE_TEXT;
-                return text.split("\n").map((line) => theme.fg("dim", line).slice(0, width));
-            },
-            invalidate(): void {},
-        };
-    });
-}
-
 export async function handleCodexNativeCompaction(
     event: SessionBeforeCompactEvent,
     ctx: ExtensionContext,
@@ -357,7 +341,10 @@ export async function handleCodexNativeCompaction(
         reasoning: buildReasoning(config).reasoning,
         tools: buildCompactionTools(pi),
     });
-    const shrink = shrinkRemoteCompactionRequestForContextWindow(request, ctx.model?.contextWindow);
+    const shrink = await shrinkRemoteCompactionRequestForContextWindow(
+        request,
+        ctx.model?.contextWindow,
+    );
     if (shrink.kind === "too_large") {
         notifyCompactionFallback(
             ctx,
@@ -382,7 +369,7 @@ export async function handleCodexNativeCompaction(
                 : undefined;
         }
         const response = responseResult.value;
-        const compactedWindow = buildRemoteCompactionV2Window(
+        const compactedWindow = await buildRemoteCompactionV2Window(
             shrink.promptInput,
             response.compactionOutput,
         );
@@ -1080,12 +1067,12 @@ function toolInfoToResponsesTool(tool: ToolInfo): ResponsesTool {
     };
 }
 
-function shrinkRemoteCompactionRequestForContextWindow(
+async function shrinkRemoteCompactionRequestForContextWindow(
     request: RemoteCompactionV2Request,
     contextWindow: number | null | undefined,
-): ShrinkRemoteCompactionRequestResult {
+): Promise<ShrinkRemoteCompactionRequestResult> {
     const budgetTokens = compactRequestBudget(contextWindow);
-    const estimatedTokensBefore = estimateTokenCount(request);
+    const estimatedTokensBefore = await estimateTokenCount(request);
     const promptInput = request.input.filter((item) => item.type !== "compaction_trigger");
     if (budgetTokens === undefined || estimatedTokensBefore <= budgetTokens) {
         return {
@@ -1108,7 +1095,8 @@ function shrinkRemoteCompactionRequestForContextWindow(
         const rewrittenItem = { ...item, output: TRUNCATED_TOOL_OUTPUT_MESSAGE };
         input[index] = rewrittenItem;
         rewrittenToolOutputs += 1;
-        estimatedTokensAfter += estimateTokenCount(rewrittenItem) - estimateTokenCount(item);
+        estimatedTokensAfter +=
+            (await estimateTokenCount(rewrittenItem)) - (await estimateTokenCount(item));
     }
 
     for (let index = 0; index < input.length && estimatedTokensAfter > budgetTokens; ) {
@@ -1118,7 +1106,7 @@ function shrinkRemoteCompactionRequestForContextWindow(
             continue;
         }
         input.splice(index, 1);
-        estimatedTokensAfter -= estimateTokenCount(item);
+        estimatedTokensAfter -= await estimateTokenCount(item);
     }
 
     if (estimatedTokensAfter > budgetTokens) {
@@ -1320,14 +1308,14 @@ function createRemoteCompactionV2Collector(): {
     };
 }
 
-function buildRemoteCompactionV2Window(
+async function buildRemoteCompactionV2Window(
     promptInput: readonly ResponsesInputItem[],
     compactionOutput: ResponsesInputItem,
-): ResponsesInputItem[] {
+): Promise<ResponsesInputItem[]> {
     const retained = promptInput
         .filter(isRetainedRemoteCompactionMessage)
         .map((item) => structuredClone(item));
-    const truncated = truncateRetainedMessages(retained, RETAINED_MESSAGE_TOKEN_BUDGET);
+    const truncated = await truncateRetainedMessages(retained, RETAINED_MESSAGE_TOKEN_BUDGET);
     return [...truncated, structuredClone(compactionOutput)];
 }
 
@@ -1706,20 +1694,20 @@ function isRetainedRemoteCompactionMessage(item: ResponsesInputItem): boolean {
     return text.length > 0 || inputImageCount(item) > 0;
 }
 
-function truncateRetainedMessages(
+async function truncateRetainedMessages(
     items: readonly ResponsesInputItem[],
     maxTokens: number,
-): ResponsesInputItem[] {
+): Promise<ResponsesInputItem[]> {
     let remaining = maxTokens;
     const retainedReversed: ResponsesInputItem[] = [];
     for (const item of [...items].reverse()) {
         if (remaining <= 0) continue;
-        const tokenCount = Math.max(1, messageTextTokenCount(item));
+        const tokenCount = Math.max(1, await messageTextTokenCount(item));
         if (tokenCount <= remaining) {
             retainedReversed.push(item);
             remaining -= tokenCount;
         } else {
-            const truncated = truncateMessageTextToTokenBudget(item, remaining);
+            const truncated = await truncateMessageTextToTokenBudget(item, remaining);
             if (truncated) retainedReversed.push(truncated);
             remaining = 0;
         }
@@ -1727,24 +1715,24 @@ function truncateRetainedMessages(
     return retainedReversed.reverse();
 }
 
-function messageTextTokenCount(item: ResponsesInputItem): number {
+async function messageTextTokenCount(item: ResponsesInputItem): Promise<number> {
     const content = item.content;
     if (!isJsonArray(content)) return typeof content === "string" ? estimateTextTokens(content) : 0;
     const parts = content;
     let tokenCount = 0;
-    for (const part of parts) tokenCount += retainedContentPartTokenCount(part);
+    for (const part of parts) tokenCount += await retainedContentPartTokenCount(part);
     return tokenCount;
 }
 
-function retainedContentPartTokenCount(part: JsonValue): number {
+async function retainedContentPartTokenCount(part: JsonValue): Promise<number> {
     if (isResponsesTextPart(part)) return estimateTextTokens(part.text);
     if (isInputImagePart(part)) return inputImageRetainedTokenCount(part);
     return estimateTokenCount(part);
 }
 
-function inputImageRetainedTokenCount(part: ResponsesInputItem): number {
+async function inputImageRetainedTokenCount(part: ResponsesInputItem): Promise<number> {
     const imageUrlTokens =
-        typeof part.image_url === "string" ? estimateTextTokens(part.image_url) : 0;
+        typeof part.image_url === "string" ? await estimateTextTokens(part.image_url) : 0;
     return Math.max(RETAINED_INPUT_IMAGE_MIN_TOKEN_COST, imageUrlTokens);
 }
 
@@ -1762,15 +1750,15 @@ function isInputImagePart(part: JsonValue): part is ResponsesInputItem {
     return isJsonObject(part) && part.type === "input_image";
 }
 
-function truncateMessageTextToTokenBudget(
+async function truncateMessageTextToTokenBudget(
     item: ResponsesInputItem,
     maxTokens: number,
-): ResponsesInputItem | undefined {
+): Promise<ResponsesInputItem | undefined> {
     if (maxTokens <= 0) return undefined;
     const cloned = structuredClone(item);
     const content = cloned.content;
     if (typeof content === "string") {
-        const text = truncateTextToTokenBudget(content, maxTokens);
+        const text = await truncateTextToTokenBudget(content, maxTokens);
         return text.length > 0 ? { ...cloned, content: text } : undefined;
     }
     if (!isJsonArray(content)) return cloned;
@@ -1780,30 +1768,30 @@ function truncateMessageTextToTokenBudget(
     for (const part of content) {
         if (remaining <= 0) continue;
         if (isResponsesTextPart(part)) {
-            const tokenCount = estimateTextTokens(part.text);
+            const tokenCount = await estimateTextTokens(part.text);
             const text =
                 tokenCount <= remaining
                     ? part.text
-                    : truncateTextToTokenBudget(part.text, remaining);
+                    : await truncateTextToTokenBudget(part.text, remaining);
             remaining -= Math.min(tokenCount, remaining);
             if (text.length > 0) nextContent.push({ ...part, text });
             continue;
         }
         if (isInputImagePart(part)) {
-            const tokenCount = inputImageRetainedTokenCount(part);
+            const tokenCount = await inputImageRetainedTokenCount(part);
             if (tokenCount <= remaining) {
                 nextContent.push(part);
                 remaining -= tokenCount;
                 continue;
             }
-            const placeholderTokens = estimateTextTokens(RETAINED_IMAGE_OMITTED_TEXT);
+            const placeholderTokens = await estimateTextTokens(RETAINED_IMAGE_OMITTED_TEXT);
             if (placeholderTokens <= remaining) {
                 nextContent.push({ type: "input_text", text: RETAINED_IMAGE_OMITTED_TEXT });
                 remaining -= placeholderTokens;
             }
             continue;
         }
-        const tokenCount = estimateTokenCount(part);
+        const tokenCount = await estimateTokenCount(part);
         if (tokenCount <= remaining) {
             nextContent.push(part);
             remaining -= tokenCount;
@@ -2014,32 +2002,17 @@ function isNativeCompactionAnchor(item: ResponsesInputItem): boolean {
     );
 }
 
-function estimateTokenCount(value: unknown): number {
+function estimateTokenCount(value: unknown): Promise<number> {
     const serialized = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
     return estimateTextTokens(serialized);
 }
 
-function estimateTextTokens(text: string): number {
-    try {
-        return tokenEncoding.encode(text).length;
-    } catch {
-        return Math.ceil(text.length / 4);
-    }
+function estimateTextTokens(text: string): Promise<number> {
+    return countCodexTextTokens(text);
 }
 
-function truncateTextToTokenBudget(text: string, maxTokens: number): string {
-    if (maxTokens <= 0) return "";
-    const tokens = tokenEncoding.encode(text);
-    if (tokens.length <= maxTokens) return text;
-    if (maxTokens <= 3) return tokenEncoding.decode(tokens.slice(0, maxTokens));
-    const marker = "\n…\n";
-    const markerTokens = tokenEncoding.encode(marker).length;
-    const remaining = Math.max(1, maxTokens - markerTokens);
-    const headCount = Math.ceil(remaining / 2);
-    const tailCount = Math.floor(remaining / 2);
-    const head = tokenEncoding.decode(tokens.slice(0, headCount));
-    const tail = tokenEncoding.decode(tokens.slice(tokens.length - tailCount));
-    return `${head}${marker}${tail}`;
+function truncateTextToTokenBudget(text: string, maxTokens: number): Promise<string> {
+    return truncateCodexTextToTokenBudget(text, maxTokens);
 }
 
 function sanitizeSurrogates(text: string): string {
