@@ -542,12 +542,16 @@ export function renderCodexExplore(
 export function renderMutationCall(
     theme: CodexRenderTheme,
     summary: MutationSummary,
-    options: { readonly body?: Component } = {},
+    options: { readonly body?: Component; readonly labelColumnWidth?: number } = {},
 ): Component {
     return makeComponent((width) => {
         const stats = `(${green(theme, `+${summary.added}`)} ${red(theme, `-${summary.removed}`)})`;
         const body = `${formatPathTarget(theme, summary.path)} ${stats}`;
-        const prefix = `${dim(theme, "• ")}${actionText(theme, summary.label, { bold: true })} `;
+        const label =
+            options.labelColumnWidth === undefined
+                ? summary.label
+                : summary.label.padEnd(options.labelColumnWidth, " ");
+        const prefix = `${dim(theme, "• ")}${actionText(theme, label, { bold: true })} `;
         return [
             ...wrapPrefixedLine(body, width, prefix, "  "),
             ...(options.body?.render(width) ?? []),

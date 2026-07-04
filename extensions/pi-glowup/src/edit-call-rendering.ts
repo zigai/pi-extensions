@@ -6,6 +6,7 @@ export type EditCallRenderContext = {
     readonly isError: boolean;
     readonly isPartial: boolean;
     readonly argsComplete?: boolean;
+    readonly dynamicStatusLabels?: boolean;
 };
 
 export type EditCallSummary = {
@@ -55,9 +56,11 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
     const validEdits = edits?.filter(hasEditTextPair).length ?? 0;
     const invalidEdits = edits === undefined ? 0 : edits.length - validEdits;
 
+    const editLabel = context.dynamicStatusLabels === true ? "Editing" : "Edit";
+
     if (invalidEdits > 0) {
         return {
-            statusText: "Edit",
+            statusText: editLabel,
             path,
             suffix: formatInvalidEditCount(validEdits, invalidEdits),
             hasInvalidEdits: true,
@@ -66,7 +69,7 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
 
     if (context.isError) {
         return {
-            statusText: "Edit Failed",
+            statusText: context.dynamicStatusLabels === true ? "Edit Failed" : editLabel,
             path,
             suffix: formatEditCount(validEdits),
             hasInvalidEdits: false,
@@ -75,7 +78,7 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
 
     if (context.isPartial) {
         return {
-            statusText: "Edit Pending",
+            statusText: editLabel,
             path,
             suffix: formatEditCount(validEdits),
             hasInvalidEdits: false,
@@ -83,7 +86,7 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
     }
 
     return {
-        statusText: "Editing",
+        statusText: editLabel,
         path,
         suffix: formatEditCount(validEdits),
         hasInvalidEdits: false,

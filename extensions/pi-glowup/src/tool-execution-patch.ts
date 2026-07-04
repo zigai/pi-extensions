@@ -251,7 +251,7 @@ const writeCallRenderer: ThirdPartyToolRenderer["renderCall"] = (args, theme, co
     const path = record === undefined ? undefined : Reflect.get(record, "path");
     return renderCodexCall(theme, {
         state: context.isError ? "error" : context.isPartial ? "muted" : "success",
-        statusText: context.isPartial ? "Write" : "Wrote",
+        statusText: "Write",
         body: formatPathTarget(theme, typeof path === "string" ? path : undefined),
     });
 };

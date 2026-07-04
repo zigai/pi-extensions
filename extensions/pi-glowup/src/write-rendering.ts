@@ -15,6 +15,8 @@ type WriteCallContext = {
     readonly isError: boolean;
     readonly isPartial: boolean;
     readonly expanded: boolean;
+    readonly dynamicStatusLabels?: boolean;
+    readonly mutationLabelColumnWidth?: number;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -82,10 +84,11 @@ export function renderWriteCallPreview(
 ): Component {
     const path = stringField(args, "path") ?? "";
     const content = writeContentFromArgs(args);
+    const dynamicStatusLabels = context.dynamicStatusLabels === true;
     if (content === undefined || context.isError) {
         return renderCodexCall(theme, {
             state: context.isError ? "error" : context.isPartial ? "muted" : "success",
-            statusText: context.isPartial ? "Write" : "Wrote",
+            statusText: dynamicStatusLabels && !context.isPartial ? "Wrote" : "Write",
             body: formatPathTarget(theme, path),
         });
     }
@@ -93,12 +96,15 @@ export function renderWriteCallPreview(
     return renderMutationCall(
         theme,
         {
-            label: context.isPartial ? "Writing" : "Wrote",
+            label: dynamicStatusLabels ? (context.isPartial ? "Writing" : "Wrote") : "Write",
             path,
             added: countContentLines(content),
             removed: 0,
         },
         {
+            ...(context.mutationLabelColumnWidth === undefined
+                ? {}
+                : { labelColumnWidth: context.mutationLabelColumnWidth }),
             body: renderCodexOutput(theme, boundedWriteContentPreview(content), {
                 expanded: context.expanded,
                 mode: "head",

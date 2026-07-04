@@ -24,6 +24,18 @@
         "preloadOnStartup": false
       }
     },
+    "toolLabels": {
+      "type": "object",
+      "properties": {
+        "dynamicStatus": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "dynamicStatus": false
+      }
+    },
     "patches": {
       "type": "object",
       "properties": {

@@ -80,6 +80,9 @@ const explorationGroups = new ExplorationGroupStore();
 const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
+const MUTATION_LABEL_COLUMN_WIDTH = "Writing".length;
+const ACTIVE_MUTATION_ALIGNMENT_KEY = "codexLookActiveMutationAlignment";
+const MUTATION_RESULT_RENDERED_KEY = "codexLookMutationResultRendered";
 
 function textOutput(result: TextResult): string | undefined {
     if (!Array.isArray(result.content)) {
@@ -148,6 +151,61 @@ function makeMutationSummary(options: {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type MutableRenderState = {
+    [key: string]: unknown;
+};
+
+function isMutableRenderState(value: unknown): value is MutableRenderState {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mutationLabelColumnWidth(
+    context: BuiltInRenderContext,
+    dynamicStatusLabels: boolean,
+): number | undefined {
+    if (!dynamicStatusLabels) {
+        return undefined;
+    }
+
+    const state = isMutableRenderState(context.state) ? context.state : undefined;
+    if (state === undefined) {
+        return undefined;
+    }
+
+    if (context.isPartial) {
+        state[ACTIVE_MUTATION_ALIGNMENT_KEY] = true;
+        state[MUTATION_RESULT_RENDERED_KEY] = false;
+    }
+
+    if (
+        state[ACTIVE_MUTATION_ALIGNMENT_KEY] === true &&
+        state[MUTATION_RESULT_RENDERED_KEY] !== true
+    ) {
+        return MUTATION_LABEL_COLUMN_WIDTH;
+    }
+
+    return undefined;
+}
+
+function markMutationResultRendered(
+    context: BuiltInRenderContext,
+    dynamicStatusLabels: boolean,
+): void {
+    if (!dynamicStatusLabels) {
+        return;
+    }
+
+    const state = isMutableRenderState(context.state) ? context.state : undefined;
+    if (state?.[ACTIVE_MUTATION_ALIGNMENT_KEY] !== true) {
+        return;
+    }
+
+    if (state[MUTATION_RESULT_RENDERED_KEY] !== true) {
+        state[MUTATION_RESULT_RENDERED_KEY] = true;
+        context.invalidate();
+    }
 }
 
 function renderExplorationCall(
@@ -270,9 +328,10 @@ function scriptPreviewHeaderLayout(config: CodexLookConfig): ScriptPreviewHeader
         : parseScriptPreviewHeaderLayout(headerLayoutFromEnv);
 }
 
-function renderBuiltInToolCall(
-    headerLayout: () => ScriptPreviewHeaderLayout,
-): BuiltInToolRendererOptions["renderCall"] {
+function renderBuiltInToolCall(options: {
+    readonly headerLayout: () => ScriptPreviewHeaderLayout;
+    readonly dynamicStatusLabels: boolean;
+}): BuiltInToolRendererOptions["renderCall"] {
     return (toolName, args, theme, context) => {
         switch (toolName) {
             case "read":
@@ -300,18 +359,19 @@ function renderBuiltInToolCall(
                     formatLsAction(theme, lsActionArgs(args)),
                 );
             case "bash":
-                return renderBashCall(args, theme, context, headerLayout);
+                return renderBashCall(args, theme, context, options.headerLayout);
             case "write":
-                return renderWriteCall(args, theme, context);
+                return renderWriteCall(args, theme, context, options.dynamicStatusLabels);
             case "edit":
-                return renderEditCall(args, theme, context);
+                return renderEditCall(args, theme, context, options.dynamicStatusLabels);
         }
     };
 }
 
-function renderBuiltInToolResult(
-    headerLayout: () => ScriptPreviewHeaderLayout,
-): BuiltInToolRendererOptions["renderResult"] {
+function renderBuiltInToolResult(settings: {
+    readonly headerLayout: () => ScriptPreviewHeaderLayout;
+    readonly dynamicStatusLabels: boolean;
+}): BuiltInToolRendererOptions["renderResult"] {
     return (toolName, result, options, theme, context) => {
         switch (toolName) {
             case "read":
@@ -325,11 +385,23 @@ function renderBuiltInToolResult(
             case "ls":
                 return renderExplorationResult(result, options.expanded, theme);
             case "bash":
-                return renderBashResult(result, options, theme, context, headerLayout);
+                return renderBashResult(result, options, theme, context, settings.headerLayout);
             case "write":
-                return renderWriteResult(result, options, theme, context);
+                return renderWriteResult(
+                    result,
+                    options,
+                    theme,
+                    context,
+                    settings.dynamicStatusLabels,
+                );
             case "edit":
-                return renderEditResult(result, options, theme, context);
+                return renderEditResult(
+                    result,
+                    options,
+                    theme,
+                    context,
+                    settings.dynamicStatusLabels,
+                );
         }
     };
 }
@@ -378,9 +450,19 @@ function renderBashResult(
     });
 }
 
-function renderWriteCall(args: unknown, theme: BuiltInRenderTheme, context: BuiltInRenderContext) {
+function renderWriteCall(
+    args: unknown,
+    theme: BuiltInRenderTheme,
+    context: BuiltInRenderContext,
+    dynamicStatusLabels: boolean,
+) {
     closeExplorationGroup();
-    return renderWriteCallPreview(args, theme, context);
+    const labelColumnWidth = mutationLabelColumnWidth(context, dynamicStatusLabels);
+    return renderWriteCallPreview(args, theme, {
+        ...context,
+        dynamicStatusLabels,
+        ...(labelColumnWidth === undefined ? {} : { mutationLabelColumnWidth: labelColumnWidth }),
+    });
 }
 
 function renderWriteResult(
@@ -388,7 +470,12 @@ function renderWriteResult(
     options: BuiltInResultOptions,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
+    dynamicStatusLabels: boolean,
 ) {
+    if (!options.isPartial) {
+        markMutationResultRendered(context, dynamicStatusLabels);
+    }
+
     const pierrePayload = !context.isError
         ? getPierreDiffPayloadFromDetails(result.details)
         : undefined;
@@ -408,22 +495,29 @@ function renderWriteResult(
     });
 }
 
-function renderEditCall(args: unknown, theme: BuiltInRenderTheme, context: BuiltInRenderContext) {
+function renderEditCall(
+    args: unknown,
+    theme: BuiltInRenderTheme,
+    context: BuiltInRenderContext,
+    dynamicStatusLabels: boolean,
+) {
     closeExplorationGroup();
+    const labelColumnWidth = mutationLabelColumnWidth(context, dynamicStatusLabels);
     const preview = editPreviews.get(context.toolCallId);
     if (!context.isPartial && preview) {
         return renderMutationCall(
             theme,
             makeMutationSummary({
-                label: "Edited",
+                label: dynamicStatusLabels ? "Edited" : "Edit",
                 path: preview.path,
                 added: preview.added,
                 removed: preview.removed,
             }),
+            labelColumnWidth === undefined ? {} : { labelColumnWidth },
         );
     }
 
-    const summary = summarizeEditCall(args, context);
+    const summary = summarizeEditCall(args, { ...context, dynamicStatusLabels });
     const state = summary.hasInvalidEdits || context.isError ? "error" : "muted";
     return renderCodexCall(theme, {
         state,
@@ -437,7 +531,12 @@ function renderEditResult(
     options: BuiltInResultOptions,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
+    dynamicStatusLabels: boolean,
 ) {
+    if (!options.isPartial) {
+        markMutationResultRendered(context, dynamicStatusLabels);
+    }
+
     const pierrePayload = !context.isError
         ? getPierreDiffPayloadFromDetails(result.details)
         : undefined;
@@ -528,8 +627,14 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
                 : { enabled: false },
         );
         configureBuiltInToolRendererPatch(true, {
-            renderCall: renderBuiltInToolCall(() => headerLayout),
-            renderResult: renderBuiltInToolResult(() => headerLayout),
+            renderCall: renderBuiltInToolCall({
+                headerLayout: () => headerLayout,
+                dynamicStatusLabels: config.toolLabels.dynamicStatus,
+            }),
+            renderResult: renderBuiltInToolResult({
+                headerLayout: () => headerLayout,
+                dynamicStatusLabels: config.toolLabels.dynamicStatus,
+            }),
         });
     };
 

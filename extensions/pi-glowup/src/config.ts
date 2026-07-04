@@ -16,6 +16,9 @@ export type CodexLookConfig = {
     readonly scriptFormatters: ScriptFormatterCommands;
     readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
     readonly syntaxPreloadOnStartup: boolean;
+    readonly toolLabels: {
+        readonly dynamicStatus: boolean;
+    };
     readonly patches: {
         readonly assistantSeparator: boolean;
         readonly workingWidgetSpacing: boolean;
@@ -45,6 +48,9 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     syntax: {
         preloadOnStartup: false,
     },
+    toolLabels: {
+        dynamicStatus: false,
+    },
     patches: {
         assistantSeparator: true,
         workingWidgetSpacing: false,
@@ -73,6 +79,12 @@ const SyntaxConfigSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+const ToolLabelsConfigSchema = Type.Object(
+    {
+        dynamicStatus: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false },
+);
 const PatchesConfigSchema = Type.Object(
     {
         assistantSeparator: Type.Optional(Type.Boolean()),
@@ -95,6 +107,7 @@ const CodexLookConfigSchema = Type.Object(
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
         syntax: Type.Optional(SyntaxConfigSchema),
+        toolLabels: Type.Optional(ToolLabelsConfigSchema),
         patches: Type.Optional(PatchesConfigSchema),
         scriptPreview: Type.Optional(ScriptPreviewConfigSchema),
     },
@@ -110,6 +123,14 @@ const CodexLookConfigJsonSchema = Type.Object(
                     preloadOnStartup: Type.Optional(Type.Boolean()),
                 },
                 { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax },
+            ),
+        ),
+        toolLabels: Type.Optional(
+            Type.Object(
+                {
+                    dynamicStatus: Type.Optional(Type.Boolean()),
+                },
+                { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels },
             ),
         ),
         patches: Type.Optional(
@@ -219,6 +240,7 @@ export function parseCodexLookConfig(
     const config = parseCodexLookConfigInput(input, options);
     const scriptPreview = config.scriptPreview ?? {};
     const syntax = config.syntax ?? {};
+    const toolLabels = config.toolLabels ?? {};
     const patches = config.patches ?? {};
 
     return {
@@ -236,6 +258,10 @@ export function parseCodexLookConfig(
         scriptHeaderLayout: parseScriptPreviewHeaderLayout(scriptPreview.headerLayout),
         syntaxPreloadOnStartup:
             syntax.preloadOnStartup ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.preloadOnStartup,
+        toolLabels: {
+            dynamicStatus:
+                toolLabels.dynamicStatus ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.dynamicStatus,
+        },
         patches: {
             assistantSeparator:
                 patches.assistantSeparator ??
