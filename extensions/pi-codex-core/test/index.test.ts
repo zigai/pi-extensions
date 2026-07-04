@@ -471,7 +471,10 @@ test("formats Codex reset credit expiration metadata", () => {
     assert.equal(firstCredit.redeemStartedAt, undefined);
     const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} });
 
-    assert.match(formatted, /- Resets available: 2 \(next expires in ~5d \(/);
+    assert.match(
+        formatted,
+        /- Resets available: 2\n  - Reset 1: expires in ~5d \([^\n]+\)\n  - Reset 2: expires in ~30d \(/,
+    );
     assert.doesNotMatch(formatted, /~1m/);
 });
 
@@ -493,7 +496,7 @@ test("formats Codex reset credit expiration from granted time", () => {
     assert.ok(credits);
     const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} });
 
-    assert.match(formatted, /- Resets available: 1 \(expires in ~30d \(/);
+    assert.match(formatted, /- Resets available: 1\n  - Reset 1: expires in ~30d \(/);
 });
 
 test("fetches Codex usage from the selected provider base URL", async () => {

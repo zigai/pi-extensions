@@ -262,10 +262,8 @@ export function formatCodexUsage(snapshot: CodexUsageSnapshot): string {
         lines.push(`- ${`${row.title}:`.padEnd(titleWidth + 1)} ${row.usage}`);
     }
     if (snapshot.resetCredits) {
-        const expiration = formatResetCreditExpiration(snapshot.resetCredits);
-        lines.push(
-            `- Resets available: ${snapshot.resetCredits.availableCount}${expiration ? ` (${expiration})` : ""}`,
-        );
+        lines.push(`- Resets available: ${snapshot.resetCredits.availableCount}`);
+        lines.push(...formatResetCreditLines(snapshot.resetCredits));
     }
     return lines.join("\n");
 }
@@ -278,19 +276,28 @@ export function formatResetConsumeResult(result: CodexRateLimitResetConsumeResul
     return "Reset response was not recognized; refresh usage before trying again.";
 }
 
-function formatResetCreditExpiration(resetCredits: CodexRateLimitResetCredits): string | undefined {
-    if (resetCredits.availableCount <= 0) return undefined;
-    const expirations = resetCredits.credits
+function formatResetCreditLines(resetCredits: CodexRateLimitResetCredits): string[] {
+    if (resetCredits.availableCount <= 0) return [];
+    return resetCredits.credits
         .filter(isAvailableResetCredit)
-        .flatMap((credit) => {
-            const expirationMs = resetCreditExpirationMs(credit);
-            return expirationMs === undefined ? [] : [expirationMs];
-        })
-        .sort((left, right) => left - right);
-    const nextExpirationMs = expirations[0];
-    if (nextExpirationMs === undefined) return undefined;
-    const label = resetCredits.availableCount === 1 ? "expires" : "next expires";
-    return `${label} ${formatExpiration(nextExpirationMs)}`;
+        .map(resetCreditExpirationMs)
+        .sort(compareResetCredits)
+        .map((expirationMs, index) => `  - Reset ${index + 1}: ${formatResetCredit(expirationMs)}`);
+}
+
+function compareResetCredits(
+    leftExpirationMs: number | undefined,
+    rightExpirationMs: number | undefined,
+): number {
+    if (leftExpirationMs === undefined && rightExpirationMs === undefined) return 0;
+    if (leftExpirationMs === undefined) return 1;
+    if (rightExpirationMs === undefined) return -1;
+    return leftExpirationMs - rightExpirationMs;
+}
+
+function formatResetCredit(expirationMs: number | undefined): string {
+    if (expirationMs === undefined) return "expiration unknown";
+    return `expires ${formatExpiration(expirationMs)}`;
 }
 
 function isAvailableResetCredit(credit: CodexRateLimitResetCredit): boolean {
