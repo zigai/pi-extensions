@@ -10,6 +10,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | --------------------------------- | -------- | -------------------------------------------------------------------------- |
 | `preserveTools`                   | `[]`     | Keep selected third-party tools on their original renderer.                |
 | `syntax.preloadOnStartup`         | `false`  | Load Shiki during startup instead of lazily.                               |
+| `toolLabels.dynamicStatus`        | `false`  | Use changing status labels like `Writing`/`Wrote` and `Editing`/`Edited`.  |
 | `patches.assistantSeparator`      | `true`   | Add separators and spacing around assistant messages.                      |
 | `patches.workingWidgetSpacing`    | `false`  | Remove one blank line near the working indicator with a global TUI patch.  |
 | `patches.autocompleteCleanup`     | `true`   | Force a cleanup redraw after slash autocomplete closes.                    |
@@ -24,6 +25,9 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
   "preserveTools": [],
   "syntax": {
     "preloadOnStartup": false
+  },
+  "toolLabels": {
+    "dynamicStatus": false
   },
   "patches": {
     "assistantSeparator": true,
