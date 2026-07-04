@@ -201,7 +201,7 @@ describe("tool execution patches", () => {
                 )
                 .render(80)
                 .join("\n"),
-        ).toContain("Wrote large.ts");
+        ).toContain("Write large.ts");
         expect(
             prototype.getCallRenderer
                 .call(readInstance)?.({}, plainTheme, renderContext)

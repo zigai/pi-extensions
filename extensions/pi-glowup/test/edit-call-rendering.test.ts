@@ -24,14 +24,33 @@ describe("edit call rendering", () => {
         });
     });
 
-    it("marks incomplete edit arguments as pending", () => {
+    it("marks incomplete edit arguments with the stable edit label", () => {
         const summary = summarizeEditCall(
             { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
             { isError: false, isPartial: true, argsComplete: false },
         );
 
         expect(summary).toEqual({
-            statusText: "Edit Pending",
+            statusText: "Edit",
+            path: "src/rendering.ts",
+            suffix: "",
+            hasInvalidEdits: false,
+        });
+    });
+
+    it("uses dynamic status labels when enabled", () => {
+        const summary = summarizeEditCall(
+            { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
+            {
+                isError: false,
+                isPartial: true,
+                argsComplete: false,
+                dynamicStatusLabels: true,
+            },
+        );
+
+        expect(summary).toEqual({
+            statusText: "Editing",
             path: "src/rendering.ts",
             suffix: "",
             hasInvalidEdits: false,
@@ -45,14 +64,14 @@ describe("edit call rendering", () => {
         );
 
         expect(summary).toEqual({
-            statusText: "Editing",
+            statusText: "Edit",
             path: "src/rendering.ts",
             suffix: "",
             hasInvalidEdits: false,
         });
     });
 
-    it("marks completed errored edit calls as failed", () => {
+    it("marks completed errored edit calls with the stable edit label", () => {
         const summary = summarizeEditCall(
             {
                 path: "src/rendering.ts",
@@ -65,7 +84,7 @@ describe("edit call rendering", () => {
         );
 
         expect(summary).toEqual({
-            statusText: "Edit Failed",
+            statusText: "Edit",
             path: "src/rendering.ts",
             suffix: " (2 edits)",
             hasInvalidEdits: false,

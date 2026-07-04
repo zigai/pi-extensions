@@ -11,6 +11,7 @@ import {
     renderCodexCall,
     renderCodexDiff,
     renderCodexOutput,
+    renderMutationCall,
     renderScriptCall,
     type CodexRenderTheme,
 } from "../src/rendering.ts";
@@ -119,6 +120,17 @@ describe("Codex rendering helpers", () => {
         });
 
         expect(component.render(12)).toEqual(["• Run "]);
+    });
+
+    it("pads mutation labels only when a label column width is provided", () => {
+        const summary = { label: "Wrote", path: "src/example.ts", added: 1, removed: 0 };
+
+        expect(renderMutationCall(plainTheme, summary).render(80)[0]).toContain(
+            "Wrote src/example.ts (+1 -0)",
+        );
+        expect(
+            renderMutationCall(plainTheme, summary, { labelColumnWidth: 7 }).render(80)[0],
+        ).toContain("Wrote   src/example.ts (+1 -0)");
     });
 
     it("marks collapsed call previews as truncated instead of expandable", () => {

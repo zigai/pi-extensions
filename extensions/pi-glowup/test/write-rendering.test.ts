@@ -27,8 +27,18 @@ describe("write rendering", () => {
 
         const rendered = component.render(100).join("\n");
 
-        expect(rendered).toContain("Wrote src/example.ts (+1 -0)");
+        expect(rendered).toContain("Write src/example.ts (+1 -0)");
         expect(rendered).toContain("export const value = 1;");
+    });
+
+    it("uses dynamic write labels when enabled", () => {
+        const component = renderWriteCallPreview(
+            { path: "src/example.ts", content: "export const value = 1;\n" },
+            plainTheme,
+            { isError: false, isPartial: false, expanded: false, dynamicStatusLabels: true },
+        );
+
+        expect(component.render(100).join("\n")).toContain("Wrote src/example.ts (+1 -0)");
     });
 
     it("hides successful byte-count output after rendering write content", () => {
