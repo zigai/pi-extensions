@@ -26,6 +26,8 @@ type ApplyPatchSummary = {
     readonly removed: number;
 };
 
+const MAX_PARTIAL_PATCH_PARSE_CHARS = 8 * 1024;
+
 type MutableApplyPatchSection = {
     kind: ApplyPatchKind;
     path: string;
@@ -67,7 +69,25 @@ function lineCount(text: string): number {
     if (text.length === 0) {
         return 0;
     }
-    return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
+
+    let lines = text.endsWith("\n") ? 0 : 1;
+    for (let index = 0; index < text.length; index += 1) {
+        if (text.charCodeAt(index) === 10) {
+            lines += 1;
+        }
+    }
+    return lines;
+}
+
+function hasCompletePatchEnvelope(patchText: string): boolean {
+    return patchText.trimEnd().endsWith("*** End Patch") && patchText.includes("*** Begin Patch");
+}
+
+function canParsePatchCall(patchText: string, context: ThirdPartyToolRenderContext): boolean {
+    if (!context.isPartial && context.argsComplete) {
+        return true;
+    }
+    return patchText.length <= MAX_PARTIAL_PATCH_PARSE_CHARS && hasCompletePatchEnvelope(patchText);
 }
 
 function makeSection(kind: ApplyPatchKind, path: string): MutableApplyPatchSection {
@@ -263,7 +283,8 @@ function renderApplyPatchFallbackCall(
     context: ThirdPartyToolRenderContext,
 ): Component {
     const patch = patchTextFromArgs(args);
-    const lines = patch === undefined ? 0 : lineCount(patch);
+    const lines =
+        patch === undefined || context.isPartial || !context.argsComplete ? 0 : lineCount(patch);
     return renderMutationCall(theme, {
         label: context.isPartial || !context.argsComplete ? "Editing" : "Edited",
         path: lines > 0 ? `${lines} patch lines` : "patch",
@@ -305,7 +326,10 @@ export function createApplyPatchRenderer(): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const patch = patchTextFromArgs(args);
-            const summary = patch === undefined ? undefined : parseApplyPatchSummary(patch);
+            const summary =
+                patch === undefined || !canParsePatchCall(patch, context)
+                    ? undefined
+                    : parseApplyPatchSummary(patch);
             return summary === undefined
                 ? renderApplyPatchFallbackCall(args, theme, context)
                 : renderApplyPatchSummary(summary, theme, context.expanded);

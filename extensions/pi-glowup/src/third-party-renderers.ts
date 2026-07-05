@@ -118,6 +118,7 @@ type AskUserQuestionAnswer = {
 const MAX_PREVIEW_CHARACTERS = 700;
 const MAX_PREVIEW_ARRAY_ITEMS = 20;
 const MAX_PREVIEW_OBJECT_PROPERTIES = 30;
+const MAX_PARTIAL_PREVIEW_PROPERTIES = 8;
 const MAX_WEB_RUN_HIGHLIGHTS = 3;
 const WEB_RUN_COLLAPSED_SOURCE_LIMIT = 4;
 const WEB_RUN_EXPANDED_SOURCE_LIMIT = 100;
@@ -383,6 +384,77 @@ function previewArgs(args: unknown, fallback?: string): string | undefined {
     return fallback ?? previewValue(args);
 }
 
+function previewPartialArgs(args: unknown, fallback?: string): string | undefined {
+    if (fallback !== undefined) {
+        return fallback;
+    }
+    if (typeof args === "string") {
+        return compactWhitespaceText(
+            args.slice(0, MAX_PREVIEW_CHARACTERS * 2),
+            MAX_PREVIEW_CHARACTERS,
+        );
+    }
+    if (
+        typeof args === "number" ||
+        typeof args === "boolean" ||
+        typeof args === "bigint" ||
+        args === null
+    ) {
+        return String(args);
+    }
+    if (Array.isArray(args)) {
+        return args.length === 0 ? undefined : `${args.length} items`;
+    }
+    if (!isRecord(args)) {
+        return undefined;
+    }
+
+    const parts: string[] = [];
+    let omitted = false;
+    for (const key in args) {
+        if (!Object.prototype.propertyIsEnumerable.call(args, key)) {
+            continue;
+        }
+        if (parts.length >= MAX_PARTIAL_PREVIEW_PROPERTIES) {
+            omitted = true;
+            break;
+        }
+        const value = args[key];
+        if (typeof value === "string") {
+            const preview = compactWhitespaceText(value.slice(0, 96 * 2), 96);
+            parts.push(preview === undefined ? key : `${key}: ${preview}`);
+        } else if (
+            typeof value === "number" ||
+            typeof value === "boolean" ||
+            typeof value === "bigint" ||
+            value === null
+        ) {
+            parts.push(`${key}: ${String(value)}`);
+        } else if (Array.isArray(value)) {
+            parts.push(`${key}: ${value.length} items`);
+        } else if (isRecord(value)) {
+            parts.push(`${key}: object`);
+        } else if (value !== undefined) {
+            parts.push(key);
+        }
+    }
+    if (parts.length === 0) {
+        return undefined;
+    }
+    const suffix = omitted ? " • more fields" : "";
+    return truncateText(`${parts.join(" • ")}${suffix}`, MAX_PREVIEW_CHARACTERS);
+}
+
+function previewArgsForContext(
+    args: unknown,
+    context: ThirdPartyToolRenderContext,
+    fallback?: string,
+): string | undefined {
+    return context.isPartial || !context.argsComplete
+        ? previewPartialArgs(args, fallback)
+        : previewArgs(args, fallback);
+}
+
 function textOutput(result: ThirdPartyToolResult): string | undefined {
     const content = result.content;
     if (!Array.isArray(content)) {
@@ -520,7 +592,7 @@ function createGenericRenderer(toolName: string, label?: string): ThirdPartyTool
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: label ?? `Called ${displayToolName(toolName)}`,
-                body: previewArgs(args),
+                body: previewArgsForContext(args, context),
                 maxRenderedLines: 4,
                 expanded: context.expanded,
             });
@@ -531,9 +603,9 @@ function createGenericRenderer(toolName: string, label?: string): ThirdPartyTool
     };
 }
 
-function summarizeBrowserArgs(args: unknown): CallSummary {
+function summarizeBrowserArgs(args: unknown, context: ThirdPartyToolRenderContext): CallSummary {
     if (!isRecord(args)) {
-        return { label: "Browser", body: previewArgs(args) };
+        return { label: "Browser", body: previewArgsForContext(args, context) };
     }
 
     if (isRecord(args.electron)) {
@@ -544,7 +616,7 @@ function summarizeBrowserArgs(args: unknown): CallSummary {
         const summary = [action, appName].filter(isDefined).join(" ");
         return {
             label: BROWSER_COMMAND_LABELS.get("electron") ?? "Electron",
-            body: summary.length > 0 ? summary : previewArgs(args.electron),
+            body: summary.length > 0 ? summary : previewArgsForContext(args.electron, context),
         };
     }
 
@@ -558,7 +630,7 @@ function summarizeBrowserArgs(args: unknown): CallSummary {
         if (args[key] !== undefined) {
             return {
                 label: BROWSER_COMMAND_LABELS.get(key) ?? "Browser",
-                body: previewArgs(args[key]),
+                body: previewArgsForContext(args[key], context),
             };
         }
     }
@@ -570,16 +642,19 @@ function summarizeBrowserArgs(args: unknown): CallSummary {
     if (command !== undefined && commandArgs !== undefined) {
         return {
             label: BROWSER_COMMAND_LABELS.get(command) ?? `Browser ${command}`,
-            body: previewArgs(commandArgs.slice(1)),
+            body:
+                context.isPartial || !context.argsComplete
+                    ? `${Math.max(0, commandArgs.length - 1)} args`
+                    : previewArgs(commandArgs.slice(1)),
         };
     }
 
-    return { label: "Browser", body: previewArgs(args) };
+    return { label: "Browser", body: previewArgsForContext(args, context) };
 }
 
-function summarizeMcpArgs(args: unknown): CallSummary {
+function summarizeMcpArgs(args: unknown, context: ThirdPartyToolRenderContext): CallSummary {
     if (!isRecord(args)) {
-        return { label: "MCP", body: previewArgs(args) };
+        return { label: "MCP", body: previewArgsForContext(args, context) };
     }
 
     const tool =
@@ -589,7 +664,7 @@ function summarizeMcpArgs(args: unknown): CallSummary {
     if (tool !== undefined) {
         return {
             label: MCP_COMMAND_LABELS.get(tool) ?? `MCP ${tool}`,
-            body: previewArgs(args.args ?? args),
+            body: previewArgsForContext(args.args ?? args, context),
         };
     }
 
@@ -598,14 +673,16 @@ function summarizeMcpArgs(args: unknown): CallSummary {
         return { label: "MCP Connect", body: connect };
     }
 
-    return { label: "MCP", body: previewArgs(args) };
+    return { label: "MCP", body: previewArgsForContext(args, context) };
 }
 
 function createBrowserRenderer(toolName: string): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const summary =
-                toolName === "mcp" ? summarizeMcpArgs(args) : summarizeBrowserArgs(args);
+                toolName === "mcp"
+                    ? summarizeMcpArgs(args, context)
+                    : summarizeBrowserArgs(args, context);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: summary.label,
@@ -628,7 +705,7 @@ function createMcpToolRenderer(toolName: string): ThirdPartyToolRenderer {
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: label,
-                body: previewArgs(args),
+                body: previewArgsForContext(args, context),
                 maxRenderedLines: 4,
                 expanded: context.expanded,
             });
@@ -833,9 +910,13 @@ function createGoalRenderer(toolName: string): ThirdPartyToolRenderer {
     };
 }
 
-function summarizeWebRunArgs(args: unknown, theme: CodexRenderTheme): string | undefined {
+function summarizeWebRunArgs(
+    args: unknown,
+    theme: CodexRenderTheme,
+    context: ThirdPartyToolRenderContext,
+): string | undefined {
     if (!isRecord(args)) {
-        return previewArgs(args);
+        return previewArgsForContext(args, context);
     }
 
     const webRunActions = [
@@ -858,12 +939,17 @@ function summarizeWebRunArgs(args: unknown, theme: CodexRenderTheme): string | u
             ),
         )
         .filter(isDefined);
-    return parts.length > 0 ? highlightUrlText(theme, parts.join(" • ")) : previewArgs(args);
+    return parts.length > 0
+        ? highlightUrlText(theme, parts.join(" • "))
+        : previewArgsForContext(args, context);
 }
 
-function summarizeImagegenArgs(args: unknown): string | undefined {
+function summarizeImagegenArgs(
+    args: unknown,
+    context: ThirdPartyToolRenderContext,
+): string | undefined {
     if (!isRecord(args)) {
-        return previewArgs(args);
+        return previewArgsForContext(args, context);
     }
     const prompt = compactQuotedText(getString(args, "prompt"), 140);
     const referenced = getArray(args, "referenced_image_paths") ?? getArray(args, "images");
@@ -876,9 +962,13 @@ function summarizeImagegenArgs(args: unknown): string | undefined {
     return summary.length > 0 ? summary : undefined;
 }
 
-function summarizeViewImageArgs(args: unknown, theme: CodexRenderTheme): string | undefined {
+function summarizeViewImageArgs(
+    args: unknown,
+    theme: CodexRenderTheme,
+    context: ThirdPartyToolRenderContext,
+): string | undefined {
     if (!isRecord(args)) {
-        return previewArgs(args);
+        return previewArgsForContext(args, context);
     }
     const path =
         getString(args, "path") ?? getString(args, "file_path") ?? getString(args, "image_path");
@@ -1250,18 +1340,19 @@ function coreCallBody(
     toolName: string,
     args: unknown,
     theme: CodexRenderTheme,
+    context: ThirdPartyToolRenderContext,
 ): string | undefined {
     const normalized = baseToolName(toolName);
     if (normalized === "web_run") {
-        return summarizeWebRunArgs(args, theme);
+        return summarizeWebRunArgs(args, theme, context);
     }
     if (normalized === "imagegen") {
-        return summarizeImagegenArgs(args);
+        return summarizeImagegenArgs(args, context);
     }
     if (normalized === "view_image") {
-        return summarizeViewImageArgs(args, theme);
+        return summarizeViewImageArgs(args, theme, context);
     }
-    return previewArgs(args);
+    return previewArgsForContext(args, context);
 }
 
 function parseAskUserQuestionOption(value: unknown): AskUserQuestionOption | undefined {
@@ -1354,10 +1445,15 @@ function summarizeAskUserQuestionArgs(
     args: unknown,
     theme: CodexRenderTheme,
     expanded: boolean,
+    context: ThirdPartyToolRenderContext,
 ): string | undefined {
+    if (context.isPartial || !context.argsComplete) {
+        return previewArgsForContext(args, context);
+    }
+
     const questions = parseAskUserQuestions(args);
     if (questions.length === 0) {
-        return previewArgs(args);
+        return previewArgsForContext(args, context);
     }
 
     const lines: string[] = [];
@@ -1451,7 +1547,7 @@ function createAskUserQuestionRenderer(toolName: string): ThirdPartyToolRenderer
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: coreCallLabel(toolName),
-                body: summarizeAskUserQuestionArgs(args, theme, context.expanded),
+                body: summarizeAskUserQuestionArgs(args, theme, context.expanded, context),
                 maxRenderedLines: 5,
                 expanded: context.expanded,
             });
@@ -1531,7 +1627,7 @@ function createCoreRenderer(toolName: string): ThirdPartyToolRenderer {
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: coreCallLabel(toolName),
-                body: coreCallBody(toolName, args, theme),
+                body: coreCallBody(toolName, args, theme, context),
                 maxRenderedLines: 4,
                 expanded: context.expanded,
             });
@@ -1564,9 +1660,12 @@ function displaySubagentType(value: string | undefined): string | undefined {
     return value;
 }
 
-function summarizeAgentLaunchArgs(args: unknown): string | undefined {
+function summarizeAgentLaunchArgs(
+    args: unknown,
+    context: ThirdPartyToolRenderContext,
+): string | undefined {
     if (!isRecord(args)) {
-        return previewArgs(args);
+        return previewArgsForContext(args, context);
     }
 
     const description = getNonEmptyString(args, "description");
@@ -1594,12 +1693,15 @@ function summarizeAgentLaunchArgs(args: unknown): string | undefined {
     const summary = [description ?? prompt, metadata.join(" · ")]
         .filter(isNonEmptyString)
         .join("\n");
-    return summary.length > 0 ? summary : previewArgs(args);
+    return summary.length > 0 ? summary : previewArgsForContext(args, context);
 }
 
-function summarizeSubagentLookupArgs(args: unknown): string | undefined {
+function summarizeSubagentLookupArgs(
+    args: unknown,
+    context: ThirdPartyToolRenderContext,
+): string | undefined {
     if (!isRecord(args)) {
-        return previewArgs(args);
+        return previewArgsForContext(args, context);
     }
 
     const agentId = getNonEmptyString(args, "agent_id") ?? getNonEmptyString(args, "agentId");
@@ -1608,32 +1710,39 @@ function summarizeSubagentLookupArgs(args: unknown): string | undefined {
         getBoolean(args, "verbose") === true ? "verbose" : undefined,
     ].filter(isDefined);
     const summary = [agentId, metadata.join(" · ")].filter(isNonEmptyString).join(" · ");
-    return summary.length > 0 ? summary : previewArgs(args);
+    return summary.length > 0 ? summary : previewArgsForContext(args, context);
 }
 
-function summarizeSubagentSteerArgs(args: unknown): string | undefined {
+function summarizeSubagentSteerArgs(
+    args: unknown,
+    context: ThirdPartyToolRenderContext,
+): string | undefined {
     if (!isRecord(args)) {
-        return previewArgs(args);
+        return previewArgsForContext(args, context);
     }
 
     const agentId = getNonEmptyString(args, "agent_id") ?? getNonEmptyString(args, "agentId");
     const message = compactQuotedText(getString(args, "message"), 140);
     const summary = [agentId, message].filter(isNonEmptyString).join("\n");
-    return summary.length > 0 ? summary : previewArgs(args);
+    return summary.length > 0 ? summary : previewArgsForContext(args, context);
 }
 
-function agentCallBody(toolName: string, args: unknown): string | undefined {
+function agentCallBody(
+    toolName: string,
+    args: unknown,
+    context: ThirdPartyToolRenderContext,
+): string | undefined {
     const normalized = baseToolName(toolName);
     if (normalized === "Agent" || normalized === "agent") {
-        return summarizeAgentLaunchArgs(args);
+        return summarizeAgentLaunchArgs(args, context);
     }
     if (normalized === "get_subagent_result") {
-        return summarizeSubagentLookupArgs(args);
+        return summarizeSubagentLookupArgs(args, context);
     }
     if (normalized === "steer_subagent") {
-        return summarizeSubagentSteerArgs(args);
+        return summarizeSubagentSteerArgs(args, context);
     }
-    return previewArgs(args);
+    return previewArgsForContext(args, context);
 }
 
 function isWhitespaceChar(text: string, index: number): boolean {
@@ -1768,7 +1877,7 @@ function createAgentRenderer(toolName: string): ThirdPartyToolRenderer {
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: agentCallLabel(toolName),
-                body: agentCallBody(toolName, args),
+                body: agentCallBody(toolName, args, context),
                 maxRenderedLines: 4,
                 expanded: context.expanded,
             });

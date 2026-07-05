@@ -33,7 +33,16 @@ type RenderShellMode = "default" | "self";
 
 type ToolExecutionInstance = object;
 
-export type BuiltInToolName = "read" | "bash" | "edit" | "write" | "find" | "grep" | "ls";
+export type BuiltInToolName =
+    | "read"
+    | "bash"
+    | "edit"
+    | "write"
+    | "find"
+    | "grep"
+    | "ls"
+    | "delete"
+    | "webSearch";
 
 export type BuiltInToolRenderContext = ThirdPartyToolRenderContext & {
     readonly invalidate: () => void;
@@ -98,15 +107,47 @@ type ThirdPartyRendererPatchState = {
     readonly wrappers: RendererPatchWrappers;
 };
 
-const BUILT_IN_TOOL_NAMES = new Set<string>([
-    "read",
-    "bash",
-    "edit",
-    "write",
-    "find",
-    "grep",
-    "ls",
-]);
+function nativeBuiltInToolName(toolName: string): BuiltInToolName | undefined {
+    switch (toolName) {
+        case "read":
+        case "bash":
+        case "edit":
+        case "write":
+        case "find":
+        case "grep":
+        case "ls":
+            return toolName;
+        default:
+            return undefined;
+    }
+}
+
+/** Returns the Codex-look renderer family for Pi/Cursor/Grok-compatible tool names. */
+export function compatBuiltInToolName(toolName: string): BuiltInToolName | undefined {
+    switch (toolName) {
+        case "Read":
+            return "read";
+        case "Write":
+            return "write";
+        case "StrReplace":
+        case "Edit":
+            return "edit";
+        case "Delete":
+            return "delete";
+        case "LS":
+            return "ls";
+        case "Grep":
+            return "grep";
+        case "Glob":
+            return "find";
+        case "Shell":
+            return "bash";
+        case "WebSearch":
+            return "webSearch";
+        default:
+            return undefined;
+    }
+}
 
 type ToolExecutionPrototype = {
     getCallRenderer?: (this: ToolExecutionInstance) => ToolCallRenderer | undefined;
@@ -139,14 +180,16 @@ function hasBuiltInToolDefinition(instance: ToolExecutionInstance): boolean {
 
 function builtInToolName(instance: ToolExecutionInstance): BuiltInToolName | undefined {
     const toolName = getNonEmptyStringField(instance, "toolName");
-    if (toolName === undefined || !hasBuiltInToolDefinition(instance)) {
+    if (toolName === undefined) {
         return undefined;
     }
-    return isBuiltInToolName(toolName) ? toolName : undefined;
-}
 
-function isBuiltInToolName(toolName: string): toolName is BuiltInToolName {
-    return BUILT_IN_TOOL_NAMES.has(toolName);
+    const nativeName = nativeBuiltInToolName(toolName);
+    if (nativeName !== undefined) {
+        return hasBuiltInToolDefinition(instance) ? nativeName : undefined;
+    }
+
+    return compatBuiltInToolName(toolName);
 }
 
 function toolDefinition(instance: ToolExecutionInstance): unknown {

@@ -52,6 +52,7 @@ import {
 import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
 import { createScriptPreviewStore } from "./script-preview-store.ts";
 import {
+    compatBuiltInToolName,
     configureBuiltInToolRendererPatch,
     configureThirdPartyToolRendererPatch,
     type BuiltInToolRendererOptions,
@@ -77,6 +78,7 @@ type BuiltInResultOptions = Parameters<BuiltInToolRendererOptions["renderResult"
 const editPreviews = new EditPreviewStore(300);
 const scriptPreviews = createScriptPreviewStore();
 const explorationGroups = new ExplorationGroupStore();
+const PARTIAL_BASH_COMMAND_PREVIEW_CHARS = 4_000;
 const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
@@ -242,6 +244,31 @@ function stringField(args: unknown, key: string): string | undefined {
     return typeof value === "string" ? value : undefined;
 }
 
+function stringFieldFrom(args: unknown, keys: readonly string[]): string | undefined {
+    for (const key of keys) {
+        const value = stringField(args, key);
+        if (value !== undefined) {
+            return value;
+        }
+    }
+    return undefined;
+}
+
+function pathField(args: unknown): string | undefined {
+    return stringFieldFrom(args, ["path", "file_path"]);
+}
+
+function commandField(args: unknown): string | undefined {
+    return stringFieldFrom(args, ["command", "cmd"]);
+}
+
+function partialBashCommandPreview(command: string): string {
+    if (command.length <= PARTIAL_BASH_COMMAND_PREVIEW_CHARS) {
+        return command;
+    }
+    return `${command.slice(0, PARTIAL_BASH_COMMAND_PREVIEW_CHARS)}\n… command preview truncated while streaming`;
+}
+
 function numberField(args: unknown, key: string): number | undefined {
     if (!isRecord(args)) {
         return undefined;
@@ -250,8 +277,38 @@ function numberField(args: unknown, key: string): number | undefined {
     return typeof value === "number" ? value : undefined;
 }
 
+function normalizedWriteArgs(args: unknown): unknown {
+    const path = pathField(args);
+    const content = stringFieldFrom(args, ["content", "contents"]);
+    return {
+        ...(isRecord(args) ? args : {}),
+        ...(path === undefined ? {} : { path }),
+        ...(content === undefined ? {} : { content }),
+    };
+}
+
+function replacementEditFromArgs(args: unknown): ReadonlyArray<Record<string, string>> | undefined {
+    const oldText = stringFieldFrom(args, ["oldText", "old_string"]);
+    const newText = stringFieldFrom(args, ["newText", "new_string"]);
+    if (oldText === undefined || newText === undefined) {
+        return undefined;
+    }
+    return [{ oldText, newText }];
+}
+
+function normalizedEditArgs(args: unknown): unknown {
+    const path = pathField(args);
+    const existingEdits = isRecord(args) && Array.isArray(args.edits) ? args.edits : undefined;
+    const edits = existingEdits ?? replacementEditFromArgs(args);
+    return {
+        ...(isRecord(args) ? args : {}),
+        ...(path === undefined ? {} : { path }),
+        ...(edits === undefined ? {} : { edits }),
+    };
+}
+
 function readActionArgs(args: unknown): ReadActionArgs {
-    const path = stringField(args, "path");
+    const path = pathField(args);
     const offset = numberField(args, "offset");
     const limit = numberField(args, "limit");
     return {
@@ -262,8 +319,8 @@ function readActionArgs(args: unknown): ReadActionArgs {
 }
 
 function findActionArgs(args: unknown): FindActionArgs {
-    const pattern = stringField(args, "pattern");
-    const path = stringField(args, "path");
+    const pattern = stringFieldFrom(args, ["pattern", "glob"]);
+    const path = pathField(args);
     const limit = numberField(args, "limit");
     return {
         ...(pattern === undefined ? {} : { pattern }),
@@ -273,9 +330,9 @@ function findActionArgs(args: unknown): FindActionArgs {
 }
 
 function grepActionArgs(args: unknown): GrepActionArgs {
-    const pattern = stringField(args, "pattern");
-    const path = stringField(args, "path");
-    const glob = stringField(args, "glob");
+    const pattern = stringFieldFrom(args, ["pattern", "query"]);
+    const path = pathField(args);
+    const glob = stringFieldFrom(args, ["glob", "include", "glob_filter"]);
     const limit = numberField(args, "limit");
     return {
         ...(pattern === undefined ? {} : { pattern }),
@@ -286,12 +343,16 @@ function grepActionArgs(args: unknown): GrepActionArgs {
 }
 
 function lsActionArgs(args: unknown): LsActionArgs {
-    const path = stringField(args, "path");
+    const path = pathField(args);
     const limit = numberField(args, "limit");
     return {
         ...(path === undefined ? {} : { path }),
         ...(limit === undefined ? {} : { limit }),
     };
+}
+
+function webSearchQuery(args: unknown): string | undefined {
+    return stringFieldFrom(args, ["query", "search_term"]);
 }
 
 function hasImageContent(result: TextResult): boolean {
@@ -364,6 +425,10 @@ function renderBuiltInToolCall(options: {
                 return renderWriteCall(args, theme, context, options.dynamicStatusLabels);
             case "edit":
                 return renderEditCall(args, theme, context, options.dynamicStatusLabels);
+            case "delete":
+                return renderDeleteCall(args, theme, context);
+            case "webSearch":
+                return renderWebSearchCall(args, theme, context);
         }
     };
 }
@@ -378,7 +443,7 @@ function renderBuiltInToolResult(settings: {
                 return hasImageContent(result)
                     ? undefined
                     : renderExplorationResult(result, options.expanded, theme, {
-                          syntaxPath: syntaxPathFromToolArg(stringField(context.args, "path")),
+                          syntaxPath: syntaxPathFromToolArg(pathField(context.args)),
                       });
             case "find":
             case "grep":
@@ -402,8 +467,42 @@ function renderBuiltInToolResult(settings: {
                     context,
                     settings.dynamicStatusLabels,
                 );
+            case "delete":
+            case "webSearch":
+                return renderCodexOutput(theme, textOutput(result), {
+                    expanded: options.expanded,
+                    mode: "head",
+                    maxPreviewLines: 5,
+                });
         }
     };
+}
+
+function callState(context: BuiltInRenderContext) {
+    return context.isError ? "error" : context.isPartial ? "muted" : "success";
+}
+
+function renderDeleteCall(args: unknown, theme: BuiltInRenderTheme, context: BuiltInRenderContext) {
+    closeExplorationGroup();
+    return renderCodexCall(theme, {
+        state: callState(context),
+        statusText: "Delete",
+        body: formatPathTarget(theme, pathField(args)),
+    });
+}
+
+function renderWebSearchCall(
+    args: unknown,
+    theme: BuiltInRenderTheme,
+    context: BuiltInRenderContext,
+) {
+    closeExplorationGroup();
+    const query = webSearchQuery(args);
+    return renderCodexCall(theme, {
+        state: callState(context),
+        statusText: "Web Search",
+        ...(query === undefined ? {} : { body: query }),
+    });
 }
 
 function renderBashCall(
@@ -414,7 +513,23 @@ function renderBashCall(
 ) {
     closeExplorationGroup();
     const state = context.isError ? "error" : context.isPartial ? "running" : "success";
-    const command = stringField(args, "command") ?? "";
+    const command = commandField(args) ?? "";
+    if (context.isPartial && scriptPreviews.get(context.toolCallId) === undefined) {
+        return renderScriptCall(
+            theme,
+            {
+                label: "Bash",
+                language: "bash",
+                code: partialBashCommandPreview(command),
+            },
+            {
+                state,
+                expanded: false,
+                maxCodePreviewLines: 3,
+                headerLayout: headerLayout(),
+            },
+        );
+    }
     const script = scriptPreviews.get(context.toolCallId) ??
         parseScriptInvocation(command) ?? {
             label: "Bash",
@@ -438,7 +553,7 @@ function renderBashResult(
 ) {
     const output = textOutput(result);
     const language = detectStructuredOutputLanguage(output);
-    const script = parseScriptInvocation(stringField(context.args, "command"));
+    const script = parseScriptInvocation(commandField(context.args));
     return renderCodexOutput(theme, output, {
         expanded: options.expanded,
         mode: "headTail",
@@ -458,7 +573,7 @@ function renderWriteCall(
 ) {
     closeExplorationGroup();
     const labelColumnWidth = mutationLabelColumnWidth(context, dynamicStatusLabels);
-    return renderWriteCallPreview(args, theme, {
+    return renderWriteCallPreview(normalizedWriteArgs(args), theme, {
         ...context,
         dynamicStatusLabels,
         ...(labelColumnWidth === undefined ? {} : { mutationLabelColumnWidth: labelColumnWidth }),
@@ -483,7 +598,7 @@ function renderWriteResult(
         return renderPierreDiff(pierrePayload, theme, { expanded: options.expanded }, context);
     }
     if (!context.isError) {
-        const fallback = renderSuccessfulWriteResultFallback(context.args);
+        const fallback = renderSuccessfulWriteResultFallback(normalizedWriteArgs(context.args));
         if (fallback !== undefined) {
             return fallback;
         }
@@ -517,7 +632,10 @@ function renderEditCall(
         );
     }
 
-    const summary = summarizeEditCall(args, { ...context, dynamicStatusLabels });
+    const summary = summarizeEditCall(normalizedEditArgs(args), {
+        ...context,
+        dynamicStatusLabels,
+    });
     const state = summary.hasInvalidEdits || context.isError ? "error" : "muted";
     return renderCodexCall(theme, {
         state,
@@ -550,7 +668,7 @@ function renderEditResult(
         typeof result.details.diff === "string" &&
         hasNonWhitespaceText(result.details.diff)
     ) {
-        const path = stringField(context.args, "path");
+        const path = pathField(context.args);
         const summaryPayload = buildLargeDiffSummaryPayload({
             path: path ?? "",
             diffText: result.details.diff,
@@ -641,15 +759,21 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     applyConfig(config);
 
     pi.on("tool_call", (event) => {
-        if (!isToolCallEventType("bash", event)) {
+        if (
+            !isToolCallEventType("bash", event) &&
+            compatBuiltInToolName(event.toolName) !== "bash"
+        ) {
             return;
         }
-        rememberRawScriptPreview(scriptPreviews, event.toolCallId, event.input.command);
+        const command = commandField(event.input);
+        if (command !== undefined) {
+            rememberRawScriptPreview(scriptPreviews, event.toolCallId, command);
+        }
     });
 
     pi.on("tool_result", (event, ctx) => {
-        if (event.toolName === "bash") {
-            const command = stringField(event.input, "command");
+        if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
+            const command = commandField(event.input);
             if (command !== undefined) {
                 rememberRawScriptPreview(scriptPreviews, event.toolCallId, command);
                 scheduleFormattedScriptPreview({
@@ -662,13 +786,20 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
             }
         }
 
-        if (!isEditToolResult(event) || event.isError || typeof event.details?.diff !== "string") {
+        const rendersAsEdit =
+            isEditToolResult(event) || compatBuiltInToolName(event.toolName) === "edit";
+        if (
+            !rendersAsEdit ||
+            event.isError ||
+            !isRecord(event.details) ||
+            typeof event.details.diff !== "string"
+        ) {
             return;
         }
         editPreviews.set(
             event.toolCallId,
             buildEditPreview({
-                path: stringField(event.input, "path") ?? "",
+                path: pathField(event.input) ?? "",
                 diff: event.details.diff,
             }),
         );

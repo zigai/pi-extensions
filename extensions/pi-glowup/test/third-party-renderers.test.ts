@@ -66,6 +66,31 @@ describe("third-party tool renderers", () => {
         expect(rendered).not.toContain("line 10000");
     });
 
+    it("uses shallow previews for partial generic third-party tool arguments", () => {
+        const renderer = createThirdPartyToolRenderer("custom_tool");
+        const args = {
+            prompt: "generate " + "token ".repeat(10_000),
+            nested: { content: "do not traverse this".repeat(1_000) },
+            files: Array.from({ length: 5_000 }, (_value, index) => `file-${index}`),
+        };
+
+        const rendered = renderer
+            .renderCall(args, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+                expanded: true,
+            })
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("prompt: generate token");
+        expect(rendered).toContain("nested: object");
+        expect(rendered).toContain("files: 5000 items");
+        expect(rendered).not.toContain("do not traverse this");
+        expect(rendered).not.toContain("file-4999");
+    });
+
     it("expands long third-party tool call arguments", () => {
         const renderer = createThirdPartyToolRenderer("custom_tool");
         const args = { lines: Array.from({ length: 10 }, (_value, index) => `line ${index + 1}`) };
@@ -93,6 +118,30 @@ describe("third-party tool renderers", () => {
 
         expect(lines[0]).toContain("Browser Snapshot");
         expect(lines.join("\n")).toContain('"-i"');
+    });
+
+    it("uses shallow previews for partial agent browser job arguments", () => {
+        const renderer = createThirdPartyToolRenderer("agent_browser");
+
+        const rendered = renderer
+            .renderCall(
+                {
+                    job: {
+                        steps: Array.from({ length: 5_000 }, (_value, index) => ({
+                            action: "fill",
+                            text: `secretly large ${index}`,
+                        })),
+                    },
+                },
+                plainTheme,
+                { ...renderContext, argsComplete: false, isPartial: true, expanded: true },
+            )
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("Browser");
+        expect(rendered).toContain("steps: 5000 items");
+        expect(rendered).not.toContain("secretly large");
     });
 
     it("uses Chrome DevTools labels for MCP gateway calls", () => {

@@ -141,6 +141,53 @@ describe("tool execution patches", () => {
         expect(prototype.getRenderShell.call(customInstance)).toBe("default");
     });
 
+    it("renders compatibility tool names through canonical built-in renderers", () => {
+        const prototype = createPrototype();
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: (toolName) => ({
+                    render: () => [`called ${toolName}`],
+                    invalidate: noop,
+                }),
+                renderResult: (toolName) => ({
+                    render: () => [`result ${toolName}`],
+                    invalidate: noop,
+                }),
+            },
+            prototype,
+        );
+
+        const lsInstance: FakeToolExecutionInstance = {
+            toolName: "LS",
+            toolDefinition: {},
+        };
+        const deleteInstance: FakeToolExecutionInstance = {
+            toolName: "Delete",
+            toolDefinition: {},
+        };
+
+        expect(prototype.getRenderShell.call(lsInstance)).toBe("self");
+        expect(prototype.hasRendererDefinition.call(lsInstance)).toBe(true);
+        expect(
+            prototype.getCallRenderer.call(lsInstance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["called ls"]);
+        expect(
+            prototype.getResultRenderer
+                .call(lsInstance)?.(
+                    { content: [] },
+                    { expanded: false, isPartial: false },
+                    plainTheme,
+                    renderContext,
+                )
+                .render(80),
+        ).toEqual(["result ls"]);
+        expect(
+            prototype.getCallRenderer
+                .call(deleteInstance)?.({}, plainTheme, renderContext)
+                .render(80),
+        ).toEqual(["called delete"]);
+    });
+
     it("restores built-in tool renderers when disabled", () => {
         const prototype = createPrototype();
         const originalGetCallRenderer = Reflect.get(prototype, "getCallRenderer");

@@ -96,4 +96,22 @@ describe("apply_patch renderer", () => {
         expect(rendered).toContain("Invalid patch: missing header");
         expectLinesWithinWidth(lines, 80);
     });
+
+    it("keeps incomplete streaming patch calls on the cheap fallback path", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch");
+        const partialPatch = `${samplePatch.replace("*** End Patch", "")}\n${"+extra\n".repeat(1_000)}`;
+        const lines = renderer
+            .renderCall({ patch: partialPatch }, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100);
+        const rendered = lines.join("\n");
+
+        expect(rendered).toContain("• Editing patch (+0 -0)");
+        expect(rendered).not.toContain("README.md");
+        expect(rendered).not.toContain("+extra");
+        expectLinesWithinWidth(lines, 100);
+    });
 });
