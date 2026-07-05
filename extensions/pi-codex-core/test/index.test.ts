@@ -76,6 +76,7 @@ test("parses codex config with safe defaults", () => {
     assert.equal(config.tools.webSearch, false);
     assert.equal(config.tools.imageGeneration, DEFAULT_CODEX_CORE_CONFIG.tools.imageGeneration);
     assert.equal(config.tools.viewImageDescriptions, true);
+    assert.equal(config.tools.applyPatch, "off");
     assert.equal(config.prompt.mode, "codex");
     assert.equal(config.compaction.enabled, true);
     assert.equal(config.compaction.auto, false);
@@ -199,6 +200,69 @@ test("ignores project codex config when session cwd is untrusted", async () => {
         await harness.startSession(makeExtensionContext(cwd, false));
 
         assert.ok(harness.activeTools.includes("web_run"));
+        assert.equal(harness.activeTools.includes("apply_patch"), false);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("apply_patch replaces edit when enabled for OpenAI-like models", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-tools-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(join(globalConfigPath, ".."), { recursive: true });
+        await writeFile(globalConfigPath, JSON.stringify({ tools: { applyPatch: "openai" } }));
+
+        const harness = makeExtensionHarness(["read", "edit", "bash"]);
+        extension(harness.api);
+        await harness.startSession(makeExtensionContext(cwd, true));
+
+        assert.ok(harness.activeTools.includes("apply_patch"));
+        assert.equal(harness.activeTools.includes("edit"), false);
+
+        await writeFile(globalConfigPath, JSON.stringify({ tools: { applyPatch: "off" } }));
+        await harness.startSession(makeExtensionContext(cwd, true));
+
+        assert.equal(harness.activeTools.includes("apply_patch"), false);
+        assert.ok(harness.activeTools.includes("edit"));
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("apply_patch all mode replaces edit for non-OpenAI models", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-all-tools-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(join(globalConfigPath, ".."), { recursive: true });
+        await writeFile(globalConfigPath, JSON.stringify({ tools: { applyPatch: "all" } }));
+
+        const harness = makeExtensionHarness(["read", "edit", "bash"]);
+        extension(harness.api);
+        await harness.startSession(
+            makeExtensionContext(cwd, true, {
+                provider: "anthropic",
+                api: "anthropic-messages",
+                id: "claude-sonnet",
+                baseUrl: "https://api.anthropic.com",
+                input: ["text"],
+            }),
+        );
+
+        assert.ok(harness.activeTools.includes("apply_patch"));
+        assert.equal(harness.activeTools.includes("edit"), false);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -242,6 +306,7 @@ test("codex command saves only changed global config values", async () => {
             imageGeneration: true,
             viewImage: true,
             viewImageDescriptions: false,
+            applyPatch: "off",
         });
         assert.deepEqual(savedConfig.prompt, { mode: "codex" });
         assert.equal(appliedConfig.tools.webSearch, false);
@@ -1962,8 +2027,8 @@ type ExtensionHarness = {
     readonly startSession: (ctx: ExtensionContext) => Promise<void>;
 };
 
-function makeExtensionHarness(): ExtensionHarness {
-    let activeTools: string[] = [];
+function makeExtensionHarness(initialActiveTools: readonly string[] = []): ExtensionHarness {
+    let activeTools: string[] = [...initialActiveTools];
     let sessionStart: ExtensionSessionStartHandler | undefined;
     const api = {
         registerTool() {},
@@ -2015,18 +2080,32 @@ function makeCodexCommandHarness(): CodexCommandHarness {
     };
 }
 
-function makeExtensionContext(cwd: string, trusted: boolean): ExtensionContext {
+type TestExtensionModel = {
+    readonly provider: string;
+    readonly api: string;
+    readonly id: string;
+    readonly baseUrl: string;
+    readonly input: readonly string[];
+};
+
+const DEFAULT_TEST_EXTENSION_MODEL: TestExtensionModel = {
+    provider: "openai-codex",
+    api: "openai-codex-responses",
+    id: "gpt-5.5",
+    baseUrl: "https://chatgpt.com/backend-api",
+    input: ["text", "image"],
+};
+
+function makeExtensionContext(
+    cwd: string,
+    trusted: boolean,
+    model: TestExtensionModel = DEFAULT_TEST_EXTENSION_MODEL,
+): ExtensionContext {
     const ctx = {
         cwd,
         hasUI: false,
         isProjectTrusted: () => trusted,
-        model: {
-            provider: "openai-codex",
-            api: "openai-codex-responses",
-            id: "gpt-5.5",
-            baseUrl: "https://chatgpt.com/backend-api",
-            input: ["text", "image"],
-        },
+        model,
     };
     // SAFETY: This fixture supplies the fields read by session_start tool synchronization.
     return ctx as unknown as ExtensionContext;
