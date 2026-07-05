@@ -34,6 +34,10 @@ function stripAccentStyle(text: string): string {
     return text.replaceAll("<accent>", "").replaceAll("</accent>", "");
 }
 
+function compactRenderedText(text: string): string {
+    return text.replace(/[│└]/gu, " ").replace(/\s+/gu, " ");
+}
+
 describe("third-party tool renderers", () => {
     it("renders unknown tools as compact Codex-style calls", () => {
         const renderer = createThirdPartyToolRenderer("custom_tool");
@@ -350,6 +354,90 @@ describe("third-party tool renderers", () => {
             .render(100);
 
         expect(lines).toEqual([]);
+    });
+
+    it("renders ask_user_question calls as readable choices instead of JSON", () => {
+        const renderer = createThirdPartyToolRenderer("ask_user_question");
+
+        const lines = renderer
+            .renderCall(
+                {
+                    questions: [
+                        {
+                            header: "Candidates",
+                            question:
+                                "Which items should `/loti review` consider eligible for promotion into durable memory?",
+                            options: [
+                                {
+                                    label: "Stable durable only (Recommended)",
+                                    description: "Only promote candidates already marked stable.",
+                                },
+                                {
+                                    label: "Stable and pending",
+                                    description: "Include pending candidates in the review.",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                plainTheme,
+                renderContext,
+            )
+            .render(120);
+
+        const rendered = lines.join("\n");
+        expect(rendered).toContain("Asked User");
+        expect(stripAccentStyle(rendered)).toContain("Candidates");
+        expect(compactRenderedText(stripAccentStyle(rendered))).toContain(
+            "Which items should `/loti review` consider eligible for promotion into durable memory?",
+        );
+        expect(rendered).toContain("Choose one:");
+        expect(rendered).toContain("Stable durable only (Recommended)");
+        expect(rendered).not.toContain('"questions"');
+        expect(rendered).not.toContain('"description"');
+    });
+
+    it("renders ask_user_question answers without the boilerplate result sentence", () => {
+        const renderer = createThirdPartyToolRenderer("ask_user_question");
+        const args = {
+            questions: [
+                {
+                    header: "Candidates",
+                    question:
+                        "Which items should `/loti review` consider eligible for promotion into durable memory?",
+                    options: [
+                        {
+                            label: "Stable durable only (Recommended)",
+                            description: "Only promote candidates already marked stable.",
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const lines = renderer
+            .renderResult(
+                {
+                    content: [
+                        {
+                            type: "text",
+                            text: 'User has answered your questions: "Which items should `/loti review` consider eligible for promotion into durable memory?"="Stable durable only (Recommended)". You can now continue with the user\'s answers in mind.',
+                        },
+                    ],
+                },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                { ...renderContext, args },
+            )
+            .render(120);
+
+        const rendered = lines.join("\n");
+        expect(stripAccentStyle(rendered)).toContain("Candidates → Stable durable only");
+        expect(stripAccentStyle(rendered)).toContain(
+            "Which items should `/loti review` consider eligible for promotion into durable memory?",
+        );
+        expect(rendered).not.toContain("User has answered your questions");
+        expect(rendered).not.toContain("You can now continue");
     });
 
     it("labels view_image detail mode", () => {
