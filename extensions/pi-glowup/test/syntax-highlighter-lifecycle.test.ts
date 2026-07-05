@@ -2,10 +2,12 @@ import type { Highlighter } from "shiki";
 import { afterEach, describe, expect, it } from "vitest";
 import {
     disposeSyntaxHighlighting,
+    clearSyntaxHighlightCache,
     getSyntaxHighlighterForLanguage,
     highlightSyntaxCode,
     initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
+    syntaxHighlightCacheStats,
     type SyntaxHighlighterFactory,
 } from "../src/syntax/highlighter.ts";
 
@@ -108,9 +110,11 @@ describe("syntax highlighter lifecycle", () => {
         expect(highlightSyntaxCode("const value = 1;", "typescript").join("\n")).toContain(
             "\u001b[",
         );
+        expect(syntaxHighlightCacheStats().entries).toBeGreaterThan(0);
 
         await disposeSyntaxHighlighting();
 
+        expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
         expect(isSyntaxHighlightingReady()).toBe(false);
         expect(highlightSyntaxCode("const value = 1;", "typescript")).toEqual(["const value = 1;"]);
 
@@ -118,5 +122,19 @@ describe("syntax highlighter lifecycle", () => {
 
         expect(isSyntaxHighlightingReady()).toBe(false);
         expect(highlightSyntaxCode("const value = 1;", "typescript")).toEqual(["const value = 1;"]);
+    });
+
+    it("does not cache highlights when cache is disabled", async () => {
+        await initializeSyntaxHighlighting();
+        clearSyntaxHighlightCache();
+
+        highlightSyntaxCode("const streamed = 1;", "typescript", { cache: false });
+
+        expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
+
+        highlightSyntaxCode("const finalValue = 1;", "typescript");
+
+        expect(syntaxHighlightCacheStats().entries).toBe(1);
+        expect(syntaxHighlightCacheStats().bytes).toBeGreaterThan(0);
     });
 });

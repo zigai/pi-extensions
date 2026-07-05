@@ -4,6 +4,7 @@ import { highlightSyntaxCode } from "./highlighter.ts";
 export type CodeOutputSyntax = {
     readonly language?: string;
     readonly path?: string;
+    readonly cache?: boolean | undefined;
 };
 
 const MAX_STRUCTURED_OUTPUT_DETECTION_CHARS = 64 * 1024;
@@ -11,7 +12,7 @@ const MAX_STRUCTURED_OUTPUT_DETECTION_CHARS = 64 * 1024;
 /** Highlights code-like output when a language or path is known; otherwise returns normalized plain lines. */
 export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | undefined): string[] {
     const language = syntax?.language ?? syntaxLanguageFromPath(syntax?.path);
-    return highlightSyntaxCode(text, language);
+    return highlightSyntaxCode(text, language, { cache: syntax?.cache });
 }
 
 /** Detects small structured third-party output that is safe and useful to syntax-highlight. */
