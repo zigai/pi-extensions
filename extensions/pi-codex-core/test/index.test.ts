@@ -52,6 +52,12 @@ import { createWebRunTool } from "../src/tools/web-run.ts";
 import { Redacted } from "../src/redacted.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
 import {
+    countCodexTextTokens,
+    shutdownCodexTokenizer,
+    truncateCodexTextToTokenBudget,
+    warmCodexTokenizer,
+} from "../src/tokenizer.ts";
+import {
     fetchCodexUsage,
     formatCodexUsage,
     parseCodexRateLimitResetCreditsPayload,
@@ -650,6 +656,28 @@ test("renders compact invocation summaries for Codex tools", () => {
         ),
         /view_image \/tmp\/pi-agent\/pi-codex-core\/imagegen\/session\/latest\.png • detail=high/,
     );
+});
+
+test("Codex tokenizer worker restarts after shutdown", async () => {
+    await shutdownCodexTokenizer();
+    try {
+        const text = "alpha beta gamma delta epsilon zeta eta theta";
+        warmCodexTokenizer();
+        const countBeforeShutdown = await countCodexTextTokens(text);
+        const truncatedBeforeShutdown = await truncateCodexTextToTokenBudget(text, 3);
+
+        await shutdownCodexTokenizer();
+
+        const countAfterShutdown = await countCodexTextTokens(text);
+        const truncatedAfterShutdown = await truncateCodexTextToTokenBudget(text, 3);
+
+        assert.ok(countBeforeShutdown > 3);
+        assert.equal(countAfterShutdown, countBeforeShutdown);
+        assert.equal(truncatedAfterShutdown, truncatedBeforeShutdown);
+        assert.ok(truncatedAfterShutdown.length < text.length);
+    } finally {
+        await shutdownCodexTokenizer();
+    }
 });
 
 test("rejects invalid tool arguments before I/O", () => {
@@ -1413,6 +1441,75 @@ test("chains previous native compaction into the next remote v2 request", async 
     ]);
 });
 
+test("native compaction inserts synthetic output for missing tool results", async () => {
+    let requestBody: unknown;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as unknown;
+        const body = [
+            "event: response.output_item.done",
+            'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-missing-tool-result"}}',
+            "",
+            "event: response.completed",
+            'data: {"type":"response.completed","response":{"id":"resp_missing_tool_result","created_at":123}}',
+            "",
+        ].join("\n");
+        return new Response(body, { status: 200 });
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                messageEntry(
+                    "assistant-tool",
+                    null,
+                    assistantMessage([
+                        {
+                            type: "toolCall",
+                            id: "call/missing|item/missing",
+                            name: "read",
+                            arguments: { path: "missing.txt" },
+                        },
+                    ]),
+                ),
+                messageEntry("user-after-tool", "assistant-tool", userMessage("please continue")),
+            ],
+            firstKeptEntryId: "user-after-tool",
+        }),
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.ok(result?.compaction);
+    assert.ok(isRecord(requestBody));
+    const requestInput = responseInput(requestBody);
+    const callIndex = requestInput.findIndex(
+        (item) => isRecord(item) && item.type === "function_call",
+    );
+    const syntheticOutputIndex = requestInput.findIndex(
+        (item) =>
+            isRecord(item) &&
+            item.type === "function_call_output" &&
+            item.output === "No result provided",
+    );
+    const userIndex = requestInput.findIndex(
+        (item) => isRecord(item) && textFromResponseItem(item) === "please continue",
+    );
+
+    assert.ok(callIndex >= 0);
+    assert.ok(syntheticOutputIndex > callIndex);
+    assert.ok(userIndex > syntheticOutputIndex);
+    assert.deepEqual(requestInput[syntheticOutputIndex], {
+        type: "function_call_output",
+        call_id: "call_missing",
+        output: "No result provided",
+    });
+});
+
 test("preserves previous native compaction anchor while trimming next request", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
@@ -1522,6 +1619,89 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
     assert.ok(isRecord(outputItem));
     assert.equal(outputItem.output, "[truncated]");
     assert.equal(result?.compaction?.details.requestMeta?.rewrittenToolOutputs, 1);
+});
+
+test("rewrites multiple oversized tool outputs before serializing remote v2 compaction", async () => {
+    let requestBodyText = "";
+    const firstHugeOutput = `first huge output ${"a ".repeat(3_000)}`;
+    const secondHugeOutput = `second huge output ${"b ".repeat(3_000)}`;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBodyText = String(init?.body);
+        const body = [
+            "event: response.output_item.done",
+            'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-multi-tool"}}',
+            "",
+            "event: response.completed",
+            'data: {"type":"response.completed","response":{"id":"resp_multi_tool","created_at":123}}',
+            "",
+        ].join("\n");
+        return new Response(body, { status: 200 });
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                messageEntry(
+                    "assistant-tool-1",
+                    null,
+                    assistantMessage([
+                        {
+                            type: "toolCall",
+                            id: "call/1|item/1",
+                            name: "read",
+                            arguments: { path: "first.txt" },
+                        },
+                    ]),
+                ),
+                messageEntry(
+                    "tool-result-1",
+                    "assistant-tool-1",
+                    toolResultMessage("call/1|item/1", firstHugeOutput),
+                ),
+                messageEntry("user-after-tool-1", "tool-result-1", userMessage("continue 1")),
+                messageEntry(
+                    "assistant-tool-2",
+                    "user-after-tool-1",
+                    assistantMessage([
+                        {
+                            type: "toolCall",
+                            id: "call/2|item/2",
+                            name: "read",
+                            arguments: { path: "second.txt" },
+                        },
+                    ]),
+                ),
+                messageEntry(
+                    "tool-result-2",
+                    "assistant-tool-2",
+                    toolResultMessage("call/2|item/2", secondHugeOutput),
+                ),
+                messageEntry("user-after-tool-2", "tool-result-2", userMessage("continue 2")),
+            ],
+            firstKeptEntryId: "user-after-tool-2",
+        }),
+        makeNativeCompactionContext({ contextWindow: 1_000 }),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.ok(result?.compaction);
+    assert.equal(result.compaction.details.requestMeta?.rewrittenToolOutputs, 2);
+    assert.doesNotMatch(requestBodyText, /first huge output/);
+    assert.doesNotMatch(requestBodyText, /second huge output/);
+    const requestInput = responseInput(JSON.parse(requestBodyText) as unknown);
+    const outputItems = requestInput.filter(
+        (item) => isRecord(item) && item.type === "function_call_output",
+    );
+    assert.equal(outputItems.length, 2);
+    assert.deepEqual(
+        outputItems.map((item) => (isRecord(item) ? item.output : undefined)),
+        ["[truncated]", "[truncated]"],
+    );
 });
 
 test("trims oversized non-tool input before remote v2 compaction", async () => {
@@ -1645,6 +1825,61 @@ test("retained image-only messages consume compaction budget", async () => {
     );
     assert.ok(retainedImageUrls.length > 0);
     assert.ok(retainedImageUrls.length < 80);
+});
+
+test("retained native compaction window truncates huge text and omits over-budget image", async () => {
+    const hugeText = `retained-start ${"x ".repeat(90_000)}retained-end`;
+    const runtime = makeTestRuntime(async () => {
+        const body = [
+            "event: response.output_item.done",
+            'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-retained-truncated"}}',
+            "",
+            "event: response.completed",
+            'data: {"type":"response.completed","response":{"id":"resp_retained_truncated","created_at":123}}',
+            "",
+        ].join("\n");
+        return new Response(body, { status: 200 });
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                messageEntry("retained", null, {
+                    role: "user",
+                    content: [
+                        { type: "text", text: hugeText },
+                        {
+                            type: "image",
+                            mimeType: "image/png",
+                            data: Buffer.from("retained-image").toString("base64"),
+                        },
+                    ],
+                    timestamp: 0,
+                }),
+            ],
+            firstKeptEntryId: "retained",
+        }),
+        makeNativeCompactionContext({ contextWindow: 300_000 }),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    const compactedWindow = result?.compaction?.details.compactedWindow ?? [];
+    assert.deepEqual(compactedWindow.at(-1), {
+        type: "compaction",
+        encrypted_content: "sealed-retained-truncated",
+    });
+    const retainedItem = compactedWindow.find((item) => isRecord(item) && item.role === "user");
+    assert.ok(retainedItem);
+    const retainedText = textFromResponseItem(retainedItem);
+    assert.match(retainedText, /^retained-start/);
+    assert.match(retainedText, /retained-end$/);
+    assert.ok(retainedText.length < hugeText.length);
+    assert.equal(imageUrlsFromResponseItem(retainedItem).length, 0);
 });
 
 test("preserves previous native window when falling back to Pi compaction", async () => {
@@ -2604,6 +2839,15 @@ function responseInput(value: unknown): unknown[] {
 
 function worldStateText(item: unknown): string {
     if (!isRecord(item) || !Array.isArray(item.content)) return "";
+    return item.content
+        .flatMap((part) => (isRecord(part) && typeof part.text === "string" ? [part.text] : []))
+        .join("\n");
+}
+
+function textFromResponseItem(item: unknown): string {
+    if (!isRecord(item)) return "";
+    if (typeof item.content === "string") return item.content;
+    if (!Array.isArray(item.content)) return "";
     return item.content
         .flatMap((part) => (isRecord(part) && typeof part.text === "string" ? [part.text] : []))
         .join("\n");

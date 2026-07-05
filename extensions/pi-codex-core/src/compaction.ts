@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
     CompactionEntry,
     ExtensionAPI,
@@ -54,6 +55,8 @@ const CODEX_CORE_WORLD_STATE_TAG = "codex_core_world_state";
 const AUTO_COMPACTION_MIN_INTERVAL_MS = 30_000;
 const MAX_SSE_TAIL_CHARS = 1_000_000;
 const MAX_SSE_EVENT_CHARS = 2_000_000;
+const TOKEN_ESTIMATE_CHUNK_CHARS = 512 * 1024;
+const TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS = 8 * 1024;
 
 const JsonObjectSchema = Type.Record(Type.String(), Type.Unknown());
 const StringArraySchema = Type.Array(Type.String());
@@ -253,6 +256,28 @@ type BuildPromptInputResult = {
     readonly previousCompactionEntryId?: string | undefined;
 };
 
+type RemoteCompactionRequestParts = {
+    readonly model: string;
+    readonly instructions: string;
+    readonly promptCacheKey: string;
+    readonly verbosity: string;
+    readonly fast: boolean;
+    readonly reasoning?: { readonly effort: string; readonly summary: "auto" } | undefined;
+    readonly tools?: readonly ResponsesTool[] | undefined;
+};
+
+type RemoteCompactionPreflightResult = {
+    readonly input: readonly ResponsesInputItem[];
+    readonly rewrittenToolOutputs: number;
+    readonly estimatedTokensBefore: number;
+    readonly estimatedTokensAfter: number;
+};
+
+type TokenEstimateCache = {
+    readonly objectTokens: WeakMap<object, number>;
+    readonly textTokens: Map<string, number>;
+};
+
 type ShrinkRemoteCompactionRequestResult =
     | {
           readonly kind: "ok";
@@ -324,26 +349,51 @@ export async function handleCodexNativeCompaction(
         baseUrl: runtime.value.baseUrl,
     };
     const latestNativeCompaction = findLatestNativeCompactionEntry(event.branchEntries, match);
-    const promptInput = buildRemoteCompactionPromptInput(event, ctx.model, latestNativeCompaction);
+    let promptInput = buildRemoteCompactionPromptInput(event, ctx.model, latestNativeCompaction);
     if (promptInput.input.length === 0) return undefined;
     const compactionModel = resolveCodexRequestModel(
         config.openai.compactionModel,
         runtime.value.model,
     );
+    const instructions = buildCompactionInstructions(
+        ctx.getSystemPrompt(),
+        event.customInstructions,
+    );
+    const tools = buildCompactionTools(pi);
+    const promptCacheKey = safePromptCacheKey(ctx.sessionManager.getSessionId());
+    const reasoning = buildReasoning(config).reasoning;
+    let tokenCache = createTokenEstimateCache();
+    const preflight = await rewriteRemoteCompactionToolOutputsForContextWindow(
+        promptInput.input,
+        {
+            model: compactionModel,
+            instructions,
+            promptCacheKey,
+            verbosity: config.openai.verbosity,
+            fast: config.openai.fast,
+            reasoning,
+            tools,
+        },
+        ctx.model?.contextWindow,
+        tokenCache,
+    );
+    promptInput = { ...promptInput, input: preflight.input };
 
     const request = buildRemoteCompactionV2Request({
         model: compactionModel,
         input: promptInput.input,
-        instructions: buildCompactionInstructions(ctx.getSystemPrompt(), event.customInstructions),
-        promptCacheKey: safePromptCacheKey(ctx.sessionManager.getSessionId()),
+        instructions,
+        promptCacheKey,
         verbosity: config.openai.verbosity,
         fast: config.openai.fast,
-        reasoning: buildReasoning(config).reasoning,
-        tools: buildCompactionTools(pi),
+        reasoning,
+        tools,
     });
     const shrink = await shrinkRemoteCompactionRequestForContextWindow(
         request,
         ctx.model?.contextWindow,
+        tokenCache,
+        preflight,
     );
     if (shrink.kind === "too_large") {
         notifyCompactionFallback(
@@ -354,7 +404,7 @@ export async function handleCodexNativeCompaction(
         );
         return undefined;
     }
-
+    tokenCache = createTokenEstimateCache();
     try {
         const responseResult = await executeRemoteCompactionV2(
             runtime.value,
@@ -372,6 +422,7 @@ export async function handleCodexNativeCompaction(
         const compactedWindow = await buildRemoteCompactionV2Window(
             shrink.promptInput,
             response.compactionOutput,
+            tokenCache,
         );
         if (compactedWindow.length === 0 || !hasCompactionOutputItem(compactedWindow)) {
             notifyCompactionFallback(
@@ -463,26 +514,24 @@ export async function rewriteProviderRequestWithNativeCompaction(
     const branchEntries = ctx.sessionManager.getBranch();
     const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
     if (!latestNativeCompaction) return undefined;
+    const replacementInput = buildFreshReplacementInput(
+        latestNativeCompaction.entry.details,
+        ctx,
+        pi,
+        runtime,
+    );
 
     const replay = rewriteResponsesPayloadWithNativeReplay({
         payload: responsesPayload,
         model,
         branchEntries,
         compactionEntry: latestNativeCompaction.entry,
-        replacementInput: buildFreshReplacementInput(
-            latestNativeCompaction.entry.details,
-            ctx,
-            pi,
-            runtime,
-        ),
+        replacementInput,
     });
     if (replay.ok) return replay.payload;
 
     notifyNativeReplayFallbackOnce(ctx, latestNativeCompaction.entry.id, replay.reason);
-    return buildLenientNativeReplayPayload(
-        responsesPayload,
-        buildFreshReplacementInput(latestNativeCompaction.entry.details, ctx, pi, runtime),
-    );
+    return buildLenientNativeReplayPayload(responsesPayload, replacementInput);
 }
 
 export function isNativeCompactionDetails(value: unknown): value is NativeCompactionDetails {
@@ -637,7 +686,7 @@ function buildRemoteCompactionPromptInput(
     if (latestNativeCompaction) {
         return {
             input: [
-                ...cloneCompactedWindow(latestNativeCompaction.entry.details.compactedWindow),
+                ...latestNativeCompaction.entry.details.compactedWindow,
                 ...serializeEntriesToResponsesInput(
                     model,
                     event.branchEntries.slice(latestNativeCompaction.index + 1),
@@ -671,46 +720,39 @@ function serializeEntriesToResponsesInput(
     model: ExtensionContext["model"] | undefined,
     entries: readonly SessionEntry[],
 ): ResponsesInputItem[] {
-    const messages: CompactionMessage[] = [];
+    return serializeMessagesToResponsesInput(model, compactionMessagesFromSessionEntries(entries));
+}
+
+function* compactionMessagesFromSessionEntries(
+    entries: readonly SessionEntry[],
+): Generator<CompactionMessage> {
     for (const entry of entries) {
         const message = compactionMessageFromSessionEntry(entry);
-        if (message) messages.push(message);
+        if (message) yield message;
     }
-    return serializeMessagesToResponsesInput(model, messages);
 }
 
 function serializeMessagesToResponsesInput(
     model: ExtensionContext["model"] | undefined,
-    messages: readonly CompactionMessage[],
+    messages: Iterable<CompactionMessage>,
 ): ResponsesInputItem[] {
     const input: ResponsesInputItem[] = [];
-    let messageIndex = 0;
-    const normalizedMessages = normalizeMessagesForResponses(model, messages);
-    for (const message of normalizedMessages) {
-        input.push(...serializeMessage(message, messageIndex, model));
-        messageIndex += 1;
-    }
-    return input;
-}
-
-function normalizeMessagesForResponses(
-    model: ExtensionContext["model"] | undefined,
-    messages: readonly CompactionMessage[],
-): CompactionMessage[] {
     const toolCallIdMap = new Map<string, string>();
-    const transformed = messages.map((message) =>
-        transformMessageForResponses(model, message, toolCallIdMap),
-    );
-    const result: CompactionMessage[] = [];
     let pendingToolCalls: ResponsesInputItem[] = [];
     let existingToolResultIds = new Set<string>();
+    let messageIndex = 0;
+
+    const serializeNormalizedMessage = (message: CompactionMessage) => {
+        input.push(...serializeMessage(message, messageIndex, model));
+        messageIndex += 1;
+    };
 
     const insertSyntheticToolResults = () => {
         if (pendingToolCalls.length === 0) return;
         for (const toolCall of pendingToolCalls) {
             const id = typeof toolCall.call_id === "string" ? toolCall.call_id : undefined;
             if (id && !existingToolResultIds.has(id)) {
-                result.push({
+                serializeNormalizedMessage({
                     role: "toolResult",
                     toolCallId: id,
                     content: [{ type: "text", text: "No result provided" }],
@@ -721,30 +763,31 @@ function normalizeMessagesForResponses(
         existingToolResultIds = new Set();
     };
 
-    for (const message of transformed) {
+    for (const rawMessage of messages) {
+        const message = transformMessageForResponses(model, rawMessage, toolCallIdMap);
         if (message.role === "assistant") {
             insertSyntheticToolResults();
             if (message.stopReason === "error" || message.stopReason === "aborted") continue;
             pendingToolCalls = toolCallsFromContent(message.content);
-            result.push(message);
+            serializeNormalizedMessage(message);
             continue;
         }
         if (message.role === "toolResult") {
             const callId = responseCallIdFromToolCallId(message.toolCallId);
             if (callId) existingToolResultIds.add(callId);
-            result.push(message);
+            serializeNormalizedMessage(message);
             continue;
         }
         if (message.role === "user") {
             insertSyntheticToolResults();
-            result.push(message);
+            serializeNormalizedMessage(message);
             continue;
         }
-        result.push(message);
+        serializeNormalizedMessage(message);
     }
 
     insertSyntheticToolResults();
-    return result;
+    return input;
 }
 
 function transformMessageForResponses(
@@ -1067,36 +1110,91 @@ function toolInfoToResponsesTool(tool: ToolInfo): ResponsesTool {
     };
 }
 
+async function rewriteRemoteCompactionToolOutputsForContextWindow(
+    input: readonly ResponsesInputItem[],
+    requestParts: RemoteCompactionRequestParts,
+    contextWindow: number | null | undefined,
+    cache: TokenEstimateCache,
+): Promise<RemoteCompactionPreflightResult> {
+    const estimatedTokensBefore = await estimateRemoteCompactionRequestTokens(
+        buildRemoteCompactionV2Request({ ...requestParts, input }),
+        cache,
+    );
+    const budgetTokens = compactRequestBudget(contextWindow);
+    if (budgetTokens === undefined || estimatedTokensBefore <= budgetTokens) {
+        return {
+            input,
+            rewrittenToolOutputs: 0,
+            estimatedTokensBefore,
+            estimatedTokensAfter: estimatedTokensBefore,
+        };
+    }
+
+    const rewrittenInput = [...input];
+    let rewrittenToolOutputs = 0;
+    let estimatedTokensAfter = estimatedTokensBefore;
+    for (
+        let index = rewrittenInput.length - 1;
+        index >= 0 && estimatedTokensAfter > budgetTokens;
+        index -= 1
+    ) {
+        const item = rewrittenInput[index];
+        if (!item || !isRewritableToolOutputItem(item)) continue;
+        const rewrittenItem = rewriteToolOutputItem(item);
+        rewrittenInput[index] = rewrittenItem;
+        rewrittenToolOutputs += 1;
+        const [beforeTokens, afterTokens] = await Promise.all([
+            estimateResponsesInputItemTokens(item, cache),
+            estimateResponsesInputItemTokens(rewrittenItem, cache),
+        ]);
+        estimatedTokensAfter += afterTokens - beforeTokens;
+    }
+
+    return {
+        input: rewrittenToolOutputs === 0 ? input : rewrittenInput,
+        rewrittenToolOutputs,
+        estimatedTokensBefore,
+        estimatedTokensAfter,
+    };
+}
+
 async function shrinkRemoteCompactionRequestForContextWindow(
     request: RemoteCompactionV2Request,
     contextWindow: number | null | undefined,
+    cache: TokenEstimateCache,
+    preflight?: RemoteCompactionPreflightResult,
 ): Promise<ShrinkRemoteCompactionRequestResult> {
     const budgetTokens = compactRequestBudget(contextWindow);
-    const estimatedTokensBefore = await estimateTokenCount(request);
+    const estimatedTokensBefore =
+        preflight?.estimatedTokensBefore ??
+        (await estimateRemoteCompactionRequestTokens(request, cache));
+    let rewrittenToolOutputs = preflight?.rewrittenToolOutputs ?? 0;
+    let estimatedTokensAfter = preflight?.estimatedTokensAfter ?? estimatedTokensBefore;
     const promptInput = request.input.filter((item) => item.type !== "compaction_trigger");
-    if (budgetTokens === undefined || estimatedTokensBefore <= budgetTokens) {
+    if (budgetTokens === undefined || estimatedTokensAfter <= budgetTokens) {
         return {
             kind: "ok",
             request,
             promptInput,
-            rewrittenToolOutputs: 0,
+            rewrittenToolOutputs,
             estimatedTokensBefore,
-            estimatedTokensAfter: estimatedTokensBefore,
+            estimatedTokensAfter,
             budgetTokens,
         };
     }
 
-    let rewrittenToolOutputs = 0;
-    let estimatedTokensAfter = estimatedTokensBefore;
     const input = [...request.input];
     for (let index = 0; index < input.length && estimatedTokensAfter > budgetTokens; index += 1) {
         const item = input[index];
         if (!item || !isRewritableToolOutputItem(item)) continue;
-        const rewrittenItem = { ...item, output: TRUNCATED_TOOL_OUTPUT_MESSAGE };
+        const rewrittenItem = rewriteToolOutputItem(item);
         input[index] = rewrittenItem;
         rewrittenToolOutputs += 1;
-        estimatedTokensAfter +=
-            (await estimateTokenCount(rewrittenItem)) - (await estimateTokenCount(item));
+        const [beforeTokens, afterTokens] = await Promise.all([
+            estimateResponsesInputItemTokens(item, cache),
+            estimateResponsesInputItemTokens(rewrittenItem, cache),
+        ]);
+        estimatedTokensAfter += afterTokens - beforeTokens;
     }
 
     for (let index = 0; index < input.length && estimatedTokensAfter > budgetTokens; ) {
@@ -1106,7 +1204,7 @@ async function shrinkRemoteCompactionRequestForContextWindow(
             continue;
         }
         input.splice(index, 1);
-        estimatedTokensAfter -= await estimateTokenCount(item);
+        estimatedTokensAfter -= await estimateResponsesInputItemTokens(item, cache);
     }
 
     if (estimatedTokensAfter > budgetTokens) {
@@ -1311,12 +1409,15 @@ function createRemoteCompactionV2Collector(): {
 async function buildRemoteCompactionV2Window(
     promptInput: readonly ResponsesInputItem[],
     compactionOutput: ResponsesInputItem,
+    cache: TokenEstimateCache,
 ): Promise<ResponsesInputItem[]> {
-    const retained = promptInput
-        .filter(isRetainedRemoteCompactionMessage)
-        .map((item) => structuredClone(item));
-    const truncated = await truncateRetainedMessages(retained, RETAINED_MESSAGE_TOKEN_BUDGET);
-    return [...truncated, structuredClone(compactionOutput)];
+    const retained = promptInput.filter(isRetainedRemoteCompactionMessage);
+    const truncated = await truncateRetainedMessages(
+        retained,
+        RETAINED_MESSAGE_TOKEN_BUDGET,
+        cache,
+    );
+    return [...truncated, compactionOutput];
 }
 
 function buildWindowLifecycle(
@@ -1336,10 +1437,7 @@ function buildWindowLifecycle(
     const windowId = createWindowId(runtime);
     const previousWindowId = previousDetails?.windowId;
     return {
-        replacementInput: [
-            ...cloneCompactedWindow(compactedWindow),
-            ...cloneCompactedWindow(worldStateInput),
-        ],
+        replacementInput: [...compactedWindow, ...worldStateInput],
         windowNumber: (previousDetails?.windowNumber ?? 0) + 1,
         windowId,
         firstWindowId: previousDetails?.firstWindowId ?? windowId,
@@ -1361,10 +1459,7 @@ function buildFreshReplacementInput(
         undefined,
         details.worldState,
     );
-    return [
-        ...cloneCompactedWindow(details.compactedWindow),
-        ...buildWorldStateInput(worldState, details),
-    ];
+    return [...details.compactedWindow, ...buildWorldStateInput(worldState, details)];
 }
 
 function captureNativeCompactionWorldState(
@@ -1445,7 +1540,7 @@ function rewriteResponsesPayloadWithNativeReplay(input: {
     );
     if (firstKeptEntryIndex < 0) return { ok: false, reason: "first-kept-entry-not-found" };
 
-    const inputItems = cloneResponsesInputSlice(input.payload.input);
+    const inputItems = input.payload.input;
 
     const preambleCount = countLeadingInstructionItems(inputItems);
     const shimIndex = inputItems.findIndex(
@@ -1479,7 +1574,7 @@ function rewriteResponsesPayloadWithNativeReplay(input: {
             ...input.payload,
             input: [
                 ...inputItems.slice(0, shimIndex),
-                ...cloneCompactedWindow(input.replacementInput),
+                ...input.replacementInput,
                 ...inputItems.slice(afterShimIndex, keptReplayIndex),
                 ...inputItems.slice(afterKeptReplayIndex),
             ],
@@ -1491,7 +1586,7 @@ function buildLenientNativeReplayPayload(
     payload: ResponsesPayload,
     replacementInput: readonly ResponsesInputItem[],
 ): ResponsesPayload {
-    const input = cloneResponsesInputSlice(payload.input);
+    const input = payload.input;
     const withoutShim = input.filter((item) => !itemContainsShimSummary(item));
     let insertAt = 0;
     while (insertAt < withoutShim.length && isInstructionItem(withoutShim[insertAt])) insertAt += 1;
@@ -1499,7 +1594,7 @@ function buildLenientNativeReplayPayload(
         ...payload,
         input: [
             ...withoutShim.slice(0, insertAt),
-            ...cloneCompactedWindow(replacementInput),
+            ...replacementInput,
             ...withoutShim.slice(insertAt),
         ],
     };
@@ -1545,9 +1640,7 @@ function stashLatestNativeWindowForPiCompactionFallback(
     pendingPiCompactionNativeWindows.delete(sessionId);
     const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
     if (!latestNativeCompaction) return false;
-    const replacementInput = cloneCompactedWindow(
-        latestNativeCompaction.entry.details.replacementInput,
-    );
+    const replacementInput = latestNativeCompaction.entry.details.replacementInput;
     if (replacementInput.length === 0) return false;
     pendingPiCompactionNativeWindows.set(sessionId, {
         ...match,
@@ -1571,17 +1664,13 @@ function injectPendingNativeWindowIntoPiCompactionRequest(
     }
     if (!isPiCompactionSummarizationPayload(payload)) return undefined;
 
-    const input = cloneResponsesInputSlice(payload.input);
+    const input = payload.input;
     let insertAt = 0;
     while (insertAt < input.length && isInstructionItem(input[insertAt])) insertAt += 1;
     pendingPiCompactionNativeWindows.delete(sessionId);
     return {
         ...payload,
-        input: [
-            ...input.slice(0, insertAt),
-            ...cloneCompactedWindow(pending.replacementInput),
-            ...input.slice(insertAt),
-        ],
+        input: [...input.slice(0, insertAt), ...pending.replacementInput, ...input.slice(insertAt)],
     };
 }
 
@@ -1697,17 +1786,18 @@ function isRetainedRemoteCompactionMessage(item: ResponsesInputItem): boolean {
 async function truncateRetainedMessages(
     items: readonly ResponsesInputItem[],
     maxTokens: number,
+    cache: TokenEstimateCache,
 ): Promise<ResponsesInputItem[]> {
     let remaining = maxTokens;
     const retainedReversed: ResponsesInputItem[] = [];
     for (const item of [...items].reverse()) {
         if (remaining <= 0) continue;
-        const tokenCount = Math.max(1, await messageTextTokenCount(item));
+        const tokenCount = Math.max(1, await messageTextTokenCount(item, cache));
         if (tokenCount <= remaining) {
             retainedReversed.push(item);
             remaining -= tokenCount;
         } else {
-            const truncated = await truncateMessageTextToTokenBudget(item, remaining);
+            const truncated = await truncateMessageTextToTokenBudget(item, remaining, cache);
             if (truncated) retainedReversed.push(truncated);
             remaining = 0;
         }
@@ -1715,24 +1805,34 @@ async function truncateRetainedMessages(
     return retainedReversed.reverse();
 }
 
-async function messageTextTokenCount(item: ResponsesInputItem): Promise<number> {
+async function messageTextTokenCount(
+    item: ResponsesInputItem,
+    cache: TokenEstimateCache,
+): Promise<number> {
     const content = item.content;
-    if (!isJsonArray(content)) return typeof content === "string" ? estimateTextTokens(content) : 0;
+    if (!isJsonArray(content))
+        return typeof content === "string" ? estimateTextTokens(content, cache) : 0;
     const parts = content;
     let tokenCount = 0;
-    for (const part of parts) tokenCount += await retainedContentPartTokenCount(part);
+    for (const part of parts) tokenCount += await retainedContentPartTokenCount(part, cache);
     return tokenCount;
 }
 
-async function retainedContentPartTokenCount(part: JsonValue): Promise<number> {
-    if (isResponsesTextPart(part)) return estimateTextTokens(part.text);
-    if (isInputImagePart(part)) return inputImageRetainedTokenCount(part);
-    return estimateTokenCount(part);
+async function retainedContentPartTokenCount(
+    part: JsonValue,
+    cache: TokenEstimateCache,
+): Promise<number> {
+    if (isResponsesTextPart(part)) return estimateTextTokens(part.text, cache);
+    if (isInputImagePart(part)) return inputImageRetainedTokenCount(part, cache);
+    return estimateTokenCount(part, cache);
 }
 
-async function inputImageRetainedTokenCount(part: ResponsesInputItem): Promise<number> {
+async function inputImageRetainedTokenCount(
+    part: ResponsesInputItem,
+    cache: TokenEstimateCache,
+): Promise<number> {
     const imageUrlTokens =
-        typeof part.image_url === "string" ? await estimateTextTokens(part.image_url) : 0;
+        typeof part.image_url === "string" ? await estimateTextTokens(part.image_url, cache) : 0;
     return Math.max(RETAINED_INPUT_IMAGE_MIN_TOKEN_COST, imageUrlTokens);
 }
 
@@ -1753,6 +1853,7 @@ function isInputImagePart(part: JsonValue): part is ResponsesInputItem {
 async function truncateMessageTextToTokenBudget(
     item: ResponsesInputItem,
     maxTokens: number,
+    cache: TokenEstimateCache,
 ): Promise<ResponsesInputItem | undefined> {
     if (maxTokens <= 0) return undefined;
     const cloned = structuredClone(item);
@@ -1768,7 +1869,7 @@ async function truncateMessageTextToTokenBudget(
     for (const part of content) {
         if (remaining <= 0) continue;
         if (isResponsesTextPart(part)) {
-            const tokenCount = await estimateTextTokens(part.text);
+            const tokenCount = await estimateTextTokens(part.text, cache);
             const text =
                 tokenCount <= remaining
                     ? part.text
@@ -1778,20 +1879,20 @@ async function truncateMessageTextToTokenBudget(
             continue;
         }
         if (isInputImagePart(part)) {
-            const tokenCount = await inputImageRetainedTokenCount(part);
+            const tokenCount = await inputImageRetainedTokenCount(part, cache);
             if (tokenCount <= remaining) {
                 nextContent.push(part);
                 remaining -= tokenCount;
                 continue;
             }
-            const placeholderTokens = await estimateTextTokens(RETAINED_IMAGE_OMITTED_TEXT);
+            const placeholderTokens = await estimateTextTokens(RETAINED_IMAGE_OMITTED_TEXT, cache);
             if (placeholderTokens <= remaining) {
                 nextContent.push({ type: "input_text", text: RETAINED_IMAGE_OMITTED_TEXT });
                 remaining -= placeholderTokens;
             }
             continue;
         }
-        const tokenCount = await estimateTokenCount(part);
+        const tokenCount = await estimateTokenCount(part, cache);
         if (tokenCount <= remaining) {
             nextContent.push(part);
             remaining -= tokenCount;
@@ -1908,14 +2009,6 @@ function safePromptCacheKey(value: string): string {
     return Array.from(value).slice(0, 64).join("");
 }
 
-function cloneCompactedWindow(window: readonly ResponsesInputItem[]): ResponsesInputItem[] {
-    return window.map((item) => structuredClone(item));
-}
-
-function cloneResponsesInputSlice(input: readonly ResponsesInputItem[]): ResponsesInputItem[] {
-    return input.map((item) => structuredClone(item));
-}
-
 function countLeadingInstructionItems(input: readonly ResponsesInputItem[]): number {
     let count = 0;
     while (count < input.length && isInstructionItem(input[count])) count += 1;
@@ -1928,26 +2021,17 @@ function findInputSliceIndex(
     fromIndex: number,
 ): number {
     if (expected.length === 0) return fromIndex;
-    const inputKeys = input.map(stableStringify);
-    const expectedKeys = expected.map(stableStringify);
-    return findSubsequenceIndex(inputKeys, expectedKeys, fromIndex);
-}
-
-function findSubsequenceIndex(
-    haystack: readonly string[],
-    needle: readonly string[],
-    fromIndex: number,
-): number {
-    if (needle.length === 0) return fromIndex;
-    const prefixTable = buildPrefixTable(needle);
+    const expectedKeys = expected.map(stableFingerprint);
+    const prefixTable = buildPrefixTable(expectedKeys);
     let matched = 0;
-    for (let index = Math.max(0, fromIndex); index < haystack.length; index += 1) {
-        while (matched > 0 && haystack[index] !== needle[matched]) {
+    for (let index = Math.max(0, fromIndex); index < input.length; index += 1) {
+        const inputKey = stableFingerprint(input[index]);
+        while (matched > 0 && inputKey !== expectedKeys[matched]) {
             matched = prefixTable[matched - 1] ?? 0;
         }
-        if (haystack[index] !== needle[matched]) continue;
+        if (inputKey !== expectedKeys[matched]) continue;
         matched += 1;
-        if (matched === needle.length) return index - needle.length + 1;
+        if (matched === expectedKeys.length) return index - expectedKeys.length + 1;
     }
     return -1;
 }
@@ -1963,6 +2047,11 @@ function buildPrefixTable(values: readonly string[]): number[] {
         table[index] = prefixLength;
     }
     return table;
+}
+
+function stableFingerprint(value: unknown): string {
+    const serialized = stableStringify(value);
+    return `${serialized.length}:${createHash("sha256").update(serialized).digest("base64url")}`;
 }
 
 function stableStringify(value: unknown): string {
@@ -1984,6 +2073,10 @@ function isRewritableToolOutputItem(item: ResponsesInputItem): boolean {
     return item.type === "function_call_output" && item.output !== TRUNCATED_TOOL_OUTPUT_MESSAGE;
 }
 
+function rewriteToolOutputItem(item: ResponsesInputItem): ResponsesInputItem {
+    return { ...item, output: TRUNCATED_TOOL_OUTPUT_MESSAGE };
+}
+
 function isTrimCandidateForCompactionRequest(item: ResponsesInputItem): boolean {
     return (
         !isNativeCompactionAnchor(item) &&
@@ -2002,13 +2095,93 @@ function isNativeCompactionAnchor(item: ResponsesInputItem): boolean {
     );
 }
 
-function estimateTokenCount(value: unknown): Promise<number> {
-    const serialized = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
-    return estimateTextTokens(serialized);
+function createTokenEstimateCache(): TokenEstimateCache {
+    return { objectTokens: new WeakMap(), textTokens: new Map() };
 }
 
-function estimateTextTokens(text: string): Promise<number> {
-    return countCodexTextTokens(text);
+function estimateTokenCount(value: unknown, cache?: TokenEstimateCache): Promise<number> {
+    if (cache && typeof value === "object" && value !== null) {
+        return cachedObjectTokenCount(value, cache, () => {
+            const serialized = JSON.stringify(value) ?? "";
+            return estimateTextTokens(serialized, cache);
+        });
+    }
+    const serialized = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
+    return estimateTextTokens(serialized, cache);
+}
+
+async function estimateRemoteCompactionRequestTokens(
+    request: RemoteCompactionV2Request,
+    cache: TokenEstimateCache,
+): Promise<number> {
+    let total = await estimateTextTokens(JSON.stringify({ ...request, input: [] }) ?? "", cache);
+    for (const item of request.input) total += await estimateResponsesInputItemTokens(item, cache);
+    return total;
+}
+
+async function estimateResponsesInputItemTokens(
+    item: ResponsesInputItem,
+    cache: TokenEstimateCache,
+): Promise<number> {
+    return cachedObjectTokenCount(item, cache, () =>
+        estimateTokenParts(responsesInputItemTokenParts(item), cache),
+    );
+}
+
+function* responsesInputItemTokenParts(item: ResponsesInputItem): Generator<string> {
+    if (item.type === "function_call_output" && typeof item.output === "string") {
+        yield JSON.stringify({ ...item, output: "" }) ?? "";
+        yield item.output;
+        return;
+    }
+    yield JSON.stringify(item) ?? "";
+}
+
+async function estimateTokenParts(
+    parts: Iterable<string>,
+    cache: TokenEstimateCache,
+): Promise<number> {
+    let total = 0;
+    let chunk = "";
+    for (const part of parts) {
+        if (part.length >= TOKEN_ESTIMATE_CHUNK_CHARS) {
+            if (chunk.length > 0) {
+                total += await estimateTextTokens(chunk, cache);
+                chunk = "";
+            }
+            total += await estimateTextTokens(part, cache);
+            continue;
+        }
+        if (chunk.length + part.length > TOKEN_ESTIMATE_CHUNK_CHARS) {
+            total += await estimateTextTokens(chunk, cache);
+            chunk = "";
+        }
+        chunk += part;
+    }
+    return chunk.length > 0 ? total + (await estimateTextTokens(chunk, cache)) : total;
+}
+
+async function cachedObjectTokenCount(
+    value: object,
+    cache: TokenEstimateCache,
+    compute: () => Promise<number>,
+): Promise<number> {
+    const cached = cache.objectTokens.get(value);
+    if (cached !== undefined) return cached;
+    const count = await compute();
+    cache.objectTokens.set(value, count);
+    return count;
+}
+
+async function estimateTextTokens(text: string, cache?: TokenEstimateCache): Promise<number> {
+    if (!cache || text.length > TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS) {
+        return countCodexTextTokens(text);
+    }
+    const cached = cache.textTokens.get(text);
+    if (cached !== undefined) return cached;
+    const count = await countCodexTextTokens(text);
+    cache.textTokens.set(text, count);
+    return count;
 }
 
 function truncateTextToTokenBudget(text: string, maxTokens: number): Promise<string> {
