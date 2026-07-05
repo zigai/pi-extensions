@@ -107,7 +107,7 @@ export type HelpMetadataSettings = {
     enumValues?: boolean;
 };
 
-/** User-facing dense-form appearance settings from Pi global settings. */
+/** User-facing dense-form appearance settings from extension config. */
 export type FormAppearanceSettings = {
     colors?: Partial<Record<FormAppearanceColorSlot, PiThemeColorName>>;
     symbols?: TypedCommandFormSymbols & { focusedField?: string };
@@ -123,7 +123,7 @@ export type FormAppearanceSettings = {
     };
 };
 
-/** User-facing inline-helper appearance settings from Pi global settings. */
+/** User-facing inline-helper appearance settings from extension config. */
 export type InlineHelpAppearanceSettings = {
     layout?: InlineHelpLayout;
     order?: InlineHelpOrder;
@@ -139,13 +139,13 @@ export type InlineHelpAppearanceSettings = {
     };
 };
 
-/** User-facing detailed-help appearance settings from Pi global settings. */
+/** User-facing detailed-help appearance settings from extension config. */
 export type DetailedHelpAppearanceSettings = {
     metadata?: HelpMetadataSettings;
     order?: DetailedHelpOrder;
 };
 
-/** User-facing global appearance settings accepted at piTypedCommands.appearance. */
+/** User-facing appearance settings accepted at appearance. */
 export type PiTypedCommandsAppearanceSettings = {
     form?: FormAppearanceSettings;
     inlineHelp?: InlineHelpAppearanceSettings;
@@ -443,8 +443,8 @@ function parseSettings<T>(schema: TSchema, input: unknown): T | undefined {
     if (!Schema.Check(schema, input)) {
         return undefined;
     }
-    // SAFETY: TypeBox's Check refined input against the requested schema-backed DTO type.
-    return input as T;
+    // SAFETY: TypeBox's Parse decoded input against the requested schema-backed DTO type.
+    return Schema.Parse(schema, input) as T;
 }
 
 export function parsePiSettings(input: unknown): PiSettingsInput | undefined {
@@ -743,7 +743,7 @@ function parseDetailedHelpAppearance(input: unknown): ResolvedDetailedHelpAppear
     };
 }
 
-/** Parse and normalize piTypedCommands.appearance from unknown Pi settings input. */
+/** Parse and normalize appearance from unknown config input. */
 export function parsePiTypedCommandsAppearance(input: unknown): ResolvedPiTypedCommandsAppearance {
     const settings = parseSettings<PiTypedCommandsAppearanceSettingsInput>(
         PiTypedCommandsAppearanceSettingsSchema,
@@ -760,7 +760,7 @@ export function parsePiTypedCommandsAppearance(input: unknown): ResolvedPiTypedC
     };
 }
 
-/** Extract and parse global piTypedCommands.appearance from a settings object. */
+/** Extract and parse legacy nested appearance from a settings-shaped object. */
 export function parsePiTypedCommandsAppearanceFromSettings(
     settings: unknown,
 ): ResolvedPiTypedCommandsAppearance {
