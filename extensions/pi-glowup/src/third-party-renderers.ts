@@ -1,4 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
+import { createApplyPatchRenderer } from "./apply-patch-rendering.ts";
 import {
     emptyComponent,
     formatPathTarget,
@@ -1560,6 +1561,10 @@ function isGoalTool(toolName: string): boolean {
     );
 }
 
+function isApplyPatchTool(toolName: string): boolean {
+    return baseToolName(toolName) === "apply_patch";
+}
+
 function isCoreTool(toolName: string): boolean {
     return CORE_TOOL_LABELS.has(baseToolName(toolName));
 }
@@ -1569,6 +1574,11 @@ function isAgentTool(toolName: string): boolean {
 }
 
 const DEFAULT_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
+    {
+        name: "apply-patch",
+        matches: isApplyPatchTool,
+        createRenderer: createApplyPatchRenderer,
+    },
     {
         name: "browser-mcp-gateway",
         matches: (toolName) => toolName === "agent_browser" || toolName === "mcp",
