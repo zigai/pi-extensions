@@ -11,8 +11,10 @@ import { onTypedCommandsChanged } from "../registry.js";
 import { isTypedSkillCommand } from "../skills/command.js";
 import type { TypedCommandUxOptions } from "../types.js";
 import {
+    commandDisplayName,
     commandInvocationForEditorText,
     helperInvocationForEditorText,
+    type EditorTypedCommandInvocation,
 } from "./editor-invocation.js";
 import { notifyDetailedHelp } from "./help.js";
 import { setHelperWidget, WIDGET_KEY } from "./helper.js";
@@ -106,6 +108,7 @@ export class TypedCommandUxSession {
     private active = false;
     private formRunId = 0;
     private submittedInvalidEditorText: string | undefined;
+    private helperWidgetSignature: string | undefined;
     private options: ResolvedTypedCommandUxOptions;
 
     constructor(
@@ -117,6 +120,7 @@ export class TypedCommandUxSession {
 
     start(ctx: ExtensionContext): void {
         this.stop();
+        this.helperWidgetSignature = undefined;
         this.active = true;
         this.options = resolveTypedCommandUxOptions(this.configuredOptions, ctx);
         if (!ctx.hasUI) {
@@ -139,11 +143,7 @@ export class TypedCommandUxSession {
 
     clearWidget(ctx: ExtensionContext): void {
         this.clearRefreshTimer();
-        if (ctx.hasUI) {
-            ctx.ui.setWidget(WIDGET_KEY, undefined, {
-                placement: this.options.helperPlacement,
-            });
-        }
+        this.clearHelperWidget(ctx);
     }
 
     stop(): void {
@@ -168,40 +168,22 @@ export class TypedCommandUxSession {
 
     private refresh(ctx: ExtensionContext): void {
         if (this.openingForm) {
-            setHelperWidget(
-                ctx,
-                undefined,
-                this.options.helperPlacement,
-                {},
-                this.options.appearance.inlineHelp,
-            );
+            this.clearHelperWidget(ctx);
             return;
         }
         const helperInvocation = helperInvocationForEditorText(ctx.ui.getEditorText());
-        setHelperWidget(
-            ctx,
-            helperInvocation,
-            this.options.helperPlacement,
-            {
-                submittedInvalidEditorText: this.submittedInvalidEditorText,
-            },
-            this.options.appearance.inlineHelp,
-        );
+        this.syncHelperWidget(ctx, helperInvocation, {
+            submittedInvalidEditorText: this.submittedInvalidEditorText,
+        });
     }
 
     private showSubmittedInvalidCommand(ctx: ExtensionContext, editorText: string): void {
         this.clearRefreshTimer();
         this.submittedInvalidEditorText = editorText;
         const helperInvocation = helperInvocationForEditorText(editorText);
-        setHelperWidget(
-            ctx,
-            helperInvocation,
-            this.options.helperPlacement,
-            {
-                submittedInvalidEditorText: editorText,
-            },
-            this.options.appearance.inlineHelp,
-        );
+        this.syncHelperWidget(ctx, helperInvocation, {
+            submittedInvalidEditorText: editorText,
+        });
     }
 
     private scheduleRefresh(ctx: ExtensionContext): void {
@@ -218,6 +200,52 @@ export class TypedCommandUxSession {
                 reportDetachedError(ctx, error);
             }
         }, 0);
+    }
+
+    private helperSignature(
+        invocation: EditorTypedCommandInvocation,
+        state: { submittedInvalidEditorText?: string | undefined },
+    ): string {
+        return JSON.stringify([
+            this.options.helperPlacement,
+            commandDisplayName(invocation.command),
+            invocation.rawArgs,
+            invocation.trailingBody,
+            state.submittedInvalidEditorText ?? null,
+        ]);
+    }
+
+    private clearHelperWidget(ctx: ExtensionContext): void {
+        if (!ctx.hasUI || this.helperWidgetSignature === undefined) {
+            return;
+        }
+        ctx.ui.setWidget(WIDGET_KEY, undefined, {
+            placement: this.options.helperPlacement,
+        });
+        this.helperWidgetSignature = undefined;
+    }
+
+    private syncHelperWidget(
+        ctx: ExtensionContext,
+        invocation: EditorTypedCommandInvocation | undefined,
+        state: { submittedInvalidEditorText?: string | undefined } = {},
+    ): void {
+        if (invocation === undefined) {
+            this.clearHelperWidget(ctx);
+            return;
+        }
+        const signature = this.helperSignature(invocation, state);
+        if (signature === this.helperWidgetSignature) {
+            return;
+        }
+        setHelperWidget(
+            ctx,
+            invocation,
+            this.options.helperPlacement,
+            state,
+            this.options.appearance.inlineHelp,
+        );
+        this.helperWidgetSignature = signature;
     }
 
     private launchOpenEditorCommandForm(ctx: ExtensionContext): void {
@@ -251,13 +279,7 @@ export class TypedCommandUxSession {
         ctx: ExtensionContext,
     ): { consume: true } | undefined {
         if (this.openingForm) {
-            setHelperWidget(
-                ctx,
-                undefined,
-                this.options.helperPlacement,
-                {},
-                this.options.appearance.inlineHelp,
-            );
+            this.clearHelperWidget(ctx);
             return undefined;
         }
         if (!matchesKey(data, "tab")) {
