@@ -2,11 +2,9 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { defineTypedCommand } from "../command/definition.js";
 import { createCommandHandle } from "../command/handle.js";
 import { normalizeRegisteredCommand } from "../command/registered-command.js";
-import { getTypedArgumentCompletions } from "../completions.js";
 import { decideArgumentIssueAction } from "../invocation.js";
 import { parseTypedCommandArgs } from "../parser.js";
 import { registerTypedCommandMetadata } from "../registry.js";
-import { openArgumentForm } from "../form/open.js";
 import type {
     ArgumentDefinitions,
     DefinedTypedCommand,
@@ -18,11 +16,6 @@ import type {
     TypedCommandDefinition,
     TypedCommandHandle,
 } from "../types.js";
-import { helperInvocationForEditorText } from "./editor-invocation.js";
-import { notifyDetailedHelp } from "./help.js";
-import { setHelperWidget } from "./helper.js";
-import { markSubmittedInvalidCommand } from "./session-state.js";
-import { resolveTypedCommandUxOptions } from "./settings.js";
 
 /** Notify Pi users about one or more typed-command issues. */
 export function notifyIssues(ctx: ExtensionCommandContext, messages: string[]): void {
@@ -45,6 +38,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
 ): Promise<InferArguments<FlatArgumentDefinitions> | undefined> {
     const parsed = parseTypedCommandArgs(command, rawArgs);
     if (parsed.mode === "help") {
+        const { notifyDetailedHelp } = await import("./help.js");
         notifyDetailedHelp(ctx, command);
         return undefined;
     }
@@ -61,6 +55,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
             notifyIssues(ctx, issueMessages);
             return undefined;
         }
+        const { openArgumentForm } = await import("../form/open.js");
         const collected = await openArgumentForm(command, parsed, formMode, ctx);
         if (collected === undefined) {
             return undefined;
@@ -75,6 +70,17 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
                 editorText += ` ${rawArgs}`;
             }
             ctx.ui.setEditorText(editorText);
+            const [
+                { helperInvocationForEditorText },
+                { setHelperWidget },
+                { markSubmittedInvalidCommand },
+                { resolveTypedCommandUxOptions },
+            ] = await Promise.all([
+                import("./editor-invocation.js"),
+                import("./helper.js"),
+                import("./session-state.js"),
+                import("./settings.js"),
+            ]);
             if (!markSubmittedInvalidCommand(ctx, editorText)) {
                 const options = resolveTypedCommandUxOptions({}, ctx);
                 setHelperWidget(
@@ -114,7 +120,8 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     let invocationName = name;
     const maybeInvocationName: unknown = pi.registerCommand(name, {
         description: command.description,
-        getArgumentCompletions(argumentPrefix) {
+        async getArgumentCompletions(argumentPrefix) {
+            const { getTypedArgumentCompletions } = await import("../completions.js");
             return getTypedArgumentCompletions(command, argumentPrefix);
         },
         handler: async (rawArgs, ctx) => {
