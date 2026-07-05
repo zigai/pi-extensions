@@ -34,6 +34,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./core": "./src/core/index.ts",
+    "./command": "./src/pi/command.ts",
     "./pi": "./src/pi/index.ts",
     "./skills": "./src/skills/index.ts",
     "./pi-tui": "./src/pi-tui/index.ts",
