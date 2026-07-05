@@ -74,18 +74,16 @@ For example:
          [count=1] [--pane-window] [--worktree]  [--panes] [--keep-open] [--prompt <prompt>]
 ```
 
-Set `piTypedCommands.helperPlacement` to `"belowEditor"` in Pi settings, or pass `helperPlacement: "belowEditor"` to `installTypedCommandUx()` when composing a custom extension entrypoint, to render the helper below the user input editor instead.
+Set `helperPlacement` to `"belowEditor"` in `~/.pi/agent/pi-typed-commands/config.json`, or pass `helperPlacement: "belowEditor"` to `installTypedCommandUx()` when composing a custom extension entrypoint, to render the helper below the user input editor instead.
 
-Inline helper presentation can be customized globally from `~/.pi/agent/settings.json` with `piTypedCommands.appearance.inlineHelp`. For example, enable type-rich tokens without changing command definitions:
+Inline helper presentation can be customized with `appearance.inlineHelp` in the extension config. For example, enable type-rich tokens without changing command definitions:
 
 ```json
 {
-  "piTypedCommands": {
-    "appearance": {
-      "inlineHelp": {
-        "metadata": { "types": true, "aliases": true },
-        "order": "active-required-available"
-      }
+  "appearance": {
+    "inlineHelp": {
+      "metadata": { "types": true, "aliases": true },
+      "order": "active-required-available"
     }
   }
 }
@@ -109,7 +107,7 @@ Forms can also open automatically for missing required arguments or invalid valu
 
 The selected field is marked with `›` and accented so users can tell which value arrow keys, space, or typing will edit.
 
-Dense form presentation can be customized globally with `piTypedCommands.appearance.form`. The setting applies to extension commands and typed skills. Project settings and command metadata cannot override global colors or layout.
+Dense form presentation can be customized with `appearance.form`. The setting applies to extension commands and typed skills. Command metadata cannot override configured colors or layout.
 
 ## Form configuration
 
@@ -137,20 +135,18 @@ Global form appearance example:
 
 ```json
 {
-  "piTypedCommands": {
-    "appearance": {
-      "form": {
-        "symbols": {
-          "focusedField": "»",
-          "selectedCheckbox": "☑",
-          "unselectedCheckbox": "☐"
-        },
-        "layout": {
-          "minNameWidth": 10,
-          "maxNameWidth": 30,
-          "descriptions": "focused",
-          "instructions": "short"
-        }
+  "appearance": {
+    "form": {
+      "symbols": {
+        "focusedField": "»",
+        "selectedCheckbox": "☑",
+        "unselectedCheckbox": "☐"
+      },
+      "layout": {
+        "minNameWidth": 10,
+        "maxNameWidth": 30,
+        "descriptions": "focused",
+        "instructions": "short"
       }
     }
   }

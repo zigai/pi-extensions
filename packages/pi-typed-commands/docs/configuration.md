@@ -1,183 +1,141 @@
-# Configuration and Package Notes
+# Configuration
 
-Pi Typed Commands is a library for Pi extensions and typed skills. When a command or skill uses this library, typed parsing, completions, editor hints, and argument forms are always active.
+Pi Typed Commands is a library for Pi extensions and typed skills. Typed parsing, completions, editor hints, and argument forms are active for commands and skills that use it.
 
-There are no environment variables, command options, or callbacks that disable or bypass those features.
+Use global config at `~/.pi/agent/pi-typed-commands/config.json`.
 
-## Live helper placement
-
-The compact live helper is shown above the user input editor by default. Move it below the input editor with Pi settings:
+| Option                                          | Default                       | Purpose                                                |
+| ----------------------------------------------- | ----------------------------- | ------------------------------------------------------ |
+| `helperPlacement`                               | `"aboveEditor"`               | Place the live helper above or below the input editor. |
+| `appearance.form.colors.title`                  | `"accent"`                    | Color the dense form title.                            |
+| `appearance.form.colors.focusedLabel`           | `"accent"`                    | Color the focused field label.                         |
+| `appearance.form.colors.focusedValue`           | `"accent"`                    | Color the focused field value.                         |
+| `appearance.form.colors.unsetValue`             | `"muted"`                     | Color unset field values.                              |
+| `appearance.form.colors.description`            | `"dim"`                       | Color field descriptions.                              |
+| `appearance.form.colors.instructions`           | `"dim"`                       | Color form instructions.                               |
+| `appearance.form.colors.issue`                  | `"warning"`                   | Color validation issues.                               |
+| `appearance.form.colors.editorBorder`           | `"accent"`                    | Color the form editor border.                          |
+| `appearance.form.colors.selectedOption`         | `"accent"`                    | Color selected checkbox and radio options.             |
+| `appearance.form.symbols.focusedField`          | `"›"`                         | Mark the focused field.                                |
+| `appearance.form.symbols.selectedCheckbox`      | `"■"`                         | Mark selected checkboxes.                              |
+| `appearance.form.symbols.unselectedCheckbox`    | `"□"`                         | Mark unselected checkboxes.                            |
+| `appearance.form.symbols.selectedRadio`         | `"●"`                         | Mark selected radio options.                           |
+| `appearance.form.symbols.unselectedRadio`       | `"○"`                         | Mark unselected radio options.                         |
+| `appearance.form.layout.leftPadding`            | `1`                           | Set dense form left padding.                           |
+| `appearance.form.layout.fieldGap`               | `1`                           | Set the gap between field labels and values.           |
+| `appearance.form.layout.minNameWidth`           | `12`                          | Set the minimum field-name column width.               |
+| `appearance.form.layout.maxNameWidth`           | `24`                          | Set the maximum field-name column width.               |
+| `appearance.form.layout.minValueWidth`          | `12`                          | Set the minimum field-value column width.              |
+| `appearance.form.layout.maxValueWidth`          | `32`                          | Set the maximum field-value column width.              |
+| `appearance.form.layout.descriptions`           | `"inline"`                    | Show descriptions inline, focused, or hidden.          |
+| `appearance.form.layout.instructions`           | `"full"`                      | Show full, short, or hidden instructions.              |
+| `appearance.inlineHelp.layout`                  | `"compact"`                   | Use the compact live-helper layout.                    |
+| `appearance.inlineHelp.order`                   | `"active-required-available"` | Order active, required, and available tokens.          |
+| `appearance.inlineHelp.metadata.types`          | `false`                       | Show type metadata in the live helper.                 |
+| `appearance.inlineHelp.metadata.defaults`       | `true`                        | Show default values in the live helper.                |
+| `appearance.inlineHelp.metadata.required`       | `false`                       | Show required markers in the live helper.              |
+| `appearance.inlineHelp.metadata.aliases`        | `false`                       | Show aliases in the live helper.                       |
+| `appearance.inlineHelp.metadata.descriptions`   | `false`                       | Show descriptions in the live helper.                  |
+| `appearance.inlineHelp.metadata.enumValues`     | `true`                        | Show enum values in the live helper.                   |
+| `appearance.inlineHelp.colors.active`           | `"accent"`                    | Color active argument tokens.                          |
+| `appearance.inlineHelp.colors.required`         | `"warning"`                   | Color required argument tokens.                        |
+| `appearance.inlineHelp.colors.available`        | `"dim"`                       | Color available argument tokens.                       |
+| `appearance.inlineHelp.colors.type`             | `"syntaxType"`                | Color type hints.                                      |
+| `appearance.inlineHelp.colors.metadata`         | `"muted"`                     | Color metadata tokens.                                 |
+| `appearance.inlineHelp.colors.issue`            | `"error"`                     | Color live-helper issues.                              |
+| `appearance.inlineHelp.format.tokenPrefix`      | `"["`                         | Prefix each live-helper token.                         |
+| `appearance.inlineHelp.format.tokenSuffix`      | `"]"`                         | Suffix each live-helper token.                         |
+| `appearance.inlineHelp.format.groupSeparator`   | `"  "`                        | Separate token groups.                                 |
+| `appearance.inlineHelp.format.itemSeparator`    | `" "`                         | Separate items within token groups.                    |
+| `appearance.inlineHelp.format.typeSeparator`    | `":"`                         | Separate names from type hints.                        |
+| `appearance.inlineHelp.format.valueSeparator`   | `"="`                         | Separate names from values.                            |
+| `appearance.detailedHelp.metadata.types`        | `true`                        | Show types in generated help.                          |
+| `appearance.detailedHelp.metadata.defaults`     | `true`                        | Show defaults in generated help.                       |
+| `appearance.detailedHelp.metadata.required`     | `true`                        | Show required markers in generated help.               |
+| `appearance.detailedHelp.metadata.aliases`      | `false`                       | Show aliases in generated help.                        |
+| `appearance.detailedHelp.metadata.descriptions` | `true`                        | Show descriptions in generated help.                   |
+| `appearance.detailedHelp.metadata.enumValues`   | `true`                        | Show enum values in generated help.                    |
+| `appearance.detailedHelp.order`                 | `"definition"`                | Order arguments by definition or required-first.       |
 
 ```json
 {
-  "piTypedCommands": {
-    "helperPlacement": "belowEditor"
-  }
-}
-```
-
-Project `.pi/settings.json` overrides global `~/.pi/agent/settings.json` when the project is trusted. Valid values are `"belowEditor"` and `"aboveEditor"`.
-
-You can also pass the option when you compose the extension entrypoint yourself:
-
-```ts
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { installTypedCommandUx } from "pi-typed-commands";
-
-export default function extension(pi: ExtensionAPI): void {
-  installTypedCommandUx(pi, { helperPlacement: "belowEditor" });
-}
-```
-
-Explicit `installTypedCommandUx()` options override Pi settings.
-
-## Global appearance
-
-Presentation is controlled globally from `~/.pi/agent/settings.json` under `piTypedCommands.appearance`. Project settings are intentionally ignored for appearance so all extensions and typed skills share the same command UI.
-
-Command and skill definitions still own local content such as argument descriptions, titles, widgets, defaults, and completion behavior. Global appearance only controls colors, symbols, layout, and helper metadata formatting.
-
-```json
-{
-  "piTypedCommands": {
-    "appearance": {
-      "form": {
-        "colors": {
-          "title": "accent",
-          "focusedLabel": "accent",
-          "focusedValue": "accent",
-          "unsetValue": "muted",
-          "description": "dim",
-          "instructions": "dim",
-          "issue": "warning",
-          "editorBorder": "accent",
-          "selectedOption": "accent"
-        },
-        "symbols": {
-          "focusedField": "›",
-          "selectedCheckbox": "■",
-          "unselectedCheckbox": "□",
-          "selectedRadio": "●",
-          "unselectedRadio": "○"
-        },
-        "layout": {
-          "leftPadding": 1,
-          "fieldGap": 1,
-          "minNameWidth": 12,
-          "maxNameWidth": 24,
-          "minValueWidth": 12,
-          "maxValueWidth": 32,
-          "descriptions": "inline",
-          "instructions": "full"
-        }
+  "$schema": "./config.schema.json",
+  "helperPlacement": "aboveEditor",
+  "appearance": {
+    "form": {
+      "colors": {
+        "title": "accent",
+        "focusedLabel": "accent",
+        "focusedValue": "accent",
+        "unsetValue": "muted",
+        "description": "dim",
+        "instructions": "dim",
+        "issue": "warning",
+        "editorBorder": "accent",
+        "selectedOption": "accent"
       },
-      "inlineHelp": {
-        "layout": "compact",
-        "order": "active-required-available",
-        "metadata": {
-          "types": false,
-          "defaults": true,
-          "required": false,
-          "aliases": false,
-          "descriptions": false,
-          "enumValues": true
-        }
+      "symbols": {
+        "focusedField": "›",
+        "selectedCheckbox": "■",
+        "unselectedCheckbox": "□",
+        "selectedRadio": "●",
+        "unselectedRadio": "○"
+      },
+      "layout": {
+        "leftPadding": 1,
+        "fieldGap": 1,
+        "minNameWidth": 12,
+        "maxNameWidth": 24,
+        "minValueWidth": 12,
+        "maxValueWidth": 32,
+        "descriptions": "inline",
+        "instructions": "full"
       }
+    },
+    "inlineHelp": {
+      "layout": "compact",
+      "order": "active-required-available",
+      "metadata": {
+        "types": false,
+        "defaults": true,
+        "required": false,
+        "aliases": false,
+        "descriptions": false,
+        "enumValues": true
+      },
+      "colors": {
+        "active": "accent",
+        "required": "warning",
+        "available": "dim",
+        "type": "syntaxType",
+        "metadata": "muted",
+        "issue": "error"
+      },
+      "format": {
+        "tokenPrefix": "[",
+        "tokenSuffix": "]",
+        "groupSeparator": "  ",
+        "itemSeparator": " ",
+        "typeSeparator": ":",
+        "valueSeparator": "="
+      }
+    },
+    "detailedHelp": {
+      "metadata": {
+        "types": true,
+        "defaults": true,
+        "required": true,
+        "aliases": false,
+        "descriptions": true,
+        "enumValues": true
+      },
+      "order": "definition"
     }
   }
 }
 ```
 
-Unknown keys, unsupported color names, invalid modes, empty symbols, and out-of-range layout numbers fall back to safe defaults.
-
-### Supported color roles
-
-Appearance colors must use Pi theme roles, not raw ANSI escapes:
-
-`accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`, `userMessageText`, `customMessageText`, `customMessageLabel`, `toolTitle`, `toolOutput`, `mdHeading`, `mdLink`, `mdLinkUrl`, `mdCode`, `mdCodeBlock`, `mdCodeBlockBorder`, `mdQuote`, `mdQuoteBorder`, `mdHr`, `mdListBullet`, `toolDiffAdded`, `toolDiffRemoved`, `toolDiffContext`, `syntaxComment`, `syntaxKeyword`, `syntaxFunction`, `syntaxVariable`, `syntaxString`, `syntaxNumber`, `syntaxType`, `syntaxOperator`, `syntaxPunctuation`, `thinkingOff`, `thinkingMinimal`, `thinkingLow`, `thinkingMedium`, `thinkingHigh`, `thinkingXhigh`, `bashMode`.
-
-### Inline helper examples
-
-Compact default-style helper:
-
-```json
-{
-  "piTypedCommands": {
-    "appearance": {
-      "inlineHelp": {
-        "metadata": { "types": false, "descriptions": false }
-      }
-    }
-  }
-}
-```
-
-Type-rich helper:
-
-```json
-{
-  "piTypedCommands": {
-    "appearance": {
-      "inlineHelp": {
-        "metadata": { "types": true, "aliases": true, "descriptions": true },
-        "colors": { "type": "syntaxType", "metadata": "muted" }
-      }
-    }
-  }
-}
-```
-
-### Form customization example
-
-```json
-{
-  "piTypedCommands": {
-    "appearance": {
-      "form": {
-        "symbols": {
-          "focusedField": "»",
-          "selectedCheckbox": "☑",
-          "unselectedCheckbox": "☐"
-        },
-        "layout": {
-          "leftPadding": 2,
-          "fieldGap": 2,
-          "descriptions": "focused",
-          "instructions": "short"
-        }
-      }
-    }
-  }
-}
-```
-
-### Detailed `--help` metadata
-
-`piTypedCommands.appearance.detailedHelp` can opt into alternate generated help metadata when users run `--help`:
-
-```json
-{
-  "piTypedCommands": {
-    "appearance": {
-      "detailedHelp": {
-        "order": "required-first",
-        "metadata": {
-          "types": true,
-          "defaults": true,
-          "required": true,
-          "aliases": true,
-          "descriptions": true,
-          "enumValues": true
-        }
-      }
-    }
-  }
-}
-```
-
-When `detailedHelp` is omitted, the generated `formatDetailedHelp(command)` output remains the legacy default. Partial `detailedHelp` settings inherit that legacy metadata, so aliases stay hidden unless `metadata.aliases` is explicitly set to `true`.
-
-## Package contract
+## Package Notes
 
 Current package characteristics:
 
