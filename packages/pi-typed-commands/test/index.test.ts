@@ -3,7 +3,11 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import {
+    CONFIG_DIR_NAME,
+    type ExtensionAPI,
+    type ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import {
     defineTypedCommand,
     group,
@@ -500,6 +504,99 @@ describe("typed command live helper", () => {
         }
     });
 
+    it("does not update the helper widget when helper state is unchanged", async () => {
+        const commandName = "branch-helper-cache-test";
+        const command: RegisteredTypedCommand = {
+            name: commandName,
+            description: "Manage branches",
+            args: {
+                count: { type: "number", position: 0, default: 1 },
+                panes: { type: "boolean" },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+
+        registerTypedCommandMetadata(command);
+
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        const widgetUpdates: Array<{ value: unknown; placement: string | undefined }> = [];
+        let editorText = "plain text";
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            mode: "interactive",
+            ui: {
+                getEditorText() {
+                    return editorText;
+                },
+                setWidget(_key: string, value: unknown, options?: { placement?: string }) {
+                    widgetUpdates.push({ value, placement: options?.placement });
+                },
+                onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
+                    terminalInput = handler;
+                    return () => {
+                        terminalInput = undefined;
+                    };
+                },
+                addAutocompleteProvider() {},
+                notify() {},
+            },
+        };
+        const flushRefresh = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        try {
+            installTypedCommandUx(pi, { helperPlacement: "belowEditor" });
+            await firstHandler(handlers, "session_start")({}, ctx);
+            assert.equal(widgetUpdates.length, 0);
+            assert.notEqual(terminalInput, undefined);
+
+            editorText = `/${commandName}`;
+            terminalInput?.("a");
+            await flushRefresh();
+            assert.equal(widgetUpdates.length, 1);
+            assert.notEqual(widgetUpdates[0]?.value, undefined);
+            assert.equal(widgetUpdates[0]?.placement, "belowEditor");
+
+            terminalInput?.("b");
+            await flushRefresh();
+            assert.equal(widgetUpdates.length, 1);
+
+            editorText = `/${commandName} --panes`;
+            terminalInput?.("c");
+            await flushRefresh();
+            assert.equal(widgetUpdates.length, 2);
+            assert.notEqual(widgetUpdates[1]?.value, undefined);
+
+            editorText = "plain text";
+            terminalInput?.("d");
+            await flushRefresh();
+            assert.equal(widgetUpdates.length, 3);
+            assert.equal(widgetUpdates[2]?.value, undefined);
+
+            terminalInput?.("e");
+            await flushRefresh();
+            assert.equal(widgetUpdates.length, 3);
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+            unregisterTypedCommandMetadata(command);
+        }
+    });
+
     it("aligns inline errors with the helper tokens", async () => {
         const commandName = "branch-helper-error-align-test";
         const command: RegisteredTypedCommand = {
@@ -974,12 +1071,13 @@ describe("typed command live helper", () => {
         }
     });
 
-    it("reads helper placement from Pi settings", async () => {
+    it("reads helper placement from project config", async () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-helper-settings-"));
-        mkdirSync(join(dir, ".pi"));
+        const configDir = join(dir, CONFIG_DIR_NAME, "pi-typed-commands");
+        mkdirSync(configDir, { recursive: true });
         writeFileSync(
-            join(dir, ".pi", "settings.json"),
-            JSON.stringify({ piTypedCommands: { helperPlacement: "belowEditor" } }),
+            join(configDir, "config.json"),
+            JSON.stringify({ helperPlacement: "belowEditor" }),
         );
 
         const commandName = "branch-helper-settings-test";

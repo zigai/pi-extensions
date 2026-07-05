@@ -1,14 +1,26 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import {
+    CONFIG_DIR_NAME,
+    type ExtensionAPI,
+    type ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
+import {
+    DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON,
+    piTypedCommandsConfigJsonSchema,
+} from "../src/pi/config-schema.js";
 import { renderInlineHelper } from "../src/pi/helper.js";
 import { parsePiTypedCommandsAppearance } from "../src/pi/presentation-config.js";
-import { resolveTypedCommandAppearance } from "../src/pi/settings.js";
+import {
+    getPiTypedCommandsGlobalConfigPath,
+    getPiTypedCommandsGlobalConfigSchemaPath,
+    resolveTypedCommandAppearance,
+} from "../src/pi/settings.js";
 import { typedSkillCommandFromMetadata } from "../src/skills.js";
 import { formatDetailedHelp } from "../src/usage.js";
 import { installTypedCommandUx, registerTypedCommand } from "../src/index.js";
@@ -71,9 +83,16 @@ async function withAgentDirAsync<T>(agentDir: string, run: () => Promise<T>): Pr
     }
 }
 
-function writeGlobalSettings(agentDir: string, settings: unknown): void {
-    mkdirSync(agentDir, { recursive: true });
-    writeFileSync(join(agentDir, "settings.json"), JSON.stringify(settings));
+function writeGlobalConfig(agentDir: string, config: unknown): void {
+    const configDir = join(agentDir, "pi-typed-commands");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, "config.json"), JSON.stringify(config));
+}
+
+function writeProjectConfig(cwd: string, config: unknown): void {
+    const configDir = join(cwd, CONFIG_DIR_NAME, "pi-typed-commands");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, "config.json"), JSON.stringify(config));
 }
 
 function firstHandler(
@@ -101,6 +120,80 @@ function helperCommand(): RegisteredTypedCommand {
 }
 
 describe("global presentation config", () => {
+    it("scaffolds missing global config and schema files", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+
+        withAgentDir(agentDir, () => {
+            const appearance = resolveTypedCommandAppearance({ cwd: process.cwd() } as never);
+
+            assert.equal(appearance.inlineHelp.order, "active-required-available");
+            assert.deepEqual(
+                JSON.parse(readFileSync(getPiTypedCommandsGlobalConfigPath(agentDir), "utf8")),
+                DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON,
+            );
+            assert.deepEqual(
+                JSON.parse(
+                    readFileSync(getPiTypedCommandsGlobalConfigSchemaPath(agentDir), "utf8"),
+                ),
+                piTypedCommandsConfigJsonSchema(),
+            );
+        });
+    });
+
+    it("does not overwrite malformed existing global config", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        const configPath = getPiTypedCommandsGlobalConfigPath(agentDir);
+        mkdirSync(join(configPath, ".."), { recursive: true });
+        writeFileSync(configPath, "{not json");
+
+        withAgentDir(agentDir, () => {
+            const appearance = resolveTypedCommandAppearance({ cwd: process.cwd() } as never);
+
+            assert.equal(appearance.inlineHelp.order, "active-required-available");
+            assert.equal(readFileSync(configPath, "utf8"), "{not json");
+        });
+    });
+
+    it("refreshes stale global schema without rewriting user config", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        const configPath = getPiTypedCommandsGlobalConfigPath(agentDir);
+        const schemaPath = getPiTypedCommandsGlobalConfigSchemaPath(agentDir);
+        mkdirSync(join(configPath, ".."), { recursive: true });
+        writeFileSync(configPath, "{not json");
+        writeFileSync(schemaPath, "{}\n");
+
+        withAgentDir(agentDir, () => {
+            const appearance = resolveTypedCommandAppearance({ cwd: process.cwd() } as never);
+
+            assert.equal(appearance.inlineHelp.order, "active-required-available");
+            assert.equal(readFileSync(configPath, "utf8"), "{not json");
+            assert.deepEqual(
+                JSON.parse(readFileSync(schemaPath, "utf8")),
+                piTypedCommandsConfigJsonSchema(),
+            );
+        });
+    });
+
+    it("refreshes stale global schema without rewriting user config", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        const configPath = getPiTypedCommandsGlobalConfigPath(agentDir);
+        const schemaPath = getPiTypedCommandsGlobalConfigSchemaPath(agentDir);
+        mkdirSync(join(configPath, ".."), { recursive: true });
+        writeFileSync(configPath, "{not json");
+        writeFileSync(schemaPath, "{}\n");
+
+        withAgentDir(agentDir, () => {
+            const appearance = resolveTypedCommandAppearance({ cwd: process.cwd() } as never);
+
+            assert.equal(appearance.inlineHelp.order, "active-required-available");
+            assert.equal(readFileSync(configPath, "utf8"), "{not json");
+            assert.deepEqual(
+                JSON.parse(readFileSync(schemaPath, "utf8")),
+                piTypedCommandsConfigJsonSchema(),
+            );
+        });
+    });
+
     it("parses global appearance settings and safely falls back for invalid values", () => {
         const appearance = parsePiTypedCommandsAppearance({
             form: {
@@ -141,23 +234,15 @@ describe("global presentation config", () => {
         assert.equal(appearance.inlineHelp.colors.issue, "error");
     });
 
-    it("ignores project settings for appearance", () => {
+    it("uses project config as an appearance override", () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
         const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-project-"));
-        mkdirSync(join(projectDir, ".pi"));
-        writeGlobalSettings(agentDir, {
-            piTypedCommands: {
-                appearance: { form: { symbols: { focusedField: "G" } } },
-            },
+        writeGlobalConfig(agentDir, {
+            appearance: { form: { symbols: { focusedField: "G" } } },
         });
-        writeFileSync(
-            join(projectDir, ".pi", "settings.json"),
-            JSON.stringify({
-                piTypedCommands: {
-                    appearance: { form: { symbols: { focusedField: "P" } } },
-                },
-            }),
-        );
+        writeProjectConfig(projectDir, {
+            appearance: { form: { symbols: { focusedField: "P" } } },
+        });
 
         withAgentDir(agentDir, () => {
             const appearance = resolveTypedCommandAppearance({
@@ -165,7 +250,7 @@ describe("global presentation config", () => {
                 isProjectTrusted: () => true,
             } as never);
 
-            assert.equal(appearance.form.symbols.focusedField, "G");
+            assert.equal(appearance.form.symbols.focusedField, "P");
         });
     });
 
@@ -272,26 +357,24 @@ describe("global presentation config", () => {
     it("applies global form marker, symbols, layout, description, and footer modes", async () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-form-appearance-agent-"));
         const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-form-appearance-project-"));
-        writeGlobalSettings(agentDir, {
-            piTypedCommands: {
-                appearance: {
-                    form: {
-                        colors: {
-                            title: "success",
-                            focusedLabel: "toolTitle",
-                            focusedValue: "syntaxString",
-                        },
-                        symbols: {
-                            focusedField: "»",
-                            selectedCheckbox: "☑",
-                            unselectedCheckbox: "☐",
-                        },
-                        layout: {
-                            leftPadding: 3,
-                            fieldGap: 3,
-                            descriptions: "hidden",
-                            instructions: "hidden",
-                        },
+        writeGlobalConfig(agentDir, {
+            appearance: {
+                form: {
+                    colors: {
+                        title: "success",
+                        focusedLabel: "toolTitle",
+                        focusedValue: "syntaxString",
+                    },
+                    symbols: {
+                        focusedField: "»",
+                        selectedCheckbox: "☑",
+                        unselectedCheckbox: "☐",
+                    },
+                    layout: {
+                        leftPadding: 3,
+                        fieldGap: 3,
+                        descriptions: "hidden",
+                        instructions: "hidden",
                     },
                 },
             },
@@ -369,12 +452,10 @@ describe("global presentation config", () => {
 
     it("uses global appearance for typed skill inline help", async () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-skill-appearance-agent-"));
-        writeGlobalSettings(agentDir, {
-            piTypedCommands: {
-                appearance: {
-                    inlineHelp: {
-                        format: { tokenPrefix: "<", tokenSuffix: ">" },
-                    },
+        writeGlobalConfig(agentDir, {
+            appearance: {
+                inlineHelp: {
+                    format: { tokenPrefix: "<", tokenSuffix: ">" },
                 },
             },
         });
@@ -443,12 +524,10 @@ describe("global presentation config", () => {
     it("uses global detailed help settings through registered command help", async () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-help-appearance-agent-"));
         const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-help-appearance-project-"));
-        writeGlobalSettings(agentDir, {
-            piTypedCommands: {
-                appearance: {
-                    detailedHelp: {
-                        order: "required-first",
-                    },
+        writeGlobalConfig(agentDir, {
+            appearance: {
+                detailedHelp: {
+                    order: "required-first",
                 },
             },
         });
