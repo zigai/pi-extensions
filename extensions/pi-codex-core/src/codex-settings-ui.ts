@@ -8,7 +8,11 @@ import { Result, type Result as ResultType } from "better-result";
 
 import type { CodexFailure } from "./failures.ts";
 
-import { CODEX_CURRENT_MODEL_SELECTION, type CodexCoreConfig } from "./config.ts";
+import {
+    CODEX_APPLY_PATCH_MODES,
+    CODEX_CURRENT_MODEL_SELECTION,
+    type CodexCoreConfig,
+} from "./config.ts";
 import {
     consumeCodexRateLimitResetCredit,
     createCodexRateLimitResetRedeemRequestId,
@@ -280,6 +284,14 @@ function buildItems(
                 "Fallback image descriptions for text-only models.",
                 config.tools.viewImageDescriptions,
             ),
+            {
+                id: "applyPatch",
+                label: "Apply patch",
+                description:
+                    "Use apply_patch instead of edit: off, OpenAI/Codex-like models, or all models.",
+                currentValue: config.tools.applyPatch,
+                values: [...CODEX_APPLY_PATCH_MODES],
+            },
         ];
     }
 
@@ -378,6 +390,8 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
         return { ...config, tools: { ...config.tools, viewImage: value === "on" } };
     if (id === "imageDescriptions")
         return { ...config, tools: { ...config.tools, viewImageDescriptions: value === "on" } };
+    if (id === "applyPatch" && (value === "off" || value === "openai" || value === "all"))
+        return { ...config, tools: { ...config.tools, applyPatch: value } };
     if (id === "fast") return { ...config, openai: { ...config.openai, fast: value === "on" } };
     if (id === "verbosity" && (value === "low" || value === "medium" || value === "high")) {
         return { ...config, openai: { ...config.openai, verbosity: value } };

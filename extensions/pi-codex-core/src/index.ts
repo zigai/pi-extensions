@@ -5,6 +5,7 @@ import { registerCodexCommand } from "./codex-command.ts";
 import { readCodexCoreConfig, type CodexCoreConfig } from "./config.ts";
 import { registerNativeCompactionDisplay } from "./compaction-display.ts";
 import { buildCodexCoreSystemPrompt } from "./prompt.ts";
+import { registerApplyPatchTool } from "./tools/apply-patch.ts";
 import { registerImagegenTool } from "./tools/imagegen.ts";
 import { registerViewImageTool } from "./tools/view-image.ts";
 import { registerWebRunTool } from "./tools/web-run.ts";
@@ -44,6 +45,7 @@ export default function extension(pi: ExtensionAPI): void {
     registerWebRunTool(pi, { getConfig });
     registerImagegenTool(pi, { getConfig });
     registerViewImageTool(pi, { getConfig });
+    registerApplyPatchTool(pi);
     registerNativeCompactionDisplay(pi);
     registerCodexCommand(pi, { getConfig, applyConfig });
 

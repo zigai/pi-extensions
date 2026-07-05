@@ -22,6 +22,7 @@ const CODEX_COMMAND_COMPLETIONS = [
     "imagegen",
     "view",
     "descriptions",
+    "patch",
     "tools",
     "prompt",
     "compact",
@@ -56,7 +57,7 @@ export function registerCodexCommand(pi: ExtensionAPI, options: CodexCommandOpti
             if (!nextConfig) {
                 notify(
                     ctx,
-                    "Usage: /codex, /codex status|usage|web|imagegen|view|descriptions|tools|prompt|compact|autocompact|fast|verbosity",
+                    "Usage: /codex, /codex status|usage|web|imagegen|view|descriptions|patch|tools|prompt|compact|autocompact|fast|verbosity",
                     "warning",
                 );
                 return;
@@ -96,6 +97,11 @@ function applyCommand(command: string, config: CodexCoreConfig): CodexCoreConfig
             tools: { ...config.tools, viewImageDescriptions: !config.tools.viewImageDescriptions },
         };
     }
+    if (command === "patch")
+        return {
+            ...config,
+            tools: { ...config.tools, applyPatch: nextApplyPatchMode(config.tools.applyPatch) },
+        };
     if (command === "tools")
         return { ...config, scope: { tools: config.scope.tools === "codex" ? "all" : "codex" } };
     if (command === "prompt")
@@ -203,6 +209,11 @@ function applyChangedConfigValues(
                 previousEffectiveConfig.tools.viewImageDescriptions,
                 nextEffectiveConfig.tools.viewImageDescriptions,
             ),
+            applyPatch: changedValue(
+                globalConfig.tools.applyPatch,
+                previousEffectiveConfig.tools.applyPatch,
+                nextEffectiveConfig.tools.applyPatch,
+            ),
         },
         prompt: {
             mode: changedValue(
@@ -282,11 +293,20 @@ function formatConfig(config: CodexCoreConfig): string {
         `- web_run: ${onOff(config.tools.webSearch)} (model ${formatCodexModelSelection(config.openai.webSearchModel)})`,
         `- imagegen: ${onOff(config.tools.imageGeneration)}`,
         `- view_image: ${onOff(config.tools.viewImage)}${config.tools.viewImageDescriptions ? " + descriptions" : ""}`,
+        `- apply_patch: ${config.tools.applyPatch}${config.tools.applyPatch === "off" ? "" : " (replaces edit)"}`,
         `- tool scope: ${config.scope.tools}`,
         `- prompt mode: ${config.prompt.mode}`,
         `- native compaction: ${onOff(config.compaction.enabled)} (model ${formatCodexModelSelection(config.openai.compactionModel)}, reasoning ${config.openai.compactionReasoning}, auto ${onOff(config.compaction.auto)} at ${config.compaction.thresholdPercent}%)`,
         `- fast: ${onOff(config.openai.fast)}, verbosity: ${config.openai.verbosity}`,
     ].join("\n");
+}
+
+function nextApplyPatchMode(
+    value: CodexCoreConfig["tools"]["applyPatch"],
+): CodexCoreConfig["tools"]["applyPatch"] {
+    if (value === "off") return "openai";
+    if (value === "openai") return "all";
+    return "off";
 }
 
 function nextVerbosity(

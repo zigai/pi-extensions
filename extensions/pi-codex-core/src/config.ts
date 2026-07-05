@@ -13,12 +13,14 @@ import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 export type CodexPromptMode = "pi" | "codex";
 export type CodexToolScope = "codex" | "all";
+export type CodexApplyPatchMode = "off" | "openai" | "all";
 export type CodexVerbosity = "low" | "medium" | "high";
 export type CodexCompactionReasoning = "current" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 /** Config value that means Codex API requests should use the active Codex model. */
 export const CODEX_CURRENT_MODEL_SELECTION = "current";
 export const CODEX_TOOL_SCOPES: readonly CodexToolScope[] = ["codex", "all"];
+export const CODEX_APPLY_PATCH_MODES: readonly CodexApplyPatchMode[] = ["off", "openai", "all"];
 export const CODEX_PROMPT_MODES: readonly CodexPromptMode[] = ["pi", "codex"];
 export const CODEX_VERBOSITY_LEVELS: readonly CodexVerbosity[] = ["low", "medium", "high"];
 export const CODEX_COMPACTION_REASONING_LEVELS: readonly CodexCompactionReasoning[] = [
@@ -39,6 +41,7 @@ export type CodexCoreConfig = {
         readonly imageGeneration: boolean;
         readonly viewImage: boolean;
         readonly viewImageDescriptions: boolean;
+        readonly applyPatch: CodexApplyPatchMode;
     };
     readonly prompt: {
         readonly mode: CodexPromptMode;
@@ -68,6 +71,11 @@ const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
 const CODEX_CORE_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-core/config.schema.json";
 
 const CodexToolScopeSchema = Type.Union([Type.Literal("codex"), Type.Literal("all")]);
+const CodexApplyPatchModeSchema = Type.Union([
+    Type.Literal("off"),
+    Type.Literal("openai"),
+    Type.Literal("all"),
+]);
 const CodexPromptModeSchema = Type.Union([Type.Literal("pi"), Type.Literal("codex")]);
 const CodexVerbositySchema = Type.Union([
     Type.Literal("low"),
@@ -94,6 +102,7 @@ const CodexCoreConfigJsonSchema = Type.Object(
                 imageGeneration: Type.Boolean({ default: true }),
                 viewImage: Type.Boolean({ default: true }),
                 viewImageDescriptions: Type.Boolean({ default: false }),
+                applyPatch: CodexApplyPatchModeSchema,
             },
             { additionalProperties: false },
         ),
@@ -137,6 +146,7 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
         imageGeneration: true,
         viewImage: true,
         viewImageDescriptions: false,
+        applyPatch: "off",
     },
     prompt: { mode: "pi" },
     compaction: { enabled: false, auto: true, thresholdPercent: 80 },
@@ -240,6 +250,13 @@ export function parseCodexCoreConfigWithDiagnostics(
                     tools.viewImageDescriptions,
                     DEFAULT_CODEX_CORE_CONFIG.tools.viewImageDescriptions,
                     "$.tools.viewImageDescriptions",
+                    diagnostics,
+                ),
+                applyPatch: parseStringEnum(
+                    tools.applyPatch,
+                    CODEX_APPLY_PATCH_MODES,
+                    DEFAULT_CODEX_CORE_CONFIG.tools.applyPatch,
+                    "$.tools.applyPatch",
                     diagnostics,
                 ),
             },

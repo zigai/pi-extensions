@@ -28,7 +28,13 @@
     },
     "tools": {
       "type": "object",
-      "required": ["webSearch", "imageGeneration", "viewImage", "viewImageDescriptions"],
+      "required": [
+        "webSearch",
+        "imageGeneration",
+        "viewImage",
+        "viewImageDescriptions",
+        "applyPatch"
+      ],
       "properties": {
         "webSearch": {
           "type": "boolean",
@@ -45,6 +51,22 @@
         "viewImageDescriptions": {
           "type": "boolean",
           "default": false
+        },
+        "applyPatch": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "openai"
+            },
+            {
+              "type": "string",
+              "const": "all"
+            }
+          ]
         }
       },
       "additionalProperties": false
