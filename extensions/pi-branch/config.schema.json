@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zigai/pi-branch/config.schema.json",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./config.schema.json",
+      "description": "Relative JSON Schema path for editors."
+    },
+    "worktreeDir": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "worktrees",
+      "description": "Directory for /branch --worktree. Null or an empty string disables worktrees."
+    }
+  },
+  "additionalProperties": false,
+  "description": "pi-branch extension configuration."
+}

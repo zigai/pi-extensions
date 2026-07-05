@@ -32,7 +32,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "pi-typed-commands": "file:../pi-typed-commands"
+    "pi-typed-commands": "file:../pi-typed-commands",
+    "typebox": "1.1.38"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.79.8",

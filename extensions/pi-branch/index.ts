@@ -7,20 +7,61 @@
  */
 
 import {
-    SettingsManager,
+    CONFIG_DIR_NAME,
     getAgentDir,
     type ExtensionAPI,
     type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands";
+import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands/command";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const MAX_FORK_COUNT = 100;
 const DEFAULT_WORKTREE_DIR_NAME = "worktrees";
+const EXTENSION_ID = "pi-branch";
+const CONFIG_FILE_NAME = "config.json";
+const CONFIG_SCHEMA_FILE_NAME = "config.schema.json";
+const CONFIG_SCHEMA_REFERENCE = "./config.schema.json";
+
+function createWorktreeDirSchema() {
+    return Type.Optional(
+        Type.Union([Type.String(), Type.Null()], {
+            default: DEFAULT_WORKTREE_DIR_NAME,
+            description:
+                "Directory for /branch --worktree. Null or an empty string disables worktrees.",
+        }),
+    );
+}
+
+const BranchConfigSchema = Type.Object(
+    {
+        worktreeDir: createWorktreeDirSchema(),
+    },
+    { additionalProperties: false },
+);
+type BranchConfig = Static<typeof BranchConfigSchema>;
+
+const BranchConfigFileSchema = Type.Object(
+    {
+        $schema: Type.Optional(
+            Type.String({
+                default: CONFIG_SCHEMA_REFERENCE,
+                description: "Relative JSON Schema path for editors.",
+            }),
+        ),
+        worktreeDir: createWorktreeDirSchema(),
+    },
+    { additionalProperties: false, description: "pi-branch extension configuration." },
+);
+type BranchConfigFile = Static<typeof BranchConfigFileSchema>;
+
+const DEFAULT_BRANCH_CONFIG: BranchConfig = { worktreeDir: DEFAULT_WORKTREE_DIR_NAME };
 
 const GHOSTTY_WINDOW_SCRIPT = `on run argv
 	set targetCwd to item 1 of argv
@@ -74,7 +115,16 @@ type CommandResult = {
     stderr?: string;
 };
 
-type SettingsRecord = Record<string, unknown>;
+type LoadedBranchConfig = {
+    config: BranchConfig;
+    worktreeDirBaseDir?: string;
+};
+
+type BranchConfigResult =
+    | LoadedBranchConfig
+    | {
+          error: string;
+      };
 
 type WorktreeConfig =
     | {
@@ -321,10 +371,6 @@ function formatUnknownError(error: unknown): string {
     return String(error);
 }
 
-function isRecord(value: unknown): value is SettingsRecord {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function expandHomePath(value: string): string {
     if (value === "~") {
         return homedir();
@@ -350,91 +396,240 @@ function getDefaultWorktreeRoot(): string {
     return path.join(getAgentDir(), DEFAULT_WORKTREE_DIR_NAME);
 }
 
-function readGlobalWorktreeDir(settings: SettingsRecord):
+function getGlobalBranchConfigDir(): string {
+    return path.join(getAgentDir(), EXTENSION_ID);
+}
+
+function isFileAlreadyPresentError(error: unknown): boolean {
+    return (
+        typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST"
+    );
+}
+
+function isFileMissingError(error: unknown): boolean {
+    return (
+        typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
+    );
+}
+
+function getDefaultBranchConfigFileText(): string {
+    return `${JSON.stringify({ $schema: CONFIG_SCHEMA_REFERENCE, ...DEFAULT_BRANCH_CONFIG }, null, 2)}\n`;
+}
+
+async function readInstalledBranchConfigSchemaText(): Promise<string | undefined> {
+    const installedSchemaPath = path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        CONFIG_SCHEMA_FILE_NAME,
+    );
+    try {
+        return await fs.readFile(installedSchemaPath, "utf8");
+    } catch (error: unknown) {
+        console.error(
+            `[pi-branch] Failed to read installed schema ${installedSchemaPath}: ${formatUnknownError(error)}`,
+        );
+        return undefined;
+    }
+}
+
+async function writeTextFileIfMissing(filePath: string, content: string): Promise<void> {
+    try {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
+    } catch (error: unknown) {
+        if (isFileAlreadyPresentError(error)) {
+            return;
+        }
+        console.error(`[pi-branch] Failed to scaffold ${filePath}: ${formatUnknownError(error)}`);
+    }
+}
+
+async function refreshExtensionOwnedTextFile(filePath: string, content: string): Promise<void> {
+    try {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        try {
+            if ((await fs.readFile(filePath, "utf8")) === content) {
+                return;
+            }
+        } catch (error: unknown) {
+            if (!isFileMissingError(error)) {
+                console.error(
+                    `[pi-branch] Failed to read ${filePath}: ${formatUnknownError(error)}`,
+                );
+            }
+        }
+        await fs.writeFile(filePath, content, "utf8");
+    } catch (error: unknown) {
+        console.error(`[pi-branch] Failed to refresh ${filePath}: ${formatUnknownError(error)}`);
+    }
+}
+
+async function scaffoldGlobalBranchConfigFiles(): Promise<void> {
+    const globalConfigDir = getGlobalBranchConfigDir();
+    await writeTextFileIfMissing(
+        path.join(globalConfigDir, CONFIG_FILE_NAME),
+        getDefaultBranchConfigFileText(),
+    );
+
+    const installedSchemaText = await readInstalledBranchConfigSchemaText();
+    if (installedSchemaText !== undefined) {
+        await refreshExtensionOwnedTextFile(
+            path.join(globalConfigDir, CONFIG_SCHEMA_FILE_NAME),
+            installedSchemaText,
+        );
+    }
+}
+
+function parseBranchConfig(parsed: unknown): BranchConfigFile {
+    if (!Value.Check(BranchConfigFileSchema, parsed)) {
+        throw new Error("Config does not match config.schema.json");
+    }
+
+    return Value.Decode(BranchConfigFileSchema, parsed);
+}
+
+function projectBranchConfig(fileConfig: BranchConfigFile): BranchConfig {
+    if (fileConfig.worktreeDir === undefined) {
+        return {};
+    }
+
+    return { worktreeDir: fileConfig.worktreeDir };
+}
+
+function getBranchConfigPaths(ctx: ExtensionCommandContext): Array<{
+    file: string;
+    baseDir: string;
+    label: string;
+}> {
+    const agentDir = getAgentDir();
+    const projectConfigDir = path.join(ctx.cwd, CONFIG_DIR_NAME);
+    return [
+        {
+            file: path.join(agentDir, EXTENSION_ID, CONFIG_FILE_NAME),
+            baseDir: agentDir,
+            label: "global",
+        },
+        {
+            file: path.join(projectConfigDir, EXTENSION_ID, CONFIG_FILE_NAME),
+            baseDir: projectConfigDir,
+            label: "project",
+        },
+    ];
+}
+
+async function readBranchConfigFile(input: {
+    file: string;
+    baseDir: string;
+    label: string;
+}): Promise<
     | {
-          state: "unset";
+          state: "missing";
       }
     | {
-          state: "disabled";
-      }
-    | {
-          state: "value";
-          value: string;
+          state: "loaded";
+          config: BranchConfigFile;
+          hasWorktreeDir: boolean;
+          baseDir: string;
       }
     | {
           state: "invalid";
-          reason: string;
-      } {
-    const piBranch = settings.piBranch;
-    if (piBranch === undefined) {
-        return { state: "unset" };
+          error: string;
+      }
+> {
+    if (!existsSync(input.file)) {
+        return { state: "missing" };
     }
 
-    if (!isRecord(piBranch)) {
-        return { state: "invalid", reason: "Global piBranch setting must be an object." };
+    try {
+        const parsed: unknown = JSON.parse(await fs.readFile(input.file, "utf8"));
+        const hasWorktreeDir =
+            typeof parsed === "object" && parsed !== null && Object.hasOwn(parsed, "worktreeDir");
+        const config = parseBranchConfig(parsed);
+        return {
+            state: "loaded",
+            config,
+            hasWorktreeDir,
+            baseDir: input.baseDir,
+        };
+    } catch (error: unknown) {
+        return {
+            state: "invalid",
+            error: `Invalid ${input.label} pi-branch config at ${input.file}: ${formatUnknownError(error)}`,
+        };
+    }
+}
+
+async function loadBranchConfig(ctx: ExtensionCommandContext): Promise<BranchConfigResult> {
+    await scaffoldGlobalBranchConfigFiles();
+
+    let config: BranchConfig = DEFAULT_BRANCH_CONFIG;
+    let worktreeDirBaseDir: string | undefined = getAgentDir();
+
+    for (const configPath of getBranchConfigPaths(ctx)) {
+        const result = await readBranchConfigFile(configPath);
+        if (result.state === "missing") {
+            continue;
+        }
+
+        if (result.state === "invalid") {
+            return { error: result.error };
+        }
+
+        config = { ...config, ...projectBranchConfig(result.config) };
+        if (result.hasWorktreeDir) {
+            worktreeDirBaseDir = result.baseDir;
+        }
     }
 
-    let rawValue: unknown;
-    if (Object.hasOwn(piBranch, "worktreeDir")) {
-        rawValue = piBranch.worktreeDir;
-    } else {
-        return { state: "unset" };
+    if (worktreeDirBaseDir !== undefined) {
+        return { config, worktreeDirBaseDir };
+    }
+
+    return { config };
+}
+
+async function getConfigWorktreeConfig(
+    ctx: ExtensionCommandContext,
+): Promise<WorktreeConfigResult> {
+    const result = await loadBranchConfig(ctx);
+    if ("error" in result) {
+        return { enabled: false, error: result.error };
+    }
+
+    const rawValue = result.config.worktreeDir;
+    if (rawValue === undefined) {
+        return { enabled: true, root: getDefaultWorktreeRoot() };
     }
 
     if (rawValue === null) {
-        return { state: "disabled" };
-    }
-
-    if (typeof rawValue !== "string") {
         return {
-            state: "invalid",
-            reason: "Global piBranch.worktreeDir setting must be a string path.",
+            enabled: false,
+            error: `pi-branch worktreeDir is null. Remove it to use ${getDefaultWorktreeRoot()}, or set it to a directory path.`,
         };
     }
 
     const trimmedValue = rawValue.trim();
     if (trimmedValue.length === 0) {
-        return { state: "disabled" };
-    }
-
-    return { state: "value", value: trimmedValue };
-}
-
-function getSettingsWorktreeConfig(ctx: ExtensionCommandContext): WorktreeConfigResult {
-    const agentDir = getAgentDir();
-    const settingsManager = SettingsManager.create(ctx.cwd, agentDir, {
-        projectTrusted: false,
-    });
-    const globalSettings = settingsManager.getGlobalSettings() as unknown as SettingsRecord;
-    const result = readGlobalWorktreeDir(globalSettings);
-
-    if (result.state === "unset") {
-        return { enabled: true, root: getDefaultWorktreeRoot() };
-    }
-
-    if (result.state === "disabled") {
         return {
             enabled: false,
-            error: `Global piBranch.worktreeDir is empty or null. Remove it to use ${getDefaultWorktreeRoot()}, or set it to a directory path.`,
+            error: `pi-branch worktreeDir is empty. Remove it to use ${getDefaultWorktreeRoot()}, or set it to a directory path.`,
         };
-    }
-
-    if (result.state === "invalid") {
-        return { enabled: false, error: result.reason };
     }
 
     return {
         enabled: true,
-        root: resolveSettingPath(result.value, agentDir),
+        root: resolveSettingPath(trimmedValue, result.worktreeDirBaseDir ?? getAgentDir()),
     };
 }
 
-function getWorktreeConfig(ctx: ExtensionCommandContext, parsed: ParsedArgs): WorktreeConfigResult {
+async function getWorktreeConfig(
+    ctx: ExtensionCommandContext,
+    parsed: ParsedArgs,
+): Promise<WorktreeConfigResult> {
     if (!parsed.worktree) {
         return { enabled: false };
     }
 
-    return getSettingsWorktreeConfig(ctx);
+    return getConfigWorktreeConfig(ctx);
 }
 
 function slugify(value: string, fallback: string, maxLength = 48): string {
@@ -1127,7 +1322,7 @@ async function handleParsedBranch(parsed: ParsedArgs, ctx: ExtensionCommandConte
         return;
     }
 
-    const worktreeConfig = getWorktreeConfig(ctx, parsed);
+    const worktreeConfig = await getWorktreeConfig(ctx, parsed);
     if ("error" in worktreeConfig) {
         ctx.ui.notify(worktreeConfig.error, "error");
         return;
