@@ -8,14 +8,6 @@ This Pi extension branches the current session into parallel tmux or Ghostty pan
 pi install git:github.com/zigai/pi-branch
 ```
 
-For this private package on this machine, load the local working copy from Pi settings:
-
-```json
-{
-  "packages": ["/home/zigai/Projects/pi-branch"]
-}
-```
-
 ## Commands
 
 ### `/branch [args]`
@@ -52,17 +44,22 @@ On macOS Ghostty, forks open in Ghostty windows by default, split the current wi
 
 ## Worktrees
 
-By default, forks launch in the current working directory. When `/branch --worktree` is passed, worktrees are created under `~/.pi/agent/worktrees` unless you override the location with this global Pi setting in `~/.pi/agent/settings.json`:
+By default, forks launch in the current working directory. When `--worktree` is passed, `/branch` creates one worktree per fork under the configured worktree directory, creates a new branch named like `pi-branch/<session>-<id>` from the current `HEAD`, writes the forked Pi session with the worktree as its `cwd`, and opens the new terminal there.
+
+## Configuration
+
+Configuration is optional. Global config lives at `~/.pi/agent/pi-branch/config.json`.
+
+| Key           | Type           | Default       | Description                                                                                                                                                 |
+| ------------- | -------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `worktreeDir` | string or null | `"worktrees"` | Directory for `/branch --worktree`; `~` is supported, relative paths resolve from the config file location, and `null` or empty disables worktree creation. |
 
 ```json
 {
-  "piBranch": {
-    "worktreeDir": "~/Projects/pi-worktrees"
-  }
+  "$schema": "./config.schema.json",
+  "worktreeDir": "worktrees"
 }
 ```
-
-When `--worktree` is passed, `/branch` creates one worktree per fork under the configured/default worktree directory, creates a new branch named like `pi-branch/<session>-<id>` from the current `HEAD`, writes the forked Pi session with the worktree as its `cwd`, and opens the new terminal there. Relative `worktreeDir` values are resolved relative to `~/.pi/agent`.
 
 ## Development note
 
