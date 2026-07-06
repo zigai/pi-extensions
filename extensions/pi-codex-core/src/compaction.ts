@@ -32,7 +32,11 @@ import {
     NATIVE_COMPACTION_STRATEGY,
 } from "./compaction-messages.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
-import { countCodexTextTokens, truncateCodexTextToTokenBudget } from "./tokenizer.ts";
+import {
+    countCodexTextTokens,
+    shutdownCodexTokenizer,
+    truncateCodexTextToTokenBudget,
+} from "./tokenizer.ts";
 
 export {
     NATIVE_COMPACTION_MESSAGE_TYPE,
@@ -57,6 +61,8 @@ const MAX_SSE_TAIL_CHARS = 1_000_000;
 const MAX_SSE_EVENT_CHARS = 2_000_000;
 const TOKEN_ESTIMATE_CHUNK_CHARS = 512 * 1024;
 const TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS = 8 * 1024;
+const PENDING_NATIVE_WINDOW_MAX_AGE_MS = 5 * 60 * 1000;
+const INLINE_IMAGE_TOKEN_ESTIMATE_TEXT = "(inline image data omitted for token estimate)";
 
 const JsonObjectSchema = Type.Record(Type.String(), Type.Unknown());
 const StringArraySchema = Type.Array(Type.String());
@@ -83,7 +89,7 @@ const NativeCompactionDetailsSchema = Type.Object({
     model: Type.String(),
     baseUrl: Type.String(),
     compactedWindow: Type.Array(JsonObjectSchema),
-    replacementInput: Type.Array(JsonObjectSchema),
+    replacementInput: Type.Optional(Type.Array(JsonObjectSchema)),
     windowNumber: Type.Number(),
     windowId: Type.String(),
     firstWindowId: Type.String(),
@@ -191,7 +197,6 @@ type NativeCompactionDetails = {
     readonly model: string;
     readonly baseUrl: string;
     readonly compactedWindow: readonly ResponsesInputItem[];
-    readonly replacementInput: readonly ResponsesInputItem[];
     readonly windowNumber: number;
     readonly windowId: string;
     readonly firstWindowId: string;
@@ -249,6 +254,7 @@ type FoundNativeCompactionEntry = {
 type PendingPiCompactionNativeWindow = NativeCompactionMatch & {
     readonly sessionId: string;
     readonly replacementInput: readonly ResponsesInputItem[];
+    readonly createdAtMs: number;
 };
 
 type BuildPromptInputResult = {
@@ -398,10 +404,13 @@ export async function handleCodexNativeCompaction(
     if (shrink.kind === "too_large") {
         notifyCompactionFallback(
             ctx,
+            pi,
+            runtimeServices,
             event.branchEntries,
             match,
             `Codex remote compaction v2 request is too large for the context window (${shrink.estimatedTokensAfter}/${shrink.budgetTokens} estimated tokens).`,
         );
+        await shutdownCodexTokenizer();
         return undefined;
     }
     tokenCache = createTokenEstimateCache();
@@ -413,7 +422,15 @@ export async function handleCodexNativeCompaction(
             runtimeServices,
         );
         if (responseResult.isErr()) {
-            notifyCompactionFallback(ctx, event.branchEntries, match, responseResult.error.message);
+            notifyCompactionFallback(
+                ctx,
+                pi,
+                runtimeServices,
+                event.branchEntries,
+                match,
+                responseResult.error.message,
+            );
+            await shutdownCodexTokenizer();
             return responseResult.error._tag === "CodexRequestCancelled"
                 ? { cancel: true }
                 : undefined;
@@ -427,21 +444,19 @@ export async function handleCodexNativeCompaction(
         if (compactedWindow.length === 0 || !hasCompactionOutputItem(compactedWindow)) {
             notifyCompactionFallback(
                 ctx,
+                pi,
+                runtimeServices,
                 event.branchEntries,
                 match,
                 "Codex remote compaction v2 returned no usable compacted context",
             );
+            await shutdownCodexTokenizer();
             return undefined;
         }
         const worldState = captureNativeCompactionWorldState(ctx, pi, runtimeServices, event);
-        const worldStateInput = buildWorldStateInput(worldState);
-        const lifecycle = buildWindowLifecycle(
-            latestNativeCompaction,
-            compactedWindow,
-            worldStateInput,
-            runtimeServices,
-        );
+        const lifecycle = buildWindowLifecycle(latestNativeCompaction, runtimeServices);
         pendingPiCompactionNativeWindows.delete(ctx.sessionManager.getSessionId());
+        await shutdownCodexTokenizer();
         return {
             compaction: {
                 summary: NATIVE_COMPACTION_SHIM_SUMMARY,
@@ -454,7 +469,6 @@ export async function handleCodexNativeCompaction(
                     model: compactionModel,
                     baseUrl: runtime.value.baseUrl,
                     compactedWindow,
-                    replacementInput: lifecycle.replacementInput,
                     windowNumber: lifecycle.windowNumber,
                     windowId: lifecycle.windowId,
                     firstWindowId: lifecycle.firstWindowId,
@@ -475,14 +489,20 @@ export async function handleCodexNativeCompaction(
             },
         };
     } catch (cause: unknown) {
-        if (isCodexAbortCause(cause)) return { cancel: true };
+        if (isCodexAbortCause(cause)) {
+            await shutdownCodexTokenizer();
+            return { cancel: true };
+        }
         const message = safeCauseMessage(cause);
         notifyCompactionFallback(
             ctx,
+            pi,
+            runtimeServices,
             event.branchEntries,
             match,
             `Codex remote compaction v2 failed: ${message}`,
         );
+        await shutdownCodexTokenizer();
         return undefined;
     }
 }
@@ -494,8 +514,7 @@ export async function rewriteProviderRequestWithNativeCompaction(
     pi: ExtensionAPI,
     runtime: CodexRuntime = defaultCodexRuntime,
 ): Promise<unknown> {
-    const responsesPayload = parseResponsesPayload(payload);
-    if (!config.compaction.enabled || !responsesPayload) return undefined;
+    if (!config.compaction.enabled) return undefined;
     const model = ctx.model;
     if (!model) return undefined;
     const match: NativeCompactionMatch = {
@@ -504,15 +523,23 @@ export async function rewriteProviderRequestWithNativeCompaction(
         baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
     };
 
+    const sessionId = ctx.sessionManager.getSessionId();
+    const branchEntries = ctx.sessionManager.getBranch();
+    const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
+    const pendingNativeWindow = getPendingNativeWindow(sessionId, match, runtime);
+    if (!latestNativeCompaction && !pendingNativeWindow) return undefined;
+
+    const responsesPayload = asResponsesPayload(payload);
+    if (!responsesPayload) return undefined;
+
     const pendingFallbackRewrite = injectPendingNativeWindowIntoPiCompactionRequest(
         responsesPayload,
         ctx,
         match,
+        runtime,
     );
     if (pendingFallbackRewrite) return pendingFallbackRewrite;
 
-    const branchEntries = ctx.sessionManager.getBranch();
-    const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
     if (!latestNativeCompaction) return undefined;
     const replacementInput = buildFreshReplacementInput(
         latestNativeCompaction.entry.details,
@@ -542,7 +569,10 @@ function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails |
     const details = parseWithSchema(NativeCompactionDetailsValidator, value);
     if (!details) return undefined;
     const compactedWindow = parseResponsesInputItems(details.compactedWindow);
-    const replacementInput = parseResponsesInputItems(details.replacementInput);
+    const legacyReplacementInput =
+        details.replacementInput === undefined
+            ? undefined
+            : parseResponsesInputItems(details.replacementInput);
     const worldState = parseWithSchema(NativeCompactionWorldStateValidator, details.worldState);
     const requestMeta =
         details.requestMeta === undefined
@@ -550,7 +580,7 @@ function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails |
             : parseWithSchema(NativeCompactionRequestMetaValidator, details.requestMeta);
     if (
         !compactedWindow ||
-        !replacementInput ||
+        (details.replacementInput !== undefined && !legacyReplacementInput) ||
         !worldState ||
         !Number.isFinite(details.windowNumber) ||
         details.windowNumber < 1 ||
@@ -565,7 +595,6 @@ function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails |
         model: details.model,
         baseUrl: details.baseUrl,
         compactedWindow,
-        replacementInput,
         windowNumber: details.windowNumber,
         windowId: details.windowId,
         firstWindowId: details.firstWindowId,
@@ -619,8 +648,19 @@ export function cancelScheduledCodexAutoCompaction(): void {
     for (const state of autoCompactionBySession.values()) {
         if (state.timer) state.timer.cancel();
     }
+    pendingPiCompactionNativeWindows.clear();
     autoCompactionBySession.clear();
     nativeReplayWarningKeys.clear();
+}
+
+export function clearCodexCompactionSessionState(sessionId: string): void {
+    const state = autoCompactionBySession.get(sessionId);
+    state?.timer?.cancel();
+    autoCompactionBySession.delete(sessionId);
+    pendingPiCompactionNativeWindows.delete(sessionId);
+    for (const key of nativeReplayWarningKeys) {
+        if (key.startsWith(`${sessionId}:`)) nativeReplayWarningKeys.delete(key);
+    }
 }
 
 function latestAssistantEndedWithError(
@@ -1422,11 +1462,8 @@ async function buildRemoteCompactionV2Window(
 
 function buildWindowLifecycle(
     latestNativeCompaction: FoundNativeCompactionEntry | undefined,
-    compactedWindow: readonly ResponsesInputItem[],
-    worldStateInput: readonly ResponsesInputItem[],
     runtime: CodexRuntime,
 ): {
-    readonly replacementInput: readonly ResponsesInputItem[];
     readonly windowNumber: number;
     readonly windowId: string;
     readonly firstWindowId: string;
@@ -1437,7 +1474,6 @@ function buildWindowLifecycle(
     const windowId = createWindowId(runtime);
     const previousWindowId = previousDetails?.windowId;
     return {
-        replacementInput: [...compactedWindow, ...worldStateInput],
         windowNumber: (previousDetails?.windowNumber ?? 0) + 1,
         windowId,
         firstWindowId: previousDetails?.firstWindowId ?? windowId,
@@ -1618,11 +1654,19 @@ function notifyNativeReplayFallbackOnce(
 
 function notifyCompactionFallback(
     ctx: ExtensionContext,
+    pi: ExtensionAPI,
+    runtime: CodexRuntime,
     branchEntries: readonly SessionEntry[],
     match: NativeCompactionMatch,
     message: string,
 ): void {
-    const stashed = stashLatestNativeWindowForPiCompactionFallback(ctx, branchEntries, match);
+    const stashed = stashLatestNativeWindowForPiCompactionFallback(
+        ctx,
+        pi,
+        runtime,
+        branchEntries,
+        match,
+    );
     if (ctx.hasUI) {
         ctx.ui.notify(
             `${message}; Pi compaction will run.${stashed ? " Previous native compacted window will be included in Pi compaction fallback." : ""}`,
@@ -1633,6 +1677,8 @@ function notifyCompactionFallback(
 
 function stashLatestNativeWindowForPiCompactionFallback(
     ctx: ExtensionContext,
+    pi: ExtensionAPI,
+    runtime: CodexRuntime,
     branchEntries: readonly SessionEntry[],
     match: NativeCompactionMatch,
 ): boolean {
@@ -1640,12 +1686,18 @@ function stashLatestNativeWindowForPiCompactionFallback(
     pendingPiCompactionNativeWindows.delete(sessionId);
     const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
     if (!latestNativeCompaction) return false;
-    const replacementInput = latestNativeCompaction.entry.details.replacementInput;
+    const replacementInput = buildFreshReplacementInput(
+        latestNativeCompaction.entry.details,
+        ctx,
+        pi,
+        runtime,
+    );
     if (replacementInput.length === 0) return false;
     pendingPiCompactionNativeWindows.set(sessionId, {
         ...match,
         sessionId,
         replacementInput,
+        createdAtMs: runtime.clock.nowMs(),
     });
     return true;
 }
@@ -1654,14 +1706,11 @@ function injectPendingNativeWindowIntoPiCompactionRequest(
     payload: ResponsesPayload,
     ctx: ExtensionContext,
     match: NativeCompactionMatch,
+    runtime: CodexRuntime,
 ): ResponsesPayload | undefined {
     const sessionId = ctx.sessionManager.getSessionId();
-    const pending = pendingPiCompactionNativeWindows.get(sessionId);
+    const pending = getPendingNativeWindow(sessionId, match, runtime);
     if (!pending) return undefined;
-    if (!nativeCompactionMatches(pending, match)) {
-        pendingPiCompactionNativeWindows.delete(sessionId);
-        return undefined;
-    }
     if (!isPiCompactionSummarizationPayload(payload)) return undefined;
 
     const input = payload.input;
@@ -1672,6 +1721,24 @@ function injectPendingNativeWindowIntoPiCompactionRequest(
         ...payload,
         input: [...input.slice(0, insertAt), ...pending.replacementInput, ...input.slice(insertAt)],
     };
+}
+
+function getPendingNativeWindow(
+    sessionId: string,
+    match: NativeCompactionMatch,
+    runtime: CodexRuntime,
+): PendingPiCompactionNativeWindow | undefined {
+    const pending = pendingPiCompactionNativeWindows.get(sessionId);
+    if (!pending) return undefined;
+    if (runtime.clock.nowMs() - pending.createdAtMs > PENDING_NATIVE_WINDOW_MAX_AGE_MS) {
+        pendingPiCompactionNativeWindows.delete(sessionId);
+        return undefined;
+    }
+    if (!nativeCompactionMatches(pending, match)) {
+        pendingPiCompactionNativeWindows.delete(sessionId);
+        return undefined;
+    }
+    return pending;
 }
 
 function isPiCompactionSummarizationPayload(payload: ResponsesPayload): boolean {
@@ -1794,7 +1861,7 @@ async function truncateRetainedMessages(
         if (remaining <= 0) continue;
         const tokenCount = Math.max(1, await messageTextTokenCount(item, cache));
         if (tokenCount <= remaining) {
-            retainedReversed.push(item);
+            retainedReversed.push(omitRetainedInputImages(item));
             remaining -= tokenCount;
         } else {
             const truncated = await truncateMessageTextToTokenBudget(item, remaining, cache);
@@ -1803,6 +1870,18 @@ async function truncateRetainedMessages(
         }
     }
     return retainedReversed.reverse();
+}
+
+function omitRetainedInputImages(item: ResponsesInputItem): ResponsesInputItem {
+    const content = item.content;
+    if (!isJsonArray(content)) return item;
+    let changed = false;
+    const nextContent = content.map((part): JsonValue => {
+        if (!isInputImagePart(part)) return part;
+        changed = true;
+        return { type: "input_text", text: RETAINED_IMAGE_OMITTED_TEXT };
+    });
+    return changed ? { ...item, content: nextContent } : item;
 }
 
 async function messageTextTokenCount(
@@ -1881,7 +1960,7 @@ async function truncateMessageTextToTokenBudget(
         if (isInputImagePart(part)) {
             const tokenCount = await inputImageRetainedTokenCount(part, cache);
             if (tokenCount <= remaining) {
-                nextContent.push(part);
+                nextContent.push({ type: "input_text", text: RETAINED_IMAGE_OMITTED_TEXT });
                 remaining -= tokenCount;
                 continue;
             }
@@ -1951,14 +2030,18 @@ function nativeCompactionMatches(
     );
 }
 
-function parseResponsesPayload(value: unknown): ResponsesPayload | undefined {
-    const payload = parseJsonObject(value);
-    if (!payload || typeof payload.model !== "string" || !Array.isArray(payload.input)) {
+function asResponsesPayload(value: unknown): ResponsesPayload | undefined {
+    if (!isJsonObject(value) || typeof value.model !== "string" || !Array.isArray(value.input)) {
         return undefined;
     }
-    const input = parseResponsesInputItems(payload.input);
-    if (!input) return undefined;
-    return { ...payload, model: payload.model, input };
+    if (!value.input.every(isJsonObject)) return undefined;
+    return {
+        ...value,
+        model: value.model,
+        // SAFETY: The provider request rewrite path only needs object-shaped response input items;
+        // recursively rebuilding long provider payloads here duplicates session-sized data.
+        input: value.input as readonly ResponsesInputItem[],
+    };
 }
 
 function parseResponsesInputItems(value: unknown): ResponsesInputItem[] | undefined {
@@ -2050,17 +2133,62 @@ function buildPrefixTable(values: readonly string[]): number[] {
 }
 
 function stableFingerprint(value: unknown): string {
-    const serialized = stableStringify(value);
-    return `${serialized.length}:${createHash("sha256").update(serialized).digest("base64url")}`;
+    const hash = createHash("sha256");
+    const stats = { chars: 0, nodes: 0 };
+    updateStableFingerprint(hash, value, stats, new WeakSet<object>());
+    return `${stats.chars}:${stats.nodes}:${hash.digest("base64url")}`;
 }
 
-function stableStringify(value: unknown): string {
-    return JSON.stringify(value, (_key, nested: unknown) => {
-        if (!isJsonObject(nested)) return nested;
-        return Object.fromEntries(
-            Object.entries(nested).sort(([left], [right]) => left.localeCompare(right)),
-        );
-    });
+function updateStableFingerprint(
+    hash: ReturnType<typeof createHash>,
+    value: unknown,
+    stats: { chars: number; nodes: number },
+    seen: WeakSet<object>,
+): void {
+    stats.nodes += 1;
+    if (value === null) {
+        hash.update("null;");
+        return;
+    }
+    if (typeof value === "string") {
+        stats.chars += value.length;
+        hash.update(`string:${value.length}:`);
+        hash.update(value);
+        hash.update(";");
+        return;
+    }
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+        hash.update(`${typeof value}:${String(value)};`);
+        return;
+    }
+    if (typeof value === "undefined" || typeof value === "symbol" || typeof value === "function") {
+        hash.update(`${typeof value};`);
+        return;
+    }
+    if (seen.has(value)) {
+        hash.update("circular;");
+        return;
+    }
+    seen.add(value);
+    if (Array.isArray(value)) {
+        hash.update(`array:${value.length}[`);
+        for (const item of value) updateStableFingerprint(hash, item, stats, seen);
+        hash.update("];");
+        seen.delete(value);
+        return;
+    }
+
+    hash.update("object{");
+    // SAFETY: Fingerprinting treats arbitrary object properties as unknown and never trusts them.
+    const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+        left.localeCompare(right),
+    );
+    for (const [key, nested] of entries) {
+        updateStableFingerprint(hash, key, stats, seen);
+        updateStableFingerprint(hash, nested, stats, seen);
+    }
+    hash.update("};");
+    seen.delete(value);
 }
 
 function compactRequestBudget(contextWindow: number | null | undefined): number | undefined {
@@ -2102,11 +2230,12 @@ function createTokenEstimateCache(): TokenEstimateCache {
 function estimateTokenCount(value: unknown, cache?: TokenEstimateCache): Promise<number> {
     if (cache && typeof value === "object" && value !== null) {
         return cachedObjectTokenCount(value, cache, () => {
-            const serialized = JSON.stringify(value) ?? "";
+            const serialized = JSON.stringify(sanitizeForTokenEstimate(value)) ?? "";
             return estimateTextTokens(serialized, cache);
         });
     }
-    const serialized = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
+    const serialized =
+        typeof value === "string" ? value : (JSON.stringify(sanitizeForTokenEstimate(value)) ?? "");
     return estimateTextTokens(serialized, cache);
 }
 
@@ -2130,11 +2259,26 @@ async function estimateResponsesInputItemTokens(
 
 function* responsesInputItemTokenParts(item: ResponsesInputItem): Generator<string> {
     if (item.type === "function_call_output" && typeof item.output === "string") {
-        yield JSON.stringify({ ...item, output: "" }) ?? "";
+        yield JSON.stringify(sanitizeForTokenEstimate({ ...item, output: "" })) ?? "";
         yield item.output;
         return;
     }
-    yield JSON.stringify(item) ?? "";
+    yield JSON.stringify(sanitizeForTokenEstimate(item)) ?? "";
+}
+
+function sanitizeForTokenEstimate(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(sanitizeForTokenEstimate);
+    if (typeof value !== "object" || value === null) return value;
+
+    const next: Record<string, unknown> = {};
+    // SAFETY: Token estimation only projects enumerable data into a JSON-like clone.
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+        next[key] =
+            key === "image_url" && typeof nested === "string" && nested.startsWith("data:")
+                ? INLINE_IMAGE_TOKEN_ESTIMATE_TEXT
+                : sanitizeForTokenEstimate(nested);
+    }
+    return next;
 }
 
 async function estimateTokenParts(
