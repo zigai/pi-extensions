@@ -17,9 +17,19 @@ describe("codex look config", () => {
         const config = parseCodexLookConfig({});
 
         expect(config.preserveTools).toEqual([]);
+        expect(config.debugLog).toEqual({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 10_000,
+        });
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.syntax).toEqual({
+            preloadLanguages: ["markdown", "bash", "python"],
+            projectLanguageDetection: { enabled: true },
+        });
         expect(config.patches).toEqual({
             assistantSeparator: true,
             workingWidgetSpacing: false,
@@ -44,9 +54,12 @@ describe("codex look config", () => {
         );
 
         expect(config.preserveTools).toEqual([]);
+        expect(config.debugLog.enabled).toBe(true);
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.syntax.preloadLanguages).toEqual(["markdown", "bash", "python"]);
+        expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(reportedWarnings).toEqual([
             expect.stringContaining("[pi-codex-look] Ignoring invalid test config:"),
@@ -61,9 +74,11 @@ describe("codex look config", () => {
         const config = readCodexLookConfig({ agentDir });
 
         expect(config.preserveTools).toEqual([]);
+        expect(config.debugLog.path).toBe("debug.log");
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(JSON.parse(readFileSync(getCodexLookGlobalConfigPath(agentDir), "utf8"))).toEqual(
             DEFAULT_CODEX_LOOK_CONFIG_JSON,
@@ -87,7 +102,9 @@ describe("codex look config", () => {
         });
 
         expect(config.preserveTools).toEqual([]);
+        expect(config.debugLog.enabled).toBe(true);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.syntax.preloadLanguages).toEqual(["markdown", "bash", "python"]);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
         expect(reportedWarnings).toEqual([
             expect.stringContaining(`[pi-codex-look] Failed to read ${configPath}:`),
@@ -110,7 +127,9 @@ describe("codex look config", () => {
         });
 
         expect(config.preserveTools).toEqual([]);
+        expect(config.debugLog.memorySampleIntervalMs).toBe(10_000);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.thirdPartyToolRenderers).toBe(true);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
         expect(JSON.parse(readFileSync(schemaPath, "utf8"))).toEqual(codexLookConfigJsonSchema());
@@ -138,7 +157,12 @@ describe("codex look config", () => {
             JSON.stringify({
                 $schema: "./config.schema.json",
                 preserveTools: ["mcp"],
+                debugLog: { enabled: false, memorySampleIntervalMs: 0 },
                 toolLabels: { dynamicStatus: true },
+                syntax: {
+                    preloadLanguages: ["go"],
+                    projectLanguageDetection: { enabled: false },
+                },
                 patches: { workingWidgetSpacing: true },
                 scriptPreview: { headerLayout: "block" },
             }),
@@ -147,6 +171,11 @@ describe("codex look config", () => {
             projectConfigPath,
             JSON.stringify({
                 toolLabels: { dynamicStatus: false },
+                debugLog: { enabled: true, path: "project-debug.log" },
+                syntax: {
+                    preloadLanguages: ["typescript"],
+                    projectLanguageDetection: { enabled: true },
+                },
                 patches: { workingWidgetSpacing: false, markdownSyntax: false },
                 scriptPreview: { formatters: { python: ["black", "-"] } },
             }),
@@ -155,9 +184,17 @@ describe("codex look config", () => {
         const config = readCodexLookConfig({ agentDir, cwd });
 
         expect(config.preserveTools).toEqual(["mcp"]);
+        expect(config.debugLog).toEqual({
+            enabled: false,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptFormatters.get("python")).toBeUndefined();
         expect(config.toolLabels.dynamicStatus).toBe(true);
+        expect(config.syntax.preloadLanguages).toEqual(["go"]);
+        expect(config.syntax.projectLanguageDetection.enabled).toBe(false);
         expect(config.patches.workingWidgetSpacing).toBe(true);
         expect(config.patches.markdownSyntax).toBe(true);
         expect(config.patches.thirdPartyToolRenderers).toBe(true);
@@ -176,7 +213,12 @@ describe("codex look config", () => {
             JSON.stringify({
                 $schema: "./config.schema.json",
                 preserveTools: ["mcp"],
+                debugLog: { enabled: false, memorySampleIntervalMs: 0 },
                 toolLabels: { dynamicStatus: true },
+                syntax: {
+                    preloadLanguages: ["go"],
+                    projectLanguageDetection: { enabled: false },
+                },
                 patches: { workingWidgetSpacing: true },
                 scriptPreview: { headerLayout: "block" },
             }),
@@ -185,6 +227,11 @@ describe("codex look config", () => {
             projectConfigPath,
             JSON.stringify({
                 toolLabels: { dynamicStatus: false },
+                debugLog: { enabled: true, path: "project-debug.log" },
+                syntax: {
+                    preloadLanguages: ["typescript"],
+                    projectLanguageDetection: { enabled: true },
+                },
                 patches: { workingWidgetSpacing: false, markdownSyntax: false },
                 scriptPreview: { formatters: { python: ["black", "-"] } },
             }),
@@ -193,9 +240,17 @@ describe("codex look config", () => {
         const config = readCodexLookConfig({ agentDir, cwd }, { includeProjectConfig: true });
 
         expect(config.preserveTools).toEqual(["mcp"]);
+        expect(config.debugLog).toEqual({
+            enabled: true,
+            path: "project-debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptFormatters.get("python")).toEqual(["black", "-"]);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.syntax.preloadLanguages).toEqual(["typescript"]);
+        expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(config.patches.markdownSyntax).toBe(false);
         expect(config.patches.thirdPartyToolRenderers).toBe(true);

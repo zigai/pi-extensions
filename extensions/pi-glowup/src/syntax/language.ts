@@ -82,37 +82,9 @@ const SPECIAL_FILE_LANGUAGES = new Map<string, string>([
 
 /** Common languages preloaded during extension startup for synchronous TUI rendering. */
 export const PRELOADED_SYNTAX_LANGUAGES = [
-    "bash",
-    "c",
-    "cpp",
-    "csharp",
-    "css",
-    "docker",
-    "fish",
-    "go",
-    "hcl",
-    "html",
-    "java",
-    "javascript",
-    "json",
-    "jsonc",
-    "jsx",
-    "kotlin",
-    "lua",
-    "make",
     "markdown",
-    "php",
+    "bash",
     "python",
-    "ruby",
-    "rust",
-    "sql",
-    "swift",
-    "toml",
-    "tsx",
-    "typescript",
-    "xml",
-    "yaml",
-    "zsh",
 ] as const satisfies ReadonlyArray<BundledLanguage>;
 
 /** Normalizes a Markdown/tool language hint to a Shiki bundled language when known. */

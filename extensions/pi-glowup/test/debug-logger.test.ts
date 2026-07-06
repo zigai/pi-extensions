@@ -1,0 +1,135 @@
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DebugFileLogger } from "../src/debug-logger.ts";
+
+describe("debug file logger", () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("writes structured JSONL diagnostics to a relative file path", () => {
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const logger = new DebugFileLogger({
+            extensionDirectory,
+            reportWarning() {},
+        });
+
+        logger.configure({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
+        logger.record("test_event", {
+            memory: { heapUsedBytes: 123 },
+            omitted: undefined,
+        });
+
+        const entries = readJsonLines(join(extensionDirectory, "debug.log"));
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({
+            event: "test_event",
+            fields: { memory: { heapUsedBytes: 123 } },
+        });
+        expect(entries[0]).not.toMatchObject({ fields: { omitted: expect.anything() } });
+    });
+
+    it("does not create a file when disabled", () => {
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const logger = new DebugFileLogger({
+            extensionDirectory,
+            reportWarning() {},
+        });
+
+        logger.configure({
+            enabled: false,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
+        logger.record("test_event", { value: true });
+
+        expect(existsSync(join(extensionDirectory, "debug.log"))).toBe(false);
+    });
+
+    it("rotates the active file when it exceeds the configured byte limit", () => {
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const logger = new DebugFileLogger({
+            extensionDirectory,
+            reportWarning() {},
+        });
+
+        logger.configure({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: 240,
+            memorySampleIntervalMs: 0,
+        });
+        logger.record("first_event", { payload: "x".repeat(80) });
+        logger.record("second_event", { payload: "y".repeat(80) });
+
+        expect(readJsonLines(join(extensionDirectory, "debug.log"))[0]).toMatchObject({
+            event: "second_event",
+        });
+        expect(readJsonLines(join(extensionDirectory, "debug.log.1"))[0]).toMatchObject({
+            event: "first_event",
+        });
+    });
+
+    it("does not rotate when maxBytes is null", () => {
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const logger = new DebugFileLogger({
+            extensionDirectory,
+            reportWarning() {},
+        });
+
+        logger.configure({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
+        logger.record("first_event", { payload: "x".repeat(80) });
+        logger.record("second_event", { payload: "y".repeat(80) });
+
+        expect(readJsonLines(join(extensionDirectory, "debug.log"))).toHaveLength(2);
+        expect(existsSync(join(extensionDirectory, "debug.log.1"))).toBe(false);
+    });
+
+    it("samples memory on an unrefed timer and stops cleanly", () => {
+        vi.useFakeTimers();
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const logger = new DebugFileLogger({
+            extensionDirectory,
+            reportWarning() {},
+        });
+
+        logger.configure({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 1_000,
+        });
+        logger.startMemorySampling(() => ({ memory: { heapUsedBytes: 456 } }));
+
+        expect(vi.getTimerCount()).toBe(1);
+        vi.advanceTimersByTime(1_000);
+        logger.stopMemorySampling();
+
+        expect(vi.getTimerCount()).toBe(0);
+        expect(readJsonLines(join(extensionDirectory, "debug.log"))[0]).toMatchObject({
+            event: "memory_sample",
+            fields: { memory: { heapUsedBytes: 456 } },
+        });
+    });
+});
+
+function readJsonLines(filePath: string): unknown[] {
+    return readFileSync(filePath, "utf8").trim().split("\n").map(parseJsonLine);
+}
+
+function parseJsonLine(line: string): unknown {
+    return JSON.parse(line);
+}

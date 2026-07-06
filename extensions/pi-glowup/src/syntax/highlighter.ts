@@ -7,6 +7,10 @@ import {
     PRELOADED_SYNTAX_LANGUAGES,
 } from "./language.ts";
 import {
+    detectProjectSyntaxLanguages,
+    type ProjectLanguageDetectionResult,
+} from "./project-language-detection.ts";
+import {
     loadSyntaxConfig,
     loadSyntaxTheme,
     type LoadedSyntaxTheme,
@@ -19,8 +23,6 @@ const MAX_CACHE_BYTES = 512 * 1024;
 const MAX_LINE_LENGTH = 2_000;
 const TOKENIZE_MAX_LINE_LENGTH = 1_000;
 const CACHE_LIMIT = 100;
-const MAX_DYNAMIC_SYNTAX_LANGUAGES = 8;
-const DYNAMIC_SYNTAX_LANGUAGE_ALLOWLIST = new Set<string>(PRELOADED_SYNTAX_LANGUAGES);
 
 export type SyntaxHighlightOptions = {
     readonly cache?: boolean | undefined;
@@ -29,6 +31,51 @@ export type SyntaxHighlightOptions = {
 export type SyntaxHighlightCacheStats = {
     readonly entries: number;
     readonly bytes: number;
+};
+
+export type SyntaxHighlighterDiagnostics = {
+    readonly status: SyntaxStateStatus;
+    readonly cacheEntries: number;
+    readonly cacheBytes: number;
+    readonly configuredPreloadLanguages?: readonly string[];
+    readonly preloadLanguages?: readonly string[];
+    readonly ignoredPreloadLanguages?: readonly string[];
+    readonly projectLanguageDetectionEnabled?: boolean;
+    readonly projectLanguageDetectionCwd?: string;
+    readonly projectLanguageDetectionScannedFiles?: number;
+    readonly projectLanguageDetectionScannedDirectories?: number;
+    readonly projectLanguageDetectionReadErrors?: number;
+    readonly projectLanguageDetectionStoppedReason?: string;
+    readonly detectedProjectLanguages?: readonly string[];
+    readonly loadedLanguages?: readonly string[];
+    readonly dynamicLanguages?: readonly string[];
+};
+
+type SyntaxStateStatus = "disabled" | "failed" | "ready" | "uninitialized";
+
+type SyntaxWarningReporter = (message: string) => void;
+
+type SyntaxProjectLanguageDetectionOptions = {
+    readonly enabled: boolean;
+    readonly cwd?: string;
+};
+
+type SyntaxProjectLanguageDetectionDiagnostics = {
+    readonly cwd: string;
+    readonly result: ProjectLanguageDetectionResult;
+};
+
+type SyntaxPreloadDiagnostics = {
+    readonly configuredLanguages: readonly string[];
+    readonly preloadLanguages: readonly BundledLanguage[];
+    readonly ignoredConfiguredLanguages: readonly string[];
+    readonly projectDetectionEnabled: boolean;
+    readonly projectDetection?: SyntaxProjectLanguageDetectionDiagnostics;
+};
+
+type SyntaxPreloadSelection = {
+    readonly languages: readonly BundledLanguage[];
+    readonly diagnostics: SyntaxPreloadDiagnostics;
 };
 
 type SyntaxState =
@@ -54,6 +101,7 @@ type SyntaxState =
 let syntaxState: SyntaxState | undefined;
 let initializationPromise: Promise<SyntaxState> | undefined;
 let syntaxGeneration = 0;
+let syntaxPreloadDiagnostics: SyntaxPreloadDiagnostics | undefined;
 const highlightedCodeCache = new Map<
     string,
     { readonly lines: string[]; readonly bytes: number }
@@ -64,6 +112,9 @@ export type SyntaxHighlighterFactory = typeof createHighlighter;
 
 export type SyntaxInitializationOptions = {
     readonly createHighlighter?: SyntaxHighlighterFactory;
+    readonly preloadLanguages?: readonly string[];
+    readonly projectLanguageDetection?: SyntaxProjectLanguageDetectionOptions;
+    readonly reportWarning?: SyntaxWarningReporter;
 };
 
 /** Initializes the central Shiki highlighter once during extension startup. */
@@ -77,16 +128,18 @@ export async function initializeSyntaxHighlighting(
 
     const generation = syntaxGeneration;
     const createSyntaxHighlighter = options.createHighlighter ?? createHighlighter;
-    initializationPromise = initializeSyntaxHighlightingOnce(env, createSyntaxHighlighter).then(
-        (state) => {
-            if (generation !== syntaxGeneration) {
-                disposeReadySyntaxState(state);
-                return disposedSyntaxState(state.config);
-            }
-            syntaxState = state;
-            return state;
-        },
-    );
+    initializationPromise = initializeSyntaxHighlightingOnce(
+        env,
+        createSyntaxHighlighter,
+        options,
+    ).then((state) => {
+        if (generation !== syntaxGeneration) {
+            disposeReadySyntaxState(state);
+            return disposedSyntaxState(state.config);
+        }
+        syntaxState = state;
+        return state;
+    });
     return initializationPromise;
 }
 
@@ -189,11 +242,7 @@ export async function getSyntaxHighlighterForLanguage(
 
     const normalizedLanguage = normalizeSyntaxLanguage(language) ?? "text";
     if (normalizedLanguage !== "text" && !state.loadedLanguages.has(normalizedLanguage)) {
-        if (
-            !isBundledSyntaxLanguage(normalizedLanguage) ||
-            !DYNAMIC_SYNTAX_LANGUAGE_ALLOWLIST.has(normalizedLanguage) ||
-            state.dynamicLanguages.size >= MAX_DYNAMIC_SYNTAX_LANGUAGES
-        ) {
+        if (!isBundledSyntaxLanguage(normalizedLanguage)) {
             return undefined;
         }
         await state.highlighter.loadLanguage(normalizedLanguage);
@@ -228,6 +277,49 @@ export function syntaxHighlightCacheStats(): SyntaxHighlightCacheStats {
     };
 }
 
+/** Returns syntax highlighter diagnostics for debug logging. */
+export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
+    const state = syntaxState;
+    const diagnostics = syntaxPreloadDiagnostics;
+    return {
+        status: state?.status ?? "uninitialized",
+        cacheEntries: highlightedCodeCache.size,
+        cacheBytes: highlightedCodeCacheBytes,
+        ...(diagnostics === undefined
+            ? {}
+            : {
+                  configuredPreloadLanguages: diagnostics.configuredLanguages,
+                  preloadLanguages: diagnostics.preloadLanguages,
+                  ignoredPreloadLanguages: diagnostics.ignoredConfiguredLanguages,
+                  projectLanguageDetectionEnabled: diagnostics.projectDetectionEnabled,
+              }),
+        ...(diagnostics?.projectDetection === undefined
+            ? {}
+            : {
+                  projectLanguageDetectionCwd: diagnostics.projectDetection.cwd,
+                  projectLanguageDetectionScannedFiles:
+                      diagnostics.projectDetection.result.scannedFiles,
+                  projectLanguageDetectionScannedDirectories:
+                      diagnostics.projectDetection.result.scannedDirectories,
+                  projectLanguageDetectionReadErrors:
+                      diagnostics.projectDetection.result.readErrors,
+                  detectedProjectLanguages: diagnostics.projectDetection.result.languages,
+                  ...(diagnostics.projectDetection.result.stoppedReason === undefined
+                      ? {}
+                      : {
+                            projectLanguageDetectionStoppedReason:
+                                diagnostics.projectDetection.result.stoppedReason,
+                        }),
+              }),
+        ...(state?.status === "ready"
+            ? {
+                  loadedLanguages: [...state.loadedLanguages].sort(),
+                  dynamicLanguages: [...state.dynamicLanguages].sort(),
+              }
+            : {}),
+    };
+}
+
 /** Disposes the central highlighter and resets syntax state for reloads or shutdown. */
 export async function disposeSyntaxHighlighting(): Promise<void> {
     clearSyntaxHighlightCache();
@@ -236,6 +328,7 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     const state = syntaxState;
     syntaxState = undefined;
     initializationPromise = undefined;
+    syntaxPreloadDiagnostics = undefined;
 
     disposeReadySyntaxState(state);
 }
@@ -253,6 +346,7 @@ function disposedSyntaxState(config: SyntaxConfig): SyntaxState {
 async function initializeSyntaxHighlightingOnce(
     env: NodeJS.ProcessEnv,
     createSyntaxHighlighter: SyntaxHighlighterFactory,
+    options: SyntaxInitializationOptions,
 ): Promise<SyntaxState> {
     const config = loadSyntaxConfig(env);
     if (!config.enabled) {
@@ -265,9 +359,12 @@ async function initializeSyntaxHighlightingOnce(
             return { status: "disabled", config, reason: "syntax theme disabled" };
         }
 
+        const preloadSelection = selectSyntaxPreloadLanguages(options);
+        syntaxPreloadDiagnostics = preloadSelection.diagnostics;
+
         const highlighter = await createSyntaxHighlighter({
             themes: [theme.registration],
-            langs: [...PRELOADED_SYNTAX_LANGUAGES],
+            langs: [...preloadSelection.languages],
         });
 
         return {
@@ -285,6 +382,61 @@ async function initializeSyntaxHighlightingOnce(
             reason: cause instanceof Error ? cause.message : String(cause),
         };
     }
+}
+
+function selectSyntaxPreloadLanguages(
+    options: SyntaxInitializationOptions,
+): SyntaxPreloadSelection {
+    const configuredLanguages = [...(options.preloadLanguages ?? PRELOADED_SYNTAX_LANGUAGES)];
+    const ignoredConfiguredLanguages: string[] = [];
+    const preloadLanguages = new Set<BundledLanguage>();
+
+    for (const configuredLanguage of configuredLanguages) {
+        const normalizedLanguage = normalizeSyntaxLanguage(configuredLanguage);
+        if (normalizedLanguage === undefined || normalizedLanguage === "text") {
+            ignoredConfiguredLanguages.push(configuredLanguage);
+            options.reportWarning?.(
+                `[pi-codex-look] Ignoring unknown syntax preload language ${formatConfiguredLanguageForWarning(configuredLanguage)}`,
+            );
+            continue;
+        }
+        preloadLanguages.add(normalizedLanguage);
+    }
+
+    const projectDetectionEnabled = options.projectLanguageDetection?.enabled === true;
+    const projectDetectionCwd = options.projectLanguageDetection?.cwd;
+    const projectDetection =
+        projectDetectionEnabled &&
+        projectDetectionCwd !== undefined &&
+        projectDetectionCwd.length > 0
+            ? {
+                  cwd: projectDetectionCwd,
+                  result: detectProjectSyntaxLanguages(projectDetectionCwd),
+              }
+            : undefined;
+
+    if (projectDetection !== undefined) {
+        for (const language of projectDetection.result.languages) {
+            preloadLanguages.add(language);
+        }
+    }
+
+    return {
+        languages: [...preloadLanguages],
+        diagnostics: {
+            configuredLanguages,
+            preloadLanguages: [...preloadLanguages],
+            ignoredConfiguredLanguages,
+            projectDetectionEnabled,
+            ...(projectDetection === undefined ? {} : { projectDetection }),
+        },
+    };
+}
+
+function formatConfiguredLanguageForWarning(language: string): string {
+    const trimmed = language.trim();
+    const displayed = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+    return JSON.stringify(displayed) ?? '""';
 }
 
 function splitCodeLines(code: string): string[] {

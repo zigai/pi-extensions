@@ -408,6 +408,23 @@ export function configureBuiltInToolRendererPatch(
     prototype[BUILT_IN_RENDERER_PATCH_KEY] = true;
 }
 
+/** Returns renderer patch state sizes for memory diagnostics. */
+export function toolRendererPatchStats(
+    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
+): {
+    readonly builtInPatchEnabled: boolean;
+    readonly thirdPartyPatchEnabled: boolean;
+    readonly thirdPartyRendererCacheEntries: number;
+} {
+    const builtInState = prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
+    const thirdPartyState = prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
+    return {
+        builtInPatchEnabled: builtInState?.enabled === true,
+        thirdPartyPatchEnabled: thirdPartyState?.enabled === true,
+        thirdPartyRendererCacheEntries: thirdPartyState?.rendererCache.size ?? 0,
+    };
+}
+
 /** Installs render-only Codex-look renderers for built-in tool names. */
 export function installBuiltInToolRendererPatch(
     options: BuiltInToolRendererOptions,

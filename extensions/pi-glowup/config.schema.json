@@ -12,6 +12,40 @@
         "type": "string"
       }
     },
+    "debugLog": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxBytes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memorySampleIntervalMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "enabled": true,
+        "path": "debug.log",
+        "maxBytes": null,
+        "memorySampleIntervalMs": 10000
+      }
+    },
     "toolLabels": {
       "type": "object",
       "properties": {
@@ -22,6 +56,36 @@
       "additionalProperties": false,
       "default": {
         "dynamicStatus": false
+      }
+    },
+    "syntax": {
+      "type": "object",
+      "properties": {
+        "preloadLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "projectLanguageDetection": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "enabled": true
+          }
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "preloadLanguages": ["markdown", "bash", "python"],
+        "projectLanguageDetection": {
+          "enabled": true
+        }
       }
     },
     "patches": {

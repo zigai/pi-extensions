@@ -1,8 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getCodexLookGlobalConfigPath } from "../src/config.ts";
 import codexLookExtension from "../src/index.ts";
 import { disposeSyntaxHighlighting, isSyntaxHighlightingReady } from "../src/syntax/highlighter.ts";
 
@@ -35,8 +36,11 @@ type ToolCallContext = {
 
 type ToolCallHandler = (event: ToolCallEvent, context: ToolCallContext) => Promise<void> | void;
 
+type SessionShutdownHandler = () => Promise<void> | void;
+
 class FakeExtensionApi {
     private readonly sessionStartHandlers: SessionStartHandler[] = [];
+    private readonly sessionShutdownHandlers: SessionShutdownHandler[] = [];
     private readonly toolCallHandlers: ToolCallHandler[] = [];
     registeredToolCount = 0;
 
@@ -54,6 +58,10 @@ class FakeExtensionApi {
         }
         if (eventName === "tool_call") {
             this.toolCallHandlers.push(handler as ToolCallHandler);
+            return;
+        }
+        if (eventName === "session_shutdown") {
+            this.sessionShutdownHandlers.push(handler as SessionShutdownHandler);
         }
     }
 
@@ -83,6 +91,12 @@ class FakeExtensionApi {
             ),
         );
     }
+
+    async shutdownSession(): Promise<void> {
+        for (const handler of this.sessionShutdownHandlers) {
+            await handler();
+        }
+    }
 }
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
@@ -107,10 +121,11 @@ describe("extension lifecycle", () => {
         await disposeSyntaxHighlighting();
     });
 
-    it("initializes syntax highlighting at session start without timers", async () => {
+    it("initializes syntax highlighting and starts default diagnostic sampling", async () => {
         vi.useFakeTimers();
         const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
-        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        const agentDir = join(root, "agent");
+        process.env[AGENT_DIR_ENV] = agentDir;
         const pi = new FakeExtensionApi();
 
         await codexLookExtension(pi as unknown as ExtensionAPI);
@@ -120,8 +135,34 @@ describe("extension lifecycle", () => {
 
         await pi.startSession(join(root, "project"), false);
 
-        expect(vi.getTimerCount()).toBe(0);
+        expect(vi.getTimerCount()).toBe(1);
         expect(isSyntaxHighlightingReady()).toBe(true);
+        expect(readLogEvents(join(agentDir, "pi-codex-look", "debug.log"))).toEqual(
+            expect.arrayContaining(["config_applied", "extension_loaded", "session_start"]),
+        );
+
+        await pi.shutdownSession();
+
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("respects disabled debug logging from global config", async () => {
+        vi.useFakeTimers();
+        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        const agentDir = join(root, "agent");
+        process.env[AGENT_DIR_ENV] = agentDir;
+        const configPath = getCodexLookGlobalConfigPath(agentDir);
+        mkdirSync(join(agentDir, "pi-codex-look"), { recursive: true });
+        writeFileSync(configPath, JSON.stringify({ debugLog: { enabled: false } }));
+        const pi = new FakeExtensionApi();
+
+        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await pi.startSession(join(root, "project"), false);
+
+        expect(vi.getTimerCount()).toBe(0);
+        expect(existsSync(join(agentDir, "pi-codex-look", "debug.log"))).toBe(false);
+
+        await pi.shutdownSession();
     });
 
     it("does not block bash tool-call preflight on configured script formatters", async () => {
@@ -135,5 +176,24 @@ describe("extension lifecycle", () => {
         await codexLookExtension(pi as unknown as ExtensionAPI);
 
         expect(pi.runBashToolCall("python - <<'PY'\nprint('hi')\nPY")).toEqual([undefined]);
+
+        await pi.shutdownSession();
     });
 });
+
+function readLogEvents(filePath: string): string[] {
+    return readFileSync(filePath, "utf8")
+        .trim()
+        .split("\n")
+        .flatMap((line) => {
+            const entry: unknown = JSON.parse(line);
+            if (!isRecord(entry) || typeof entry.event !== "string") {
+                return [];
+            }
+            return [entry.event];
+        });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}

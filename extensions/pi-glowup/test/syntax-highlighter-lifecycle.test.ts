@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Highlighter } from "shiki";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -8,6 +11,7 @@ import {
     initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
     syntaxHighlightCacheStats,
+    syntaxHighlighterDiagnostics,
     type SyntaxHighlighterFactory,
 } from "../src/syntax/highlighter.ts";
 
@@ -34,6 +38,16 @@ function fakeHighlighter(options: FakeHighlighterOptions = {}): Highlighter {
             }
         },
     } as unknown as Highlighter;
+}
+
+function stringLanguageNames(languages: ReadonlyArray<unknown> | undefined): string[] {
+    const names: string[] = [];
+    for (const language of languages ?? []) {
+        if (typeof language === "string") {
+            names.push(language);
+        }
+    }
+    return names;
 }
 
 describe("syntax highlighter lifecycle", () => {
@@ -104,7 +118,82 @@ describe("syntax highlighter lifecycle", () => {
         expect(disposedCount).toBe(1);
     });
 
-    it("does not dynamically load arbitrary non-preloaded bundled languages", async () => {
+    it("preloads configured languages and reports invalid language names", async () => {
+        let requestedLanguages: string[] = [];
+        const reportedWarnings: string[] = [];
+        const factory: SyntaxHighlighterFactory = async (options) => {
+            requestedLanguages = stringLanguageNames(options.langs);
+            return fakeHighlighter({ loadedLanguages: requestedLanguages });
+        };
+
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                createHighlighter: factory,
+                preloadLanguages: ["markdown", "ts", "not-real", "text"],
+                reportWarning: (message) => reportedWarnings.push(message),
+            },
+        );
+
+        expect(requestedLanguages).toEqual(["markdown", "typescript"]);
+        expect(reportedWarnings).toEqual([
+            expect.stringContaining('Ignoring unknown syntax preload language "not-real"'),
+            expect.stringContaining('Ignoring unknown syntax preload language "text"'),
+        ]);
+        expect(syntaxHighlighterDiagnostics()).toEqual(
+            expect.objectContaining({
+                configuredPreloadLanguages: ["markdown", "ts", "not-real", "text"],
+                preloadLanguages: ["markdown", "typescript"],
+                ignoredPreloadLanguages: ["not-real", "text"],
+            }),
+        );
+    });
+
+    it("adds project-detected languages to configured preloads", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "pi-codex-look-languages-"));
+        let requestedLanguages: string[] = [];
+        const factory: SyntaxHighlighterFactory = async (options) => {
+            requestedLanguages = stringLanguageNames(options.langs);
+            return fakeHighlighter({ loadedLanguages: requestedLanguages });
+        };
+
+        try {
+            mkdirSync(join(directory, "src"));
+            mkdirSync(join(directory, "node_modules"));
+            writeFileSync(join(directory, "src", "index.ts"), "const value = 1;\n");
+            writeFileSync(join(directory, "script.py"), "print('ok')\n");
+            writeFileSync(join(directory, "Dockerfile"), "FROM node\n");
+            writeFileSync(join(directory, "node_modules", "ignored.rb"), "puts 'ignored'\n");
+
+            await initializeSyntaxHighlighting(
+                {},
+                {
+                    createHighlighter: factory,
+                    preloadLanguages: ["markdown"],
+                    projectLanguageDetection: { enabled: true, cwd: directory },
+                },
+            );
+
+            expect(requestedLanguages).toEqual(
+                expect.arrayContaining(["markdown", "typescript", "python", "docker"]),
+            );
+            expect(requestedLanguages).not.toContain("ruby");
+            expect(syntaxHighlighterDiagnostics()).toEqual(
+                expect.objectContaining({
+                    projectLanguageDetectionEnabled: true,
+                    detectedProjectLanguages: expect.arrayContaining([
+                        "docker",
+                        "python",
+                        "typescript",
+                    ]),
+                }),
+            );
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it("dynamically loads bundled languages without a preload cap", async () => {
         const loadedLanguages: string[] = [];
         const factory: SyntaxHighlighterFactory = async () =>
             fakeHighlighter({
@@ -116,39 +205,39 @@ describe("syntax highlighter lifecycle", () => {
 
         await initializeSyntaxHighlighting({}, { createHighlighter: factory });
 
-        await expect(getSyntaxHighlighterForLanguage("vue")).resolves.toBeUndefined();
-        expect(loadedLanguages).toEqual([]);
+        await expect(getSyntaxHighlighterForLanguage("vue")).resolves.toEqual(
+            expect.objectContaining({ language: "vue" }),
+        );
+        expect(loadedLanguages).toEqual(["vue"]);
     });
 
     it("disposes and resets highlighter state between sessions", async () => {
         await initializeSyntaxHighlighting();
         expect(isSyntaxHighlightingReady()).toBe(true);
-        expect(highlightSyntaxCode("const value = 1;", "typescript").join("\n")).toContain(
-            "\u001b[",
-        );
+        expect(highlightSyntaxCode("import sys", "python").join("\n")).toContain("\u001b[");
         expect(syntaxHighlightCacheStats().entries).toBeGreaterThan(0);
 
         await disposeSyntaxHighlighting();
 
         expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
         expect(isSyntaxHighlightingReady()).toBe(false);
-        expect(highlightSyntaxCode("const value = 1;", "typescript")).toEqual(["const value = 1;"]);
+        expect(highlightSyntaxCode("import sys", "python")).toEqual(["import sys"]);
 
         await initializeSyntaxHighlighting({ PI_CODEX_LOOK_SYNTAX: "off" });
 
         expect(isSyntaxHighlightingReady()).toBe(false);
-        expect(highlightSyntaxCode("const value = 1;", "typescript")).toEqual(["const value = 1;"]);
+        expect(highlightSyntaxCode("import sys", "python")).toEqual(["import sys"]);
     });
 
     it("does not cache highlights when cache is disabled", async () => {
         await initializeSyntaxHighlighting();
         clearSyntaxHighlightCache();
 
-        highlightSyntaxCode("const streamed = 1;", "typescript", { cache: false });
+        highlightSyntaxCode("streamed = 1", "python", { cache: false });
 
         expect(syntaxHighlightCacheStats()).toEqual({ entries: 0, bytes: 0 });
 
-        highlightSyntaxCode("const finalValue = 1;", "typescript");
+        highlightSyntaxCode("final_value = 1", "python");
 
         expect(syntaxHighlightCacheStats().entries).toBe(1);
         expect(syntaxHighlightCacheStats().bytes).toBeGreaterThan(0);

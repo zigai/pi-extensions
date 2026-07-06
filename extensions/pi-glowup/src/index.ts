@@ -9,7 +9,12 @@ import {
     type ScriptBlockFormatter,
     type ScriptFormatterCommands,
 } from "./script-formatters.ts";
-import { readCodexLookConfig, type CodexLookConfig } from "./config.ts";
+import {
+    getCodexLookGlobalConfigDirectory,
+    readCodexLookConfig,
+    type CodexLookConfig,
+} from "./config.ts";
+import { DebugFileLogger, type DebugLogFields } from "./debug-logger.ts";
 import { configureAssistantSeparatorPatch } from "./assistant-separator.ts";
 import { configureWorkingWidgetSpacingPatch } from "./working-widget-spacing.ts";
 import { configureAutocompleteCleanupPatch } from "./autocomplete-cleanup.ts";
@@ -56,11 +61,18 @@ import {
     compatBuiltInToolName,
     configureBuiltInToolRendererPatch,
     configureThirdPartyToolRendererPatch,
+    toolRendererPatchStats,
     type BuiltInToolRendererOptions,
+    type BuiltInToolName,
 } from "./tool-execution-patch.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
-import { disposeSyntaxHighlighting, initializeSyntaxHighlighting } from "./syntax/highlighter.ts";
-import { configureMarkdownSyntaxPatch } from "./syntax/markdown-patch.ts";
+import {
+    disposeSyntaxHighlighting,
+    initializeSyntaxHighlighting,
+    isSyntaxHighlightingReady,
+    syntaxHighlighterDiagnostics,
+} from "./syntax/highlighter.ts";
+import { configureMarkdownSyntaxPatch, markdownSyntaxPatchStats } from "./syntax/markdown-patch.ts";
 import { renderSuccessfulWriteResultFallback, renderWriteCallPreview } from "./write-rendering.ts";
 import {
     rememberRawScriptPreview,
@@ -83,11 +95,100 @@ const PARTIAL_BASH_COMMAND_PREVIEW_CHARS = 4_000;
 const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
-const MEMORY_LOG_ENV = "PI_CODEX_LOOK_MEMORY_LOG";
 const MUTATION_LABEL_COLUMN_WIDTH = "Writing".length;
 const ACTIVE_MUTATION_ALIGNMENT_KEY = "codexLookActiveMutationAlignment";
 const MUTATION_RESULT_RENDERED_KEY = "codexLookMutationResultRendered";
 const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-codex-look.extension-loaded");
+const builtInRenderCallCounts: Record<string, number> = {};
+const builtInRenderResultCounts: Record<string, number> = {};
+
+function recordBuiltInRender(kind: "call" | "result", toolName: BuiltInToolName): void {
+    const counts = kind === "call" ? builtInRenderCallCounts : builtInRenderResultCounts;
+    counts[toolName] = (counts[toolName] ?? 0) + 1;
+}
+
+function diagnosticSnapshot(): DebugLogFields {
+    const memory = process.memoryUsage();
+    const editStats = editPreviews.stats();
+    const scriptStats = scriptPreviews.stats();
+    const explorationStats = explorationGroups.stats();
+    const diffStats = pierreDiffHighlightStats();
+    const syntaxStats = syntaxHighlighterDiagnostics();
+    const markdownStats = markdownSyntaxPatchStats();
+    const rendererStats = toolRendererPatchStats();
+    return {
+        memory: {
+            rssBytes: memory.rss,
+            heapUsedBytes: memory.heapUsed,
+            heapTotalBytes: memory.heapTotal,
+            externalBytes: memory.external,
+            arrayBuffersBytes: memory.arrayBuffers,
+        },
+        stores: {
+            editPreviewEntries: editStats.entries,
+            editPreviewBytes: editStats.bytes,
+            scriptPreviewEntries: scriptStats.entries,
+            scriptPreviewBytes: scriptStats.bytes,
+            explorationGroups: explorationStats.groups,
+            explorationToolCalls: explorationStats.toolCalls,
+        },
+        syntax: {
+            ready: isSyntaxHighlightingReady(),
+            ...syntaxStats,
+            markdownHighlightingEnabled: markdownStats.highlightingEnabled,
+            markdownRenderPatchEnabled: markdownStats.renderPatchEnabled,
+            markdownRenderInjections: markdownStats.renderInjections,
+            markdownThemePatchAttempts: markdownStats.themePatchAttempts,
+            markdownThemePatches: markdownStats.themePatches,
+            markdownThemePatchHits: markdownStats.themePatchHits,
+            markdownThemePatchFailures: markdownStats.themePatchFailures,
+            markdownThinkingThemeSuppressions: markdownStats.thinkingThemeSuppressions,
+            markdownThinkingThemeSuppressionFailures:
+                markdownStats.thinkingThemeSuppressionFailures,
+        },
+        diffHighlights: {
+            queuedHighlights: diffStats.queuedHighlights,
+            activeTimers: diffStats.activeTimers,
+            queueRunning: diffStats.queueRunning,
+        },
+        renderers: {
+            builtInPatchEnabled: rendererStats.builtInPatchEnabled,
+            thirdPartyPatchEnabled: rendererStats.thirdPartyPatchEnabled,
+            thirdPartyRendererCacheEntries: rendererStats.thirdPartyRendererCacheEntries,
+            builtInRenderCalls: { ...builtInRenderCallCounts },
+            builtInRenderResults: { ...builtInRenderResultCounts },
+        },
+    };
+}
+
+function configDiagnostics(config: CodexLookConfig): DebugLogFields {
+    return {
+        debugLog: {
+            enabled: config.debugLog.enabled,
+            maxBytes: config.debugLog.maxBytes,
+            memorySampleIntervalMs: config.debugLog.memorySampleIntervalMs,
+        },
+        scriptPreview: {
+            headerLayout: config.scriptHeaderLayout,
+            formatterCount: config.scriptFormatters.size,
+        },
+        toolLabels: {
+            dynamicStatus: config.toolLabels.dynamicStatus,
+        },
+        syntax: {
+            preloadLanguages: config.syntax.preloadLanguages,
+            projectLanguageDetection: config.syntax.projectLanguageDetection.enabled,
+        },
+        patches: {
+            assistantSeparator: config.patches.assistantSeparator,
+            workingWidgetSpacing: config.patches.workingWidgetSpacing,
+            autocompleteCleanup: config.patches.autocompleteCleanup,
+            markdownSyntax: config.patches.markdownSyntax,
+            thirdPartyToolRenderers: config.patches.thirdPartyToolRenderers,
+        },
+        preserveToolCount: config.preserveTools.length,
+    };
+}
 
 function textOutput(result: TextResult): string | undefined {
     if (!Array.isArray(result.content)) {
@@ -395,8 +496,10 @@ function scriptPreviewHeaderLayout(config: CodexLookConfig): ScriptPreviewHeader
 function renderBuiltInToolCall(options: {
     readonly headerLayout: () => ScriptPreviewHeaderLayout;
     readonly dynamicStatusLabels: boolean;
+    readonly recordRender: (kind: "call", toolName: BuiltInToolName) => void;
 }): BuiltInToolRendererOptions["renderCall"] {
     return (toolName, args, theme, context) => {
+        options.recordRender("call", toolName);
         switch (toolName) {
             case "read":
                 return renderExplorationCall(
@@ -439,8 +542,10 @@ function renderBuiltInToolCall(options: {
 function renderBuiltInToolResult(settings: {
     readonly headerLayout: () => ScriptPreviewHeaderLayout;
     readonly dynamicStatusLabels: boolean;
+    readonly recordRender: (kind: "result", toolName: BuiltInToolName) => void;
 }): BuiltInToolRendererOptions["renderResult"] {
     return (toolName, result, options, theme, context) => {
+        settings.recordRender("result", toolName);
         switch (toolName) {
             case "read":
                 return hasImageContent(result)
@@ -704,11 +809,22 @@ function renderEditResult(
     });
 }
 
-async function startSyntaxHighlighting(reportWarning: (message: string) => void): Promise<void> {
+async function startSyntaxHighlighting(options: {
+    readonly config: CodexLookConfig;
+    readonly cwd: string | undefined;
+    readonly reportWarning: (message: string) => void;
+}): Promise<void> {
     try {
-        await initializeSyntaxHighlighting();
+        await initializeSyntaxHighlighting(process.env, {
+            preloadLanguages: options.config.syntax.preloadLanguages,
+            projectLanguageDetection: {
+                enabled: options.config.syntax.projectLanguageDetection.enabled,
+                ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+            },
+            reportWarning: options.reportWarning,
+        });
     } catch (cause: unknown) {
-        reportWarning(`[pi-codex-look] Syntax preload failed: ${errorMessage(cause)}`);
+        options.reportWarning(`[pi-codex-look] Syntax preload failed: ${errorMessage(cause)}`);
     }
 }
 
@@ -723,43 +839,53 @@ function clearSessionState(): void {
     clearQueuedDiffHighlights();
 }
 
-function formatMb(bytes: number): string {
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function shouldReportMemory(): boolean {
-    const value = process.env[MEMORY_LOG_ENV]?.trim().toLowerCase();
-    return value === "1" || value === "true" || value === "yes";
-}
-
-function reportMemory(label: string): void {
-    if (!shouldReportMemory()) {
-        return;
+function valueKind(value: unknown): string {
+    if (Array.isArray(value)) {
+        return "array";
     }
+    return value === null ? "null" : typeof value;
+}
 
-    const memory = process.memoryUsage();
-    const editStats = editPreviews.stats();
-    const scriptStats = scriptPreviews.stats();
-    const explorationStats = explorationGroups.stats();
-    const diffStats = pierreDiffHighlightStats();
-    console.warn(
-        `[pi-codex-look] ${label} ` +
-            `rss=${formatMb(memory.rss)} ` +
-            `heapUsed=${formatMb(memory.heapUsed)} ` +
-            `heapTotal=${formatMb(memory.heapTotal)} ` +
-            `external=${formatMb(memory.external)} ` +
-            `arrayBuffers=${formatMb(memory.arrayBuffers)} ` +
-            `state=${JSON.stringify({
-                editPreviews: editStats.entries,
-                editPreviewBytes: editStats.bytes,
-                scriptPreviews: scriptStats.entries,
-                scriptPreviewBytes: scriptStats.bytes,
-                explorationGroups: explorationStats.groups,
-                explorationToolCalls: explorationStats.toolCalls,
-                queuedDiffHighlights: diffStats.queuedHighlights,
-                activeDiffHighlightTimers: diffStats.activeTimers,
-            })}`,
-    );
+function textByteLength(text: string | undefined): number | undefined {
+    return text === undefined ? undefined : Buffer.byteLength(text, "utf8");
+}
+
+function detailsDiagnostics(details: unknown): DebugLogFields {
+    if (!isRecord(details)) {
+        return { detailsKind: valueKind(details) };
+    }
+    const diff = details.diff;
+    const pierreDiff = details.pierreDiff;
+    return {
+        detailsKind: "object",
+        detailKeyCount: Object.keys(details).length,
+        detailsDiffBytes: typeof diff === "string" ? Buffer.byteLength(diff, "utf8") : undefined,
+        pierreDiffKind:
+            isRecord(pierreDiff) && typeof pierreDiff.kind === "string"
+                ? pierreDiff.kind
+                : undefined,
+    };
+}
+
+function diagnosticBuiltInToolName(toolName: string): BuiltInToolName | undefined {
+    const compatibleName = compatBuiltInToolName(toolName);
+    if (compatibleName !== undefined) {
+        return compatibleName;
+    }
+    switch (toolName) {
+        case "read":
+        case "bash":
+        case "edit":
+        case "write":
+        case "find":
+        case "grep":
+        case "ls":
+        case "delete":
+        case "webSearch":
+            return toolName;
+        default:
+            return undefined;
+    }
 }
 
 export default async function codexLookExtension(pi: ExtensionAPI): Promise<void> {
@@ -773,11 +899,17 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
 
     const reportWarning = (message: string): void => console.warn(message);
     let config = readCodexLookConfig({ reportWarning });
+    const debugLogger = new DebugFileLogger({
+        extensionDirectory: getCodexLookGlobalConfigDirectory(),
+        reportWarning,
+    });
+    debugLogger.configure(config.debugLog);
     let formatter = scriptBlockFormatter(config, reportWarning);
     let headerLayout = scriptPreviewHeaderLayout(config);
 
     const applyConfig = (nextConfig: CodexLookConfig): void => {
         config = nextConfig;
+        debugLogger.configure(config.debugLog);
         formatter = scriptBlockFormatter(config, reportWarning);
         headerLayout = scriptPreviewHeaderLayout(config);
         configureAssistantSeparatorPatch(config.patches.assistantSeparator);
@@ -794,30 +926,52 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
             renderCall: renderBuiltInToolCall({
                 headerLayout: () => headerLayout,
                 dynamicStatusLabels: config.toolLabels.dynamicStatus,
+                recordRender: recordBuiltInRender,
             }),
             renderResult: renderBuiltInToolResult({
                 headerLayout: () => headerLayout,
                 dynamicStatusLabels: config.toolLabels.dynamicStatus,
+                recordRender: recordBuiltInRender,
             }),
+        });
+        debugLogger.record("config_applied", {
+            ...configDiagnostics(config),
+            ...diagnosticSnapshot(),
         });
     };
 
     applyConfig(config);
+    debugLogger.record("extension_loaded", diagnosticSnapshot());
 
     pi.on("tool_call", (event) => {
+        const command = commandField(event.input);
+        debugLogger.record("tool_call", {
+            toolName: event.toolName,
+            builtInToolName: diagnosticBuiltInToolName(event.toolName),
+            toolCallId: event.toolCallId,
+            inputKind: valueKind(event.input),
+            commandBytes: textByteLength(command),
+            ...diagnosticSnapshot(),
+        });
         if (
             !isToolCallEventType("bash", event) &&
             compatBuiltInToolName(event.toolName) !== "bash"
         ) {
             return;
         }
-        const command = commandField(event.input);
         if (command !== undefined) {
             rememberRawScriptPreview(scriptPreviews, event.toolCallId, command);
+            debugLogger.record("script_preview_remembered", {
+                toolCallId: event.toolCallId,
+                commandBytes: textByteLength(command),
+                ...diagnosticSnapshot(),
+            });
         }
     });
 
     pi.on("tool_result", (event, ctx) => {
+        let scheduledFormattedPreview = false;
+        let storedEditPreview = false;
         if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
             const command = commandField(event.input);
             if (command !== undefined) {
@@ -829,53 +983,71 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
                     formatter,
                     ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
                 });
+                scheduledFormattedPreview = formatter !== undefined;
             }
         }
 
         const rendersAsEdit =
             isEditToolResult(event) || compatBuiltInToolName(event.toolName) === "edit";
         if (
-            !rendersAsEdit ||
-            event.isError ||
-            !isRecord(event.details) ||
-            typeof event.details.diff !== "string"
+            rendersAsEdit &&
+            !event.isError &&
+            isRecord(event.details) &&
+            typeof event.details.diff === "string"
         ) {
-            return;
+            editPreviews.set(
+                event.toolCallId,
+                buildEditPreview({
+                    path: pathField(event.input) ?? "",
+                    diff: event.details.diff,
+                }),
+            );
+            storedEditPreview = true;
         }
-        editPreviews.set(
-            event.toolCallId,
-            buildEditPreview({
-                path: pathField(event.input) ?? "",
-                diff: event.details.diff,
-            }),
-        );
+
+        const output = textOutput(event);
+        debugLogger.record("tool_result", {
+            toolName: event.toolName,
+            builtInToolName: diagnosticBuiltInToolName(event.toolName),
+            toolCallId: event.toolCallId,
+            isError: event.isError === true,
+            outputTextBytes: textByteLength(output),
+            scheduledFormattedPreview,
+            storedEditPreview,
+            ...detailsDiagnostics(event.details),
+            ...diagnosticSnapshot(),
+        });
     });
 
     pi.on("session_start", async (_event, ctx) => {
-        reportMemory("session_start");
-        clearSessionState();
-        await disposeSyntaxHighlighting();
         applyConfig(
             readCodexLookConfig(
                 { cwd: ctx.cwd, reportWarning },
                 { includeProjectConfig: ctx.isProjectTrusted() },
             ),
         );
-        await startSyntaxHighlighting(reportWarning);
+        debugLogger.startMemorySampling(diagnosticSnapshot);
+        debugLogger.record("session_start", { phase: "before_reset", ...diagnosticSnapshot() });
+        clearSessionState();
+        await disposeSyntaxHighlighting();
+        debugLogger.record("session_start", { phase: "after_reset", ...diagnosticSnapshot() });
+        await startSyntaxHighlighting({ config, cwd: ctx.cwd, reportWarning });
+        debugLogger.record("session_start", { phase: "after_syntax", ...diagnosticSnapshot() });
     });
 
     pi.on("turn_start", () => {
-        reportMemory("turn_start");
         closeExplorationGroup();
+        debugLogger.record("turn_start", diagnosticSnapshot());
     });
 
     pi.on("turn_end", () => {
         closeExplorationGroup();
-        reportMemory("turn_end");
+        debugLogger.record("turn_end", diagnosticSnapshot());
     });
 
     pi.on("session_shutdown", async () => {
-        reportMemory("session_shutdown");
+        debugLogger.stopMemorySampling();
+        debugLogger.record("session_shutdown", { phase: "before_reset", ...diagnosticSnapshot() });
         clearSessionState();
         configureAssistantSeparatorPatch(false);
         configureWorkingWidgetSpacingPatch(false);
@@ -884,6 +1056,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         configureThirdPartyToolRendererPatch(false);
         configureBuiltInToolRendererPatch(false);
         await disposeSyntaxHighlighting();
+        debugLogger.record("session_shutdown", { phase: "after_reset", ...diagnosticSnapshot() });
         guardedPi[EXTENSION_LOADED_KEY] = false;
     });
 }

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { buildPierreDiffPayload, createWriteSnapshot } from "../src/pierre-diff.ts";
 import { renderPierreDiff } from "../src/pierre-diff-renderer.ts";
@@ -16,7 +16,11 @@ import {
     type CodexRenderTheme,
 } from "../src/rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-renderers.ts";
-import { highlightSyntaxCode, initializeSyntaxHighlighting } from "../src/syntax/highlighter.ts";
+import {
+    disposeSyntaxHighlighting,
+    highlightSyntaxCode,
+    initializeSyntaxHighlighting,
+} from "../src/syntax/highlighter.ts";
 import { normalizeSyntaxLanguage, PRELOADED_SYNTAX_LANGUAGES } from "../src/syntax/language.ts";
 import { installMarkdownSyntaxPatch } from "../src/syntax/markdown-patch.ts";
 import { SYNTAX_ACCENT_COLORS } from "../src/syntax/palette.ts";
@@ -105,7 +109,14 @@ const bundledThemePath = join(process.cwd(), "themes", "darker-modern-theme.json
 
 describe("central syntax highlighting", () => {
     beforeAll(async () => {
-        await initializeSyntaxHighlighting();
+        await disposeSyntaxHighlighting();
+        await initializeSyntaxHighlighting(process.env, {
+            preloadLanguages: ["markdown", "bash", "python", "typescript", "javascript", "json"],
+        });
+    });
+
+    afterAll(async () => {
+        await disposeSyntaxHighlighting();
     });
 
     it("loads syntax env config including default, custom override, and off switch", () => {
@@ -182,13 +193,12 @@ describe("central syntax highlighting", () => {
         ]);
     });
 
-    it("normalizes Rust and Go language aliases for preloading", () => {
+    it("normalizes Rust and Go language aliases and keeps a small default preload set", () => {
         expect(normalizeSyntaxLanguage("rust")).toBe("rust");
         expect(normalizeSyntaxLanguage("rs")).toBe("rust");
         expect(normalizeSyntaxLanguage("go")).toBe("go");
         expect(normalizeSyntaxLanguage("golang")).toBe("go");
-        expect(PRELOADED_SYNTAX_LANGUAGES).toContain("rust");
-        expect(PRELOADED_SYNTAX_LANGUAGES).toContain("go");
+        expect(PRELOADED_SYNTAX_LANGUAGES).toEqual(["markdown", "bash", "python"]);
     });
 
     it("injects the central highlighter into Markdown code fences", () => {

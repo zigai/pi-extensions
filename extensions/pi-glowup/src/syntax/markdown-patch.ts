@@ -3,7 +3,15 @@ import { highlightSyntaxCode } from "./highlighter.ts";
 
 const MARKDOWN_PATCH_KEY = Symbol.for("zigai.pi-codex-look.syntax-markdown");
 const MARKDOWN_PATCH_STATE_KEY = Symbol.for("zigai.pi-codex-look.syntax-markdown.state");
-const MARKDOWN_THEME_CACHE = new WeakMap<MarkdownTheme, MarkdownTheme>();
+
+let markdownSyntaxEnabled = false;
+let markdownRenderInjections = 0;
+let markdownThemePatchAttempts = 0;
+let markdownThemePatches = 0;
+let markdownThemePatchHits = 0;
+let markdownThemePatchFailures = 0;
+let markdownThinkingThemeSuppressions = 0;
+let markdownThinkingThemeSuppressionFailures = 0;
 
 type MarkdownInstance = object;
 
@@ -18,6 +26,39 @@ type MarkdownPrototype = {
     [MARKDOWN_PATCH_KEY]?: true;
     [MARKDOWN_PATCH_STATE_KEY]?: MarkdownPatchState;
 };
+
+export type MarkdownSyntaxPatchStats = {
+    readonly highlightingEnabled: boolean;
+    readonly renderPatchEnabled: boolean;
+    readonly renderInjections: number;
+    readonly themePatchAttempts: number;
+    readonly themePatches: number;
+    readonly themePatchHits: number;
+    readonly themePatchFailures: number;
+    readonly thinkingThemeSuppressions: number;
+    readonly thinkingThemeSuppressionFailures: number;
+};
+
+function highlightMarkdownCode(code: string, lang?: string): string[] {
+    return markdownSyntaxEnabled ? highlightSyntaxCode(code, lang) : splitMarkdownCodeLines(code);
+}
+
+/** Returns Markdown syntax patch counters for debug diagnostics. */
+export function markdownSyntaxPatchStats(
+    prototype: MarkdownPrototype = Markdown.prototype as unknown as MarkdownPrototype,
+): MarkdownSyntaxPatchStats {
+    return {
+        highlightingEnabled: markdownSyntaxEnabled,
+        renderPatchEnabled: prototype[MARKDOWN_PATCH_STATE_KEY]?.enabled === true,
+        renderInjections: markdownRenderInjections,
+        themePatchAttempts: markdownThemePatchAttempts,
+        themePatches: markdownThemePatches,
+        themePatchHits: markdownThemePatchHits,
+        themePatchFailures: markdownThemePatchFailures,
+        thinkingThemeSuppressions: markdownThinkingThemeSuppressions,
+        thinkingThemeSuppressionFailures: markdownThinkingThemeSuppressionFailures,
+    };
+}
 
 /** Installs an idempotent Markdown render patch that injects the central syntax highlighter. */
 export function installMarkdownSyntaxPatch(
@@ -34,6 +75,7 @@ export function configureMarkdownSyntaxPatch(
     const state = prototype[MARKDOWN_PATCH_STATE_KEY];
 
     if (!enabled) {
+        markdownSyntaxEnabled = false;
         if (state !== undefined) {
             state.enabled = false;
             if (prototype.render === state.wrapperRender) {
@@ -45,6 +87,8 @@ export function configureMarkdownSyntaxPatch(
         return;
     }
 
+    markdownSyntaxEnabled = true;
+
     if (state !== undefined) {
         state.enabled = true;
         return;
@@ -55,15 +99,24 @@ export function configureMarkdownSyntaxPatch(
         this: MarkdownInstance,
         width: number,
     ) {
-        const currentState = prototype[MARKDOWN_PATCH_STATE_KEY];
-        if (currentState?.enabled !== false) {
-            injectSyntaxTheme(this);
+        const restoreSyntaxTheme =
+            prototype[MARKDOWN_PATCH_STATE_KEY]?.enabled !== false
+                ? prepareSyntaxTheme(this)
+                : undefined;
+        try {
+            return originalRender?.call(this, width) ?? [];
+        } finally {
+            restoreSyntaxTheme?.();
         }
-        return originalRender?.call(this, width) ?? [];
     };
     prototype.render = wrapperRender;
     prototype[MARKDOWN_PATCH_STATE_KEY] = { enabled: true, originalRender, wrapperRender };
     prototype[MARKDOWN_PATCH_KEY] = true;
+}
+
+function splitMarkdownCodeLines(code: string): string[] {
+    const normalized = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    return normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
 }
 
 function restoreMarkdownRender(
@@ -77,36 +130,77 @@ function restoreMarkdownRender(
     prototype.render = originalRender;
 }
 
-function injectSyntaxTheme(instance: MarkdownInstance): void {
-    if (isThinkingMarkdown(instance)) {
-        return;
-    }
-
+function prepareSyntaxTheme(instance: MarkdownInstance): (() => void) | undefined {
     const theme = Reflect.get(instance, "theme");
     if (!isMarkdownTheme(theme)) {
-        return;
+        return undefined;
     }
 
-    const wrappedTheme = syntaxMarkdownTheme(theme);
-    if (wrappedTheme !== theme) {
-        Reflect.set(instance, "theme", wrappedTheme);
+    if (isThinkingMarkdown(instance)) {
+        return suppressSyntaxMarkdownTheme(theme);
+    }
+
+    markdownRenderInjections += 1;
+    const originalHighlightDescriptor = Object.getOwnPropertyDescriptor(theme, "highlightCode");
+    patchSyntaxMarkdownTheme(theme);
+    return () => restoreSyntaxMarkdownTheme(theme, originalHighlightDescriptor);
+}
+
+function restoreSyntaxMarkdownTheme(
+    theme: MarkdownTheme,
+    originalHighlightDescriptor: PropertyDescriptor | undefined,
+): void {
+    try {
+        if (originalHighlightDescriptor === undefined) {
+            Reflect.deleteProperty(theme, "highlightCode");
+            return;
+        }
+        Reflect.defineProperty(theme, "highlightCode", originalHighlightDescriptor);
+    } catch {
+        markdownThemePatchFailures += 1;
     }
 }
 
-function syntaxMarkdownTheme(theme: MarkdownTheme): MarkdownTheme {
-    const cached = MARKDOWN_THEME_CACHE.get(theme);
-    if (cached) {
-        return cached;
+function suppressSyntaxMarkdownTheme(theme: MarkdownTheme): (() => void) | undefined {
+    const highlightCode = theme.highlightCode;
+    if (highlightCode !== highlightMarkdownCode) {
+        return undefined;
     }
 
-    const wrapped: MarkdownTheme = {
-        ...theme,
-        highlightCode(code: string, lang?: string): string[] {
-            return highlightSyntaxCode(code, lang);
-        },
+    markdownThinkingThemeSuppressions += 1;
+    if (!Reflect.deleteProperty(theme, "highlightCode")) {
+        markdownThinkingThemeSuppressionFailures += 1;
+        return undefined;
+    }
+
+    return () => {
+        try {
+            theme.highlightCode = highlightCode;
+        } catch {
+            markdownThinkingThemeSuppressionFailures += 1;
+        }
     };
-    MARKDOWN_THEME_CACHE.set(theme, wrapped);
-    return wrapped;
+}
+
+function patchSyntaxMarkdownTheme(theme: MarkdownTheme): void {
+    if (theme.highlightCode === highlightMarkdownCode) {
+        markdownThemePatchHits += 1;
+        return;
+    }
+
+    markdownThemePatchAttempts += 1;
+    try {
+        theme.highlightCode = highlightMarkdownCode;
+    } catch {
+        markdownThemePatchFailures += 1;
+        return;
+    }
+
+    if (theme.highlightCode === highlightMarkdownCode) {
+        markdownThemePatches += 1;
+        return;
+    }
+    markdownThemePatchFailures += 1;
 }
 
 function isThinkingMarkdown(instance: MarkdownInstance): boolean {

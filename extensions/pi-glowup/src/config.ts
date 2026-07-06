@@ -13,10 +13,22 @@ import Schema from "./typebox-schema.ts";
 
 export type CodexLookConfig = {
     readonly preserveTools: readonly string[];
+    readonly debugLog: {
+        readonly enabled: boolean;
+        readonly path: string;
+        readonly maxBytes: number | null;
+        readonly memorySampleIntervalMs: number;
+    };
     readonly scriptFormatters: ScriptFormatterCommands;
     readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
     readonly toolLabels: {
         readonly dynamicStatus: boolean;
+    };
+    readonly syntax: {
+        readonly preloadLanguages: readonly string[];
+        readonly projectLanguageDetection: {
+            readonly enabled: boolean;
+        };
     };
     readonly patches: {
         readonly assistantSeparator: boolean;
@@ -44,8 +56,20 @@ const CODEX_LOOK_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-look/conf
 export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
+    debugLog: {
+        enabled: true,
+        path: "debug.log",
+        maxBytes: null,
+        memorySampleIntervalMs: 10_000,
+    },
     toolLabels: {
         dynamicStatus: false,
+    },
+    syntax: {
+        preloadLanguages: ["markdown", "bash", "python"],
+        projectLanguageDetection: {
+            enabled: true,
+        },
     },
     patches: {
         assistantSeparator: true,
@@ -69,9 +93,32 @@ const SchemaReferenceSchema = Type.String();
 const StringArraySchema = Type.Array(Type.String());
 const FormatterCommandSchema = Type.Array(Type.String({ minLength: 1 }), { minItems: 1 });
 const FormatterCommandsSchema = Type.Record(Type.String(), FormatterCommandSchema);
+const DebugLogMaxBytesSchema = Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]);
+const DebugLogConfigSchema = Type.Object(
+    {
+        enabled: Type.Optional(Type.Boolean()),
+        path: Type.Optional(Type.String({ minLength: 1 })),
+        maxBytes: Type.Optional(DebugLogMaxBytesSchema),
+        memorySampleIntervalMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    },
+    { additionalProperties: false },
+);
 const ToolLabelsConfigSchema = Type.Object(
     {
         dynamicStatus: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false },
+);
+const SyntaxProjectLanguageDetectionConfigSchema = Type.Object(
+    {
+        enabled: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false },
+);
+const SyntaxConfigSchema = Type.Object(
+    {
+        preloadLanguages: Type.Optional(StringArraySchema),
+        projectLanguageDetection: Type.Optional(SyntaxProjectLanguageDetectionConfigSchema),
     },
     { additionalProperties: false },
 );
@@ -96,7 +143,9 @@ const CodexLookConfigSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
+        debugLog: Type.Optional(DebugLogConfigSchema),
         toolLabels: Type.Optional(ToolLabelsConfigSchema),
+        syntax: Type.Optional(SyntaxConfigSchema),
         patches: Type.Optional(PatchesConfigSchema),
         scriptPreview: Type.Optional(ScriptPreviewConfigSchema),
     },
@@ -106,12 +155,43 @@ const CodexLookConfigJsonSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
+        debugLog: Type.Optional(
+            Type.Object(
+                {
+                    enabled: Type.Optional(Type.Boolean()),
+                    path: Type.Optional(Type.String({ minLength: 1 })),
+                    maxBytes: Type.Optional(DebugLogMaxBytesSchema),
+                    memorySampleIntervalMs: Type.Optional(Type.Integer({ minimum: 0 })),
+                },
+                { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog },
+            ),
+        ),
         toolLabels: Type.Optional(
             Type.Object(
                 {
                     dynamicStatus: Type.Optional(Type.Boolean()),
                 },
                 { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels },
+            ),
+        ),
+        syntax: Type.Optional(
+            Type.Object(
+                {
+                    preloadLanguages: Type.Optional(StringArraySchema),
+                    projectLanguageDetection: Type.Optional(
+                        Type.Object(
+                            {
+                                enabled: Type.Optional(Type.Boolean()),
+                            },
+                            {
+                                additionalProperties: false,
+                                default:
+                                    DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.projectLanguageDetection,
+                            },
+                        ),
+                    ),
+                },
+                { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax },
             ),
         ),
         patches: Type.Optional(
@@ -145,7 +225,7 @@ const CodexLookConfigJsonSchema = Type.Object(
 type CodexLookConfigInput = Static<typeof CodexLookConfigSchema>;
 
 export function getCodexLookGlobalConfigPath(agentDir: string = getAgentDir()): string {
-    return join(agentDir, CODEX_LOOK_EXTENSION_ID, CODEX_LOOK_CONFIG_BASENAME);
+    return join(getCodexLookGlobalConfigDirectory(agentDir), CODEX_LOOK_CONFIG_BASENAME);
 }
 
 export function getCodexLookProjectConfigPath(cwd: string): string {
@@ -153,7 +233,11 @@ export function getCodexLookProjectConfigPath(cwd: string): string {
 }
 
 export function getCodexLookGlobalConfigSchemaPath(agentDir: string = getAgentDir()): string {
-    return join(agentDir, CODEX_LOOK_EXTENSION_ID, CODEX_LOOK_CONFIG_SCHEMA_BASENAME);
+    return join(getCodexLookGlobalConfigDirectory(agentDir), CODEX_LOOK_CONFIG_SCHEMA_BASENAME);
+}
+
+export function getCodexLookGlobalConfigDirectory(agentDir: string = getAgentDir()): string {
+    return join(agentDir, CODEX_LOOK_EXTENSION_ID);
 }
 
 export function codexLookConfigJsonSchema(): unknown {
@@ -220,7 +304,10 @@ export function parseCodexLookConfig(
 ): CodexLookConfig {
     const config = parseCodexLookConfigInput(input, options);
     const scriptPreview = config.scriptPreview ?? {};
+    const debugLog = config.debugLog ?? {};
     const toolLabels = config.toolLabels ?? {};
+    const syntax = config.syntax ?? {};
+    const projectLanguageDetection = syntax.projectLanguageDetection ?? {};
     const patches = config.patches ?? {};
 
     return {
@@ -229,6 +316,14 @@ export function parseCodexLookConfig(
                   (value) => value.trim().length > 0,
               )
             : [],
+        debugLog: {
+            enabled: debugLog.enabled ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.enabled,
+            path: debugLog.path ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.path,
+            maxBytes: debugLog.maxBytes ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.maxBytes,
+            memorySampleIntervalMs:
+                debugLog.memorySampleIntervalMs ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.memorySampleIntervalMs,
+        },
         scriptFormatters: parseScriptFormatterCommandsValue(scriptPreview.formatters ?? {}, {
             source: `${options.source ?? "config"}.scriptPreview.formatters`,
             ...(options.reportWarning === undefined
@@ -239,6 +334,15 @@ export function parseCodexLookConfig(
         toolLabels: {
             dynamicStatus:
                 toolLabels.dynamicStatus ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.dynamicStatus,
+        },
+        syntax: {
+            preloadLanguages:
+                syntax.preloadLanguages ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.preloadLanguages,
+            projectLanguageDetection: {
+                enabled:
+                    projectLanguageDetection.enabled ??
+                    DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.projectLanguageDetection.enabled,
+            },
         },
         patches: {
             assistantSeparator:
