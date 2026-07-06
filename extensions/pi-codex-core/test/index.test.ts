@@ -34,6 +34,7 @@ import {
     resolveCodexRequestModel,
 } from "../src/config.ts";
 import {
+    cancelScheduledCodexAutoCompaction,
     handleCodexNativeCompaction,
     NATIVE_COMPACTION_SHIM_SUMMARY,
     rewriteProviderRequestWithNativeCompaction,
@@ -46,7 +47,11 @@ import {
     saveGeneratedImage,
 } from "../src/image-content.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
-import { createViewImageTool } from "../src/tools/view-image.ts";
+import {
+    clearDeferredViewImagesForSession,
+    createViewImageTool,
+    rewriteProviderRequestWithDeferredViewImages,
+} from "../src/tools/view-image.ts";
 import { formatWebRunToolOutput } from "../src/tools/web-run-output.ts";
 import { createWebRunTool } from "../src/tools/web-run.ts";
 import { Redacted } from "../src/redacted.ts";
@@ -67,6 +72,47 @@ import {
 test("exports extension metadata", () => {
     assert.equal(packageName, "pi-codex-core");
     assert.equal(extensionName, "Pi Codex Core");
+});
+
+test("registers extension handlers once per Pi API", () => {
+    let registeredTools = 0;
+    let registeredCommands = 0;
+    let registeredRenderers = 0;
+    let registeredHandlers = 0;
+    const api = {
+        registerTool() {
+            registeredTools += 1;
+        },
+        registerCommand() {
+            registeredCommands += 1;
+        },
+        registerMessageRenderer() {
+            registeredRenderers += 1;
+        },
+        on() {
+            registeredHandlers += 1;
+        },
+        getActiveTools: () => [],
+        setActiveTools() {},
+        getAllTools: () => [],
+    };
+
+    // SAFETY: This fixture implements only extension registration members used during activation.
+    const extensionApi = api as unknown as ExtensionAPI;
+    extension(extensionApi);
+    const countsAfterFirstActivation = {
+        registeredTools,
+        registeredCommands,
+        registeredRenderers,
+        registeredHandlers,
+    };
+
+    extension(extensionApi);
+
+    assert.deepEqual(
+        { registeredTools, registeredCommands, registeredRenderers, registeredHandlers },
+        countsAfterFirstActivation,
+    );
 });
 
 test("parses codex config with safe defaults", () => {
@@ -725,16 +771,16 @@ test("rejects invalid tool arguments before I/O", () => {
 
 test("computes Codex prompt image target dimensions", () => {
     assert.deepEqual(codexPromptImageTargetDimensions(2304, 864), {
-        width: 2048,
-        height: 768,
+        width: 1280,
+        height: 480,
     });
     assert.deepEqual(codexPromptImageTargetDimensions(1024, 4096), {
-        width: 512,
-        height: 2048,
+        width: 320,
+        height: 1280,
     });
     assert.deepEqual(codexPromptImageTargetDimensions(2048, 2048), {
-        width: 1600,
-        height: 1600,
+        width: 1280,
+        height: 1280,
     });
 });
 
@@ -783,23 +829,36 @@ test("view_image resizes default detail with Codex patch budget", async () => {
             makeImageContext(root),
         );
 
-        const image = result.content.find(
-            (
-                item,
-            ): item is {
-                readonly type: "image";
-                readonly data: string;
-                readonly mimeType: string;
-            } =>
-                isRecord(item) &&
-                item.type === "image" &&
-                typeof item.data === "string" &&
-                typeof item.mimeType === "string",
+        assert.doesNotMatch(JSON.stringify(result), /iVBOR|base64/);
+        const marker = result.content.find(
+            (item): item is { readonly type: "text"; readonly text: string } =>
+                isRecord(item) && item.type === "text" && typeof item.text === "string",
+        )?.text;
+        assert.ok(marker);
+        const rewritten = rewriteProviderRequestWithDeferredViewImages(
+            {
+                model: "gpt-5.5",
+                input: [
+                    { type: "function_call_output", call_id: "view-image-resize", output: marker },
+                ],
+            },
+            makeImageContext(root),
         );
-        assert.ok(image);
-        const dimensions = getImageDimensions(image.data, image.mimeType);
-        assert.deepEqual(dimensions, { widthPx: 1600, heightPx: 1600 });
+        assert.ok(isRecord(rewritten));
+        assert.ok(Array.isArray(rewritten.input));
+        const [toolOutput] = rewritten.input;
+        assert.ok(isRecord(toolOutput));
+        assert.ok(Array.isArray(toolOutput.output));
+        const imagePart = toolOutput.output.find(
+            (part) => isRecord(part) && typeof part.image_url === "string",
+        );
+        assert.ok(isRecord(imagePart));
+        const imageUrl = String(imagePart.image_url);
+        const imageData = imageUrl.replace(/^data:image\/png;base64,/, "");
+        const dimensions = getImageDimensions(imageData, "image/png");
+        assert.deepEqual(dimensions, { widthPx: 1280, heightPx: 1280 });
     } finally {
+        clearDeferredViewImagesForSession("session/1");
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -1076,6 +1135,48 @@ test("imagegen returns saved paths without inline generated images", async () =>
     }
 });
 
+test("imagegen saves generated images sequentially", async () => {
+    const base64A = Buffer.from("first generated png bytes").toString("base64");
+    const base64B = Buffer.from("second generated png bytes").toString("base64");
+    const runtime = makeTestRuntime(
+        async () =>
+            new Response(JSON.stringify({ data: [{ b64_json: base64A }, { b64_json: base64B }] }), {
+                status: 200,
+            }),
+    );
+    let activeSaves = 0;
+    let maxActiveSaves = 0;
+    const savedOrder: string[] = [];
+    const imagegenTool = createImagegenTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+        runtime,
+        async saveImage(args) {
+            activeSaves += 1;
+            maxActiveSaves = Math.max(maxActiveSaves, activeSaves);
+            await Promise.resolve();
+            savedOrder.push(args.base64);
+            activeSaves -= 1;
+            return {
+                path: `/tmp/${args.index}.png`,
+                absolutePath: `/tmp/${args.index}.png`,
+                latestPath: "/tmp/latest.png",
+                latestAbsolutePath: "/tmp/latest.png",
+            };
+        },
+    });
+
+    await imagegenTool.execute(
+        "call/1",
+        { prompt: "Draw two robots" },
+        undefined,
+        undefined,
+        makeWebRunContext("/workspace"),
+    );
+
+    assert.equal(maxActiveSaves, 1);
+    assert.deepEqual(savedOrder, [base64A, base64B]);
+});
+
 test("imagegen edits recent generated image artifacts from tool details", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-imagegen-recent-"));
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -1278,19 +1379,10 @@ test("creates native compaction using remote compaction v2", async () => {
     assert.equal(result?.compaction?.details.windowNumber, 1);
     assert.equal(result?.compaction?.details.firstWindowId, result?.compaction?.details.windowId);
     assert.equal(result?.compaction?.details.previousWindowId, undefined);
-    assert.deepEqual(result?.compaction?.details.replacementInput.slice(0, 2), [
-        {
-            role: "user",
-            content: [{ type: "input_text", text: "keep this request" }],
-        },
-        { type: "compaction", encrypted_content: "sealed" },
-    ]);
-    const worldState = result?.compaction?.details.replacementInput.at(2);
-    assert.ok(isRecord(worldState));
-    assert.match(worldStateText(worldState), /<codex_core_world_state>/);
-    assert.match(worldStateText(worldState), /cwd: \/workspace/);
-    assert.match(worldStateText(worldState), /model: openai-codex\/gpt-5\.5/);
-    assert.match(worldStateText(worldState), /active tools: read/);
+    assert.equal(Object.hasOwn(result?.compaction?.details ?? {}, "replacementInput"), false);
+    assert.equal(result?.compaction?.details.worldState.cwd, "/workspace");
+    assert.equal(result?.compaction?.details.worldState.model, "openai-codex/gpt-5.5");
+    assert.deepEqual(result?.compaction?.details.worldState.activeToolNames, ["read"]);
 });
 
 test("streams remote compaction SSE without buffering response text", async () => {
@@ -1820,11 +1912,14 @@ test("retained image-only messages consume compaction budget", async () => {
         runtime,
     );
 
-    const retainedImageUrls = (result?.compaction?.details.compactedWindow ?? []).flatMap(
-        imageUrlsFromResponseItem,
+    const compactedWindow = result?.compaction?.details.compactedWindow ?? [];
+    const retainedImageUrls = compactedWindow.flatMap(imageUrlsFromResponseItem);
+    const retainedImagePlaceholders = compactedWindow.filter((item) =>
+        /image omitted from retained compacted window/.test(textFromResponseItem(item)),
     );
-    assert.ok(retainedImageUrls.length > 0);
-    assert.ok(retainedImageUrls.length < 80);
+    assert.equal(retainedImageUrls.length, 0);
+    assert.ok(retainedImagePlaceholders.length > 0);
+    assert.ok(retainedImagePlaceholders.length < 80);
 });
 
 test("retained native compaction window truncates huge text and omits over-budget image", async () => {
@@ -1996,6 +2091,117 @@ test("keeps pending Pi fallback windows isolated by session", async () => {
         { role: "developer", content: "summarize compact" },
         { type: "compaction", encrypted_content: "opaque" },
     ]);
+});
+
+test("expires pending Pi fallback windows", async () => {
+    cancelScheduledCodexAutoCompaction();
+    let nowMs = 1_000;
+    const runtime = {
+        ...makeTestRuntime(async () => new Response("limit", { status: 429 })),
+        clock: {
+            nowMs: () => nowMs,
+            nowDate: () => new Date("2026-01-01T00:00:00.000Z"),
+        },
+    } satisfies CodexRuntime;
+    const ctx = makeNativeCompactionContext({ sessionId: "expires-pending" });
+    const config = {
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+    };
+
+    await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries: [
+                nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
+                messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
+            ],
+            firstKeptEntryId: "entry-tail",
+        }),
+        ctx,
+        config,
+        makeCompactionApi(),
+        runtime,
+    );
+
+    nowMs += 5 * 60 * 1000 + 1;
+    const rewritten = await rewriteProviderRequestWithNativeCompaction(
+        {
+            model: "gpt-5.5",
+            instructions: "compact this conversation",
+            input: [{ role: "developer", content: "summarize compact" }],
+        },
+        ctx,
+        config,
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.equal(rewritten, undefined);
+    cancelScheduledCodexAutoCompaction();
+});
+
+test("skips provider payload parsing when no native compaction state exists", async () => {
+    cancelScheduledCodexAutoCompaction();
+    const payload = { model: "gpt-5.4-mini" };
+    Object.defineProperty(payload, "input", {
+        get() {
+            throw new Error("provider payload should not be parsed");
+        },
+    });
+
+    const rewritten = await rewriteProviderRequestWithNativeCompaction(
+        payload,
+        makeCompactionContext({ branchEntries: [] }),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+    );
+
+    assert.equal(rewritten, undefined);
+});
+
+test("native replay matching does not JSON-stringify provider items", async () => {
+    const ctx = makeCompactionContext();
+    const poisonReplayItem = {
+        role: "user",
+        content: [{ type: "input_text", text: "inserted context" }],
+        toJSON() {
+            throw new Error("provider item should not be JSON-stringified");
+        },
+    };
+
+    const rewritten = await rewriteProviderRequestWithNativeCompaction(
+        {
+            model: "gpt-5.4-mini",
+            input: [
+                { role: "developer", content: "system" },
+                {
+                    role: "user",
+                    content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
+                },
+                poisonReplayItem,
+                { role: "user", content: [{ type: "input_text", text: "pre kept" }] },
+                { role: "user", content: [{ type: "input_text", text: "post tail" }] },
+            ],
+        },
+        ctx,
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+    );
+
+    const rewrittenInput = responseInput(rewritten);
+    assert.deepEqual(rewrittenInput.slice(0, 2), [
+        { role: "developer", content: "system" },
+        { type: "compaction", encrypted_content: "opaque" },
+    ]);
+    const rewrittenText = rewrittenInput.map(textFromResponseItem).join("\n");
+    assert.match(rewrittenText, /inserted context/);
+    assert.doesNotMatch(rewrittenText, /pre kept/);
 });
 
 test("auto compaction defers until Pi is idle after agent_end", async () => {
@@ -2602,8 +2808,11 @@ function makeImageContext(cwd: string): ExtensionContext {
             baseUrl: "https://chatgpt.com/backend-api",
             input: ["text", "image"],
         },
+        sessionManager: {
+            getSessionId: () => "session/1",
+        },
     };
-    // SAFETY: This test only exercises cwd and model image support.
+    // SAFETY: This test only exercises cwd, model image support, and session id lookup.
     return ctx as unknown as ExtensionContext;
 }
 
