@@ -63,6 +63,7 @@ export async function shutdownCodexTokenizer(): Promise<void> {
     const state = workerState;
     workerState = undefined;
     warmupPromise = undefined;
+    mainEncodingPromise = undefined;
     if (state === undefined) {
         return;
     }
