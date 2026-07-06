@@ -354,9 +354,9 @@ describe("Pierre diff rendering", () => {
         );
         const plainLines = component.render(100).map((line) => stripAnsi(line).trimEnd());
 
-        expect(plainLines).toContain("+  2");
+        expect(plainLines).toContain("+2");
         expect(plainLines).not.toContain("");
-        expect(plainLines[plainLines.indexOf("+  2") + 1]).toContain("+  3 def greet():");
+        expect(plainLines[plainLines.indexOf("+2") + 1]).toContain("+3 def greet():");
     });
 
     it("fills added blank rows with the insertion background", () => {
@@ -379,7 +379,7 @@ describe("Pierre diff rendering", () => {
             { expanded: true },
             { lastComponent: undefined, invalidate() {} },
         ).render(width);
-        const blankAddition = lines.find((line) => stripAnsi(line).trimEnd() === "+  2");
+        const blankAddition = lines.find((line) => stripAnsi(line).trimEnd() === "+2");
 
         expect(blankAddition).toBeDefined();
         expect(blankAddition).toContain("48;2;0;34;0");
@@ -408,7 +408,7 @@ describe("Pierre diff rendering", () => {
         ).render(width);
 
         expect(lines.length).toBeGreaterThan(1);
-        expect(lines.some((line) => stripAnsi(line).trimEnd() === "   2")).toBe(true);
+        expect(lines.some((line) => stripAnsi(line).trimEnd() === " 2")).toBe(true);
         expect(lines.every((line) => visibleWidth(line) < width)).toBe(true);
     });
 });

@@ -810,10 +810,15 @@ function markerForLineType(lineType: SplitDiffCell["lineType"] | UnifiedDiffRowL
 type UnifiedDiffRowLineType = Extract<UnifiedDiffRow, { readonly kind: "line" }>["lineType"];
 
 function lineNumberWidthFor(metadata: PierreRenderableDiffPayload["metadata"]): number {
-    return Math.max(
-        3,
-        String(Math.max(metadata.deletionLines.length, metadata.additionLines.length, 1)).length,
-    );
+    let maxLineNumber = 1;
+    for (const hunk of metadata.hunks) {
+        maxLineNumber = Math.max(
+            maxLineNumber,
+            hunk.deletionStart + Math.max(0, hunk.deletionCount - 1),
+            hunk.additionStart + Math.max(0, hunk.additionCount - 1),
+        );
+    }
+    return String(maxLineNumber).length;
 }
 
 function hasHighlightedLines(highlighted: HighlightedDiffSet): boolean {

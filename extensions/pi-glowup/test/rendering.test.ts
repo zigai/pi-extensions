@@ -795,6 +795,15 @@ describe("Codex rendering helpers", () => {
         expect(rendered).toContain("<dim>2 </dim><toolDiffAdded>+</toolDiffAdded>");
     });
 
+    it("right-aligns fallback diff line numbers by the widest line number", () => {
+        const sections = parseDiffSections("-8 old\n+9 new\n+10 ten", "file.ts");
+        const lines = renderCodexDiff(plainTheme, sections, true)
+            .render(120)
+            .map((line) => line.trimEnd());
+
+        expect(lines).toEqual(["     8 -old", "     9 +new", "    10 +ten"]);
+    });
+
     it("keeps diff renderer lines short of the terminal edge", () => {
         const sections = parseDiffSections(
             "-1 old text that wraps\n+1 new text that wraps",

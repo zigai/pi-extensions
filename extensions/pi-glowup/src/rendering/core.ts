@@ -1872,6 +1872,30 @@ function parseDiffLine(line: string):
     };
 }
 
+function normalizedDiffLineNumber(lineNumber: string): string {
+    return lineNumber.trim();
+}
+
+function formatDiffLineNumber(lineNumber: string, width: number): string {
+    const normalized = normalizedDiffLineNumber(lineNumber);
+    if (normalized.length === 0) {
+        return " ".repeat(Math.max(0, width));
+    }
+    return normalized.padStart(Math.max(normalized.length, width), " ");
+}
+
+function diffLineNumberWidth(lines: ReadonlyArray<string>): number {
+    let width = 0;
+    for (const line of lines) {
+        const parsed = parseDiffLine(line);
+        if (parsed === null || parsed.kind === "ellipsis") {
+            continue;
+        }
+        width = Math.max(width, normalizedDiffLineNumber(parsed.lineNumber).length);
+    }
+    return width;
+}
+
 function wrapDiffText(text: string, width: number, maxWrappedRows: number | undefined): string[] {
     if (maxWrappedRows === undefined) {
         return wrapStyledText(text, width);
@@ -1888,6 +1912,7 @@ function renderDiffRow(
     theme: CodexRenderTheme,
     options?: {
         readonly path?: string;
+        readonly lineNumberWidth?: number;
         readonly maxWrappedRows?: number;
     },
 ): string[] {
@@ -1913,7 +1938,10 @@ function renderDiffRow(
         sign = "-";
     }
 
-    const lineNumber = `${parsed.lineNumber} `;
+    const lineNumber = `${formatDiffLineNumber(
+        parsed.lineNumber,
+        options?.lineNumberWidth ?? normalizedDiffLineNumber(parsed.lineNumber).length,
+    )} `;
     const lineNumberWidth = visibleWidth(lineNumber);
     const rowPrefix = `${lineNumber}${sign}`;
     const wrapPrefix = `${" ".repeat(lineNumberWidth)} `;
@@ -2032,6 +2060,7 @@ export function renderCodexDiff(
             const visibleLines = shouldCollapse
                 ? section.lines.slice(0, Math.min(remainingBudget, section.lines.length))
                 : [...section.lines];
+            const sectionLineNumberWidth = diffLineNumberWidth(section.lines);
 
             for (const line of visibleLines) {
                 if (shouldCollapse && remainingBudget <= 0) {
@@ -2040,6 +2069,7 @@ export function renderCodexDiff(
                 rendered.push(
                     ...renderDiffRow(line, width, "    ", theme, {
                         ...(section.path === undefined ? {} : { path: section.path }),
+                        lineNumberWidth: sectionLineNumberWidth,
                         ...(expanded ? {} : { maxWrappedRows: 4 }),
                     }),
                 );
