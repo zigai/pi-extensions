@@ -28,6 +28,18 @@ export type ScriptFormatterParseOptions = {
 
 const FORMATTER_TIMEOUT_MS = 1_000;
 const FORMATTER_MAX_BUFFER = 1024 * 1024;
+const FORMATTER_MAX_INPUT_BYTES = 64 * 1024;
+const MAX_CONCURRENT_FORMATTERS = 2;
+const MAX_QUEUED_FORMATTERS = 20;
+
+type FormatterQueueEntry = {
+    readonly signal: AbortSignal | undefined;
+    readonly resolve: (release: (() => void) | undefined) => void;
+    abort: (() => void) | undefined;
+};
+
+let activeFormatterCount = 0;
+const queuedFormatters: FormatterQueueEntry[] = [];
 
 function reportFormatterWarning(options: ScriptFormatterParseOptions, message: string): void {
     options.reportWarning?.(`[pi-codex-look] ${message}`);
@@ -151,6 +163,7 @@ function runFormatterCommand(
             child.kill();
             finishFormatterCommand(resolve, undefined, state, timeout);
         }, FORMATTER_TIMEOUT_MS);
+        timeout.unref?.();
 
         child.stdout.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => {
@@ -175,6 +188,62 @@ function runFormatterCommand(
     });
 }
 
+function acquireFormatterSlot(
+    options: ScriptBlockFormatterOptions,
+): Promise<(() => void) | undefined> {
+    if (options.signal?.aborted === true) {
+        return Promise.resolve(undefined);
+    }
+    if (activeFormatterCount < MAX_CONCURRENT_FORMATTERS) {
+        activeFormatterCount += 1;
+        return Promise.resolve(releaseFormatterSlot);
+    }
+    if (queuedFormatters.length >= MAX_QUEUED_FORMATTERS) {
+        return Promise.resolve(undefined);
+    }
+
+    return new Promise((resolve) => {
+        const entry: FormatterQueueEntry = {
+            signal: options.signal,
+            resolve,
+            abort: undefined,
+        };
+        const abort = (): void => {
+            const index = queuedFormatters.indexOf(entry);
+            if (index >= 0) {
+                queuedFormatters.splice(index, 1);
+            }
+            resolve(undefined);
+        };
+        entry.abort = abort;
+        options.signal?.addEventListener("abort", abort, { once: true });
+        queuedFormatters.push(entry);
+    });
+}
+
+function releaseFormatterSlot(): void {
+    activeFormatterCount = Math.max(0, activeFormatterCount - 1);
+    startQueuedFormatters();
+}
+
+function startQueuedFormatters(): void {
+    while (activeFormatterCount < MAX_CONCURRENT_FORMATTERS) {
+        const entry = queuedFormatters.shift();
+        if (entry === undefined) {
+            return;
+        }
+        if (entry.abort !== undefined) {
+            entry.signal?.removeEventListener("abort", entry.abort);
+        }
+        if (entry.signal?.aborted === true) {
+            entry.resolve(undefined);
+            continue;
+        }
+        activeFormatterCount += 1;
+        entry.resolve(releaseFormatterSlot);
+    }
+}
+
 export function createCommandScriptFormatter(
     commands: ScriptFormatterCommands,
 ): ScriptBlockFormatter | undefined {
@@ -187,13 +256,26 @@ export function createCommandScriptFormatter(
         if (command === undefined) {
             return undefined;
         }
+        if (Buffer.byteLength(input.code, "utf8") > FORMATTER_MAX_INPUT_BYTES) {
+            return undefined;
+        }
 
         const [executable, ...args] = command;
         if (executable === undefined) {
             return undefined;
         }
 
-        const output = await runFormatterCommand(executable, args, input.code, options);
+        const release = await acquireFormatterSlot(options);
+        if (release === undefined) {
+            return undefined;
+        }
+
+        let output: string | undefined;
+        try {
+            output = await runFormatterCommand(executable, args, input.code, options);
+        } finally {
+            release();
+        }
         if (output === undefined) {
             return undefined;
         }

@@ -85,6 +85,20 @@ describe("script formatter settings", () => {
         ).resolves.toEqual({ label: "Node", language: "javascript", code: "console.log(1)" });
     });
 
+    it("skips command formatters for oversized inputs", async () => {
+        const commands = parseScriptFormatterCommands(
+            JSON.stringify({
+                python: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
+            }),
+        );
+        const formatter = createCommandScriptFormatter(commands);
+        const code = "print(1)\n".repeat(10_000);
+
+        await expect(
+            formatScriptInvocation({ label: "Python", language: "python", code }, formatter),
+        ).resolves.toEqual({ label: "Python", language: "python", code });
+    });
+
     it("falls back to the original script when a formatter throws", async () => {
         await expect(
             formatScriptInvocation(
