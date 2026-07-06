@@ -1,16 +1,16 @@
-import { renderCodexOutput } from "../rendering/core.ts";
+import { renderCodexOutput } from "../../../rendering/core.ts";
 import type {
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
     ThirdPartyToolResult,
-} from "./types.ts";
-import { callState, renderSimpleResult, renderThirdPartyCall } from "./call-rendering.ts";
+} from "../../types.ts";
+import { callState, renderSimpleResult, renderThirdPartyCall } from "../../call-rendering.ts";
 import {
     compactQuotedText,
     previewArgsForContext,
     textOutput,
     visitNormalizedOutputLines,
-} from "./previews.ts";
+} from "../../previews.ts";
 import {
     baseToolName,
     compactInteger,
@@ -22,7 +22,7 @@ import {
     isDefined,
     isNonEmptyString,
     isRecord,
-} from "./tool-values.ts";
+} from "../../tool-values.ts";
 
 const AGENT_TOOL_LABELS = new Map<string, string>([
     ["Agent", "Launched Agent"],

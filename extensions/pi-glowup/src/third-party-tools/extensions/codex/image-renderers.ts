@@ -1,6 +1,6 @@
-import { formatPathTarget, type CodexRenderTheme } from "../rendering/core.ts";
-import type { ThirdPartyToolRenderContext, ThirdPartyToolResult } from "./types.ts";
-import { compactQuotedText, previewArgsForContext } from "./previews.ts";
+import { formatPathTarget, type CodexRenderTheme } from "../../../rendering/core.ts";
+import type { ThirdPartyToolRenderContext, ThirdPartyToolResult } from "../../types.ts";
+import { compactQuotedText, previewArgsForContext } from "../../previews.ts";
 import {
     getArray,
     getNumber,
@@ -8,7 +8,7 @@ import {
     isDefined,
     isNonEmptyString,
     isRecord,
-} from "./tool-values.ts";
+} from "../../tool-values.ts";
 
 export function summarizeImagegenArgs(
     args: unknown,

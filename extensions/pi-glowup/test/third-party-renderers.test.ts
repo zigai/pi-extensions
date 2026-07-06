@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import type { CodexLookRenderingAdapter } from "../src/tool-rendering/protocol.ts";
 import {
     CODEX_LOOK_RENDERING_PROPERTY,
     createThirdPartyToolRenderer,
+    hasCodexLookRenderingAdapter,
     parsePreservedThirdPartyToolNames,
     shouldPreserveThirdPartyToolRenderer,
 } from "../src/third-party-tools/renderers.ts";
@@ -39,6 +41,58 @@ function compactRenderedText(text: string): string {
 }
 
 describe("third-party tool renderers", () => {
+    it("uses passive codexLookRendering adapters when present", () => {
+        type DbQueryArgs = {
+            readonly sql: string;
+        };
+        type DbQueryResult = {
+            readonly details?: {
+                readonly rowCount?: number;
+            };
+        };
+        const rendering = {
+            version: 1,
+            renderCall(args) {
+                return {
+                    kind: "call",
+                    label: "DB Query",
+                    body: args.sql,
+                };
+            },
+            renderResult(result) {
+                return {
+                    kind: "output",
+                    text: `${result.details?.rowCount ?? 0} rows`,
+                    mode: "head",
+                };
+            },
+        } satisfies CodexLookRenderingAdapter<DbQueryArgs, DbQueryResult>;
+        const renderer = createThirdPartyToolRenderer("db_query", undefined, {
+            [CODEX_LOOK_RENDERING_PROPERTY]: rendering,
+        });
+
+        expect(hasCodexLookRenderingAdapter({ [CODEX_LOOK_RENDERING_PROPERTY]: rendering })).toBe(
+            true,
+        );
+        expect(
+            renderer
+                .renderCall({ sql: "select * from users" }, plainTheme, renderContext)
+                .render(120)
+                .join("\n"),
+        ).toContain("DB Query select * from users");
+        expect(
+            renderer
+                .renderResult(
+                    { content: [], details: { rowCount: 3 } },
+                    { expanded: false, isPartial: false },
+                    plainTheme,
+                    renderContext,
+                )
+                .render(120)
+                .join("\n"),
+        ).toContain("3 rows");
+    });
+
     it("renders unknown tools as compact Codex-style calls", () => {
         const renderer = createThirdPartyToolRenderer("custom_tool");
 

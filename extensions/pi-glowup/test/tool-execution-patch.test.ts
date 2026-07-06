@@ -291,6 +291,56 @@ describe("tool execution patches", () => {
         );
     });
 
+    it("preserves native third-party renderers unless they opt in", () => {
+        const prototype = createPrototype();
+        prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
+            return true;
+        };
+        installThirdPartyToolRendererPatch(undefined, prototype);
+
+        const instance: FakeToolExecutionInstance = {
+            toolName: "custom_tool",
+            toolDefinition: {},
+        };
+
+        expect(prototype.getRenderShell.call(instance)).toBe("default");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
+        expect(
+            prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["existing renderer"]);
+    });
+
+    it("uses passive Codex-look adapters over native third-party renderers", () => {
+        const prototype = createPrototype();
+        prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
+            return true;
+        };
+        installThirdPartyToolRendererPatch(undefined, prototype);
+
+        const instance: FakeToolExecutionInstance = {
+            toolName: "db_query",
+            toolDefinition: {
+                codexLookRendering: {
+                    version: 1,
+                    renderCall: () => ({
+                        kind: "call",
+                        label: "DB Query",
+                        body: "select 1",
+                    }),
+                },
+            },
+        };
+
+        expect(prototype.getRenderShell.call(instance)).toBe("self");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
+        expect(
+            prototype.getCallRenderer
+                .call(instance)?.({}, plainTheme, renderContext)
+                .render(80)
+                .join("\n"),
+        ).toContain("DB Query select 1");
+    });
+
     it("leaves third-party tools on their original render path when disabled", () => {
         const prototype = createPrototype();
         installThirdPartyToolRendererPatch({ enabled: false }, prototype);

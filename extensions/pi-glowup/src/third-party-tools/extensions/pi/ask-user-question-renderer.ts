@@ -1,11 +1,11 @@
-import { renderCodexOutput, type CodexRenderTheme } from "../rendering/core.ts";
+import { renderCodexOutput, type CodexRenderTheme } from "../../../rendering/core.ts";
 import type {
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
     ThirdPartyToolResult,
-} from "./types.ts";
-import { callState, renderSimpleResult, renderThirdPartyCall } from "./call-rendering.ts";
-import { previewArgsForContext, textOutput } from "./previews.ts";
+} from "../../types.ts";
+import { callState, renderSimpleResult, renderThirdPartyCall } from "../../call-rendering.ts";
+import { previewArgsForContext, textOutput } from "../../previews.ts";
 import {
     getArray,
     getBoolean,
@@ -14,7 +14,7 @@ import {
     isDefined,
     isNonEmptyString,
     isRecord,
-} from "./tool-values.ts";
+} from "../../tool-values.ts";
 
 type AskUserQuestionOption = {
     readonly label: string;

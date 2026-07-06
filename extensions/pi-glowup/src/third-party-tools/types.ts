@@ -1,32 +1,24 @@
 import type { Component } from "@earendil-works/pi-tui";
 import type { CodexRenderTheme } from "../rendering/core.ts";
+import type { CodexLookRenderContext, CodexLookToolResult } from "../tool-rendering/protocol.ts";
 
-/** Optional property third-party tools can set to preserve their own renderer. */
-export const CODEX_LOOK_RENDERING_PROPERTY = "codexLookRendering";
-
-/** Rendering preference read from third-party tool definitions when present. */
-export type CodexLookRenderingPreference = "auto" | "preserve";
+export {
+    CODEX_LOOK_RENDERING_PROPERTY,
+    type CodexLookRendering,
+    type CodexLookRenderingAdapter,
+    type CodexLookRenderingPreference,
+    type CodexLookSection,
+    type CodexLookView,
+} from "../tool-rendering/protocol.ts";
 
 /** Matcher used to opt selected third-party tools out of Codex-look conversion. */
 export type ToolNameMatcher = string | RegExp | ((toolName: string) => boolean);
 
 /** Minimal render context consumed by Codex-look third-party renderers. */
-export type ThirdPartyToolRenderContext = {
-    readonly args: unknown;
-    readonly toolCallId: string;
-    readonly executionStarted: boolean;
-    readonly argsComplete: boolean;
-    readonly isPartial: boolean;
-    readonly expanded: boolean;
-    readonly showImages: boolean;
-    readonly isError: boolean;
-};
+export type ThirdPartyToolRenderContext = CodexLookRenderContext;
 
 /** Minimal result shape consumed by Codex-look third-party renderers. */
-export type ThirdPartyToolResult = {
-    readonly content?: unknown;
-    readonly details?: unknown;
-};
+export type ThirdPartyToolResult = CodexLookToolResult;
 
 /** Codex-look renderer pair for a non-native tool. */
 export type ThirdPartyToolRenderer = {

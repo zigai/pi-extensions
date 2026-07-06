@@ -1,13 +1,13 @@
-import type { CodexRenderTheme } from "../rendering/core.ts";
-import type { ThirdPartyToolRenderContext, ThirdPartyToolResult } from "./types.ts";
-import { RENDER_THEME_TOKENS } from "../syntax/palette.ts";
+import type { CodexRenderTheme } from "../../../rendering/core.ts";
+import type { ThirdPartyToolRenderContext, ThirdPartyToolResult } from "../../types.ts";
+import { RENDER_THEME_TOKENS } from "../../../syntax/palette.ts";
 import {
     countedSummary,
     previewArgsForContext,
     textOutput,
     truncateText,
     visitNormalizedOutputLines,
-} from "./previews.ts";
+} from "../../previews.ts";
 import {
     getArray,
     getNumber,
@@ -15,7 +15,7 @@ import {
     isDefined,
     isNonEmptyString,
     isRecord,
-} from "./tool-values.ts";
+} from "../../tool-values.ts";
 
 const MAX_WEB_RUN_HIGHLIGHTS = 3;
 export const WEB_RUN_COLLAPSED_SOURCE_LIMIT = 4;

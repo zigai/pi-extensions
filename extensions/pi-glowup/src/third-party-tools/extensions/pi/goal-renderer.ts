@@ -1,7 +1,7 @@
-import { renderCodexOutput } from "../rendering/core.ts";
-import type { ThirdPartyToolRenderer, ThirdPartyToolResult } from "./types.ts";
-import { callState, renderSimpleResult, renderThirdPartyCall } from "./call-rendering.ts";
-import { textOutput } from "./previews.ts";
+import { renderCodexOutput } from "../../../rendering/core.ts";
+import type { ThirdPartyToolRenderer, ThirdPartyToolResult } from "../../types.ts";
+import { callState, renderSimpleResult, renderThirdPartyCall } from "../../call-rendering.ts";
+import { textOutput } from "../../previews.ts";
 import {
     baseToolName,
     compactInteger,
@@ -9,7 +9,7 @@ import {
     getNumber,
     getString,
     isRecord,
-} from "./tool-values.ts";
+} from "../../tool-values.ts";
 
 type GoalRecord = {
     readonly objective: string;

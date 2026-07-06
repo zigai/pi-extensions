@@ -1,13 +1,16 @@
 import { createApplyPatchRenderer } from "../rendering/apply-patch-rendering.ts";
-import { createAgentRenderer, isAgentTool } from "./agent-renderer.ts";
+import { createAgentBrowserRenderer } from "./extensions/agent-browser/renderer.ts";
+import { createCodexRenderer, isCodexTool } from "./extensions/codex/renderer.ts";
 import {
-    createBrowserRenderer,
-    createMcpToolRenderer,
+    createChromeDevtoolsMcpRenderer,
+    createMcpGatewayRenderer,
     hasChromeDevtoolsName,
-} from "./browser-renderers.ts";
-import { createCoreRenderer, isCoreTool } from "./core-renderer.ts";
-import { createGoalRenderer, isGoalTool } from "./goal-renderer.ts";
+} from "./extensions/mcp-gateway/renderer.ts";
+import { createAgentRenderer, isAgentTool } from "./extensions/pi/agent-renderer.ts";
+import { createGoalRenderer, isGoalTool } from "./extensions/pi/goal-renderer.ts";
+import { createPiCoreRenderer, isPiCoreTool } from "./extensions/pi/core-renderer.ts";
 import { createGenericRenderer } from "./call-rendering.ts";
+import { codexLookRenderingAdapter, createProtocolRenderer } from "./protocol-renderer.ts";
 import { baseToolName, isRecord } from "./tool-values.ts";
 import {
     CODEX_LOOK_RENDERING_PROPERTY,
@@ -39,14 +42,24 @@ const DEFAULT_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
         createRenderer: createApplyPatchRenderer,
     },
     {
-        name: "browser-mcp-gateway",
-        matches: (toolName) => toolName === "agent_browser" || toolName === "mcp",
-        createRenderer: createBrowserRenderer,
+        name: "agent-browser",
+        matches: (toolName) => toolName === "agent_browser",
+        createRenderer: createAgentBrowserRenderer,
+    },
+    {
+        name: "mcp-gateway",
+        matches: (toolName) => toolName === "mcp",
+        createRenderer: createMcpGatewayRenderer,
     },
     {
         name: "chrome-devtools-mcp-tools",
         matches: hasChromeDevtoolsName,
-        createRenderer: createMcpToolRenderer,
+        createRenderer: createChromeDevtoolsMcpRenderer,
+    },
+    {
+        name: "pi-core-tools",
+        matches: isPiCoreTool,
+        createRenderer: createPiCoreRenderer,
     },
     {
         name: "goal-tools",
@@ -54,9 +67,9 @@ const DEFAULT_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
         createRenderer: createGoalRenderer,
     },
     {
-        name: "codex-core-tools",
-        matches: isCoreTool,
-        createRenderer: createCoreRenderer,
+        name: "codex-tools",
+        matches: isCodexTool,
+        createRenderer: createCodexRenderer,
     },
     {
         name: "agent-tools",
@@ -85,6 +98,11 @@ function hasPreservePreference(toolDefinition: unknown): boolean {
         return false;
     }
     return toolDefinition[CODEX_LOOK_RENDERING_PROPERTY] === "preserve";
+}
+
+/** Returns whether a tool definition carries a passive Codex-look adapter. */
+export function hasCodexLookRenderingAdapter(toolDefinition: unknown): boolean {
+    return codexLookRenderingAdapter(toolDefinition, CODEX_LOOK_RENDERING_PROPERTY) !== undefined;
 }
 
 /** Parses comma-separated tool names for `PI_CODEX_LOOK_PRESERVE_TOOLS`. */
@@ -119,8 +137,11 @@ export function shouldPreserveThirdPartyToolRenderer(options: {
 export function createThirdPartyToolRenderer(
     toolName: string,
     options?: ThirdPartyToolRenderingOptions,
+    toolDefinition?: unknown,
 ): ThirdPartyToolRenderer {
     const plugins = [...(options?.renderers ?? []), ...DEFAULT_RENDERER_PLUGINS];
     const plugin = plugins.find((candidate) => candidate.matches(toolName));
-    return plugin?.createRenderer(toolName) ?? createGenericRenderer(toolName);
+    const fallback = plugin?.createRenderer(toolName) ?? createGenericRenderer(toolName);
+    const adapter = codexLookRenderingAdapter(toolDefinition, CODEX_LOOK_RENDERING_PROPERTY);
+    return adapter === undefined ? fallback : createProtocolRenderer(adapter, fallback);
 }

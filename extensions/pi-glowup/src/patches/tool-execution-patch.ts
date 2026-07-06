@@ -13,6 +13,7 @@ import {
 import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
 import {
     createThirdPartyToolRenderer,
+    hasCodexLookRenderingAdapter,
     shouldPreserveThirdPartyToolRenderer,
     type ThirdPartyToolRenderer,
     type ThirdPartyToolRenderContext,
@@ -199,18 +200,29 @@ function toolDefinition(instance: ToolExecutionInstance): unknown {
 function shouldUseThirdPartyRenderer(
     instance: ToolExecutionInstance,
     options: ThirdPartyToolRenderingOptions | undefined,
+    hasOriginalRendererDefinition: boolean,
 ): boolean {
     const toolName = getNonEmptyStringField(instance, "toolName");
     if (toolName === undefined || hasBuiltInToolDefinition(instance)) {
         return false;
     }
 
+    const definition = toolDefinition(instance);
+
     const preserveInput =
         options === undefined
-            ? { toolName, toolDefinition: toolDefinition(instance) }
-            : { toolName, toolDefinition: toolDefinition(instance), renderingOptions: options };
+            ? { toolName, toolDefinition: definition }
+            : { toolName, toolDefinition: definition, renderingOptions: options };
 
-    return !shouldPreserveThirdPartyToolRenderer(preserveInput);
+    if (shouldPreserveThirdPartyToolRenderer(preserveInput)) {
+        return false;
+    }
+
+    if (hasCodexLookRenderingAdapter(definition)) {
+        return true;
+    }
+
+    return !hasOriginalRendererDefinition;
 }
 
 function rendererForInstance(
@@ -228,7 +240,7 @@ function rendererForInstance(
         return cachedRenderer;
     }
 
-    const renderer = createThirdPartyToolRenderer(toolName, options);
+    const renderer = createThirdPartyToolRenderer(toolName, options, toolDefinition(instance));
     cache?.set(toolName, renderer);
     trimRendererCache(cache);
     return renderer;
@@ -589,7 +601,16 @@ export function configureThirdPartyToolRendererPatch(
 
     const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
         function getCodexLookCallRenderer(this: ToolExecutionInstance) {
-            if (state.enabled && shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+            const hasOriginalRendererDefinition =
+                originalHasRendererDefinition?.call(this) ?? false;
+            if (
+                state.enabled &&
+                shouldUseThirdPartyRenderer(
+                    this,
+                    state.renderingOptions,
+                    hasOriginalRendererDefinition,
+                )
+            ) {
                 return rendererForInstance(this, state.renderingOptions, state.rendererCache)
                     ?.renderCall;
             }
@@ -598,7 +619,16 @@ export function configureThirdPartyToolRendererPatch(
 
     const getResultRenderer: RendererPatchWrappers["getResultRenderer"] =
         function getCodexLookResultRenderer(this: ToolExecutionInstance) {
-            if (state.enabled && shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+            const hasOriginalRendererDefinition =
+                originalHasRendererDefinition?.call(this) ?? false;
+            if (
+                state.enabled &&
+                shouldUseThirdPartyRenderer(
+                    this,
+                    state.renderingOptions,
+                    hasOriginalRendererDefinition,
+                )
+            ) {
                 return rendererForInstance(this, state.renderingOptions, state.rendererCache)
                     ?.renderResult;
             }
@@ -607,7 +637,16 @@ export function configureThirdPartyToolRendererPatch(
 
     const getRenderShell: RendererPatchWrappers["getRenderShell"] =
         function getCodexLookRenderShell(this: ToolExecutionInstance) {
-            if (state.enabled && shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+            const hasOriginalRendererDefinition =
+                originalHasRendererDefinition?.call(this) ?? false;
+            if (
+                state.enabled &&
+                shouldUseThirdPartyRenderer(
+                    this,
+                    state.renderingOptions,
+                    hasOriginalRendererDefinition,
+                )
+            ) {
                 return "self";
             }
             return originalGetRenderShell?.call(this) ?? "default";
@@ -615,7 +654,16 @@ export function configureThirdPartyToolRendererPatch(
 
     const hasRendererDefinition: RendererPatchWrappers["hasRendererDefinition"] =
         function hasCodexLookRendererDefinition(this: ToolExecutionInstance) {
-            if (state.enabled && shouldUseThirdPartyRenderer(this, state.renderingOptions)) {
+            const hasOriginalRendererDefinition =
+                originalHasRendererDefinition?.call(this) ?? false;
+            if (
+                state.enabled &&
+                shouldUseThirdPartyRenderer(
+                    this,
+                    state.renderingOptions,
+                    hasOriginalRendererDefinition,
+                )
+            ) {
                 return true;
             }
             return originalHasRendererDefinition?.call(this) ?? false;
