@@ -47,6 +47,7 @@ import {
     saveGeneratedImage,
 } from "../src/image-content.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
+import { createApplyPatchTool } from "../src/tools/apply-patch.ts";
 import {
     clearDeferredViewImagesForSession,
     createViewImageTool,
@@ -702,6 +703,94 @@ test("renders compact invocation summaries for Codex tools", () => {
         ),
         /view_image \/tmp\/pi-agent\/pi-codex-core\/imagegen\/session\/latest\.png • detail=high/,
     );
+
+    const applyPatchTool = createApplyPatchTool();
+    assert.ok(applyPatchTool.renderCall);
+    const applyPatchArgs = {
+        patch: `*** Begin Patch
+*** Update File: Scripts/pi-memory-bench.py
+@@
+-old
++new
+*** End Patch`,
+    };
+    const renderedApplyPatchCall = renderComponent(
+        applyPatchTool.renderCall(applyPatchArgs, TEST_THEME, makeRenderContext(applyPatchArgs)),
+    );
+    assert.match(
+        renderedApplyPatchCall.split("\n")[0] ?? "",
+        /apply_patch M Scripts\/pi-memory-bench\.py • \+1 -1/,
+    );
+    assert.match(renderedApplyPatchCall, /Scripts\/pi-memory-bench\.py/);
+    assert.match(renderedApplyPatchCall, /- old/);
+    assert.match(renderedApplyPatchCall, /\+ new/);
+});
+
+test("renders apply_patch results with line stats and expanded diffs", () => {
+    const applyPatchTool = createApplyPatchTool();
+    assert.ok(applyPatchTool.renderResult);
+    const args = {
+        patch: `*** Begin Patch
+*** Update File: Scripts/pi-memory-bench.py
+@@
+-old
++new
+*** End Patch`,
+    };
+    const result = {
+        content: [
+            {
+                type: "text" as const,
+                text: "Success. Updated the following files:\nM Scripts/pi-memory-bench.py\n",
+            },
+        ],
+        details: {
+            affectedPaths: { added: [], modified: ["Scripts/pi-memory-bench.py"], deleted: [] },
+            changedFileCount: 1,
+            lineSummary: {
+                files: [
+                    {
+                        action: "M" as const,
+                        path: "Scripts/pi-memory-bench.py",
+                        addedLines: 1,
+                        removedLines: 1,
+                    },
+                ],
+                addedLines: 1,
+                removedLines: 1,
+                unknownRemovedFileCount: 0,
+            },
+            diff: "Scripts/pi-memory-bench.py\n-1 old\n+1 new",
+            patch: "--- Scripts/pi-memory-bench.py\n+++ Scripts/pi-memory-bench.py\n@@ -1 +1 @@\n-old\n+new\n",
+            firstChangedLine: 1,
+        },
+    };
+
+    const compact = renderComponent(
+        applyPatchTool.renderResult(
+            result,
+            { expanded: false, isPartial: false },
+            TEST_THEME,
+            makeRenderContext(args),
+        ),
+    );
+    assert.match(compact, /M Scripts\/pi-memory-bench\.py \+1 -1/);
+    assert.match(compact, /Scripts\/pi-memory-bench\.py/);
+    assert.match(compact, /-1 old/);
+    assert.match(compact, /\+1 new/);
+
+    const expanded = renderComponent(
+        applyPatchTool.renderResult(
+            result,
+            { expanded: true, isPartial: false },
+            TEST_THEME,
+            makeRenderContext(args, undefined, { expanded: true }),
+        ),
+    );
+    assert.match(expanded, /Success\. Updated the following files:/);
+    assert.match(expanded, /Scripts\/pi-memory-bench\.py/);
+    assert.match(expanded, /-1 old/);
+    assert.match(expanded, /\+1 new/);
 });
 
 test("Codex tokenizer worker restarts after shutdown", async () => {

@@ -124,6 +124,21 @@ test("apply_patch tool executes patch argument and formats parser errors", async
         assert.equal(await readFile(join(root, "hello.txt"), "utf8"), "hi\n");
         assert.equal(result.content[0]?.type, "text");
         assert.match(result.content[0]?.text ?? "", /A hello\.txt/);
+        assert.match(result.details.diff, /hello\.txt\n\+1 hi/);
+        assert.match(result.details.patch, /--- hello\.txt\n\+\+\+ hello\.txt/);
+        assert.deepEqual(result.details.lineSummary, {
+            files: [
+                {
+                    action: "A",
+                    path: "hello.txt",
+                    addedLines: 1,
+                    removedLines: 0,
+                },
+            ],
+            addedLines: 1,
+            removedLines: 0,
+            unknownRemovedFileCount: 0,
+        });
 
         let caught: unknown;
         try {
