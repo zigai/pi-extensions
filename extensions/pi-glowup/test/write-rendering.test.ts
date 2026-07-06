@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Component } from "@earendil-works/pi-tui";
-import type { CodexRenderTheme } from "../src/rendering.ts";
+import type { CodexRenderTheme } from "../src/rendering/core.ts";
 import {
     renderSuccessfulWriteResultFallback,
     renderWriteCallPreview,
-} from "../src/write-rendering.ts";
+} from "../src/rendering/write-rendering.ts";
 
 const plainTheme: CodexRenderTheme = {
     fg(_token: string, text: string): string {

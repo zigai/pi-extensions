@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering.ts";
-import { createThirdPartyToolRenderer } from "../src/third-party-renderers.ts";
+import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 
 const plainTheme: CodexRenderTheme = {
     fg(_token: string, text: string): string {

@@ -7,7 +7,7 @@ import {
     type FileContents,
     type FileDiffMetadata,
 } from "@pierre/diffs";
-import { cleanDiffLine, flattenHighlightedLine } from "./pierre-highlight.ts";
+import { cleanDiffLine, flattenHighlightedLine } from "./highlight.ts";
 import type {
     HighlightedDiffCode,
     PierreDiffPayload,
@@ -16,8 +16,8 @@ import type {
     SplitDiffCell,
     SplitDiffRow,
     UnifiedDiffRow,
-} from "./pierre-diff-types.ts";
-import type { PierreTerminalPalette } from "./pierre-theme.ts";
+} from "./types.ts";
+import type { PierreTerminalPalette } from "./theme.ts";
 
 export const MAX_DIFF_RENDER_BYTES = 512 * 1024;
 export const MAX_DIFF_RENDER_LINES = 5_000;

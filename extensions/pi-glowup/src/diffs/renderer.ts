@@ -6,16 +6,12 @@ import {
     wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
-import {
-    buildSplitDiffRows,
-    buildUnifiedDiffRows,
-    normalizePierreDiffPayload,
-} from "./pierre-diff.ts";
+import { buildSplitDiffRows, buildUnifiedDiffRows, normalizePierreDiffPayload } from "./diff.ts";
 import {
     emptyHighlightedDiffSet,
     highlightDiffIfLoaded,
     loadHighlightedDiff,
-} from "./pierre-highlight.ts";
+} from "./highlight.ts";
 import type {
     DiffSpan,
     HighlightedDiffSet,
@@ -25,8 +21,8 @@ import type {
     SplitDiffCell,
     SplitDiffRow,
     UnifiedDiffRow,
-} from "./pierre-diff-types.ts";
-import { getPierrePalette, type PierreTerminalPalette } from "./pierre-theme.ts";
+} from "./types.ts";
+import { getPierrePalette, type PierreTerminalPalette } from "./theme.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const DIFF_STYLE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.color.close}${ansiStyles.bgColor.close}`;

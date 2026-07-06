@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
-import type { CodexLookConfig, ConfigWarningReporter } from "./config.ts";
+import type { CodexLookConfig, ConfigWarningReporter } from "../config/config.ts";
 
 export type DebugLogValue =
     | string

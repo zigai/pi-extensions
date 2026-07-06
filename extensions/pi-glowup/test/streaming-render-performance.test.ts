@@ -1,10 +1,10 @@
 import { performance } from "node:perf_hooks";
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering.ts";
+import type { CodexRenderTheme } from "../src/rendering/core.ts";
 import { clearSyntaxHighlightCache, syntaxHighlightCacheStats } from "../src/syntax/highlighter.ts";
-import { createThirdPartyToolRenderer } from "../src/third-party-renderers.ts";
-import { renderWriteCallPreview } from "../src/write-rendering.ts";
+import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
+import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 
 const plainTheme: CodexRenderTheme = {
     fg(_token: string, text: string): string {

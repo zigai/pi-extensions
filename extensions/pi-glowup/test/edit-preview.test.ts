@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEditPreview, EditPreviewStore, PreviewStore } from "../src/edit-preview.ts";
+import { buildEditPreview, EditPreviewStore, PreviewStore } from "../src/rendering/edit-preview.ts";
 
 describe("edit previews", () => {
     it("builds display-only diff metadata", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundedScriptPreview, createScriptPreviewStore } from "../src/script-preview-store.ts";
+import { boundedScriptPreview, createScriptPreviewStore } from "../src/script-preview/store.ts";
 
 describe("script preview store", () => {
     it("truncates oversized formatted script previews", () => {

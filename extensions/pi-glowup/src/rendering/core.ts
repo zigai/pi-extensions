@@ -6,8 +6,8 @@ import {
     wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
-import { highlightCodeOutput, type CodeOutputSyntax } from "./syntax/code-component.ts";
-import { highlightSyntaxCode } from "./syntax/highlighter.ts";
+import { highlightCodeOutput, type CodeOutputSyntax } from "../syntax/code-component.ts";
+import { highlightSyntaxCode } from "../syntax/highlighter.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;

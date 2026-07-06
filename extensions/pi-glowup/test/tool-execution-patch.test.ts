@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering.ts";
+import type { CodexRenderTheme } from "../src/rendering/core.ts";
 import type {
     ThirdPartyToolRenderer,
     ThirdPartyToolRendererPlugin,
-} from "../src/third-party-renderers.ts";
+} from "../src/third-party-tools/renderers.ts";
 import {
     configureBuiltInToolRendererPatch,
     configureThirdPartyToolRendererPatch,
     installBuiltInToolRendererPatch,
     installBuiltInWriteRendererPatch,
     installThirdPartyToolRendererPatch,
-} from "../src/tool-execution-patch.ts";
+} from "../src/patches/tool-execution-patch.ts";
 
 const plainTheme: CodexRenderTheme = {
     fg(_token: string, text: string): string {

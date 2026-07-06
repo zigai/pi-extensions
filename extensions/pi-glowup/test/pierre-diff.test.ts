@@ -9,14 +9,14 @@ import {
     buildPierreDiffPayload,
     buildUnifiedDiffRows,
     createWriteSnapshot,
-} from "../src/pierre-diff.ts";
+} from "../src/diffs/diff.ts";
 import {
     clearQueuedDiffHighlights,
     renderPierreDiff,
     shouldRenderSideBySideDiff,
-} from "../src/pierre-diff-renderer.ts";
-import { loadHighlightedDiff } from "../src/pierre-highlight.ts";
-import { getPierrePalette } from "../src/pierre-theme.ts";
+} from "../src/diffs/renderer.ts";
+import { loadHighlightedDiff } from "../src/diffs/highlight.ts";
+import { getPierrePalette } from "../src/diffs/theme.ts";
 
 type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
 

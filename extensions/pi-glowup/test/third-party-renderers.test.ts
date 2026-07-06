@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering.ts";
+import type { CodexRenderTheme } from "../src/rendering/core.ts";
 import {
     CODEX_LOOK_RENDERING_PROPERTY,
     createThirdPartyToolRenderer,
     parsePreservedThirdPartyToolNames,
     shouldPreserveThirdPartyToolRenderer,
-} from "../src/third-party-renderers.ts";
+} from "../src/third-party-tools/renderers.ts";
 
 const plainTheme: CodexRenderTheme = {
     fg(token: string, text: string): string {

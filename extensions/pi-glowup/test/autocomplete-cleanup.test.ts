@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
     configureAutocompleteCleanupPatch,
     installAutocompleteCleanupPatch,
-} from "../src/autocomplete-cleanup.ts";
+} from "../src/patches/autocomplete-cleanup.ts";
 
 type FakeTui = {
     readonly getClearOnShrink: () => boolean;

@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
-import { buildPierreDiffPayload, createWriteSnapshot } from "../src/pierre-diff.ts";
-import { renderPierreDiff } from "../src/pierre-diff-renderer.ts";
-import { loadHighlightedDiff } from "../src/pierre-highlight.ts";
+import { buildPierreDiffPayload, createWriteSnapshot } from "../src/diffs/diff.ts";
+import { renderPierreDiff } from "../src/diffs/renderer.ts";
+import { loadHighlightedDiff } from "../src/diffs/highlight.ts";
 import {
     highlightShell,
     parseDiffSections,
@@ -14,8 +14,8 @@ import {
     renderCodexOutput,
     renderScriptCall,
     type CodexRenderTheme,
-} from "../src/rendering.ts";
-import { createThirdPartyToolRenderer } from "../src/third-party-renderers.ts";
+} from "../src/rendering/core.ts";
+import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import {
     disposeSyntaxHighlighting,
     highlightSyntaxCode,

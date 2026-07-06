@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { ScriptBlockFormatter } from "../src/script-formatters.ts";
+import type { ScriptBlockFormatter } from "../src/script-preview/formatters.ts";
 import {
     rememberRawScriptPreview,
     scheduleFormattedScriptPreview,
-} from "../src/script-preview-events.ts";
-import type { ScriptInvocation } from "../src/rendering.ts";
+} from "../src/script-preview/events.ts";
+import type { ScriptInvocation } from "../src/rendering/core.ts";
 
 class RecordingPreviewSink {
     readonly previews = new Map<string, ScriptInvocation>();

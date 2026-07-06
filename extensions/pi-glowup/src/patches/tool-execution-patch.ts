@@ -9,8 +9,8 @@ import {
     formatPathTarget,
     renderCodexCall,
     renderCodexOutput,
-} from "./rendering.ts";
-import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
+} from "../rendering/core.ts";
+import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
 import {
     createThirdPartyToolRenderer,
     shouldPreserveThirdPartyToolRenderer,
@@ -18,7 +18,7 @@ import {
     type ThirdPartyToolRenderContext,
     type ThirdPartyToolRenderingOptions,
     type ThirdPartyToolResult,
-} from "./third-party-renderers.ts";
+} from "../third-party-tools/renderers.ts";
 
 const BUILT_IN_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.built-in-renderers");
 const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for("zigai.pi-codex-look.built-in-renderer-state");

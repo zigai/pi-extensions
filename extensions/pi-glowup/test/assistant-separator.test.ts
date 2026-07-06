@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
     configureAssistantSeparatorPatch,
     installAssistantSeparatorPatch,
-} from "../src/assistant-separator.ts";
+} from "../src/patches/assistant-separator.ts";
 
 const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator.render");
 

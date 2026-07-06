@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
     configureWorkingWidgetSpacingPatch,
     installWorkingWidgetSpacingPatch,
-} from "../src/working-widget-spacing.ts";
+} from "../src/patches/working-widget-spacing.ts";
 
 function createStaticLoader(message = "Working..."): Loader {
     // SAFETY: Loader only uses requestRender from the TUI instance in this test.

@@ -3,13 +3,13 @@ import { dirname, join } from "node:path";
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
-import type { ScriptPreviewHeaderLayout } from "./rendering.ts";
+import type { ScriptPreviewHeaderLayout } from "../rendering/core.ts";
 import {
     parseScriptFormatterCommandsValue,
     type ScriptFormatterCommands,
-} from "./script-formatters.ts";
-import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
-import Schema from "./typebox-schema.ts";
+} from "../script-preview/formatters.ts";
+import { parseScriptPreviewHeaderLayout } from "../script-preview/settings.ts";
+import Schema from "typebox/schema";
 
 export type CodexLookConfig = {
     readonly preserveTools: readonly string[];

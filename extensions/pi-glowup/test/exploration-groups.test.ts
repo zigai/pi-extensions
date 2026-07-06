@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ExplorationGroupStore } from "../src/exploration-groups.ts";
+import { ExplorationGroupStore } from "../src/rendering/exploration-groups.ts";
 
 function noop(): void {}
 

@@ -1,4 +1,4 @@
-import type { ScriptPreviewHeaderLayout } from "./rendering.ts";
+import type { ScriptPreviewHeaderLayout } from "../rendering/core.ts";
 
 export function parseScriptPreviewHeaderLayout(
     value: string | undefined,

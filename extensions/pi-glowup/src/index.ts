@@ -8,17 +8,20 @@ import {
     parseScriptFormatterCommands,
     type ScriptBlockFormatter,
     type ScriptFormatterCommands,
-} from "./script-formatters.ts";
+} from "./script-preview/formatters.ts";
 import {
     getCodexLookGlobalConfigDirectory,
     readCodexLookConfig,
     type CodexLookConfig,
-} from "./config.ts";
-import { DebugFileLogger, type DebugLogFields } from "./debug-logger.ts";
-import { configureAssistantSeparatorPatch } from "./assistant-separator.ts";
-import { configureWorkingWidgetSpacingPatch } from "./working-widget-spacing.ts";
-import { configureAutocompleteCleanupPatch } from "./autocomplete-cleanup.ts";
-import { ExplorationGroupStore, type ExplorationRenderContext } from "./exploration-groups.ts";
+} from "./config/config.ts";
+import { DebugFileLogger, type DebugLogFields } from "./diagnostics/debug-logger.ts";
+import { configureAssistantSeparatorPatch } from "./patches/assistant-separator.ts";
+import { configureWorkingWidgetSpacingPatch } from "./patches/working-widget-spacing.ts";
+import { configureAutocompleteCleanupPatch } from "./patches/autocomplete-cleanup.ts";
+import {
+    ExplorationGroupStore,
+    type ExplorationRenderContext,
+} from "./rendering/exploration-groups.ts";
 import {
     emptyComponent,
     formatFindAction,
@@ -41,22 +44,22 @@ import {
     type MutationSummary,
     type ReadActionArgs,
     type ScriptPreviewHeaderLayout,
-} from "./rendering.ts";
-import { buildEditPreview, EditPreviewStore } from "./edit-preview.ts";
-import { summarizeEditCall } from "./edit-call-rendering.ts";
-import { buildLargeDiffSummaryPayload } from "./pierre-diff.ts";
+} from "./rendering/core.ts";
+import { buildEditPreview, EditPreviewStore } from "./rendering/edit-preview.ts";
+import { summarizeEditCall } from "./rendering/edit-call-rendering.ts";
+import { buildLargeDiffSummaryPayload } from "./diffs/diff.ts";
 import {
     clearQueuedDiffHighlights,
     getPierreDiffPayloadFromDetails,
     pierreDiffHighlightStats,
     renderPierreDiff,
-} from "./pierre-diff-renderer.ts";
+} from "./diffs/renderer.ts";
 import {
     parsePreservedThirdPartyToolNames,
     type ThirdPartyToolRenderingOptions,
-} from "./third-party-renderers.ts";
-import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
-import { boundedScriptPreview, createScriptPreviewStore } from "./script-preview-store.ts";
+} from "./third-party-tools/renderers.ts";
+import { parseScriptPreviewHeaderLayout } from "./script-preview/settings.ts";
+import { boundedScriptPreview, createScriptPreviewStore } from "./script-preview/store.ts";
 import {
     compatBuiltInToolName,
     configureBuiltInToolRendererPatch,
@@ -64,7 +67,7 @@ import {
     toolRendererPatchStats,
     type BuiltInToolRendererOptions,
     type BuiltInToolName,
-} from "./tool-execution-patch.ts";
+} from "./patches/tool-execution-patch.ts";
 import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
 import {
     disposeSyntaxHighlighting,
@@ -73,11 +76,14 @@ import {
     syntaxHighlighterDiagnostics,
 } from "./syntax/highlighter.ts";
 import { configureMarkdownSyntaxPatch, markdownSyntaxPatchStats } from "./syntax/markdown-patch.ts";
-import { renderSuccessfulWriteResultFallback, renderWriteCallPreview } from "./write-rendering.ts";
+import {
+    renderSuccessfulWriteResultFallback,
+    renderWriteCallPreview,
+} from "./rendering/write-rendering.ts";
 import {
     rememberRawScriptPreview,
     scheduleFormattedScriptPreview,
-} from "./script-preview-events.ts";
+} from "./script-preview/events.ts";
 
 type TextResult = {
     readonly content?: unknown;

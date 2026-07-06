@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DebugFileLogger } from "../src/debug-logger.ts";
+import { DebugFileLogger } from "../src/diagnostics/debug-logger.ts";
 
 describe("debug file logger", () => {
     afterEach(() => {

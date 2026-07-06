@@ -10,7 +10,7 @@ import {
     getCodexLookProjectConfigPath,
     parseCodexLookConfig,
     readCodexLookConfig,
-} from "../src/config.ts";
+} from "../src/config/config.ts";
 
 describe("codex look config", () => {
     it("parses optional config with safe defaults", () => {

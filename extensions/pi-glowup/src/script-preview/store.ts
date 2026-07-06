@@ -1,5 +1,5 @@
-import { PreviewStore } from "./edit-preview.ts";
-import type { ScriptInvocation } from "./rendering.ts";
+import { PreviewStore } from "../rendering/edit-preview.ts";
+import type { ScriptInvocation } from "../rendering/core.ts";
 
 const MAX_SCRIPT_PREVIEW_ENTRIES = 300;
 const MAX_SCRIPT_PREVIEW_BYTES = 64 * 1024;

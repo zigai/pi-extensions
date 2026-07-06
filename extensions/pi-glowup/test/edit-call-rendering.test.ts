@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeEditCall } from "../src/edit-call-rendering.ts";
+import { summarizeEditCall } from "../src/rendering/edit-call-rendering.ts";
 
 describe("edit call rendering", () => {
     it("counts only structurally valid edit entries", () => {

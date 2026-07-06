@@ -6,7 +6,7 @@ import {
     renderCodexOutput,
     renderMutationCall,
     type CodexRenderTheme,
-} from "./rendering.ts";
+} from "./core.ts";
 
 const MAX_WRITE_PREVIEW_BYTES = 64 * 1024;
 const WRITE_PREVIEW_TRUNCATION_SUFFIX = "\n… write preview truncated";

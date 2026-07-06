@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getCodexLookGlobalConfigPath } from "../src/config.ts";
+import { getCodexLookGlobalConfigPath } from "../src/config/config.ts";
 import codexLookExtension from "../src/index.ts";
 import { disposeSyntaxHighlighting, isSyntaxHighlightingReady } from "../src/syntax/highlighter.ts";
 

@@ -14,7 +14,7 @@ import {
     renderMutationCall,
     renderScriptCall,
     type CodexRenderTheme,
-} from "../src/rendering.ts";
+} from "../src/rendering/core.ts";
 
 const plainTheme: CodexRenderTheme = {
     fg(_token: string, text: string): string {

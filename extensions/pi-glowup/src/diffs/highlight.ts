@@ -9,13 +9,13 @@ import type {
     HighlightedDiffCode,
     HighlightedDiffSet,
     PierreAppearance,
-} from "./pierre-diff-types.ts";
-import { enhanceSyntaxSegments } from "./syntax/brackets.ts";
+} from "./types.ts";
+import { enhanceSyntaxSegments } from "../syntax/brackets.ts";
 import {
     getLoadedSyntaxHighlighterForLanguage,
     getSyntaxHighlighterForLanguage,
     type LoadedSyntaxHighlighter,
-} from "./syntax/highlighter.ts";
+} from "../syntax/highlighter.ts";
 
 const PIERRE_RENDER_OPTIONS = {
     useTokenTransformer: false,

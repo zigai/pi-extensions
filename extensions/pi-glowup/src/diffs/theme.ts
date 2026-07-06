@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { PierreAppearance } from "./pierre-diff-types.ts";
+import type { PierreAppearance } from "./types.ts";
 
 /** Terminal color palette derived from Pi's active theme. */
 export type PierreTerminalPalette = {

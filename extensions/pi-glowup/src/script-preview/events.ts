@@ -1,6 +1,6 @@
-import { formatScriptInvocation, type ScriptBlockFormatter } from "./script-formatters.ts";
-import { boundedScriptPreview } from "./script-preview-store.ts";
-import { parseScriptInvocation, type ScriptInvocation } from "./rendering.ts";
+import { formatScriptInvocation, type ScriptBlockFormatter } from "./formatters.ts";
+import { boundedScriptPreview } from "./store.ts";
+import { parseScriptInvocation, type ScriptInvocation } from "../rendering/core.ts";
 
 type ScriptPreviewSink = {
     set(toolCallId: string, preview: ScriptInvocation): void;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScriptPreviewHeaderLayout } from "../src/script-preview-settings.ts";
+import { parseScriptPreviewHeaderLayout } from "../src/script-preview/settings.ts";
 
 describe("script preview settings", () => {
     it("defaults script preview headers to auto layout", () => {

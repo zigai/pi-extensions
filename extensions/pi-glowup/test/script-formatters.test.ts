@@ -4,7 +4,7 @@ import {
     formatScriptInvocation,
     parseScriptFormatterCommands,
     parseScriptFormatterCommandsValue,
-} from "../src/script-formatters.ts";
+} from "../src/script-preview/formatters.ts";
 
 describe("script formatter settings", () => {
     it("leaves formatter commands empty by default", () => {

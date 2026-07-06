@@ -7,12 +7,12 @@ import {
     renderMutationCall,
     type CodexRenderTheme,
     type DiffSection,
-} from "./rendering.ts";
+} from "./core.ts";
 import type {
     ThirdPartyToolRenderer,
     ThirdPartyToolRenderContext,
     ThirdPartyToolResult,
-} from "./third-party-renderers.ts";
+} from "../third-party-tools/types.ts";
 
 type ApplyPatchKind = "add" | "delete" | "update";
 
