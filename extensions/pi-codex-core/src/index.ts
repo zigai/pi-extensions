@@ -7,7 +7,11 @@ import { registerNativeCompactionDisplay } from "./compaction-display.ts";
 import { buildCodexCoreSystemPrompt } from "./prompt.ts";
 import { registerApplyPatchTool } from "./tools/apply-patch.ts";
 import { registerImagegenTool } from "./tools/imagegen.ts";
-import { registerViewImageTool } from "./tools/view-image.ts";
+import {
+    clearDeferredViewImagesForSession,
+    registerViewImageTool,
+    rewriteProviderRequestWithDeferredViewImages,
+} from "./tools/view-image.ts";
 import { registerWebRunTool } from "./tools/web-run.ts";
 import { shutdownCodexTokenizer, warmCodexTokenizer } from "./tokenizer.ts";
 
@@ -20,6 +24,7 @@ export const packageName = "pi-codex-core";
 type CompactionModule = typeof import("./compaction.ts");
 
 let compactionModulePromise: Promise<CompactionModule> | undefined;
+const activatedApis = new WeakSet<ExtensionAPI>();
 
 function loadCompactionModule(): Promise<CompactionModule> {
     compactionModulePromise ??= import("./compaction.ts");
@@ -28,6 +33,9 @@ function loadCompactionModule(): Promise<CompactionModule> {
 
 /** Register the Pi Codex Core Pi extension. */
 export default function extension(pi: ExtensionAPI): void {
+    if (activatedApis.has(pi)) return;
+    activatedApis.add(pi);
+
     let config: CodexCoreConfig = readCodexCoreConfig();
 
     const getConfig = (): CodexCoreConfig => config;
@@ -92,18 +100,32 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("before_provider_request", async (event, ctx) => {
+        const imagePayload = rewriteProviderRequestWithDeferredViewImages(event.payload, ctx);
+        const payload = imagePayload ?? event.payload;
         if (!config.compaction.enabled) {
-            return undefined;
+            return imagePayload;
         }
         const { rewriteProviderRequestWithNativeCompaction } = await loadCompactionModule();
-        return rewriteProviderRequestWithNativeCompaction(event.payload, ctx, config, pi);
+        const compactionPayload = await rewriteProviderRequestWithNativeCompaction(
+            payload,
+            ctx,
+            config,
+            pi,
+        );
+        return compactionPayload ?? imagePayload;
     });
 
-    pi.on("session_shutdown", async () => {
+    pi.on("session_shutdown", async (event, ctx) => {
         if (compactionModulePromise !== undefined) {
-            const { cancelScheduledCodexAutoCompaction } = await compactionModulePromise;
-            cancelScheduledCodexAutoCompaction();
+            const { cancelScheduledCodexAutoCompaction, clearCodexCompactionSessionState } =
+                await compactionModulePromise;
+            if (event.reason === "quit" || event.reason === "reload") {
+                cancelScheduledCodexAutoCompaction();
+            } else {
+                clearCodexCompactionSessionState(ctx.sessionManager.getSessionId());
+            }
         }
+        clearDeferredViewImagesForSession(ctx.sessionManager.getSessionId());
         await shutdownCodexTokenizer();
     });
 }
