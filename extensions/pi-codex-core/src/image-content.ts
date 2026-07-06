@@ -42,18 +42,18 @@ type CodexPromptImageResizeLimits = {
     readonly maxPatches: number;
 };
 
-export const MAX_INPUT_IMAGE_BYTES = 25 * 1024 * 1024;
+export const MAX_INPUT_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const IMAGE_HEADER_BYTE_COUNT = 32;
 const CODEX_PROMPT_IMAGE_PATCH_SIZE = 32;
-const CODEX_PROMPT_IMAGE_MAX_BYTES = 1024 * 1024 * 1024;
+const CODEX_PROMPT_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
 const CODEX_HIGH_DETAIL_LIMITS: CodexPromptImageResizeLimits = {
-    maxDimension: 2048,
-    maxPatches: 2_500,
+    maxDimension: 1280,
+    maxPatches: 1_600,
 };
 const CODEX_ORIGINAL_DETAIL_LIMITS: CodexPromptImageResizeLimits = {
-    maxDimension: 6000,
-    maxPatches: 10_000,
+    maxDimension: 2048,
+    maxPatches: 2_500,
 };
 
 export async function loadImageContent(path: string, cwd: string): Promise<LoadedImage> {
