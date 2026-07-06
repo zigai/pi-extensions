@@ -15,7 +15,6 @@ export type CodexLookConfig = {
     readonly preserveTools: readonly string[];
     readonly scriptFormatters: ScriptFormatterCommands;
     readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
-    readonly syntaxPreloadOnStartup: boolean;
     readonly toolLabels: {
         readonly dynamicStatus: boolean;
     };
@@ -45,9 +44,6 @@ const CODEX_LOOK_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-look/conf
 export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
-    syntax: {
-        preloadOnStartup: false,
-    },
     toolLabels: {
         dynamicStatus: false,
     },
@@ -73,12 +69,6 @@ const SchemaReferenceSchema = Type.String();
 const StringArraySchema = Type.Array(Type.String());
 const FormatterCommandSchema = Type.Array(Type.String({ minLength: 1 }), { minItems: 1 });
 const FormatterCommandsSchema = Type.Record(Type.String(), FormatterCommandSchema);
-const SyntaxConfigSchema = Type.Object(
-    {
-        preloadOnStartup: Type.Optional(Type.Boolean()),
-    },
-    { additionalProperties: false },
-);
 const ToolLabelsConfigSchema = Type.Object(
     {
         dynamicStatus: Type.Optional(Type.Boolean()),
@@ -106,7 +96,6 @@ const CodexLookConfigSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
-        syntax: Type.Optional(SyntaxConfigSchema),
         toolLabels: Type.Optional(ToolLabelsConfigSchema),
         patches: Type.Optional(PatchesConfigSchema),
         scriptPreview: Type.Optional(ScriptPreviewConfigSchema),
@@ -117,14 +106,6 @@ const CodexLookConfigJsonSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
-        syntax: Type.Optional(
-            Type.Object(
-                {
-                    preloadOnStartup: Type.Optional(Type.Boolean()),
-                },
-                { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax },
-            ),
-        ),
         toolLabels: Type.Optional(
             Type.Object(
                 {
@@ -239,7 +220,6 @@ export function parseCodexLookConfig(
 ): CodexLookConfig {
     const config = parseCodexLookConfigInput(input, options);
     const scriptPreview = config.scriptPreview ?? {};
-    const syntax = config.syntax ?? {};
     const toolLabels = config.toolLabels ?? {};
     const patches = config.patches ?? {};
 
@@ -256,8 +236,6 @@ export function parseCodexLookConfig(
                 : { reportWarning: options.reportWarning }),
         }),
         scriptHeaderLayout: parseScriptPreviewHeaderLayout(scriptPreview.headerLayout),
-        syntaxPreloadOnStartup:
-            syntax.preloadOnStartup ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.preloadOnStartup,
         toolLabels: {
             dynamicStatus:
                 toolLabels.dynamicStatus ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.dynamicStatus,

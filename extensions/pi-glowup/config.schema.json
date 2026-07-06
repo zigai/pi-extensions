@@ -12,18 +12,6 @@
         "type": "string"
       }
     },
-    "syntax": {
-      "type": "object",
-      "properties": {
-        "preloadOnStartup": {
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false,
-      "default": {
-        "preloadOnStartup": false
-      }
-    },
     "toolLabels": {
       "type": "object",
       "properties": {

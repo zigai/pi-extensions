@@ -19,7 +19,6 @@ describe("codex look config", () => {
         expect(config.preserveTools).toEqual([]);
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
-        expect(config.syntaxPreloadOnStartup).toBe(false);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.patches).toEqual({
             assistantSeparator: true,
@@ -47,7 +46,6 @@ describe("codex look config", () => {
         expect(config.preserveTools).toEqual([]);
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
-        expect(config.syntaxPreloadOnStartup).toBe(false);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(reportedWarnings).toEqual([
@@ -65,7 +63,6 @@ describe("codex look config", () => {
         expect(config.preserveTools).toEqual([]);
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
-        expect(config.syntaxPreloadOnStartup).toBe(false);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(JSON.parse(readFileSync(getCodexLookGlobalConfigPath(agentDir), "utf8"))).toEqual(
@@ -90,7 +87,6 @@ describe("codex look config", () => {
         });
 
         expect(config.preserveTools).toEqual([]);
-        expect(config.syntaxPreloadOnStartup).toBe(false);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
         expect(reportedWarnings).toEqual([
@@ -142,7 +138,6 @@ describe("codex look config", () => {
             JSON.stringify({
                 $schema: "./config.schema.json",
                 preserveTools: ["mcp"],
-                syntax: { preloadOnStartup: true },
                 toolLabels: { dynamicStatus: true },
                 patches: { workingWidgetSpacing: true },
                 scriptPreview: { headerLayout: "block" },
@@ -162,7 +157,6 @@ describe("codex look config", () => {
         expect(config.preserveTools).toEqual(["mcp"]);
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptFormatters.get("python")).toBeUndefined();
-        expect(config.syntaxPreloadOnStartup).toBe(true);
         expect(config.toolLabels.dynamicStatus).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(true);
         expect(config.patches.markdownSyntax).toBe(true);
@@ -182,7 +176,6 @@ describe("codex look config", () => {
             JSON.stringify({
                 $schema: "./config.schema.json",
                 preserveTools: ["mcp"],
-                syntax: { preloadOnStartup: true },
                 toolLabels: { dynamicStatus: true },
                 patches: { workingWidgetSpacing: true },
                 scriptPreview: { headerLayout: "block" },
@@ -202,7 +195,6 @@ describe("codex look config", () => {
         expect(config.preserveTools).toEqual(["mcp"]);
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptFormatters.get("python")).toEqual(["black", "-"]);
-        expect(config.syntaxPreloadOnStartup).toBe(true);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(config.patches.markdownSyntax).toBe(false);
