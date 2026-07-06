@@ -33,6 +33,10 @@ type FileSnapshot = {
     readonly skippedReason?: "too-large" | "not-readable";
 };
 
+type DiffRowBuildOptions = {
+    readonly maxRows?: number;
+};
+
 /** In-flight snapshot for edit tool execution. */
 export type EditSnapshotState = {
     readonly finish: () => Promise<DiffSnapshot>;
@@ -216,17 +220,23 @@ export function buildUnifiedDiffRows(
     metadata: FileDiffMetadata,
     highlighted: HighlightedDiffCode,
     palette: PierreTerminalPalette,
+    options: DiffRowBuildOptions = {},
 ): ReadonlyArray<UnifiedDiffRow> {
     const rows: UnifiedDiffRow[] = [];
+    const pushRow = (row: UnifiedDiffRow): boolean => pushBudgetedRow(rows, row, options.maxRows);
 
     for (const hunk of metadata.hunks) {
         if (hunk.collapsedBefore > 0) {
-            rows.push({
-                kind: "collapsed",
-                text: "...",
-                fg: palette.metadataFg,
-                bg: palette.metadataBg,
-            });
+            if (
+                pushRow({
+                    kind: "collapsed",
+                    text: "...",
+                    fg: palette.metadataFg,
+                    bg: palette.metadataBg,
+                })
+            ) {
+                return trimEdgeCollapsedRows(rows);
+            }
         }
 
         let deletionLineIndex = hunk.deletionLineIndex;
@@ -237,20 +247,26 @@ export function buildUnifiedDiffRows(
         for (const content of hunk.hunkContent) {
             if (content.type === "context") {
                 for (let offset = 0; offset < content.lines; offset += 1) {
-                    rows.push(
-                        makeUnifiedLine({
-                            lineType: "context",
-                            lineNumber: additionLineNumber + offset,
-                            spans: flattenHighlightedLine(
-                                highlighted.additionLines[additionLineIndex + offset],
-                                palette.appearance,
-                                palette.contextRowBg,
-                                cleanDiffLine(metadata.additionLines[additionLineIndex + offset]),
-                                metadata.lang,
-                            ),
-                            palette,
-                        }),
-                    );
+                    if (
+                        pushRow(
+                            makeUnifiedLine({
+                                lineType: "context",
+                                lineNumber: additionLineNumber + offset,
+                                spans: flattenHighlightedLine(
+                                    highlighted.additionLines[additionLineIndex + offset],
+                                    palette.appearance,
+                                    palette.contextRowBg,
+                                    cleanDiffLine(
+                                        metadata.additionLines[additionLineIndex + offset],
+                                    ),
+                                    metadata.lang,
+                                ),
+                                palette,
+                            }),
+                        )
+                    ) {
+                        return trimEdgeCollapsedRows(rows);
+                    }
                 }
                 deletionLineIndex += content.lines;
                 additionLineIndex += content.lines;
@@ -260,37 +276,45 @@ export function buildUnifiedDiffRows(
             }
 
             for (let offset = 0; offset < content.deletions; offset += 1) {
-                rows.push(
-                    makeUnifiedLine({
-                        lineType: "deletion",
-                        lineNumber: deletionLineNumber + offset,
-                        spans: flattenHighlightedLine(
-                            highlighted.deletionLines[deletionLineIndex + offset],
-                            palette.appearance,
-                            palette.deletionRowBg,
-                            cleanDiffLine(metadata.deletionLines[deletionLineIndex + offset]),
-                            metadata.lang,
-                        ),
-                        palette,
-                    }),
-                );
+                if (
+                    pushRow(
+                        makeUnifiedLine({
+                            lineType: "deletion",
+                            lineNumber: deletionLineNumber + offset,
+                            spans: flattenHighlightedLine(
+                                highlighted.deletionLines[deletionLineIndex + offset],
+                                palette.appearance,
+                                palette.deletionRowBg,
+                                cleanDiffLine(metadata.deletionLines[deletionLineIndex + offset]),
+                                metadata.lang,
+                            ),
+                            palette,
+                        }),
+                    )
+                ) {
+                    return trimEdgeCollapsedRows(rows);
+                }
             }
 
             for (let offset = 0; offset < content.additions; offset += 1) {
-                rows.push(
-                    makeUnifiedLine({
-                        lineType: "addition",
-                        lineNumber: additionLineNumber + offset,
-                        spans: flattenHighlightedLine(
-                            highlighted.additionLines[additionLineIndex + offset],
-                            palette.appearance,
-                            palette.additionRowBg,
-                            cleanDiffLine(metadata.additionLines[additionLineIndex + offset]),
-                            metadata.lang,
-                        ),
-                        palette,
-                    }),
-                );
+                if (
+                    pushRow(
+                        makeUnifiedLine({
+                            lineType: "addition",
+                            lineNumber: additionLineNumber + offset,
+                            spans: flattenHighlightedLine(
+                                highlighted.additionLines[additionLineIndex + offset],
+                                palette.appearance,
+                                palette.additionRowBg,
+                                cleanDiffLine(metadata.additionLines[additionLineIndex + offset]),
+                                metadata.lang,
+                            ),
+                            palette,
+                        }),
+                    )
+                ) {
+                    return trimEdgeCollapsedRows(rows);
+                }
             }
 
             deletionLineIndex += content.deletions;
@@ -300,17 +324,21 @@ export function buildUnifiedDiffRows(
         }
 
         if (hunk.noEOFCRDeletions || hunk.noEOFCRAdditions) {
-            rows.push({
-                kind: "metadata",
-                text: "\\ No newline at end of file",
-                fg: palette.metadataFg,
-                bg: palette.metadataBg,
-            });
+            if (
+                pushRow({
+                    kind: "metadata",
+                    text: "\\ No newline at end of file",
+                    fg: palette.metadataFg,
+                    bg: palette.metadataBg,
+                })
+            ) {
+                return trimEdgeCollapsedRows(rows);
+            }
         }
     }
 
     if (hasTrailingCollapsedLines(metadata)) {
-        rows.push({
+        pushRow({
             kind: "collapsed",
             text: "...",
             fg: palette.metadataFg,
@@ -326,17 +354,23 @@ export function buildSplitDiffRows(
     metadata: FileDiffMetadata,
     highlighted: HighlightedDiffCode,
     palette: PierreTerminalPalette,
+    options: DiffRowBuildOptions = {},
 ): ReadonlyArray<SplitDiffRow> {
     const rows: SplitDiffRow[] = [];
+    const pushRow = (row: SplitDiffRow): boolean => pushBudgetedRow(rows, row, options.maxRows);
 
     for (const hunk of metadata.hunks) {
         if (hunk.collapsedBefore > 0) {
-            rows.push({
-                kind: "collapsed",
-                text: "...",
-                fg: palette.metadataFg,
-                bg: palette.metadataBg,
-            });
+            if (
+                pushRow({
+                    kind: "collapsed",
+                    text: "...",
+                    fg: palette.metadataFg,
+                    bg: palette.metadataBg,
+                })
+            ) {
+                return trimEdgeCollapsedRows(rows);
+            }
         }
 
         let deletionLineIndex = hunk.deletionLineIndex;
@@ -354,21 +388,25 @@ export function buildSplitDiffRows(
                         cleanDiffLine(metadata.additionLines[additionLineIndex + offset]),
                         metadata.lang,
                     );
-                    rows.push({
-                        kind: "line",
-                        deletion: makeSplitCell({
-                            lineType: "context",
-                            lineNumber: deletionLineNumber + offset,
-                            spans,
-                            palette,
-                        }),
-                        addition: makeSplitCell({
-                            lineType: "context",
-                            lineNumber: additionLineNumber + offset,
-                            spans,
-                            palette,
-                        }),
-                    });
+                    if (
+                        pushRow({
+                            kind: "line",
+                            deletion: makeSplitCell({
+                                lineType: "context",
+                                lineNumber: deletionLineNumber + offset,
+                                spans,
+                                palette,
+                            }),
+                            addition: makeSplitCell({
+                                lineType: "context",
+                                lineNumber: additionLineNumber + offset,
+                                spans,
+                                palette,
+                            }),
+                        })
+                    ) {
+                        return trimEdgeCollapsedRows(rows);
+                    }
                 }
                 deletionLineIndex += content.lines;
                 additionLineIndex += content.lines;
@@ -379,43 +417,47 @@ export function buildSplitDiffRows(
 
             const rowCount = Math.max(content.deletions, content.additions);
             for (let offset = 0; offset < rowCount; offset += 1) {
-                rows.push({
-                    kind: "line",
-                    deletion:
-                        offset < content.deletions
-                            ? makeSplitCell({
-                                  lineType: "deletion",
-                                  lineNumber: deletionLineNumber + offset,
-                                  spans: flattenHighlightedLine(
-                                      highlighted.deletionLines[deletionLineIndex + offset],
-                                      palette.appearance,
-                                      palette.deletionRowBg,
-                                      cleanDiffLine(
-                                          metadata.deletionLines[deletionLineIndex + offset],
+                if (
+                    pushRow({
+                        kind: "line",
+                        deletion:
+                            offset < content.deletions
+                                ? makeSplitCell({
+                                      lineType: "deletion",
+                                      lineNumber: deletionLineNumber + offset,
+                                      spans: flattenHighlightedLine(
+                                          highlighted.deletionLines[deletionLineIndex + offset],
+                                          palette.appearance,
+                                          palette.deletionRowBg,
+                                          cleanDiffLine(
+                                              metadata.deletionLines[deletionLineIndex + offset],
+                                          ),
+                                          metadata.lang,
                                       ),
-                                      metadata.lang,
-                                  ),
-                                  palette,
-                              })
-                            : makeEmptySplitCell(palette),
-                    addition:
-                        offset < content.additions
-                            ? makeSplitCell({
-                                  lineType: "addition",
-                                  lineNumber: additionLineNumber + offset,
-                                  spans: flattenHighlightedLine(
-                                      highlighted.additionLines[additionLineIndex + offset],
-                                      palette.appearance,
-                                      palette.additionRowBg,
-                                      cleanDiffLine(
-                                          metadata.additionLines[additionLineIndex + offset],
+                                      palette,
+                                  })
+                                : makeEmptySplitCell(palette),
+                        addition:
+                            offset < content.additions
+                                ? makeSplitCell({
+                                      lineType: "addition",
+                                      lineNumber: additionLineNumber + offset,
+                                      spans: flattenHighlightedLine(
+                                          highlighted.additionLines[additionLineIndex + offset],
+                                          palette.appearance,
+                                          palette.additionRowBg,
+                                          cleanDiffLine(
+                                              metadata.additionLines[additionLineIndex + offset],
+                                          ),
+                                          metadata.lang,
                                       ),
-                                      metadata.lang,
-                                  ),
-                                  palette,
-                              })
-                            : makeEmptySplitCell(palette),
-                });
+                                      palette,
+                                  })
+                                : makeEmptySplitCell(palette),
+                    })
+                ) {
+                    return trimEdgeCollapsedRows(rows);
+                }
             }
 
             deletionLineIndex += content.deletions;
@@ -425,17 +467,21 @@ export function buildSplitDiffRows(
         }
 
         if (hunk.noEOFCRDeletions || hunk.noEOFCRAdditions) {
-            rows.push({
-                kind: "metadata",
-                text: "\\ No newline at end of file",
-                fg: palette.metadataFg,
-                bg: palette.metadataBg,
-            });
+            if (
+                pushRow({
+                    kind: "metadata",
+                    text: "\\ No newline at end of file",
+                    fg: palette.metadataFg,
+                    bg: palette.metadataBg,
+                })
+            ) {
+                return trimEdgeCollapsedRows(rows);
+            }
         }
     }
 
     if (hasTrailingCollapsedLines(metadata)) {
-        rows.push({
+        pushRow({
             kind: "collapsed",
             text: "...",
             fg: palette.metadataFg,
@@ -444,6 +490,14 @@ export function buildSplitDiffRows(
     }
 
     return trimEdgeCollapsedRows(rows);
+}
+
+function pushBudgetedRow<TRow>(rows: TRow[], row: TRow, maxRows: number | undefined): boolean {
+    if (maxRows !== undefined && rows.length >= Math.max(1, Math.floor(maxRows))) {
+        return true;
+    }
+    rows.push(row);
+    return maxRows !== undefined && rows.length >= Math.max(1, Math.floor(maxRows));
 }
 
 function trimEdgeCollapsedRows<TRow extends { readonly kind: string }>(

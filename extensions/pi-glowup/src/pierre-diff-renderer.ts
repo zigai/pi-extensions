@@ -1,4 +1,4 @@
-import { type Theme } from "@earendil-works/pi-coding-agent";
+import { keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import {
     truncateToWidth,
     type Component,
@@ -32,11 +32,15 @@ const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const DIFF_STYLE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.color.close}${ansiStyles.bgColor.close}`;
 const SIDE_BY_SIDE_MIN_WIDTH = 140;
 const INITIAL_TTY_DIFF_HIGHLIGHT_DEFER_MS = 1_500;
+const MAX_QUEUED_DIFF_HIGHLIGHTS = 50;
+const MAX_ACTIVE_DIFF_HIGHLIGHT_TIMERS = 16;
+const MAX_EXPANDED_DIFF_RENDER_LINES = 5_000;
 const DISABLE_INITIAL_DEFER_ENV = "PI_CODEX_LOOK_DISABLE_INITIAL_SYNTAX_DEFER";
 const moduleLoadedAtMs = Date.now();
 
 let highlightGeneration = 0;
 let queuedDiffHighlightRunning = false;
+let queuedDiffHighlightTimer: ReturnType<typeof setTimeout> | undefined;
 const activeDiffHighlightTimers = new Set<ReturnType<typeof setTimeout>>();
 const queuedDiffHighlights: Array<{
     readonly generation: number;
@@ -77,6 +81,10 @@ export function renderPierreDiff(
         return renderPierreDiffSummary(payload, theme);
     }
 
+    if (!options.expanded) {
+        return renderPierreCollapsedPreview(payload, theme);
+    }
+
     const maxVisibleLines = maxVisibleDiffLines(options.expanded);
     const component =
         context.lastComponent instanceof PierreDiffComponent
@@ -93,6 +101,19 @@ export function getPierreDiffPayloadFromDetails(details: unknown): PierreDiffPay
         return undefined;
     }
     return normalizePierreDiffPayload(details.pierreDiff);
+}
+
+/** Returns bounded lazy-diff scheduler stats for diagnostics. */
+export function pierreDiffHighlightStats(): {
+    readonly activeTimers: number;
+    readonly queuedHighlights: number;
+    readonly queueRunning: boolean;
+} {
+    return {
+        activeTimers: activeDiffHighlightTimers.size,
+        queuedHighlights: queuedDiffHighlights.length,
+        queueRunning: queuedDiffHighlightRunning,
+    };
 }
 
 class PierreDiffComponent implements Component {
@@ -118,7 +139,9 @@ class PierreDiffComponent implements Component {
         this.highlighted = emptyHighlightedDiffSet();
         this.maxVisibleLines = maxVisibleLines;
         this.expanded = expanded;
-        this.maybeRefreshHighlightedDiff();
+        if (this.expanded) {
+            this.maybeRefreshHighlightedDiff();
+        }
     }
 
     update(
@@ -141,6 +164,11 @@ class PierreDiffComponent implements Component {
         this.palette = nextPalette;
         this.maxVisibleLines = maxVisibleLines;
         this.expanded = expanded;
+        if (!this.expanded) {
+            this.highlighted = emptyHighlightedDiffSet();
+            this.refreshPromise = undefined;
+            this.clearRefreshTimer();
+        }
         if (!canReuseRenderedCache) {
             this.invalidate();
         }
@@ -150,7 +178,9 @@ class PierreDiffComponent implements Component {
             this.clearRefreshTimer();
             this.refreshKey = undefined;
         }
-        this.maybeRefreshHighlightedDiff();
+        if (this.expanded) {
+            this.maybeRefreshHighlightedDiff();
+        }
     }
 
     render(width: number): string[] {
@@ -179,7 +209,7 @@ class PierreDiffComponent implements Component {
             renderFullWidthLine(
                 [
                     {
-                        text: `… ${lines.length - visible} more lines`,
+                        text: `… ${omittedDiffLineCount(this.payload, lines.length, visible).toLocaleString("en-US")} more lines`,
                         fg: this.palette.metadataFg,
                         bg: this.palette.metadataBg,
                     },
@@ -197,6 +227,9 @@ class PierreDiffComponent implements Component {
     }
 
     private highlightVisibleRenderIfPossible(): void {
+        if (!this.expanded) {
+            return;
+        }
         if (hasHighlightedLines(this.highlighted)) {
             return;
         }
@@ -209,19 +242,33 @@ class PierreDiffComponent implements Component {
     }
 
     private renderUnifiedBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
-        const rows = buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette);
-        return rows.flatMap((row) => renderUnifiedRow(row, this.payload.metadata, width));
+        const rows = buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette, {
+            maxRows: this.maxVisibleLines + 1,
+        });
+        return renderUnifiedRows(rows, this.payload.metadata, width, this.maxVisibleLines + 1);
     }
 
     private renderSplitBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
-        const rows = buildSplitDiffRows(this.payload.metadata, highlighted, this.palette);
-        return rows.flatMap((row) =>
-            renderSplitRow(row, this.payload.metadata, width, this.palette),
+        const rows = buildSplitDiffRows(this.payload.metadata, highlighted, this.palette, {
+            maxRows: this.maxVisibleLines + 1,
+        });
+        return renderSplitRows(
+            rows,
+            this.payload.metadata,
+            width,
+            this.palette,
+            this.maxVisibleLines + 1,
         );
     }
 
     private maybeRefreshHighlightedDiff(): void {
+        if (!this.expanded) {
+            return;
+        }
         if (hasHighlightedLines(this.highlighted)) {
+            return;
+        }
+        if (activeDiffHighlightTimers.size >= MAX_ACTIVE_DIFF_HIGHLIGHT_TIMERS) {
             return;
         }
 
@@ -259,6 +306,7 @@ class PierreDiffComponent implements Component {
                     }
                 });
         }, initialDiffHighlightDelayMs());
+        timer.unref?.();
         this.refreshTimer = timer;
         activeDiffHighlightTimers.add(timer);
     }
@@ -290,6 +338,52 @@ function renderPierreDiffSummary(payload: PierreSummaryDiffPayload, theme: Theme
     };
 }
 
+function renderPierreCollapsedPreview(
+    payload: PierreRenderableDiffPayload,
+    theme: Theme,
+): Component {
+    const path = payload.path;
+    const added = payload.stats.added;
+    const removed = payload.stats.removed;
+    const lineCount = payload.stats.lineCount;
+    const sizeBytes = payload.stats.sizeBytes;
+    const expandHint = pierreExpandHint();
+
+    return {
+        render(width: number): string[] {
+            const safeWidth = Math.max(24, Math.floor(width));
+            const changeStats = `${added.toLocaleString("en-US")} + / ${removed.toLocaleString("en-US")} -`;
+            const headline = `${theme.fg("toolDiffContext", path)} ${theme.fg("muted", changeStats)}`;
+            const detail = `${lineCount.toLocaleString("en-US")} diff lines, ${formatDiffSize(sizeBytes)} (${expandHint})`;
+            return [
+                truncateToWidth(headline, safeWidth, ""),
+                truncateToWidth(`  └ ${theme.fg("muted", detail)}`, safeWidth, ""),
+            ];
+        },
+        invalidate() {},
+    };
+}
+
+function pierreExpandHint(): string {
+    try {
+        return keyHint("app.tools.expand", "to expand");
+    } catch {
+        return "expand to inspect";
+    }
+}
+
+function omittedDiffLineCount(
+    payload: PierreRenderableDiffPayload,
+    renderedLineCount: number,
+    visibleLineCount: number,
+): number {
+    return Math.max(
+        1,
+        renderedLineCount - visibleLineCount,
+        payload.stats.lineCount - visibleLineCount,
+    );
+}
+
 function summaryDetail(payload: PierreSummaryDiffPayload): string {
     if (payload.summary.reason === "not-readable") {
         return `Diff omitted: ${payload.path} could not be read safely.`;
@@ -313,6 +407,7 @@ function formatDiffSize(bytes: number): string {
 function runQueuedDiffHighlight(run: () => Promise<void>): Promise<void> {
     return new Promise((resolve) => {
         queuedDiffHighlights.push({ generation: highlightGeneration, run, resolve });
+        trimQueuedDiffHighlights();
         scheduleQueuedDiffHighlight();
     });
 }
@@ -324,6 +419,10 @@ export function clearQueuedDiffHighlights(): void {
         clearTimeout(timer);
     }
     activeDiffHighlightTimers.clear();
+    if (queuedDiffHighlightTimer !== undefined) {
+        clearTimeout(queuedDiffHighlightTimer);
+        queuedDiffHighlightTimer = undefined;
+    }
 
     const pendingTasks = queuedDiffHighlights.splice(0);
     for (const task of pendingTasks) {
@@ -332,12 +431,29 @@ export function clearQueuedDiffHighlights(): void {
     queuedDiffHighlightRunning = false;
 }
 
+function trimQueuedDiffHighlights(): void {
+    while (queuedDiffHighlights.length > MAX_QUEUED_DIFF_HIGHLIGHTS) {
+        queuedDiffHighlights.shift()?.resolve();
+    }
+}
+
+function scheduleDiffHighlightQueueTimer(delayMs: number): void {
+    if (queuedDiffHighlightTimer !== undefined) {
+        clearTimeout(queuedDiffHighlightTimer);
+    }
+    queuedDiffHighlightTimer = setTimeout(() => {
+        queuedDiffHighlightTimer = undefined;
+        processNextQueuedDiffHighlight();
+    }, delayMs);
+    queuedDiffHighlightTimer.unref?.();
+}
+
 function scheduleQueuedDiffHighlight(): void {
     if (queuedDiffHighlightRunning) {
         return;
     }
     queuedDiffHighlightRunning = true;
-    setTimeout(processNextQueuedDiffHighlight, 0);
+    scheduleDiffHighlightQueueTimer(0);
 }
 
 function processNextQueuedDiffHighlight(): void {
@@ -349,7 +465,7 @@ function processNextQueuedDiffHighlight(): void {
 
     if (task.generation !== highlightGeneration) {
         task.resolve();
-        setTimeout(processNextQueuedDiffHighlight, 0);
+        scheduleDiffHighlightQueueTimer(0);
         return;
     }
 
@@ -362,7 +478,7 @@ function processNextQueuedDiffHighlight(): void {
                 queuedDiffHighlightRunning = false;
                 return;
             }
-            setTimeout(processNextQueuedDiffHighlight, 100);
+            scheduleDiffHighlightQueueTimer(100);
         });
 }
 
@@ -389,6 +505,64 @@ function isLikelySessionRestore(): boolean {
             arg === "--fork" ||
             arg.startsWith("--fork="),
     );
+}
+
+function renderUnifiedRows(
+    rows: ReadonlyArray<UnifiedDiffRow>,
+    metadata: PierreRenderableDiffPayload["metadata"],
+    width: number,
+    maxRenderedLines: number,
+): string[] {
+    const rendered: string[] = [];
+    for (const row of rows) {
+        if (
+            appendBudgetedRenderedLines(
+                rendered,
+                renderUnifiedRow(row, metadata, width),
+                maxRenderedLines,
+            )
+        ) {
+            break;
+        }
+    }
+    return rendered;
+}
+
+function renderSplitRows(
+    rows: ReadonlyArray<SplitDiffRow>,
+    metadata: PierreRenderableDiffPayload["metadata"],
+    width: number,
+    palette: PierreTerminalPalette,
+    maxRenderedLines: number,
+): string[] {
+    const rendered: string[] = [];
+    for (const row of rows) {
+        if (
+            appendBudgetedRenderedLines(
+                rendered,
+                renderSplitRow(row, metadata, width, palette),
+                maxRenderedLines,
+            )
+        ) {
+            break;
+        }
+    }
+    return rendered;
+}
+
+function appendBudgetedRenderedLines(
+    target: string[],
+    lines: ReadonlyArray<string>,
+    maxRenderedLines: number,
+): boolean {
+    if (target.length + lines.length <= maxRenderedLines) {
+        target.push(...lines);
+        return target.length >= maxRenderedLines;
+    }
+
+    const remaining = Math.max(0, maxRenderedLines - target.length);
+    target.push(...lines.slice(0, remaining));
+    return true;
 }
 
 function renderUnifiedRow(
@@ -680,7 +854,10 @@ function pierrePalettesEqual(left: PierreTerminalPalette, right: PierreTerminalP
 
 function maxVisibleDiffLines(expanded: boolean): number {
     const terminalRows = typeof process.stdout.rows === "number" ? process.stdout.rows : 40;
-    const expandedLimit = Math.max(24, Math.floor(terminalRows * 0.65));
+    const expandedLimit = Math.min(
+        MAX_EXPANDED_DIFF_RENDER_LINES,
+        Math.max(24, Math.floor(terminalRows * 0.65)),
+    );
     if (expanded) {
         return expandedLimit;
     }

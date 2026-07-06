@@ -173,7 +173,7 @@ describe("Pierre diff rendering", () => {
         expect(shouldRenderSideBySideDiff(180)).toBe(true);
     });
 
-    it("keeps cached rendered lines across identical component updates", () => {
+    it("keeps cached rendered lines across identical expanded component updates", () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
             oldContent: "alpha\nold\nomega\n",
@@ -189,14 +189,14 @@ describe("Pierre diff rendering", () => {
         const component = renderPierreDiff(
             payload,
             testTheme,
-            { expanded: false },
+            { expanded: true },
             { lastComponent: undefined, invalidate() {} },
         );
         const firstLines = component.render(80);
         const reused = renderPierreDiff(
             payload,
             testTheme,
-            { expanded: false },
+            { expanded: true },
             { lastComponent: component },
         );
         const secondLines = reused.render(80);
@@ -206,7 +206,7 @@ describe("Pierre diff rendering", () => {
         expect(secondLines).toEqual(firstLines);
     });
 
-    it("rerenders a cached collapsed diff side-by-side after the terminal widens", () => {
+    it("rerenders a cached expanded diff side-by-side after the terminal widens", () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
             oldContent: "alpha\nold\nomega\n",
@@ -222,7 +222,7 @@ describe("Pierre diff rendering", () => {
         const component = renderPierreDiff(
             payload,
             testTheme,
-            { expanded: false },
+            { expanded: true },
             { lastComponent: undefined, invalidate() {} },
         );
         const narrow = component.render(80);
@@ -252,7 +252,7 @@ describe("Pierre diff rendering", () => {
             renderPierreDiff(
                 payload,
                 testTheme,
-                { expanded: false },
+                { expanded: true },
                 { lastComponent: undefined, invalidate() {} },
             );
 
@@ -296,7 +296,8 @@ describe("Pierre diff rendering", () => {
         ).render(180);
 
         expect(stripAnsi(narrow.join("\n"))).not.toContain(" │ ");
-        expect(stripAnsi(collapsedWide.join("\n"))).toContain(" │ ");
+        expect(stripAnsi(collapsedWide.join("\n"))).not.toContain(" │ ");
+        expect(stripAnsi(collapsedWide.join("\n"))).toContain("expand to inspect");
         expect(stripAnsi(expandedWide.join("\n"))).toContain(" │ ");
         expectLinesWithinWidth(narrow, 80);
         expectLinesWithinWidth(collapsedWide, 180);
@@ -348,7 +349,7 @@ describe("Pierre diff rendering", () => {
         const component = renderPierreDiff(
             payload,
             testTheme,
-            { expanded: false },
+            { expanded: true },
             { lastComponent: undefined, invalidate() {} },
         );
         const plainLines = component.render(100).map((line) => stripAnsi(line).trimEnd());
@@ -375,7 +376,7 @@ describe("Pierre diff rendering", () => {
         const lines = renderPierreDiff(
             payload,
             testTheme,
-            { expanded: false },
+            { expanded: true },
             { lastComponent: undefined, invalidate() {} },
         ).render(width);
         const blankAddition = lines.find((line) => stripAnsi(line).trimEnd() === "+  2");
@@ -402,7 +403,7 @@ describe("Pierre diff rendering", () => {
         const lines = renderPierreDiff(
             payload,
             testTheme,
-            { expanded: false },
+            { expanded: true },
             { lastComponent: undefined, invalidate() {} },
         ).render(width);
 
