@@ -89,6 +89,7 @@ type ImagegenDetails = {
 type ImagegenOptions = {
     readonly getConfig: () => CodexCoreConfig;
     readonly runtime?: CodexRuntime | undefined;
+    readonly saveImage?: typeof saveGeneratedImage | undefined;
 };
 
 export function registerImagegenTool(pi: ExtensionAPI, options: ImagegenOptions): void {
@@ -147,16 +148,18 @@ export function createImagegenTool(
                 options.runtime ?? defaultCodexRuntime,
             );
             if (response.isErr()) throw codexFailureToError(response.error);
-            const savedImages = await Promise.all(
-                response.value.images.map((base64, index) =>
-                    saveGeneratedImage({
+            const saveImage = options.saveImage ?? saveGeneratedImage;
+            const savedImages: SavedImage[] = [];
+            for (const [index, base64] of response.value.images.entries()) {
+                savedImages.push(
+                    await saveImage({
                         sessionId: ctx.sessionManager.getSessionId(),
                         toolCallId,
                         index,
                         base64,
                     }),
-                ),
-            );
+                );
+            }
             const text = formatImagegenOutput(savedImages, response.value);
             return {
                 content: [{ type: "text", text }],
