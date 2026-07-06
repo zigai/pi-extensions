@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 type PackageJson = {
+    readonly exports: Readonly<Record<string, unknown>> | undefined;
     readonly dependencies: Readonly<Record<string, string>> | undefined;
     readonly devDependencies: Readonly<Record<string, string>> | undefined;
     readonly peerDependencies: Readonly<Record<string, string>> | undefined;
@@ -17,6 +18,7 @@ function readPackageJson(): PackageJson {
     }
 
     return {
+        exports: parseUnknownRecord(Reflect.get(value, "exports")),
         dependencies: parseStringRecord(Reflect.get(value, "dependencies")),
         devDependencies: parseStringRecord(Reflect.get(value, "devDependencies")),
         peerDependencies: parseStringRecord(Reflect.get(value, "peerDependencies")),
@@ -24,6 +26,17 @@ function readPackageJson(): PackageJson {
             Reflect.get(value, "peerDependenciesMeta"),
         ),
     };
+}
+
+function parseUnknownRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return undefined;
+    }
+    const record: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+        record[key] = item;
+    }
+    return record;
 }
 
 function parseStringRecord(value: unknown): Readonly<Record<string, string>> | undefined {
@@ -60,6 +73,12 @@ function parseOptionalPeerMetaRecord(
 }
 
 describe("package manifest", () => {
+    it("exports the passive Codex-look protocol for extension authors", () => {
+        const manifest = readPackageJson();
+
+        expect(manifest.exports?.["./protocol"]).toBe("./src/tool-rendering/protocol.ts");
+    });
+
     it("keeps Pi core packages as peers instead of bundled runtime dependencies", () => {
         const manifest = readPackageJson();
         const piCorePackages = [

@@ -23,6 +23,7 @@
   },
   "files": [
     "src",
+    "docs",
     "themes",
     "config.schema.json",
     "README.md",
@@ -30,6 +31,10 @@
   ],
   "type": "module",
   "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/tool-rendering/protocol.ts"
+  },
   "scripts": {
     "lint": "oxlint -c ./.oxlintrc.json .",
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
