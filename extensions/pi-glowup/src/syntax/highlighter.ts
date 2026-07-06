@@ -19,6 +19,8 @@ const MAX_CACHE_BYTES = 512 * 1024;
 const MAX_LINE_LENGTH = 2_000;
 const TOKENIZE_MAX_LINE_LENGTH = 1_000;
 const CACHE_LIMIT = 100;
+const MAX_DYNAMIC_SYNTAX_LANGUAGES = 8;
+const DYNAMIC_SYNTAX_LANGUAGE_ALLOWLIST = new Set<string>(PRELOADED_SYNTAX_LANGUAGES);
 
 export type SyntaxHighlightOptions = {
     readonly cache?: boolean | undefined;
@@ -46,6 +48,7 @@ type SyntaxState =
           readonly theme: LoadedSyntaxTheme;
           readonly highlighter: Highlighter;
           readonly loadedLanguages: Set<string>;
+          readonly dynamicLanguages: Set<string>;
       };
 
 let syntaxState: SyntaxState | undefined;
@@ -186,7 +189,11 @@ export async function getSyntaxHighlighterForLanguage(
 
     const normalizedLanguage = normalizeSyntaxLanguage(language) ?? "text";
     if (normalizedLanguage !== "text" && !state.loadedLanguages.has(normalizedLanguage)) {
-        if (!isBundledSyntaxLanguage(normalizedLanguage)) {
+        if (
+            !isBundledSyntaxLanguage(normalizedLanguage) ||
+            !DYNAMIC_SYNTAX_LANGUAGE_ALLOWLIST.has(normalizedLanguage) ||
+            state.dynamicLanguages.size >= MAX_DYNAMIC_SYNTAX_LANGUAGES
+        ) {
             return undefined;
         }
         await state.highlighter.loadLanguage(normalizedLanguage);
@@ -194,6 +201,7 @@ export async function getSyntaxHighlighterForLanguage(
             return undefined;
         }
         state.loadedLanguages.add(normalizedLanguage);
+        state.dynamicLanguages.add(normalizedLanguage);
     }
 
     return {
@@ -268,6 +276,7 @@ async function initializeSyntaxHighlightingOnce(
             theme,
             highlighter,
             loadedLanguages: new Set(highlighter.getLoadedLanguages()),
+            dynamicLanguages: new Set(),
         };
     } catch (cause: unknown) {
         return {

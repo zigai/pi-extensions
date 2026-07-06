@@ -104,6 +104,22 @@ describe("syntax highlighter lifecycle", () => {
         expect(disposedCount).toBe(1);
     });
 
+    it("does not dynamically load arbitrary non-preloaded bundled languages", async () => {
+        const loadedLanguages: string[] = [];
+        const factory: SyntaxHighlighterFactory = async () =>
+            fakeHighlighter({
+                loadedLanguages: ["typescript"],
+                async loadLanguage(language) {
+                    loadedLanguages.push(language);
+                },
+            });
+
+        await initializeSyntaxHighlighting({}, { createHighlighter: factory });
+
+        await expect(getSyntaxHighlighterForLanguage("vue")).resolves.toBeUndefined();
+        expect(loadedLanguages).toEqual([]);
+    });
+
     it("disposes and resets highlighter state between sessions", async () => {
         await initializeSyntaxHighlighting();
         expect(isSyntaxHighlightingReady()).toBe(true);

@@ -17,6 +17,7 @@ import {
 } from "../src/rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-renderers.ts";
 import { highlightSyntaxCode, initializeSyntaxHighlighting } from "../src/syntax/highlighter.ts";
+import { normalizeSyntaxLanguage, PRELOADED_SYNTAX_LANGUAGES } from "../src/syntax/language.ts";
 import { installMarkdownSyntaxPatch } from "../src/syntax/markdown-patch.ts";
 import { SYNTAX_ACCENT_COLORS } from "../src/syntax/palette.ts";
 import { loadSyntaxConfig } from "../src/syntax/theme-loader.ts";
@@ -181,6 +182,15 @@ describe("central syntax highlighting", () => {
         ]);
     });
 
+    it("normalizes Rust and Go language aliases for preloading", () => {
+        expect(normalizeSyntaxLanguage("rust")).toBe("rust");
+        expect(normalizeSyntaxLanguage("rs")).toBe("rust");
+        expect(normalizeSyntaxLanguage("go")).toBe("go");
+        expect(normalizeSyntaxLanguage("golang")).toBe("go");
+        expect(PRELOADED_SYNTAX_LANGUAGES).toContain("rust");
+        expect(PRELOADED_SYNTAX_LANGUAGES).toContain("go");
+    });
+
     it("injects the central highlighter into Markdown code fences", () => {
         installMarkdownSyntaxPatch();
         const rendered = new Markdown("```ts\nconst value = 1;\n```", 0, 0, markdownTheme)
@@ -313,7 +323,7 @@ describe("central syntax highlighting", () => {
             const component = renderPierreDiff(
                 payload,
                 piTheme,
-                { expanded: false },
+                { expanded: true },
                 {
                     lastComponent: undefined,
                     invalidate() {},
