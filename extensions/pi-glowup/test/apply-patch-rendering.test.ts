@@ -114,4 +114,18 @@ describe("apply_patch renderer", () => {
         expect(rendered).not.toContain("+extra");
         expectLinesWithinWidth(lines, 100);
     });
+
+    it("keeps oversized completed patch calls on the cheap fallback path", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch");
+        const largePatch = `*** Begin Patch\n*** Add File: huge.txt\n${"+line\n".repeat(20_000)}*** End Patch`;
+        const lines = renderer
+            .renderCall({ patch: largePatch }, plainTheme, renderContext)
+            .render(100);
+        const rendered = lines.join("\n");
+
+        expect(rendered).toContain("• Edited 20003 patch lines (+0 -0)");
+        expect(rendered).not.toContain("huge.txt");
+        expect(rendered).not.toContain("+line");
+        expectLinesWithinWidth(lines, 100);
+    });
 });

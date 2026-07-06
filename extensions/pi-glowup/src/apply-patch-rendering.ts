@@ -27,6 +27,7 @@ type ApplyPatchSummary = {
 };
 
 const MAX_PARTIAL_PATCH_PARSE_CHARS = 8 * 1024;
+const MAX_COMPLETED_PATCH_PARSE_CHARS = 64 * 1024;
 
 type MutableApplyPatchSection = {
     kind: ApplyPatchKind;
@@ -85,7 +86,7 @@ function hasCompletePatchEnvelope(patchText: string): boolean {
 
 function canParsePatchCall(patchText: string, context: ThirdPartyToolRenderContext): boolean {
     if (!context.isPartial && context.argsComplete) {
-        return true;
+        return patchText.length <= MAX_COMPLETED_PATCH_PARSE_CHARS;
     }
     return patchText.length <= MAX_PARTIAL_PATCH_PARSE_CHARS && hasCompletePatchEnvelope(patchText);
 }
@@ -339,7 +340,11 @@ export function createApplyPatchRenderer(): ThirdPartyToolRenderer {
                 return renderApplyPatchFailure(result, options, theme);
             }
             const patch = patchTextFromArgs(context.args);
-            if (patch !== undefined && parseApplyPatchSummary(patch) !== undefined) {
+            if (
+                patch !== undefined &&
+                canParsePatchCall(patch, context) &&
+                parseApplyPatchSummary(patch) !== undefined
+            ) {
                 return emptyComponent();
             }
             return renderCodexOutput(theme, textOutput(result), {
