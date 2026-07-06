@@ -113,6 +113,18 @@ describe("Codex rendering helpers", () => {
         expect(renderCount).toBe(2);
     });
 
+    it("does not cache oversized rendered component lines", () => {
+        let renderCount = 0;
+        const component = makeComponent(() => {
+            renderCount += 1;
+            return Array.from({ length: 301 }, (_value, index) => `line ${index + 1}`);
+        });
+
+        expect(component.render(80).length).toBe(301);
+        expect(component.render(80).length).toBe(301);
+        expect(renderCount).toBe(2);
+    });
+
     it("renders an incomplete streaming tool call without crashing", () => {
         const component = renderCodexCall(plainTheme, {
             state: "running",

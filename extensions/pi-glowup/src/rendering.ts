@@ -78,6 +78,18 @@ const addCountPattern = /^\+\s*\d+\s/;
 const removeCountPattern = /^-\s*\d+\s/;
 const heredocOpenPattern =
     /(?<operator><<-?)\s*(?:"(?<doubleMarker>[A-Za-z_][A-Za-z0-9_]*)"|'(?<singleMarker>[A-Za-z_][A-Za-z0-9_]*)'|(?<bareMarker>[A-Za-z_][A-Za-z0-9_]*))/u;
+const MAX_COMPONENT_CACHE_LINES = 300;
+const MAX_COMPONENT_CACHE_BYTES = 128 * 1024;
+const MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES = 64 * 1024;
+const MAX_COLLAPSED_OUTPUT_LINE_BYTES = 4 * 1024;
+const MIN_COLLAPSED_OUTPUT_LINE_BYTES = 256;
+const MAX_COLLAPSED_OUTPUT_PREVIEW_LINES = Math.max(
+    1,
+    Math.floor(MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES / MIN_COLLAPSED_OUTPUT_LINE_BYTES),
+);
+const MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES = 64 * 1024;
+const UTF8_TRUNCATION_SUFFIX = "…";
+const RETAINED_OUTPUT_LOG_ENV = "PI_CODEX_LOOK_RETAINED_OUTPUT_LOG";
 
 function fg(theme: CodexRenderTheme, token: ThemeColor, text: string): string {
     return theme.fg(token, text);
@@ -166,17 +178,38 @@ export function makeComponent(renderLines: (width: number) => string[]): Compone
                 return cachedLines;
             }
 
-            cachedWidth = safeWidth;
-            cachedLines = renderLines(safeWidth).map((line) =>
+            const rendered = renderLines(safeWidth).map((line) =>
                 truncateToWidth(line, safeWidth, ""),
             );
-            return cachedLines;
+            if (shouldCacheRenderedLines(rendered)) {
+                cachedWidth = safeWidth;
+                cachedLines = rendered;
+            } else {
+                cachedWidth = undefined;
+                cachedLines = undefined;
+            }
+            return rendered;
         },
         invalidate(): void {
             cachedWidth = undefined;
             cachedLines = undefined;
         },
     };
+}
+
+function shouldCacheRenderedLines(lines: ReadonlyArray<string>): boolean {
+    if (lines.length > MAX_COMPONENT_CACHE_LINES) {
+        return false;
+    }
+
+    let bytes = 0;
+    for (const line of lines) {
+        bytes += Buffer.byteLength(line, "utf8");
+        if (bytes > MAX_COMPONENT_CACHE_BYTES) {
+            return false;
+        }
+    }
+    return true;
 }
 
 export function emptyComponent(): Component {
@@ -361,6 +394,16 @@ type CollapsedTextPreview =
           readonly lines: ReadonlyArray<string>;
       };
 
+type RetainedOutput =
+    | {
+          readonly kind: "expanded";
+          readonly text: string;
+      }
+    | {
+          readonly kind: "collapsed";
+          readonly preview: CollapsedTextPreview;
+      };
+
 function collapsedPreviewLinesFromText(
     text: string,
     maxPreviewLines: number,
@@ -371,7 +414,17 @@ function collapsedPreviewLinesFromText(
         return { isEmpty: false, lines: [] };
     }
 
-    const lineBudget = Math.max(1, Math.floor(maxPreviewLines));
+    const lineBudget = Math.max(
+        1,
+        Math.min(Math.floor(maxPreviewLines), MAX_COLLAPSED_OUTPUT_PREVIEW_LINES),
+    );
+    const lineByteBudget = Math.max(
+        MIN_COLLAPSED_OUTPUT_LINE_BYTES,
+        Math.min(
+            MAX_COLLAPSED_OUTPUT_LINE_BYTES,
+            Math.floor(MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES / lineBudget),
+        ),
+    );
     const visibleCount = Math.max(0, lineBudget - 1);
     const headCount = mode === "headTail" ? Math.ceil(visibleCount / 2) : visibleCount;
     const tailCount = mode === "headTail" ? Math.floor(visibleCount / 2) : 0;
@@ -384,18 +437,19 @@ function collapsedPreviewLinesFromText(
     let sawContent = false;
 
     const consumeLine = (line: string): void => {
+        const previewLine = detachedPreviewLine(line, lineByteBudget);
         lineCount += 1;
         if (headLines.length < headCount) {
-            headLines.push(line);
+            headLines.push(previewLine);
         }
         if (tailCount > 0) {
-            tailLines.push(line);
+            tailLines.push(previewLine);
             if (tailLines.length > tailCount) {
                 tailLines.shift();
             }
         }
         if (allLines !== undefined) {
-            allLines.push(line);
+            allLines.push(previewLine);
             if (allLines.length > lineBudget) {
                 allLines = undefined;
             }
@@ -450,6 +504,74 @@ function collapsedPreviewLinesFromText(
             ...tailLines,
         ],
     };
+}
+
+function normalizeOutputText(text: string): string {
+    return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function detachedPreviewLine(line: string, maxBytes: number): string {
+    const suffixBytes = Buffer.byteLength(UTF8_TRUNCATION_SUFFIX, "utf8");
+    if (Buffer.byteLength(line, "utf8") <= maxBytes) {
+        return detachString(line);
+    }
+
+    const budget = Math.max(0, maxBytes - suffixBytes);
+    return detachString(`${truncateUtf8(line, budget)}${UTF8_TRUNCATION_SUFFIX}`);
+}
+
+function truncateUtf8(text: string, maxBytes: number): string {
+    let bytes = 0;
+    let endIndex = 0;
+    for (const char of text) {
+        const charBytes = Buffer.byteLength(char, "utf8");
+        if (bytes + charBytes > maxBytes) {
+            break;
+        }
+        bytes += charBytes;
+        endIndex += char.length;
+    }
+    return text.slice(0, endIndex);
+}
+
+function detachString(text: string): string {
+    return Buffer.from(text, "utf8").toString("utf8");
+}
+
+function shouldReportRetainedOutput(): boolean {
+    const value = process.env[RETAINED_OUTPUT_LOG_ENV]?.trim().toLowerCase();
+    return value === "1" || value === "true" || value === "yes";
+}
+
+function retainedOutputBytes(retained: RetainedOutput): number {
+    if (retained.kind === "expanded") {
+        return Buffer.byteLength(retained.text, "utf8");
+    }
+    if (retained.preview.isEmpty) {
+        return 0;
+    }
+    return retained.preview.lines.reduce(
+        (total, line) => total + Buffer.byteLength(line, "utf8"),
+        0,
+    );
+}
+
+function reportRetainedOutput(
+    retained: RetainedOutput,
+    input: string | undefined,
+    mode: "headTail" | "head" | "hidden",
+): void {
+    if (!shouldReportRetainedOutput()) {
+        return;
+    }
+    console.warn(
+        `[pi-codex-look] renderCodexOutput retained ${JSON.stringify({
+            expanded: retained.kind === "expanded",
+            mode,
+            inputBytes: Buffer.byteLength(input ?? "", "utf8"),
+            retainedBytes: retainedOutputBytes(retained),
+        })}`,
+    );
 }
 
 function visitPhysicalLines(text: string, visit: (line: string) => void): void {
@@ -626,55 +748,62 @@ export function renderCodexOutput(
     const prefixFirst = options.prefixFirst ?? dim(theme, "  └ ");
     const prefixRest = options.prefixRest ?? "    ";
     const dimContent = options.dimContent ?? true;
+    const omittedHint = options.omittedHint ?? toolExpandHint();
+    const noOutputLabel = options.noOutputLabel;
+    const syntax = options.syntax;
+
+    if (!options.expanded && mode === "hidden") {
+        return emptyComponent();
+    }
+
+    const retained: RetainedOutput = options.expanded
+        ? { kind: "expanded", text: normalizeOutputText(text ?? "") }
+        : {
+              kind: "collapsed",
+              preview: collapsedPreviewLinesFromText(
+                  text ?? "",
+                  maxPreviewLines,
+                  mode,
+                  omittedHint,
+              ),
+          };
+    reportRetainedOutput(retained, text, mode);
 
     return makeComponent((width) => {
-        if (!options.expanded && mode === "hidden") {
-            return [];
-        }
-
-        const omittedHint = options.omittedHint ?? toolExpandHint();
-        const preview = options.expanded
-            ? undefined
-            : collapsedPreviewLinesFromText(text ?? "", maxPreviewLines, mode, omittedHint);
-        const normalizedText =
-            preview === undefined
-                ? (text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-                : undefined;
         const rawLines =
-            preview?.isEmpty === true
-                ? [""]
-                : preview === undefined
-                  ? trimEdgeBlankLines((normalizedText ?? "").split("\n"))
-                  : preview.lines;
+            retained.kind === "expanded"
+                ? trimEdgeBlankLines(retained.text.split("\n"))
+                : retained.preview.isEmpty
+                  ? [""]
+                  : retained.preview.lines;
 
         if (rawLines.length === 1 && rawLines[0] === "") {
-            if (options.noOutputLabel === null) {
+            if (noOutputLabel === null) {
                 return [];
             }
-            const label = options.noOutputLabel ?? "(no output)";
+            const label = noOutputLabel ?? "(no output)";
             return [truncateToWidth(`${prefixFirst}${muted(theme, label)}`, width, "")];
         }
 
         const visible =
-            preview === undefined
-                ? previewLines(rawLines, options.expanded, maxPreviewLines, mode, omittedHint)
+            retained.kind === "expanded"
+                ? previewLines(rawLines, true, maxPreviewLines, mode, omittedHint)
                 : [...rawLines];
         const displayLines =
-            options.syntax === undefined
+            syntax === undefined
                 ? visible
-                : options.expanded
+                : retained.kind === "expanded"
                   ? previewLines(
-                        trimEdgeBlankLines(
-                            highlightCodeOutput(normalizedText ?? "", options.syntax),
-                        ),
+                        trimEdgeBlankLines(highlightCodeOutput(retained.text, syntax)),
                         true,
                         maxPreviewLines,
                         mode,
                         omittedHint,
                     )
-                  : highlightPreviewLines(visible, options.syntax);
+                  : highlightPreviewLines(visible, syntax);
         const rendered: string[] = [];
-        const rowBudget = options.expanded ? undefined : Math.max(1, Math.floor(maxPreviewLines));
+        const rowBudget =
+            retained.kind === "expanded" ? undefined : Math.max(1, Math.floor(maxPreviewLines));
 
         for (const [index, line] of displayLines.entries()) {
             const prefix = index === 0 ? prefixFirst : prefixRest;
@@ -1381,6 +1510,34 @@ function scriptPreviewForRender(invocation: ScriptInvocation, expanded: boolean)
     return collapsedScriptPreview(invocation);
 }
 
+function retainedScriptInvocation(
+    invocation: ScriptInvocation,
+    expanded: boolean,
+): ScriptInvocation {
+    if (expanded) {
+        return invocation;
+    }
+
+    return {
+        label: invocation.label,
+        language: invocation.language,
+        code: detachedScriptPreviewCode(collapsedScriptPreview(invocation).code),
+    };
+}
+
+function detachedScriptPreviewCode(code: string): string {
+    if (Buffer.byteLength(code, "utf8") <= MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES) {
+        return detachString(code);
+    }
+
+    const suffix = "\n… script preview truncated";
+    const budget = Math.max(
+        0,
+        MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES - Buffer.byteLength(suffix, "utf8"),
+    );
+    return detachString(`${truncateUtf8(code, budget)}${suffix}`);
+}
+
 function wrapScriptLine(
     theme: CodexRenderTheme,
     line: string,
@@ -1426,17 +1583,22 @@ export function renderScriptCall(
         readonly headerLayout?: ScriptPreviewHeaderLayout;
     },
 ): Component {
+    const expanded = options.expanded;
+    const retained = retainedScriptInvocation(invocation, expanded);
+    const state = options.state;
+    const maxCodePreviewLines = options.maxCodePreviewLines ?? 8;
+    const omittedHint = options.omittedHint ?? "truncated";
+    const headerLayoutOption = options.headerLayout ?? "auto";
+
     return makeComponent((width) => {
-        const header = renderScriptHeader(theme, options.state, invocation.label);
-        const maxCodePreviewLines = options.maxCodePreviewLines ?? 8;
-        const preview = scriptPreviewForRender(invocation, options.expanded);
+        const header = renderScriptHeader(theme, state, retained.label);
+        const preview = scriptPreviewForRender(retained, expanded);
 
         if (preview.code.length === 0) {
             return wrapPrefixedLine("", width, header, "  ");
         }
 
-        const omittedHint = options.omittedHint ?? "truncated";
-        const collapsedPreview = options.expanded
+        const collapsedPreview = expanded
             ? undefined
             : collapsedPreviewLinesFromText(preview.code, maxCodePreviewLines, "head", omittedHint);
         const rawLines =
@@ -1447,13 +1609,13 @@ export function renderScriptCall(
                   : collapsedPreview.lines;
         const visible =
             collapsedPreview === undefined
-                ? previewLines(rawLines, options.expanded, maxCodePreviewLines, "head", omittedHint)
+                ? previewLines(rawLines, expanded, maxCodePreviewLines, "head", omittedHint)
                 : [...rawLines];
-        const highlighted = highlightScriptPreviewLines(visible, invocation.language);
+        const highlighted = highlightScriptPreviewLines(visible, retained.language);
         const rendered: string[] = [];
         const headerLayout = resolveScriptHeaderLayout(
-            options.headerLayout ?? "auto",
-            invocation,
+            headerLayoutOption,
+            retained,
             header,
             highlighted,
             width,
