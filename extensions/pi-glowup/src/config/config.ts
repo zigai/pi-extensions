@@ -1,15 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
+import type TypeboxSchema from "typebox/schema";
 import type { ScriptPreviewHeaderLayout } from "../rendering/core.ts";
 import {
     parseScriptFormatterCommandsValue,
     type ScriptFormatterCommands,
 } from "../script-preview/formatters.ts";
 import { parseScriptPreviewHeaderLayout } from "../script-preview/settings.ts";
-import Schema from "typebox/schema";
+
+// Pi's TypeScript loader can misresolve TypeBox subpath ESM imports as
+// `typebox/build/index.mjs/schema`; Node's require resolver honors package exports.
+const Schema = loadTypeboxSchema();
 
 export type CodexLookConfig = {
     readonly preserveTools: readonly string[];
@@ -223,6 +228,12 @@ const CodexLookConfigJsonSchema = Type.Object(
 );
 
 type CodexLookConfigInput = Static<typeof CodexLookConfigSchema>;
+
+function loadTypeboxSchema(): typeof TypeboxSchema {
+    const require = createRequire(import.meta.url);
+    const schemaModule = require("typebox/schema") as { readonly default: typeof TypeboxSchema };
+    return schemaModule.default;
+}
 
 export function getCodexLookGlobalConfigPath(agentDir: string = getAgentDir()): string {
     return join(getCodexLookGlobalConfigDirectory(agentDir), CODEX_LOOK_CONFIG_BASENAME);
