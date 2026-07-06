@@ -1551,25 +1551,28 @@ function renderScriptHeader(theme: CodexRenderTheme, state: CodexCallState, labe
     return `${renderBullet(theme, state)} ${actionText(theme, label, { bold: true })}`;
 }
 
+function scriptHasMultiplePhysicalLines(code: string): boolean {
+    const normalized = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    return trimEdgeBlankLines(normalized.split("\n")).length > 1;
+}
+
 function resolveScriptHeaderLayout(
     layout: ScriptPreviewHeaderLayout,
     invocation: ScriptInvocation,
-    header: string,
     codeLines: ReadonlyArray<string>,
-    width: number,
 ): Exclude<ScriptPreviewHeaderLayout, "auto"> {
     if (layout !== "auto") {
         return layout;
     }
-    if (invocation.language === "bash") {
-        return "inline";
+    if (scriptHasMultiplePhysicalLines(invocation.code)) {
+        return "block";
     }
 
     const firstCodeLine = codeLines[0];
-    if (firstCodeLine === undefined || codeLines.length > 2) {
+    if (firstCodeLine === undefined) {
         return "block";
     }
-    return visibleWidth(`${header} ${firstCodeLine}`) <= width ? "inline" : "block";
+    return "inline";
 }
 
 export function renderScriptCall(
@@ -1613,13 +1616,7 @@ export function renderScriptCall(
                 : [...rawLines];
         const highlighted = highlightScriptPreviewLines(visible, retained.language);
         const rendered: string[] = [];
-        const headerLayout = resolveScriptHeaderLayout(
-            headerLayoutOption,
-            retained,
-            header,
-            highlighted,
-            width,
-        );
+        const headerLayout = resolveScriptHeaderLayout(headerLayoutOption, retained, highlighted);
 
         if (headerLayout === "block") {
             rendered.push(...wrapPrefixedLine("", width, header, "  "));

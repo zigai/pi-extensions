@@ -486,20 +486,39 @@ describe("Codex rendering helpers", () => {
         expect(text).not.toContain("<<'PY'");
     });
 
-    it("renders script previews inline by default when the first line fits", () => {
+    it("renders single-line script previews inline by default", () => {
         const component = renderScriptCall(
             plainTheme,
-            { label: "Python", language: "python", code: "print('hi')\nprint('bye')" },
+            { label: "Python", language: "python", code: "print('hi')" },
             { state: "success", expanded: false },
         );
 
         const lines = component.render(100);
 
         expect(lines[0]).toContain("• Python print('hi')");
-        expect(lines[1]).toContain("  │ print('bye')");
+        expect(lines.length).toBe(1);
     });
 
-    it("renders non-bash script previews with block headers when the first line does not fit", () => {
+    it("renders multiline script previews with block headers by default", () => {
+        const scripts = [
+            { label: "Bash", language: "bash", code: "sleep 300\necho done" },
+            { label: "Python", language: "python", code: "print('hi')\nprint('bye')" },
+        ];
+
+        for (const script of scripts) {
+            const component = renderScriptCall(plainTheme, script, {
+                state: "success",
+                expanded: false,
+            });
+
+            const lines = component.render(100);
+
+            expect(lines[0]).toBe(`• ${script.label}`);
+            expect(lines[1]).toContain(`  │ ${script.code.split("\n")[0]}`);
+        }
+    });
+
+    it("renders non-bash multiline script previews with block headers", () => {
         const component = renderScriptCall(
             plainTheme,
             {
@@ -541,7 +560,7 @@ describe("Codex rendering helpers", () => {
         expect(lines[1]).not.toContain("• Python p=Path");
     });
 
-    it("keeps bash script previews inline by default", () => {
+    it("keeps single-line bash script previews inline by default", () => {
         const component = renderScriptCall(
             plainTheme,
             {
@@ -557,6 +576,24 @@ describe("Codex rendering helpers", () => {
         expect(lines[0]).toContain("• Bash printf");
         expect(lines[1]).toContain("  │   ");
         expect(lines[1]).not.toContain("↳");
+    });
+
+    it("does not truncate four-line collapsed script previews", () => {
+        const component = renderScriptCall(
+            plainTheme,
+            {
+                label: "Bash",
+                language: "bash",
+                code: ["line 1", "line 2", "line 3", "line 4"].join("\n"),
+            },
+            { state: "success", expanded: false, maxCodePreviewLines: 4 },
+        );
+
+        const rendered = component.render(100).join("\n");
+
+        expect(rendered).toContain("line 1");
+        expect(rendered).toContain("line 4");
+        expect(rendered).not.toContain("…");
     });
 
     it("renders inline script previews when configured", () => {

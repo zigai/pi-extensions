@@ -25,6 +25,7 @@ describe("codex look config", () => {
         });
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
+        expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.syntax).toEqual({
             preloadLanguages: ["markdown", "bash", "python"],
@@ -57,6 +58,7 @@ describe("codex look config", () => {
         expect(config.debugLog.enabled).toBe(true);
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
+        expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.syntax.preloadLanguages).toEqual(["markdown", "bash", "python"]);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
@@ -77,6 +79,7 @@ describe("codex look config", () => {
         expect(config.debugLog.path).toBe("debug.log");
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
+        expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
@@ -105,6 +108,7 @@ describe("codex look config", () => {
         expect(config.debugLog.enabled).toBe(true);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.syntax.preloadLanguages).toEqual(["markdown", "bash", "python"]);
+        expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
         expect(reportedWarnings).toEqual([
             expect.stringContaining(`[pi-codex-look] Failed to read ${configPath}:`),
@@ -164,7 +168,7 @@ describe("codex look config", () => {
                     projectLanguageDetection: { enabled: false },
                 },
                 patches: { workingWidgetSpacing: true },
-                scriptPreview: { headerLayout: "block" },
+                scriptPreview: { headerLayout: "block", maxCodePreviewLines: 12 },
             }),
         );
         writeFileSync(
@@ -177,7 +181,7 @@ describe("codex look config", () => {
                     projectLanguageDetection: { enabled: true },
                 },
                 patches: { workingWidgetSpacing: false, markdownSyntax: false },
-                scriptPreview: { formatters: { python: ["black", "-"] } },
+                scriptPreview: { maxCodePreviewLines: 4, formatters: { python: ["black", "-"] } },
             }),
         );
 
@@ -191,6 +195,7 @@ describe("codex look config", () => {
             memorySampleIntervalMs: 0,
         });
         expect(config.scriptHeaderLayout).toBe("block");
+        expect(config.scriptMaxCodePreviewLines).toBe(12);
         expect(config.scriptFormatters.get("python")).toBeUndefined();
         expect(config.toolLabels.dynamicStatus).toBe(true);
         expect(config.syntax.preloadLanguages).toEqual(["go"]);
@@ -220,7 +225,7 @@ describe("codex look config", () => {
                     projectLanguageDetection: { enabled: false },
                 },
                 patches: { workingWidgetSpacing: true },
-                scriptPreview: { headerLayout: "block" },
+                scriptPreview: { headerLayout: "block", maxCodePreviewLines: 12 },
             }),
         );
         writeFileSync(
@@ -233,7 +238,7 @@ describe("codex look config", () => {
                     projectLanguageDetection: { enabled: true },
                 },
                 patches: { workingWidgetSpacing: false, markdownSyntax: false },
-                scriptPreview: { formatters: { python: ["black", "-"] } },
+                scriptPreview: { maxCodePreviewLines: 4, formatters: { python: ["black", "-"] } },
             }),
         );
 
@@ -247,6 +252,7 @@ describe("codex look config", () => {
             memorySampleIntervalMs: 0,
         });
         expect(config.scriptHeaderLayout).toBe("block");
+        expect(config.scriptMaxCodePreviewLines).toBe(4);
         expect(config.scriptFormatters.get("python")).toEqual(["black", "-"]);
         expect(config.toolLabels.dynamicStatus).toBe(false);
         expect(config.syntax.preloadLanguages).toEqual(["typescript"]);

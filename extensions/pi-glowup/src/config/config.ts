@@ -26,6 +26,7 @@ export type CodexLookConfig = {
     };
     readonly scriptFormatters: ScriptFormatterCommands;
     readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
+    readonly scriptMaxCodePreviewLines: number;
     readonly toolLabels: {
         readonly dynamicStatus: boolean;
     };
@@ -57,6 +58,7 @@ export const CODEX_LOOK_CONFIG_SCHEMA_REFERENCE = `./${CODEX_LOOK_CONFIG_SCHEMA_
 
 const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
 const CODEX_LOOK_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-look/config.schema.json";
+const MIN_SCRIPT_PREVIEW_CODE_LINES = 4;
 
 export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
@@ -85,6 +87,7 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     },
     scriptPreview: {
         headerLayout: "auto",
+        maxCodePreviewLines: 8,
         formatters: {},
     },
 } as const;
@@ -98,6 +101,9 @@ const SchemaReferenceSchema = Type.String();
 const StringArraySchema = Type.Array(Type.String());
 const FormatterCommandSchema = Type.Array(Type.String({ minLength: 1 }), { minItems: 1 });
 const FormatterCommandsSchema = Type.Record(Type.String(), FormatterCommandSchema);
+const ScriptPreviewMaxCodePreviewLinesSchema = Type.Integer({
+    minimum: MIN_SCRIPT_PREVIEW_CODE_LINES,
+});
 const DebugLogMaxBytesSchema = Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]);
 const DebugLogConfigSchema = Type.Object(
     {
@@ -140,6 +146,7 @@ const PatchesConfigSchema = Type.Object(
 const ScriptPreviewConfigSchema = Type.Object(
     {
         headerLayout: Type.Optional(ScriptPreviewHeaderLayoutSchema),
+        maxCodePreviewLines: Type.Optional(ScriptPreviewMaxCodePreviewLinesSchema),
         formatters: Type.Optional(FormatterCommandsSchema),
     },
     { additionalProperties: false },
@@ -215,6 +222,7 @@ const CodexLookConfigJsonSchema = Type.Object(
             Type.Object(
                 {
                     headerLayout: Type.Optional(ScriptPreviewHeaderLayoutSchema),
+                    maxCodePreviewLines: Type.Optional(ScriptPreviewMaxCodePreviewLinesSchema),
                     formatters: Type.Optional(FormatterCommandsSchema),
                 },
                 {
@@ -342,6 +350,9 @@ export function parseCodexLookConfig(
                 : { reportWarning: options.reportWarning }),
         }),
         scriptHeaderLayout: parseScriptPreviewHeaderLayout(scriptPreview.headerLayout),
+        scriptMaxCodePreviewLines:
+            scriptPreview.maxCodePreviewLines ??
+            DEFAULT_CODEX_LOOK_CONFIG_JSON.scriptPreview.maxCodePreviewLines,
         toolLabels: {
             dynamicStatus:
                 toolLabels.dynamicStatus ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.dynamicStatus,

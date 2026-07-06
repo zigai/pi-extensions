@@ -135,6 +135,10 @@
             }
           ]
         },
+        "maxCodePreviewLines": {
+          "type": "integer",
+          "minimum": 4
+        },
         "formatters": {
           "type": "object",
           "patternProperties": {
@@ -152,6 +156,7 @@
       "additionalProperties": false,
       "default": {
         "headerLayout": "auto",
+        "maxCodePreviewLines": 8,
         "formatters": {}
       }
     }

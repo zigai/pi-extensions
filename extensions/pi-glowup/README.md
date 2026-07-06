@@ -27,6 +27,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | `patches.markdownSyntax`                  | `true`                         | Add syntax highlighting to Markdown code fences.                           |
 | `patches.thirdPartyToolRenderers`         | `true`                         | Apply compact renderers to compatible third-party tools.                   |
 | `scriptPreview.headerLayout`              | `"auto"`                       | Choose script header placement: `auto`, `inline`, or `block`.              |
+| `scriptPreview.maxCodePreviewLines`       | `8`                            | Maximum collapsed script preview lines before truncation; minimum is `4`.  |
 | `scriptPreview.formatters`                | `{}`                           | Format script previews by sending code to the configured command on stdin. |
 
 ```json
@@ -57,6 +58,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
   },
   "scriptPreview": {
     "headerLayout": "auto",
+    "maxCodePreviewLines": 8,
     "formatters": {}
   }
 }

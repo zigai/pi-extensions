@@ -176,6 +176,7 @@ function configDiagnostics(config: CodexLookConfig): DebugLogFields {
         },
         scriptPreview: {
             headerLayout: config.scriptHeaderLayout,
+            maxCodePreviewLines: config.scriptMaxCodePreviewLines,
             formatterCount: config.scriptFormatters.size,
         },
         toolLabels: {
@@ -501,6 +502,7 @@ function scriptPreviewHeaderLayout(config: CodexLookConfig): ScriptPreviewHeader
 
 function renderBuiltInToolCall(options: {
     readonly headerLayout: () => ScriptPreviewHeaderLayout;
+    readonly maxCodePreviewLines: () => number;
     readonly dynamicStatusLabels: boolean;
     readonly recordRender: (kind: "call", toolName: BuiltInToolName) => void;
 }): BuiltInToolRendererOptions["renderCall"] {
@@ -532,7 +534,13 @@ function renderBuiltInToolCall(options: {
                     formatLsAction(theme, lsActionArgs(args)),
                 );
             case "bash":
-                return renderBashCall(args, theme, context, options.headerLayout);
+                return renderBashCall(
+                    args,
+                    theme,
+                    context,
+                    options.headerLayout,
+                    options.maxCodePreviewLines,
+                );
             case "write":
                 return renderWriteCall(args, theme, context, options.dynamicStatusLabels);
             case "edit":
@@ -624,6 +632,7 @@ function renderBashCall(
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     headerLayout: () => ScriptPreviewHeaderLayout,
+    maxCodePreviewLines: () => number,
 ) {
     closeExplorationGroup();
     const state = context.isError ? "error" : context.isPartial ? "running" : "success";
@@ -639,7 +648,7 @@ function renderBashCall(
             {
                 state,
                 expanded: false,
-                maxCodePreviewLines: 3,
+                maxCodePreviewLines: maxCodePreviewLines(),
                 headerLayout: headerLayout(),
             },
         );
@@ -665,7 +674,7 @@ function renderBashCall(
     return renderScriptCall(theme, script, {
         state,
         expanded: context.expanded,
-        maxCodePreviewLines: script.language === "bash" ? 3 : 8,
+        maxCodePreviewLines: maxCodePreviewLines(),
         headerLayout: headerLayout(),
     });
 }
@@ -931,6 +940,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         configureBuiltInToolRendererPatch(true, {
             renderCall: renderBuiltInToolCall({
                 headerLayout: () => headerLayout,
+                maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
                 dynamicStatusLabels: config.toolLabels.dynamicStatus,
                 recordRender: recordBuiltInRender,
             }),
