@@ -70,6 +70,13 @@ export class ExplorationGroupStore {
         this.groupsInInsertionOrder.length = 0;
     }
 
+    stats(): { readonly groups: number; readonly toolCalls: number } {
+        return {
+            groups: this.groupsInInsertionOrder.length,
+            toolCalls: this.groupsByToolCallId.size,
+        };
+    }
+
     private createGroup(context: ExplorationRenderContext): ExplorationGroup {
         const group: ExplorationGroup = {
             ownerToolCallId: context.toolCallId,

@@ -43,6 +43,7 @@ import { buildLargeDiffSummaryPayload } from "./pierre-diff.ts";
 import {
     clearQueuedDiffHighlights,
     getPierreDiffPayloadFromDetails,
+    pierreDiffHighlightStats,
     renderPierreDiff,
 } from "./pierre-diff-renderer.ts";
 import {
@@ -50,7 +51,7 @@ import {
     type ThirdPartyToolRenderingOptions,
 } from "./third-party-renderers.ts";
 import { parseScriptPreviewHeaderLayout } from "./script-preview-settings.ts";
-import { createScriptPreviewStore } from "./script-preview-store.ts";
+import { boundedScriptPreview, createScriptPreviewStore } from "./script-preview-store.ts";
 import {
     compatBuiltInToolName,
     configureBuiltInToolRendererPatch,
@@ -82,9 +83,11 @@ const PARTIAL_BASH_COMMAND_PREVIEW_CHARS = 4_000;
 const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
+const MEMORY_LOG_ENV = "PI_CODEX_LOOK_MEMORY_LOG";
 const MUTATION_LABEL_COLUMN_WIDTH = "Writing".length;
 const ACTIVE_MUTATION_ALIGNMENT_KEY = "codexLookActiveMutationAlignment";
 const MUTATION_RESULT_RENDERED_KEY = "codexLookMutationResultRendered";
+const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-codex-look.extension-loaded");
 
 function textOutput(result: TextResult): string | undefined {
     if (!Array.isArray(result.content)) {
@@ -530,12 +533,24 @@ function renderBashCall(
             },
         );
     }
-    const script = scriptPreviews.get(context.toolCallId) ??
-        parseScriptInvocation(command) ?? {
-            label: "Bash",
-            language: "bash",
-            code: command,
-        };
+    const parsedScript = parseScriptInvocation(
+        context.expanded ? command : partialBashCommandPreview(command),
+    );
+    const script =
+        scriptPreviews.get(context.toolCallId) ??
+        (context.expanded
+            ? (parsedScript ?? {
+                  label: "Bash",
+                  language: "bash",
+                  code: command,
+              })
+            : boundedScriptPreview(
+                  parsedScript ?? {
+                      label: "Bash",
+                      language: "bash",
+                      code: partialBashCommandPreview(command),
+                  },
+              ));
     return renderScriptCall(theme, script, {
         state,
         expanded: context.expanded,
@@ -689,30 +704,7 @@ function renderEditResult(
     });
 }
 
-let deferredSyntaxPreload: ReturnType<typeof setTimeout> | undefined;
-
-function scheduleDeferredSyntaxPreload(reportWarning: (message: string) => void): void {
-    if (deferredSyntaxPreload !== undefined) {
-        clearTimeout(deferredSyntaxPreload);
-    }
-
-    deferredSyntaxPreload = setTimeout(() => {
-        deferredSyntaxPreload = undefined;
-        void initializeSyntaxHighlighting().catch((cause: unknown) => {
-            reportWarning(`[pi-codex-look] Deferred syntax preload failed: ${errorMessage(cause)}`);
-        });
-    }, 1_500);
-}
-
-async function startSyntaxPreload(
-    config: CodexLookConfig,
-    reportWarning: (message: string) => void,
-): Promise<void> {
-    if (!config.syntaxPreloadOnStartup) {
-        scheduleDeferredSyntaxPreload(reportWarning);
-        return;
-    }
-
+async function startSyntaxHighlighting(reportWarning: (message: string) => void): Promise<void> {
     try {
         await initializeSyntaxHighlighting();
     } catch (cause: unknown) {
@@ -724,7 +716,61 @@ function errorMessage(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause);
 }
 
+function clearSessionState(): void {
+    editPreviews.clear();
+    scriptPreviews.clear();
+    explorationGroups.clear();
+    clearQueuedDiffHighlights();
+}
+
+function formatMb(bytes: number): string {
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function shouldReportMemory(): boolean {
+    const value = process.env[MEMORY_LOG_ENV]?.trim().toLowerCase();
+    return value === "1" || value === "true" || value === "yes";
+}
+
+function reportMemory(label: string): void {
+    if (!shouldReportMemory()) {
+        return;
+    }
+
+    const memory = process.memoryUsage();
+    const editStats = editPreviews.stats();
+    const scriptStats = scriptPreviews.stats();
+    const explorationStats = explorationGroups.stats();
+    const diffStats = pierreDiffHighlightStats();
+    console.warn(
+        `[pi-codex-look] ${label} ` +
+            `rss=${formatMb(memory.rss)} ` +
+            `heapUsed=${formatMb(memory.heapUsed)} ` +
+            `heapTotal=${formatMb(memory.heapTotal)} ` +
+            `external=${formatMb(memory.external)} ` +
+            `arrayBuffers=${formatMb(memory.arrayBuffers)} ` +
+            `state=${JSON.stringify({
+                editPreviews: editStats.entries,
+                editPreviewBytes: editStats.bytes,
+                scriptPreviews: scriptStats.entries,
+                scriptPreviewBytes: scriptStats.bytes,
+                explorationGroups: explorationStats.groups,
+                explorationToolCalls: explorationStats.toolCalls,
+                queuedDiffHighlights: diffStats.queuedHighlights,
+                activeDiffHighlightTimers: diffStats.activeTimers,
+            })}`,
+    );
+}
+
 export default async function codexLookExtension(pi: ExtensionAPI): Promise<void> {
+    // SAFETY: The symbol property is extension-private metadata on the concrete
+    // ExtensionAPI object. It does not alter Pi's public API or handler semantics.
+    const guardedPi = pi as ExtensionAPI & { [key: symbol]: boolean | undefined };
+    if (guardedPi[EXTENSION_LOADED_KEY] === true) {
+        return;
+    }
+    guardedPi[EXTENSION_LOADED_KEY] = true;
+
     const reportWarning = (message: string): void => console.warn(message);
     let config = readCodexLookConfig({ reportWarning });
     let formatter = scriptBlockFormatter(config, reportWarning);
@@ -806,32 +852,31 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     });
 
     pi.on("session_start", async (_event, ctx) => {
+        reportMemory("session_start");
+        clearSessionState();
+        await disposeSyntaxHighlighting();
         applyConfig(
             readCodexLookConfig(
                 { cwd: ctx.cwd, reportWarning },
                 { includeProjectConfig: ctx.isProjectTrusted() },
             ),
         );
-        await startSyntaxPreload(config, reportWarning);
+        await startSyntaxHighlighting(reportWarning);
     });
 
     pi.on("turn_start", () => {
+        reportMemory("turn_start");
         closeExplorationGroup();
     });
 
     pi.on("turn_end", () => {
         closeExplorationGroup();
+        reportMemory("turn_end");
     });
 
     pi.on("session_shutdown", async () => {
-        if (deferredSyntaxPreload !== undefined) {
-            clearTimeout(deferredSyntaxPreload);
-            deferredSyntaxPreload = undefined;
-        }
-        editPreviews.clear();
-        scriptPreviews.clear();
-        explorationGroups.clear();
-        clearQueuedDiffHighlights();
+        reportMemory("session_shutdown");
+        clearSessionState();
         configureAssistantSeparatorPatch(false);
         configureWorkingWidgetSpacingPatch(false);
         configureAutocompleteCleanupPatch(false);
@@ -839,5 +884,6 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         configureThirdPartyToolRendererPatch(false);
         configureBuiltInToolRendererPatch(false);
         await disposeSyntaxHighlighting();
+        guardedPi[EXTENSION_LOADED_KEY] = false;
     });
 }

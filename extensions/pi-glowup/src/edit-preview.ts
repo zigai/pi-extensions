@@ -121,6 +121,13 @@ export class PreviewStore<TPreview> {
         this.totalBytes = 0;
     }
 
+    stats(): { readonly entries: number; readonly bytes: number } {
+        return {
+            entries: this.previewsByToolCallId.size,
+            bytes: this.totalBytes,
+        };
+    }
+
     private delete(toolCallId: string): void {
         if (!this.previewsByToolCallId.delete(toolCallId)) {
             return;
