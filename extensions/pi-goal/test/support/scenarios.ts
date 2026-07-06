@@ -46,6 +46,9 @@ export async function givenOverflowPausedGoal(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await emitPersistentAssistantError(harness, attempt, "context_length_exceeded");
     await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+    if (harness.snapshot().goal?.status === "active") {
+      await harness.emit("agent_start", { type: "agent_start" });
+    }
   }
 
   const goal = harness.snapshot().goal;

@@ -80,6 +80,7 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     getRecoveryState: () => runtimeState.recoveryState,
     staleQueuedWorkGuard: runtimeState.staleQueuedWorkGuard,
     getCurrentTurnIndex: () => runtimeState.currentTurnIndex,
+    getAgentRunSequence: () => runtimeState.agentRunSequence,
   });
 
   const stateController = createGoalStateController({

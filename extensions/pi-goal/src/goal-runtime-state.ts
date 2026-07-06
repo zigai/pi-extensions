@@ -8,15 +8,20 @@ import {
 export interface GoalRuntimeState {
   accounting: AccountingState;
   recoveryState: GoalRecoveryMachineState;
+  agentRunSequence: number;
   currentTurnIndex: number | null;
   staleQueuedWorkGuard: StaleQueuedWorkGuard;
+  /** A turn_end-triggered proactive compaction is in flight; its abort must not pause the goal. */
+  proactiveCompactionPending: boolean;
 }
 
 export function createGoalRuntimeState(): GoalRuntimeState {
   return {
     accounting: createAccountingState(),
     recoveryState: createGoalRecoveryMachine(),
+    agentRunSequence: 0,
     currentTurnIndex: null,
     staleQueuedWorkGuard: createStaleQueuedWorkGuard(),
+    proactiveCompactionPending: false,
   };
 }

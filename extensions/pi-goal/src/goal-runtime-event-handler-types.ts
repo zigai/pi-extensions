@@ -1,5 +1,6 @@
 import type {
   AgentEndEvent,
+  AgentStartEvent,
   BeforeAgentStartEvent,
   ContextEvent,
   ExtensionAPI,
@@ -33,6 +34,7 @@ export interface GoalRuntimeEventHandlers {
   onSessionStart: ExtensionHandler<SessionStartEvent>;
   onSessionTree: ExtensionHandler<SessionTreeEvent>;
   onBeforeAgentStart: ExtensionHandler<BeforeAgentStartEvent, undefined>;
+  onAgentStart: ExtensionHandler<AgentStartEvent>;
   onMessageStart: ExtensionHandler<MessageStartEvent>;
   onTurnStart: ExtensionHandler<TurnStartEvent>;
   onToolExecutionEnd: ExtensionHandler<ToolExecutionEndEvent>;
@@ -57,11 +59,20 @@ export interface GoalRuntimeContinuationPort {
   clearContinuationState: () => void;
   clearContinuationStateFor: (goalId: string) => void;
   clearContinuationTimer: () => void;
+  clearPostCompactContinuationFallback: () => void;
   clearPassthroughContinuationInput: () => void;
   continuationGoalIdFromRuntimePrompt: (prompt: string) => string | null;
   markContinuationQueued: (goalId: string) => void;
   maybeContinue: (ctx: ExtensionContext) => void;
   maybeContinueAfterCurrentEvent: (ctx: ExtensionContext) => void;
+  maybeContinueAfterPostCompactFallback: (
+    ctx: ExtensionContext,
+    options: {
+      turnIndex: number | null;
+      agentRunSequence: number;
+      prepareContinuation?: () => boolean;
+    },
+  ) => void;
   notePassthroughContinuationInput: (input: string) => void;
 }
 
@@ -105,10 +116,17 @@ export interface GoalRuntimeInputContextHandlerContext extends StaleQueuedWorkEf
 }
 
 export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectContext {
-  runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "staleQueuedWorkGuard">;
+  runtimeState: Pick<
+    GoalRuntimeState,
+    "currentTurnIndex" | "proactiveCompactionPending" | "recoveryState" | "staleQueuedWorkGuard"
+  >;
   stateController: Pick<
     GoalStateController,
-    "beginOverflowRecovery" | "flushGoalPersistence" | "maybeFlushRuntimePersistence" | "pauseForAbort"
+    | "beginOverflowRecovery"
+    | "flushGoalPersistence"
+    | "getGoal"
+    | "maybeFlushRuntimePersistence"
+    | "pauseForAbort"
   >;
   continuation: Pick<GoalRuntimeContinuationPort, "bindPassthroughContinuationInputToTurn">;
   goalAccounting: GoalAccountingPort;
@@ -116,7 +134,10 @@ export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectCont
 }
 
 export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectContext {
-  runtimeState: Pick<GoalRuntimeState, "staleQueuedWorkGuard">;
+  runtimeState: Pick<
+    GoalRuntimeState,
+    "agentRunSequence" | "proactiveCompactionPending" | "staleQueuedWorkGuard"
+  >;
   stateController: Pick<GoalStateController, "beginOverflowRecovery" | "flushGoalPersistence" | "pauseForAbort">;
   continuation: Pick<
     GoalRuntimeContinuationPort,
@@ -131,14 +152,26 @@ export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectCon
 }
 
 export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectContext {
-  runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "recoveryState" | "staleQueuedWorkGuard">;
+  runtimeState: Pick<
+    GoalRuntimeState,
+    | "agentRunSequence"
+    | "currentTurnIndex"
+    | "proactiveCompactionPending"
+    | "recoveryState"
+    | "staleQueuedWorkGuard"
+  >;
   stateController: Pick<
     GoalStateController,
     "applyGoalTransition" | "flushGoalPersistence" | "getGoal" | "reloadFromSession"
   >;
   continuation: Pick<
     GoalRuntimeContinuationPort,
-    "clearContinuationTimer" | "clearPassthroughContinuationInput" | "maybeContinue" | "maybeContinueAfterCurrentEvent"
+    | "clearContinuationTimer"
+    | "clearPostCompactContinuationFallback"
+    | "clearPassthroughContinuationInput"
+    | "maybeContinue"
+    | "maybeContinueAfterCurrentEvent"
+    | "maybeContinueAfterPostCompactFallback"
   >;
   goalAccounting: GoalAccountingPort;
   recoveryRuntime: Pick<RecoveryRuntimePort, "onSessionCompact">;

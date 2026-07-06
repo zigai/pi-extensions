@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.1.34 - 2026-07-06
+
+- Proactively compact mid-run: when a tool-use turn ends during an active goal with estimated context usage within 50k tokens of the context window, trigger host compaction immediately instead of waiting for the run boundary. Closes the gap where long autonomous runs grew past the context window mid-run and died on hard overflow errors (the pi host only checks its compaction threshold between runs). The compaction-triggered abort does not pause the goal; the existing `session_compact` continuation path resumes it, and a failed proactive compaction pauses the goal for user attention.
+- Add a guarded continuation fallback for `session_compact({ willRetry: true })` when the host promises a retry but no `agent_start` arrives, including an SDK runtime smoke test that exercises the real extension runner.
+
+### Validation
+
+- Ran `npm run verify` under pi `0.80.3`: `tsc --noEmit`, 6 platform-smoke checks, and 332 regular tests, all passing.
+- Ran `npm run smoke:platform:all` under pi `0.80.3`; doctor passed and macOS, Ubuntu, and native Windows target suites completed successfully.
+- Ran `npm audit --omit=optional` and `npm publish --dry-run`, both passing.
+
 ## 0.1.33 - 2026-07-01
 
 - Execute the structural audit remediation backlog: consolidate runtime reload/resume boundaries, simplify stale queued-work cleanup paths, centralize platform-smoke build orchestration, and reduce prompt/test source-of-truth drift.

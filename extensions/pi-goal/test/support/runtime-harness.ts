@@ -83,6 +83,7 @@ export function createRuntimeHarness(options: {
   compactBehavior?: "success" | "error" | "unavailable";
   compactCompletion?: "immediate" | "manual";
   contextWindow?: number;
+  contextUsage?: ReturnType<ExtensionContext["getContextUsage"]>;
 } = {}) {
   const entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]> = [];
   const handlers = new Map<string, EventHandler[]>();
@@ -105,6 +106,7 @@ export function createRuntimeHarness(options: {
     pendingMessages: options.pendingMessages ?? false,
     compactBehavior: options.compactBehavior ?? "success",
     compactCompletion: options.compactCompletion ?? "immediate",
+    contextUsage: options.contextUsage,
     hostOverflowRecoveryAttempted: false,
   };
   let commandHandler: ((args: string, ctx: ExtensionCommandContext) => void | Promise<void>) | null = null;
@@ -253,7 +255,7 @@ export function createRuntimeHarness(options: {
     },
     cwd: "/tmp",
     fork: async () => ({ cancelled: false }),
-    getContextUsage: () => undefined,
+    getContextUsage: () => runtime.contextUsage,
     getSystemPrompt: () => "",
     getSystemPromptOptions: () => ({ cwd: ctx.cwd }),
     hasUI: true,
@@ -362,6 +364,9 @@ export function createRuntimeHarness(options: {
     },
     setPendingMessages(pendingMessages: boolean) {
       runtime.pendingMessages = pendingMessages;
+    },
+    setContextUsage(contextUsage: ReturnType<ExtensionContext["getContextUsage"]>) {
+      runtime.contextUsage = contextUsage;
     },
     setContextWindow(contextWindow: number) {
       ctx.model = {

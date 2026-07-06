@@ -1,4 +1,4 @@
-import type { AgentEndEvent, ExtensionHandler } from "@earendil-works/pi-coding-agent";
+import type { AgentEndEvent, AgentStartEvent, ExtensionHandler } from "@earendil-works/pi-coding-agent";
 
 import { assistantTurnTokens, isAbortedAssistantMessage } from "./goal-accounting.js";
 import { isErrorAssistantMessage, type AssistantErrorMessage } from "./recovery.js";
@@ -13,6 +13,10 @@ export function createAgentEventHandlers(deps: GoalRuntimeAgentHandlerContext) {
   const { runtimeState, stateController, continuation, goalAccounting, resetErrorRecovery } = deps;
 
   return {
+    onAgentStart: (async () => {
+      runtimeState.agentRunSequence += 1;
+    }) satisfies ExtensionHandler<AgentStartEvent>,
+
     onAgentEnd: (async (event, ctx) => {
       continuation.clearPassthroughContinuationInput();
       if (runStaleQueuedWorkPlan(runtimeState.staleQueuedWorkGuard.planAgentEnd(event.messages), ctx, deps)) {
@@ -26,6 +30,9 @@ export function createAgentEventHandlers(deps: GoalRuntimeAgentHandlerContext) {
       goalAccounting.accountProgress(ctx, false, abortedTurnTokens, true);
       stateController.flushGoalPersistence("runtime");
       if (abortedMessages.length > 0) {
+        if (runtimeState.proactiveCompactionPending) {
+          return;
+        }
         stateController.pauseForAbort(ctx);
         return;
       }

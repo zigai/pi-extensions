@@ -17,6 +17,10 @@ import {
 } from "./support/runtime-harness.js";
 import { givenOverflowPausedGoal } from "./support/scenarios.js";
 
+function agentStartEvent(): object {
+  return { type: "agent_start" };
+}
+
 test("turn_end provider errors defer recovery to agent_end without hidden continuation or extension compaction", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
@@ -75,10 +79,41 @@ test("host overflow session compaction does not queue extension continuation bef
     assert.equal(harness.sentMessages.length, 0);
 
     await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 0);
+
+    await harness.emit("agent_start", agentStartEvent());
     flushContinuationScheduler();
 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("host overflow session compaction falls back when promised host retry never starts", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    harness.sentMessages.length = 0;
+
+    await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
+    await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 0);
+
+    flushContinuationScheduler();
+
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.status, "active");
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "continuation",
+      goalId: goal?.goalId,
+    });
   } finally {
     mock.timers.reset();
   }
@@ -104,12 +139,7 @@ test("host overflow retry success resumes goal continuation after clearing recov
   await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
   assert.equal(harness.sentMessages.length, 0);
 
-  await harness.emit("before_agent_start", {
-    type: "before_agent_start",
-    prompt: "host retry",
-    systemPrompt: "",
-    systemPromptOptions: {},
-  });
+  await harness.emit("agent_start", agentStartEvent());
   await harness.emit("agent_end", {
     type: "agent_end",
     messages: [assistantMessage("stop", { input: 1, output: 1 })],
@@ -140,6 +170,7 @@ test("first overflow error stays active while host performs compact-and-retry", 
 
   await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
   await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+  await harness.emit("agent_start", agentStartEvent());
 
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
@@ -157,6 +188,9 @@ test("context overflow recovery preserves compaction attempts across host sessio
       `prompt is too long: ${(attempt + 1) * 100_000} tokens > 200000 maximum`,
     );
     await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+    if (harness.snapshot().goal?.status === "active") {
+      await harness.emit("agent_start", agentStartEvent());
+    }
   }
 
   assert.equal(harness.compactCalls.length, 0);
@@ -179,6 +213,7 @@ test("overflow after compaction and intervening transient error pauses with reco
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
 
   await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+  await harness.emit("agent_start", agentStartEvent());
   assert.equal(harness.snapshot().goal?.status, "active");
 
   await emitPersistentAssistantError(harness, 1, "websocket closed");
@@ -355,6 +390,7 @@ test("successful toolUse turns reset context overflow recovery counters", async 
   await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
   assert.equal(harness.compactCalls.length, 0);
   await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+  await harness.emit("agent_start", agentStartEvent());
 
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
   await harness.emit("turn_end", {

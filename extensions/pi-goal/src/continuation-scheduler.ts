@@ -16,6 +16,13 @@ interface ContinuationSchedulerDeps {
   getRecoveryState: () => GoalRecoveryMachineState;
   staleQueuedWorkGuard: StaleQueuedWorkGuard;
   getCurrentTurnIndex: () => number | null;
+  getAgentRunSequence: () => number;
+}
+
+interface PostCompactContinuationOptions {
+  turnIndex: number | null;
+  agentRunSequence: number;
+  prepareContinuation?: () => boolean;
 }
 
 export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
@@ -23,6 +30,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
   let continuationScheduledFor: string | null = null;
   let continuationScheduledDelayMs: number | null = null;
   let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+  let postCompactContinuationTimer: ReturnType<typeof setTimeout> | null = null;
   let passthroughContinuationInput: { text: string; turnIndex: number | null } | null = null;
 
   const clearContinuationTimer = (): void => {
@@ -32,6 +40,14 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     }
     continuationScheduledFor = null;
     continuationScheduledDelayMs = null;
+  };
+
+  const clearPostCompactContinuationFallback = (): void => {
+    if (!postCompactContinuationTimer) {
+      return;
+    }
+    clearTimeout(postCompactContinuationTimer);
+    postCompactContinuationTimer = null;
   };
 
   const clearContinuationState = (): void => {
@@ -173,16 +189,67 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     scheduleContinuationCheck(goal.goalId, ctx, 0);
   };
 
+  const canSchedulePostCompactFallbackFor = (goal: ThreadGoal | null, prepareContinuation?: () => boolean): goal is ThreadGoal => {
+    return Boolean(
+      !deps.staleQueuedWorkGuard.isBlockingContinuation() &&
+        goal &&
+        goal.status === "active" &&
+        continuationQueuedFor !== goal.goalId &&
+        !hasPendingRecoveryAttention() &&
+        (prepareContinuation || !recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase)),
+    );
+  };
+
+  const maybeContinueAfterPostCompactFallback = (
+    ctx: ExtensionContext,
+    options: PostCompactContinuationOptions,
+  ): void => {
+    clearPostCompactContinuationFallback();
+    const goal = deps.getGoal();
+    if (!canSchedulePostCompactFallbackFor(goal, options.prepareContinuation)) {
+      return;
+    }
+
+    const goalId = goal.goalId;
+    const runFallback = (): void => {
+      postCompactContinuationTimer = null;
+      const currentGoal = deps.getGoal();
+      if (!currentGoal || currentGoal.status !== "active" || currentGoal.goalId !== goalId) {
+        return;
+      }
+      if (deps.getCurrentTurnIndex() !== options.turnIndex) {
+        return;
+      }
+      if (deps.getAgentRunSequence() !== options.agentRunSequence) {
+        return;
+      }
+      if (!ctx.isIdle() || ctx.hasPendingMessages()) {
+        postCompactContinuationTimer = setTimeout(runFallback, CONTINUATION_RETRY_MS);
+        postCompactContinuationTimer.unref?.();
+        return;
+      }
+      if (options.prepareContinuation && !options.prepareContinuation()) {
+        return;
+      }
+      maybeContinue(ctx);
+    };
+
+    postCompactContinuationTimer = setTimeout(runFallback, CONTINUATION_RETRY_MS);
+    postCompactContinuationTimer.unref?.();
+  };
+
   return {
     bindPassthroughContinuationInputToTurn,
     clearContinuationState,
     clearContinuationStateFor,
     clearContinuationTimer,
+    clearPostCompactContinuationFallback,
     clearPassthroughContinuationInput,
     continuationGoalIdFromRuntimePrompt,
     markContinuationQueued,
     maybeContinue,
     maybeContinueAfterCurrentEvent,
+    maybeContinueAfterPostCompactFallback,
     notePassthroughContinuationInput,
   };
 }
