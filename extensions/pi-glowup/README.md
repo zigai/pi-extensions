@@ -2,6 +2,11 @@
 
 Compact Codex-style rendering for Pi tool calls and results.
 
+## Contents
+
+- [Codex-look tool rendering](docs/tool-rendering.md)
+- [Script previews](docs/script-previews.md)
+
 ## Configuration
 
 Use global config at `~/.pi/agent/pi-codex-look/config.json`.
@@ -57,25 +62,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 }
 ```
 
-## Script Preview Layout
+## Package Exports
 
-Script previews use adaptive headers by default. `auto` keeps short previews inline:
-
-```text
-• Python print('hi')
-  │ print('bye')
-```
-
-When the first code line does not fit, non-Bash previews move code below the header:
-
-```text
-• Python
-  │ root=Path.home()/'.pi/agent/debug-runs'
-  │ rows=[]
-```
-
-Bash previews stay inline by default. Set `scriptPreview.headerLayout` to `"inline"` or `"block"` to force one layout globally.
-
-## Script Preview Formatters
-
-Script previews are not formatted by default. Configure `scriptPreview.formatters` to map rendered language ids to formatter command argv arrays. Formatter failures, missing commands, invalid JSON, and empty output are ignored; the original script preview is rendered unchanged.
+- Extension entrypoint: `pi-codex-look`
+- Passive rendering protocol types: `pi-codex-look/protocol`
