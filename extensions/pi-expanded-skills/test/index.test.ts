@@ -2,16 +2,18 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
-import type {
-    BeforeAgentStartEvent,
-    ExtensionAPI,
-    ExtensionContext,
-    InputEvent,
-    InputEventResult,
-    SlashCommandInfo,
-    ToolResultEvent,
+import {
+    formatSkillsForPrompt,
+    type BeforeProviderRequestEvent,
+    type BeforeAgentStartEvent,
+    type ContextEvent,
+    type ExtensionAPI,
+    type ExtensionContext,
+    type InputEvent,
+    type InputEventResult,
+    type SlashCommandInfo,
+    type ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
-import { formatSkillsForPrompt } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
 import extension, {
@@ -23,27 +25,49 @@ import extension, {
 } from "../src/index.ts";
 
 type RegisteredHandlers = {
+    readonly agentStart: () => Promise<void>;
+    readonly beforeProviderRequest: (
+        event: BeforeProviderRequestEvent,
+        ctx?: ExtensionContext,
+    ) => Promise<unknown>;
     readonly beforeAgentStart: (
         event: BeforeAgentStartEvent,
     ) => Promise<{ readonly systemPrompt?: string } | void>;
+    readonly context: (
+        event: ContextEvent,
+        ctx?: ExtensionContext,
+    ) => Promise<{ readonly messages?: ContextEvent["messages"] } | void>;
     readonly input: (event: InputEvent, ctx: ExtensionContext) => Promise<InputEventResult | void>;
     readonly toolResult: (
         event: ToolResultEvent,
-    ) => Promise<{ readonly content?: ToolResultEvent["content"] } | void>;
+        ctx?: ExtensionContext,
+    ) => Promise<{
+        readonly content?: ToolResultEvent["content"];
+        readonly details?: unknown;
+        readonly isError?: boolean;
+    } | void>;
 };
 
 describe("extension entrypoint", () => {
     it("exports generated package metadata", () => {
-        expect(packageName).toBe("pi-expanded-skills");
-        expect(extensionName).toBe("Pi Expanded Skills");
+        expect(packageName).toBe("pi-enhanced-skills");
+        expect(extensionName).toBe("Pi Enhanced Skills");
         expect(typeof extension).toBe("function");
     });
 
-    it("registers expanded skill hooks", () => {
+    it("registers enhanced skill hooks", () => {
         const { pi, events } = createExtensionHarness([]);
 
         expect(extension(pi)).toBeUndefined();
-        expect(events).toEqual(["before_agent_start", "input", "tool_result", "session_start"]);
+        expect(events).toEqual([
+            "before_agent_start",
+            "input",
+            "tool_result",
+            "agent_start",
+            "context",
+            "before_provider_request",
+            "session_start",
+        ]);
     });
 });
 
@@ -131,10 +155,11 @@ describe("dynamic command injection", () => {
             frontmatter: "name: dynamic\ndescription: Dynamic context skill",
             body: "Current branch: !`git branch --show-current`",
         });
+        const { store } = makeRecordingSkillUsageStore();
         const { pi, handlers } = createExtensionHarness([makeSkillCommand("dynamic", skillPath)], {
             stdout: "main\n",
         });
-        extension(pi);
+        extension(pi, { skillUsageStore: store });
 
         const result = await handlers.toolResult({
             type: "tool_result",
@@ -147,6 +172,220 @@ describe("dynamic command injection", () => {
         });
 
         expect(result?.content).toEqual([{ type: "text", text: "Current branch: main" }]);
+    });
+});
+
+describe("skill usage tracking", () => {
+    it("uses a central state path instead of the extension config folder", () => {
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = "/tmp/pi-agent-test";
+        try {
+            expect(internals.defaultSkillUsageLogPath()).toBe(
+                "/tmp/pi-agent-test/state/pi-enhanced-skills/skill-usage.jsonl",
+            );
+        } finally {
+            if (previousAgentDir === undefined) {
+                delete process.env.PI_CODING_AGENT_DIR;
+            } else {
+                process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+            }
+        }
+    });
+
+    it("persists successful agent reads of SKILL.md with session and model metadata", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: tracked\ndescription: Tracked skill",
+            body: "# Tracked",
+        });
+        const { records, store } = makeRecordingSkillUsageStore();
+        const { pi, handlers } = createExtensionHarness([makeSkillCommand("tracked", skillPath)]);
+        extension(pi, { skillUsageStore: store });
+
+        await handlers.toolResult(
+            {
+                type: "tool_result",
+                toolCallId: "read-1",
+                toolName: "read",
+                input: { path: skillPath },
+                content: [{ type: "text", text: "# Tracked" }],
+                isError: false,
+                details: undefined,
+            },
+            makeContext(vi.fn(), {
+                cwd: dirname(skillPath),
+                sessionId: "session-123",
+                sessionFile: "/tmp/session-123.jsonl",
+                model: { provider: "anthropic", id: "claude-sonnet" },
+            }),
+        );
+
+        expect(records).toEqual([
+            expect.objectContaining({
+                schemaVersion: 1,
+                timestamp: expect.any(String),
+                event: "agent_read",
+                sessionId: "session-123",
+                sessionFile: "/tmp/session-123.jsonl",
+                model: { provider: "anthropic", id: "claude-sonnet" },
+                projectFolder: dirname(skillPath),
+                skillName: "tracked",
+                skillPath,
+                skillBaseDir: dirname(skillPath),
+                filePath: skillPath,
+                relativePath: "SKILL.md",
+                fileRole: "main",
+                commandSource: {
+                    source: "local",
+                    scope: "user",
+                    origin: "top-level",
+                },
+                read: { toolCallId: "read-1" },
+            }),
+        ]);
+    });
+
+    it("persists referenced skill subfile reads with read window metadata", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: referenced\ndescription: References a topic",
+            body: "Read [topic](TOPIC.md) for details.",
+        });
+        const topicPath = join(dirname(skillPath), "TOPIC.md");
+        await writeFile(topicPath, "# Topic\n", "utf-8");
+        const { records, store } = makeRecordingSkillUsageStore();
+        const { pi, handlers } = createExtensionHarness([
+            makeSkillCommand("referenced", skillPath),
+        ]);
+        extension(pi, { skillUsageStore: store });
+
+        await handlers.toolResult(
+            {
+                type: "tool_result",
+                toolCallId: "read-topic",
+                toolName: "read",
+                input: { path: "TOPIC.md", offset: 2, limit: 5 },
+                content: [{ type: "text", text: "Topic" }],
+                isError: false,
+                details: undefined,
+            },
+            makeContext(vi.fn(), { cwd: dirname(skillPath) }),
+        );
+
+        expect(records).toEqual([
+            expect.objectContaining({
+                event: "agent_read",
+                skillName: "referenced",
+                filePath: topicPath,
+                relativePath: "TOPIC.md",
+                fileRole: "referenced",
+                read: { toolCallId: "read-topic", offset: 2, limit: 5 },
+            }),
+        ]);
+    });
+
+    it("persists direct user skill invocations without storing raw arguments", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: visible\ndescription: Visible skill",
+            body: "# Visible",
+        });
+        const { records, store } = makeRecordingSkillUsageStore();
+        const { pi, handlers } = createExtensionHarness([makeSkillCommand("visible", skillPath)]);
+        extension(pi, { skillUsageStore: store });
+
+        await handlers.input(
+            {
+                type: "input",
+                text: "/skill:visible secret request text",
+                source: "interactive",
+            },
+            makeContext(vi.fn(), { cwd: dirname(skillPath), sessionId: "session-user" }),
+        );
+
+        expect(records).toEqual([expect.not.objectContaining({ args: expect.any(String) })]);
+        expect(records[0]).toEqual(
+            expect.objectContaining({
+                event: "user_invocation",
+                sessionId: "session-user",
+                skillName: "visible",
+                filePath: skillPath,
+                fileRole: "main",
+                invocation: { inputSource: "interactive", hasArguments: true },
+            }),
+        );
+    });
+
+    it("persists skill mentions expanded into context blocks", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: python\ndescription: Python skill",
+            body: "Use Python carefully.",
+        });
+        const { records, store } = makeRecordingSkillUsageStore();
+        const { pi, handlers } = createExtensionHarness([makeSkillCommand("python", skillPath)]);
+        extension(pi, { skillUsageStore: store });
+
+        await handlers.context(
+            {
+                type: "context",
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: `<skill name="python" location="${skillPath}">\nUse Python carefully.\n</skill>\n\nPlease use python`,
+                            },
+                        ],
+                        timestamp: 1,
+                    },
+                ],
+            } as ContextEvent,
+            makeContext(vi.fn(), { cwd: dirname(skillPath), sessionId: "session-mention" }),
+        );
+
+        expect(records).toEqual([
+            expect.objectContaining({
+                event: "mention_expansion",
+                sessionId: "session-mention",
+                skillName: "python",
+                filePath: skillPath,
+                fileRole: "main",
+                mention: { source: "context" },
+            }),
+        ]);
+    });
+
+    it("persists skill mentions from provider payload when context hook order misses them", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: review\ndescription: Review skill",
+            body: "Review carefully.",
+        });
+        const { records, store } = makeRecordingSkillUsageStore();
+        const { pi, handlers } = createExtensionHarness([makeSkillCommand("review", skillPath)]);
+        extension(pi, { skillUsageStore: store });
+
+        await handlers.beforeProviderRequest(
+            {
+                type: "before_provider_request",
+                payload: {
+                    messages: [
+                        {
+                            role: "user",
+                            content: `<skill name="review" location="${skillPath}">\nReview carefully.\n</skill>\n\nPlease use review`,
+                        },
+                    ],
+                },
+            },
+            makeContext(vi.fn(), { cwd: dirname(skillPath), sessionId: "session-provider" }),
+        );
+
+        expect(records).toEqual([
+            expect.objectContaining({
+                event: "mention_expansion",
+                sessionId: "session-provider",
+                skillName: "review",
+                filePath: skillPath,
+                mention: { source: "provider_payload" },
+            }),
+        ]);
     });
 });
 
@@ -179,10 +418,11 @@ describe("user invocable metadata", () => {
             frontmatter: "name: visible\ndescription: Visible skill",
             body: "Data: !`printf ok`",
         });
+        const { store } = makeRecordingSkillUsageStore();
         const { pi, handlers } = createExtensionHarness([makeSkillCommand("visible", skillPath)], {
             stdout: "ok\n",
         });
-        extension(pi);
+        extension(pi, { skillUsageStore: store });
 
         const result = await handlers.input(
             {
@@ -229,7 +469,7 @@ async function writeSkill(options: {
     readonly body: string;
     readonly openAiPolicy?: boolean;
 }): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), "pi-expanded-skills-"));
+    const dir = await mkdtemp(join(tmpdir(), "pi-enhanced-skills-"));
     const skillPath = join(dir, "SKILL.md");
     await writeFile(skillPath, `---\n${options.frontmatter}\n---\n\n${options.body}`, "utf-8");
     if (options.openAiPolicy !== undefined) {
@@ -252,7 +492,11 @@ function createExtensionHarness(
         readonly code?: number;
         readonly killed?: boolean;
     },
-): { readonly pi: ExtensionAPI; readonly events: string[]; readonly handlers: RegisteredHandlers } {
+): {
+    readonly pi: ExtensionAPI;
+    readonly events: string[];
+    readonly handlers: RegisteredHandlers;
+} {
     const events: string[] = [];
     const capturedHandlers = new Map<string, unknown>();
     const pi = {
@@ -274,21 +518,37 @@ function createExtensionHarness(
         pi: pi as unknown as ExtensionAPI,
         events,
         handlers: {
+            agentStart: async () => {
+                const handler = capturedHandlers.get(
+                    "agent_start",
+                ) as RegisteredHandlers["agentStart"];
+                return handler();
+            },
+            beforeProviderRequest: async (event, ctx = makeContext(vi.fn())) => {
+                const handler = capturedHandlers.get(
+                    "before_provider_request",
+                ) as RegisteredHandlers["beforeProviderRequest"];
+                return handler(event, ctx);
+            },
             beforeAgentStart: async (event) => {
                 const handler = capturedHandlers.get(
                     "before_agent_start",
                 ) as RegisteredHandlers["beforeAgentStart"];
                 return handler(event);
             },
+            context: async (event, ctx = makeContext(vi.fn())) => {
+                const handler = capturedHandlers.get("context") as RegisteredHandlers["context"];
+                return handler(event, ctx);
+            },
             input: async (event, ctx) => {
                 const handler = capturedHandlers.get("input") as RegisteredHandlers["input"];
                 return handler(event, ctx);
             },
-            toolResult: async (event) => {
+            toolResult: async (event, ctx = makeContext(vi.fn())) => {
                 const handler = capturedHandlers.get(
                     "tool_result",
                 ) as RegisteredHandlers["toolResult"];
-                return handler(event);
+                return handler(event, ctx);
             },
         },
     };
@@ -313,12 +573,44 @@ function makeSourceInfo(skillPath: string): SlashCommandInfo["sourceInfo"] {
     };
 }
 
-function makeContext(notify: (message: string, type: "warning") => void): ExtensionContext {
+function makeRecordingSkillUsageStore(): {
+    readonly records: unknown[];
+    readonly store: { readonly record: (record: unknown) => Promise<void> };
+} {
+    const records: unknown[] = [];
+    return {
+        records,
+        store: {
+            record: async (record) => {
+                records.push(record);
+            },
+        },
+    };
+}
+
+function makeContext(
+    notify: (message: string, type?: "info" | "warning" | "error") => void,
+    options?: {
+        readonly cwd?: string;
+        readonly sessionId?: string;
+        readonly sessionFile?: string;
+        readonly model?: { readonly provider: string; readonly id: string };
+    },
+): ExtensionContext {
+    const cwd = options?.cwd ?? process.cwd();
+    const sessionId = options?.sessionId ?? "test-session";
+    const sessionFile = options?.sessionFile ?? join(cwd, "test-session.jsonl");
     return {
         hasUI: true,
+        mode: "tui",
         ui: {
             notify,
         },
-        cwd: process.cwd(),
+        cwd,
+        sessionManager: {
+            getSessionId: () => sessionId,
+            getSessionFile: () => sessionFile,
+        },
+        model: options?.model ?? { provider: "test-provider", id: "test-model" },
     } as ExtensionContext;
 }

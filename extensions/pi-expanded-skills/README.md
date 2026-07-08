@@ -60,6 +60,12 @@ git status --short
 
 Command output is bounded and command execution times out after 10 seconds.
 
+### Skill Usage Tracking
+
+Skill usage is appended to `<Pi agent dir>/state/pi-enhanced-skills/skill-usage.jsonl` as JSONL.
+Each record includes the session id, current model, project folder, skill name, skill path, file path, and whether the event came from a direct `/skill:` invocation, a mention-expanded skill block, or an agent `read` of `SKILL.md` or a file under the skill directory, with `SKILL.md` references marked separately.
+Raw skill contents and user arguments are not stored.
+
 ## Development
 
 ```sh
