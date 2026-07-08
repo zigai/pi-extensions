@@ -1,24 +1,24 @@
 {
-  "name": "pi-expanded-skills",
+  "name": "pi-enhanced-skills",
   "version": "0.1.0",
   "private": true,
-  "description": "Expanded Pi skills",
+  "description": "Enhanced Pi skills",
   "keywords": [
-    "expanded-skills",
+    "enhanced-skills",
     "pi",
     "pi-coding-agent",
     "pi-extension",
     "pi-package"
   ],
-  "homepage": "https://github.com/zigai/pi-expanded-skills#readme",
+  "homepage": "https://github.com/zigai/pi-enhanced-skills#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-expanded-skills/issues"
+    "url": "https://github.com/zigai/pi-enhanced-skills/issues"
   },
   "license": "UNLICENSED",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-expanded-skills.git"
+    "url": "git+https://github.com/zigai/pi-enhanced-skills.git"
   },
   "files": [
     "src",
