@@ -13,6 +13,7 @@ import {
 import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
 import {
     createThirdPartyToolRenderer,
+    hasThirdPartyToolRendererPlugin,
     hasCodexLookRenderingAdapter,
     shouldPreserveThirdPartyToolRenderer,
     type ThirdPartyToolRenderer,
@@ -203,7 +204,7 @@ function shouldUseThirdPartyRenderer(
     hasOriginalRendererDefinition: boolean,
 ): boolean {
     const toolName = getNonEmptyStringField(instance, "toolName");
-    if (toolName === undefined || hasBuiltInToolDefinition(instance)) {
+    if (toolName === undefined) {
         return false;
     }
 
@@ -222,7 +223,11 @@ function shouldUseThirdPartyRenderer(
         return true;
     }
 
-    return !hasOriginalRendererDefinition;
+    if (hasThirdPartyToolRendererPlugin(toolName, options)) {
+        return true;
+    }
+
+    return !hasBuiltInToolDefinition(instance) && !hasOriginalRendererDefinition;
 }
 
 function rendererForInstance(

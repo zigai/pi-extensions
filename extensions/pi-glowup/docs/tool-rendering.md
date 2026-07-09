@@ -17,8 +17,9 @@ For a third-party tool, rendering is selected in this order:
 
 1. If the tool is preserved by config or by `codexLookRendering: "preserve"`, use its original Pi rendering.
 2. If the tool defines a `codexLookRendering` adapter, use that adapter.
-3. If the tool already has its own Pi renderer, keep that renderer.
-4. Otherwise, use the generic compatibility renderer.
+3. If `pi-codex-look` has an explicit built-in renderer for this tool family, use it.
+4. If the tool already has its own Pi renderer, keep that renderer.
+5. Otherwise, use the generic compatibility renderer.
 
 This means existing rich tool renderers are preserved by default. A tool author only needs `codexLookRendering` when they want a specific Codex-look presentation.
 

@@ -310,6 +310,61 @@ describe("tool execution patches", () => {
         ).toEqual(["existing renderer"]);
     });
 
+    it("uses explicit Codex-look plugins over native renderers", () => {
+        const prototype = createPrototype();
+        prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
+            return true;
+        };
+        installThirdPartyToolRendererPatch(undefined, prototype);
+
+        const instance: FakeToolExecutionInstance = {
+            toolName: "apply_patch",
+            toolDefinition: {},
+        };
+        const patch = `*** Begin Patch
+*** Update File: README.md
+@@
+-old
++new
+*** End Patch`;
+
+        expect(prototype.getRenderShell.call(instance)).toBe("self");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
+        expect(
+            prototype.getCallRenderer
+                .call(instance)?.({ patch }, plainTheme, renderContext)
+                .render(100)
+                .join("\n"),
+        ).toContain("Edited README.md (+1 -1)");
+    });
+
+    it("uses explicit Codex-look plugins over native built-in renderers", () => {
+        const prototype = createPrototype();
+        prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
+            return true;
+        };
+        installThirdPartyToolRendererPatch(undefined, prototype);
+
+        const instance: FakeToolExecutionInstance = {
+            toolName: "apply_patch",
+            builtInToolDefinition: {},
+            toolDefinition: {},
+        };
+        const patch = `*** Begin Patch
+*** Add File: src/new.ts
++export const value = 1;
+*** End Patch`;
+
+        expect(prototype.getRenderShell.call(instance)).toBe("self");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
+        expect(
+            prototype.getCallRenderer
+                .call(instance)?.({ patch }, plainTheme, renderContext)
+                .render(100)
+                .join("\n"),
+        ).toContain("Added src/new.ts (+1 -0)");
+    });
+
     it("uses passive Codex-look adapters over native third-party renderers", () => {
         const prototype = createPrototype();
         prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {

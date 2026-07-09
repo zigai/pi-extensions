@@ -78,6 +78,20 @@ const DEFAULT_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
     },
 ];
 
+function rendererPlugins(
+    options: ThirdPartyToolRenderingOptions | undefined,
+): ReadonlyArray<ThirdPartyToolRendererPlugin> {
+    return [...(options?.renderers ?? []), ...DEFAULT_RENDERER_PLUGINS];
+}
+
+/** Returns whether Codex-look has an explicit renderer for this tool family. */
+export function hasThirdPartyToolRendererPlugin(
+    toolName: string,
+    options?: ThirdPartyToolRenderingOptions,
+): boolean {
+    return rendererPlugins(options).some((candidate) => candidate.matches(toolName));
+}
+
 function matcherMatches(toolName: string, matcher: ToolNameMatcher): boolean {
     if (typeof matcher === "string") {
         return matcher === toolName || matcher === baseToolName(toolName);
@@ -139,7 +153,7 @@ export function createThirdPartyToolRenderer(
     options?: ThirdPartyToolRenderingOptions,
     toolDefinition?: unknown,
 ): ThirdPartyToolRenderer {
-    const plugins = [...(options?.renderers ?? []), ...DEFAULT_RENDERER_PLUGINS];
+    const plugins = rendererPlugins(options);
     const plugin = plugins.find((candidate) => candidate.matches(toolName));
     const fallback = plugin?.createRenderer(toolName) ?? createGenericRenderer(toolName);
     const adapter = codexLookRenderingAdapter(toolDefinition, CODEX_LOOK_RENDERING_PROPERTY);
