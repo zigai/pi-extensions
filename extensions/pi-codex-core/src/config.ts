@@ -12,24 +12,29 @@ import {
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
 
 export type CodexPromptMode = "pi" | "codex";
+export type CodexPersonality = "friendly" | "pragmatic" | "none";
 export type CodexToolScope = "codex" | "all";
 export type CodexApplyPatchMode = "off" | "openai" | "all";
 export type CodexVerbosity = "low" | "medium" | "high";
-export type CodexCompactionReasoning = "current" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type CodexCompactionReasoning = string;
 
 /** Config value that means Codex API requests should use the active Codex model. */
 export const CODEX_CURRENT_MODEL_SELECTION = "current";
 export const CODEX_TOOL_SCOPES: readonly CodexToolScope[] = ["codex", "all"];
 export const CODEX_APPLY_PATCH_MODES: readonly CodexApplyPatchMode[] = ["off", "openai", "all"];
 export const CODEX_PROMPT_MODES: readonly CodexPromptMode[] = ["pi", "codex"];
+export const CODEX_PERSONALITIES: readonly CodexPersonality[] = ["friendly", "pragmatic", "none"];
 export const CODEX_VERBOSITY_LEVELS: readonly CodexVerbosity[] = ["low", "medium", "high"];
 export const CODEX_COMPACTION_REASONING_LEVELS: readonly CodexCompactionReasoning[] = [
     "current",
+    "none",
     "minimal",
     "low",
     "medium",
     "high",
     "xhigh",
+    "max",
+    "ultra",
 ];
 
 export type CodexCoreConfig = {
@@ -45,6 +50,7 @@ export type CodexCoreConfig = {
     };
     readonly prompt: {
         readonly mode: CodexPromptMode;
+        readonly personality: CodexPersonality;
     };
     readonly compaction: {
         readonly enabled: boolean;
@@ -77,19 +83,17 @@ const CodexApplyPatchModeSchema = Type.Union([
     Type.Literal("all"),
 ]);
 const CodexPromptModeSchema = Type.Union([Type.Literal("pi"), Type.Literal("codex")]);
+const CodexPersonalitySchema = Type.Union([
+    Type.Literal("friendly"),
+    Type.Literal("pragmatic"),
+    Type.Literal("none"),
+]);
 const CodexVerbositySchema = Type.Union([
     Type.Literal("low"),
     Type.Literal("medium"),
     Type.Literal("high"),
 ]);
-const CodexCompactionReasoningSchema = Type.Union([
-    Type.Literal("current"),
-    Type.Literal("minimal"),
-    Type.Literal("low"),
-    Type.Literal("medium"),
-    Type.Literal("high"),
-    Type.Literal("xhigh"),
-]);
+const CodexCompactionReasoningSchema = Type.String({ minLength: 1, pattern: "\\S" });
 const CodexCoreConfigJsonSchema = Type.Object(
     {
         scope: Type.Object(
@@ -107,8 +111,8 @@ const CodexCoreConfigJsonSchema = Type.Object(
             { additionalProperties: false },
         ),
         prompt: Type.Object(
-            { mode: CodexPromptModeSchema },
-            { additionalProperties: false, default: { mode: "pi" } },
+            { mode: CodexPromptModeSchema, personality: CodexPersonalitySchema },
+            { additionalProperties: false, default: { mode: "pi", personality: "pragmatic" } },
         ),
         compaction: Type.Object(
             {
@@ -148,7 +152,7 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
         viewImageDescriptions: false,
         applyPatch: "off",
     },
-    prompt: { mode: "pi" },
+    prompt: { mode: "pi", personality: "pragmatic" },
     compaction: { enabled: false, auto: true, thresholdPercent: 80 },
     openai: {
         webSearchModel: CODEX_CURRENT_MODEL_SELECTION,
@@ -268,6 +272,13 @@ export function parseCodexCoreConfigWithDiagnostics(
                     "$.prompt.mode",
                     diagnostics,
                 ),
+                personality: parseStringEnum(
+                    prompt.personality,
+                    CODEX_PERSONALITIES,
+                    DEFAULT_CODEX_CORE_CONFIG.prompt.personality,
+                    "$.prompt.personality",
+                    diagnostics,
+                ),
             },
             compaction: {
                 enabled: parseBoolean(
@@ -314,9 +325,8 @@ export function parseCodexCoreConfigWithDiagnostics(
                     "$.openai.compactionModel",
                     diagnostics,
                 ),
-                compactionReasoning: parseStringEnum(
+                compactionReasoning: parseNonEmptyString(
                     openai.compactionReasoning,
-                    CODEX_COMPACTION_REASONING_LEVELS,
                     DEFAULT_CODEX_CORE_CONFIG.openai.compactionReasoning,
                     "$.openai.compactionReasoning",
                     diagnostics,

@@ -73,7 +73,7 @@
     },
     "prompt": {
       "type": "object",
-      "required": ["mode"],
+      "required": ["mode", "personality"],
       "properties": {
         "mode": {
           "anyOf": [
@@ -86,11 +86,28 @@
               "const": "codex"
             }
           ]
+        },
+        "personality": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "friendly"
+            },
+            {
+              "type": "string",
+              "const": "pragmatic"
+            },
+            {
+              "type": "string",
+              "const": "none"
+            }
+          ]
         }
       },
       "additionalProperties": false,
       "default": {
-        "mode": "pi"
+        "mode": "pi",
+        "personality": "pragmatic"
       }
     },
     "compaction": {
@@ -143,32 +160,9 @@
           "default": "current"
         },
         "compactionReasoning": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "current"
-            },
-            {
-              "type": "string",
-              "const": "minimal"
-            },
-            {
-              "type": "string",
-              "const": "low"
-            },
-            {
-              "type": "string",
-              "const": "medium"
-            },
-            {
-              "type": "string",
-              "const": "high"
-            },
-            {
-              "type": "string",
-              "const": "xhigh"
-            }
-          ]
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "verbosity": {
           "anyOf": [
