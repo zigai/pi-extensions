@@ -105,7 +105,10 @@ function applyCommand(command: string, config: CodexCoreConfig): CodexCoreConfig
     if (command === "tools")
         return { ...config, scope: { tools: config.scope.tools === "codex" ? "all" : "codex" } };
     if (command === "prompt")
-        return { ...config, prompt: { mode: config.prompt.mode === "pi" ? "codex" : "pi" } };
+        return {
+            ...config,
+            prompt: { ...config.prompt, mode: config.prompt.mode === "pi" ? "codex" : "pi" },
+        };
     if (command === "compact") {
         return {
             ...config,
@@ -221,6 +224,11 @@ function applyChangedConfigValues(
                 previousEffectiveConfig.prompt.mode,
                 nextEffectiveConfig.prompt.mode,
             ),
+            personality: changedValue(
+                globalConfig.prompt.personality,
+                previousEffectiveConfig.prompt.personality,
+                nextEffectiveConfig.prompt.personality,
+            ),
         },
         compaction: {
             enabled: changedValue(
@@ -296,6 +304,7 @@ function formatConfig(config: CodexCoreConfig): string {
         `- apply_patch: ${config.tools.applyPatch}${config.tools.applyPatch === "off" ? "" : " (replaces edit)"}`,
         `- tool scope: ${config.scope.tools}`,
         `- prompt mode: ${config.prompt.mode}`,
+        `- personality: ${config.prompt.personality}`,
         `- native compaction: ${onOff(config.compaction.enabled)} (model ${formatCodexModelSelection(config.openai.compactionModel)}, reasoning ${config.openai.compactionReasoning}, auto ${onOff(config.compaction.auto)} at ${config.compaction.thresholdPercent}%)`,
         `- fast: ${onOff(config.openai.fast)}, verbosity: ${config.openai.verbosity}`,
     ].join("\n");

@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { formatCodexModelSelection, type CodexCoreConfig } from "./config.ts";
+import { supportsCodexPromptPersonality } from "./codex-personality.ts";
 import { APPLY_PATCH_TOOL_NAME } from "./tools/apply-patch.ts";
 import { IMAGEGEN_TOOL_NAME } from "./tools/imagegen.ts";
 import { VIEW_IMAGE_TOOL_NAME } from "./tools/view-image.ts";
@@ -95,6 +96,9 @@ function setCodexStatus(ctx: ExtensionContext, config: CodexCoreConfig): void {
         tools.length > 0 ? tools.join(", ") : undefined,
         config.scope.tools === "all" ? "all models" : undefined,
         config.prompt.mode === "codex" ? "codex prompt" : undefined,
+        config.prompt.mode === "codex" && supportsCodexPromptPersonality(ctx.model?.id)
+            ? config.prompt.personality
+            : undefined,
         config.compaction.enabled
             ? `compact ${formatCodexModelSelection(config.openai.compactionModel)}`
             : undefined,

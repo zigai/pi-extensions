@@ -10,32 +10,189 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { CodexCoreConfig } from "./config.ts";
+import { supportsCodexPromptPersonality } from "./codex-personality.ts";
 import { defaultCodexRuntime, type Clock } from "./runtime.ts";
 
-const CODEX_BASE_PROMPT_PATH = fileURLToPath(
-    new URL("./prompt/codex-base-prompt.md", import.meta.url),
+const FALLBACK_CODEX_PROMPT_PATH = fileURLToPath(
+    new URL("./prompt/codex-fallback-prompt.md", import.meta.url),
 );
-let cachedCodexBasePrompt: string | undefined;
+const GPT_5_5_CODEX_PROMPT_PATH = fileURLToPath(
+    new URL("./prompt/codex-gpt-5.5.md", import.meta.url),
+);
+const GPT_5_6_SOL_CODEX_PROMPT_PATH = fileURLToPath(
+    new URL("./prompt/codex-gpt-5.6-sol.md", import.meta.url),
+);
+const GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH = fileURLToPath(
+    new URL("./prompt/codex-gpt-5.6-terra-luna.md", import.meta.url),
+);
+const GPT_5_5_FRIENDLY_PERSONALITY_PATH = fileURLToPath(
+    new URL("./prompt/codex-gpt-5.5-personality-friendly.md", import.meta.url),
+);
+const GPT_5_5_PRAGMATIC_PERSONALITY_PATH = fileURLToPath(
+    new URL("./prompt/codex-gpt-5.5-personality-pragmatic.md", import.meta.url),
+);
+const CODEX_PROMPT_PATHS_BY_MODEL: Readonly<Record<string, string>> = {
+    "gpt-5.5": GPT_5_5_CODEX_PROMPT_PATH,
+    "gpt-5.6-sol": GPT_5_6_SOL_CODEX_PROMPT_PATH,
+    "gpt-5.6-terra": GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH,
+    "gpt-5.6-luna": GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH,
+};
+const cachedCodexPromptsByPath = new Map<string, string>();
+const CODEX_PERSONALITY_PLACEHOLDER = "{{ personality }}";
 
 const DEFAULT_PI_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
 
+/** Runtime values used to select and render the active model's Codex prompt. */
+export type CodexSystemPromptContext = {
+    readonly modelId?: string | undefined;
+    readonly clock?: Clock | undefined;
+};
+
+/** Builds either Pi's original prompt or the active GPT model's Pi-adapted Codex prompt. */
 export function buildCodexCoreSystemPrompt(
     basePrompt: string,
     config: CodexCoreConfig,
     options?: BuildSystemPromptOptions,
-    clock: Clock = defaultCodexRuntime.clock,
+    context: CodexSystemPromptContext = {},
 ): string {
-    if (config.prompt.mode === "codex") {
-        return [readCodexBasePrompt(), buildPiCodexContext(basePrompt, options, clock)]
-            .filter((section) => section.length > 0)
-            .join("\n\n");
-    }
-    return basePrompt;
+    if (config.prompt.mode !== "codex" || !isGptPromptModel(context.modelId)) return basePrompt;
+
+    const tools = options ? selectedTools(options) : DEFAULT_PI_TOOLS;
+    const codexPrompt = adaptCodexPromptForPi(
+        renderCodexPrompt(context.modelId, config.prompt.personality),
+        tools,
+    );
+    const piContext = buildPiCodexContext(
+        basePrompt,
+        options,
+        context.clock ?? defaultCodexRuntime.clock,
+    );
+    return [codexPrompt, piContext].filter((section) => section.length > 0).join("\n\n");
 }
 
-function readCodexBasePrompt(): string {
-    cachedCodexBasePrompt ??= readFileSync(CODEX_BASE_PROMPT_PATH, "utf8").trim();
-    return cachedCodexBasePrompt;
+function isGptPromptModel(modelId: string | undefined): boolean {
+    return modelId?.trim().toLowerCase().startsWith("gpt-") ?? false;
+}
+
+function readCodexPrompt(modelId: string | undefined): string {
+    const normalizedModelId = modelId?.trim().toLowerCase();
+    const promptPath =
+        (normalizedModelId ? CODEX_PROMPT_PATHS_BY_MODEL[normalizedModelId] : undefined) ??
+        FALLBACK_CODEX_PROMPT_PATH;
+    return readPromptFile(promptPath);
+}
+
+function renderCodexPrompt(
+    modelId: string | undefined,
+    personality: CodexCoreConfig["prompt"]["personality"],
+): string {
+    const prompt = readCodexPrompt(modelId);
+    if (!supportsCodexPromptPersonality(modelId)) return prompt;
+    const personalityPrompt =
+        personality === "friendly"
+            ? readPromptFile(GPT_5_5_FRIENDLY_PERSONALITY_PATH)
+            : personality === "pragmatic"
+              ? readPromptFile(GPT_5_5_PRAGMATIC_PERSONALITY_PATH)
+              : "";
+    return prompt.replace(CODEX_PERSONALITY_PLACEHOLDER, personalityPrompt).trim();
+}
+
+function readPromptFile(promptPath: string): string {
+    const cachedPrompt = cachedCodexPromptsByPath.get(promptPath);
+    if (cachedPrompt !== undefined) return cachedPrompt;
+    const prompt = readFileSync(promptPath, "utf8").trim();
+    cachedCodexPromptsByPath.set(promptPath, prompt);
+    return prompt;
+}
+
+function adaptCodexPromptForPi(prompt: string, tools: readonly string[]): string {
+    const hasShellTool = tools.includes("bash");
+    const editTool = tools.includes("apply_patch")
+        ? "`apply_patch`"
+        : tools.includes("edit")
+          ? "`edit`"
+          : tools.includes("write")
+            ? "`write`"
+            : undefined;
+    let adaptedPrompt = prompt;
+    if (hasShellTool) {
+        adaptedPrompt = adaptedPrompt
+            .replaceAll("`exec_command`", "`bash`")
+            .replaceAll("exec_command", "`bash`");
+    } else {
+        adaptedPrompt = removeLineContaining(adaptedPrompt, "exec_command calls").replace(
+            " Do not end your turn while `exec_command` sessions needed for the user’s request are still running.",
+            "",
+        );
+        adaptedPrompt = removeLineContaining(adaptedPrompt, "reach first for `rg`");
+        adaptedPrompt = removeLineContaining(adaptedPrompt, "When you search for text or files");
+        adaptedPrompt = removeLineContaining(adaptedPrompt, "Do not chain shell commands");
+        adaptedPrompt = removeLineContaining(adaptedPrompt, "You parallelize tool calls whenever");
+    }
+    if (editTool) {
+        adaptedPrompt = adaptedPrompt.replaceAll("`apply_patch`", editTool);
+    } else {
+        adaptedPrompt = adaptedPrompt
+            .replace(
+                "Use `apply_patch` for local file edits.",
+                "Do not edit files unless an active Pi file-editing tool is available.",
+            )
+            .replace(
+                "Use `apply_patch` for manual code edits.",
+                "Do not edit files unless an active Pi file-editing tool is available.",
+            )
+            .replaceAll("`apply_patch`", "an active Pi file-editing tool");
+    }
+    if (!hasShellTool && !editTool) {
+        adaptedPrompt = removeMarkdownSection(
+            adaptedPrompt,
+            "## File editing constraints",
+            "## Autonomy and persistence",
+        );
+        adaptedPrompt = removeMarkdownSection(
+            adaptedPrompt,
+            "## Editing constraints",
+            "## Special user requests",
+        );
+    }
+    adaptedPrompt = adaptedPrompt.replace(
+        "You use `multi_tool_use.parallel` for that parallelism, and only that.",
+        "Use Pi's parallel tool interface for that parallelism when it is available.",
+    );
+    const skillsHeading = "\n# Using skills";
+    const skillsIndex = adaptedPrompt.indexOf(skillsHeading);
+    if (skillsIndex < 0) return adaptedPrompt;
+    const promptWithoutCodexSkills = adaptedPrompt.slice(0, skillsIndex).trimEnd();
+    if (!tools.includes("read")) return promptWithoutCodexSkills;
+    return [promptWithoutCodexSkills, buildPiSkillUsageGuidance()].join("\n\n");
+}
+
+function removeLineContaining(prompt: string, marker: string): string {
+    return prompt
+        .split("\n")
+        .filter((line) => !line.includes(marker))
+        .join("\n");
+}
+
+function removeMarkdownSection(prompt: string, heading: string, nextHeading: string): string {
+    const sectionStart = prompt.indexOf(`${heading}\n`);
+    if (sectionStart < 0) return prompt;
+    const nextSectionStart = prompt.indexOf(`${nextHeading}\n`, sectionStart);
+    if (nextSectionStart < 0) return prompt.slice(0, sectionStart).trimEnd();
+    return `${prompt.slice(0, sectionStart).trimEnd()}\n\n${prompt.slice(nextSectionStart)}`;
+}
+
+function buildPiSkillUsageGuidance(): string {
+    return [
+        "# Using skills",
+        "",
+        "Pi may provide specialized skills in the available-skills catalog below.",
+        "",
+        "- When the user names a listed skill, or the task clearly matches its description, read that skill's `SKILL.md` completely before acting.",
+        "- Resolve relative references from the directory containing `SKILL.md`, and read every referenced instruction needed for the task.",
+        "- Do not delegate reading or interpreting skill instructions. Prefer provided scripts, assets, and templates when applicable.",
+        "- If a requested skill is unavailable or cannot be read, say so briefly and continue with the best available approach.",
+    ].join("\n");
 }
 
 function buildPiCodexContext(
