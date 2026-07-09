@@ -15,6 +15,7 @@ import {
     renderScriptCall,
     type CodexRenderTheme,
 } from "../src/rendering/core.ts";
+import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import {
     disposeSyntaxHighlighting,
@@ -30,6 +31,7 @@ const ANSI_ESCAPE = "\u001b[";
 const TYPESCRIPT_KEYWORD_RGB_CODE = "38;2;86;156;214";
 const TYPESCRIPT_KEYWORD_COLOR = `\u001b[${TYPESCRIPT_KEYWORD_RGB_CODE}m`;
 const STRING_RGB_CODE = "38;2;206;145;120";
+const TOML_INVALID_RGB_CODE = "38;2;244;71;71";
 const TYPE_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.pythonImportIdentifier);
 const VARIABLE_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.pythonVariableIdentifier);
 const FUNCTION_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.pythonFunctionIdentifier);
@@ -52,6 +54,7 @@ const piTheme = new Theme(
         toolTitle: "#ffffff",
         accent: "#4fc1ff",
         customMessageLabel: "#c586c0",
+        syntaxKeyword: "#569cd6",
         syntaxFunction: "#dcdcaa",
         syntaxOperator: "#d4d4d4",
         syntaxString: "#ce9178",
@@ -111,7 +114,15 @@ describe("central syntax highlighting", () => {
     beforeAll(async () => {
         await disposeSyntaxHighlighting();
         await initializeSyntaxHighlighting(process.env, {
-            preloadLanguages: ["markdown", "bash", "python", "typescript", "javascript", "json"],
+            preloadLanguages: [
+                "markdown",
+                "bash",
+                "python",
+                "toml",
+                "typescript",
+                "javascript",
+                "json",
+            ],
         });
     });
 
@@ -239,6 +250,80 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain("const");
     });
 
+    it("keeps unquoted bash operands out of string color", () => {
+        const rendered = renderScriptCall(
+            piTheme,
+            {
+                label: "Bash",
+                language: "bash",
+                code: [
+                    "python3 packages.py validate --os fedora && rsync -az Packages/manifests/vps.toml vps.01:~/Projects/config/Packages/manifests/vps.toml",
+                    "sudo dnf install -y duf",
+                ].join("\n"),
+            },
+            { state: "success", expanded: true },
+        )
+            .render(240)
+            .join("\n");
+
+        expect(rendered).toContain(ANSI_ESCAPE);
+        expect(rendered).toContain("packages.py");
+        expect(rendered).toContain("Packages/manifests/vps.toml");
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}mpackages.py`);
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}mfedora`);
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}mPackages/manifests/vps.toml`);
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}mvalidate`);
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}minstall`);
+    });
+
+    it("preserves multiline TypeScript comment highlighting in script previews", () => {
+        const code = [
+            "/**",
+            " * Expands the collapsed paste marker currently under the editor cursor.",
+            " */",
+            "export function expandPasteMarkerAtCursor(): boolean {",
+            "    return true;",
+            "}",
+        ].join("\n");
+        const expectedCommentLine = highlightSyntaxCode(code, "typescript")[1];
+        const renderedCommentLine = renderScriptCall(
+            plainTheme,
+            { label: "TypeScript", language: "typescript", code },
+            { state: "success", expanded: false },
+        )
+            .render(160)
+            .find((line) => line.includes("Expands the collapsed"));
+
+        expect(expectedCommentLine).toBeDefined();
+        expect(renderedCommentLine).toContain(expectedCommentLine);
+    });
+
+    it("preserves multiline TypeScript highlighting inside bash heredocs", () => {
+        const code = [
+            "/**",
+            " * Expands the collapsed paste marker currently under the editor cursor.",
+            " */",
+            "const value: { readonly ok: boolean } = { ok: true };",
+        ].join("\n");
+        const command = [
+            "pkg=/tmp/node_modules",
+            "NODE_PATH=\"$pkg:./node_modules\" tsx - <<'TS'",
+            code,
+            "TS",
+        ].join("\n");
+        const expectedCommentLine = highlightSyntaxCode(code, "typescript")[1];
+        const rendered = renderScriptCall(
+            plainTheme,
+            { label: "Bash", language: "bash", code: command },
+            { state: "success", expanded: true },
+        ).render(180);
+        const renderedCommentLine = rendered.find((line) => line.includes("Expands the collapsed"));
+
+        expect(rendered[0]).toContain("Bash");
+        expect(expectedCommentLine).toBeDefined();
+        expect(renderedCommentLine).toContain(expectedCommentLine);
+    });
+
     it("highlights embedded Python heredocs inside bash previews as Python", () => {
         const command = [
             'for f in /tmp/*.json; do [ -f "$f" ] || continue;',
@@ -268,6 +353,41 @@ describe("central syntax highlighting", () => {
             expanded: false,
             syntax: { path: "src/example.ts" },
         })
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain(TYPESCRIPT_KEYWORD_COLOR);
+        expect(rendered).toContain("const");
+    });
+
+    it("preserves multiline TypeScript comment highlighting in code output previews", () => {
+        const code = [
+            "/**",
+            " * Expands the collapsed paste marker currently under the editor cursor.",
+            " */",
+            "export function expandPasteMarkerAtCursor(): boolean {",
+            "    return true;",
+            "}",
+        ].join("\n");
+        const expectedCommentLine = highlightSyntaxCode(code, "typescript")[1];
+        const renderedCommentLine = renderCodexOutput(plainTheme, code, {
+            expanded: false,
+            maxPreviewLines: 8,
+            syntax: { path: "src/example.ts" },
+        })
+            .render(160)
+            .find((line) => line.includes("Expands the collapsed"));
+
+        expect(expectedCommentLine).toBeDefined();
+        expect(renderedCommentLine).toContain(expectedCommentLine);
+    });
+
+    it("highlights partial write previews while streaming", () => {
+        const rendered = renderWriteCallPreview(
+            { path: "src/example.ts", content: "const value = 1;\n" },
+            plainTheme,
+            { isError: false, isPartial: true, expanded: false },
+        )
             .render(100)
             .join("\n");
 
@@ -305,6 +425,63 @@ describe("central syntax highlighting", () => {
 
         expect(rendered).toContain("def");
         expect(rendered).toContain("38;2");
+    });
+
+    it("uses surrounding TOML diff context for inline table braces", () => {
+        const rendered = renderCodexDiff(
+            plainTheme,
+            parseDiffSections(
+                [
+                    " 1 [[package]]",
+                    ' 2 name = "bat"',
+                    " 3 targets = [",
+                    ' 4     { os = "arch", id = "bat", pm = "pacman" },',
+                    " 5 ]",
+                ].join("\n"),
+                "Packages/manifests/vps.toml",
+            ),
+            true,
+        )
+            .render(180)
+            .join("\n");
+
+        expect(rendered).toContain(BRACKET_PAIR_2_RGB_CODE);
+        expect(rendered).not.toContain(TOML_INVALID_RGB_CODE);
+    });
+
+    it("does not highlight TOML after diff ellipses as invalid", () => {
+        const rendered = renderCodexDiff(
+            plainTheme,
+            parseDiffSections(
+                [
+                    " 1 [[package]]",
+                    ' 2 name = "libedit-dev"',
+                    " 3 targets = [",
+                    ' 4     { os = "arch", id = "libedit", pm = "pacman" },',
+                    ' 5     { os = "fedora", id = "libedit-devel", pm = "dnf" },',
+                    "   ...",
+                    " 6 tags = [",
+                    ' 7     "core",',
+                    " 8 ]",
+                    "+9 ",
+                    "+10 [[package]]",
+                    '+11 name = "perl-FindBin"',
+                    "+12 targets = [",
+                    '+13     { os = "fedora", id = "perl-FindBin", pm = "dnf" },',
+                    "+14 ]",
+                    "+15 tags = [",
+                    '+16     "core",',
+                    "+17 ]",
+                ].join("\n"),
+                "Packages/manifests/vps.toml",
+            ),
+            false,
+        )
+            .render(180)
+            .join("\n");
+
+        expect(rendered).toContain(BRACKET_PAIR_2_RGB_CODE);
+        expect(rendered).not.toContain(TOML_INVALID_RGB_CODE);
     });
 
     it("uses the same VS Code theme for Pierre diff highlighting", async () => {

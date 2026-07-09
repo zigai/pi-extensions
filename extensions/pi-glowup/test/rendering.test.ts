@@ -260,6 +260,45 @@ describe("Codex rendering helpers", () => {
         ]);
     });
 
+    it("does not render carriage-return progress updates as blank tail rows", () => {
+        const component = renderCodexOutput(
+            plainTheme,
+            [
+                "WARNING Disk /var/lib/libvirt/images/vm.qcow2 is already in use.",
+                ...Array.from({ length: 12 }, (_value, index) => `setup line ${index + 1}`),
+                "\rCreating domain...                                      |      00:00",
+            ].join("\n"),
+            {
+                expanded: false,
+                maxPreviewLines: 5,
+                omittedHint: "hint",
+            },
+        );
+
+        const lines = component.render(100);
+
+        expect(lines).toContain(
+            "    Creating domain...                                      |      00:00",
+        );
+        expect(lines).not.toContain("    ");
+    });
+
+    it("drops bash status separator blanks before command exit lines", () => {
+        const component = renderCodexOutput(
+            plainTheme,
+            "python3: can't open file '/home/zigai/Projects/pi-codex-look/packages.py': [Errno 2] No such file or directory\n\n\nCommand exited with code 2",
+            {
+                expanded: false,
+                maxPreviewLines: 5,
+            },
+        );
+
+        expect(component.render(140)).toEqual([
+            "  └ python3: can't open file '/home/zigai/Projects/pi-codex-look/packages.py': [Errno 2] No such file or directory",
+            "    Command exited with code 2",
+        ]);
+    });
+
     it("wraps long output lines in compact and expanded views", () => {
         const longLine =
             "oxfmt . packages/pi-ui-tweaks/src/index.ts packages/pi-ui-tweaks/test/index.test.ts packages/pi-ui-tweaks/README.md";
@@ -355,6 +394,66 @@ describe("Codex rendering helpers", () => {
 
     it("strips shell wrappers before command highlighting", () => {
         expect(highlightShell(plainTheme, "bash -lc 'npm run check'")).toBe("npm run check");
+    });
+
+    it("renders bash previews with lightweight syntax without red or accent floods", () => {
+        const command =
+            'set -euo pipefail\nsource /tmp/pi-tweaks-live-tui-demo.zLtsoL/env.sh\n# Ensure a clean input before demo 1.\ntmux send-keys -t "$target" C-u\nfind . -maxdepth 3 -name package.json | head -80';
+        const rendered = renderScriptCall(
+            tokenTheme,
+            { label: "Bash", language: "bash", code: command },
+            { state: "success", expanded: false },
+        )
+            .render(220)
+            .join("\n");
+
+        expect(rendered).toContain("<syntaxFunction>set</syntaxFunction>");
+        expect(rendered).toContain("<syntaxFunction>find</syntaxFunction>");
+        expect(rendered).toContain("<toolTitle>pipefail</toolTitle>");
+        expect(rendered).toContain(
+            "<toolTitle>/tmp/pi-tweaks-live-tui-demo.zLtsoL/env.sh</toolTitle>",
+        );
+        expect(rendered).toContain("<dim># Ensure a clean input before demo 1.</dim>");
+        expect(rendered).toContain('<syntaxString>"$target"</syntaxString>');
+        expect(rendered).not.toContain("<syntaxFunction></syntaxFunction>");
+        expect(rendered).toContain("<syntaxKeyword>-maxdepth</syntaxKeyword>");
+        expect(rendered).toContain("<syntaxKeyword>-name</syntaxKeyword>");
+        expect(rendered).toContain("<syntaxKeyword>-80</syntaxKeyword>");
+        expect(rendered).toContain("<toolTitle>3</toolTitle>");
+        expect(rendered).toContain("<toolTitle>package.json</toolTitle>");
+        expect(rendered).not.toContain("<accent>");
+        expect(rendered).not.toContain("<toolOutput></toolOutput>");
+        expect(rendered).not.toContain("<toolDiffRemoved>-maxdepth</toolDiffRemoved>");
+        expect(rendered).not.toContain("<toolDiffRemoved>-name</toolDiffRemoved>");
+    });
+
+    it("classifies shell subcommands, full flags, and string operands", () => {
+        const command =
+            "python3 packages.py validate --os fedora && rsync -az Packages/manifests/vps.toml vps.01:~/Projects/config/Packages/manifests/vps.toml";
+        const rendered = renderScriptCall(
+            tokenTheme,
+            { label: "Bash", language: "bash", code: command },
+            { state: "error", expanded: false },
+        )
+            .render(240)
+            .join("\n");
+
+        expect(rendered).toContain("<syntaxFunction>python3</syntaxFunction>");
+        expect(rendered).toContain("<toolTitle>packages.py</toolTitle>");
+        expect(rendered).toContain("<syntaxFunction>validate</syntaxFunction>");
+        expect(rendered).toContain("<syntaxKeyword>--os</syntaxKeyword>");
+        expect(rendered).toContain("<toolTitle>fedora</toolTitle>");
+        expect(rendered).toContain("<syntaxFunction>rsync</syntaxFunction>");
+        expect(rendered).toContain("<syntaxKeyword>-az</syntaxKeyword>");
+        expect(rendered).toContain("<toolTitle>Packages/manifests/vps.toml</toolTitle>");
+        expect(rendered).toContain(
+            "<toolTitle>vps.01:~/Projects/config/Packages/manifests/vps.toml</toolTitle>",
+        );
+        expect(rendered).not.toContain("<dim>--</dim>");
+        expect(rendered).not.toContain("<dim>-</dim><syntaxOperator>az</syntaxOperator>");
+        expect(rendered).not.toContain("<toolOutput>fedora</toolOutput>");
+        expect(rendered).not.toContain("<syntaxString>fedora</syntaxString>");
+        expect(rendered).not.toContain("<toolDiffRemoved>os</toolDiffRemoved>");
     });
 
     it("parses partial heredoc scripts before the closing marker arrives", () => {

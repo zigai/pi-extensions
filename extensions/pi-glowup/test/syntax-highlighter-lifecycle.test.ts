@@ -1,8 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Component } from "@earendil-works/pi-tui";
 import type { Highlighter } from "shiki";
 import { afterEach, describe, expect, it } from "vitest";
+import { renderScriptCall, type CodexRenderTheme } from "../src/rendering/core.ts";
+import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 import {
     disposeSyntaxHighlighting,
     clearSyntaxHighlightCache,
@@ -10,10 +13,23 @@ import {
     highlightSyntaxCode,
     initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
+    loadSyntaxLanguageIfReady,
     syntaxHighlightCacheStats,
     syntaxHighlighterDiagnostics,
     type SyntaxHighlighterFactory,
 } from "../src/syntax/highlighter.ts";
+
+const plainTheme: CodexRenderTheme = {
+    fg(_token: string, text: string): string {
+        return text;
+    },
+    bg(_token: string, text: string): string {
+        return text;
+    },
+    bold(text: string): string {
+        return text;
+    },
+};
 
 type FakeHighlighterOptions = {
     readonly loadedLanguages?: readonly string[];
@@ -48,6 +64,16 @@ function stringLanguageNames(languages: ReadonlyArray<unknown> | undefined): str
         }
     }
     return names;
+}
+
+async function waitForCondition(condition: () => boolean): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (!condition()) {
+        if (Date.now() > deadline) {
+            throw new Error("timed out waiting for condition");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 }
 
 describe("syntax highlighter lifecycle", () => {
@@ -209,6 +235,154 @@ describe("syntax highlighter lifecycle", () => {
             expect.objectContaining({ language: "vue" }),
         );
         expect(loadedLanguages).toEqual(["vue"]);
+    });
+
+    it("loads extra languages only after the central highlighter is ready", async () => {
+        const loadedLanguages: string[] = [];
+
+        await expect(loadSyntaxLanguageIfReady("typescript")).resolves.toBe(false);
+
+        const factory: SyntaxHighlighterFactory = async () =>
+            fakeHighlighter({
+                loadedLanguages: ["markdown"],
+                async loadLanguage(language) {
+                    loadedLanguages.push(language);
+                },
+            });
+
+        await initializeSyntaxHighlighting({}, { createHighlighter: factory });
+
+        await expect(loadSyntaxLanguageIfReady("typescript")).resolves.toBe(true);
+        expect(loadedLanguages).toEqual(["typescript"]);
+        expect(syntaxHighlighterDiagnostics()).toEqual(
+            expect.objectContaining({
+                loadedLanguages: expect.arrayContaining(["markdown", "typescript"]),
+                dynamicLanguages: ["typescript"],
+            }),
+        );
+    });
+
+    it("dynamically loads syntax for write previews in new-language projects", async () => {
+        await initializeSyntaxHighlighting(process.env, { preloadLanguages: ["markdown"] });
+        let invalidations = 0;
+        let lastComponent: Component | undefined = renderWriteCallPreview(
+            { path: "src/index.ts", content: "const value = 1;\n" },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: true,
+                expanded: false,
+                invalidate() {
+                    invalidations += 1;
+                },
+            },
+        );
+        lastComponent.render(120);
+
+        await waitForCondition(() => invalidations > 0);
+
+        lastComponent = renderWriteCallPreview(
+            { path: "src/index.ts", content: "const value = 1;\n" },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: true,
+                expanded: false,
+                lastComponent,
+                invalidate() {
+                    invalidations += 1;
+                },
+            },
+        );
+
+        const rendered = lastComponent.render(120).join("\n");
+
+        expect(rendered).toContain("\u001b[");
+        expect(rendered).toContain("const");
+    });
+
+    it("dynamically loads syntax for script previews in new-language projects", async () => {
+        await initializeSyntaxHighlighting(process.env, { preloadLanguages: ["markdown"] });
+        let invalidations = 0;
+        const code = [
+            "await disposeSyntaxHighlighting();",
+            "const theme = new Theme({ toolTitle: '#ffffff' });",
+        ].join("\n");
+        let component: Component = renderScriptCall(
+            plainTheme,
+            { label: "Node", language: "javascript", code },
+            {
+                state: "success",
+                expanded: false,
+                invalidate() {
+                    invalidations += 1;
+                },
+            },
+        );
+
+        expect(component.render(120).join("\n")).not.toContain("\u001b[");
+        await waitForCondition(() => invalidations > 0);
+
+        component = renderScriptCall(
+            plainTheme,
+            { label: "Node", language: "javascript", code },
+            {
+                state: "success",
+                expanded: false,
+                invalidate() {
+                    invalidations += 1;
+                },
+            },
+        );
+
+        const rendered = component.render(120).join("\n");
+
+        expect(rendered).toContain("\u001b[");
+        expect(rendered).toContain("const");
+    });
+
+    it("dynamically loads syntax for TypeScript embedded in bash heredocs", async () => {
+        await initializeSyntaxHighlighting(process.env, { preloadLanguages: ["bash"] });
+        let invalidations = 0;
+        const code = [
+            "NODE_PATH=\"$pkg:./node_modules\" tsx - <<'TS'",
+            "const value: string = 'ok';",
+            "TS",
+        ].join("\n");
+        let component: Component = renderScriptCall(
+            plainTheme,
+            { label: "Bash", language: "bash", code },
+            {
+                state: "success",
+                expanded: false,
+                invalidate() {
+                    invalidations += 1;
+                },
+            },
+        );
+
+        expect(component.render(120).join("\n")).not.toContain("\u001b[");
+        await waitForCondition(() => invalidations > 0);
+
+        component = renderScriptCall(
+            plainTheme,
+            { label: "Bash", language: "bash", code },
+            {
+                state: "success",
+                expanded: false,
+                invalidate() {
+                    invalidations += 1;
+                },
+            },
+        );
+
+        const rendered = component.render(120).join("\n");
+
+        expect(rendered).toContain("\u001b[");
+        expect(rendered).toContain("const");
+        expect(syntaxHighlighterDiagnostics()).toEqual(
+            expect.objectContaining({ dynamicLanguages: ["typescript"] }),
+        );
     });
 
     it("disposes and resets highlighter state between sessions", async () => {

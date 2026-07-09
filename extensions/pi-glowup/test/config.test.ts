@@ -27,6 +27,7 @@ describe("codex look config", () => {
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.writePreview).toEqual({ movingViewport: true });
         expect(config.syntax).toEqual({
             preloadLanguages: ["markdown", "bash", "python"],
             projectLanguageDetection: { enabled: true },
@@ -60,6 +61,7 @@ describe("codex look config", () => {
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.preloadLanguages).toEqual(["markdown", "bash", "python"]);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
@@ -81,6 +83,7 @@ describe("codex look config", () => {
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(JSON.parse(readFileSync(getCodexLookGlobalConfigPath(agentDir), "utf8"))).toEqual(
@@ -107,6 +110,7 @@ describe("codex look config", () => {
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog.enabled).toBe(true);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.preloadLanguages).toEqual(["markdown", "bash", "python"]);
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
@@ -133,6 +137,7 @@ describe("codex look config", () => {
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog.memorySampleIntervalMs).toBe(10_000);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.thirdPartyToolRenderers).toBe(true);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
@@ -163,6 +168,7 @@ describe("codex look config", () => {
                 preserveTools: ["mcp"],
                 debugLog: { enabled: false, memorySampleIntervalMs: 0 },
                 toolLabels: { dynamicStatus: true },
+                writePreview: { movingViewport: false },
                 syntax: {
                     preloadLanguages: ["go"],
                     projectLanguageDetection: { enabled: false },
@@ -175,6 +181,7 @@ describe("codex look config", () => {
             projectConfigPath,
             JSON.stringify({
                 toolLabels: { dynamicStatus: false },
+                writePreview: { movingViewport: true },
                 debugLog: { enabled: true, path: "project-debug.log" },
                 syntax: {
                     preloadLanguages: ["typescript"],
@@ -198,6 +205,7 @@ describe("codex look config", () => {
         expect(config.scriptMaxCodePreviewLines).toBe(12);
         expect(config.scriptFormatters.get("python")).toBeUndefined();
         expect(config.toolLabels.dynamicStatus).toBe(true);
+        expect(config.writePreview.movingViewport).toBe(false);
         expect(config.syntax.preloadLanguages).toEqual(["go"]);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(false);
         expect(config.patches.workingWidgetSpacing).toBe(true);
@@ -220,6 +228,7 @@ describe("codex look config", () => {
                 preserveTools: ["mcp"],
                 debugLog: { enabled: false, memorySampleIntervalMs: 0 },
                 toolLabels: { dynamicStatus: true },
+                writePreview: { movingViewport: false },
                 syntax: {
                     preloadLanguages: ["go"],
                     projectLanguageDetection: { enabled: false },
@@ -232,6 +241,7 @@ describe("codex look config", () => {
             projectConfigPath,
             JSON.stringify({
                 toolLabels: { dynamicStatus: false },
+                writePreview: { movingViewport: true },
                 debugLog: { enabled: true, path: "project-debug.log" },
                 syntax: {
                     preloadLanguages: ["typescript"],
@@ -255,6 +265,7 @@ describe("codex look config", () => {
         expect(config.scriptMaxCodePreviewLines).toBe(4);
         expect(config.scriptFormatters.get("python")).toEqual(["black", "-"]);
         expect(config.toolLabels.dynamicStatus).toBe(false);
+        expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.preloadLanguages).toEqual(["typescript"]);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);

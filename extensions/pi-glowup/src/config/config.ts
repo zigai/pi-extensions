@@ -30,6 +30,9 @@ export type CodexLookConfig = {
     readonly toolLabels: {
         readonly dynamicStatus: boolean;
     };
+    readonly writePreview: {
+        readonly movingViewport: boolean;
+    };
     readonly syntax: {
         readonly preloadLanguages: readonly string[];
         readonly projectLanguageDetection: {
@@ -71,6 +74,9 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     },
     toolLabels: {
         dynamicStatus: false,
+    },
+    writePreview: {
+        movingViewport: true,
     },
     syntax: {
         preloadLanguages: ["markdown", "bash", "python"],
@@ -120,6 +126,12 @@ const ToolLabelsConfigSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+const WritePreviewConfigSchema = Type.Object(
+    {
+        movingViewport: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false },
+);
 const SyntaxProjectLanguageDetectionConfigSchema = Type.Object(
     {
         enabled: Type.Optional(Type.Boolean()),
@@ -157,6 +169,7 @@ const CodexLookConfigSchema = Type.Object(
         preserveTools: Type.Optional(StringArraySchema),
         debugLog: Type.Optional(DebugLogConfigSchema),
         toolLabels: Type.Optional(ToolLabelsConfigSchema),
+        writePreview: Type.Optional(WritePreviewConfigSchema),
         syntax: Type.Optional(SyntaxConfigSchema),
         patches: Type.Optional(PatchesConfigSchema),
         scriptPreview: Type.Optional(ScriptPreviewConfigSchema),
@@ -184,6 +197,17 @@ const CodexLookConfigJsonSchema = Type.Object(
                     dynamicStatus: Type.Optional(Type.Boolean()),
                 },
                 { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels },
+            ),
+        ),
+        writePreview: Type.Optional(
+            Type.Object(
+                {
+                    movingViewport: Type.Optional(Type.Boolean()),
+                },
+                {
+                    additionalProperties: false,
+                    default: DEFAULT_CODEX_LOOK_CONFIG_JSON.writePreview,
+                },
             ),
         ),
         syntax: Type.Optional(
@@ -325,6 +349,7 @@ export function parseCodexLookConfig(
     const scriptPreview = config.scriptPreview ?? {};
     const debugLog = config.debugLog ?? {};
     const toolLabels = config.toolLabels ?? {};
+    const writePreview = config.writePreview ?? {};
     const syntax = config.syntax ?? {};
     const projectLanguageDetection = syntax.projectLanguageDetection ?? {};
     const patches = config.patches ?? {};
@@ -356,6 +381,11 @@ export function parseCodexLookConfig(
         toolLabels: {
             dynamicStatus:
                 toolLabels.dynamicStatus ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.dynamicStatus,
+        },
+        writePreview: {
+            movingViewport:
+                writePreview.movingViewport ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.writePreview.movingViewport,
         },
         syntax: {
             preloadLanguages:

@@ -1,5 +1,9 @@
-import { syntaxLanguageFromPath } from "./language.ts";
-import { highlightSyntaxCode } from "./highlighter.ts";
+import { normalizeSyntaxLanguage, syntaxLanguageFromPath } from "./language.ts";
+import {
+    getLoadedSyntaxHighlighterForLanguage,
+    highlightSyntaxCode,
+    loadSyntaxLanguageIfReady,
+} from "./highlighter.ts";
 
 export type CodeOutputSyntax = {
     readonly language?: string;
@@ -8,11 +12,45 @@ export type CodeOutputSyntax = {
 };
 
 const MAX_STRUCTURED_OUTPUT_DETECTION_CHARS = 64 * 1024;
+const pendingCodeOutputSyntaxLoads = new Set<string>();
 
 /** Highlights code-like output when a language or path is known; otherwise returns normalized plain lines. */
 export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | undefined): string[] {
     const language = syntax?.language ?? syntaxLanguageFromPath(syntax?.path);
     return highlightSyntaxCode(text, language, { cache: syntax?.cache });
+}
+
+/** Schedules async loading for path/language hints so later sync renders can highlight them. */
+export function scheduleCodeOutputSyntaxLoad(
+    syntax: CodeOutputSyntax | undefined,
+    invalidate: (() => void) | undefined,
+): void {
+    if (invalidate === undefined) {
+        return;
+    }
+    const language = syntax?.language ?? syntaxLanguageFromPath(syntax?.path);
+    const normalizedLanguage = normalizeSyntaxLanguage(language);
+    if (normalizedLanguage === undefined || normalizedLanguage === "text") {
+        return;
+    }
+    if (getLoadedSyntaxHighlighterForLanguage(normalizedLanguage) !== undefined) {
+        return;
+    }
+    if (pendingCodeOutputSyntaxLoads.has(normalizedLanguage)) {
+        return;
+    }
+
+    pendingCodeOutputSyntaxLoads.add(normalizedLanguage);
+    void loadSyntaxLanguageIfReady(normalizedLanguage)
+        .then((loaded) => {
+            if (loaded) {
+                invalidate();
+            }
+        })
+        .catch(() => {})
+        .finally(() => {
+            pendingCodeOutputSyntaxLoads.delete(normalizedLanguage);
+        });
 }
 
 /** Detects small structured third-party output that is safe and useful to syntax-highlight. */

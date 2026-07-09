@@ -260,6 +260,34 @@ export async function getSyntaxHighlighterForLanguage(
     };
 }
 
+/** Loads an additional bundled language only when the central highlighter is already ready. */
+export async function loadSyntaxLanguageIfReady(language: string | undefined): Promise<boolean> {
+    const generation = syntaxGeneration;
+    const state = syntaxState;
+    if (state?.status !== "ready") {
+        return false;
+    }
+
+    const normalizedLanguage = normalizeSyntaxLanguage(language) ?? "text";
+    if (normalizedLanguage === "text") {
+        return true;
+    }
+    if (state.loadedLanguages.has(normalizedLanguage)) {
+        return true;
+    }
+    if (!isBundledSyntaxLanguage(normalizedLanguage)) {
+        return false;
+    }
+
+    await state.highlighter.loadLanguage(normalizedLanguage);
+    if (generation !== syntaxGeneration || syntaxState !== state) {
+        return false;
+    }
+    state.loadedLanguages.add(normalizedLanguage);
+    state.dynamicLanguages.add(normalizedLanguage);
+    return true;
+}
+
 export function currentSyntaxThemeName(): string | undefined {
     return syntaxState?.status === "ready" ? syntaxState.theme.name : undefined;
 }

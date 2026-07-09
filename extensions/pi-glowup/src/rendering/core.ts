@@ -6,7 +6,11 @@ import {
     wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
-import { highlightCodeOutput, type CodeOutputSyntax } from "../syntax/code-component.ts";
+import {
+    highlightCodeOutput,
+    scheduleCodeOutputSyntaxLoad,
+    type CodeOutputSyntax,
+} from "../syntax/code-component.ts";
 import { highlightSyntaxCode } from "../syntax/highlighter.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
@@ -116,7 +120,10 @@ function shellCommand(theme: CodexRenderTheme, text: string): string {
 }
 
 function shellText(theme: CodexRenderTheme, text: string): string {
-    return fg(theme, "toolOutput", text);
+    if (text.length === 0) {
+        return "";
+    }
+    return fg(theme, "toolTitle", text);
 }
 
 function shellOperator(theme: CodexRenderTheme, text: string): string {
@@ -124,12 +131,88 @@ function shellOperator(theme: CodexRenderTheme, text: string): string {
 }
 
 function shellFlag(theme: CodexRenderTheme, text: string): string {
-    return fg(theme, "toolDiffRemoved", text);
+    return fg(theme, "syntaxKeyword", text);
 }
 
 function shellString(theme: CodexRenderTheme, text: string): string {
     return fg(theme, "syntaxString", text);
 }
+
+type ShellCommandKind = "generic" | "interpreter" | "script" | "subcommands";
+
+type ShellHighlightState = {
+    readonly expectsCommand: boolean;
+    readonly expectingFlagValue: boolean;
+    readonly commandKind: ShellCommandKind;
+    readonly sawScriptOperand: boolean;
+    readonly subcommandSeen: boolean;
+};
+
+const SUBCOMMAND_SHELL_COMMANDS = new Set([
+    "apt",
+    "brew",
+    "cargo",
+    "docker",
+    "dnf",
+    "gh",
+    "git",
+    "go",
+    "kubectl",
+    "npm",
+    "pnpm",
+    "systemctl",
+    "tmux",
+    "yarn",
+]);
+
+const INTERPRETER_SHELL_COMMANDS = new Set([
+    "bun",
+    "deno",
+    "node",
+    "python",
+    "python2",
+    "python3",
+    "ruby",
+    "tsx",
+]);
+
+const WRAPPER_SHELL_COMMANDS = new Set(["command", "doas", "env", "exec", "sudo", "time"]);
+
+const BOOLEAN_LONG_FLAGS = new Set([
+    "all",
+    "dry-run",
+    "force",
+    "help",
+    "json",
+    "quiet",
+    "verbose",
+    "version",
+    "yes",
+]);
+
+const VALUE_SHORT_FLAGS = new Set(["c", "C", "f", "I", "m", "n", "o", "p", "t", "u"]);
+
+const VALUE_SINGLE_DASH_LONG_FLAGS = new Set([
+    "depth",
+    "exec",
+    "group",
+    "maxdepth",
+    "mindepth",
+    "mtime",
+    "name",
+    "path",
+    "size",
+    "type",
+    "user",
+]);
+
+const initialShellHighlightState: ShellHighlightState = {
+    expectsCommand: true,
+    expectingFlagValue: false,
+    commandKind: "generic",
+    sawScriptOperand: false,
+    subcommandSeen: false,
+};
 
 function dim(theme: CodexRenderTheme, text: string): string {
     return fg(theme, "dim", text);
@@ -414,6 +497,8 @@ function collapsedPreviewLinesFromText(
         return { isEmpty: false, lines: [] };
     }
 
+    const normalized = normalizeOutputText(text);
+
     const lineBudget = Math.max(
         1,
         Math.min(Math.floor(maxPreviewLines), MAX_COLLAPSED_OUTPUT_PREVIEW_LINES),
@@ -464,7 +549,7 @@ function collapsedPreviewLinesFromText(
         pendingBlankLineSamples = [];
     };
 
-    visitPhysicalLines(text, (line) => {
+    visitPhysicalLines(normalized, (line) => {
         if (!hasNonWhitespaceText(line)) {
             if (sawContent) {
                 pendingBlankLineCount += 1;
@@ -476,7 +561,12 @@ function collapsedPreviewLinesFromText(
         }
 
         sawContent = true;
-        flushPendingBlankLines();
+        if (isCommandExitStatusLine(line)) {
+            pendingBlankLineCount = 0;
+            pendingBlankLineSamples = [];
+        } else {
+            flushPendingBlankLines();
+        }
         consumeLine(line);
     });
 
@@ -507,7 +597,27 @@ function collapsedPreviewLinesFromText(
 }
 
 function normalizeOutputText(text: string): string {
-    return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const normalizedLineEndings = text.replace(/\r\n/g, "\n");
+    let output = "";
+    let lineStart = 0;
+
+    for (let index = 0; index < normalizedLineEndings.length; index += 1) {
+        const charCode = normalizedLineEndings.charCodeAt(index);
+        if (charCode === 10) {
+            output += `${normalizedLineEndings.slice(lineStart, index)}\n`;
+            lineStart = index + 1;
+            continue;
+        }
+        if (charCode === 13) {
+            lineStart = index + 1;
+        }
+    }
+
+    return `${output}${normalizedLineEndings.slice(lineStart)}`;
+}
+
+function isCommandExitStatusLine(line: string): boolean {
+    return /^Command exited with code \d+$/u.test(line.trim());
 }
 
 function detachedPreviewLine(line: string, maxBytes: number): string {
@@ -518,6 +628,44 @@ function detachedPreviewLine(line: string, maxBytes: number): string {
 
     const budget = Math.max(0, maxBytes - suffixBytes);
     return detachString(`${truncateUtf8(line, budget)}${UTF8_TRUNCATION_SUFFIX}`);
+}
+
+function isPreviewMetaLine(line: string): boolean {
+    return (
+        line.startsWith("… +") ||
+        line === "… command preview truncated while streaming" ||
+        line === "… preview truncated" ||
+        line === "… script preview truncated" ||
+        line === "… write preview truncated"
+    );
+}
+
+function highlightCodePreviewRuns(
+    lines: ReadonlyArray<string>,
+    highlightRun: (code: string) => ReadonlyArray<string>,
+): ReadonlyArray<string> {
+    const highlighted: string[] = [];
+    let run: string[] = [];
+
+    function flushRun(): void {
+        if (run.length === 0) {
+            return;
+        }
+        highlighted.push(...highlightRun(run.join("\n")));
+        run = [];
+    }
+
+    for (const line of lines) {
+        if (isPreviewMetaLine(line)) {
+            flushRun();
+            highlighted.push(line);
+            continue;
+        }
+        run.push(line);
+    }
+
+    flushRun();
+    return highlighted;
 }
 
 function truncateUtf8(text: string, maxBytes: number): string {
@@ -664,10 +812,14 @@ export function renderCodexExplore(
 export function renderMutationCall(
     theme: CodexRenderTheme,
     summary: MutationSummary,
-    options: { readonly body?: Component; readonly labelColumnWidth?: number } = {},
+    options: {
+        readonly body?: Component;
+        readonly labelColumnWidth?: number;
+        readonly statDigitWidth?: number;
+    } = {},
 ): Component {
     return makeComponent((width) => {
-        const stats = `(${green(theme, `+${summary.added}`)} ${red(theme, `-${summary.removed}`)})`;
+        const stats = formatMutationStats(theme, summary, options.statDigitWidth);
         const body = `${formatPathTarget(theme, summary.path)} ${stats}`;
         const label =
             options.labelColumnWidth === undefined
@@ -679,6 +831,14 @@ export function renderMutationCall(
             ...(options.body?.render(width) ?? []),
         ];
     });
+}
+
+function formatMutationStats(
+    theme: CodexRenderTheme,
+    summary: MutationSummary,
+    _statDigitWidth: number | undefined,
+): string {
+    return `(${green(theme, `+${summary.added}`)} ${red(theme, `-${summary.removed}`)})`;
 }
 
 function appendBudgetedPreviewRows(
@@ -808,7 +968,7 @@ export function renderCodexOutput(
         for (const [index, line] of displayLines.entries()) {
             const prefix = index === 0 ? prefixFirst : prefixRest;
             let styled = line;
-            if (line.startsWith("… +")) {
+            if (isPreviewMetaLine(line)) {
                 styled = muted(theme, line);
             } else if (dimContent) {
                 styled = muted(theme, line);
@@ -836,12 +996,7 @@ function highlightPreviewLines(
     lines: ReadonlyArray<string>,
     syntax: CodeOutputSyntax,
 ): ReadonlyArray<string> {
-    return lines.map((line) => {
-        if (line.startsWith("… +") || line.length === 0) {
-            return line;
-        }
-        return highlightCodeOutput(line, syntax)[0] ?? line;
-    });
+    return highlightCodePreviewRuns(lines, (code) => highlightCodeOutput(code, syntax));
 }
 
 export function isInstructionFilePath(path: string | undefined): boolean {
@@ -1398,42 +1553,100 @@ function bashHeredocHighlightFromLine(line: string): BashHeredocHighlight | unde
     return { marker, language: interpreter.language };
 }
 
-function highlightBashScriptPreviewLines(lines: ReadonlyArray<string>): string[] {
+function highlightShellLine(theme: CodexRenderTheme, line: string): string {
+    const commentStart = shellCommentStart(line);
+    const shellPart = commentStart === undefined ? line : line.slice(0, commentStart);
+    const commentPart = commentStart === undefined ? "" : line.slice(commentStart);
+    let state = initialShellHighlightState;
+    const highlightedShell = tokenizeShellLine(shellPart)
+        .map((token) => {
+            const result = styleShellToken(theme, token, state);
+            state = result.state;
+            return result.styled;
+        })
+        .join("");
+    return `${highlightedShell}${commentPart.length === 0 ? "" : dim(theme, commentPart)}`;
+}
+
+function highlightBashScriptPreviewLines(
+    lines: ReadonlyArray<string>,
+    theme: CodexRenderTheme,
+): string[] {
     const highlighted: string[] = [];
     let heredoc: BashHeredocHighlight | undefined;
+    let heredocBody: string[] = [];
+
+    function flushHeredocBody(): void {
+        if (heredoc === undefined || heredocBody.length === 0) {
+            return;
+        }
+        highlighted.push(...highlightSyntaxCode(heredocBody.join("\n"), heredoc.language));
+        heredocBody = [];
+    }
 
     for (const line of lines) {
-        if (line.startsWith("… +")) {
+        if (isPreviewMetaLine(line)) {
+            flushHeredocBody();
             highlighted.push(line);
             continue;
         }
 
         if (heredoc !== undefined) {
             if (line.trim() === heredoc.marker) {
-                highlighted.push(highlightSyntaxCode(line, "bash")[0] ?? line);
+                flushHeredocBody();
+                highlighted.push(highlightShellLine(theme, line));
                 heredoc = undefined;
                 continue;
             }
 
-            highlighted.push(highlightSyntaxCode(line, heredoc.language)[0] ?? line);
+            heredocBody.push(line);
             continue;
         }
 
-        highlighted.push(highlightSyntaxCode(line, "bash")[0] ?? line);
+        highlighted.push(highlightShellLine(theme, line));
         heredoc = bashHeredocHighlightFromLine(line);
     }
+
+    flushHeredocBody();
 
     return highlighted;
 }
 
-function highlightScriptPreviewLines(lines: ReadonlyArray<string>, language: string): string[] {
+function highlightScriptPreviewLines(
+    lines: ReadonlyArray<string>,
+    language: string,
+    theme: CodexRenderTheme,
+): string[] {
     if (language === "bash") {
-        return highlightBashScriptPreviewLines(lines);
+        return highlightBashScriptPreviewLines(lines, theme);
     }
 
-    return lines.map((line) =>
-        line.startsWith("… +") ? line : (highlightSyntaxCode(line, language)[0] ?? line),
-    );
+    return [...highlightCodePreviewRuns(lines, (code) => highlightSyntaxCode(code, language))];
+}
+
+function scriptPreviewSyntaxLanguages(invocation: ScriptInvocation): readonly string[] {
+    const languages = new Set<string>([invocation.language]);
+    if (invocation.language !== "bash") {
+        return [...languages];
+    }
+
+    for (const line of invocation.code.split("\n")) {
+        const heredoc = bashHeredocHighlightFromLine(line);
+        if (heredoc !== undefined) {
+            languages.add(heredoc.language);
+        }
+    }
+
+    return [...languages];
+}
+
+function scheduleScriptPreviewSyntaxLoads(
+    invocation: ScriptInvocation,
+    invalidate: (() => void) | undefined,
+): void {
+    for (const language of scriptPreviewSyntaxLanguages(invocation)) {
+        scheduleCodeOutputSyntaxLoad({ language }, invalidate);
+    }
 }
 
 export function parseScriptInvocation(command: string | undefined): ScriptInvocation | undefined {
@@ -1584,6 +1797,7 @@ export function renderScriptCall(
         readonly maxCodePreviewLines?: number;
         readonly omittedHint?: string;
         readonly headerLayout?: ScriptPreviewHeaderLayout;
+        readonly invalidate?: () => void;
     },
 ): Component {
     const expanded = options.expanded;
@@ -1592,6 +1806,7 @@ export function renderScriptCall(
     const maxCodePreviewLines = options.maxCodePreviewLines ?? 8;
     const omittedHint = options.omittedHint ?? "truncated";
     const headerLayoutOption = options.headerLayout ?? "auto";
+    scheduleScriptPreviewSyntaxLoads(retained, options.invalidate);
 
     return makeComponent((width) => {
         const header = renderScriptHeader(theme, state, retained.label);
@@ -1614,7 +1829,7 @@ export function renderScriptCall(
             collapsedPreview === undefined
                 ? previewLines(rawLines, expanded, maxCodePreviewLines, "head", omittedHint)
                 : [...rawLines];
-        const highlighted = highlightScriptPreviewLines(visible, retained.language);
+        const highlighted = highlightScriptPreviewLines(visible, retained.language, theme);
         const rendered: string[] = [];
         const headerLayout = resolveScriptHeaderLayout(headerLayoutOption, retained, highlighted);
 
@@ -1623,7 +1838,7 @@ export function renderScriptCall(
         }
 
         for (const [index, line] of highlighted.entries()) {
-            const styled = line.startsWith("… +") ? muted(theme, line) : line;
+            const styled = isPreviewMetaLine(line) ? muted(theme, line) : line;
             const firstPrefix =
                 headerLayout === "inline" && index === 0 ? `${header} ` : dim(theme, "  │ ");
             rendered.push(...wrapScriptLine(theme, styled, width, firstPrefix));
@@ -1634,6 +1849,9 @@ export function renderScriptCall(
 }
 
 function tokenizeShellLine(line: string): string[] {
+    if (line.length === 0) {
+        return [];
+    }
     return (
         line.match(
             /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|&&|\|\||2>>|2>|>>|[|;&<>]|\s+|[^\s|;&<>]+/g,
@@ -1641,53 +1859,206 @@ function tokenizeShellLine(line: string): string[] {
     );
 }
 
+function shellCommentStart(line: string): number | undefined {
+    let quote: '"' | "'" | undefined;
+    let escaped = false;
+
+    for (let index = 0; index < line.length; index += 1) {
+        const char = line[index];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === "\\" && quote !== "'") {
+            escaped = true;
+            continue;
+        }
+        if (quote !== undefined) {
+            if (char === quote) {
+                quote = undefined;
+            }
+            continue;
+        }
+        if (char === '"' || char === "'") {
+            quote = char;
+            continue;
+        }
+        if (char === "#" && (index === 0 || /\s/.test(line[index - 1] ?? ""))) {
+            return index;
+        }
+    }
+
+    return undefined;
+}
+
+function shellCommandName(token: string): string {
+    const normalized = token.replace(/^.*\//u, "");
+    return normalized.toLowerCase();
+}
+
+function shellCommandKind(token: string): ShellCommandKind {
+    const commandName = shellCommandName(token);
+    if (INTERPRETER_SHELL_COMMANDS.has(commandName)) {
+        return "interpreter";
+    }
+    if (SUBCOMMAND_SHELL_COMMANDS.has(commandName)) {
+        return "subcommands";
+    }
+    if (isScriptLikeShellWord(token)) {
+        return "script";
+    }
+    return "generic";
+}
+
+function isShellWrapperCommand(token: string): boolean {
+    return WRAPPER_SHELL_COMMANDS.has(shellCommandName(token));
+}
+
+function isQuotedShellString(token: string): boolean {
+    return (
+        (token.startsWith('"') && token.endsWith('"')) ||
+        (token.startsWith("'") && token.endsWith("'"))
+    );
+}
+
+function isScriptLikeShellWord(token: string): boolean {
+    return /\.(?:cjs|cts|js|jsx|mjs|mts|py|rb|sh|ts|tsx)$/iu.test(token);
+}
+
+function isPathLikeShellWord(token: string): boolean {
+    return (
+        token === "." ||
+        token === ".." ||
+        token.startsWith("/") ||
+        token.startsWith("./") ||
+        token.startsWith("../") ||
+        token.startsWith("~/") ||
+        token.includes("/") ||
+        /^[^\s:]+:.+\//u.test(token) ||
+        /\.(?:cjs|conf|cts|env|js|json|jsx|lock|log|md|mjs|mts|py|rb|sh|toml|ts|tsx|txt|yaml|yml)$/iu.test(
+            token,
+        )
+    );
+}
+
+function isShellFlagToken(token: string): boolean {
+    return /^--[A-Za-z0-9][\w-]*(?:=.*)?$/u.test(token) || /^-[A-Za-z0-9][\w-]*$/u.test(token);
+}
+
+function styleShellFlagToken(theme: CodexRenderTheme, token: string): string {
+    const equalsIndex = token.indexOf("=");
+    if (token.startsWith("--") && equalsIndex > 2) {
+        const value = token.slice(equalsIndex + 1);
+        return `${shellFlag(theme, token.slice(0, equalsIndex))}${shellOperator(theme, "=")}${shellValue(theme, value)}`;
+    }
+    return shellFlag(theme, token);
+}
+
+function shellValue(theme: CodexRenderTheme, token: string): string {
+    return isQuotedShellString(token) ? shellString(theme, token) : shellText(theme, token);
+}
+
+function shellFlagConsumesValue(token: string): boolean {
+    if (token.includes("=")) {
+        return false;
+    }
+    const longFlag = /^--(?<name>[A-Za-z0-9][\w-]*)$/u.exec(token)?.groups?.name;
+    if (longFlag !== undefined) {
+        return !BOOLEAN_LONG_FLAGS.has(longFlag);
+    }
+    const singleDashLongFlag = /^-(?<name>[A-Za-z][\w-]{1,})$/u.exec(token)?.groups?.name;
+    if (singleDashLongFlag !== undefined) {
+        return VALUE_SINGLE_DASH_LONG_FLAGS.has(singleDashLongFlag);
+    }
+    const shortFlag = /^-(?<name>[A-Za-z])$/u.exec(token)?.groups?.name;
+    return shortFlag !== undefined && VALUE_SHORT_FLAGS.has(shortFlag);
+}
+
+function shellStateAfterOperand(state: ShellHighlightState): ShellHighlightState {
+    return {
+        ...state,
+        expectsCommand: false,
+        expectingFlagValue: false,
+        sawScriptOperand: state.sawScriptOperand || state.commandKind === "interpreter",
+    };
+}
+
+function shouldStyleShellSubcommand(state: ShellHighlightState, token: string): boolean {
+    if (state.subcommandSeen || isPathLikeShellWord(token) || isQuotedShellString(token)) {
+        return false;
+    }
+    if (state.commandKind === "interpreter") {
+        return state.sawScriptOperand;
+    }
+    return state.commandKind === "script" || state.commandKind === "subcommands";
+}
+
 function styleShellToken(
     theme: CodexRenderTheme,
     token: string,
-    expectsCommand: boolean,
-): { readonly styled: string; readonly expectsCommandAfter: boolean } {
+    state: ShellHighlightState,
+): { readonly styled: string; readonly state: ShellHighlightState } {
     if (/^\s+$/.test(token)) {
-        return { styled: token, expectsCommandAfter: expectsCommand };
+        return { styled: token, state };
     }
 
     if (["|", "||", "&&", "&", ";", ">", ">>", "<", "2>", "2>>"].includes(token)) {
-        return { styled: shellOperator(theme, token), expectsCommandAfter: true };
+        return { styled: shellOperator(theme, token), state: initialShellHighlightState };
     }
 
-    const longFlag = /^(--)([A-Za-z0-9][\w-]*)/.exec(token);
-    if (longFlag) {
-        const value = token.slice((longFlag[1] ?? "").length + (longFlag[2] ?? "").length);
+    if (isShellFlagToken(token)) {
         return {
-            styled: `${dim(theme, longFlag[1] ?? "")}${shellFlag(theme, longFlag[2] ?? "")}${shellText(theme, value)}`,
-            expectsCommandAfter: false,
+            styled: styleShellFlagToken(theme, token),
+            state: {
+                ...state,
+                expectingFlagValue: shellFlagConsumesValue(token),
+            },
         };
     }
 
-    const shortFlag = /^(-)([A-Za-z0-9][\w-]*)/.exec(token);
-    if (shortFlag) {
-        const value = token.slice((shortFlag[1] ?? "").length + (shortFlag[2] ?? "").length);
+    if (state.expectingFlagValue) {
         return {
-            styled: `${dim(theme, shortFlag[1] ?? "")}${shellFlag(theme, shortFlag[2] ?? "")}${shellText(theme, value)}`,
-            expectsCommandAfter: false,
+            styled: shellValue(theme, token),
+            state: shellStateAfterOperand(state),
         };
     }
 
     if (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token)) {
-        return { styled: shellString(theme, token), expectsCommandAfter: expectsCommand };
+        return { styled: shellString(theme, token), state };
     }
 
-    if (
-        (token.startsWith('"') && token.endsWith('"')) ||
-        (token.startsWith("'") && token.endsWith("'"))
-    ) {
-        return { styled: shellString(theme, token), expectsCommandAfter: false };
+    if (isQuotedShellString(token)) {
+        return { styled: shellString(theme, token), state: shellStateAfterOperand(state) };
     }
 
-    if (expectsCommand) {
-        return { styled: shellCommand(theme, token), expectsCommandAfter: false };
+    if (state.expectsCommand) {
+        if (isShellWrapperCommand(token)) {
+            return { styled: shellCommand(theme, token), state: initialShellHighlightState };
+        }
+        return {
+            styled: shellCommand(theme, token),
+            state: {
+                expectsCommand: false,
+                expectingFlagValue: false,
+                commandKind: shellCommandKind(token),
+                sawScriptOperand: false,
+                subcommandSeen: false,
+            },
+        };
     }
 
-    return { styled: shellText(theme, token), expectsCommandAfter: false };
+    if (shouldStyleShellSubcommand(state, token)) {
+        return {
+            styled: shellCommand(theme, token),
+            state: { ...state, expectingFlagValue: false, subcommandSeen: true },
+        };
+    }
+
+    if (isPathLikeShellWord(token)) {
+        return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };
+    }
+
+    return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };
 }
 
 export function highlightShell(theme: CodexRenderTheme, command: string | undefined): string {
@@ -1700,11 +2071,11 @@ export function highlightShell(theme: CodexRenderTheme, command: string | undefi
     return stripped
         .split("\n")
         .map((line) => {
-            let expectsCommand = true;
+            let state = initialShellHighlightState;
             return tokenizeShellLine(line)
                 .map((token) => {
-                    const result = styleShellToken(theme, token, expectsCommand);
-                    expectsCommand = result.expectsCommandAfter;
+                    const result = styleShellToken(theme, token, state);
+                    state = result.state;
                     return result.styled;
                 })
                 .join("");
@@ -1914,6 +2285,7 @@ function renderDiffRow(
         readonly path?: string;
         readonly lineNumberWidth?: number;
         readonly maxWrappedRows?: number;
+        readonly highlightedContent?: string;
     },
 ): string[] {
     const parsed = parseDiffLine(line);
@@ -1948,7 +2320,7 @@ function renderDiffRow(
     const availableWidth = Math.max(1, contentWidth - visibleWidth(rowPrefix));
     const styledContent = styleDiffContent(
         parsed.kind,
-        highlightDiffContent(parsed.content, options?.path),
+        options?.highlightedContent ?? highlightDiffContent(parsed.content, options?.path),
         theme,
     );
     if (parsed.content.length === 0) {
@@ -1997,6 +2369,53 @@ function styleDiffContent(
         return muted(theme, content);
     }
     return dim(theme, content);
+}
+
+function highlightDiffContents(
+    lines: ReadonlyArray<string>,
+    filePath: string | undefined,
+): ReadonlyArray<string | undefined> {
+    if (filePath === undefined) {
+        return [];
+    }
+    const syntaxPath = filePath;
+    const highlightedByLine = new Map<number, string>();
+    let run: Array<{ readonly index: number; readonly content: string }> = [];
+
+    function flushRun(): void {
+        if (run.length === 0) {
+            return;
+        }
+
+        const highlightedLines = highlightCodeOutput(run.map((row) => row.content).join("\n"), {
+            path: syntaxPath,
+        });
+        if (highlightedLines.length === run.length) {
+            for (const [rowIndex, row] of run.entries()) {
+                const highlighted = highlightedLines[rowIndex];
+                if (highlighted !== undefined) {
+                    highlightedByLine.set(row.index, preserveRowBackground(highlighted));
+                }
+            }
+        }
+
+        run = [];
+    }
+
+    for (const [index, line] of lines.entries()) {
+        const parsed = parseDiffLine(line);
+        if (parsed === null) {
+            continue;
+        }
+        if (parsed.kind === "ellipsis") {
+            flushRun();
+            continue;
+        }
+        run.push({ index, content: parsed.content });
+    }
+    flushRun();
+
+    return lines.map((_line, index) => highlightedByLine.get(index));
 }
 
 function highlightDiffContent(content: string, filePath: string | undefined): string {
@@ -2061,8 +2480,9 @@ export function renderCodexDiff(
                 ? section.lines.slice(0, Math.min(remainingBudget, section.lines.length))
                 : [...section.lines];
             const sectionLineNumberWidth = diffLineNumberWidth(section.lines);
+            const highlightedContents = highlightDiffContents(visibleLines, section.path);
 
-            for (const line of visibleLines) {
+            for (const [lineIndex, line] of visibleLines.entries()) {
                 if (shouldCollapse && remainingBudget <= 0) {
                     break;
                 }
@@ -2070,6 +2490,9 @@ export function renderCodexDiff(
                     ...renderDiffRow(line, width, "    ", theme, {
                         ...(section.path === undefined ? {} : { path: section.path }),
                         lineNumberWidth: sectionLineNumberWidth,
+                        ...(highlightedContents[lineIndex] === undefined
+                            ? {}
+                            : { highlightedContent: highlightedContents[lineIndex] }),
                         ...(expanded ? {} : { maxWrappedRows: 4 }),
                     }),
                 );

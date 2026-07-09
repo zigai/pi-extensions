@@ -2,6 +2,7 @@ import type { Component } from "@earendil-works/pi-tui";
 import {
     emptyComponent,
     makeComponent,
+    renderCodexCall,
     renderCodexDiff,
     renderCodexOutput,
     renderMutationCall,
@@ -311,7 +312,10 @@ function renderApplyPatchFailure(
     theme: CodexRenderTheme,
 ): Component {
     return makeComponent((width) => [
-        theme.fg("error", theme.bold("✘ Failed to apply patch")),
+        ...renderCodexCall(theme, {
+            state: "error",
+            statusText: "Failed to apply patch",
+        }).render(width),
         ...renderCodexOutput(theme, textOutput(result), {
             expanded: options.expanded,
             mode: "head",

@@ -58,6 +58,18 @@
         "dynamicStatus": false
       }
     },
+    "writePreview": {
+      "type": "object",
+      "properties": {
+        "movingViewport": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "movingViewport": true
+      }
+    },
     "syntax": {
       "type": "object",
       "properties": {

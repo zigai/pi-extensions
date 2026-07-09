@@ -18,6 +18,18 @@ const plainTheme: CodexRenderTheme = {
     },
 };
 
+const dimMarkerTheme: CodexRenderTheme = {
+    fg(token: string, text: string): string {
+        return token === "dim" ? `<dim>${text}</dim>` : text;
+    },
+    bg(_token: string, text: string): string {
+        return text;
+    },
+    bold(text: string): string {
+        return text;
+    },
+};
+
 describe("write rendering", () => {
     it("renders successful write content from call arguments", () => {
         const component = renderWriteCallPreview(
@@ -42,7 +54,23 @@ describe("write rendering", () => {
         expect(component.render(100).join("\n")).toContain("Wrote src/example.ts (+1 -0)");
     });
 
-    it("renders streaming write content from bounded incremental preview state", () => {
+    it("dims write preview guide prefixes", () => {
+        const completed = renderWriteCallPreview(
+            { path: "src/example.ts", content: "export const value = 1;\n" },
+            dimMarkerTheme,
+            { isError: false, isPartial: false, expanded: false },
+        );
+        const streaming = renderWriteCallPreview(
+            { path: "src/example.ts", content: "export const value = 1;\n" },
+            dimMarkerTheme,
+            { isError: false, isPartial: true, expanded: false },
+        );
+
+        expect(completed.render(140).join("\n")).toContain("<dim>  │ </dim>");
+        expect(streaming.render(140).join("\n")).toContain("<dim>  │ </dim>");
+    });
+
+    it("renders streaming write content with a moving tail viewport", () => {
         let lastComponent: Component | undefined;
         let content = "";
         for (let index = 1; index <= 200; index += 1) {
@@ -64,10 +92,73 @@ describe("write rendering", () => {
         const rendered = lastComponent?.render(120).join("\n") ?? "";
 
         expect(rendered).toContain("Writing src/generated.ts (+200 -0)");
+        expect(rendered).not.toContain("export const value1 = 1;");
+        expect(rendered).not.toContain("export const value3 = 3;");
+        expect(rendered).toContain("export const value182 = 182;");
+        expect(rendered).toContain("export const value185 = 185;");
+        expect(rendered).toContain("export const value200 = 200;");
+        expect(rendered).toContain("… +181 lines (to expand)");
+        expect(rendered).not.toContain("export const value19 = 19;");
+        expect(rendered).not.toContain("export const value100 = 100;");
+    });
+
+    it("can disable the moving streaming write viewport", () => {
+        let lastComponent: Component | undefined;
+        let content = "";
+        for (let index = 1; index <= 200; index += 1) {
+            content += `export const value${index} = ${index};\n`;
+            lastComponent = renderWriteCallPreview(
+                { path: "src/generated.ts", content },
+                plainTheme,
+                {
+                    isError: false,
+                    isPartial: true,
+                    expanded: false,
+                    dynamicStatusLabels: true,
+                    movingViewport: false,
+                    lastComponent,
+                },
+            );
+            lastComponent.render(120);
+        }
+
+        const rendered = lastComponent?.render(120).join("\n") ?? "";
+
         expect(rendered).toContain("export const value1 = 1;");
         expect(rendered).toContain("export const value19 = 19;");
         expect(rendered).toContain("… +181 lines (to expand)");
-        expect(rendered).not.toContain("export const value100 = 100;");
+        expect(rendered).not.toContain("export const value185 = 185;");
+    });
+
+    it("keeps streaming mutation counter spacing compact", () => {
+        const singleDigit = renderWriteCallPreview(
+            { path: "src/generated.ts", content: "one\n" },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: true,
+                expanded: false,
+                dynamicStatusLabels: true,
+                mutationStatDigitWidth: 3,
+            },
+        );
+        const tripleDigit = renderWriteCallPreview(
+            {
+                path: "src/generated.ts",
+                content: Array.from({ length: 100 }, (_value, index) => `line ${index}`).join("\n"),
+            },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: true,
+                expanded: false,
+                dynamicStatusLabels: true,
+                mutationStatDigitWidth: 3,
+            },
+        );
+
+        expect(singleDigit.render(120).join("\n")).toContain("(+1 -0)");
+        expect(tripleDigit.render(120).join("\n")).toContain("(+100 -0)");
     });
 
     it("does not double-count split CRLF line endings while streaming", () => {

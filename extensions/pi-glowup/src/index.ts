@@ -102,8 +102,10 @@ const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
 const MUTATION_LABEL_COLUMN_WIDTH = "Writing".length;
+const MUTATION_STAT_DIGIT_WIDTH = 3;
 const ACTIVE_MUTATION_ALIGNMENT_KEY = "codexLookActiveMutationAlignment";
 const MUTATION_RESULT_RENDERED_KEY = "codexLookMutationResultRendered";
+const ACTIVE_MUTATION_STAT_DIGIT_WIDTH_KEY = "codexLookActiveMutationStatDigitWidth";
 const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-codex-look.extension-loaded");
 const builtInRenderCallCounts: Record<string, number> = {};
 const builtInRenderResultCounts: Record<string, number> = {};
@@ -181,6 +183,9 @@ function configDiagnostics(config: CodexLookConfig): DebugLogFields {
         },
         toolLabels: {
             dynamicStatus: config.toolLabels.dynamicStatus,
+        },
+        writePreview: {
+            movingViewport: config.writePreview.movingViewport,
         },
         syntax: {
             preloadLanguages: config.syntax.preloadLanguages,
@@ -302,18 +307,38 @@ function mutationLabelColumnWidth(
     return undefined;
 }
 
+function mutationStatDigitWidth(context: BuiltInRenderContext): number | undefined {
+    const state = isMutableRenderState(context.state) ? context.state : undefined;
+    if (state === undefined) {
+        return undefined;
+    }
+
+    if (context.isPartial) {
+        state[ACTIVE_MUTATION_STAT_DIGIT_WIDTH_KEY] = MUTATION_STAT_DIGIT_WIDTH;
+        state[MUTATION_RESULT_RENDERED_KEY] = false;
+    }
+
+    if (state[MUTATION_RESULT_RENDERED_KEY] === true) {
+        return undefined;
+    }
+
+    const digitWidth = state[ACTIVE_MUTATION_STAT_DIGIT_WIDTH_KEY];
+    return typeof digitWidth === "number" ? digitWidth : undefined;
+}
+
 function markMutationResultRendered(
     context: BuiltInRenderContext,
-    dynamicStatusLabels: boolean,
+    _dynamicStatusLabels: boolean,
 ): void {
-    if (!dynamicStatusLabels) {
+    const state = isMutableRenderState(context.state) ? context.state : undefined;
+    if (state === undefined) {
         return;
     }
 
-    const state = isMutableRenderState(context.state) ? context.state : undefined;
-    if (state?.[ACTIVE_MUTATION_ALIGNMENT_KEY] !== true) {
-        return;
-    }
+    const hadActiveMutationLayout =
+        state[ACTIVE_MUTATION_ALIGNMENT_KEY] === true ||
+        state[ACTIVE_MUTATION_STAT_DIGIT_WIDTH_KEY] !== undefined;
+    if (!hadActiveMutationLayout) return;
 
     if (state[MUTATION_RESULT_RENDERED_KEY] !== true) {
         state[MUTATION_RESULT_RENDERED_KEY] = true;
@@ -504,6 +529,7 @@ function renderBuiltInToolCall(options: {
     readonly headerLayout: () => ScriptPreviewHeaderLayout;
     readonly maxCodePreviewLines: () => number;
     readonly dynamicStatusLabels: boolean;
+    readonly movingWriteViewport: boolean;
     readonly recordRender: (kind: "call", toolName: BuiltInToolName) => void;
 }): BuiltInToolRendererOptions["renderCall"] {
     return (toolName, args, theme, context) => {
@@ -542,7 +568,10 @@ function renderBuiltInToolCall(options: {
                     options.maxCodePreviewLines,
                 );
             case "write":
-                return renderWriteCall(args, theme, context, options.dynamicStatusLabels);
+                return renderWriteCall(args, theme, context, {
+                    dynamicStatusLabels: options.dynamicStatusLabels,
+                    movingViewport: options.movingWriteViewport,
+                });
             case "edit":
                 return renderEditCall(args, theme, context, options.dynamicStatusLabels);
             case "delete":
@@ -650,6 +679,7 @@ function renderBashCall(
                 expanded: false,
                 maxCodePreviewLines: maxCodePreviewLines(),
                 headerLayout: headerLayout(),
+                invalidate: context.invalidate,
             },
         );
     }
@@ -676,6 +706,7 @@ function renderBashCall(
         expanded: context.expanded,
         maxCodePreviewLines: maxCodePreviewLines(),
         headerLayout: headerLayout(),
+        invalidate: context.invalidate,
     });
 }
 
@@ -704,14 +735,17 @@ function renderWriteCall(
     args: unknown,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
-    dynamicStatusLabels: boolean,
+    options: { readonly dynamicStatusLabels: boolean; readonly movingViewport: boolean },
 ) {
     closeExplorationGroup();
-    const labelColumnWidth = mutationLabelColumnWidth(context, dynamicStatusLabels);
+    const labelColumnWidth = mutationLabelColumnWidth(context, options.dynamicStatusLabels);
+    const statDigitWidth = mutationStatDigitWidth(context);
     return renderWriteCallPreview(normalizedWriteArgs(args), theme, {
         ...context,
-        dynamicStatusLabels,
+        dynamicStatusLabels: options.dynamicStatusLabels,
+        movingViewport: options.movingViewport,
         ...(labelColumnWidth === undefined ? {} : { mutationLabelColumnWidth: labelColumnWidth }),
+        ...(statDigitWidth === undefined ? {} : { mutationStatDigitWidth: statDigitWidth }),
     });
 }
 
@@ -753,6 +787,7 @@ function renderEditCall(
 ) {
     closeExplorationGroup();
     const labelColumnWidth = mutationLabelColumnWidth(context, dynamicStatusLabels);
+    const statDigitWidth = mutationStatDigitWidth(context);
     const preview = editPreviews.get(context.toolCallId);
     if (!context.isPartial && preview) {
         return renderMutationCall(
@@ -763,7 +798,10 @@ function renderEditCall(
                 added: preview.added,
                 removed: preview.removed,
             }),
-            labelColumnWidth === undefined ? {} : { labelColumnWidth },
+            {
+                ...(labelColumnWidth === undefined ? {} : { labelColumnWidth }),
+                ...(statDigitWidth === undefined ? {} : { statDigitWidth }),
+            },
         );
     }
 
@@ -942,6 +980,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
                 headerLayout: () => headerLayout,
                 maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
                 dynamicStatusLabels: config.toolLabels.dynamicStatus,
+                movingWriteViewport: config.writePreview.movingViewport,
                 recordRender: recordBuiltInRender,
             }),
             renderResult: renderBuiltInToolResult({

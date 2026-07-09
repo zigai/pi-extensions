@@ -92,7 +92,8 @@ describe("apply_patch renderer", () => {
             .render(80);
         const rendered = lines.join("\n");
 
-        expect(rendered).toContain("✘ Failed to apply patch");
+        expect(lines[0]?.trimEnd()).toBe("• Failed to apply patch");
+        expect(rendered).not.toContain("✘ Failed to apply patch");
         expect(rendered).toContain("Invalid patch: missing header");
         expectLinesWithinWidth(lines, 80);
     });
