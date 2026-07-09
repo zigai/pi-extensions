@@ -1,7 +1,8 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { deflateSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
@@ -19,7 +20,8 @@ import { getImageDimensions } from "@earendil-works/pi-tui";
 import extension, { packageName, extensionName } from "../src/index.ts";
 import { codexToolProviderHeaders, resolveCodexToolProvider } from "../src/codex-auth.ts";
 import { registerCodexCommand } from "../src/codex-command.ts";
-import { openCodexSettingsScreen } from "../src/codex-settings-ui.ts";
+import { openCodexSettingsScreen, type CodexSettingsTab } from "../src/codex-settings-ui.ts";
+import { supportsCodexPromptPersonality } from "../src/codex-personality.ts";
 import { buildCodexCoreSystemPrompt } from "../src/prompt.ts";
 import {
     CODEX_CURRENT_MODEL_SELECTION,
@@ -36,6 +38,7 @@ import {
 import {
     cancelScheduledCodexAutoCompaction,
     handleCodexNativeCompaction,
+    maybeTriggerCodexAutoCompaction,
     NATIVE_COMPACTION_SHIM_SUMMARY,
     rewriteProviderRequestWithNativeCompaction,
     scheduleCodexAutoCompaction,
@@ -56,6 +59,11 @@ import {
 import { formatWebRunToolOutput } from "../src/tools/web-run-output.ts";
 import { createWebRunTool } from "../src/tools/web-run.ts";
 import { Redacted } from "../src/redacted.ts";
+import {
+    CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY,
+    CODEX_RESPONSES_LITE_HEADER,
+    rewriteCodexResponsesPayload,
+} from "../src/responses-compat.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
 import {
     countCodexTextTokens,
@@ -120,7 +128,7 @@ test("parses codex config with safe defaults", () => {
     const config = parseCodexCoreConfig({
         scope: { tools: "all" },
         tools: { webSearch: false, viewImageDescriptions: true },
-        prompt: { mode: "codex" },
+        prompt: { mode: "codex", personality: "friendly" },
         compaction: { enabled: true, auto: false, thresholdPercent: 90 },
         openai: { verbosity: "high", compactionReasoning: "low" },
     });
@@ -131,10 +139,16 @@ test("parses codex config with safe defaults", () => {
     assert.equal(config.tools.viewImageDescriptions, true);
     assert.equal(config.tools.applyPatch, "off");
     assert.equal(config.prompt.mode, "codex");
+    assert.equal(config.prompt.personality, "friendly");
     assert.equal(config.compaction.enabled, true);
     assert.equal(config.compaction.auto, false);
     assert.equal(config.compaction.thresholdPercent, 90);
     assert.equal(parseCodexCoreConfig({}).compaction.thresholdPercent, 80);
+    assert.equal(parseCodexCoreConfig({}).prompt.personality, "pragmatic");
+    assert.equal(
+        parseCodexCoreConfig({ prompt: { personality: "verbose" } }).prompt.personality,
+        "pragmatic",
+    );
     assert.equal(parseCodexCoreConfig({}).openai.compactionReasoning, "medium");
     assert.equal(
         parseCodexCoreConfig({ openai: { verbosity: "high" } }).openai.compactionModel,
@@ -145,6 +159,15 @@ test("parses codex config with safe defaults", () => {
     assert.equal(config.openai.compactionModel, CODEX_CURRENT_MODEL_SELECTION);
     assert.equal(config.openai.verbosity, "high");
     assert.equal(config.openai.compactionReasoning, "low");
+    assert.equal(
+        parseCodexCoreConfig({ openai: { compactionReasoning: "future-effort" } }).openai
+            .compactionReasoning,
+        "future-effort",
+    );
+    assert.equal(
+        parseCodexCoreConfig({ openai: { compactionReasoning: " " } }).openai.compactionReasoning,
+        "medium",
+    );
 });
 
 test("reads codex config as optional defaults and scaffolds global files", async () => {
@@ -349,6 +372,7 @@ test("codex command saves only changed global config values", async () => {
                 appliedConfig = config;
             },
         });
+        assert.deepEqual(command.registeredCommands, ["codex"]);
 
         await command.run("prompt", makeExtensionContext(cwd, true));
 
@@ -361,7 +385,7 @@ test("codex command saves only changed global config values", async () => {
             viewImageDescriptions: false,
             applyPatch: "off",
         });
-        assert.deepEqual(savedConfig.prompt, { mode: "codex" });
+        assert.deepEqual(savedConfig.prompt, { mode: "codex", personality: "pragmatic" });
         assert.equal(appliedConfig.tools.webSearch, false);
         assert.equal(appliedConfig.prompt.mode, "codex");
     } finally {
@@ -413,11 +437,253 @@ test("settings screen refreshes draft from effective config after save", async (
     assert.equal(webSearchLine.includes("on"), false);
 });
 
+test("settings screen shows personality only for supported bundled prompts", async () => {
+    const renderForModel = async (modelId: string): Promise<string> => {
+        let rendered = "";
+        const ctx = {
+            model: { ...DEFAULT_TEST_EXTENSION_MODEL, id: modelId },
+            ui: {
+                custom: async (
+                    factory: (
+                        tui: unknown,
+                        theme: Theme,
+                        keybindings: unknown,
+                        done: () => void,
+                    ) => { readonly render: (width: number) => readonly string[] },
+                ) => {
+                    const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                    rendered = component.render(120).join("\n");
+                },
+            },
+        };
+        await openCodexSettingsScreen(ctx as unknown as ExtensionContext, {
+            initialConfig: DEFAULT_CODEX_CORE_CONFIG,
+            onChange: () => ({ ok: false }),
+        });
+        return rendered;
+    };
+
+    assert.match(await renderForModel("gpt-5.5"), /Personality/);
+    assert.doesNotMatch(await renderForModel("gpt-5.6-sol"), /Personality/);
+});
+
+test("settings screen renders a description for every setting", async () => {
+    const descriptionsByTab: Readonly<Record<CodexSettingsTab, readonly string[]>> = {
+        general: [
+            "Expose Codex extras only on Codex-like models, or on all models.",
+            "Use Pi's prompt or the active GPT model's bundled Codex prompt.",
+            "Set the Codex communication style; none disables personality instructions.",
+            "Use OpenAI Codex responses compaction checkpoints when available.",
+            "Automatically run native Codex compaction between turns.",
+            "Context usage percentage that triggers native auto-compaction.",
+        ],
+        tools: [
+            "Codex web.run / web_run search tool.",
+            "Generate or edit images through Codex image APIs.",
+            "Return local images to image-capable models.",
+            "Fallback image descriptions for text-only models.",
+            "Use apply_patch instead of edit: off, OpenAI/Codex-like models, or all models.",
+        ],
+        openai: [
+            "Up to 1.5× faster token velocity; credit usage is higher and varies by model and pricing.",
+            "Text verbosity for Codex-native calls that support it.",
+            "Model used by web_run; current follows the active Codex model.",
+            "OpenAI image model used by imagegen generation and editing.",
+            "Model used for optional image descriptions; current follows the active Codex model.",
+            "Model used for native Codex compaction; current follows the active Codex model.",
+            "Reasoning effort for native compaction calls.",
+        ],
+        usage: [
+            "Fetch current Codex usage and banked reset credits.",
+            "Spend one banked reset credit after an in-screen confirmation.",
+        ],
+    };
+
+    for (const tab of ["general", "tools", "openai", "usage"] as const) {
+        const renderedSelections: string[] = [];
+        const ctx = {
+            model: DEFAULT_TEST_EXTENSION_MODEL,
+            ui: {
+                custom: async (
+                    factory: (
+                        tui: unknown,
+                        theme: Theme,
+                        keybindings: unknown,
+                        done: () => void,
+                    ) => {
+                        readonly render: (width: number) => readonly string[];
+                        readonly handleInput?: (data: string) => void;
+                    },
+                ) => {
+                    const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                    for (const _description of descriptionsByTab[tab]) {
+                        renderedSelections.push(component.render(160).join("\n"));
+                        component.handleInput?.("\x1b[B");
+                    }
+                },
+            },
+        };
+
+        await openCodexSettingsScreen(ctx as unknown as ExtensionContext, {
+            initialConfig: DEFAULT_CODEX_CORE_CONFIG,
+            initialTab: tab,
+            initialUsage: { error: "Usage unavailable in this UI test." },
+            onChange: () => ({ ok: false }),
+        });
+
+        const rendered = renderedSelections.join("\n");
+        for (const description of descriptionsByTab[tab]) {
+            assert.ok(
+                rendered.includes(description),
+                `${tab} description was not rendered: ${description}`,
+            );
+        }
+    }
+});
+
+test("shows a scrollable startup warning when fast mode is enabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-fast-warning-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const configPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(
+            configPath,
+            JSON.stringify({
+                ...DEFAULT_CODEX_CORE_CONFIG_JSON,
+                openai: { ...DEFAULT_CODEX_CORE_CONFIG_JSON.openai, fast: true },
+            }),
+        );
+
+        const notifications: Array<{ readonly message: string; readonly type: string }> = [];
+        const baseContext = makeExtensionContext("/workspace", true);
+        const ctx = {
+            ...baseContext,
+            hasUI: true,
+            mode: "tui",
+            ui: {
+                theme: TEST_THEME,
+                setStatus() {},
+                notify(message: string, type: string) {
+                    notifications.push({ message, type });
+                },
+            },
+        } as unknown as ExtensionContext;
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+
+        await harness.startSession(ctx);
+
+        assert.deepEqual(notifications, [
+            {
+                message:
+                    "Fast mode is enabled: supported Codex calls can deliver up to 1.5× faster token velocity, with higher credit usage that varies by model and pricing.",
+                type: "warning",
+            },
+        ]);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("resolves current Codex model selections", () => {
     assert.equal(resolveCodexRequestModel("current", "gpt-5.5"), "gpt-5.5");
     assert.equal(resolveCodexRequestModel(undefined, "gpt-5.5"), "gpt-5.5");
     assert.equal(resolveCodexRequestModel("", "gpt-5.5"), "gpt-5.5");
     assert.equal(resolveCodexRequestModel("gpt-5.4-mini", "gpt-5.5"), "gpt-5.4-mini");
+});
+
+test("rewrites GPT-5.6 requests to the Responses Lite layout", () => {
+    const rewritten = rewriteCodexResponsesPayload({
+        model: "gpt-5.6-sol",
+        instructions: "model instructions",
+        tools: [{ type: "function", name: "read" }],
+        input: [
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "input_image",
+                        image_url: "data:image/png;base64,aGVsbG8=",
+                        detail: "original",
+                    },
+                ],
+            },
+        ],
+        reasoning: { effort: "ultra", summary: "auto" },
+        service_tier: "flex",
+        parallel_tool_calls: true,
+    });
+
+    assert.ok(rewritten);
+    assert.equal(Object.hasOwn(rewritten, "instructions"), false);
+    assert.equal(Object.hasOwn(rewritten, "tools"), false);
+    assert.equal(Object.hasOwn(rewritten, "service_tier"), false);
+    assert.equal(rewritten.parallel_tool_calls, false);
+    assert.deepEqual(rewritten.reasoning, {
+        effort: "max",
+        summary: "auto",
+        context: "all_turns",
+    });
+    assert.deepEqual(rewritten.client_metadata, {
+        [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
+    });
+    assert.ok(Array.isArray(rewritten.input));
+    assert.deepEqual(rewritten.input.slice(0, 2), [
+        {
+            type: "additional_tools",
+            role: "developer",
+            tools: [{ type: "function", name: "read" }],
+        },
+        {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: "model instructions" }],
+        },
+    ]);
+    assert.doesNotMatch(JSON.stringify(rewritten.input), /"detail"/);
+    assert.equal(rewriteCodexResponsesPayload({ model: "gpt-5.5", input: [] }), undefined);
+});
+
+test("applies GPT-5.6 Responses Lite compatibility through extension hooks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-responses-lite-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        const ctx = makeExtensionContext("/workspace", true, {
+            ...DEFAULT_TEST_EXTENSION_MODEL,
+            id: "gpt-5.6-terra",
+        });
+        const headers: Record<string, string | null> = {};
+
+        await harness.startSession(ctx);
+        await harness.prepareProviderHeaders(headers, ctx);
+        const rewritten = await harness.rewriteProviderRequest(
+            {
+                model: "gpt-5.6-terra",
+                instructions: "Pi system prompt",
+                input: [{ role: "user", content: "hello" }],
+            },
+            ctx,
+        );
+
+        assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], "true");
+        assert.equal(ctx.model?.contextWindow, 353_400);
+        assert.ok(isRecord(rewritten));
+        assert.equal(Object.hasOwn(rewritten, "instructions"), false);
+        assert.equal(rewritten.parallel_tool_calls, false);
+        assert.deepEqual(rewritten.reasoning, { effort: "medium", context: "all_turns" });
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 test("codex prompt mode inherits structured Pi prompt sections", () => {
@@ -463,13 +729,21 @@ test("codex prompt mode inherits structured Pi prompt sections", () => {
         "Current working directory: /workspace",
     ].join("\n");
 
-    const prompt = buildCodexCoreSystemPrompt(piPrompt, config, options);
+    const prompt = buildCodexCoreSystemPrompt(piPrompt, config, options, {
+        modelId: "gpt-5.6-sol",
+    });
 
-    assert.match(prompt, /^You are an expert coding assistant operating inside pi/);
+    assert.match(prompt, /^You are Codex, an agent based on GPT-5/);
+    assert.match(prompt, /A substantial ASCII diagram counts as a visualization/);
+    assert.doesNotMatch(prompt, /You are an expert coding assistant operating inside pi/);
     assert.doesNotMatch(prompt, /Codex CLI/);
     assert.doesNotMatch(prompt, /Codex-style/);
     assert.doesNotMatch(prompt, /update_plan/);
     assert.doesNotMatch(prompt, /apply_patch/);
+    assert.doesNotMatch(prompt, /exec_command/);
+    assert.doesNotMatch(prompt, /multi_tool_use\.parallel/);
+    assert.doesNotMatch(prompt, /skills\.(?:list|read)/);
+    assert.doesNotMatch(prompt, /subagents?/i);
     assert.doesNotMatch(prompt, /Sandbox and approvals/);
     assert.doesNotMatch(prompt, /approval mode/);
     assert.doesNotMatch(prompt, /# Pi Context/);
@@ -478,6 +752,7 @@ test("codex prompt mode inherits structured Pi prompt sections", () => {
     assert.doesNotMatch(prompt, /Codex tool scope/);
     assert.doesNotMatch(prompt, /following Pi-provided/);
     assert.match(prompt, /Available tools:\n- read: Read file contents/);
+    assert.equal(prompt.split("Available tools:").length - 1, 1);
     assert.match(prompt, /- bash: Execute shell commands/);
     assert.match(prompt, /- web_run: Search or open the web through Codex-backed web access\./);
     assert.match(prompt, /- imagegen: Generate or edit images through Codex image generation\./);
@@ -498,6 +773,202 @@ test("codex prompt mode inherits structured Pi prompt sections", () => {
         prompt,
         /# Pi Context[\s\S]*You are an expert coding assistant operating inside pi/,
     );
+});
+
+test("selects Codex prompts by active GPT model and preserves Pi mode", () => {
+    const codexConfig = parseCodexCoreConfig({
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        prompt: { mode: "codex" },
+    });
+    const piConfig = parseCodexCoreConfig({
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        prompt: { mode: "pi" },
+    });
+    const piPrompt = "Pi system prompt";
+    const options: BuildSystemPromptOptions = {
+        cwd: "/workspace",
+        selectedTools: ["read", "bash", "edit"],
+        toolSnippets: {
+            read: "Read files.",
+            bash: "Run shell commands.",
+            edit: "Edit files.",
+        },
+    };
+    const sol = buildCodexCoreSystemPrompt(piPrompt, codexConfig, options, {
+        modelId: "gpt-5.6-sol",
+    });
+    const terra = buildCodexCoreSystemPrompt(piPrompt, codexConfig, options, {
+        modelId: "gpt-5.6-terra",
+    });
+    const luna = buildCodexCoreSystemPrompt(piPrompt, codexConfig, options, {
+        modelId: "gpt-5.6-luna",
+    });
+    const gpt55 = buildCodexCoreSystemPrompt(piPrompt, codexConfig, options, {
+        modelId: "gpt-5.5",
+    });
+
+    assert.notEqual(sol, terra);
+    assert.equal(terra, luna);
+    assert.match(sol, /A substantial ASCII diagram counts as a visualization/);
+    assert.doesNotMatch(terra, /A substantial ASCII diagram counts as a visualization/);
+    assert.match(gpt55, /## Engineering judgment/);
+    assert.match(gpt55, /You are a deeply pragmatic, effective software engineer/);
+    assert.doesNotMatch(gpt55, /# Using skills/);
+    assert.match(sol, /Use `edit` for local file edits/);
+    assert.match(gpt55, /Use `edit` for manual code edits/);
+    assert.doesNotMatch(
+        `${sol}\n${terra}\n${gpt55}`,
+        /`apply_patch`|exec_command|multi_tool_use\.parallel|skills\.(?:list|read)|subagents?/i,
+    );
+    assert.equal(
+        buildCodexCoreSystemPrompt(piPrompt, codexConfig, options, { modelId: "claude-sonnet" }),
+        piPrompt,
+    );
+    assert.equal(buildCodexCoreSystemPrompt(piPrompt, codexConfig, options), piPrompt);
+    assert.equal(
+        buildCodexCoreSystemPrompt(piPrompt, piConfig, options, { modelId: "gpt-5.6-sol" }),
+        piPrompt,
+    );
+});
+
+test("renders Codex personality variants only for supported bundled prompts", () => {
+    const options: BuildSystemPromptOptions = {
+        cwd: "/workspace",
+        selectedTools: ["read", "bash", "edit"],
+        toolSnippets: { read: "Read files.", bash: "Run shell commands.", edit: "Edit files." },
+    };
+    const build = (personality: "friendly" | "pragmatic" | "none", modelId = "gpt-5.5") =>
+        buildCodexCoreSystemPrompt(
+            "Pi system prompt",
+            parseCodexCoreConfig({ prompt: { mode: "codex", personality } }),
+            options,
+            { modelId },
+        );
+
+    const friendly = build("friendly");
+    const pragmatic = build("pragmatic");
+    const none = build("none");
+    assert.match(friendly, /You have a vivid inner life as Codex/);
+    assert.doesNotMatch(friendly, /You are a deeply pragmatic, effective software engineer/);
+    assert.match(pragmatic, /You are a deeply pragmatic, effective software engineer/);
+    assert.doesNotMatch(pragmatic, /You have a vivid inner life as Codex/);
+    assert.doesNotMatch(none, /# Personality|\{\{ personality \}\}/);
+    assert.match(none, /# General/);
+
+    assert.equal(build("friendly", "gpt-5.6-sol"), build("none", "gpt-5.6-sol"));
+    assert.equal(supportsCodexPromptPersonality("GPT-5.5"), true);
+    assert.equal(supportsCodexPromptPersonality("gpt-5.6-sol"), false);
+    assert.equal(supportsCodexPromptPersonality("gpt-5.4"), false);
+});
+
+test("removes unavailable shell and editing assumptions from Codex prompts", () => {
+    const config = parseCodexCoreConfig({
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        prompt: { mode: "codex" },
+    });
+    const readOnlyPrompt = buildCodexCoreSystemPrompt(
+        "Pi system prompt",
+        config,
+        {
+            cwd: "/workspace",
+            selectedTools: ["read"],
+            toolSnippets: { read: "Read files." },
+        },
+        { modelId: "gpt-5.6-sol" },
+    );
+    const toolLessPrompt = buildCodexCoreSystemPrompt(
+        "Pi system prompt",
+        config,
+        { cwd: "/workspace", selectedTools: [], toolSnippets: {} },
+        { modelId: "gpt-5.5" },
+    );
+
+    assert.doesNotMatch(readOnlyPrompt, /exec_command|`bash`|file-editing tool|git reset|`rg`/);
+    assert.doesNotMatch(
+        toolLessPrompt,
+        /exec_command|`bash`|file-editing tool|git reset|multi_tool_use\.parallel|`rg`/,
+    );
+    assert.match(readOnlyPrompt, /Available tools:\n- read: Read files\./);
+    assert.match(toolLessPrompt, /Available tools:\n\(none\)/);
+});
+
+test("bundled Codex prompts match the pinned upstream content", async () => {
+    const prompts = [
+        [
+            new URL("../src/prompt/codex-gpt-5.6-sol.md", import.meta.url),
+            "e9778714d505f3dd04d44db4394024c5fab5bf6554fc9faa3cdf9cf776b63bb9",
+        ],
+        [
+            new URL("../src/prompt/codex-gpt-5.6-terra-luna.md", import.meta.url),
+            "78a2fc84e1bffa421d865c1a2ade4185d3d33ef38e6a15157f0ff1a89b7d52ec",
+        ],
+        [
+            new URL("../src/prompt/codex-gpt-5.5.md", import.meta.url),
+            "c13cc50bc068912608769224bf2c5ffcb5f534856fd631f3df0ef72a8a3108a4",
+        ],
+        [
+            new URL("../src/prompt/codex-gpt-5.5-personality-friendly.md", import.meta.url),
+            "534873b3132a3e1db9782ffe8de56e64b2c74eb7e190aa2d0e7a0335fac09d50",
+        ],
+        [
+            new URL("../src/prompt/codex-gpt-5.5-personality-pragmatic.md", import.meta.url),
+            "5ef72df6e1e414b4373b05c7db0340fa2e8254859b4551ae4441043da7ceac81",
+        ],
+    ] as const;
+
+    for (const [promptUrl, expectedHash] of prompts) {
+        const prompt = await readFile(promptUrl);
+        assert.equal(createHash("sha256").update(prompt).digest("hex"), expectedHash);
+    }
+});
+
+test("extension prompt hook follows the selected GPT model", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-model-prompt-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const configPath = getCodexCoreConfigPath();
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(
+            configPath,
+            JSON.stringify({
+                ...DEFAULT_CODEX_CORE_CONFIG_JSON,
+                prompt: { mode: "codex" },
+            }),
+        );
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        const options: BuildSystemPromptOptions = {
+            cwd: "/workspace",
+            selectedTools: ["read", "bash", "edit"],
+            toolSnippets: {
+                read: "Read files.",
+                bash: "Run shell commands.",
+                edit: "Edit files.",
+            },
+        };
+        const terraPrompt = await harness.prepareSystemPrompt(
+            "Pi system prompt",
+            options,
+            makeExtensionContext("/workspace", true, {
+                ...DEFAULT_TEST_EXTENSION_MODEL,
+                id: "gpt-5.6-terra",
+            }),
+        );
+        const gpt55Prompt = await harness.prepareSystemPrompt(
+            "Pi system prompt",
+            options,
+            makeExtensionContext("/workspace", true),
+        );
+
+        assert.match(terraPrompt, /^You are Codex, an agent based on GPT-5/);
+        assert.doesNotMatch(terraPrompt, /## Engineering judgment/);
+        assert.match(gpt55Prompt, /## Engineering judgment/);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 test("formats codex usage payloads", () => {
@@ -1474,6 +1945,76 @@ test("creates native compaction using remote compaction v2", async () => {
     assert.deepEqual(result?.compaction?.details.worldState.activeToolNames, ["read"]);
 });
 
+test("creates GPT-5.6 native compaction with Responses Lite", async () => {
+    let requestBody: unknown;
+    let responsesLiteHeader: string | null = null;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as unknown;
+        responsesLiteHeader = new Headers(init?.headers).get(CODEX_RESPONSES_LITE_HEADER);
+        return new Response(
+            [
+                "event: response.output_item.done",
+                'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-lite"}}',
+                "",
+                "event: response.completed",
+                'data: {"type":"response.completed","response":{"id":"resp_lite","created_at":123}}',
+                "",
+            ].join("\n"),
+            { status: 200 },
+        );
+    });
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent(),
+        makeNativeCompactionContext({ modelId: "gpt-5.6-sol", contextWindow: 272_000 }),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+            openai: {
+                ...DEFAULT_CODEX_CORE_CONFIG.openai,
+                compactionReasoning: "current",
+            },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.equal(responsesLiteHeader, "true");
+    assert.ok(isRecord(requestBody));
+    assert.equal(Object.hasOwn(requestBody, "instructions"), false);
+    assert.equal(Object.hasOwn(requestBody, "tools"), false);
+    assert.equal(requestBody.parallel_tool_calls, false);
+    assert.deepEqual(requestBody.reasoning, { effort: "low", context: "all_turns" });
+    assert.deepEqual(requestBody.client_metadata, {
+        [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
+    });
+    const input = responseInput(requestBody);
+    assert.deepEqual(input[0], {
+        type: "additional_tools",
+        role: "developer",
+        tools: [
+            {
+                type: "function",
+                name: "read",
+                description: "Read a file.",
+                parameters: {
+                    type: "object",
+                    properties: { path: { type: "string" } },
+                    required: ["path"],
+                },
+                strict: null,
+            },
+        ],
+    });
+    assert.deepEqual(input[1], {
+        type: "message",
+        role: "developer",
+        content: [{ type: "input_text", text: "system prompt" }],
+    });
+    assert.deepEqual(input.at(-1), { type: "compaction_trigger" });
+    assert.equal(result?.compaction?.details.model, "gpt-5.6-sol");
+});
+
 test("streams remote compaction SSE without buffering response text", async () => {
     let textCalled = false;
     const encoder = new TextEncoder();
@@ -2327,6 +2868,34 @@ test("auto compaction defers until Pi is idle after agent_end", async () => {
     assert.equal(compactCalls.length, 1);
 });
 
+test("uses GPT-5.6 effective context for auto compaction", () => {
+    const compactCalls: unknown[] = [];
+    const usage = { tokens: 230_000 };
+    const ctx = makeAutoCompactionContext(
+        compactCalls,
+        { value: true },
+        {
+            modelId: "gpt-5.6-sol",
+            sessionId: "auto-session-gpt-5.6",
+            usageTokens: () => usage.tokens,
+        },
+    );
+    const config = {
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        compaction: {
+            ...DEFAULT_CODEX_CORE_CONFIG.compaction,
+            enabled: true,
+            thresholdPercent: 80,
+        },
+    };
+
+    assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), false);
+    usage.tokens = 300_000;
+    assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), true);
+    assert.equal(compactCalls.length, 1);
+    cancelScheduledCodexAutoCompaction();
+});
+
 test("auto compaction skips after assistant errors so Pi retry can continue", async () => {
     const compactCalls: unknown[] = [];
     const idle = { value: true };
@@ -2549,23 +3118,39 @@ test("rewrites native compaction replay when new-session context is inserted", a
 
 const TEST_THEME = makeTestTheme();
 
-type ExtensionSessionStartHandler = (event: unknown, ctx: ExtensionContext) => Promise<void> | void;
+type ExtensionEventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
 
 type ExtensionHarness = {
     readonly api: ExtensionAPI;
     readonly activeTools: readonly string[];
     readonly startSession: (ctx: ExtensionContext) => Promise<void>;
+    readonly prepareProviderHeaders: (
+        headers: Record<string, string | null>,
+        ctx: ExtensionContext,
+    ) => Promise<void>;
+    readonly rewriteProviderRequest: (payload: unknown, ctx: ExtensionContext) => Promise<unknown>;
+    readonly prepareSystemPrompt: (
+        systemPrompt: string,
+        options: BuildSystemPromptOptions,
+        ctx: ExtensionContext,
+    ) => Promise<string>;
 };
 
 function makeExtensionHarness(initialActiveTools: readonly string[] = []): ExtensionHarness {
     let activeTools: string[] = [...initialActiveTools];
-    let sessionStart: ExtensionSessionStartHandler | undefined;
+    let sessionStart: ExtensionEventHandler | undefined;
+    let beforeProviderHeaders: ExtensionEventHandler | undefined;
+    let beforeProviderRequest: ExtensionEventHandler | undefined;
+    let beforeAgentStart: ExtensionEventHandler | undefined;
     const api = {
         registerTool() {},
         registerCommand() {},
         registerMessageRenderer() {},
-        on(eventName: string, handler: ExtensionSessionStartHandler) {
+        on(eventName: string, handler: ExtensionEventHandler) {
             if (eventName === "session_start") sessionStart = handler;
+            if (eventName === "before_provider_headers") beforeProviderHeaders = handler;
+            if (eventName === "before_provider_request") beforeProviderRequest = handler;
+            if (eventName === "before_agent_start") beforeAgentStart = handler;
         },
         getActiveTools: () => activeTools,
         setActiveTools(tools: readonly string[]) {
@@ -2583,6 +3168,38 @@ function makeExtensionHarness(initialActiveTools: readonly string[] = []): Exten
             assert.ok(sessionStart);
             await sessionStart({ type: "session_start" }, ctx);
         },
+        async prepareProviderHeaders(
+            headers: Record<string, string | null>,
+            ctx: ExtensionContext,
+        ): Promise<void> {
+            assert.ok(beforeProviderHeaders);
+            await beforeProviderHeaders({ type: "before_provider_headers", headers }, ctx);
+        },
+        async rewriteProviderRequest(payload: unknown, ctx: ExtensionContext): Promise<unknown> {
+            assert.ok(beforeProviderRequest);
+            return beforeProviderRequest({ type: "before_provider_request", payload }, ctx);
+        },
+        async prepareSystemPrompt(
+            systemPrompt: string,
+            options: BuildSystemPromptOptions,
+            ctx: ExtensionContext,
+        ): Promise<string> {
+            assert.ok(beforeAgentStart);
+            const result = await beforeAgentStart(
+                {
+                    type: "before_agent_start",
+                    prompt: "test",
+                    systemPrompt,
+                    systemPromptOptions: options,
+                },
+                ctx,
+            );
+            assert.ok(isRecord(result));
+            if (typeof result.systemPrompt !== "string") {
+                assert.fail("before_agent_start did not return a system prompt");
+            }
+            return result.systemPrompt;
+        },
     };
 }
 
@@ -2590,22 +3207,26 @@ type CodexCommandHandler = (args: string, ctx: ExtensionContext) => Promise<void
 
 type CodexCommandHarness = {
     readonly api: ExtensionAPI;
+    readonly registeredCommands: readonly string[];
     readonly run: (args: string, ctx: ExtensionContext) => Promise<void>;
 };
 
 function makeCodexCommandHarness(): CodexCommandHarness {
-    let handler: CodexCommandHandler | undefined;
+    let codexHandler: CodexCommandHandler | undefined;
+    const registeredCommands: string[] = [];
     const api = {
         registerCommand(name: string, command: { readonly handler: CodexCommandHandler }) {
-            if (name === "codex") handler = command.handler;
+            registeredCommands.push(name);
+            if (name === "codex") codexHandler = command.handler;
         },
     };
     return {
         // SAFETY: This fixture implements the ExtensionAPI member exercised by registerCodexCommand.
         api: api as unknown as ExtensionAPI,
+        registeredCommands,
         async run(args: string, ctx: ExtensionContext): Promise<void> {
-            assert.ok(handler);
-            await handler(args, ctx);
+            assert.ok(codexHandler);
+            await codexHandler(args, ctx);
         },
     };
 }
@@ -2616,6 +3237,7 @@ type TestExtensionModel = {
     readonly id: string;
     readonly baseUrl: string;
     readonly input: readonly string[];
+    readonly contextWindow?: number;
 };
 
 const DEFAULT_TEST_EXTENSION_MODEL: TestExtensionModel = {
@@ -2624,6 +3246,7 @@ const DEFAULT_TEST_EXTENSION_MODEL: TestExtensionModel = {
     id: "gpt-5.5",
     baseUrl: "https://chatgpt.com/backend-api",
     input: ["text", "image"],
+    contextWindow: 272_000,
 };
 
 function makeExtensionContext(
@@ -2636,6 +3259,7 @@ function makeExtensionContext(
         hasUI: false,
         isProjectTrusted: () => trusted,
         model,
+        sessionManager: { getSessionId: () => "extension-session" },
     };
     // SAFETY: This fixture supplies the fields read by session_start tool synchronization.
     return ctx as unknown as ExtensionContext;
@@ -3029,15 +3653,20 @@ function makeCompactionApi(): ExtensionAPI {
 }
 
 function makeNativeCompactionContext(
-    options: { readonly contextWindow?: number; readonly sessionId?: string } = {},
+    options: {
+        readonly contextWindow?: number;
+        readonly sessionId?: string;
+        readonly modelId?: string;
+    } = {},
 ): ExtensionContext {
+    const modelId = options.modelId ?? "gpt-5.5";
     const ctx = {
         hasUI: false,
         cwd: "/workspace",
         model: {
             provider: "openai-codex",
             api: "openai-codex-responses",
-            id: "gpt-5.5",
+            id: modelId,
             baseUrl: "https://chatgpt.com/backend-api",
             input: ["text", "image"],
             contextWindow: options.contextWindow ?? 200_000,
@@ -3048,6 +3677,17 @@ function makeNativeCompactionContext(
                 apiKey: makeCodexJwtAccountToken("account"),
                 headers: {},
             }),
+            find: (_provider: string, requestedModelId: string) =>
+                requestedModelId === modelId
+                    ? {
+                          provider: "openai-codex",
+                          api: "openai-codex-responses",
+                          id: modelId,
+                          baseUrl: "https://chatgpt.com/backend-api",
+                          input: ["text", "image"],
+                          contextWindow: options.contextWindow ?? 200_000,
+                      }
+                    : undefined,
         },
         sessionManager: {
             getSessionId: () => options.sessionId ?? "session-1",
@@ -3062,12 +3702,28 @@ function makeNativeCompactionContext(
 function makeAutoCompactionContext(
     compactCalls: unknown[],
     idle: { readonly value: boolean },
+    options: {
+        readonly modelId?: string;
+        readonly sessionId?: string;
+        readonly usageTokens?: () => number;
+    } = {},
 ): ExtensionContext {
+    const contextWindow = 100;
     const ctx = {
         hasUI: false,
         cwd: "/workspace",
         isIdle: () => idle.value,
-        getContextUsage: () => ({ tokens: 90, contextWindow: 100, percent: 90 }),
+        model: options.modelId
+            ? {
+                  provider: "openai-codex",
+                  api: "openai-codex-responses",
+                  id: options.modelId,
+              }
+            : undefined,
+        getContextUsage: () => {
+            const tokens = options.usageTokens?.() ?? 90;
+            return { tokens, contextWindow, percent: (tokens / contextWindow) * 100 };
+        },
         compact: (options: unknown) => {
             compactCalls.push(options);
             if (isRecord(options) && typeof options.onComplete === "function") {
@@ -3075,7 +3731,7 @@ function makeAutoCompactionContext(
             }
         },
         sessionManager: {
-            getSessionId: () => "auto-session-1",
+            getSessionId: () => options.sessionId ?? "auto-session-1",
             getBranch: () => [{ type: "message", id: "entry-auto" }],
         },
     };
