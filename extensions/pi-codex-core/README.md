@@ -8,33 +8,35 @@ Slim Pi-native Codex extras for Pi coding agent.
 - `imagegen` — Codex image generation/editing. Images are saved outside the active workspace under `~/.pi/agent/pi-codex-core/imagegen/<session>/`, with `latest.png` kept in that artifact directory.
 - `view_image` — native image return for local files, plus optional Codex-backed descriptions.
 - `apply_patch` — optional TypeScript port of the Codex native apply_patch edit tool. When enabled, it replaces Pi's native `edit` tool.
-- `/codex` — Pi-native tabbed settings UI for tools, prompt mode, OpenAI options, usage, reset expiration, and reset spending.
-- Optional Codex-style prompt mode using the bundled Codex base prompt.
+- `/codex` — Pi-native tabbed settings UI for tools, prompt mode, supported personalities, OpenAI options, usage, reset expiration, and reset spending.
+- Optional model-aware Codex prompt mode using the matching bundled GPT-5.6 Sol/Terra/Luna or GPT-5.5 prompt, adapted to Pi's active tools and runtime context.
 - Optional Codex remote compaction v2 replay for OpenAI Codex responses models, with chaining, metadata, fallbacks, world-state injection, auto-compaction, and token-aware shrinking.
+- GPT-5.6 Responses Lite compatibility for ordinary Pi turns, image descriptions, and native compaction.
 
 ## Configuration
 
 Use global config at `~/.pi/agent/pi-codex-core/config.json`.
 
-| Option                         | Default         | Purpose                                                                                  |
-| ------------------------------ | --------------- | ---------------------------------------------------------------------------------------- |
-| `scope.tools`                  | `"codex"`       | Show Codex tools only for Codex-like models; use `"all"` to expose them for every model. |
-| `tools.webSearch`              | `true`          | Enable the `web_run` search tool.                                                        |
-| `tools.imageGeneration`        | `true`          | Enable the `imagegen` generation/editing tool.                                           |
-| `tools.viewImage`              | `true`          | Enable local image viewing.                                                              |
-| `tools.viewImageDescriptions`  | `false`         | Add Codex-generated descriptions when viewing images.                                    |
-| `tools.applyPatch`             | `"off"`         | Use `apply_patch` instead of `edit`: `"off"`, `"openai"`, or `"all"`.                    |
-| `prompt.mode`                  | `"pi"`          | Use Pi's normal prompt; use `"codex"` for the bundled Codex-style prompt.                |
-| `compaction.enabled`           | `false`         | Enable Codex-style conversation compaction.                                              |
-| `compaction.auto`              | `true`          | Automatically compact when token usage reaches the threshold.                            |
-| `compaction.thresholdPercent`  | `80`            | Token usage percentage that triggers auto-compaction.                                    |
-| `openai.webSearchModel`        | `"current"`     | Model for `web_run`; `"current"` uses the active Codex model.                            |
-| `openai.imageModel`            | `"gpt-image-2"` | Model for `imagegen`.                                                                    |
-| `openai.imageDescriptionModel` | `"current"`     | Model for image descriptions; `"current"` uses the active Codex model.                   |
-| `openai.compactionModel`       | `"current"`     | Model for compaction; `"current"` uses the active Codex model.                           |
-| `openai.compactionReasoning`   | `"medium"`      | Reasoning level for compaction requests.                                                 |
-| `openai.verbosity`             | `"low"`         | Verbosity for Codex-backed requests.                                                     |
-| `openai.fast`                  | `false`         | Prefer faster/lower-latency Codex request behavior when available.                       |
+| Option                         | Default         | Purpose                                                                                      |
+| ------------------------------ | --------------- | -------------------------------------------------------------------------------------------- |
+| `scope.tools`                  | `"codex"`       | Show Codex tools only for Codex-like models; use `"all"` to expose them for every model.     |
+| `tools.webSearch`              | `true`          | Enable the `web_run` search tool.                                                            |
+| `tools.imageGeneration`        | `true`          | Enable the `imagegen` generation/editing tool.                                               |
+| `tools.viewImage`              | `true`          | Enable local image viewing.                                                                  |
+| `tools.viewImageDescriptions`  | `false`         | Add Codex-generated descriptions when viewing images.                                        |
+| `tools.applyPatch`             | `"off"`         | Use `apply_patch` instead of `edit`: `"off"`, `"openai"`, or `"all"`.                        |
+| `prompt.mode`                  | `"pi"`          | Use Pi's normal prompt; use `"codex"` for model-aware Codex prompts on GPT models.           |
+| `prompt.personality`           | `"pragmatic"`   | Codex communication style: `"friendly"`, `"pragmatic"`, or `"none"`; currently GPT-5.5 only. |
+| `compaction.enabled`           | `false`         | Enable Codex-style conversation compaction.                                                  |
+| `compaction.auto`              | `true`          | Automatically compact when token usage reaches the threshold.                                |
+| `compaction.thresholdPercent`  | `80`            | Token usage percentage that triggers auto-compaction.                                        |
+| `openai.webSearchModel`        | `"current"`     | Model for `web_run`; `"current"` uses the active Codex model.                                |
+| `openai.imageModel`            | `"gpt-image-2"` | Model for `imagegen`.                                                                        |
+| `openai.imageDescriptionModel` | `"current"`     | Model for image descriptions; `"current"` uses the active Codex model.                       |
+| `openai.compactionModel`       | `"current"`     | Model for compaction; `"current"` uses the active Codex model.                               |
+| `openai.compactionReasoning`   | `"medium"`      | Model-supported reasoning effort; also accepts `"current"`, `"max"`, and `"ultra"`.          |
+| `openai.verbosity`             | `"low"`         | Verbosity for Codex-backed requests.                                                         |
+| `openai.fast`                  | `false`         | Use up to 1.5× faster token velocity; credit usage varies by model and current pricing.      |
 
 ```json
 {
@@ -50,7 +52,8 @@ Use global config at `~/.pi/agent/pi-codex-core/config.json`.
     "applyPatch": "off"
   },
   "prompt": {
-    "mode": "pi"
+    "mode": "pi",
+    "personality": "pragmatic"
   },
   "compaction": {
     "enabled": false,
