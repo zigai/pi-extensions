@@ -1,4 +1,8 @@
-import { renderCodexOutput, type CodexRenderTheme } from "../../../rendering/core.ts";
+import {
+    emptyComponent,
+    renderCodexOutput,
+    type CodexRenderTheme,
+} from "../../../rendering/core.ts";
 import type {
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
@@ -83,7 +87,10 @@ export function createCodexRenderer(toolName: string): ThirdPartyToolRenderer {
                 expanded: context.expanded,
             });
         },
-        renderResult(result, options, theme) {
+        renderResult(result, options, theme, context) {
+            if (baseToolName(toolName) === "view_image" && !context.isError && !options.isPartial) {
+                return emptyComponent();
+            }
             const summary = codexResultSummary(toolName, result, theme, {
                 expanded: options.expanded,
             });

@@ -563,6 +563,44 @@ describe("third-party tool renderers", () => {
         expect(rendered).not.toContain(" • detail: high");
     });
 
+    it("hides successful view_image attachment text results", () => {
+        const renderer = createThirdPartyToolRenderer("view_image");
+
+        const lines = renderer
+            .renderResult(
+                {
+                    content: [
+                        {
+                            type: "text",
+                            text: "[view_image image attached: /tmp/preview.png]",
+                        },
+                    ],
+                },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                { ...renderContext, args: { path: "/tmp/preview.png" } },
+            )
+            .render(100);
+
+        expect(lines).toEqual([]);
+    });
+
+    it("keeps failed view_image result text visible", () => {
+        const renderer = createThirdPartyToolRenderer("view_image");
+
+        const rendered = renderer
+            .renderResult(
+                { content: [{ type: "text", text: "Failed to load image" }] },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                { ...renderContext, args: { path: "/tmp/missing.png" }, isError: true },
+            )
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("Failed to load image");
+    });
+
     it("summarizes pi-codex-core web_run search calls without repeating search", () => {
         const renderer = createThirdPartyToolRenderer("web_run");
 
