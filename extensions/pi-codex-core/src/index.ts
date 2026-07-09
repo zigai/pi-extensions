@@ -5,6 +5,8 @@ import { registerCodexCommand } from "./codex-command.ts";
 import { readCodexCoreConfig, type CodexCoreConfig } from "./config.ts";
 import { registerNativeCompactionDisplay } from "./compaction-display.ts";
 import { buildCodexCoreSystemPrompt } from "./prompt.ts";
+import { CODEX_RESPONSES_LITE_HEADER, rewriteCodexResponsesPayload } from "./responses-compat.ts";
+import { applyCodexModelMetadataCompatibility, codexModelRequestProfile } from "./codex-models.ts";
 import { registerApplyPatchTool } from "./tools/apply-patch.ts";
 import { registerImagegenTool } from "./tools/imagegen.ts";
 import {
@@ -20,6 +22,9 @@ export const extensionName = "Pi Codex Core";
 
 /** Generated npm package name. */
 export const packageName = "pi-codex-core";
+
+const FAST_MODE_STARTUP_WARNING =
+    "Fast mode is enabled: supported Codex calls can deliver up to 1.5× faster token velocity, with higher credit usage that varies by model and pricing.";
 
 type CompactionModule = typeof import("./compaction.ts");
 
@@ -64,21 +69,36 @@ export default function extension(pi: ExtensionAPI): void {
         if (config.compaction.enabled) {
             warmCodexTokenizer();
         }
+        applyCodexModelMetadataCompatibility(ctx.model);
         syncCodexCoreTools(pi, ctx, config);
+        if (config.openai.fast && ctx.hasUI) {
+            ctx.ui.notify(FAST_MODE_STARTUP_WARNING, "warning");
+        }
     });
 
     pi.on("model_select", async (_event, ctx) => {
+        applyCodexModelMetadataCompatibility(ctx.model);
         syncCodexCoreTools(pi, ctx, config);
     });
 
-    pi.on("before_agent_start", async (event) => {
+    pi.on("before_agent_start", async (event, ctx) => {
         return {
             systemPrompt: buildCodexCoreSystemPrompt(
                 event.systemPrompt,
                 config,
                 event.systemPromptOptions,
+                { modelId: ctx.model?.id },
             ),
         };
+    });
+
+    pi.on("before_provider_headers", (event, ctx) => {
+        if (
+            isActiveCodexResponsesModel(ctx) &&
+            codexModelRequestProfile(ctx.model?.id)?.useResponsesLite
+        ) {
+            event.headers[CODEX_RESPONSES_LITE_HEADER] = "true";
+        }
     });
 
     pi.on("session_before_compact", async (event, ctx) => {
@@ -102,17 +122,21 @@ export default function extension(pi: ExtensionAPI): void {
     pi.on("before_provider_request", async (event, ctx) => {
         const imagePayload = rewriteProviderRequestWithDeferredViewImages(event.payload, ctx);
         const payload = imagePayload ?? event.payload;
+        const responsesPayload = isActiveCodexResponsesModel(ctx)
+            ? rewriteCodexResponsesPayload(payload, ctx.model?.id)
+            : undefined;
+        const compatiblePayload = responsesPayload ?? payload;
         if (!config.compaction.enabled) {
-            return imagePayload;
+            return responsesPayload ?? imagePayload;
         }
         const { rewriteProviderRequestWithNativeCompaction } = await loadCompactionModule();
         const compactionPayload = await rewriteProviderRequestWithNativeCompaction(
-            payload,
+            compatiblePayload,
             ctx,
             config,
             pi,
         );
-        return compactionPayload ?? imagePayload;
+        return compactionPayload ?? responsesPayload ?? imagePayload;
     });
 
     pi.on("session_shutdown", async (event, ctx) => {
@@ -128,6 +152,13 @@ export default function extension(pi: ExtensionAPI): void {
         clearDeferredViewImagesForSession(ctx.sessionManager.getSessionId());
         await shutdownCodexTokenizer();
     });
+}
+
+function isActiveCodexResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]): boolean {
+    return (
+        ctx.model?.provider.trim().toLowerCase() === "openai-codex" &&
+        String(ctx.model.api).toLowerCase().includes("responses")
+    );
 }
 
 export { parseCodexCoreConfig, readCodexCoreConfig, writeCodexCoreConfig } from "./config.ts";

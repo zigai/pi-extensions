@@ -10,9 +10,13 @@ import type { CodexFailure } from "./failures.ts";
 
 import {
     CODEX_APPLY_PATCH_MODES,
+    CODEX_COMPACTION_REASONING_LEVELS,
     CODEX_CURRENT_MODEL_SELECTION,
+    CODEX_PERSONALITIES,
     type CodexCoreConfig,
 } from "./config.ts";
+import { CODEX_TEXT_MODEL_CHOICES } from "./codex-models.ts";
+import { supportsCodexPromptPersonality } from "./codex-personality.ts";
 import {
     consumeCodexRateLimitResetCredit,
     createCodexRateLimitResetRedeemRequestId,
@@ -40,6 +44,7 @@ export type CodexSettingsScreenOptions = {
 };
 
 const TAB_ORDER: readonly CodexSettingsTab[] = ["general", "tools", "openai", "usage"];
+type DescribedSettingItem = SettingItem & { readonly description: string };
 
 export async function openCodexSettingsScreen(
     ctx: ExtensionContext,
@@ -52,6 +57,7 @@ export async function openCodexSettingsScreen(
     let resetLoading = false;
     let pendingResetConfirm = false;
     let resetMessage: { readonly kind: "info" | "error"; readonly text: string } | undefined;
+    const personalitySupported = supportsCodexPromptPersonality(ctx.model?.id);
 
     await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
         const loadUsage = (): void => {
@@ -118,7 +124,14 @@ export async function openCodexSettingsScreen(
 
         const createSettingsList = (): SettingsList =>
             new SettingsList(
-                buildItems(activeTab, draft, usageState, usageLoading, resetLoading),
+                buildItems(
+                    activeTab,
+                    draft,
+                    usageState,
+                    usageLoading,
+                    resetLoading,
+                    personalitySupported,
+                ),
                 10,
                 getSettingsListTheme(),
                 (id, value) => {
@@ -167,7 +180,7 @@ export async function openCodexSettingsScreen(
                     rule(width, theme, "accent"),
                     formatTabs(activeTab, theme),
                     rule(width, theme, "borderMuted"),
-                    ...formatHeaderLines(activeTab, draft, theme),
+                    ...formatHeaderLines(activeTab, draft, theme, personalitySupported),
                     ...(activeTab === "usage"
                         ? formatUsageLines(
                               theme,
@@ -217,7 +230,8 @@ function buildItems(
     usageState: CodexUsageSnapshot | { readonly error: string } | undefined,
     usageLoading: boolean,
     resetLoading: boolean,
-): SettingItem[] {
+    personalitySupported: boolean,
+): DescribedSettingItem[] {
     if (tab === "general") {
         return [
             {
@@ -230,10 +244,22 @@ function buildItems(
             {
                 id: "promptMode",
                 label: "Prompt mode",
-                description: "Use Pi's normal prompt or the bundled Codex-style base prompt.",
+                description: "Use Pi's prompt or the active GPT model's bundled Codex prompt.",
                 currentValue: config.prompt.mode,
                 values: ["pi", "codex"],
             },
+            ...(personalitySupported
+                ? [
+                      {
+                          id: "personality",
+                          label: "Personality",
+                          description:
+                              "Set the Codex communication style; none disables personality instructions.",
+                          currentValue: config.prompt.personality,
+                          values: [...CODEX_PERSONALITIES],
+                      },
+                  ]
+                : []),
             {
                 id: "nativeCompaction",
                 label: "Native compaction",
@@ -300,7 +326,7 @@ function buildItems(
             toggleItem(
                 "fast",
                 "Fast mode",
-                "Request priority service tier for supported Codex calls.",
+                "Up to 1.5× faster token velocity; credit usage is higher and varies by model and pricing.",
                 config.openai.fast,
             ),
             {
@@ -310,34 +336,40 @@ function buildItems(
                 currentValue: config.openai.verbosity,
                 values: ["low", "medium", "high"],
             },
-            selectItem("webSearchModel", "Web search model", config.openai.webSearchModel, [
-                CODEX_CURRENT_MODEL_SELECTION,
-                "gpt-5.5",
-                "gpt-5.4",
-                "gpt-5.4-mini",
-            ]),
-            selectItem("imageModel", "Image model", config.openai.imageModel, [
-                "gpt-image-2",
-                "gpt-image-1.5",
-            ]),
+            selectItem(
+                "webSearchModel",
+                "Web search model",
+                "Model used by web_run; current follows the active Codex model.",
+                config.openai.webSearchModel,
+                [CODEX_CURRENT_MODEL_SELECTION, ...CODEX_TEXT_MODEL_CHOICES],
+            ),
+            selectItem(
+                "imageModel",
+                "Image model",
+                "OpenAI image model used by imagegen generation and editing.",
+                config.openai.imageModel,
+                ["gpt-image-2", "gpt-image-1.5"],
+            ),
             selectItem(
                 "imageDescriptionModel",
                 "Image description model",
+                "Model used for optional image descriptions; current follows the active Codex model.",
                 config.openai.imageDescriptionModel,
-                [CODEX_CURRENT_MODEL_SELECTION, "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+                [CODEX_CURRENT_MODEL_SELECTION, ...CODEX_TEXT_MODEL_CHOICES],
             ),
-            selectItem("compactionModel", "Compaction model", config.openai.compactionModel, [
-                CODEX_CURRENT_MODEL_SELECTION,
-                "gpt-5.5",
-                "gpt-5.4",
-                "gpt-5.4-mini",
-            ]),
+            selectItem(
+                "compactionModel",
+                "Compaction model",
+                "Model used for native Codex compaction; current follows the active Codex model.",
+                config.openai.compactionModel,
+                [CODEX_CURRENT_MODEL_SELECTION, ...CODEX_TEXT_MODEL_CHOICES],
+            ),
             {
                 id: "compactionReasoning",
                 label: "Compaction reasoning",
                 description: "Reasoning effort for native compaction calls.",
                 currentValue: config.openai.compactionReasoning,
-                values: ["current", "minimal", "low", "medium", "high", "xhigh"],
+                values: [...CODEX_COMPACTION_REASONING_LEVELS],
             },
         ];
     }
@@ -369,7 +401,21 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
     if (id === "toolScope")
         return { ...config, scope: { tools: value === "all" ? "all" : "codex" } };
     if (id === "promptMode")
-        return { ...config, prompt: { mode: value === "codex" ? "codex" : "pi" } };
+        return {
+            ...config,
+            prompt: { ...config.prompt, mode: value === "codex" ? "codex" : "pi" },
+        };
+    if (id === "personality") {
+        const personality = CODEX_PERSONALITIES.find((item) => item === value);
+        if (!personality) return config;
+        return {
+            ...config,
+            prompt: {
+                ...config.prompt,
+                personality,
+            },
+        };
+    }
     if (id === "nativeCompaction") {
         return { ...config, compaction: { ...config.compaction, enabled: value === "on" } };
     }
@@ -404,42 +450,47 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
     }
     if (id === "compactionModel")
         return { ...config, openai: { ...config.openai, compactionModel: value } };
-    if (
-        id === "compactionReasoning" &&
-        (value === "current" ||
-            value === "minimal" ||
-            value === "low" ||
-            value === "medium" ||
-            value === "high" ||
-            value === "xhigh")
-    ) {
+    if (id === "compactionReasoning" && value.trim().length > 0) {
         return { ...config, openai: { ...config.openai, compactionReasoning: value } };
     }
     return config;
 }
 
-function toggleItem(id: string, label: string, description: string, enabled: boolean): SettingItem {
+function toggleItem(
+    id: string,
+    label: string,
+    description: string,
+    enabled: boolean,
+): DescribedSettingItem {
     return { id, label, description, currentValue: enabled ? "on" : "off", values: ["off", "on"] };
 }
 
 function selectItem(
     id: string,
     label: string,
+    description: string,
     currentValue: string,
     values: readonly string[],
-): SettingItem {
+): DescribedSettingItem {
     return {
         id,
         label,
+        description,
         currentValue,
         values: values.includes(currentValue) ? [...values] : [currentValue, ...values],
     };
 }
 
-function formatHeaderLines(tab: CodexSettingsTab, config: CodexCoreConfig, theme: Theme): string[] {
+function formatHeaderLines(
+    tab: CodexSettingsTab,
+    config: CodexCoreConfig,
+    theme: Theme,
+    personalitySupported: boolean,
+): string[] {
     if (tab !== "general") return [""];
+    const personality = personalitySupported ? `, personality ${config.prompt.personality}` : "";
     return [
-        `  ${theme.bold("Pi Codex Core")}: tools ${config.scope.tools}, prompt ${config.prompt.mode}, compaction ${config.compaction.enabled ? "on" : "off"}`,
+        `  ${theme.bold("Pi Codex Core")}: tools ${config.scope.tools}, prompt ${config.prompt.mode}${personality}, compaction ${config.compaction.enabled ? "on" : "off"}`,
         "",
     ];
 }

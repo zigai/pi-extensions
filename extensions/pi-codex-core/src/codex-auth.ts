@@ -11,6 +11,7 @@ import {
 } from "./failures.ts";
 import { Redacted } from "./redacted.ts";
 import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
+import { CODEX_TEXT_MODEL_CHOICES } from "./codex-models.ts";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
@@ -203,7 +204,7 @@ function resolveCodexToolAuthModel(ctx: ExtensionContext): CodexResult<RuntimeMo
     const direct = currentId ? registry.find?.(OPENAI_CODEX_PROVIDER, currentId) : undefined;
     if (isUsableOpenAICodexModel(direct)) return ok(direct);
 
-    for (const modelId of ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"]) {
+    for (const modelId of [...CODEX_TEXT_MODEL_CHOICES, "gpt-5.3-codex-spark"]) {
         const model = registry.find?.(OPENAI_CODEX_PROVIDER, modelId);
         if (isUsableOpenAICodexModel(model)) return ok(model);
     }

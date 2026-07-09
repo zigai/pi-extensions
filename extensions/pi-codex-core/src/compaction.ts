@@ -37,6 +37,11 @@ import {
     shutdownCodexTokenizer,
     truncateCodexTextToTokenBudget,
 } from "./tokenizer.ts";
+import { codexModelRequestProfile, codexReasoningEffortForRequest } from "./codex-models.ts";
+import {
+    CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY,
+    CODEX_RESPONSES_LITE_HEADER,
+} from "./responses-compat.ts";
 
 export {
     NATIVE_COMPACTION_MESSAGE_TYPE,
@@ -220,18 +225,25 @@ type RemoteCompactionV2Response = {
 
 type RemoteCompactionV2Request = {
     readonly model: string;
-    readonly instructions: string;
+    readonly instructions?: string | undefined;
     readonly input: readonly ResponsesInputItem[];
     readonly tool_choice: "auto";
-    readonly parallel_tool_calls: true;
+    readonly parallel_tool_calls: boolean;
     readonly store: false;
     readonly stream: true;
     readonly include: readonly string[];
     readonly prompt_cache_key: string;
     readonly text: { readonly verbosity: string };
     readonly service_tier?: "priority" | undefined;
-    readonly reasoning?: { readonly effort: string; readonly summary: "auto" } | undefined;
+    readonly reasoning?: RemoteCompactionReasoning | undefined;
     readonly tools?: readonly ResponsesTool[] | undefined;
+    readonly client_metadata?: Readonly<Record<string, string>> | undefined;
+};
+
+type RemoteCompactionReasoning = {
+    readonly effort?: string | undefined;
+    readonly summary?: "auto" | undefined;
+    readonly context?: "all_turns" | undefined;
 };
 
 type ResponsesPayload = JsonObject & {
@@ -268,7 +280,7 @@ type RemoteCompactionRequestParts = {
     readonly promptCacheKey: string;
     readonly verbosity: string;
     readonly fast: boolean;
-    readonly reasoning?: { readonly effort: string; readonly summary: "auto" } | undefined;
+    readonly reasoning?: RemoteCompactionReasoning | undefined;
     readonly tools?: readonly ResponsesTool[] | undefined;
 };
 
@@ -354,20 +366,23 @@ export async function handleCodexNativeCompaction(
         api: runtime.value.api,
         baseUrl: runtime.value.baseUrl,
     };
-    const latestNativeCompaction = findLatestNativeCompactionEntry(event.branchEntries, match);
-    let promptInput = buildRemoteCompactionPromptInput(event, ctx.model, latestNativeCompaction);
-    if (promptInput.input.length === 0) return undefined;
     const compactionModel = resolveCodexRequestModel(
         config.openai.compactionModel,
         runtime.value.model,
     );
+    const targetModel = resolveCompactionTargetModel(ctx, compactionModel);
+    const requestProfile = codexModelRequestProfile(compactionModel);
+    const contextWindow = requestProfile?.effectiveContextWindow ?? targetModel?.contextWindow;
+    const latestNativeCompaction = findLatestNativeCompactionEntry(event.branchEntries, match);
+    let promptInput = buildRemoteCompactionPromptInput(event, targetModel, latestNativeCompaction);
+    if (promptInput.input.length === 0) return undefined;
     const instructions = buildCompactionInstructions(
         ctx.getSystemPrompt(),
         event.customInstructions,
     );
     const tools = buildCompactionTools(pi);
     const promptCacheKey = safePromptCacheKey(ctx.sessionManager.getSessionId());
-    const reasoning = buildReasoning(config).reasoning;
+    const reasoning = buildReasoning(config, compactionModel).reasoning;
     let tokenCache = createTokenEstimateCache();
     const preflight = await rewriteRemoteCompactionToolOutputsForContextWindow(
         promptInput.input,
@@ -380,7 +395,7 @@ export async function handleCodexNativeCompaction(
             reasoning,
             tools,
         },
-        ctx.model?.contextWindow,
+        contextWindow,
         tokenCache,
     );
     promptInput = { ...promptInput, input: preflight.input };
@@ -397,7 +412,7 @@ export async function handleCodexNativeCompaction(
     });
     const shrink = await shrinkRemoteCompactionRequestForContextWindow(
         request,
-        ctx.model?.contextWindow,
+        contextWindow,
         tokenCache,
         preflight,
     );
@@ -415,8 +430,12 @@ export async function handleCodexNativeCompaction(
     }
     tokenCache = createTokenEstimateCache();
     try {
+        const headers = new Headers(runtime.value.headers);
+        if (requestProfile?.useResponsesLite) {
+            headers.set(CODEX_RESPONSES_LITE_HEADER, "true");
+        }
         const responseResult = await executeRemoteCompactionV2(
-            runtime.value,
+            { responsesUrl: runtime.value.responsesUrl, headers },
             shrink.request,
             event.signal,
             runtimeServices,
@@ -682,8 +701,13 @@ export function maybeTriggerCodexAutoCompaction(
     if (!config.compaction.enabled || !config.compaction.auto) return false;
     if (!ctx.isIdle()) return false;
     const usage = ctx.getContextUsage();
-    if (!usage || usage.percent === null || usage.percent < config.compaction.thresholdPercent)
-        return false;
+    if (!usage) return false;
+    const effectiveContextWindow = codexModelRequestProfile(ctx.model?.id)?.effectiveContextWindow;
+    const usagePercent =
+        effectiveContextWindow && usage.tokens !== null
+            ? (usage.tokens / effectiveContextWindow) * 100
+            : usage.percent;
+    if (usagePercent === null || usagePercent < config.compaction.thresholdPercent) return false;
 
     const sessionId = ctx.sessionManager.getSessionId();
     const branch = ctx.sessionManager.getBranch();
@@ -1111,9 +1135,50 @@ function buildRemoteCompactionV2Request(input: {
     readonly promptCacheKey: string;
     readonly verbosity: string;
     readonly fast: boolean;
-    readonly reasoning?: { readonly effort: string; readonly summary: "auto" } | undefined;
+    readonly reasoning?: RemoteCompactionReasoning | undefined;
     readonly tools?: readonly ResponsesTool[] | undefined;
 }): RemoteCompactionV2Request {
+    const profile = codexModelRequestProfile(input.model);
+    const serviceTier =
+        input.fast && (profile?.supportsPriorityServiceTier ?? true)
+            ? { service_tier: "priority" as const }
+            : {};
+    if (profile?.useResponsesLite) {
+        const instructions = sanitizeSurrogates(input.instructions);
+        return {
+            model: input.model,
+            input: [
+                {
+                    type: "additional_tools",
+                    role: "developer",
+                    tools: (input.tools ?? []).map((tool) => ({ ...tool })),
+                },
+                ...(instructions.length > 0
+                    ? [
+                          {
+                              type: "message",
+                              role: "developer",
+                              content: [{ type: "input_text", text: instructions }],
+                          },
+                      ]
+                    : []),
+                ...input.input.map(stripResponsesLiteImageDetails),
+                { type: "compaction_trigger" },
+            ],
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+            store: false,
+            stream: true,
+            include: input.reasoning ? ["reasoning.encrypted_content"] : [],
+            prompt_cache_key: input.promptCacheKey,
+            text: { verbosity: input.verbosity },
+            ...serviceTier,
+            ...(input.reasoning ? { reasoning: input.reasoning } : {}),
+            client_metadata: {
+                [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
+            },
+        };
+    }
     return {
         model: input.model,
         instructions: sanitizeSurrogates(input.instructions),
@@ -1125,7 +1190,7 @@ function buildRemoteCompactionV2Request(input: {
         include: input.reasoning ? ["reasoning.encrypted_content"] : [],
         prompt_cache_key: input.promptCacheKey,
         text: { verbosity: input.verbosity },
-        ...(input.fast ? { service_tier: "priority" as const } : {}),
+        ...serviceTier,
         ...(input.reasoning ? { reasoning: input.reasoning } : {}),
         ...(input.tools && input.tools.length > 0 ? { tools: input.tools } : {}),
     };
@@ -1997,11 +2062,49 @@ function buildCompactionInstructions(systemPrompt: string, customInstructions?: 
         : systemPrompt;
 }
 
-function buildReasoning(config: CodexCoreConfig): {
-    readonly reasoning?: { readonly effort: string; readonly summary: "auto" };
+function buildReasoning(
+    config: CodexCoreConfig,
+    modelId: string,
+): {
+    readonly reasoning?: RemoteCompactionReasoning;
 } {
-    if (config.openai.compactionReasoning === "current") return {};
-    return { reasoning: { effort: config.openai.compactionReasoning, summary: "auto" } };
+    const profile = codexModelRequestProfile(modelId);
+    const configuredEffort = config.openai.compactionReasoning;
+    const effort =
+        configuredEffort === "current"
+            ? profile?.defaultReasoningEffort
+            : codexReasoningEffortForRequest(configuredEffort);
+    if (!effort) return {};
+    return profile?.useResponsesLite
+        ? { reasoning: { effort, context: "all_turns" } }
+        : { reasoning: { effort, summary: "auto" } };
+}
+
+function resolveCompactionTargetModel(
+    ctx: ExtensionContext,
+    modelId: string,
+): ExtensionContext["model"] | undefined {
+    if (ctx.model?.provider === "openai-codex" && ctx.model.id === modelId) return ctx.model;
+    return ctx.modelRegistry.find?.("openai-codex", modelId);
+}
+
+function stripResponsesLiteImageDetails(item: ResponsesInputItem): ResponsesInputItem {
+    return stripResponsesLiteJsonObject(item);
+}
+
+function stripResponsesLiteJsonObject(value: JsonObject): JsonObject {
+    const rewritten: Record<string, JsonValue | undefined> = {};
+    for (const [key, item] of Object.entries(value)) {
+        if (value.type === "input_image" && key === "detail") continue;
+        rewritten[key] = stripResponsesLiteJsonValue(item);
+    }
+    return rewritten;
+}
+
+function stripResponsesLiteJsonValue(value: JsonValue | undefined): JsonValue | undefined {
+    if (isJsonArray(value)) return value.map((item) => stripResponsesLiteJsonValue(item) ?? null);
+    if (isJsonObject(value)) return stripResponsesLiteJsonObject(value);
+    return value;
 }
 
 function findLatestNativeCompactionEntry(

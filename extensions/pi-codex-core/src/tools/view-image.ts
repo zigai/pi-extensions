@@ -47,6 +47,8 @@ import {
     type LoadedImage,
 } from "../image-content.ts";
 import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
+import { CODEX_RESPONSES_LITE_HEADER, rewriteCodexResponsesPayload } from "../responses-compat.ts";
+import { codexModelRequestProfile } from "../codex-models.ts";
 
 const IMAGE_DESCRIPTION_PROMPT =
     "Describe this image in detail. Output only the image description, no other commentary.";
@@ -441,6 +443,35 @@ async function describeImage(
         config.openai.imageDescriptionModel,
         provider.value.model,
     );
+    if (codexModelRequestProfile(model)?.useResponsesLite) {
+        headers.set(CODEX_RESPONSES_LITE_HEADER, "true");
+    }
+
+    const requestBody = {
+        model,
+        store: false,
+        stream: false,
+        instructions: IMAGE_DESCRIPTION_PROMPT,
+        text: { verbosity: "low" },
+        reasoning: { effort: "low", summary: "auto" },
+        include: ["reasoning.encrypted_content"],
+        tool_choice: "auto",
+        parallel_tool_calls: true,
+        input: [
+            {
+                role: "user",
+                content: [
+                    { type: "input_text", text: "Describe the image." },
+                    {
+                        type: "input_image",
+                        image_url: imageContentToDataUrl(promptImage),
+                        detail: detail === "original" ? "high" : detail,
+                    },
+                ],
+            },
+        ],
+    };
+    const compatibleRequestBody = rewriteCodexResponsesPayload(requestBody, model) ?? requestBody;
 
     let response: Response;
     try {
@@ -448,27 +479,7 @@ async function describeImage(
             method: "POST",
             headers,
             ...(signal ? { signal } : {}),
-            body: JSON.stringify({
-                model,
-                store: false,
-                stream: false,
-                instructions: IMAGE_DESCRIPTION_PROMPT,
-                text: { verbosity: "low" },
-                reasoning: { effort: "low", summary: "auto" },
-                input: [
-                    {
-                        role: "user",
-                        content: [
-                            { type: "input_text", text: "Describe the image." },
-                            {
-                                type: "input_image",
-                                image_url: imageContentToDataUrl(promptImage),
-                                detail: detail === "original" ? "high" : detail,
-                            },
-                        ],
-                    },
-                ],
-            }),
+            body: JSON.stringify(compatibleRequestBody),
         });
     } catch (cause: unknown) {
         if (isAbortCause(cause)) {
