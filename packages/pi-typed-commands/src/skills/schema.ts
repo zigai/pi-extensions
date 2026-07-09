@@ -157,10 +157,10 @@ export const SkillArgumentsYamlSchema = Type.Object(
     {},
     {
         $schema: "https://json-schema.org/draft/2020-12/schema",
-        $id: "https://github.com/zigai/pi-typed-commands/schemas/skill-arguments.schema.json",
-        title: "Pi Typed Skill Arguments",
+        $id: "https://github.com/zigai/pi-typed-args/schemas/skill-arguments.schema.json",
+        title: "Pi Typed Args Skill Arguments",
         description:
-            "Schema for the top-level `arguments` field in SKILL.md frontmatter used by pi-typed-commands.",
+            "Schema for the top-level `arguments` field in SKILL.md frontmatter used by pi-typed-args.",
         propertyNames: Type.String({
             allOf: [
                 { pattern: ARGUMENT_NAME_PATTERN },
@@ -214,7 +214,7 @@ export type MultiEnumSkillArgumentYaml = Static<typeof MultiEnumSkillArgumentYam
 export type SkillArgumentYaml = Static<typeof SkillArgumentYamlSchema>;
 export type SkillFrontmatterYaml = Static<typeof SkillFrontmatterYamlSchema>;
 
-/** Return the JSON Schema published at `pi-typed-commands/schema`. */
+/** Return the JSON Schema published at `pi-typed-args/schema`. */
 export function skillArgumentsJsonSchema(): typeof SkillArgumentsYamlSchema {
     return SkillArgumentsYamlSchema;
 }

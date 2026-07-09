@@ -2,7 +2,7 @@ import Type, { type Static, type TSchema } from "typebox";
 import Schema from "../typebox-schema.js";
 import type { TypedCommandFormSymbols } from "../types.js";
 
-/** Pi TUI theme colour roles accepted by pi-typed-commands appearance settings. */
+/** Pi TUI theme colour roles accepted by pi-typed-args appearance settings. */
 export const PI_THEME_COLOR_NAMES = [
     "accent",
     "border",
@@ -200,7 +200,7 @@ export type ResolvedDetailedHelpAppearance = {
     configured: boolean;
 };
 
-/** Fully resolved global pi-typed-commands appearance. */
+/** Fully resolved global pi-typed-args appearance. */
 export type ResolvedPiTypedCommandsAppearance = {
     form: ResolvedFormAppearance;
     inlineHelp: ResolvedInlineHelpAppearance;

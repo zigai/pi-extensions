@@ -1073,7 +1073,7 @@ describe("typed command live helper", () => {
 
     it("reads helper placement from project config", async () => {
         const dir = mkdtempSync(join(tmpdir(), "pi-typed-helper-settings-"));
-        const configDir = join(dir, CONFIG_DIR_NAME, "pi-typed-commands");
+        const configDir = join(dir, CONFIG_DIR_NAME, "pi-typed-args");
         mkdirSync(configDir, { recursive: true });
         writeFileSync(
             join(configDir, "config.json"),

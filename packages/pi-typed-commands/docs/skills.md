@@ -1,6 +1,6 @@
 # Typed Agent Skills
 
-Pi Typed Commands can read typed argument metadata from Agent Skill `SKILL.md` frontmatter. This lets a skill use the same parser, validation, completions, and form model as extension commands.
+Pi Typed Args can read typed argument metadata from Agent Skill `SKILL.md` frontmatter. This lets a skill use the same parser, validation, completions, and form model as extension commands.
 
 ## Frontmatter shape
 
@@ -83,7 +83,7 @@ Diagnostics include a code, message, path, and severity. Invalid YAML frontmatte
 The JSON Schema for skill arguments is exported as a package subpath and stored in the repository:
 
 ```ts
-import schema from "pi-typed-commands/schema";
+import schema from "pi-typed-args/schema";
 ```
 
 Repository path:

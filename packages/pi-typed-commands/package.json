@@ -1,7 +1,7 @@
 {
-  "name": "pi-typed-commands",
+  "name": "pi-typed-args",
   "version": "0.1.0",
-  "description": "Library for typed Pi extension slash-command arguments, completions, help, and forms.",
+  "description": "Typed input definitions for Pi slash commands and Agent Skills — parsing, completions, help, and forms from a single definition.",
   "keywords": [
     "commands",
     "pi",
@@ -9,17 +9,18 @@
     "pi-extension",
     "pi-package",
     "slash-commands",
-    "typed-args"
+    "typed-args",
+    "typed-input"
   ],
-  "homepage": "https://github.com/zigai/pi-typed-commands#readme",
+  "homepage": "https://github.com/zigai/pi-typed-args#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-typed-commands/issues"
+    "url": "https://github.com/zigai/pi-typed-args/issues"
   },
   "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-typed-commands.git"
+    "url": "git+https://github.com/zigai/pi-typed-args.git"
   },
   "files": [
     "src",

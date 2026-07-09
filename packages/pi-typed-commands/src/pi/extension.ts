@@ -15,7 +15,7 @@ import { TypedCommandUxSession } from "./ux-session.js";
  * Install the live editor helper, typed autocomplete bridge, and Tab-to-form shortcut.
  *
  * This is installed automatically by the default extension export. Extension authors usually only
- * call it directly when composing pi-typed-commands into a custom extension entrypoint.
+ * call it directly when composing pi-typed-args into a custom extension entrypoint.
  */
 export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxOptions = {}): void {
     const session = new TypedCommandUxSession(pi, options);

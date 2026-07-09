@@ -103,7 +103,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
 /**
  * Register a Pi slash command with typed named arguments.
  *
- * The command is still registered with Pi's raw command system, but pi-typed-commands parses,
+ * The command is still registered with Pi's raw command system, but pi-typed-args parses,
  * validates, defaults, completes, and optionally prompts for arguments before calling `run`.
  */
 export function registerTypedCommand<const TDefinitions extends ArgumentDefinitions>(

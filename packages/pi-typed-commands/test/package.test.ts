@@ -4,11 +4,11 @@ import { describe, it } from "vitest";
 import {
     defineTypedCommand as defineLeanTypedCommand,
     registerTypedCommand,
-} from "pi-typed-commands/command";
-import { compileTypedCommandDefinition, enumArgument, group } from "pi-typed-commands/core";
-import { createTypedCommandUxExtension, defineTypedCommand } from "pi-typed-commands/pi";
-import { normalizeSkillArguments, skillArgumentsJsonSchema } from "pi-typed-commands/skills";
-import { createHeadlessFormModel, type FormMode } from "pi-typed-commands/pi-tui";
+} from "pi-typed-args/command";
+import { compileTypedCommandDefinition, enumArgument, group } from "pi-typed-args/core";
+import { createTypedCommandUxExtension, defineTypedCommand } from "pi-typed-args/pi";
+import { normalizeSkillArguments, skillArgumentsJsonSchema } from "pi-typed-args/skills";
+import { createHeadlessFormModel, type FormMode } from "pi-typed-args/pi-tui";
 import { piTypedCommandsConfigJsonSchema } from "../src/pi/config-schema.js";
 
 describe("package subpath exports", () => {

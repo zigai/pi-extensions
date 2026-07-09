@@ -1,10 +1,10 @@
-# Pi Typed Commands
+# Pi Typed Args
 
-[![npm version](https://img.shields.io/npm/v/pi-typed-commands.svg?color=blue)](https://www.npmjs.com/package/pi-typed-commands)
-[![npm downloads](https://img.shields.io/npm/dm/pi-typed-commands.svg)](https://www.npmjs.com/package/pi-typed-commands)
-[![license](https://img.shields.io/npm/l/pi-typed-commands.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/pi-typed-args.svg?color=blue)](https://www.npmjs.com/package/pi-typed-args)
+[![npm downloads](https://img.shields.io/npm/dm/pi-typed-args.svg)](https://www.npmjs.com/package/pi-typed-args)
+[![license](https://img.shields.io/npm/l/pi-typed-args.svg)](LICENSE)
 
-Pi Typed Commands is a TypeScript library for adding typed inputs to Pi slash commands and Agent Skills. Define arguments once, then use them for parsing, validation, completion hints, generated help, live usage hints, and TUI input forms.
+Pi Typed Args is a TypeScript library for adding typed inputs to Pi slash commands and Agent Skills. Define arguments once, then use them for parsing, validation, completion hints, generated help, live usage hints, and TUI input forms.
 
 Use it inside your own Pi extension when commands or skills need structured input instead of hand-parsed raw strings.
 
@@ -13,7 +13,7 @@ Use it inside your own Pi extension when commands or skills need structured inpu
 Add the library to the package that contains your Pi extension:
 
 ```sh
-npm install pi-typed-commands
+npm install pi-typed-args
 ```
 
 Or add it manually to your extension package manifest:
@@ -21,7 +21,7 @@ Or add it manually to your extension package manifest:
 ```json
 {
   "dependencies": {
-    "pi-typed-commands": "^0.1.0"
+    "pi-typed-args": "^0.1.0"
   }
 }
 ```
@@ -30,7 +30,7 @@ Then import it from your extension code:
 
 ```ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands";
+import { defineTypedCommand, registerTypedCommand } from "pi-typed-args";
 
 const deploy = defineTypedCommand({
   name: "deploy",
@@ -76,14 +76,14 @@ While users type a command, Pi shows a compact live helper above the editor by d
 If you compose the Pi UX bridge yourself, move the helper below the input editor with:
 
 ```ts
-import { installTypedCommandUx } from "pi-typed-commands";
+import { installTypedCommandUx } from "pi-typed-args";
 
 installTypedCommandUx(pi, { helperPlacement: "belowEditor" });
 ```
 
 ## Configuration
 
-Use global config at `~/.pi/agent/pi-typed-commands/config.json`.
+Use global config at `~/.pi/agent/pi-typed-args/config.json`.
 
 | Option                                          | Default                       | Purpose                                                |
 | ----------------------------------------------- | ----------------------------- | ------------------------------------------------------ |

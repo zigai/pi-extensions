@@ -91,9 +91,9 @@ function reportDetachedError(ctx: ExtensionContext, error: unknown): void {
     try {
         notifyDetachedError(ctx);
     } catch (notifyError) {
-        console.error(`pi-typed-commands detached form task failed (${thrownValueKind(error)})`);
+        console.error(`pi-typed-args detached form task failed (${thrownValueKind(error)})`);
         console.error(
-            `pi-typed-commands failed to report detached form task error (${thrownValueKind(
+            `pi-typed-args failed to report detached form task error (${thrownValueKind(
                 notifyError,
             )})`,
         );

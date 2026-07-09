@@ -9,7 +9,7 @@ export const PI_TYPED_COMMANDS_CONFIG_SCHEMA_REFERENCE = "./config.schema.json";
 
 const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
 const PI_TYPED_COMMANDS_CONFIG_SCHEMA_ID =
-    "https://github.com/zigai/pi-typed-commands/config.schema.json";
+    "https://github.com/zigai/pi-typed-args/config.schema.json";
 
 export const DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON = {
     $schema: PI_TYPED_COMMANDS_CONFIG_SCHEMA_REFERENCE,

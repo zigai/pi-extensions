@@ -39,7 +39,7 @@ Public `ArgumentDefinitions` maps are readonly inputs and may include `group()` 
 Builders are useful for separately declared schemas because they preserve literal types.
 
 ```ts
-import { enumArgument, multiEnumArgument, stringArgument } from "pi-typed-commands";
+import { enumArgument, multiEnumArgument, stringArgument } from "pi-typed-args";
 
 const args = {
   env: enumArgument(["dev", "staging", "prod"], { required: true }),
@@ -84,7 +84,7 @@ Rules enforced by the compiler include:
 Use `group()` when the handler should receive a nested object while CLI flags stay flat.
 
 ```ts
-import { group, numberArgument, stringArgument } from "pi-typed-commands";
+import { group, numberArgument, stringArgument } from "pi-typed-args";
 
 const command = defineTypedCommand({
   name: "database",

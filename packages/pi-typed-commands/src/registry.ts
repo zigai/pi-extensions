@@ -20,8 +20,8 @@ type TypedCommandRegistry = {
     listeners: Set<RegistryListener>;
 };
 
-const REGISTRY_KEY = Symbol.for("pi-typed-commands.registry.v1");
-const DEFAULT_OWNER_ID = Symbol.for("pi-typed-commands.owner.default");
+const REGISTRY_KEY = Symbol.for("pi-typed-args.registry.v1");
+const DEFAULT_OWNER_ID = Symbol.for("pi-typed-args.owner.default");
 
 type GlobalWithRegistry = typeof globalThis & {
     [REGISTRY_KEY]?: TypedCommandRegistry;

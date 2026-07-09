@@ -7,7 +7,7 @@ import type {
 /**
  * Built-in dense-form widget names for typed command arguments.
  *
- * Omit `ui.widget` to let pi-typed-commands choose a widget from the argument type.
+ * Omit `ui.widget` to let pi-typed-args choose a widget from the argument type.
  */
 export type ArgumentWidget =
     | "text"
@@ -30,7 +30,7 @@ export type PrimitiveArgumentValue = string | number | boolean;
 /** Selected values produced by a `multi-enum` argument. */
 export type MultiArgumentValue = readonly string[];
 
-export const ARGUMENT_GROUP: unique symbol = Symbol.for("pi-typed-commands.argument-group");
+export const ARGUMENT_GROUP: unique symbol = Symbol.for("pi-typed-args.argument-group");
 
 /** Any concrete value a parsed argument can produce before optional `undefined` is added. */
 export type ConcreteArgumentValue = PrimitiveArgumentValue | MultiArgumentValue;

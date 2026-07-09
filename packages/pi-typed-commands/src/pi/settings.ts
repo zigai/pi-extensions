@@ -20,7 +20,7 @@ import {
     type ResolvedPiTypedCommandsAppearance,
 } from "./presentation-config.js";
 
-const EXTENSION_ID = "pi-typed-commands";
+const EXTENSION_ID = "pi-typed-args";
 const CONFIG_BASENAME = "config.json";
 const CONFIG_SCHEMA_BASENAME = "config.schema.json";
 
@@ -89,7 +89,7 @@ function writeJsonFileIfMissing(filePath: string, value: unknown): void {
         if (cause instanceof Error) {
             message = cause.message;
         }
-        console.warn(`[pi-typed-commands] Failed to create ${filePath}: ${message}`);
+        console.warn(`[pi-typed-args] Failed to create ${filePath}: ${message}`);
     }
 }
 
@@ -105,7 +105,7 @@ function writeJsonFileIfChanged(filePath: string, value: unknown): void {
         if (cause instanceof Error) {
             message = cause.message;
         }
-        console.warn(`[pi-typed-commands] Failed to write ${filePath}: ${message}`);
+        console.warn(`[pi-typed-args] Failed to write ${filePath}: ${message}`);
     }
 }
 

@@ -84,13 +84,13 @@ async function withAgentDirAsync<T>(agentDir: string, run: () => Promise<T>): Pr
 }
 
 function writeGlobalConfig(agentDir: string, config: unknown): void {
-    const configDir = join(agentDir, "pi-typed-commands");
+    const configDir = join(agentDir, "pi-typed-args");
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify(config));
 }
 
 function writeProjectConfig(cwd: string, config: unknown): void {
-    const configDir = join(cwd, CONFIG_DIR_NAME, "pi-typed-commands");
+    const configDir = join(cwd, CONFIG_DIR_NAME, "pi-typed-args");
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "config.json"), JSON.stringify(config));
 }

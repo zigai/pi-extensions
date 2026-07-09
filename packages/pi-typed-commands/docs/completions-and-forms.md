@@ -1,6 +1,6 @@
 # Completions and Forms
 
-Pi Typed Commands derives completions and forms from the same argument definitions used by the parser.
+Pi Typed Args derives completions and forms from the same argument definitions used by the parser.
 
 ## Completion providers
 
@@ -74,7 +74,7 @@ For example:
          [count=1] [--pane-window] [--worktree]  [--panes] [--keep-open] [--prompt <prompt>]
 ```
 
-Set `helperPlacement` to `"belowEditor"` in `~/.pi/agent/pi-typed-commands/config.json`, or pass `helperPlacement: "belowEditor"` to `installTypedCommandUx()` when composing a custom extension entrypoint, to render the helper below the user input editor instead.
+Set `helperPlacement` to `"belowEditor"` in `~/.pi/agent/pi-typed-args/config.json`, or pass `helperPlacement: "belowEditor"` to `installTypedCommandUx()` when composing a custom extension entrypoint, to render the helper below the user input editor instead.
 
 Inline helper presentation can be customized with `appearance.inlineHelp` in the extension config. For example, enable type-rich tokens without changing command definitions:
 

@@ -1,8 +1,8 @@
 # Configuration
 
-Pi Typed Commands is a library for Pi extensions and typed skills. Typed parsing, completions, editor hints, and argument forms are active for commands and skills that use it.
+Pi Typed Args is a library for Pi extensions and typed skills. Typed parsing, completions, editor hints, and argument forms are active for commands and skills that use it.
 
-Use global config at `~/.pi/agent/pi-typed-commands/config.json`.
+Use global config at `~/.pi/agent/pi-typed-args/config.json`.
 
 | Option                                          | Default                       | Purpose                                                |
 | ----------------------------------------------- | ----------------------------- | ------------------------------------------------------ |

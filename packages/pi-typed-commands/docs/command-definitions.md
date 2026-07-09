@@ -5,7 +5,7 @@ A typed command starts as a user-authored definition. `defineTypedCommand()` val
 ## Define a command
 
 ```ts
-import { defineTypedCommand } from "pi-typed-commands";
+import { defineTypedCommand } from "pi-typed-args";
 
 const deploy = defineTypedCommand({
   name: "deploy",
@@ -27,7 +27,7 @@ Inline enum arrays keep literal inference, so `args.env` is typed as `"dev" | "p
 
 ```ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerTypedCommand } from "pi-typed-commands";
+import { registerTypedCommand } from "pi-typed-args";
 
 export default function extension(pi: ExtensionAPI): void {
   const handle = registerTypedCommand(pi, deploy);

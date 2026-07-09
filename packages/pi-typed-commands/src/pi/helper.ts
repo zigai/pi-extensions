@@ -28,7 +28,7 @@ import {
 } from "./presentation-config.js";
 
 /** Widget key used for the typed-command live helper. */
-export const WIDGET_KEY = "pi-typed-commands.helper";
+export const WIDGET_KEY = "pi-typed-args.helper";
 
 /** Default placement for the typed-command live helper. */
 export const DEFAULT_HELPER_PLACEMENT: WidgetPlacement = "aboveEditor";
