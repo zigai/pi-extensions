@@ -190,8 +190,8 @@ export function makeTestRuntime(
         idGenerator: { randomUUID: () => "00000000-0000-7000-8000-000000000001" },
         scheduler: {
             set(_delayMs, task) {
-                task();
-                return { cancel() {} } satisfies ScheduledTask;
+                const timer = setTimeout(task, 0);
+                return { cancel: () => clearTimeout(timer) } satisfies ScheduledTask;
             },
         },
     };

@@ -47,15 +47,9 @@ export function buildRemoteCompactionPromptInput(
         };
     }
 
-    const branchInput = serializeEntriesToResponsesInput(model, event.branchEntries);
-    if (branchInput.length > 0) return { input: branchInput };
-
     const messages: CompactionMessage[] = [];
     if (event.preparation.previousSummary) {
-        messages.push({
-            role: "user",
-            content: `Previous compaction summary:\n${event.preparation.previousSummary}`,
-        });
+        messages.push(compactionSummaryMessage(event.preparation.previousSummary));
     }
     for (const rawMessage of [
         ...event.preparation.messagesToSummarize,
@@ -63,6 +57,19 @@ export function buildRemoteCompactionPromptInput(
     ]) {
         const message = parseCompactionMessage(rawMessage);
         if (message) messages.push(message);
+    }
+
+    const firstKeptEntryIndex = event.branchEntries.findIndex(
+        (entry) => entry.id === event.preparation.firstKeptEntryId,
+    );
+    if (firstKeptEntryIndex >= 0) {
+        for (const message of compactionMessagesFromSessionEntries(
+            event.branchEntries
+                .slice(firstKeptEntryIndex)
+                .filter((entry) => entry.type !== "compaction"),
+        )) {
+            messages.push(message);
+        }
     }
     return { input: serializeMessagesToResponsesInput(model, messages) };
 }
@@ -195,17 +202,21 @@ function compactionMessageFromSessionEntry(entry: SessionEntry): CompactionMessa
         };
     }
     if (entry.type === "compaction") {
-        return {
-            role: "user",
-            content: [
-                {
-                    type: "text",
-                    text: `${COMPACTION_SUMMARY_PREFIX}${entry.summary}${COMPACTION_SUMMARY_SUFFIX}`,
-                },
-            ],
-        };
+        return compactionSummaryMessage(entry.summary);
     }
     return undefined;
+}
+
+function compactionSummaryMessage(summary: string): CompactionMessage {
+    return {
+        role: "user",
+        content: [
+            {
+                type: "text",
+                text: `${COMPACTION_SUMMARY_PREFIX}${summary}${COMPACTION_SUMMARY_SUFFIX}`,
+            },
+        ],
+    };
 }
 
 function parseCompactionMessage(value: unknown): CompactionMessage | undefined {
@@ -439,6 +450,16 @@ export function parseResponsesInputItems(value: unknown): ResponsesInputItem[] |
 
 export function isInstructionItem(item: ResponsesInputItem | undefined): boolean {
     return isJsonObject(item) && (item.role === "system" || item.role === "developer");
+}
+
+export function isRemoteCompactionOutputItem(
+    item: ResponsesInputItem | undefined,
+): item is ResponsesInputItem & { readonly encrypted_content: string } {
+    return (
+        isJsonObject(item) &&
+        (item.type === "compaction" || item.type === "compaction_summary") &&
+        typeof item.encrypted_content === "string"
+    );
 }
 
 export function itemContainsShimSummary(item: ResponsesInputItem): boolean {

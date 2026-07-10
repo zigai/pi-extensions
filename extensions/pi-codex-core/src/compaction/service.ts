@@ -34,7 +34,7 @@ import {
     buildWindowLifecycle,
     clearReplayWindowSessionState,
     clearReplayWindowState,
-    findLatestNativeCompactionEntry,
+    findLatestActiveNativeCompactionEntry,
     notifyNativeReplayFallbackOnce,
     rewriteResponsesPayloadWithNativeReplay,
 } from "./replay-window.ts";
@@ -104,7 +104,10 @@ export async function handleCodexNativeCompaction(
     const targetModel = resolveCompactionTargetModel(ctx, compactionModel);
     const requestProfile = codexModelRequestProfile(compactionModel);
     const contextWindow = requestProfile?.effectiveContextWindow ?? targetModel?.contextWindow;
-    const latestNativeCompaction = findLatestNativeCompactionEntry(event.branchEntries, match);
+    const latestNativeCompaction = findLatestActiveNativeCompactionEntry(
+        event.branchEntries,
+        match,
+    );
     const sessionId = ctx.sessionManager.getSessionId();
     const previousWindowId = latestNativeCompaction?.entry.details.windowId;
     const transportMetadata = buildRemoteCompactionTransportMetadata({
@@ -265,7 +268,7 @@ export async function rewriteProviderRequestWithNativeCompaction(
     };
 
     const branchEntries = ctx.sessionManager.getBranch();
-    const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
+    const latestNativeCompaction = findLatestActiveNativeCompactionEntry(branchEntries, match);
     if (!latestNativeCompaction) return undefined;
 
     const responsesPayload = asResponsesPayload(payload);

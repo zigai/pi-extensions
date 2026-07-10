@@ -9,6 +9,7 @@ import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
 import {
     cancelScheduledCodexAutoCompaction,
     handleCodexNativeCompaction,
+    isNativeCompactionDetails,
     maybeTriggerCodexAutoCompaction,
     NATIVE_COMPACTION_SHIM_SUMMARY,
     rewriteProviderRequestWithNativeCompaction,
@@ -361,6 +362,214 @@ test("reports bounded redacted remote compaction HTTP error details", async () =
     assert.doesNotMatch(result.error.message, /secret-token/);
 });
 
+test("retries transient remote compaction failures", async () => {
+    let attempts = 0;
+    const runtime = makeTestRuntime(async () => {
+        attempts += 1;
+        if (attempts === 1) return new Response("temporary", { status: 500 });
+        return new Response(
+            [
+                "event: response.output_item.done",
+                'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"retried"}}',
+                "",
+                "event: response.completed",
+                'data: {"type":"response.completed","response":{"id":"resp_retry"}}',
+                "",
+            ].join("\n"),
+            { status: 200 },
+        );
+    });
+    const request = buildRemoteCompactionV2Request({
+        model: "gpt-5.5",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+
+    const result = await executeRemoteCompactionV2(
+        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        request,
+        new AbortController().signal,
+        runtime,
+    );
+
+    assert.ok(result.isOk());
+    assert.equal(attempts, 2);
+    assert.equal(result.value.compactionOutput.encrypted_content, "retried");
+});
+
+test("does not retry HTTP 429 compaction responses", async () => {
+    let attempts = 0;
+    const runtime = makeTestRuntime(async () => {
+        attempts += 1;
+        return new Response("rate limited", {
+            status: 429,
+            headers: { "retry-after": "60" },
+        });
+    });
+    const request = buildRemoteCompactionV2Request({
+        model: "gpt-5.5",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+
+    const result = await executeRemoteCompactionV2(
+        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        request,
+        new AbortController().signal,
+        runtime,
+    );
+
+    assert.ok(result.isErr());
+    assert.equal(result.error._tag, "CodexHttpRequestFailed");
+    assert.equal(attempts, 1);
+});
+
+test("times out and retries idle remote compaction streams", async () => {
+    let attempts = 0;
+    let cancellations = 0;
+    const attemptSignals: AbortSignal[] = [];
+    const runtime: CodexRuntime = {
+        ...makeTestRuntime(async (_input, init) => {
+            const previousSignal = attemptSignals.at(-1);
+            if (previousSignal) assert.equal(previousSignal.aborted, true);
+            assert.ok(init?.signal);
+            attemptSignals.push(init.signal);
+            attempts += 1;
+            const body = new ReadableStream<Uint8Array>({
+                cancel() {
+                    cancellations += 1;
+                },
+            });
+            return new Response(body, { status: 200 });
+        }),
+        scheduler: {
+            set(_delayMs, task) {
+                task();
+                return { cancel() {} };
+            },
+        },
+    };
+    const request = buildRemoteCompactionV2Request({
+        model: "gpt-5.5",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+
+    const result = await executeRemoteCompactionV2(
+        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        request,
+        new AbortController().signal,
+        runtime,
+    );
+
+    assert.ok(result.isErr());
+    assert.equal(result.error._tag, "CodexNetworkUnavailable");
+    assert.equal(attempts, 3);
+    assert.equal(cancellations, 3);
+    assert.equal(
+        attemptSignals.every((signal) => signal.aborted),
+        true,
+    );
+});
+
+test("does not retry unexpected stream-processing exceptions", async () => {
+    let attempts = 0;
+    let attemptSignal: AbortSignal | null | undefined;
+    const runtime: CodexRuntime = {
+        ...makeTestRuntime(async (_input, init) => {
+            attempts += 1;
+            attemptSignal = init?.signal;
+            return new Response(new ReadableStream<Uint8Array>(), { status: 200 });
+        }),
+        scheduler: {
+            set() {
+                throw new TypeError("scheduler defect");
+            },
+        },
+    };
+    const request = buildRemoteCompactionV2Request({
+        model: "gpt-5.5",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+
+    await assert.rejects(
+        executeRemoteCompactionV2(
+            { responsesUrl: "https://example.test/responses", headers: new Headers() },
+            request,
+            new AbortController().signal,
+            runtime,
+        ),
+        /scheduler defect/,
+    );
+    assert.equal(attempts, 1);
+    assert.equal(attemptSignal?.aborted, true);
+});
+
+test("rejects malformed remote compaction output items", async () => {
+    const runtime = makeTestRuntime(
+        async () =>
+            new Response(
+                [
+                    "event: response.output_item.done",
+                    'data: {"type":"response.output_item.done","item":{"type":"compaction"}}',
+                    "",
+                    "event: response.completed",
+                    'data: {"type":"response.completed","response":{"id":"resp_malformed"}}',
+                    "",
+                ].join("\n"),
+                { status: 200 },
+            ),
+    );
+    const request = buildRemoteCompactionV2Request({
+        model: "gpt-5.5",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+
+    const result = await executeRemoteCompactionV2(
+        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        request,
+        new AbortController().signal,
+        runtime,
+    );
+
+    assert.ok(result.isErr());
+    assert.equal(result.error._tag, "CodexUnexpectedResponse");
+    assert.match(result.error.message, /expected exactly one compaction output item/i);
+});
+
+test("rejects persisted native windows with malformed compaction output", () => {
+    const entry = nativeCompactionEntry({
+        id: "malformed-native",
+        firstKeptEntryId: "entry-old",
+    });
+    assert.ok(isRecord(entry.details));
+
+    assert.equal(
+        isNativeCompactionDetails({
+            ...entry.details,
+            compactedWindow: [{ type: "compaction" }],
+        }),
+        false,
+    );
+});
+
 test("streams remote compaction SSE without buffering response text", async () => {
     let textCalled = false;
     const encoder = new TextEncoder();
@@ -509,6 +718,62 @@ test("chains previous native compaction into the next remote v2 request", async 
     ]);
 });
 
+test("uses Pi's active summary boundary instead of superseded raw history", async () => {
+    let requestBody: unknown;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as unknown;
+        return new Response(
+            [
+                "event: response.output_item.done",
+                'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"active-history"}}',
+                "",
+                "event: response.completed",
+                'data: {"type":"response.completed","response":{"id":"resp_active_history"}}',
+                "",
+            ].join("\n"),
+            { status: 200 },
+        );
+    });
+    const branchEntries = [
+        messageEntry("superseded", null, userMessage("superseded raw instruction")),
+        messageEntry("active-old", "superseded", userMessage("active old context")),
+        messageEntry("active-tail", "active-old", userMessage("active tail")),
+        {
+            type: "compaction",
+            id: "pi-compaction",
+            parentId: "active-tail",
+            summary: "authoritative Pi summary",
+            firstKeptEntryId: "active-old",
+            tokensBefore: 100,
+        },
+        messageEntry("recent", "pi-compaction", userMessage("recent request")),
+    ];
+
+    const result = await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({
+            branchEntries,
+            firstKeptEntryId: "active-tail",
+            previousSummary: "authoritative Pi summary",
+            messagesToSummarize: [userMessage("active old context")],
+        }),
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.ok(result?.compaction);
+    const serializedRequest = JSON.stringify(requestBody);
+    assert.doesNotMatch(serializedRequest, /superseded raw instruction/);
+    assert.match(serializedRequest, /authoritative Pi summary/);
+    assert.match(serializedRequest, /active tail/);
+    assert.match(serializedRequest, /recent request/);
+    assert.equal(serializedRequest.match(/authoritative Pi summary/g)?.length, 1);
+});
+
 test("native compaction inserts synthetic output for missing tool results", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
@@ -578,7 +843,7 @@ test("native compaction inserts synthetic output for missing tool results", asyn
     });
 });
 
-test("preserves previous native compaction anchor while trimming next request", async () => {
+test("falls back when a previous native anchor plus semantic input cannot fit", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as unknown;
@@ -615,11 +880,8 @@ test("preserves previous native compaction anchor while trimming next request", 
         runtime,
     );
 
-    assert.ok(isRecord(requestBody));
-    const requestInput = responseInput(requestBody);
-    assert.deepEqual(requestInput.at(0), { type: "compaction", encrypted_content: "opaque" });
-    assert.doesNotMatch(JSON.stringify(requestInput), /huge x/);
-    assert.equal(result?.compaction?.details.requestMeta?.previousCompactionEntryId, "compact-1");
+    assert.equal(requestBody, undefined);
+    assert.equal(result, undefined);
 });
 
 test("shrinks oversized tool outputs before remote v2 compaction", async () => {
@@ -771,7 +1033,7 @@ test("rewrites multiple oversized tool outputs before serializing remote v2 comp
     );
 });
 
-test("trims oversized non-tool input before remote v2 compaction", async () => {
+test("falls back instead of trimming oversized semantic input", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as unknown;
@@ -803,11 +1065,8 @@ test("trims oversized non-tool input before remote v2 compaction", async () => {
         runtime,
     );
 
-    assert.ok(isRecord(requestBody));
-    assert.doesNotMatch(JSON.stringify(requestBody.input), /old x/);
-    const requestMeta = result?.compaction?.details.requestMeta;
-    assert.ok(requestMeta?.budgetTokens);
-    assert.ok(requestMeta.estimatedTokensAfter <= requestMeta.budgetTokens);
+    assert.equal(requestBody, undefined);
+    assert.equal(result, undefined);
 });
 
 test("does not send remote v2 compaction when protected input cannot fit", async () => {
@@ -856,7 +1115,7 @@ test("does not send remote v2 compaction when protected input cannot fit", async
     assert.equal(result, undefined);
 });
 
-test("retained image-only messages consume compaction budget", async () => {
+test("retained image-only messages preserve their image content", async () => {
     const runtime = makeTestRuntime(async () => {
         const body = [
             "event: response.output_item.done",
@@ -889,15 +1148,10 @@ test("retained image-only messages consume compaction budget", async () => {
 
     const compactedWindow = result?.compaction?.details.compactedWindow ?? [];
     const retainedImageUrls = compactedWindow.flatMap(imageUrlsFromResponseItem);
-    const retainedImagePlaceholders = compactedWindow.filter((item) =>
-        /image omitted from retained compacted window/.test(textFromResponseItem(item)),
-    );
-    assert.equal(retainedImageUrls.length, 0);
-    assert.ok(retainedImagePlaceholders.length > 0);
-    assert.ok(retainedImagePlaceholders.length < 80);
+    assert.equal(retainedImageUrls.length, 80);
 });
 
-test("retained native compaction window truncates huge text and omits over-budget image", async () => {
+test("retained native compaction window truncates huge text and preserves its image", async () => {
     const hugeText = `retained-start ${"x ".repeat(90_000)}retained-end`;
     const runtime = makeTestRuntime(async () => {
         const body = [
@@ -949,10 +1203,10 @@ test("retained native compaction window truncates huge text and omits over-budge
     assert.match(retainedText, /^retained-start/);
     assert.match(retainedText, /retained-end$/);
     assert.ok(retainedText.length < hugeText.length);
-    assert.equal(imageUrlsFromResponseItem(retainedItem).length, 0);
+    assert.equal(imageUrlsFromResponseItem(retainedItem).length, 1);
 });
 
-test("layers previous native context with a later Pi fallback summary", async () => {
+test("does not replay a native checkpoint superseded by Pi compaction", async () => {
     const runtime = makeTestRuntime(async () => new Response("limit", { status: 429 }));
     const branchEntries = [
         nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
@@ -1005,18 +1259,7 @@ test("layers previous native context with a later Pi fallback summary", async ()
         runtime,
     );
 
-    const rewrittenInput = responseInput(rewritten);
-    assert.deepEqual(rewrittenInput.slice(0, 2), [
-        { role: "developer", content: "summarize compact" },
-        { type: "compaction", encrypted_content: "opaque" },
-    ]);
-    assert.match(worldStateText(rewrittenInput[2]), /<codex_core_world_state>/);
-    assert.deepEqual(rewrittenInput.slice(3), [
-        {
-            role: "user",
-            content: [{ type: "input_text", text: "<conversation>tail</conversation>" }],
-        },
-    ]);
+    assert.equal(rewritten, undefined);
 });
 
 test("keeps native fallback replay isolated by session branch", async () => {
@@ -1405,7 +1648,7 @@ test("rewrites native compaction replay in long payloads", async () => {
     assert.match(JSON.stringify(rewrittenInput), /inserted context 119/);
 });
 
-test("composes a native checkpoint with a newer Pi fallback summary", async () => {
+test("leaves a newer Pi fallback summary authoritative", async () => {
     const branchEntries = [
         messageEntry("entry-old", null, userMessage("old context")),
         nativeCompactionEntry({ id: "compact-native", firstKeptEntryId: "entry-old" }),
@@ -1443,13 +1686,7 @@ test("composes a native checkpoint with a newer Pi fallback summary", async () =
         makeCompactionApi(),
     );
 
-    const rewrittenInput = responseInput(rewritten);
-    assert.deepEqual(rewrittenInput.slice(0, 2), [
-        { role: "developer", content: "system" },
-        { type: "compaction", encrypted_content: "opaque" },
-    ]);
-    assert.match(JSON.stringify(rewrittenInput), /Fresh Pi fallback summary/);
-    assert.match(JSON.stringify(rewrittenInput), /current turn/);
+    assert.equal(rewritten, undefined);
 });
 
 test("handles native replay fallback mismatch silently", async () => {
@@ -1544,18 +1781,32 @@ function makeBeforeCompactEvent(
         readonly branchEntries?: readonly unknown[];
         readonly firstKeptEntryId?: string;
         readonly reason?: SessionBeforeCompactEvent["reason"];
+        readonly previousSummary?: string;
+        readonly messagesToSummarize?: readonly unknown[];
+        readonly turnPrefixMessages?: readonly unknown[];
     } = {},
 ): SessionBeforeCompactEvent {
     const branchEntries = options.branchEntries ?? [
         messageEntry("entry-1", null, userMessage("keep this request")),
     ];
+    const firstKeptEntryId = options.firstKeptEntryId ?? "entry-1";
+    const firstKeptEntryIndex = branchEntries.findIndex(
+        (entry) => isRecord(entry) && entry.id === firstKeptEntryId,
+    );
+    const derivedMessagesToSummarize = branchEntries
+        .slice(0, Math.max(0, firstKeptEntryIndex))
+        .flatMap((entry) =>
+            isRecord(entry) && entry.type === "message" && isRecord(entry.message)
+                ? [entry.message]
+                : [],
+        );
     const event = {
         type: "session_before_compact",
         branchEntries,
         preparation: {
-            firstKeptEntryId: options.firstKeptEntryId ?? "entry-1",
-            messagesToSummarize: [],
-            turnPrefixMessages: [],
+            firstKeptEntryId,
+            messagesToSummarize: options.messagesToSummarize ?? derivedMessagesToSummarize,
+            turnPrefixMessages: options.turnPrefixMessages ?? [],
             isSplitTurn: false,
             tokensBefore: 123,
             fileOps: {
@@ -1564,6 +1815,9 @@ function makeBeforeCompactEvent(
                 edited: new Set<string>(),
             },
             settings: { enabled: true, reserveTokens: 10_000, keepRecentTokens: 20_000 },
+            ...(options.previousSummary !== undefined
+                ? { previousSummary: options.previousSummary }
+                : {}),
         },
         reason: options.reason ?? "manual",
         willRetry: false,

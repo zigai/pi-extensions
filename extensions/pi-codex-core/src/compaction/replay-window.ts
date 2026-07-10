@@ -7,6 +7,7 @@ import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import { NATIVE_COMPACTION_STRATEGY } from "./messages.ts";
 import {
     isInstructionItem,
+    isRemoteCompactionOutputItem,
     itemContainsShimSummary,
     parseResponsesInputItems,
     serializeEntriesToResponsesInput,
@@ -81,6 +82,7 @@ function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails |
             : parseWithSchema(NativeCompactionRequestMetaValidator, details.requestMeta);
     if (
         !compactedWindow ||
+        !isValidCompactedWindow(compactedWindow) ||
         (details.replacementInput !== undefined && !legacyReplacementInput) ||
         !worldState ||
         !Number.isFinite(details.windowNumber) ||
@@ -108,6 +110,13 @@ function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails |
     };
 }
 
+function isValidCompactedWindow(compactedWindow: readonly ResponsesInputItem[]): boolean {
+    return (
+        compactedWindow.filter(isRemoteCompactionOutputItem).length === 1 &&
+        isRemoteCompactionOutputItem(compactedWindow.at(-1))
+    );
+}
+
 export function findLatestNativeCompactionDetails(
     ctx: ExtensionContext,
 ): NativeCompactionDetails | undefined {
@@ -129,6 +138,18 @@ export function findLatestNativeCompactionEntry(
         return { entry: { ...entry, details }, index };
     }
     return undefined;
+}
+
+export function findLatestActiveNativeCompactionEntry(
+    branch: readonly SessionEntry[],
+    match?: NativeCompactionMatch,
+): FoundNativeCompactionEntry | undefined {
+    const latestNative = findLatestNativeCompactionEntry(branch, match);
+    if (!latestNative) return undefined;
+    const superseded = branch
+        .slice(latestNative.index + 1)
+        .some((entry) => entry.type === "compaction");
+    return superseded ? undefined : latestNative;
 }
 
 export function nativeCompactionMatches(

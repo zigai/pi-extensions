@@ -7,10 +7,11 @@ import {
     fail,
     isAbortCause as isCodexAbortCause,
     ok,
+    type CodexFailure,
     type CodexResult,
 } from "../codex/failures.ts";
-import type { CodexRuntime } from "../runtime.ts";
-import { isJsonObject, parseJsonObject } from "./responses-input.ts";
+import type { CodexRuntime, ScheduledTask } from "../runtime.ts";
+import { isJsonObject, isRemoteCompactionOutputItem, parseJsonObject } from "./responses-input.ts";
 import type {
     JsonObject,
     RemoteCompactionV2Request,
@@ -21,6 +22,9 @@ import type {
 const MAX_SSE_TAIL_CHARS = 1_000_000;
 const MAX_SSE_EVENT_CHARS = 2_000_000;
 const MAX_HTTP_ERROR_BODY_BYTES = 8 * 1024;
+const REMOTE_COMPACTION_STREAM_IDLE_TIMEOUT_MS = 300_000;
+const MAX_REMOTE_COMPACTION_STREAM_RETRIES = 2;
+const REMOTE_COMPACTION_RETRY_INITIAL_DELAY_MS = 200;
 
 type ServerSentEvent = {
     readonly event: string;
@@ -33,6 +37,66 @@ export async function executeRemoteCompactionV2(
     signal: AbortSignal,
     services: CodexRuntime,
 ): Promise<CodexResult<RemoteCompactionV2Response>> {
+    let lastResult: CodexResult<RemoteCompactionV2Response> | undefined;
+    for (let attempt = 0; attempt <= MAX_REMOTE_COMPACTION_STREAM_RETRIES; attempt += 1) {
+        const linkedAttempt = createLinkedAttemptController(signal);
+        let result: CodexResult<RemoteCompactionV2Response>;
+        try {
+            result = await executeRemoteCompactionV2Attempt(
+                runtime,
+                request,
+                linkedAttempt.controller,
+                signal,
+                services,
+            );
+            if (result.isErr() && !linkedAttempt.controller.signal.aborted) {
+                linkedAttempt.controller.abort(result.error);
+            }
+        } catch (cause: unknown) {
+            if (!linkedAttempt.controller.signal.aborted) linkedAttempt.controller.abort(cause);
+            throw cause;
+        } finally {
+            linkedAttempt.dispose();
+        }
+        if (
+            result.isOk() ||
+            !isRetryableRemoteCompactionFailure(result.error) ||
+            attempt === MAX_REMOTE_COMPACTION_STREAM_RETRIES
+        ) {
+            return result;
+        }
+        lastResult = result;
+        try {
+            await waitForRetry(
+                REMOTE_COMPACTION_RETRY_INITIAL_DELAY_MS * 2 ** attempt,
+                signal,
+                services,
+            );
+        } catch (cause: unknown) {
+            return cancelledRemoteCompaction(cause);
+        }
+    }
+    return (
+        lastResult ??
+        fail(
+            new CodexNetworkUnavailable({
+                operation: "nativeCompaction",
+                provider: "openai-codex",
+                message: "Codex remote compaction retry limit was exhausted.",
+                cause: new Error("Remote compaction retry limit exhausted."),
+            }),
+        )
+    );
+}
+
+async function executeRemoteCompactionV2Attempt(
+    runtime: { readonly responsesUrl: string; readonly headers: Headers },
+    request: RemoteCompactionV2Request,
+    attemptController: AbortController,
+    parentSignal: AbortSignal,
+    services: CodexRuntime,
+): Promise<CodexResult<RemoteCompactionV2Response>> {
+    const signal = attemptController.signal;
     let response: Response;
     try {
         response = await services.fetch(runtime.responsesUrl, {
@@ -42,7 +106,7 @@ export async function executeRemoteCompactionV2(
             body: JSON.stringify(request),
         });
     } catch (cause: unknown) {
-        if (isCodexAbortCause(cause)) {
+        if (isCodexAbortCause(cause) || parentSignal.aborted) {
             return fail(
                 new CodexRequestCancelled({
                     operation: "nativeCompaction",
@@ -61,7 +125,12 @@ export async function executeRemoteCompactionV2(
         );
     }
     if (!response.ok) {
-        const detail = await readSafeHttpErrorDetail(response);
+        let detail: string | undefined;
+        try {
+            detail = await readSafeHttpErrorDetail(response, signal, services, attemptController);
+        } catch (cause: unknown) {
+            return cancelledRemoteCompaction(cause);
+        }
         return fail(
             new CodexHttpRequestFailed({
                 operation: "nativeCompaction",
@@ -71,17 +140,197 @@ export async function executeRemoteCompactionV2(
             }),
         );
     }
-    if (!response.body) return collectRemoteCompactionV2Output(await response.text());
-    return collectRemoteCompactionV2OutputFromStream(response.body);
+    try {
+        if (!response.body) {
+            const text = await readRemoteCompactionResponseText(
+                response,
+                signal,
+                services,
+                attemptController,
+            );
+            return collectRemoteCompactionV2Output(text);
+        }
+        return await collectRemoteCompactionV2OutputFromStream(
+            response.body,
+            signal,
+            services,
+            attemptController,
+        );
+    } catch (cause: unknown) {
+        if (cause instanceof RemoteCompactionIdleTimeout) {
+            return fail(
+                new CodexNetworkUnavailable({
+                    operation: "nativeCompaction",
+                    provider: "openai-codex",
+                    message: "Codex remote compaction stream timed out while idle.",
+                    cause,
+                }),
+            );
+        }
+        if (cause instanceof RemoteCompactionTransportFailure) {
+            return fail(
+                new CodexNetworkUnavailable({
+                    operation: "nativeCompaction",
+                    provider: "openai-codex",
+                    message: "Codex remote compaction stream failed.",
+                    cause: cause.cause,
+                }),
+            );
+        }
+        if (isCodexAbortCause(cause) || parentSignal.aborted) {
+            return cancelledRemoteCompaction(cause);
+        }
+        throw cause;
+    }
 }
 
-async function readSafeHttpErrorDetail(response: Response): Promise<string | undefined> {
+class RemoteCompactionIdleTimeout extends Error {
+    constructor() {
+        super(
+            `Remote compaction stream was idle for ${REMOTE_COMPACTION_STREAM_IDLE_TIMEOUT_MS}ms.`,
+        );
+        this.name = "RemoteCompactionIdleTimeout";
+    }
+}
+
+class RemoteCompactionTransportFailure extends Error {
+    override readonly cause: unknown;
+
+    constructor(message: string, cause: unknown) {
+        super(message);
+        this.name = "RemoteCompactionTransportFailure";
+        this.cause = cause;
+    }
+}
+
+function createLinkedAttemptController(parentSignal: AbortSignal): {
+    readonly controller: AbortController;
+    readonly dispose: () => void;
+} {
+    const controller = new AbortController();
+    const onParentAbort = () =>
+        controller.abort(parentSignal.reason ?? new DOMException("Aborted", "AbortError"));
+    if (parentSignal.aborted) onParentAbort();
+    else parentSignal.addEventListener("abort", onParentAbort, { once: true });
+    return {
+        controller,
+        dispose: () => parentSignal.removeEventListener("abort", onParentAbort),
+    };
+}
+
+function isRetryableRemoteCompactionFailure(error: CodexFailure): boolean {
+    if (error._tag === "CodexNetworkUnavailable") return true;
+    if (error._tag !== "CodexHttpRequestFailed") return false;
+    return error.status === 408 || error.status === 409 || error.status >= 500;
+}
+
+function cancelledRemoteCompaction<T>(cause: unknown): CodexResult<T> {
+    return fail(
+        new CodexRequestCancelled({
+            operation: "nativeCompaction",
+            message: "Codex remote compaction request was cancelled.",
+            cause,
+        }),
+    );
+}
+
+function withRemoteCompactionIdleTimeout<T>(
+    operation: Promise<T>,
+    signal: AbortSignal,
+    services: CodexRuntime,
+    onTimeout: (cause: RemoteCompactionIdleTimeout) => void,
+): Promise<T> {
+    if (signal.aborted) {
+        return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    }
+    return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        let timeoutTask: ScheduledTask | undefined;
+        const settle = (complete: () => void) => {
+            if (settled) return;
+            settled = true;
+            timeoutTask?.cancel();
+            signal.removeEventListener("abort", onAbort);
+            complete();
+        };
+        const onAbort = () =>
+            settle(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
+        signal.addEventListener("abort", onAbort, { once: true });
+        operation.then(
+            (value) => settle(() => resolve(value)),
+            (cause: unknown) => settle(() => reject(cause)),
+        );
+        timeoutTask = services.scheduler.set(REMOTE_COMPACTION_STREAM_IDLE_TIMEOUT_MS, () => {
+            const cause = new RemoteCompactionIdleTimeout();
+            settle(() => reject(cause));
+            onTimeout(cause);
+        });
+        if (settled) timeoutTask.cancel();
+    });
+}
+
+function readRemoteCompactionResponseText(
+    response: Response,
+    signal: AbortSignal,
+    services: CodexRuntime,
+    attemptController: AbortController,
+): Promise<string> {
+    const text = response.text().catch((cause: unknown) => {
+        if (isCodexAbortCause(cause) || signal.aborted) throw cause;
+        throw new RemoteCompactionTransportFailure(
+            "Remote compaction response body read failed.",
+            cause,
+        );
+    });
+    return withRemoteCompactionIdleTimeout(text, signal, services, (cause) =>
+        attemptController.abort(cause),
+    );
+}
+
+function waitForRetry(delayMs: number, signal: AbortSignal, services: CodexRuntime): Promise<void> {
+    if (signal.aborted) {
+        return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    }
+    return new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let task: ScheduledTask | undefined;
+        const settle = (complete: () => void) => {
+            if (settled) return;
+            settled = true;
+            task?.cancel();
+            signal.removeEventListener("abort", onAbort);
+            complete();
+        };
+        const onAbort = () =>
+            settle(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
+        signal.addEventListener("abort", onAbort, { once: true });
+        task = services.scheduler.set(delayMs, () => settle(resolve));
+        if (settled) task.cancel();
+    });
+}
+
+async function readSafeHttpErrorDetail(
+    response: Response,
+    signal: AbortSignal,
+    services: CodexRuntime,
+    attemptController: AbortController,
+): Promise<string | undefined> {
     const requestId = safeDiagnosticValue(response.headers.get("x-request-id"));
     let payload: unknown;
     try {
-        const body = await readResponseTextPrefix(response, MAX_HTTP_ERROR_BODY_BYTES);
+        const body = await readResponseTextPrefix(
+            response,
+            MAX_HTTP_ERROR_BODY_BYTES,
+            signal,
+            services,
+            attemptController,
+        );
         payload = JSON.parse(body);
-    } catch {
+    } catch (cause: unknown) {
+        if (signal.reason instanceof RemoteCompactionIdleTimeout) {
+            return requestId ? `request_id=${requestId}` : undefined;
+        }
+        if (isCodexAbortCause(cause) || signal.aborted) throw cause;
         return requestId ? `request_id=${requestId}` : undefined;
     }
     const root = parseJsonObject(payload);
@@ -100,24 +349,55 @@ async function readSafeHttpErrorDetail(response: Response): Promise<string | und
     return fields.length > 0 ? fields.join(" ") : undefined;
 }
 
-async function readResponseTextPrefix(response: Response, maxBytes: number): Promise<string> {
+async function readResponseTextPrefix(
+    response: Response,
+    maxBytes: number,
+    signal: AbortSignal,
+    services: CodexRuntime,
+    attemptController: AbortController,
+): Promise<string> {
     if (!response.body) return "";
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let remaining = maxBytes;
     let text = "";
-    for (;;) {
-        const { value, done } = await reader.read();
-        if (done) return text + decoder.decode();
-        if (!value || value.length === 0) continue;
-        const retained = value.subarray(0, remaining);
-        text += decoder.decode(retained, { stream: retained.length === value.length });
-        remaining -= retained.length;
-        if (remaining === 0) {
-            await reader.cancel();
-            return text + decoder.decode();
+    try {
+        for (;;) {
+            const { value, done } = await readRemoteCompactionStreamChunk(
+                reader,
+                signal,
+                services,
+                attemptController,
+            );
+            if (done) return text + decoder.decode();
+            if (!value || value.length === 0) continue;
+            const retained = value.subarray(0, remaining);
+            text += decoder.decode(retained, { stream: retained.length === value.length });
+            remaining -= retained.length;
+            if (remaining === 0) {
+                await cancelStreamReader(reader);
+                return text + decoder.decode();
+            }
         }
+    } catch (cause: unknown) {
+        await cancelStreamReader(reader);
+        throw cause;
     }
+}
+
+function readRemoteCompactionStreamChunk(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    signal: AbortSignal,
+    services: CodexRuntime,
+    attemptController: AbortController,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+    const read = reader.read().catch((cause: unknown) => {
+        if (isCodexAbortCause(cause) || signal.aborted) throw cause;
+        throw new RemoteCompactionTransportFailure("Remote compaction stream read failed.", cause);
+    });
+    return withRemoteCompactionIdleTimeout(read, signal, services, (cause) =>
+        attemptController.abort(cause),
+    );
 }
 
 function safeDiagnosticValue(value: unknown, maxCharacters = 128): string | undefined {
@@ -134,31 +414,54 @@ function safeDiagnosticValue(value: unknown, maxCharacters = 128): string | unde
 
 async function collectRemoteCompactionV2OutputFromStream(
     body: ReadableStream<Uint8Array>,
+    signal: AbortSignal,
+    services: CodexRuntime,
+    attemptController: AbortController,
 ): Promise<CodexResult<RemoteCompactionV2Response>> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     const collector = createRemoteCompactionV2Collector();
     let buffer = "";
-    for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        if (buffer.length > MAX_SSE_TAIL_CHARS && !hasCompleteServerSentEventDelimiter(buffer)) {
-            await reader.cancel();
-            return fail(createOversizedRemoteCompactionStreamError());
-        }
-        const drained = drainCompleteServerSentEventBlocks(buffer);
-        buffer = drained.tail;
-        for (const block of drained.blocks) {
-            if (block.length > MAX_SSE_EVENT_CHARS) {
-                await reader.cancel();
+    try {
+        for (;;) {
+            const { value, done } = await readRemoteCompactionStreamChunk(
+                reader,
+                signal,
+                services,
+                attemptController,
+            );
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            if (
+                buffer.length > MAX_SSE_TAIL_CHARS &&
+                !hasCompleteServerSentEventDelimiter(buffer)
+            ) {
+                await cancelStreamReader(reader);
                 return fail(createOversizedRemoteCompactionStreamError());
             }
-            const event = parseServerSentEventBlock(block);
-            if (!event) continue;
-            const consumed = collector.consume(event);
-            if (consumed.isErr()) return fail(consumed.error);
+            const drained = drainCompleteServerSentEventBlocks(buffer);
+            buffer = drained.tail;
+            for (const block of drained.blocks) {
+                if (block.length > MAX_SSE_EVENT_CHARS) {
+                    await cancelStreamReader(reader);
+                    return fail(createOversizedRemoteCompactionStreamError());
+                }
+                const event = parseServerSentEventBlock(block);
+                if (!event) continue;
+                const consumed = collector.consume(event);
+                if (consumed.isErr()) {
+                    await cancelStreamReader(reader);
+                    return fail(consumed.error);
+                }
+                if (collector.isComplete()) {
+                    await cancelStreamReader(reader);
+                    return collector.finish();
+                }
+            }
         }
+    } catch (cause: unknown) {
+        await cancelStreamReader(reader);
+        throw cause;
     }
     buffer += decoder.decode();
     if (buffer.trim().length > 0) {
@@ -173,6 +476,14 @@ async function collectRemoteCompactionV2OutputFromStream(
     return collector.finish();
 }
 
+async function cancelStreamReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+    try {
+        await reader.cancel();
+    } catch {
+        // The original stream result or failure is more useful than cancellation cleanup errors.
+    }
+}
+
 function collectRemoteCompactionV2Output(sseText: string): CodexResult<RemoteCompactionV2Response> {
     const collector = createRemoteCompactionV2Collector();
     for (const event of parseServerSentEvents(sseText)) {
@@ -184,6 +495,7 @@ function collectRemoteCompactionV2Output(sseText: string): CodexResult<RemoteCom
 
 function createRemoteCompactionV2Collector(): {
     readonly consume: (event: ServerSentEvent) => CodexResult<void>;
+    readonly isComplete: () => boolean;
     readonly finish: () => CodexResult<RemoteCompactionV2Response>;
 } {
     let outputItemCount = 0;
@@ -199,7 +511,7 @@ function createRemoteCompactionV2Collector(): {
                 if (item.isErr()) return fail(item.error);
                 if (!item.value) return ok(undefined);
                 outputItemCount += 1;
-                if (item.value.type === "compaction" || item.value.type === "compaction_summary") {
+                if (isRemoteCompactionOutputItem(item.value)) {
                     compactionItems.push(item.value);
                 }
                 return ok(undefined);
@@ -223,13 +535,17 @@ function createRemoteCompactionV2Collector(): {
             }
             return ok(undefined);
         },
+        isComplete: () => completed,
         finish(): CodexResult<RemoteCompactionV2Response> {
             if (!completed) {
                 return fail(
-                    new CodexUnexpectedResponse({
+                    new CodexNetworkUnavailable({
                         operation: "nativeCompaction",
                         provider: "openai-codex",
                         message: "Remote compaction stream closed before response.completed.",
+                        cause: new Error(
+                            "Remote compaction stream closed before response.completed.",
+                        ),
                     }),
                 );
             }

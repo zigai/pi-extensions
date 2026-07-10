@@ -4,9 +4,9 @@ import { codexModelRequestProfile, codexReasoningEffortForRequest } from "../cod
 import { CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY } from "../codex/responses-compat.ts";
 import type { CodexCoreConfig } from "../config/config.ts";
 import {
-    isInstructionItem,
     isJsonArray,
     isJsonObject,
+    isRemoteCompactionOutputItem,
     parseJsonValue,
     sanitizeSurrogates,
     textFromResponsesContent,
@@ -27,8 +27,6 @@ import type {
 } from "./types.ts";
 
 const RETAINED_MESSAGE_TOKEN_BUDGET = 64_000;
-const RETAINED_INPUT_IMAGE_MIN_TOKEN_COST = 4_096;
-const RETAINED_IMAGE_OMITTED_TEXT = "(image omitted from retained compacted window)";
 const COMPACTION_REQUEST_BUDGET_RATIO = 0.8;
 const TRUNCATED_TOOL_OUTPUT_MESSAGE = "[truncated]";
 const TOKEN_ESTIMATE_CHUNK_CHARS = 512 * 1024;
@@ -214,16 +212,6 @@ export async function shrinkRemoteCompactionRequestForContextWindow(
         estimatedTokensAfter += afterTokens - beforeTokens;
     }
 
-    for (let index = 0; index < input.length && estimatedTokensAfter > budgetTokens; ) {
-        const item = input[index];
-        if (!item || !isTrimCandidateForCompactionRequest(item)) {
-            index += 1;
-            continue;
-        }
-        input.splice(index, 1);
-        estimatedTokensAfter -= await estimateResponsesInputItemTokens(item, cache);
-    }
-
     if (estimatedTokensAfter > budgetTokens) {
         return {
             kind: "too_large",
@@ -266,6 +254,7 @@ function isRetainedRemoteCompactionMessage(item: ResponsesInputItem): boolean {
     if (text.includes(NATIVE_COMPACTION_SHIM_SUMMARY)) return false;
     if (/^<environment_context>[\s\S]*<\/environment_context>$/i.test(text)) return false;
     if (/^Previous compaction summary:/i.test(text)) return false;
+    if (/^The conversation history before this point was compacted/i.test(text)) return false;
     return text.length > 0 || inputImageCount(item) > 0;
 }
 
@@ -280,7 +269,7 @@ async function truncateRetainedMessages(
         if (remaining <= 0) continue;
         const tokenCount = Math.max(1, await messageTextTokenCount(item, cache));
         if (tokenCount <= remaining) {
-            retainedReversed.push(omitRetainedInputImages(item));
+            retainedReversed.push(item);
             remaining -= tokenCount;
         } else {
             const truncated = await truncateMessageTextToTokenBudget(item, remaining, cache);
@@ -289,18 +278,6 @@ async function truncateRetainedMessages(
         }
     }
     return retainedReversed.reverse();
-}
-
-function omitRetainedInputImages(item: ResponsesInputItem): ResponsesInputItem {
-    const content = item.content;
-    if (!isJsonArray(content)) return item;
-    let changed = false;
-    const nextContent = content.map((part): JsonValue => {
-        if (!isInputImagePart(part)) return part;
-        changed = true;
-        return { type: "input_text", text: RETAINED_IMAGE_OMITTED_TEXT };
-    });
-    return changed ? { ...item, content: nextContent } : item;
 }
 
 async function messageTextTokenCount(
@@ -320,17 +297,8 @@ async function retainedContentPartTokenCount(
     cache: TokenEstimateCache,
 ): Promise<number> {
     if (isResponsesTextPart(part)) return estimateTextTokens(part.text, cache);
-    if (isInputImagePart(part)) return inputImageRetainedTokenCount(part, cache);
+    if (isInputImagePart(part)) return 0;
     return estimateTokenCount(part, cache);
-}
-
-async function inputImageRetainedTokenCount(
-    part: ResponsesInputItem,
-    cache: TokenEstimateCache,
-): Promise<number> {
-    const imageUrlTokens =
-        typeof part.image_url === "string" ? await estimateTextTokens(part.image_url, cache) : 0;
-    return Math.max(RETAINED_INPUT_IMAGE_MIN_TOKEN_COST, imageUrlTokens);
 }
 
 function isResponsesTextPart(
@@ -339,7 +307,9 @@ function isResponsesTextPart(
     return isJsonObject(part) && typeof part.text === "string";
 }
 
-function isInputImagePart(part: JsonValue): part is ResponsesInputItem {
+function isInputImagePart(
+    part: JsonValue,
+): part is ResponsesInputItem & { readonly type: "input_image" } {
     return isJsonObject(part) && part.type === "input_image";
 }
 
@@ -360,6 +330,10 @@ async function truncateMessageTextToTokenBudget(
     let remaining = maxTokens;
     const nextContent: JsonValue[] = [];
     for (const part of content) {
+        if (isInputImagePart(part)) {
+            nextContent.push(part);
+            continue;
+        }
         if (remaining <= 0) continue;
         if (isResponsesTextPart(part)) {
             const tokenCount = await estimateTextTokens(part.text, cache);
@@ -369,20 +343,6 @@ async function truncateMessageTextToTokenBudget(
                     : await truncateCodexTextToTokenBudget(part.text, remaining);
             remaining -= Math.min(tokenCount, remaining);
             if (text.length > 0) nextContent.push({ ...part, text });
-            continue;
-        }
-        if (isInputImagePart(part)) {
-            const tokenCount = await inputImageRetainedTokenCount(part, cache);
-            if (tokenCount <= remaining) {
-                nextContent.push({ type: "input_text", text: RETAINED_IMAGE_OMITTED_TEXT });
-                remaining -= tokenCount;
-                continue;
-            }
-            const placeholderTokens = await estimateTextTokens(RETAINED_IMAGE_OMITTED_TEXT, cache);
-            if (placeholderTokens <= remaining) {
-                nextContent.push({ type: "input_text", text: RETAINED_IMAGE_OMITTED_TEXT });
-                remaining -= placeholderTokens;
-            }
             continue;
         }
         const tokenCount = await estimateTokenCount(part, cache);
@@ -396,12 +356,7 @@ async function truncateMessageTextToTokenBudget(
 }
 
 export function hasCompactionOutputItem(compactedWindow: readonly ResponsesInputItem[]): boolean {
-    return compactedWindow.some(
-        (item) =>
-            item.type === "compaction" ||
-            item.type === "compaction_summary" ||
-            item.type === "context_compaction",
-    );
+    return compactedWindow.some(isRemoteCompactionOutputItem);
 }
 
 export function buildCompactionInstructions(
@@ -479,24 +434,6 @@ function isRewritableToolOutputItem(item: ResponsesInputItem): boolean {
 
 function rewriteToolOutputItem(item: ResponsesInputItem): ResponsesInputItem {
     return { ...item, output: TRUNCATED_TOOL_OUTPUT_MESSAGE };
-}
-
-function isTrimCandidateForCompactionRequest(item: ResponsesInputItem): boolean {
-    return (
-        !isNativeCompactionAnchor(item) &&
-        item.type !== "compaction_trigger" &&
-        item.type !== "function_call" &&
-        item.type !== "function_call_output" &&
-        !isInstructionItem(item)
-    );
-}
-
-function isNativeCompactionAnchor(item: ResponsesInputItem): boolean {
-    return (
-        item.type === "compaction" ||
-        item.type === "compaction_summary" ||
-        item.type === "context_compaction"
-    );
 }
 
 export function createTokenEstimateCache(): TokenEstimateCache {
