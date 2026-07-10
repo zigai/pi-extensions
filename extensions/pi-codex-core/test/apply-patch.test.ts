@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { withFileMutationQueue, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
     ApplyPatchError,
@@ -312,6 +312,42 @@ test("apply_patch tool executes patch argument and formats parser errors", async
             formatApplyPatchError(caught),
             "Invalid patch: The first line of the patch must be '*** Begin Patch'",
         );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("apply_patch shares target-file locks with Pi write operations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-lock-"));
+    try {
+        const filePath = join(root, "shared.txt");
+        await writeFile(filePath, "before\n");
+        let releaseBlocker: (() => void) | undefined;
+        let markBlockerStarted: (() => void) | undefined;
+        const blockerStarted = new Promise<void>((resolveStarted) => {
+            markBlockerStarted = resolveStarted;
+        });
+        const blockerGate = new Promise<void>((resolveBlocker) => {
+            releaseBlocker = resolveBlocker;
+        });
+        const competingWrite = withFileMutationQueue(filePath, async () => {
+            markBlockerStarted?.();
+            await blockerGate;
+            await writeFile(filePath, "before\nexternal\n");
+        });
+        await blockerStarted;
+
+        const tool = createApplyPatchTool();
+        const patch = wrapPatch(`*** Update File: shared.txt
+@@
+-before
++after`);
+        const ctx = { cwd: root } as unknown as ExtensionContext;
+        const patchResult = tool.execute("call-lock", { patch }, undefined, undefined, ctx);
+        releaseBlocker?.();
+
+        await Promise.all([competingWrite, patchResult]);
+        assert.equal(await readFile(filePath, "utf8"), "after\nexternal\n");
     } finally {
         await rm(root, { recursive: true, force: true });
     }

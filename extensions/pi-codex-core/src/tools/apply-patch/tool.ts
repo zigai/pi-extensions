@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { Text } from "@earendil-works/pi-tui";
@@ -95,9 +96,10 @@ export function createApplyPatchTool(): ToolDefinition<
         prepareArguments: prepareApplyPatchArguments,
         async execute(_toolCallId, params, signal, _onUpdate, ctx) {
             const cwd = resolve(ctx.cwd);
-            return withFileMutationQueue(cwd, async () => {
-                try {
-                    const parsed = parseApplyPatch(params.patch);
+            try {
+                const parsed = parseApplyPatch(params.patch);
+                const mutationPaths = await resolvePatchMutationQueuePaths(parsed.hunks, cwd);
+                return await withFileMutationQueues(mutationPaths, async () => {
                     const result = await applyPatchHunks(parsed.hunks, cwd, {
                         signal,
                         environmentId: parsed.environmentId,
@@ -114,14 +116,14 @@ export function createApplyPatchTool(): ToolDefinition<
                             firstChangedLine: diffSummary.firstChangedLine,
                         },
                     };
-                } catch (cause: unknown) {
-                    if (cause instanceof ApplyPatchError) {
-                        throw new Error(formatApplyPatchError(cause));
-                    }
-                    if (cause instanceof Error) throw cause;
-                    throw new Error(String(cause));
+                });
+            } catch (cause: unknown) {
+                if (cause instanceof ApplyPatchError) {
+                    throw new Error(formatApplyPatchError(cause));
                 }
-            });
+                if (cause instanceof Error) throw cause;
+                throw new Error(String(cause));
+            }
         },
         renderCall(args, theme, _context) {
             const summary = summarizeApplyPatchCall(args.patch);
@@ -163,6 +165,47 @@ export function createApplyPatchTool(): ToolDefinition<
             );
         },
     };
+}
+
+async function resolvePatchMutationQueuePaths(
+    hunks: readonly ApplyPatchHunk[],
+    cwd: string,
+): Promise<string[]> {
+    const paths = hunks.flatMap((hunk) => [
+        resolve(cwd, hunk.path),
+        ...(hunk.type === "update" && hunk.movePath !== undefined
+            ? [resolve(cwd, hunk.movePath)]
+            : []),
+    ]);
+    const canonicalPaths = await Promise.all(paths.map(canonicalMutationQueuePath));
+    return [...new Set(canonicalPaths)].sort(comparePaths);
+}
+
+async function canonicalMutationQueuePath(path: string): Promise<string> {
+    try {
+        return await realpath(path);
+    } catch (cause: unknown) {
+        if (hasNodeErrorCode(cause, "ENOENT") || hasNodeErrorCode(cause, "ENOTDIR")) return path;
+        throw cause;
+    }
+}
+
+function withFileMutationQueues<T>(
+    paths: readonly string[],
+    operation: () => Promise<T>,
+    index = 0,
+): Promise<T> {
+    const path = paths[index];
+    if (path === undefined) return operation();
+    return withFileMutationQueue(path, () => withFileMutationQueues(paths, operation, index + 1));
+}
+
+function comparePaths(left: string, right: string): number {
+    return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function hasNodeErrorCode(cause: unknown, code: string): boolean {
+    return typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;
 }
 
 function prepareApplyPatchArguments(args: unknown): ApplyPatchParams {
