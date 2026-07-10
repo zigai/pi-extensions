@@ -116,12 +116,14 @@ export function makeExtensionContext(
     cwd: string,
     trusted: boolean,
     model: TestExtensionModel = DEFAULT_TEST_EXTENSION_MODEL,
+    options: { readonly agentActive?: boolean } = {},
 ): ExtensionContext {
     const ctx = {
         cwd,
         hasUI: false,
         isProjectTrusted: () => trusted,
         model,
+        ...(options.agentActive ? { signal: new AbortController().signal } : {}),
         sessionManager: {
             getSessionId: () => "extension-session",
             getBranch: () => [],

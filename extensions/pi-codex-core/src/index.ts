@@ -96,6 +96,7 @@ export default function extension(pi: ExtensionAPI): void {
     pi.on("before_provider_headers", (event, ctx) => {
         if (
             isActiveCodexResponsesModel(ctx) &&
+            isActiveAgentProviderRequest(ctx) &&
             codexModelRequestProfile(ctx.model?.id)?.useResponsesLite
         ) {
             event.headers[CODEX_RESPONSES_LITE_HEADER] = "true";
@@ -171,6 +172,10 @@ function isActiveGptResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]
         ctx.model?.id.trim().toLowerCase().startsWith("gpt-") === true &&
         String(ctx.model.api).toLowerCase().includes("responses")
     );
+}
+
+function isActiveAgentProviderRequest(ctx: Parameters<typeof syncCodexCoreTools>[1]): boolean {
+    return ctx.signal !== undefined;
 }
 
 export { formatCodexUsage, parseCodexUsagePayload } from "./codex/usage.ts";

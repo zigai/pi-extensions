@@ -183,10 +183,15 @@ test("applies GPT-5.6 Responses Lite compatibility through extension hooks", asy
         process.env.PI_CODING_AGENT_DIR = join(root, "agent");
         const harness = makeExtensionHarness();
         extension(harness.api);
-        const ctx = makeExtensionContext("/workspace", true, {
-            ...DEFAULT_TEST_EXTENSION_MODEL,
-            id: "gpt-5.6-terra",
-        });
+        const ctx = makeExtensionContext(
+            "/workspace",
+            true,
+            {
+                ...DEFAULT_TEST_EXTENSION_MODEL,
+                id: "gpt-5.6-terra",
+            },
+            { agentActive: true },
+        );
         const headers: Record<string, string | null> = {};
 
         await harness.startSession(ctx);
@@ -206,6 +211,30 @@ test("applies GPT-5.6 Responses Lite compatibility through extension hooks", asy
         assert.equal(Object.hasOwn(rewritten, "instructions"), false);
         assert.equal(rewritten.parallel_tool_calls, false);
         assert.deepEqual(rewritten.reasoning, { effort: "medium", context: "all_turns" });
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("does not opt Pi internal summarization into Responses Lite", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-responses-summary-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        const ctx = makeExtensionContext("/workspace", true, {
+            ...DEFAULT_TEST_EXTENSION_MODEL,
+            id: "gpt-5.6-sol",
+        });
+        const headers: Record<string, string | null> = {};
+
+        await harness.startSession(ctx);
+        await harness.prepareProviderHeaders(headers, ctx);
+
+        assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], undefined);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
