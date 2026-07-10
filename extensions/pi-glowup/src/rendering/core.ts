@@ -746,10 +746,10 @@ function visitPhysicalLines(text: string, visit: (line: string) => void): void {
 
 function renderBullet(theme: CodexRenderTheme, state: CodexCallState): string {
     if (state === "success") {
-        return success(theme, "•");
+        return success(theme, theme.bold("•"));
     }
     if (state === "error") {
-        return red(theme, "•");
+        return red(theme, theme.bold("•"));
     }
     if (state === "muted") {
         return dim(theme, "•");
@@ -841,51 +841,81 @@ function formatMutationStats(
     return `(${green(theme, `+${summary.added}`)} ${red(theme, `-${summary.removed}`)})`;
 }
 
-function appendBudgetedPreviewRows(
-    rendered: string[],
-    wrapped: ReadonlyArray<string>,
+type WrappedPreviewLine = {
+    readonly isMeta: boolean;
+    readonly rows: ReadonlyArray<string>;
+    readonly text: string;
+};
+
+function flattenWrappedRows(lines: ReadonlyArray<WrappedPreviewLine>): string[] {
+    return lines.flatMap((line) => line.rows);
+}
+
+function renderCollapsedWrappedPreview(
+    lines: ReadonlyArray<WrappedPreviewLine>,
     options: {
-        readonly rowBudget: number | undefined;
-        readonly remainingDisplayLines: number;
-        readonly overflowPrefix: string;
+        readonly mode: "headTail" | "head" | "hidden";
+        readonly rowBudget: number;
+        readonly prefixFirst: string;
+        readonly prefixRest: string;
         readonly width: number;
         readonly omittedHint: string;
         readonly theme: CodexRenderTheme;
     },
-): boolean {
-    if (options.rowBudget === undefined || rendered.length + wrapped.length <= options.rowBudget) {
-        rendered.push(...wrapped);
-        return false;
+): string[] {
+    const rendered = flattenWrappedRows(lines);
+    if (rendered.length <= options.rowBudget) {
+        return rendered;
     }
 
-    const rowsLeft = Math.max(0, options.rowBudget - rendered.length);
-    const keptWrappedRows = Math.max(0, rowsLeft - 1);
-    const omittedRows = Math.max(
-        1,
-        wrapped.length - keptWrappedRows + options.remainingDisplayLines,
+    const metaIndex = lines.findIndex((line) => line.isMeta);
+    const markerText =
+        metaIndex === -1
+            ? `… preview truncated (${options.omittedHint})`
+            : (lines[metaIndex]?.text ?? `… preview truncated (${options.omittedHint})`);
+    const before = flattenWrappedRows(
+        lines.filter((line, index) => !line.isMeta && (metaIndex === -1 || index < metaIndex)),
     );
-    const overflowLine = muted(options.theme, `… +${omittedRows} rows (${options.omittedHint})`);
-    const overflowRows = wrapPrefixedLine(
-        overflowLine,
-        options.width,
-        options.overflowPrefix,
-        options.overflowPrefix,
-    );
+    const after =
+        metaIndex === -1
+            ? []
+            : flattenWrappedRows(lines.filter((line, index) => !line.isMeta && index > metaIndex));
+    const allContent = metaIndex === -1 ? before : [...before, ...after];
+    const marker = (prefix: string): string =>
+        truncateToWidth(`${prefix}${muted(options.theme, markerText)}`, options.width, "…");
 
-    if (rowsLeft <= 0) {
-        const replacement = overflowRows[0];
-        if (replacement !== undefined && rendered.length > 0) {
-            rendered[rendered.length - 1] = replacement;
-        }
-        return true;
+    if (options.rowBudget === 1) {
+        return [marker(options.prefixFirst)];
     }
 
-    rendered.push(...wrapped.slice(0, keptWrappedRows));
-    const overflowRow = overflowRows[0];
-    if (overflowRow !== undefined) {
-        rendered.push(overflowRow);
+    const visibleBudget = options.rowBudget - 1;
+    if (allContent.length <= visibleBudget) {
+        return [
+            ...before,
+            marker(before.length === 0 ? options.prefixFirst : options.prefixRest),
+            ...after,
+        ];
     }
-    return true;
+
+    if (options.mode === "head") {
+        const head = allContent.slice(0, visibleBudget);
+        return [...head, marker(head.length === 0 ? options.prefixFirst : options.prefixRest)];
+    }
+
+    const headPool = before;
+    const tailPool = metaIndex === -1 ? before : after;
+    let headCount = Math.min(headPool.length, Math.ceil(visibleBudget / 2));
+    let tailCount = Math.min(tailPool.length, visibleBudget - headCount);
+    let remaining = visibleBudget - headCount - tailCount;
+
+    const additionalHead = Math.min(remaining, headPool.length - headCount);
+    headCount += additionalHead;
+    remaining -= additionalHead;
+    tailCount += Math.min(remaining, tailPool.length - tailCount);
+
+    const head = headPool.slice(0, headCount);
+    const tail = tailCount === 0 ? [] : tailPool.slice(tailPool.length - tailCount);
+    return [...head, marker(head.length === 0 ? options.prefixFirst : options.prefixRest), ...tail];
 }
 
 export function renderCodexOutput(
@@ -961,10 +991,7 @@ export function renderCodexOutput(
                         omittedHint,
                     )
                   : highlightPreviewLines(visible, syntax);
-        const rendered: string[] = [];
-        const rowBudget =
-            retained.kind === "expanded" ? undefined : Math.max(1, Math.floor(maxPreviewLines));
-
+        const wrappedLines: WrappedPreviewLine[] = [];
         for (const [index, line] of displayLines.entries()) {
             const prefix = index === 0 ? prefixFirst : prefixRest;
             let styled = line;
@@ -974,21 +1001,25 @@ export function renderCodexOutput(
                 styled = muted(theme, line);
             }
 
-            const wrapped = wrapPrefixedLine(styled, width, prefix, prefixRest);
-            const overflowed = appendBudgetedPreviewRows(rendered, wrapped, {
-                rowBudget,
-                remainingDisplayLines: displayLines.length - index - 1,
-                overflowPrefix: rendered.length === 0 ? prefix : prefixRest,
-                width,
-                omittedHint,
-                theme,
+            wrappedLines.push({
+                isMeta: isPreviewMetaLine(line),
+                rows: wrapPrefixedLine(styled, width, prefix, prefixRest),
+                text: line,
             });
-            if (overflowed) {
-                break;
-            }
         }
 
-        return rendered;
+        if (retained.kind === "expanded") {
+            return flattenWrappedRows(wrappedLines);
+        }
+        return renderCollapsedWrappedPreview(wrappedLines, {
+            mode,
+            rowBudget: Math.max(1, Math.floor(maxPreviewLines)),
+            prefixFirst,
+            prefixRest,
+            width,
+            omittedHint,
+            theme,
+        });
     });
 }
 

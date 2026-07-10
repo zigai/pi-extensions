@@ -134,6 +134,28 @@ describe("Codex rendering helpers", () => {
         expect(component.render(12)).toEqual(["• Run "]);
     });
 
+    it("renders completed tool markers in bold", () => {
+        const styledTheme: CodexRenderTheme = {
+            ...tokenTheme,
+            bold(text: string): string {
+                return `<bold>${text}</bold>`;
+            },
+        };
+
+        expect(
+            renderCodexCall(styledTheme, {
+                state: "success",
+                statusText: "Bash",
+            }).render(80)[0],
+        ).toContain("<success><bold>•</bold></success>");
+        expect(
+            renderCodexCall(styledTheme, {
+                state: "error",
+                statusText: "Bash",
+            }).render(80)[0],
+        ).toContain("<toolDiffRemoved><bold>•</bold></toolDiffRemoved>");
+    });
+
     it("pads mutation labels only when a label column width is provided", () => {
         const summary = { label: "Wrote", path: "src/example.ts", added: 1, removed: 0 };
 
@@ -369,7 +391,7 @@ describe("Codex rendering helpers", () => {
         expect(component.render(100)).toEqual([]);
     });
 
-    it("keeps collapsed output compact when one raw line wraps many rows", () => {
+    it("uses one truncation marker when one raw line wraps many rows", () => {
         const hugeLine = `rollout.jsonl:648:${JSON.stringify({
             timestamp: "2026-05-03T12:52:02.179Z",
             payload: {
@@ -388,8 +410,35 @@ describe("Codex rendering helpers", () => {
         expect(lines.length).toBeLessThanOrEqual(5);
         expectLinesWithinWidth(lines, 80);
         expect(rendered).toContain("rollout.jsonl:648");
-        expect(rendered).toContain("… +");
-        expect(rendered).toContain("rows (hint)");
+        expect(rendered).toContain("… preview truncated (hint)");
+        expect(rendered).toContain("done");
+        expect(rendered).not.toContain("rows (hint)");
+    });
+
+    it("does not add a row marker to an already truncated output preview", () => {
+        const long = "wrapped ".repeat(40);
+        const component = renderCodexOutput(
+            plainTheme,
+            [
+                `first ${long}`,
+                `second ${long}`,
+                ...Array.from({ length: 95 }, (_value, index) => `middle ${index + 1}`),
+                `penultimate ${long}`,
+                "last",
+            ].join("\n"),
+            {
+                expanded: false,
+                maxPreviewLines: 5,
+                omittedHint: "hint",
+            },
+        );
+
+        const rendered = component.render(80).join("\n");
+
+        expect(rendered.match(/… \+95 lines \(hint\)/gu)).toHaveLength(1);
+        expect(rendered).toContain("first wrapped");
+        expect(rendered).toContain("last");
+        expect(rendered).not.toContain("rows (hint)");
     });
 
     it("strips shell wrappers before command highlighting", () => {
