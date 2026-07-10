@@ -1,7 +1,4 @@
-/**
- * Stable image-content interface retained for existing extension callers.
- * Implementations live in capability-focused sibling modules.
- */
+/** Internal image utility facade for tools, activation, and tests. */
 export {
     MAX_INPUT_IMAGE_BYTES,
     generatedPngContent,
