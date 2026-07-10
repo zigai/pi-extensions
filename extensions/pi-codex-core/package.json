@@ -2,13 +2,16 @@
   "name": "pi-codex-core",
   "version": "0.1.0",
   "private": true,
-  "description": "Slim Pi-native Codex web, image, usage, prompt, and compaction extras.",
+  "description": "Everything GPT models need to feel at home in Pi.",
   "keywords": [
-    "codex-core",
     "pi",
+    "pi-codex-compaction",
+    "pi-codex-system-prompt",
+    "pi-codex-tools",
     "pi-coding-agent",
     "pi-extension",
-    "pi-package"
+    "pi-package",
+    "pi-web-search"
   ],
   "homepage": "https://github.com/zigai/pi-codex-core#readme",
   "bugs": {
