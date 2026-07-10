@@ -70,7 +70,9 @@ export function buildRemoteCompactionV2Request(input: {
                           },
                       ]
                     : []),
-                ...input.input.map(stripResponsesLiteImageDetails),
+                ...input.input.map((item) =>
+                    stripResponsesLiteImageDetails(stripResponseItemId(item)),
+                ),
                 { type: "compaction_trigger" },
             ],
             tool_choice: "auto",
@@ -91,7 +93,7 @@ export function buildRemoteCompactionV2Request(input: {
     return {
         model: input.model,
         instructions: sanitizeSurrogates(input.instructions),
-        input: [...input.input, { type: "compaction_trigger" }],
+        input: [...input.input.map(stripResponseItemId), { type: "compaction_trigger" }],
         tool_choice: "auto",
         parallel_tool_calls: true,
         store: false,
@@ -438,6 +440,10 @@ export function resolveCompactionTargetModel(
 
 function stripResponsesLiteImageDetails(item: ResponsesInputItem): ResponsesInputItem {
     return stripResponsesLiteJsonObject(item);
+}
+
+function stripResponseItemId(item: ResponsesInputItem): ResponsesInputItem {
+    return Object.fromEntries(Object.entries(item).filter(([key]) => key !== "id"));
 }
 
 function stripResponsesLiteJsonObject(value: JsonObject): JsonObject {

@@ -8,6 +8,7 @@ const CODEX_WINDOW_ID_HEADER = "x-codex-window-id";
 
 export type RemoteCompactionTransportMetadata = {
     readonly sessionId: string;
+    readonly turnId: string;
     readonly windowId: string;
     readonly turnMetadata: string;
     readonly clientMetadata: Readonly<Record<string, string>>;
@@ -16,15 +17,19 @@ export type RemoteCompactionTransportMetadata = {
 /** Builds the Codex request identity required by the remote compaction v2 contract. */
 export function buildRemoteCompactionTransportMetadata(input: {
     readonly sessionId: string;
+    readonly turnId: string;
     readonly windowId: string;
     readonly reason: SessionBeforeCompactEvent["reason"];
+    readonly startedAtMs: number;
 }): RemoteCompactionTransportMetadata {
     const sessionId = safeHeaderIdentity(input.sessionId, "pi-session");
+    const turnId = safeHeaderIdentity(input.turnId, sessionId);
     const windowId = safeHeaderIdentity(input.windowId, `pi-window-${sessionId}`);
     const turnMetadata = JSON.stringify({
         installation_id: sessionId,
         session_id: sessionId,
         thread_id: sessionId,
+        turn_id: turnId,
         window_id: windowId,
         request_kind: "compaction",
         compaction: {
@@ -34,15 +39,18 @@ export function buildRemoteCompactionTransportMetadata(input: {
             phase: "standalone_turn",
             strategy: "memento",
         },
+        turn_started_at_unix_ms: input.startedAtMs,
     });
     return {
         sessionId,
+        turnId,
         windowId,
         turnMetadata,
         clientMetadata: {
             [CODEX_INSTALLATION_ID_HEADER]: sessionId,
             session_id: sessionId,
             thread_id: sessionId,
+            turn_id: turnId,
             [CODEX_WINDOW_ID_HEADER]: windowId,
             [CODEX_TURN_METADATA_HEADER]: turnMetadata,
         },
@@ -61,6 +69,7 @@ export function applyRemoteCompactionTransportHeaders(
     headers.set(CODEX_INSTALLATION_ID_HEADER, metadata.sessionId);
     headers.set(CODEX_WINDOW_ID_HEADER, metadata.windowId);
     headers.set(CODEX_TURN_METADATA_HEADER, metadata.turnMetadata);
+    headers.set("x-client-request-id", metadata.sessionId);
     headers.set("session-id", metadata.sessionId);
     headers.set("thread-id", metadata.sessionId);
 }

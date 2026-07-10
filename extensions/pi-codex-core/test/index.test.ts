@@ -222,7 +222,17 @@ test("does not opt Pi internal summarization into Responses Lite", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-responses-summary-"));
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     try {
-        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const configPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(
+            configPath,
+            JSON.stringify({
+                ...DEFAULT_CODEX_CORE_CONFIG_JSON,
+                compaction: { ...DEFAULT_CODEX_CORE_CONFIG_JSON.compaction, enabled: false },
+            }),
+        );
         const harness = makeExtensionHarness();
         extension(harness.api);
         const ctx = makeExtensionContext("/workspace", true, {
@@ -232,8 +242,41 @@ test("does not opt Pi internal summarization into Responses Lite", async () => {
         const headers: Record<string, string | null> = {};
 
         await harness.startSession(ctx);
+        await harness.beginCompaction(ctx);
         await harness.prepareProviderHeaders(headers, ctx);
 
+        assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], undefined);
+
+        await harness.finishCompaction(ctx);
+        await harness.prepareProviderHeaders(headers, ctx);
+
+        assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], "true");
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("routes unexpected native compaction failures through Pi fallback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-compaction-error-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        const ctx = makeExtensionContext(root, false, {
+            ...DEFAULT_TEST_EXTENSION_MODEL,
+            id: "gpt-5.6-sol",
+            contextWindow: 372_000,
+        });
+
+        await harness.startSession(ctx);
+        const result = await harness.beginCompaction(ctx);
+        const headers: Record<string, string | null> = {};
+        await harness.prepareProviderHeaders(headers, ctx);
+
+        assert.equal(result, undefined);
         assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], undefined);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

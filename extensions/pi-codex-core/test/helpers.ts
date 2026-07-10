@@ -20,6 +20,8 @@ type ExtensionHarness = {
         ctx: ExtensionContext,
     ) => Promise<void>;
     readonly rewriteProviderRequest: (payload: unknown, ctx: ExtensionContext) => Promise<unknown>;
+    readonly beginCompaction: (ctx: ExtensionContext) => Promise<unknown>;
+    readonly finishCompaction: (ctx: ExtensionContext) => Promise<void>;
     readonly prepareSystemPrompt: (
         systemPrompt: string,
         options: BuildSystemPromptOptions,
@@ -33,6 +35,8 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
     let beforeProviderHeaders: ExtensionEventHandler | undefined;
     let beforeProviderRequest: ExtensionEventHandler | undefined;
     let beforeAgentStart: ExtensionEventHandler | undefined;
+    let sessionBeforeCompact: ExtensionEventHandler | undefined;
+    let sessionCompact: ExtensionEventHandler | undefined;
     const api = {
         registerTool() {},
         registerCommand() {},
@@ -42,6 +46,8 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             if (eventName === "before_provider_headers") beforeProviderHeaders = handler;
             if (eventName === "before_provider_request") beforeProviderRequest = handler;
             if (eventName === "before_agent_start") beforeAgentStart = handler;
+            if (eventName === "session_before_compact") sessionBeforeCompact = handler;
+            if (eventName === "session_compact") sessionCompact = handler;
         },
         getActiveTools: () => activeTools,
         setActiveTools(tools: readonly string[]) {
@@ -69,6 +75,43 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         async rewriteProviderRequest(payload: unknown, ctx: ExtensionContext): Promise<unknown> {
             assert.ok(beforeProviderRequest);
             return beforeProviderRequest({ type: "before_provider_request", payload }, ctx);
+        },
+        async beginCompaction(ctx: ExtensionContext): Promise<unknown> {
+            assert.ok(sessionBeforeCompact);
+            return sessionBeforeCompact(
+                {
+                    type: "session_before_compact",
+                    reason: "manual",
+                    customInstructions: undefined,
+                    signal: new AbortController().signal,
+                    branchEntries: [
+                        {
+                            type: "message",
+                            id: "entry-1",
+                            parentId: null,
+                            timestamp: "2026-01-01T00:00:00.000Z",
+                            message: {
+                                role: "user",
+                                content: [{ type: "text", text: "hello" }],
+                                timestamp: 0,
+                            },
+                        },
+                    ],
+                    preparation: {
+                        firstKeptEntryId: "entry-1",
+                        tokensBefore: 1,
+                        previousSummary: undefined,
+                        messagesToSummarize: [],
+                        turnPrefixMessages: [],
+                        fileOps: { read: [], written: [], edited: [] },
+                    },
+                },
+                ctx,
+            );
+        },
+        async finishCompaction(ctx: ExtensionContext): Promise<void> {
+            assert.ok(sessionCompact);
+            await sessionCompact({ type: "session_compact" }, ctx);
         },
         async prepareSystemPrompt(
             systemPrompt: string,
@@ -144,7 +187,7 @@ export function makeTestRuntime(
             nowMs: () => 1_700_000_000_000,
             nowDate: () => new Date("2026-01-01T00:00:00.000Z"),
         },
-        idGenerator: { randomUUID: () => "test-uuid" },
+        idGenerator: { randomUUID: () => "00000000-0000-7000-8000-000000000001" },
         scheduler: {
             set(_delayMs, task) {
                 task();

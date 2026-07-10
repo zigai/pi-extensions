@@ -86,14 +86,16 @@ test("creates native compaction using remote compaction v2", async () => {
     assert.equal(requestUrl, "https://chatgpt.com/backend-api/codex/responses");
     assert.equal(requestAccountId, "account");
     assert.equal(requestHeaders.get("x-codex-beta-features"), "remote_compaction_v2");
-    assert.equal(requestHeaders.get("x-codex-window-id"), "pi_codex_window_session-1");
+    assert.equal(requestHeaders.get("x-codex-window-id"), "00000000-0000-7000-8000-000000000001");
+    assert.equal(requestHeaders.get("x-client-request-id"), "session-1");
     assert.equal(requestHeaders.get("session-id"), "session-1");
     assert.equal(requestHeaders.get("thread-id"), "session-1");
     assert.deepEqual(JSON.parse(requestHeaders.get("x-codex-turn-metadata") ?? "null"), {
         installation_id: "session-1",
         session_id: "session-1",
         thread_id: "session-1",
-        window_id: "pi_codex_window_session-1",
+        turn_id: "00000000-0000-7000-8000-000000000001",
+        window_id: "00000000-0000-7000-8000-000000000001",
         request_kind: "compaction",
         compaction: {
             trigger: "manual",
@@ -102,6 +104,7 @@ test("creates native compaction using remote compaction v2", async () => {
             phase: "standalone_turn",
             strategy: "memento",
         },
+        turn_started_at_unix_ms: 1_700_000_000_000,
     });
     assert.ok(isRecord(requestBody));
     assert.equal(requestBody.model, "gpt-5.5");
@@ -122,7 +125,10 @@ test("creates native compaction using remote compaction v2", async () => {
         },
     ]);
     assert.ok(isRecord(requestBody.client_metadata));
-    assert.equal(requestBody.client_metadata["x-codex-window-id"], "pi_codex_window_session-1");
+    assert.equal(
+        requestBody.client_metadata["x-codex-window-id"],
+        "00000000-0000-7000-8000-000000000001",
+    );
     assert.equal(
         requestBody.client_metadata["x-codex-turn-metadata"],
         requestHeaders.get("x-codex-turn-metadata"),
@@ -143,6 +149,89 @@ test("creates native compaction using remote compaction v2", async () => {
     assert.equal(result?.compaction?.details.worldState.cwd, "/workspace");
     assert.equal(result?.compaction?.details.worldState.model, "openai-codex/gpt-5.5");
     assert.deepEqual(result?.compaction?.details.worldState.activeToolNames, ["read"]);
+});
+
+test("cancels an invalid retained-context boundary", async () => {
+    let requested = false;
+    const runtime = makeTestRuntime(async () => {
+        requested = true;
+        return new Response("unexpected");
+    });
+    const event = makeBeforeCompactEvent({
+        branchEntries: [messageEntry("entry-1", null, userMessage("hello"))],
+        firstKeptEntryId: "missing-entry",
+    });
+
+    const result = await handleCodexNativeCompaction(
+        event,
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    assert.deepEqual(result, { cancel: true });
+    assert.equal(requested, false);
+});
+
+test("removes response item ids from remote compaction history", async () => {
+    let requestBody: unknown;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as unknown;
+        return new Response(
+            [
+                "event: response.output_item.done",
+                'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed"}}',
+                "",
+                "event: response.completed",
+                'data: {"type":"response.completed","response":{"id":"resp_ids"}}',
+                "",
+            ].join("\n"),
+            { status: 200 },
+        );
+    });
+    const branchEntries = [
+        messageEntry("entry-1", null, userMessage("inspect ids")),
+        messageEntry(
+            "entry-2",
+            "entry-1",
+            assistantMessage([
+                { type: "text", text: "calling read" },
+                {
+                    type: "toolCall",
+                    id: "call_read|fc_server_item",
+                    name: "read",
+                    arguments: { path: "README.md" },
+                },
+            ]),
+        ),
+        messageEntry(
+            "entry-3",
+            "entry-2",
+            toolResultMessage("call_read|fc_server_item", "contents"),
+        ),
+    ];
+
+    await handleCodexNativeCompaction(
+        makeBeforeCompactEvent({ branchEntries }),
+        makeNativeCompactionContext(),
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+        runtime,
+    );
+
+    const input = responseInput(requestBody);
+    assert.ok(input.some((item) => isRecord(item) && item.type === "function_call"));
+    assert.equal(
+        input.some((item) => isRecord(item) && Object.hasOwn(item, "id")),
+        false,
+    );
 });
 
 test("creates GPT-5.6 native compaction with Responses Lite", async () => {
@@ -199,7 +288,10 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
     assert.deepEqual(requestBody.reasoning, { effort: "low", context: "all_turns" });
     assert.ok(isRecord(requestBody.client_metadata));
     assert.equal(requestBody.client_metadata[CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY], "true");
-    assert.equal(requestBody.client_metadata["x-codex-window-id"], "pi_codex_window_session-1");
+    assert.equal(
+        requestBody.client_metadata["x-codex-window-id"],
+        "00000000-0000-7000-8000-000000000001",
+    );
     const input = responseInput(requestBody);
     assert.deepEqual(input[0], {
         type: "additional_tools",
@@ -584,7 +676,6 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
     );
     assert.deepEqual(callItem, {
         type: "function_call",
-        id: "fc_item_1",
         call_id: "call_1",
         name: "read",
         arguments: JSON.stringify({ path: "big.txt" }),
@@ -861,16 +952,26 @@ test("retained native compaction window truncates huge text and omits over-budge
     assert.equal(imageUrlsFromResponseItem(retainedItem).length, 0);
 });
 
-test("preserves previous native window when falling back to Pi compaction", async () => {
+test("layers previous native context with a later Pi fallback summary", async () => {
     const runtime = makeTestRuntime(async () => new Response("limit", { status: 429 }));
-    const ctx = makeNativeCompactionContext();
+    const branchEntries = [
+        nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
+        messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
+        {
+            type: "compaction",
+            id: "compact-pi",
+            parentId: "entry-tail",
+            timestamp: "2026-01-01T00:00:01.000Z",
+            summary: "Pi fallback summary of the live tail",
+            firstKeptEntryId: "entry-tail",
+            tokensBefore: 100,
+        },
+    ];
+    const ctx = makeNativeCompactionContext({ branchEntries });
 
     const result = await handleCodexNativeCompaction(
         makeBeforeCompactEvent({
-            branchEntries: [
-                nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
-                messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
-            ],
+            branchEntries: branchEntries.slice(0, 2),
             firstKeptEntryId: "entry-tail",
         }),
         ctx,
@@ -918,9 +1019,13 @@ test("preserves previous native window when falling back to Pi compaction", asyn
     ]);
 });
 
-test("keeps pending Pi fallback windows isolated by session", async () => {
+test("keeps native fallback replay isolated by session branch", async () => {
     const runtime = makeTestRuntime(async () => new Response("limit", { status: 429 }));
-    const sessionA = makeNativeCompactionContext({ sessionId: "session-a" });
+    const branchEntries = [
+        nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
+        messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
+    ];
+    const sessionA = makeNativeCompactionContext({ sessionId: "session-a", branchEntries });
     const sessionB = makeNativeCompactionContext({ sessionId: "session-b" });
     const config = {
         ...DEFAULT_CODEX_CORE_CONFIG,
@@ -929,10 +1034,7 @@ test("keeps pending Pi fallback windows isolated by session", async () => {
 
     const result = await handleCodexNativeCompaction(
         makeBeforeCompactEvent({
-            branchEntries: [
-                nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
-                messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
-            ],
+            branchEntries,
             firstKeptEntryId: "entry-tail",
         }),
         sessionA,
@@ -975,53 +1077,6 @@ test("keeps pending Pi fallback windows isolated by session", async () => {
         { role: "developer", content: "summarize compact" },
         { type: "compaction", encrypted_content: "opaque" },
     ]);
-});
-
-test("expires pending Pi fallback windows", async () => {
-    cancelScheduledCodexAutoCompaction();
-    let nowMs = 1_000;
-    const runtime = {
-        ...makeTestRuntime(async () => new Response("limit", { status: 429 })),
-        clock: {
-            nowMs: () => nowMs,
-            nowDate: () => new Date("2026-01-01T00:00:00.000Z"),
-        },
-    } satisfies CodexRuntime;
-    const ctx = makeNativeCompactionContext({ sessionId: "expires-pending" });
-    const config = {
-        ...DEFAULT_CODEX_CORE_CONFIG,
-        compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
-    };
-
-    await handleCodexNativeCompaction(
-        makeBeforeCompactEvent({
-            branchEntries: [
-                nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
-                messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
-            ],
-            firstKeptEntryId: "entry-tail",
-        }),
-        ctx,
-        config,
-        makeCompactionApi(),
-        runtime,
-    );
-
-    nowMs += 5 * 60 * 1000 + 1;
-    const rewritten = await rewriteProviderRequestWithNativeCompaction(
-        {
-            model: "gpt-5.5",
-            instructions: "compact this conversation",
-            input: [{ role: "developer", content: "summarize compact" }],
-        },
-        ctx,
-        config,
-        makeCompactionApi(),
-        runtime,
-    );
-
-    assert.equal(rewritten, undefined);
-    cancelScheduledCodexAutoCompaction();
 });
 
 test("skips provider payload parsing when no native compaction state exists", async () => {
@@ -1114,12 +1169,49 @@ test("auto compaction defers until Pi is idle after agent_end", async () => {
 
     assert.equal(scheduleCodexAutoCompaction(ctx, config, runtime), true);
     assert.equal(compactCalls.length, 0);
+    scheduledTasks.shift()?.();
+    assert.equal(compactCalls.length, 0);
     idle.value = true;
+    assert.equal(scheduleCodexAutoCompaction(ctx, config, runtime), true);
     scheduledTasks.shift()?.();
     assert.equal(compactCalls.length, 1);
     assert.equal(scheduleCodexAutoCompaction(ctx, config, runtime), true);
     scheduledTasks.shift()?.();
     assert.equal(compactCalls.length, 1);
+});
+
+test("auto compaction ignores stale session contexts", () => {
+    const compactCalls: unknown[] = [];
+    const ctx = makeAutoCompactionContext(
+        compactCalls,
+        { value: true },
+        {
+            sessionId: "stale-auto-session",
+        },
+    );
+    const scheduledTasks: Array<() => void> = [];
+    const runtime = {
+        ...makeTestRuntime(),
+        scheduler: {
+            set(_delayMs: number, task: () => void): ScheduledTask {
+                scheduledTasks.push(task);
+                return { cancel() {} };
+            },
+        },
+    } satisfies CodexRuntime;
+    const config = {
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true, auto: true },
+    };
+
+    assert.equal(scheduleCodexAutoCompaction(ctx, config, runtime), true);
+    // SAFETY: Simulates Pi invalidating an extension context during a session switch.
+    (ctx as unknown as { isIdle: () => boolean }).isIdle = () => {
+        throw new Error("Extension context is stale");
+    };
+
+    assert.doesNotThrow(() => scheduledTasks.shift()?.());
+    assert.equal(compactCalls.length, 0);
 });
 
 test("uses GPT-5.6 effective context for auto compaction", () => {
@@ -1150,7 +1242,30 @@ test("uses GPT-5.6 effective context for auto compaction", () => {
     cancelScheduledCodexAutoCompaction();
 });
 
-test("auto compaction skips after assistant errors so Pi retry can continue", async () => {
+test("auto compaction retries immediately after branch progress", () => {
+    const compactCalls: unknown[] = [];
+    let latestEntryId = "entry-a";
+    const ctx = makeAutoCompactionContext(
+        compactCalls,
+        { value: true },
+        {
+            sessionId: "auto-retry-session",
+            latestEntryId: () => latestEntryId,
+        },
+    );
+    const config = {
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true, auto: true },
+    };
+
+    assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), true);
+    latestEntryId = "entry-b";
+    assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), true);
+    assert.equal(compactCalls.length, 2);
+    cancelScheduledCodexAutoCompaction();
+});
+
+test("auto compaction skips interrupted assistant turns", async () => {
     const compactCalls: unknown[] = [];
     const idle = { value: true };
     const ctx = makeAutoCompactionContext(compactCalls, idle);
@@ -1182,6 +1297,13 @@ test("auto compaction skips after assistant errors so Pi retry can continue", as
     );
     assert.equal(scheduledTasks.length, 0);
     assert.equal(compactCalls.length, 0);
+    assert.equal(
+        scheduleCodexAutoCompaction(ctx, config, runtime, {
+            completedMessages: [{ role: "assistant", stopReason: "aborted" }],
+        }),
+        false,
+    );
+    cancelScheduledCodexAutoCompaction();
 });
 
 test("rewrites responses payload with native compaction replay matching", async () => {
@@ -1281,6 +1403,53 @@ test("rewrites native compaction replay in long payloads", async () => {
     ]);
     assert.doesNotMatch(JSON.stringify(rewrittenInput), /pre kept 0/);
     assert.match(JSON.stringify(rewrittenInput), /inserted context 119/);
+});
+
+test("composes a native checkpoint with a newer Pi fallback summary", async () => {
+    const branchEntries = [
+        messageEntry("entry-old", null, userMessage("old context")),
+        nativeCompactionEntry({ id: "compact-native", firstKeptEntryId: "entry-old" }),
+        messageEntry("entry-tail", "compact-native", userMessage("new context")),
+        {
+            type: "compaction",
+            id: "compact-pi",
+            parentId: "entry-tail",
+            timestamp: "2026-01-01T00:00:01.000Z",
+            summary: "Fresh Pi fallback summary",
+            firstKeptEntryId: "entry-tail",
+            tokensBefore: 100,
+        },
+    ];
+    const ctx = makeCompactionContext({
+        branchEntries,
+        sessionId: "pi-fallback-barrier-session",
+    });
+    const payload = {
+        model: "gpt-5.4-mini",
+        input: [
+            { role: "developer", content: "system" },
+            { role: "user", content: "Fresh Pi fallback summary" },
+            { role: "user", content: "current turn" },
+        ],
+    };
+
+    const rewritten = await rewriteProviderRequestWithNativeCompaction(
+        payload,
+        ctx,
+        {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+        },
+        makeCompactionApi(),
+    );
+
+    const rewrittenInput = responseInput(rewritten);
+    assert.deepEqual(rewrittenInput.slice(0, 2), [
+        { role: "developer", content: "system" },
+        { type: "compaction", encrypted_content: "opaque" },
+    ]);
+    assert.match(JSON.stringify(rewrittenInput), /Fresh Pi fallback summary/);
+    assert.match(JSON.stringify(rewrittenInput), /current turn/);
 });
 
 test("handles native replay fallback mismatch silently", async () => {
@@ -1558,6 +1727,7 @@ function makeNativeCompactionContext(
         readonly contextWindow?: number;
         readonly sessionId?: string;
         readonly modelId?: string;
+        readonly branchEntries?: readonly Record<string, unknown>[];
     } = {},
 ): ExtensionContext {
     const modelId = options.modelId ?? "gpt-5.5";
@@ -1592,7 +1762,7 @@ function makeNativeCompactionContext(
         },
         sessionManager: {
             getSessionId: () => options.sessionId ?? "session-1",
-            getBranch: () => [],
+            getBranch: () => options.branchEntries ?? [],
         },
         getSystemPrompt: () => "system prompt",
     };
@@ -1607,6 +1777,7 @@ function makeAutoCompactionContext(
         readonly modelId?: string;
         readonly sessionId?: string;
         readonly usageTokens?: () => number;
+        readonly latestEntryId?: () => string;
     } = {},
 ): ExtensionContext {
     const contextWindow = 100;
@@ -1633,7 +1804,7 @@ function makeAutoCompactionContext(
         },
         sessionManager: {
             getSessionId: () => options.sessionId ?? "auto-session-1",
-            getBranch: () => [{ type: "message", id: "entry-auto" }],
+            getBranch: () => [{ type: "message", id: options.latestEntryId?.() ?? "entry-auto" }],
         },
     };
     // SAFETY: This test exercises only fields read by scheduleCodexAutoCompaction.

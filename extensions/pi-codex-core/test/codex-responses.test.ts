@@ -6,6 +6,7 @@ import {
     omitReasoningSummary,
     rewriteCodexResponsesPayload,
 } from "../src/codex/responses-compat.ts";
+import { ResponsesLiteRequestPolicy } from "../src/codex/responses-lite-policy.ts";
 
 test("resolves current Codex model selections", () => {
     assert.equal(resolveCodexRequestModel("current", "gpt-5.5"), "gpt-5.5");
@@ -92,4 +93,29 @@ test("omits only the visible reasoning summary from Responses requests", () => {
         ),
         undefined,
     );
+});
+
+test("suppresses Responses Lite throughout Pi fallback compaction", () => {
+    const policy = new ResponsesLiteRequestPolicy();
+
+    policy.beginPiCompactionFallback("session-1");
+
+    assert.equal(policy.shouldAttachLiteHeader("session-1"), false);
+    assert.equal(policy.shouldAttachLiteHeader("session-1"), false);
+
+    policy.finishCompaction("session-1");
+
+    assert.equal(policy.shouldAttachLiteHeader("session-1"), true);
+});
+
+test("recovers Responses Lite state after a failed Pi fallback", () => {
+    const policy = new ResponsesLiteRequestPolicy();
+
+    policy.beginPiCompactionFallback("session-1");
+    assert.equal(policy.shouldAttachLiteHeader("session-1"), false);
+
+    assert.equal(policy.shouldAttachLiteHeader("session-1"), false);
+    assert.equal(policy.shouldRewriteLitePayload("session-1"), false);
+    assert.equal(policy.shouldAttachLiteHeader("session-1"), true);
+    assert.equal(policy.shouldRewriteLitePayload("session-1"), true);
 });

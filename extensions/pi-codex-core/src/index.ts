@@ -7,6 +7,7 @@ import {
     omitReasoningSummary,
     rewriteCodexResponsesPayload,
 } from "./codex/responses-compat.ts";
+import { ResponsesLiteRequestPolicy } from "./codex/responses-lite-policy.ts";
 import { registerNativeCompactionDisplay } from "./compaction/display.ts";
 import { shutdownCodexTokenizer, warmCodexTokenizer } from "./compaction/tokenizer.ts";
 import { readCodexCoreConfig, type CodexCoreConfig } from "./config/config.ts";
@@ -43,6 +44,7 @@ export default function extension(pi: ExtensionAPI): void {
     activatedApis.add(pi);
 
     let config: CodexCoreConfig = readCodexCoreConfig();
+    const responsesLitePolicy = new ResponsesLiteRequestPolicy();
 
     const getConfig = (): CodexCoreConfig => config;
     const applyConfig = (
@@ -64,6 +66,7 @@ export default function extension(pi: ExtensionAPI): void {
     registerCodexCommand(pi, { getConfig, applyConfig });
 
     pi.on("session_start", async (_event, ctx) => {
+        responsesLitePolicy.clearSession(ctx.sessionManager.getSessionId());
         config = ctx.isProjectTrusted()
             ? readCodexCoreConfig({ cwd: ctx.cwd })
             : readCodexCoreConfig();
@@ -96,19 +99,40 @@ export default function extension(pi: ExtensionAPI): void {
     pi.on("before_provider_headers", (event, ctx) => {
         if (
             isActiveCodexResponsesModel(ctx) &&
-            isActiveAgentProviderRequest(ctx) &&
-            codexModelRequestProfile(ctx.model?.id)?.useResponsesLite
+            codexModelRequestProfile(ctx.model?.id)?.useResponsesLite &&
+            responsesLitePolicy.shouldAttachLiteHeader(ctx.sessionManager.getSessionId())
         ) {
             event.headers[CODEX_RESPONSES_LITE_HEADER] = "true";
         }
     });
 
     pi.on("session_before_compact", async (event, ctx) => {
+        const sessionId = ctx.sessionManager.getSessionId();
         if (!config.compaction.enabled) {
+            responsesLitePolicy.beginPiCompactionFallback(sessionId);
             return undefined;
         }
-        const { handleCodexNativeCompaction } = await loadCompactionModule();
-        return handleCodexNativeCompaction(event, ctx, config, pi);
+        try {
+            const { handleCodexNativeCompaction } = await loadCompactionModule();
+            const result = await handleCodexNativeCompaction(event, ctx, config, pi);
+            if (result === undefined) responsesLitePolicy.beginPiCompactionFallback(sessionId);
+            return result;
+        } catch {
+            if (event.signal.aborted) return { cancel: true };
+            responsesLitePolicy.beginPiCompactionFallback(sessionId);
+            if (ctx.hasUI) {
+                ctx.ui.notify(
+                    "Codex native compaction failed before completing its request; Pi compaction will run.",
+                    "warning",
+                );
+            }
+            return undefined;
+        }
+    });
+
+    pi.on("session_compact", async (_event, ctx) => {
+        const sessionId = ctx.sessionManager.getSessionId();
+        responsesLitePolicy.finishCompaction(sessionId);
     });
 
     pi.on("agent_end", async (event, ctx) => {
@@ -121,12 +145,22 @@ export default function extension(pi: ExtensionAPI): void {
         });
     });
 
+    pi.on("agent_settled", async (_event, ctx) => {
+        if (!config.compaction.enabled || !config.compaction.auto) return;
+        const { scheduleCodexAutoCompaction } = await loadCompactionModule();
+        scheduleCodexAutoCompaction(ctx, config);
+    });
+
     pi.on("before_provider_request", async (event, ctx) => {
         const imageDetailPayload = rewriteProviderImageDetails(event.payload);
         const payload = imageDetailPayload ?? event.payload;
-        const responsesPayload = isActiveCodexResponsesModel(ctx)
-            ? rewriteCodexResponsesPayload(payload, ctx.model?.id)
-            : undefined;
+        const allowLitePayload = responsesLitePolicy.shouldRewriteLitePayload(
+            ctx.sessionManager.getSessionId(),
+        );
+        const responsesPayload =
+            isActiveCodexResponsesModel(ctx) && allowLitePayload
+                ? rewriteCodexResponsesPayload(payload, ctx.model?.id)
+                : undefined;
         const compatiblePayload = responsesPayload ?? payload;
         const reasoningTracePayload =
             !config.openai.showReasoningTraces && isActiveGptResponsesModel(ctx)
@@ -147,6 +181,7 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("session_shutdown", async (event, ctx) => {
+        responsesLitePolicy.clearSession(ctx.sessionManager.getSessionId());
         if (compactionModulePromise !== undefined) {
             const { cancelScheduledCodexAutoCompaction, clearCodexCompactionSessionState } =
                 await compactionModulePromise;
@@ -172,10 +207,6 @@ function isActiveGptResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]
         ctx.model?.id.trim().toLowerCase().startsWith("gpt-") === true &&
         String(ctx.model.api).toLowerCase().includes("responses")
     );
-}
-
-function isActiveAgentProviderRequest(ctx: Parameters<typeof syncCodexCoreTools>[1]): boolean {
-    return ctx.signal !== undefined;
 }
 
 export { formatCodexUsage, parseCodexUsagePayload } from "./codex/usage.ts";

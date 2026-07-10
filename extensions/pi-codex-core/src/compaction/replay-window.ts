@@ -7,23 +7,18 @@ import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import { NATIVE_COMPACTION_STRATEGY } from "./messages.ts";
 import {
     isInstructionItem,
-    isJsonObject,
     itemContainsShimSummary,
     parseResponsesInputItems,
     serializeEntriesToResponsesInput,
-    textFromResponsesContent,
 } from "./responses-input.ts";
 import type {
     FoundNativeCompactionEntry,
     NativeCompactionDetails,
     NativeCompactionMatch,
     NativeReplayResult,
-    PendingPiCompactionNativeWindow,
     ResponsesInputItem,
     ResponsesPayload,
 } from "./types.ts";
-
-const PENDING_NATIVE_WINDOW_MAX_AGE_MS = 5 * 60 * 1000;
 
 const JsonObjectSchema = Type.Record(Type.String(), Type.Unknown());
 const StringArraySchema = Type.Array(Type.String());
@@ -65,7 +60,6 @@ const NativeCompactionRequestMetaValidator = compileSchema(NativeCompactionReque
 const NativeCompactionWorldStateValidator = compileSchema(NativeCompactionWorldStateSchema);
 const NativeCompactionDetailsValidator = compileSchema(NativeCompactionDetailsSchema);
 
-const pendingPiCompactionNativeWindows = new Map<string, PendingPiCompactionNativeWindow>();
 const nativeReplayWarningKeys = new Set<string>();
 
 export function isNativeCompactionDetails(value: unknown): value is NativeCompactionDetails {
@@ -159,7 +153,7 @@ export function buildWindowLifecycle(
     readonly sourceCompactionEntryId?: string | undefined;
 } {
     const previousDetails = latestNativeCompaction?.entry.details;
-    const windowId = `pi_codex_window_${runtime.idGenerator.randomUUID()}`;
+    const windowId = runtime.idGenerator.randomUUID();
     const previousWindowId = previousDetails?.windowId;
     return {
         windowNumber: (previousDetails?.windowNumber ?? 0) + 1,
@@ -262,82 +256,11 @@ export function notifyNativeReplayFallbackOnce(
     );
 }
 
-export function stashPendingNativeWindow(input: {
-    readonly sessionId: string;
-    readonly match: NativeCompactionMatch;
-    readonly replacementInput: readonly ResponsesInputItem[];
-    readonly createdAtMs: number;
-}): void {
-    pendingPiCompactionNativeWindows.set(input.sessionId, {
-        ...input.match,
-        sessionId: input.sessionId,
-        replacementInput: input.replacementInput,
-        createdAtMs: input.createdAtMs,
-    });
-}
-
-export function discardPendingNativeWindow(sessionId: string): void {
-    pendingPiCompactionNativeWindows.delete(sessionId);
-}
-
-export function getPendingNativeWindow(
-    sessionId: string,
-    match: NativeCompactionMatch,
-    runtime: CodexRuntime,
-): PendingPiCompactionNativeWindow | undefined {
-    const pending = pendingPiCompactionNativeWindows.get(sessionId);
-    if (!pending) return undefined;
-    if (runtime.clock.nowMs() - pending.createdAtMs > PENDING_NATIVE_WINDOW_MAX_AGE_MS) {
-        pendingPiCompactionNativeWindows.delete(sessionId);
-        return undefined;
-    }
-    if (!nativeCompactionMatches(pending, match)) {
-        pendingPiCompactionNativeWindows.delete(sessionId);
-        return undefined;
-    }
-    return pending;
-}
-
-export function injectPendingNativeWindowIntoPiCompactionRequest(
-    payload: ResponsesPayload,
-    sessionId: string,
-    match: NativeCompactionMatch,
-    runtime: CodexRuntime,
-): ResponsesPayload | undefined {
-    const pending = getPendingNativeWindow(sessionId, match, runtime);
-    if (!pending) return undefined;
-    if (!isPiCompactionSummarizationPayload(payload)) return undefined;
-
-    const input = payload.input;
-    let insertAt = 0;
-    while (insertAt < input.length && isInstructionItem(input[insertAt])) insertAt += 1;
-    pendingPiCompactionNativeWindows.delete(sessionId);
-    return {
-        ...payload,
-        input: [...input.slice(0, insertAt), ...pending.replacementInput, ...input.slice(insertAt)],
-    };
-}
-
-function isPiCompactionSummarizationPayload(payload: ResponsesPayload): boolean {
-    const instructions = typeof payload.instructions === "string" ? payload.instructions : "";
-    if (/compact|summar/i.test(instructions)) return true;
-    return payload.input.some((item) => {
-        if (!isJsonObject(item)) return false;
-        const role = item.role;
-        const text = textFromResponsesContent(item.content);
-        if ((role === "system" || role === "developer") && /compact|summar/i.test(text))
-            return true;
-        return role === "user" && /<conversation>|previous compaction summary|summary/i.test(text);
-    });
-}
-
 export function clearReplayWindowState(): void {
-    pendingPiCompactionNativeWindows.clear();
     nativeReplayWarningKeys.clear();
 }
 
 export function clearReplayWindowSessionState(sessionId: string): void {
-    pendingPiCompactionNativeWindows.delete(sessionId);
     for (const key of nativeReplayWarningKeys) {
         if (key.startsWith(`${sessionId}:`)) nativeReplayWarningKeys.delete(key);
     }

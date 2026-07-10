@@ -156,12 +156,6 @@ export type FoundNativeCompactionEntry = {
     readonly index: number;
 };
 
-export type PendingPiCompactionNativeWindow = NativeCompactionMatch & {
-    readonly sessionId: string;
-    readonly replacementInput: readonly ResponsesInputItem[];
-    readonly createdAtMs: number;
-};
-
 export type BuildPromptInputResult = {
     readonly input: readonly ResponsesInputItem[];
     readonly previousCompactionEntryId?: string | undefined;
@@ -214,7 +208,7 @@ export type NativeReplayResult =
 
 export type AutoCompactionSessionState = {
     readonly lastTriggeredEntryId?: string | undefined;
-    readonly lastTriggeredAt: number;
+    readonly blockedEntryId?: string | undefined;
     readonly inFlight: boolean;
     readonly timer?: ScheduledTask | undefined;
 };

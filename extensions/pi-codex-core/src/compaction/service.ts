@@ -2,7 +2,6 @@ import type {
     ExtensionAPI,
     ExtensionContext,
     SessionBeforeCompactEvent,
-    SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -35,13 +34,9 @@ import {
     buildWindowLifecycle,
     clearReplayWindowSessionState,
     clearReplayWindowState,
-    discardPendingNativeWindow,
     findLatestNativeCompactionEntry,
-    getPendingNativeWindow,
-    injectPendingNativeWindowIntoPiCompactionRequest,
     notifyNativeReplayFallbackOnce,
     rewriteResponsesPayloadWithNativeReplay,
-    stashPendingNativeWindow,
 } from "./replay-window.ts";
 import { shutdownCodexTokenizer } from "./tokenizer.ts";
 import {
@@ -85,6 +80,15 @@ export async function handleCodexNativeCompaction(
 > {
     if (!config.compaction.enabled) return undefined;
     if (event.signal.aborted) return { cancel: true };
+    if (!event.branchEntries.some((entry) => entry.id === event.preparation.firstKeptEntryId)) {
+        if (ctx.hasUI) {
+            ctx.ui.notify(
+                "Compaction was cancelled because Pi provided an invalid retained-context boundary.",
+                "warning",
+            );
+        }
+        return { cancel: true };
+    }
     const runtime = await resolveActiveCodexResponsesProvider(ctx);
     if (runtime.isErr() || !runtime.value) return undefined;
 
@@ -102,10 +106,15 @@ export async function handleCodexNativeCompaction(
     const contextWindow = requestProfile?.effectiveContextWindow ?? targetModel?.contextWindow;
     const latestNativeCompaction = findLatestNativeCompactionEntry(event.branchEntries, match);
     const sessionId = ctx.sessionManager.getSessionId();
+    const previousWindowId = latestNativeCompaction?.entry.details.windowId;
     const transportMetadata = buildRemoteCompactionTransportMetadata({
         sessionId,
-        windowId: latestNativeCompaction?.entry.details.windowId ?? `pi_codex_window_${sessionId}`,
+        turnId: runtimeServices.idGenerator.randomUUID(),
+        windowId: isUuid(previousWindowId)
+            ? previousWindowId
+            : runtimeServices.idGenerator.randomUUID(),
         reason: event.reason,
+        startedAtMs: runtimeServices.clock.nowMs(),
     });
     let promptInput = buildRemoteCompactionPromptInput(event, targetModel, latestNativeCompaction);
     if (promptInput.input.length === 0) return undefined;
@@ -154,10 +163,6 @@ export async function handleCodexNativeCompaction(
     if (shrink.kind === "too_large") {
         notifyCompactionFallback(
             ctx,
-            pi,
-            runtimeServices,
-            event.branchEntries,
-            match,
             `Codex remote compaction v2 request is too large for the context window (${shrink.estimatedTokensAfter}/${shrink.budgetTokens} estimated tokens).`,
         );
         await shutdownCodexTokenizer();
@@ -177,14 +182,7 @@ export async function handleCodexNativeCompaction(
             runtimeServices,
         );
         if (responseResult.isErr()) {
-            notifyCompactionFallback(
-                ctx,
-                pi,
-                runtimeServices,
-                event.branchEntries,
-                match,
-                responseResult.error.message,
-            );
+            notifyCompactionFallback(ctx, responseResult.error.message);
             await shutdownCodexTokenizer();
             return responseResult.error._tag === "CodexRequestCancelled"
                 ? { cancel: true }
@@ -199,10 +197,6 @@ export async function handleCodexNativeCompaction(
         if (compactedWindow.length === 0 || !hasCompactionOutputItem(compactedWindow)) {
             notifyCompactionFallback(
                 ctx,
-                pi,
-                runtimeServices,
-                event.branchEntries,
-                match,
                 "Codex remote compaction v2 returned no usable compacted context",
             );
             await shutdownCodexTokenizer();
@@ -210,7 +204,6 @@ export async function handleCodexNativeCompaction(
         }
         const worldState = captureNativeCompactionWorldState(ctx, pi, runtimeServices, event);
         const lifecycle = buildWindowLifecycle(latestNativeCompaction, runtimeServices);
-        discardPendingNativeWindow(ctx.sessionManager.getSessionId());
         await shutdownCodexTokenizer();
         return {
             compaction: {
@@ -249,14 +242,7 @@ export async function handleCodexNativeCompaction(
             return { cancel: true };
         }
         const message = safeCauseMessage(cause);
-        notifyCompactionFallback(
-            ctx,
-            pi,
-            runtimeServices,
-            event.branchEntries,
-            match,
-            `Codex remote compaction v2 failed: ${message}`,
-        );
+        notifyCompactionFallback(ctx, `Codex remote compaction v2 failed: ${message}`);
         await shutdownCodexTokenizer();
         return undefined;
     }
@@ -278,24 +264,13 @@ export async function rewriteProviderRequestWithNativeCompaction(
         baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
     };
 
-    const sessionId = ctx.sessionManager.getSessionId();
     const branchEntries = ctx.sessionManager.getBranch();
     const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
-    const pendingNativeWindow = getPendingNativeWindow(sessionId, match, runtime);
-    if (!latestNativeCompaction && !pendingNativeWindow) return undefined;
+    if (!latestNativeCompaction) return undefined;
 
     const responsesPayload = asResponsesPayload(payload);
     if (!responsesPayload) return undefined;
 
-    const pendingFallbackRewrite = injectPendingNativeWindowIntoPiCompactionRequest(
-        responsesPayload,
-        sessionId,
-        match,
-        runtime,
-    );
-    if (pendingFallbackRewrite) return pendingFallbackRewrite;
-
-    if (!latestNativeCompaction) return undefined;
     const replacementInput = buildFreshReplacementInput(
         latestNativeCompaction.entry.details,
         ctx,
@@ -398,54 +373,10 @@ function buildWorldStateInput(
     return [{ role: "user", content: [{ type: "input_text", text: lines.join("\n") }] }];
 }
 
-function notifyCompactionFallback(
-    ctx: ExtensionContext,
-    pi: ExtensionAPI,
-    runtime: CodexRuntime,
-    branchEntries: readonly SessionEntry[],
-    match: NativeCompactionMatch,
-    message: string,
-): void {
-    const stashed = stashLatestNativeWindowForPiCompactionFallback(
-        ctx,
-        pi,
-        runtime,
-        branchEntries,
-        match,
-    );
+function notifyCompactionFallback(ctx: ExtensionContext, message: string): void {
     if (ctx.hasUI) {
-        ctx.ui.notify(
-            `${message}; Pi compaction will run.${stashed ? " Previous native compacted window will be included in Pi compaction fallback." : ""}`,
-            "warning",
-        );
+        ctx.ui.notify(`${message}; Pi compaction will run.`, "warning");
     }
-}
-
-function stashLatestNativeWindowForPiCompactionFallback(
-    ctx: ExtensionContext,
-    pi: ExtensionAPI,
-    runtime: CodexRuntime,
-    branchEntries: readonly SessionEntry[],
-    match: NativeCompactionMatch,
-): boolean {
-    const sessionId = ctx.sessionManager.getSessionId();
-    discardPendingNativeWindow(sessionId);
-    const latestNativeCompaction = findLatestNativeCompactionEntry(branchEntries, match);
-    if (!latestNativeCompaction) return false;
-    const replacementInput = buildFreshReplacementInput(
-        latestNativeCompaction.entry.details,
-        ctx,
-        pi,
-        runtime,
-    );
-    if (replacementInput.length === 0) return false;
-    stashPendingNativeWindow({
-        sessionId,
-        match,
-        replacementInput,
-        createdAtMs: runtime.clock.nowMs(),
-    });
-    return true;
 }
 
 function normalizeCreatedAt(value: unknown, runtime: CodexRuntime): string {
@@ -460,4 +391,11 @@ function normalizeCreatedAt(value: unknown, runtime: CodexRuntime): string {
 
 function safePromptCacheKey(value: string): string {
     return Array.from(value).slice(0, 64).join("");
+}
+
+function isUuid(value: string | undefined): value is string {
+    return (
+        value !== undefined &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    );
 }

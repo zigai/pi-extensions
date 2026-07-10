@@ -9,8 +9,6 @@ import type {
     ScheduleCodexAutoCompactionOptions,
 } from "./types.ts";
 
-const AUTO_COMPACTION_MIN_INTERVAL_MS = 30_000;
-
 const autoCompactionBySession = new Map<string, AutoCompactionSessionState>();
 
 export function scheduleCodexAutoCompaction(
@@ -20,9 +18,19 @@ export function scheduleCodexAutoCompaction(
     options: ScheduleCodexAutoCompactionOptions = {},
 ): boolean {
     if (!config.compaction.enabled || !config.compaction.auto) return false;
-    if (latestAssistantEndedWithError(options.completedMessages)) return false;
     const sessionId = ctx.sessionManager.getSessionId();
+    const latestEntryId = ctx.sessionManager.getBranch().at(-1)?.id;
     const state = autoCompactionBySession.get(sessionId);
+    if (latestAssistantWasInterrupted(options.completedMessages)) {
+        state?.timer?.cancel();
+        autoCompactionBySession.set(sessionId, {
+            lastTriggeredEntryId: state?.lastTriggeredEntryId,
+            blockedEntryId: latestEntryId,
+            inFlight: state?.inFlight ?? false,
+        });
+        return false;
+    }
+    if (state?.blockedEntryId === latestEntryId) return false;
     if (state?.timer || state?.inFlight) return false;
 
     const timer = runtime.scheduler.set(0, () => {
@@ -30,12 +38,16 @@ export function scheduleCodexAutoCompaction(
         if (latestState?.timer === timer) {
             autoCompactionBySession.set(sessionId, { ...latestState, timer: undefined });
         }
-        maybeTriggerCodexAutoCompaction(ctx, config, runtime);
+        try {
+            maybeTriggerCodexAutoCompaction(ctx, config, runtime);
+        } catch {
+            clearAutoCompactionSessionState(sessionId);
+        }
     });
 
     autoCompactionBySession.set(sessionId, {
         lastTriggeredEntryId: state?.lastTriggeredEntryId,
-        lastTriggeredAt: state?.lastTriggeredAt ?? 0,
+        blockedEntryId: state?.blockedEntryId,
         inFlight: state?.inFlight ?? false,
         timer,
     });
@@ -55,13 +67,15 @@ export function clearAutoCompactionSessionState(sessionId: string): void {
     autoCompactionBySession.delete(sessionId);
 }
 
-function latestAssistantEndedWithError(
+function latestAssistantWasInterrupted(
     messages: readonly AgentEndCompactionMessage[] | undefined,
 ): boolean {
     if (messages === undefined) return false;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
-        if (message?.role === "assistant") return message.stopReason === "error";
+        if (message?.role === "assistant") {
+            return message.stopReason === "error" || message.stopReason === "aborted";
+        }
     }
     return false;
 }
@@ -69,7 +83,7 @@ function latestAssistantEndedWithError(
 export function maybeTriggerCodexAutoCompaction(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
-    runtime: CodexRuntime = defaultCodexRuntime,
+    _runtime: CodexRuntime = defaultCodexRuntime,
 ): boolean {
     if (!config.compaction.enabled || !config.compaction.auto) return false;
     if (!ctx.isIdle()) return false;
@@ -84,16 +98,17 @@ export function maybeTriggerCodexAutoCompaction(
 
     const sessionId = ctx.sessionManager.getSessionId();
     const branch = ctx.sessionManager.getBranch();
-    const latestEntryId = branch.at(-1)?.id;
+    const latestEntry = branch.at(-1);
+    if (latestEntry?.type === "compaction") return false;
+    const latestEntryId = latestEntry?.id;
     const state = autoCompactionBySession.get(sessionId);
-    const now = runtime.clock.nowMs();
     if (state?.inFlight) return false;
+    if (state?.blockedEntryId === latestEntryId) return false;
     if (state?.lastTriggeredEntryId === latestEntryId) return false;
-    if (state && now - state.lastTriggeredAt < AUTO_COMPACTION_MIN_INTERVAL_MS) return false;
 
     autoCompactionBySession.set(sessionId, {
         lastTriggeredEntryId: latestEntryId,
-        lastTriggeredAt: now,
+        blockedEntryId: state?.blockedEntryId,
         inFlight: true,
         timer: state?.timer,
     });
