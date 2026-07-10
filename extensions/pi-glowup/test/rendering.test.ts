@@ -1118,12 +1118,14 @@ describe("Codex rendering helpers", () => {
             ).join("\n"),
             "file.ts",
         );
-        const rendered = renderCodexDiff(plainTheme, sections, false).render(120).join("\n");
+        const lines = renderCodexDiff(plainTheme, sections, false).render(120);
+        const rendered = lines.join("\n");
 
         expect(rendered).toContain("added line 1");
         expect(rendered).toContain("added line 40");
         expect(rendered).not.toContain("added line 20");
         expect(rendered).toContain("… +22 lines (to expand)");
+        expect(lines.at(-1)).toContain("… +22 lines (to expand)");
     });
 
     it("prioritizes changed rows when context dominates a collapsed diff", () => {

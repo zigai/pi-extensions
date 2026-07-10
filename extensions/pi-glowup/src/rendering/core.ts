@@ -2613,14 +2613,10 @@ export function renderCodexDiff(
         const collapsedIndices = shouldCollapse
             ? collapsedDiffLineIndices(sections, collapsedLineBudget)
             : [];
-        const collapsedRanks = new Map(
-            collapsedIndices.map((lineIndex, rank) => [lineIndex, rank] as const),
-        );
-        const collapsedHeadCount = Math.ceil(collapsedIndices.length / 2);
+        const collapsedLineIndexSet = new Set(collapsedIndices);
         const rendered: string[] = [];
         let sectionOffset = 0;
         let renderedSection = false;
-        let renderedOmission = false;
 
         const renderOmission = (): void => {
             const omitted = allDiffLineCount - collapsedIndices.length;
@@ -2632,31 +2628,20 @@ export function renderCodexDiff(
                     "…",
                 ),
             );
-            renderedOmission = true;
         };
 
         for (const section of sections) {
-            const headLines: string[] = [];
-            const tailLines: string[] = [];
+            const visibleLines: string[] = [];
             for (const [lineIndex, line] of section.lines.entries()) {
                 const globalLineIndex = sectionOffset + lineIndex;
-                const collapsedRank = collapsedRanks.get(globalLineIndex);
-                if (
-                    !shouldCollapse ||
-                    (collapsedRank !== undefined && collapsedRank < collapsedHeadCount)
-                ) {
-                    headLines.push(line);
-                } else if (collapsedRank !== undefined) {
-                    tailLines.push(line);
+                if (!shouldCollapse || collapsedLineIndexSet.has(globalLineIndex)) {
+                    visibleLines.push(line);
                 }
             }
             sectionOffset += section.lines.length;
 
-            if (headLines.length === 0 && tailLines.length === 0) {
+            if (visibleLines.length === 0) {
                 continue;
-            }
-            if (shouldCollapse && headLines.length === 0 && !renderedOmission) {
-                renderOmission();
             }
 
             if (renderedSection) {
@@ -2687,11 +2672,10 @@ export function renderCodexDiff(
                 }
             };
 
-            renderLines(headLines);
-            if (shouldCollapse && tailLines.length > 0 && !renderedOmission) {
-                renderOmission();
-            }
-            renderLines(tailLines);
+            renderLines(visibleLines);
+        }
+        if (shouldCollapse) {
+            renderOmission();
         }
 
         return rendered;

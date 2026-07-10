@@ -69,16 +69,8 @@ function collapsedPierreRows<T>(
         return rows;
     }
     const selected = selectSemanticDiffIndices(kinds, Math.max(1, rowBudget - 1));
-    const split = Math.ceil(selected.length / 2);
-    const head = selected
-        .slice(0, split)
-        .map((index) => rows[index])
-        .filter(isDefined);
-    const tail = selected
-        .slice(split)
-        .map((index) => rows[index])
-        .filter(isDefined);
-    return [...head, omission(rows.length - selected.length), ...tail];
+    const visible = selected.map((index) => rows[index]).filter(isDefined);
+    return [...visible, omission(rows.length - selected.length)];
 }
 
 function isDefined<T>(value: T | undefined): value is T {

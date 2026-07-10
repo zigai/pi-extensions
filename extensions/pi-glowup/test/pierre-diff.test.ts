@@ -337,6 +337,33 @@ describe("Pierre diff rendering", () => {
         expectLinesWithinWidth(lines, 40);
     });
 
+    it("renders collapsed omission metadata only after all visible diff rows", () => {
+        const content = Array.from({ length: 40 }, (_value, index) => `line ${index + 1}`).join(
+            "\n",
+        );
+        const payload = buildPierreDiffPayload({
+            path: "long.ts",
+            oldContent: "",
+            newContent: `${content}\n`,
+            oldSizeBytes: 0,
+            newSizeBytes: Buffer.byteLength(content) + 1,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
+        const lines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined },
+        )
+            .render(80)
+            .map(stripAnsi);
+
+        expect(lines.at(-1)).toContain("… +34 lines");
+        expect(lines.slice(0, -1).every((line) => !line.includes("… +34 lines"))).toBe(true);
+    });
+
     it("hides edge collapsed markers but keeps middle collapsed markers", () => {
         const oldLines = Array.from({ length: 100 }, (_, index) => `line ${index + 1}`);
         const newLines = [...oldLines];
