@@ -69,7 +69,7 @@ describe("write rendering", () => {
             .render(100)
             .join("\n");
 
-        expect(rendered).toContain("<toolSuccessBg>");
+        expect(rendered).toContain("48;2;33;58;43");
         expect(rendered).not.toContain("<toolErrorBg>");
     });
 

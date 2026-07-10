@@ -152,9 +152,8 @@ describe("third-party tool renderers", () => {
             .join("\n");
         const completed = renderer.renderCall({}, plainTheme, renderContext).render(80).join("\n");
 
-        expect(active).toContain("• custom_tool");
+        expect(active).toBe("");
         expect(completed).toContain("• custom_tool");
-        expect(active).not.toContain("Calling");
         expect(completed).not.toContain("Called");
     });
 
@@ -170,7 +169,7 @@ describe("third-party tool renderers", () => {
             .join("\n");
         const completed = renderer.renderCall({}, plainTheme, renderContext).render(80).join("\n");
 
-        expect(active).toContain("• Calling custom_tool");
+        expect(active).toBe("");
         expect(completed).toContain("• Called custom_tool");
     });
 
@@ -190,7 +189,7 @@ describe("third-party tool renderers", () => {
         expect(rendered).not.toContain("line 10000");
     });
 
-    it("uses shallow previews for partial generic third-party tool arguments", () => {
+    it("defers generic calls until their arguments are complete", () => {
         const renderer = createThirdPartyToolRenderer("custom_tool");
         const args = {
             prompt: "generate " + "token ".repeat(10_000),
@@ -208,11 +207,7 @@ describe("third-party tool renderers", () => {
             .render(120)
             .join("\n");
 
-        expect(rendered).toContain("prompt: generate token");
-        expect(rendered).toContain("nested: object");
-        expect(rendered).toContain("files: 5000 items");
-        expect(rendered).not.toContain("do not traverse this");
-        expect(rendered).not.toContain("file-4999");
+        expect(rendered).toBe("");
     });
 
     it("expands long third-party tool call arguments", () => {

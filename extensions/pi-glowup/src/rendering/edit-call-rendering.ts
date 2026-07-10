@@ -1,4 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
+import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
 import {
     formatPathTarget,
     makeComponent,
@@ -29,12 +31,24 @@ const MAX_PARTIAL_EDIT_SCAN_CHARS = 16 * 1024;
 const MAX_PARTIAL_EDIT_LINE_CHARS = 2_000;
 const PARTIAL_EDIT_OLD_LINES = 3;
 const PARTIAL_EDIT_NEW_LINES = 3;
+const MAX_EDIT_PREIMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_EDIT_LINE_NUMBER_CALLS = 100;
+
+type EditLineNumberState = {
+    key: string;
+    resolved: boolean;
+    startLine: number | undefined;
+    pending: Promise<void> | undefined;
+};
+
+const editLineNumbers = new Map<string, EditLineNumberState>();
 
 export type EditCallRenderContext = {
     readonly isError: boolean;
     readonly isPartial: boolean;
     readonly argsComplete?: boolean;
     readonly labelMode?: ToolLabelMode;
+    readonly lineNumberStart?: number;
 };
 
 export type EditCallSummary = {
@@ -51,6 +65,103 @@ function isRecord(value: unknown): value is UnknownRecord {
 function getString(record: UnknownRecord, key: string): string | undefined {
     const value = record[key];
     return typeof value === "string" ? value : undefined;
+}
+
+function editPairKey(pathValue: string, oldText: string): string {
+    let hash = 2_166_136_261;
+    for (let index = 0; index < oldText.length; index += 1) {
+        hash ^= oldText.charCodeAt(index);
+        hash = Math.imul(hash, 16_777_619);
+    }
+    return `${pathValue}\u0000${oldText.length}\u0000${Math.trunc(hash)}`;
+}
+
+function safeEditPath(cwd: string, filePath: string): string | undefined {
+    const resolvedCwd = path.resolve(cwd);
+    const resolvedPath = path.resolve(resolvedCwd, filePath);
+    const relativePath = path.relative(resolvedCwd, resolvedPath);
+    return relativePath === ".." ||
+        relativePath.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativePath)
+        ? undefined
+        : resolvedPath;
+}
+
+async function findEditStartLine(
+    cwd: string,
+    filePath: string,
+    oldText: string,
+): Promise<number | undefined> {
+    const resolvedPath = safeEditPath(cwd, filePath);
+    if (resolvedPath === undefined) return undefined;
+    try {
+        const stats = await stat(resolvedPath);
+        if (!stats.isFile() || stats.size > MAX_EDIT_PREIMAGE_BYTES) return undefined;
+        const source = (await readFile(resolvedPath, "utf8"))
+            .replace(/\r\n/gu, "\n")
+            .replace(/\r/gu, "\n");
+        const needle = oldText.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
+        if (needle.length === 0) return undefined;
+        const match = source.indexOf(needle);
+        if (match < 0 || source.indexOf(needle, match + 1) >= 0) return undefined;
+        let startLine = 1;
+        for (let index = 0; index < match; index += 1) {
+            if (source.charCodeAt(index) === 10) startLine += 1;
+        }
+        return startLine;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Starts a bounded async line-number lookup and returns a resolved position when available. */
+export function resolveStreamingEditLineNumber(
+    toolCallId: string,
+    cwd: string,
+    args: unknown,
+    invalidate: () => void,
+): number | undefined {
+    const record = isRecord(args) ? args : undefined;
+    const filePath = record === undefined ? undefined : getString(record, "path");
+    const pair = latestEditTextPair(args);
+    if (filePath === undefined || pair === undefined) return undefined;
+
+    const key = editPairKey(filePath, pair.oldText);
+    let state = editLineNumbers.get(toolCallId);
+    if (state === undefined) {
+        state = { key, resolved: false, startLine: undefined, pending: undefined };
+        editLineNumbers.set(toolCallId, state);
+        while (editLineNumbers.size > MAX_EDIT_LINE_NUMBER_CALLS) {
+            const oldest = editLineNumbers.keys().next().value;
+            if (typeof oldest !== "string") break;
+            editLineNumbers.delete(oldest);
+        }
+    } else if (state.key !== key) {
+        state.key = key;
+        state.resolved = false;
+        state.startLine = undefined;
+    }
+    if (state.resolved || state.pending !== undefined) {
+        return state.startLine;
+    }
+
+    const targetState = state;
+    const targetKey = key;
+    let request: Promise<void>;
+    request = findEditStartLine(cwd, filePath, pair.oldText)
+        .then((startLine) => {
+            if (editLineNumbers.get(toolCallId) !== targetState || targetState.key !== targetKey) {
+                return;
+            }
+            targetState.resolved = true;
+            targetState.startLine = startLine;
+        })
+        .finally(() => {
+            if (targetState.pending === request) targetState.pending = undefined;
+            invalidate();
+        });
+    targetState.pending = request;
+    return undefined;
 }
 
 function editTextPair(value: unknown): EditTextPair | undefined {
@@ -96,6 +207,16 @@ function physicalLines(text: string): string[] {
     return lines.length === 0 ? [""] : lines;
 }
 
+function physicalLineCount(text: string): number {
+    const normalized = text.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
+    if (normalized.length === 0) return 1;
+    let count = normalized.endsWith("\n") ? 0 : 1;
+    for (let index = 0; index < normalized.length; index += 1) {
+        if (normalized.charCodeAt(index) === 10) count += 1;
+    }
+    return Math.max(1, count);
+}
+
 function headLineWindow(text: string, maxLines: number): TextLineWindow {
     const bounded = text.slice(0, MAX_PARTIAL_EDIT_SCAN_CHARS);
     const lines = physicalLines(bounded);
@@ -126,14 +247,19 @@ function boundedEditLine(line: string, edge: "head" | "tail"): string {
     return `…${line.slice(-(MAX_PARTIAL_EDIT_LINE_CHARS - 1))}`;
 }
 
-function streamingEditDiffSection(path: string | undefined, pair: EditTextPair): DiffSection {
+function streamingEditDiffSection(
+    path: string | undefined,
+    pair: EditTextPair,
+    startLine: number,
+): DiffSection {
     const oldText = headLineWindow(pair.oldText, PARTIAL_EDIT_OLD_LINES);
     const newText = tailLineWindow(pair.newText, PARTIAL_EDIT_NEW_LINES);
     const removedLines = oldText.lines.map(
-        (line, index) => `-${index + 1} ${boundedEditLine(line, "head")}`,
+        (line, index) => `-${startLine + index} ${boundedEditLine(line, "head")}`,
     );
+    const addedStartLine = startLine + physicalLineCount(pair.newText) - newText.lines.length;
     const addedLines = newText.lines.map(
-        (line, index) => `+${index + 1} ${boundedEditLine(line, "tail")}`,
+        (line, index) => `+${addedStartLine + index} ${boundedEditLine(line, "tail")}`,
     );
     return {
         ...(path === undefined ? {} : { path }),
@@ -216,7 +342,7 @@ export function renderStreamingEditCallPreview(
     context: EditCallRenderContext & { readonly expanded: boolean },
 ): Component | undefined {
     const pair = latestEditTextPair(args);
-    if (pair === undefined) {
+    if (pair === undefined || context.lineNumberStart === undefined) {
         return undefined;
     }
 
@@ -231,7 +357,7 @@ export function renderStreamingEditCallPreview(
         }),
         body: formatPathTarget(theme, path),
     });
-    const section = streamingEditDiffSection(path, pair);
+    const section = streamingEditDiffSection(path, pair, context.lineNumberStart);
     const diff = renderCodexDiff(theme, [section], context.expanded, {
         collapsedLineBudget: MUTATION_DIFF_PREVIEW_ROWS,
         maxWrappedRows: 1,

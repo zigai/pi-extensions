@@ -1,5 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import {
+    emptyComponent,
     renderCodexCall,
     renderCodexOutput,
     toolExpandHint,
@@ -7,6 +8,7 @@ import {
     type CodexRenderTheme,
 } from "../rendering/core.ts";
 import {
+    shouldDeferSimpleToolCall,
     toolStatusLabel,
     type ToolLabelMode,
     type ToolLifecycleLabels,
@@ -109,6 +111,9 @@ export function createGenericRenderer(
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
+            if (shouldDeferSimpleToolCall(context)) {
+                return emptyComponent();
+            }
             const staticLabel = label ?? displayToolName(toolName);
             return renderThirdPartyCall(theme, {
                 state: callState(context),

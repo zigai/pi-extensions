@@ -23,6 +23,7 @@ import {
     type ExplorationRenderContext,
 } from "./rendering/exploration-groups.ts";
 import {
+    configureRenderingAppearance,
     emptyComponent,
     formatFindAction,
     formatGrepAction,
@@ -48,14 +49,17 @@ import {
     type ScriptPreviewHeaderLayout,
 } from "./rendering/core.ts";
 import { captureDeletedTextPreview, type DeletedTextPreview } from "./rendering/delete-preview.ts";
+import { captureApplyPatchPreimages } from "./rendering/apply-patch-rendering.ts";
 import {
     isActiveToolCall,
+    shouldDeferSimpleToolCall,
     toolStatusLabel,
     type ToolLabelMode,
 } from "./rendering/status-labels.ts";
 import { buildEditPreview, EditPreviewStore } from "./rendering/edit-preview.ts";
 import {
     renderStreamingEditCallPreview,
+    resolveStreamingEditLineNumber,
     summarizeEditCall,
 } from "./rendering/edit-call-rendering.ts";
 import { buildLargeDiffSummaryPayload } from "./diffs/diff.ts";
@@ -553,15 +557,15 @@ function renderBuiltInToolCall(options: {
         options.recordRender("call", toolName);
         switch (toolName) {
             case "read":
+                if (shouldDeferSimpleToolCall(context)) return emptyComponent();
                 return renderExplorationCall(
                     theme,
                     context,
-                    formatReadAction(theme, readActionArgs(args), {
-                        isPartial: isActiveToolCall(context),
-                    }),
+                    formatReadAction(theme, readActionArgs(args)),
                     options.labelMode,
                 );
             case "find":
+                if (shouldDeferSimpleToolCall(context)) return emptyComponent();
                 return renderExplorationCall(
                     theme,
                     context,
@@ -569,6 +573,7 @@ function renderBuiltInToolCall(options: {
                     options.labelMode,
                 );
             case "grep":
+                if (shouldDeferSimpleToolCall(context)) return emptyComponent();
                 return renderExplorationCall(
                     theme,
                     context,
@@ -576,6 +581,7 @@ function renderBuiltInToolCall(options: {
                     options.labelMode,
                 );
             case "ls":
+                if (shouldDeferSimpleToolCall(context)) return emptyComponent();
                 return renderExplorationCall(
                     theme,
                     context,
@@ -656,16 +662,19 @@ function callState(context: BuiltInRenderContext) {
 
 const nativeDeletePreviews = new Map<string, DeletedTextPreview>();
 
-function nativeDeletePreview(
+function nativeDeletePreview(toolCallId: string): DeletedTextPreview | undefined {
+    return nativeDeletePreviews.get(toolCallId);
+}
+
+async function captureNativeDeletePreview(
     toolCallId: string,
     cwd: string,
     filePath: string | undefined,
-): DeletedTextPreview | undefined {
-    const existing = nativeDeletePreviews.get(toolCallId);
-    if (existing !== undefined || filePath === undefined || filePath.length === 0) {
-        return existing;
+): Promise<void> {
+    if (nativeDeletePreviews.has(toolCallId) || filePath === undefined || filePath.length === 0) {
+        return;
     }
-    const preview = captureDeletedTextPreview(cwd, filePath);
+    const preview = await captureDeletedTextPreview(cwd, filePath);
     if (preview !== undefined) {
         nativeDeletePreviews.set(toolCallId, preview);
         while (nativeDeletePreviews.size > 300) {
@@ -676,7 +685,6 @@ function nativeDeletePreview(
             nativeDeletePreviews.delete(oldest);
         }
     }
-    return preview;
 }
 
 function renderDeleteCall(
@@ -687,7 +695,7 @@ function renderDeleteCall(
 ) {
     registerExplorationBoundary(context.toolCallId);
     const filePath = pathField(args);
-    const preview = nativeDeletePreview(context.toolCallId, context.cwd, filePath);
+    const preview = nativeDeletePreview(context.toolCallId);
     const header = renderCodexCall(theme, {
         state: callState(context),
         statusText: toolStatusLabel(labelMode, context, {
@@ -880,9 +888,16 @@ function renderEditCall(
 
     const normalizedArgs = normalizedEditArgs(args);
     if (isActiveToolCall(context)) {
+        const lineNumberStart = resolveStreamingEditLineNumber(
+            context.toolCallId,
+            context.cwd,
+            normalizedArgs,
+            context.invalidate,
+        );
         const streamingPreview = renderStreamingEditCallPreview(normalizedArgs, theme, {
             ...context,
             labelMode,
+            ...(lineNumberStart === undefined ? {} : { lineNumberStart }),
         });
         if (streamingPreview !== undefined) {
             return streamingPreview;
@@ -1075,6 +1090,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
 
     const applyConfig = (nextConfig: CodexLookConfig): void => {
         config = nextConfig;
+        configureRenderingAppearance(config.appearance);
         debugLogger.configure(config.debugLog);
         formatter = scriptBlockFormatter(config, reportWarning);
         headerLayout = scriptPreviewHeaderLayout(config);
@@ -1116,8 +1132,13 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         }
     });
 
-    pi.on("tool_call", (event) => {
+    pi.on("tool_call", (event, ctx) => {
         const command = commandField(event.input);
+        const preimageCapture = event.toolName.toLowerCase().includes("apply_patch")
+            ? captureApplyPatchPreimages(event.toolCallId, ctx.cwd, event.input)
+            : compatBuiltInToolName(event.toolName) === "delete"
+              ? captureNativeDeletePreview(event.toolCallId, ctx.cwd, pathField(event.input))
+              : undefined;
         debugLogger.record("tool_call", {
             toolName: event.toolName,
             builtInToolName: diagnosticBuiltInToolName(event.toolName),
@@ -1133,7 +1154,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
             !isToolCallEventType("bash", event) &&
             compatBuiltInToolName(event.toolName) !== "bash"
         ) {
-            return;
+            return preimageCapture;
         }
         if (command !== undefined) {
             rememberRawScriptPreview(scriptPreviews, event.toolCallId, command);
@@ -1143,6 +1164,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
                 ...diagnosticSnapshot(),
             });
         }
+        return preimageCapture;
     });
 
     pi.on("tool_result", (event, ctx) => {

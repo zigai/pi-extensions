@@ -2,6 +2,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import {
     collapseHome,
+    configureRenderingAppearance,
     formatGrepAction,
     formatReadAction,
     highlightShell,
@@ -84,6 +85,32 @@ describe("Codex rendering helpers", () => {
         expect(formatReadAction(tokenTheme, { path: "src/rendering.ts" })).toBe(
             "<toolTitle>Read</toolTitle> <accent>src/rendering.ts</accent>",
         );
+    });
+
+    it("applies configured instruction and diff colors", () => {
+        configureRenderingAppearance({
+            addedRowBackground: "#123456",
+            deletedRowBackground: "#654321",
+            instructionPathColor: "#AABBCC",
+        });
+        try {
+            const read = formatReadAction(plainTheme, { path: "src/AGENTS.md" });
+            const diff = renderCodexDiff(
+                plainTheme,
+                [{ lines: ["+1 added", "-2 deleted"], added: 1, removed: 1 }],
+                true,
+            ).render(40);
+
+            expect(read).toContain("\u001b[38;2;170;187;204m");
+            expect(diff[0]).toContain("\u001b[48;2;18;52;86m");
+            expect(diff[1]).toContain("\u001b[48;2;101;67;33m");
+        } finally {
+            configureRenderingAppearance({
+                addedRowBackground: null,
+                deletedRowBackground: null,
+                instructionPathColor: null,
+            });
+        }
     });
 
     it("does not flash the ordinary path accent while instruction paths stream", () => {
@@ -273,9 +300,9 @@ describe("Codex rendering helpers", () => {
         expect(component.render(80)).toEqual([
             "  └ one",
             "    two",
-            "    … +6 lines (hint)",
             "    nine",
             "    ten",
+            "    … +6 lines (hint)",
         ]);
     });
 
@@ -335,9 +362,9 @@ describe("Codex rendering helpers", () => {
         expect(component.render(80)).toEqual([
             "  └ start",
             "    line 1",
-            "    … +18 lines (hint)",
             "    line 20",
             "    Command exited with code 2",
+            "    … +18 lines (hint)",
         ]);
     });
 
@@ -936,7 +963,7 @@ describe("Codex rendering helpers", () => {
         expect(rendered).not.toContain("to expand");
     });
 
-    it("hides leading imports in collapsed previews when the remaining script fits", () => {
+    it("keeps Python imports when the complete short script fits", () => {
         const invocation = parseScriptInvocation(
             "python - <<'PY'\nimport ast\nfrom pathlib import Path\n\nprint(Path('.'))\nPY",
         );
@@ -947,14 +974,34 @@ describe("Codex rendering helpers", () => {
         const collapsed = renderScriptCall(plainTheme, invocation, {
             state: "success",
             expanded: false,
-            maxCodePreviewLines: 8,
+            maxCodePreviewLines: 5,
         })
             .render(120)
             .join("\n");
 
-        expect(collapsed).not.toContain("import ast");
-        expect(collapsed).not.toContain("pathlib");
+        expect(collapsed).toContain("import ast");
+        expect(collapsed).toContain("pathlib");
         expect(collapsed).toContain("print");
+    });
+
+    it("keeps Node imports when the complete short script fits", () => {
+        const invocation = parseScriptInvocation(
+            "node - <<'NODE'\nimport path from 'node:path';\nconst fs = require('node:fs');\nconsole.log(path.basename(fs.realpathSync('.')));\nNODE",
+        );
+        if (!invocation) {
+            throw new Error("expected script invocation");
+        }
+
+        const collapsed = renderScriptCall(plainTheme, invocation, {
+            state: "success",
+            expanded: false,
+            maxCodePreviewLines: 5,
+        })
+            .render(120)
+            .join("\n");
+
+        expect(collapsed).toContain("import path");
+        expect(collapsed).toContain("require('node:fs')");
     });
 
     it("keeps output renderer lines within the supplied width", () => {
@@ -988,8 +1035,8 @@ describe("Codex rendering helpers", () => {
         const contentAddition = lines.find((line) => line.includes("from pathlib import Path"));
 
         expect(blankAddition).toBeDefined();
-        expect(visibleWidth(blankAddition ?? "")).toBe(79);
-        expect(visibleWidth(contentAddition ?? "")).toBe(79);
+        expect(visibleWidth(blankAddition ?? "")).toBe(80);
+        expect(visibleWidth(contentAddition ?? "")).toBe(80);
         expect(lines).not.toContain("");
         expect(lines[lines.findIndex((line) => line.trimEnd() === "    2 +") + 1]?.trimEnd()).toBe(
             "    3 +def greet():",
@@ -1022,7 +1069,7 @@ describe("Codex rendering helpers", () => {
             renderCodexDiff(backgroundTheme, sections, true)
                 .render(80)
                 .filter((line) => line.includes("\u001b[4"))
-                .every((line) => visibleWidth(line) === 79),
+                .every((line) => visibleWidth(line) === 80),
         ).toBe(true);
     });
 
@@ -1061,7 +1108,7 @@ describe("Codex rendering helpers", () => {
         expect(lines).toEqual(["     8 -old", "     9 +new", "    10 +ten"]);
     });
 
-    it("keeps diff renderer lines short of the terminal edge", () => {
+    it("fills the terminal edge without exceeding the provided width", () => {
         const sections = parseDiffSections(
             "-1 old text that wraps\n+1 new text that wraps",
             "file.ts",
@@ -1073,7 +1120,7 @@ describe("Codex rendering helpers", () => {
 
         expect(lines.length).toBeGreaterThan(1);
         expectLinesWithinWidth(lines, width);
-        expect(lines.every((line) => visibleWidth(line) < width)).toBe(true);
+        expect(lines.some((line) => visibleWidth(line) === width)).toBe(true);
     });
 
     it("preserves every character when diff content wraps", () => {
@@ -1086,14 +1133,14 @@ describe("Codex rendering helpers", () => {
         const reconstructed = lines
             .map((line, index) => {
                 if (index === 0) {
-                    return line.slice(line.indexOf("+") + 1);
+                    return line.slice(line.indexOf("+") + 1).trimEnd();
                 }
                 return line.trim();
             })
             .join("");
 
         expect(reconstructed).toBe(content);
-        expect(lines.every((line) => visibleWidth(line) < 20)).toBe(true);
+        expect(lines.every((line) => visibleWidth(line) <= 20)).toBe(true);
     });
 
     it("caps wrapped diff rows in collapsed previews", () => {
@@ -1107,7 +1154,7 @@ describe("Codex rendering helpers", () => {
 
         expect(lines.length).toBeLessThanOrEqual(8);
         expectLinesWithinWidth(lines, 20);
-        expect(lines.every((line) => visibleWidth(line) < 20)).toBe(true);
+        expect(lines.every((line) => visibleWidth(line) <= 20)).toBe(true);
     });
 
     it("keeps the head and tail of collapsed diffs with an expansion hint", () => {
@@ -1124,8 +1171,8 @@ describe("Codex rendering helpers", () => {
         expect(rendered).toContain("added line 1");
         expect(rendered).toContain("added line 40");
         expect(rendered).not.toContain("added line 20");
-        expect(rendered).toContain("… +22 lines (to expand)");
-        expect(lines.at(-1)).toContain("… +22 lines (to expand)");
+        expect(rendered).toContain("… +34 lines (to expand)");
+        expect(lines.at(-1)).toContain("… +34 lines (to expand)");
     });
 
     it("prioritizes changed rows when context dominates a collapsed diff", () => {

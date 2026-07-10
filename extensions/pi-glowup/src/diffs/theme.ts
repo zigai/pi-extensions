@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { PierreAppearance } from "./types.ts";
 import { SYNTAX_THEME_APPEARANCE } from "../syntax/theme-assets.ts";
+import { configuredDiffBackgroundAnsi } from "../rendering/core.ts";
 
 /** Terminal color palette derived from Pi's active theme. */
 export type PierreTerminalPalette = {
@@ -32,9 +33,9 @@ export function getPierrePalette(theme: Theme): PierreTerminalPalette {
         contextFg: theme.getFgAnsi("toolDiffContext"),
         contextRowBg: "",
         additionFg: theme.getFgAnsi("toolDiffAdded"),
-        additionRowBg: theme.getBgAnsi("toolSuccessBg"),
+        additionRowBg: configuredDiffBackgroundAnsi("insert") ?? theme.getBgAnsi("toolSuccessBg"),
         deletionFg: theme.getFgAnsi("toolDiffRemoved"),
-        deletionRowBg: theme.getBgAnsi("toolErrorBg"),
+        deletionRowBg: configuredDiffBackgroundAnsi("delete") ?? theme.getBgAnsi("toolErrorBg"),
         emptyFg: theme.getFgAnsi("dim"),
         emptyRowBg: "",
         lineNumberFg: theme.getFgAnsi("dim"),

@@ -39,7 +39,7 @@ function renderCodexLookView(
             return renderCodexOutput(theme, view.text, {
                 expanded: options.expanded,
                 mode: view.mode ?? "headTail",
-                maxPreviewLines: view.maxPreviewLines ?? 4,
+                maxPreviewLines: view.maxPreviewLines ?? 5,
                 noOutputLabel: view.noOutputLabel ?? null,
                 ...(view.syntax === undefined ? {} : { syntax: view.syntax }),
             });
@@ -47,7 +47,7 @@ function renderCodexLookView(
             return renderCodexOutput(theme, sectionText(view.sections, theme), {
                 expanded: options.expanded,
                 mode: "headTail",
-                maxPreviewLines: view.maxPreviewLines ?? 6,
+                maxPreviewLines: view.maxPreviewLines ?? 5,
                 noOutputLabel: null,
             });
         case "empty":

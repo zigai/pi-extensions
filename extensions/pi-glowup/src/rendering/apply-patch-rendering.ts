@@ -48,6 +48,7 @@ const MAX_PARTIAL_PATCH_LINE_CHARS = 2_000;
 const PARTIAL_PATCH_SUFFIX_CHARS = 32;
 const MAX_DELETE_PREIMAGE_CALLS = 100;
 const MAX_UPDATE_PREIMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_PATCH_PREIMAGE_CONCURRENCY = 4;
 
 type MutableApplyPatchSection = {
     kind: ApplyPatchKind;
@@ -63,6 +64,8 @@ type MutableApplyPatchSection = {
 
 const deletePreimages = new Map<string, Map<string, DeletedTextPreview>>();
 const updatePreimages = new Map<string, Map<string, TextFilePreimage>>();
+const unavailableUpdatePreimages = new Map<string, Map<string, true>>();
+const pendingUpdatePreimages = new Map<string, Map<string, Promise<void>>>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -105,28 +108,100 @@ function boundedPreimageMap<T>(
     return previews;
 }
 
-function capturePatchPreimages(toolCallId: string, cwd: string, patch: string): void {
+export async function captureApplyPatchPreimages(
+    toolCallId: string,
+    cwd: string,
+    args: unknown,
+): Promise<void> {
+    const patch = patchTextFromArgs(args);
+    if (patch === undefined) {
+        return;
+    }
     const deletePreviews = boundedPreimageMap(deletePreimages, toolCallId);
     const updatePreviews = boundedPreimageMap(updatePreimages, toolCallId);
+    const unavailableUpdates = boundedPreimageMap(unavailableUpdatePreimages, toolCallId);
+    const pendingUpdates = boundedPreimageMap(pendingUpdatePreimages, toolCallId);
+    const deletePaths = new Set<string>();
+    const updatePaths = new Set<string>();
     for (const line of patch.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n")) {
         if (line.startsWith("*** Delete File: ")) {
             const filePath = line.slice("*** Delete File: ".length);
-            if (filePath.length > 0 && !deletePreviews.has(filePath)) {
-                const preview = captureDeletedTextPreview(cwd, filePath);
-                if (preview !== undefined) {
-                    deletePreviews.set(filePath, preview);
-                }
-            }
+            if (filePath.length > 0) deletePaths.add(filePath);
         }
         if (line.startsWith("*** Update File: ")) {
             const filePath = line.slice("*** Update File: ".length);
-            if (filePath.length > 0 && !updatePreviews.has(filePath)) {
-                const preview = captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES);
-                if (preview !== undefined) {
-                    updatePreviews.set(filePath, preview);
-                }
-            }
+            if (filePath.length > 0) updatePaths.add(filePath);
         }
+    }
+
+    const tasks: Array<() => Promise<void>> = [];
+    for (const filePath of deletePaths) {
+        if (deletePreviews.has(filePath)) continue;
+        tasks.push(async () => {
+            const preview = await captureDeletedTextPreview(cwd, filePath);
+            if (preview !== undefined) deletePreviews.set(filePath, preview);
+        });
+    }
+    for (const filePath of updatePaths) {
+        if (updatePreviews.has(filePath) || unavailableUpdates.has(filePath)) continue;
+        tasks.push(async () => {
+            const pending = pendingUpdates.get(filePath);
+            if (pending !== undefined) await pending;
+            if (updatePreviews.has(filePath) || unavailableUpdates.has(filePath)) return;
+            const preview = await captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES);
+            if (preview === undefined) unavailableUpdates.set(filePath, true);
+            else updatePreviews.set(filePath, preview);
+        });
+    }
+
+    let nextTask = 0;
+    const workers = Array.from(
+        { length: Math.min(MAX_PATCH_PREIMAGE_CONCURRENCY, tasks.length) },
+        async () => {
+            while (nextTask < tasks.length) {
+                const task = tasks[nextTask];
+                nextTask += 1;
+                await task?.();
+            }
+        },
+    );
+    await Promise.all(workers);
+}
+
+function schedulePartialUpdatePreimages(
+    toolCallId: string,
+    cwd: string | undefined,
+    patch: string,
+    invalidate: (() => void) | undefined,
+): void {
+    if (cwd === undefined || invalidate === undefined) return;
+    const previews = boundedPreimageMap(updatePreimages, toolCallId);
+    const unavailable = boundedPreimageMap(unavailableUpdatePreimages, toolCallId);
+    const pending = boundedPreimageMap(pendingUpdatePreimages, toolCallId);
+    const normalized = patch.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
+    const completeLines = normalized.split("\n");
+    if (!normalized.endsWith("\n")) completeLines.pop();
+    for (const line of completeLines) {
+        if (!line.startsWith("*** Update File: ")) continue;
+        const filePath = line.slice("*** Update File: ".length);
+        if (
+            filePath.length === 0 ||
+            previews.has(filePath) ||
+            unavailable.has(filePath) ||
+            pending.has(filePath)
+        ) {
+            continue;
+        }
+        const request = captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES)
+            .then((preimage) => {
+                if (preimage === undefined) unavailable.set(filePath, true);
+                else previews.set(filePath, preimage);
+                invalidate();
+            })
+            .finally(() => {
+                pending.delete(filePath);
+            });
+        pending.set(filePath, request);
     }
 }
 
@@ -155,6 +230,17 @@ function hydrateDeletePreimages(summary: ApplyPatchSummary, toolCallId: string):
 
 function displayPath(section: MutableApplyPatchSection): string {
     return section.movePath === undefined ? section.path : `${section.path} → ${section.movePath}`;
+}
+
+function hasUnnumberedDiffRows(section: ApplyPatchSection): boolean {
+    return section.lines.some((line) => {
+        const sign = line.charAt(0);
+        return (
+            (sign === "+" || sign === "-" || sign === " ") &&
+            !line.trimStart().startsWith("…") &&
+            !/^[+\- ]\d+ /u.test(line)
+        );
+    });
 }
 
 function lineCount(text: string): number {
@@ -761,6 +847,7 @@ class PartialApplyPatchCallPreviewComponent implements Component {
     private theme: CodexRenderTheme;
     private expanded = false;
     private labelMode: ToolLabelMode = "static";
+    private patch = "";
     private cachedWidth: number | undefined;
     private cachedLines: string[] | undefined;
 
@@ -778,6 +865,7 @@ class PartialApplyPatchCallPreviewComponent implements Component {
         this.theme = update.theme;
         this.expanded = update.expanded;
         this.labelMode = update.labelMode;
+        this.patch = update.patch;
         this.preview.update(update.patch);
         this.invalidate();
     }
@@ -787,7 +875,16 @@ class PartialApplyPatchCallPreviewComponent implements Component {
             return this.cachedLines;
         }
 
-        const section = this.preview.snapshot();
+        const snapshot = this.preview.snapshot();
+        const hydratedSection =
+            snapshot === undefined
+                ? undefined
+                : hydrateUpdateLineNumbers({ sections: [snapshot] }, this.patch, this.toolCallId)
+                      .sections[0];
+        const section =
+            hydratedSection?.kind === "update" && hasUnnumberedDiffRows(hydratedSection)
+                ? { ...hydratedSection, lines: [] }
+                : hydratedSection;
         const component =
             section === undefined
                 ? renderPartialPatchViewport(
@@ -797,9 +894,9 @@ class PartialApplyPatchCallPreviewComponent implements Component {
                               this.labelMode,
                               { isPartial: true, argsComplete: false },
                               {
-                                  static: "Apply Patch",
-                                  active: "Editing",
-                                  completed: "Applied Patch",
+                                  static: "Patch",
+                                  active: "Patching",
+                                  completed: "Patched",
                               },
                           ),
                           body: "patch",
@@ -882,16 +979,6 @@ function renderCompletedPatchViewport(
     return renderStandalonePatchSections(summary.sections, theme, false, context, labelMode);
 }
 
-function verbForSection(section: ApplyPatchSection): "Added" | "Deleted" | "Edited" {
-    if (section.kind === "add") {
-        return "Added";
-    }
-    if (section.kind === "delete") {
-        return "Deleted";
-    }
-    return "Edited";
-}
-
 function deleteStats(theme: CodexRenderTheme, section: ApplyPatchSection): string {
     return section.countsKnown && section.removed > 0
         ? ` (${theme.fg("toolDiffRemoved", `-${section.removed}`)})`
@@ -906,9 +993,9 @@ function completedPatchSection(
     labelMode: ToolLabelMode,
 ): Component {
     const label = toolStatusLabel(labelMode, context, {
-        static: "Apply Patch",
-        active: "Editing",
-        completed: verbForSection(section),
+        static: "Patch",
+        active: "Patching",
+        completed: "Patched",
     });
     const diff = expanded
         ? section.lines.length === 0
@@ -967,9 +1054,9 @@ function renderSinglePatchSection(
     labelMode: ToolLabelMode,
 ): Component {
     const label = toolStatusLabel(labelMode, context, {
-        static: "Apply Patch",
-        active: "Editing",
-        completed: verbForSection(section),
+        static: "Patch",
+        active: "Patching",
+        completed: "Patched",
     });
     if (isActiveToolCall(context)) {
         const header =
@@ -1052,9 +1139,9 @@ function renderApplyPatchFallbackCall(
     return renderCodexCall(theme, {
         state: isActiveToolCall(context) ? "running" : "muted",
         statusText: toolStatusLabel(labelMode, context, {
-            static: "Apply Patch",
-            active: "Editing",
-            completed: "Applied Patch",
+            static: "Patch",
+            active: "Patching",
+            completed: "Patched",
         }),
         body: lines > 0 ? `${lines} patch lines` : "patch",
     });
@@ -1066,6 +1153,7 @@ function renderPartialApplyPatchCall(
     context: ThirdPartyToolRenderContext,
     labelMode: ToolLabelMode,
 ): Component {
+    schedulePartialUpdatePreimages(context.toolCallId, context.cwd, patch, context.invalidate);
     const update = {
         patch,
         theme,
@@ -1103,7 +1191,7 @@ function renderApplyPatchFailure(
     return makeComponent((width) => [
         ...renderCodexCall(theme, {
             state: "error",
-            statusText: labelMode === "lifecycle" ? "Failed to apply patch" : "Apply Patch",
+            statusText: labelMode === "lifecycle" ? "Failed to patch" : "Patch",
         }).render(width),
         ...renderCodexOutput(theme, textOutput(result), {
             expanded: options.expanded,
@@ -1123,9 +1211,6 @@ export function createApplyPatchRenderer(
     return {
         renderCall(args, theme, context) {
             const patch = patchTextFromArgs(args);
-            if (patch !== undefined) {
-                capturePatchPreimages(context.toolCallId, context.cwd ?? process.cwd(), patch);
-            }
             if (patch !== undefined && isActiveToolCall(context)) {
                 return renderPartialApplyPatchCall(patch, theme, context, labelMode);
             }

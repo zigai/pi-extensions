@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import { captureApplyPatchPreimages } from "../src/rendering/apply-patch-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 
 const plainTheme: CodexRenderTheme = {
@@ -63,15 +64,15 @@ describe("apply_patch renderer", () => {
         const expanded = expandedLines.join("\n");
 
         expect(collapsedLines).toHaveLength(7);
-        expect(collapsed).toContain("• Edited README.md (+1 -1)");
-        expect(collapsed).toContain("• Added src/new.ts (+2)");
+        expect(collapsed).toContain("• Patched README.md (+1 -1)");
+        expect(collapsed).toContain("• Patched src/new.ts (+2)");
         expect(collapsed).not.toContain("files");
         expect(collapsed).not.toMatch(/[├└]/u);
         expect(collapsed).toContain("README.md");
         expect(collapsed).toContain("old heading");
         expect(collapsed).toContain("+export const answer = 42;");
-        expect(expanded).toContain("• Edited README.md (+1 -1)");
-        expect(expanded).toContain("• Added src/new.ts (+2)");
+        expect(expanded).toContain("• Patched README.md (+1 -1)");
+        expect(expanded).toContain("• Patched src/new.ts (+2)");
         expect(expanded).toContain("-old heading");
         expect(expanded).toContain("+new heading");
         expect(expanded).toContain("+export const answer = 42;");
@@ -123,7 +124,7 @@ describe("apply_patch renderer", () => {
         expect(rendered).toContain("30 +const value = 2;");
     });
 
-    it("derives real line numbers for coordinate-less edit hunks from the preimage", () => {
+    it("derives real line numbers for coordinate-less edit hunks from the preimage", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
         try {
             writeFileSync(
@@ -143,11 +144,7 @@ describe("apply_patch renderer", () => {
 *** End Patch`;
             const context = { ...renderContext, cwd, toolCallId: "coordinate-less-update" };
 
-            renderer.renderCall({ patch }, plainTheme, {
-                ...context,
-                argsComplete: false,
-                isPartial: true,
-            });
+            await captureApplyPatchPreimages(context.toolCallId, cwd, { patch });
             const rendered = renderer
                 .renderCall({ patch }, plainTheme, context)
                 .render(100)
@@ -162,7 +159,7 @@ describe("apply_patch renderer", () => {
         }
     });
 
-    it("accounts for earlier hunk line shifts when deriving later line numbers", () => {
+    it("accounts for earlier hunk line shifts when deriving later line numbers", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
         try {
             writeFileSync(
@@ -187,11 +184,7 @@ describe("apply_patch renderer", () => {
 *** End Patch`;
             const context = { ...renderContext, cwd, toolCallId: "shifted-coordinate-less-update" };
 
-            renderer.renderCall({ patch }, plainTheme, {
-                ...context,
-                argsComplete: false,
-                isPartial: true,
-            });
+            await captureApplyPatchPreimages(context.toolCallId, cwd, { patch });
             const rendered = renderer
                 .renderCall({ patch }, plainTheme, { ...context, expanded: true })
                 .render(100)
@@ -245,8 +238,7 @@ describe("apply_patch renderer", () => {
             .render(80);
         const rendered = lines.join("\n");
 
-        expect(lines[0]?.trimEnd()).toBe("• Failed to apply patch");
-        expect(rendered).not.toContain("✘ Failed to apply patch");
+        expect(lines[0]?.trimEnd()).toBe("• Failed to patch");
         expect(rendered).toContain("Invalid patch: missing header");
         expectLinesWithinWidth(lines, 80);
     });
@@ -265,13 +257,112 @@ describe("apply_patch renderer", () => {
             .render(100);
         const rendered = lines.join("\n");
 
-        expect(rendered).toMatch(/• Editing src\/new\.ts \(\+1002\)/u);
+        expect(rendered).toMatch(/• Patching src\/new\.ts \(\+1002\)/u);
         expect(lines).toHaveLength(7);
         expect(rendered).toContain("997 +extra");
         expect(rendered).toContain("1002 +extra");
         expect(rendered).not.toContain("earlier patch lines");
         expect(rendered).not.toContain("README.md");
         expectLinesWithinWidth(lines, 100);
+    });
+
+    it("resolves real line numbers for coordinate-less streaming updates", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-streaming-patch-"));
+        try {
+            writeFileSync(
+                path.join(cwd, "example.ts"),
+                Array.from({ length: 20 }, (_value, index) => `line ${index + 1}`).join("\n"),
+            );
+            const patch = `*** Begin Patch
+*** Update File: example.ts
+@@
+ line 9
+-line 10
++line ten
+ line 11`;
+            const renderer = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            });
+            let notify: (() => void) | undefined;
+            const invalidated = new Promise<void>((resolve) => {
+                notify = resolve;
+            });
+            const context = {
+                ...renderContext,
+                toolCallId: "streaming-numbered-patch",
+                argsComplete: false,
+                isPartial: true,
+                cwd,
+                invalidate: () => notify?.(),
+            };
+            const component = renderer.renderCall({ patch }, plainTheme, context);
+            const initial = component.render(100).join("\n");
+
+            expect(initial).not.toContain("-line 10");
+            expect(initial).not.toContain("+line ten");
+
+            await invalidated;
+            const rendered = renderer
+                .renderCall({ patch }, plainTheme, {
+                    ...context,
+                    lastComponent: component,
+                    invalidate: () => {},
+                })
+                .render(100)
+                .join("\n");
+
+            expect(rendered).toContain("9  line 9");
+            expect(rendered).toContain("10 -line 10");
+            expect(rendered).toContain("10 +line ten");
+            expect(rendered).toContain("11  line 11");
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
+    it("does not retry unavailable streaming update preimages", async () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch");
+        const patch = "*** Begin Patch\n*** Update File: missing.ts\n@@\n-old\n+new";
+        let invalidations = 0;
+        let notify: (() => void) | undefined;
+        const invalidated = new Promise<void>((resolve) => {
+            notify = resolve;
+        });
+        const context = {
+            ...renderContext,
+            toolCallId: "missing-streaming-preimage",
+            argsComplete: false,
+            isPartial: true,
+            cwd: process.cwd(),
+            invalidate: (): void => {
+                invalidations += 1;
+                notify?.();
+            },
+        };
+        const component = renderer.renderCall({ patch }, plainTheme, context);
+
+        await invalidated;
+        renderer.renderCall({ patch }, plainTheme, { ...context, lastComponent: component });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(invalidations).toBe(1);
+    });
+
+    it("does not read partially streamed update paths", async () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch");
+        let invalidations = 0;
+        renderer.renderCall({ patch: "*** Begin Patch\n*** Update File: incomplete" }, plainTheme, {
+            ...renderContext,
+            toolCallId: "incomplete-streaming-path",
+            argsComplete: false,
+            isPartial: true,
+            cwd: process.cwd(),
+            invalidate: () => {
+                invalidations += 1;
+            },
+        });
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(invalidations).toBe(0);
     });
 
     it("keeps the beginning and end of a completed collapsed patch", () => {
@@ -341,16 +432,16 @@ describe("apply_patch renderer", () => {
 
         expect(collapsedLines).toHaveLength(35);
         expect(collapsed).not.toContain("files");
-        expect(collapsed).toContain("• Added first.ts (+30)");
-        expect(collapsed).toContain("• Added fourth.ts (+30)");
+        expect(collapsed).toContain("• Patched first.ts (+30)");
+        expect(collapsed).toContain("• Patched fourth.ts (+30)");
         expect(collapsed).toContain("first.ts");
         expect(collapsed).toContain("export const first1 = 1;");
         expect(collapsed).toContain("export const fourth1 = 1;");
         expect(collapsed).toContain("export const fourth30 = 30;");
         expect(collapsed).not.toContain("export const fourth15 = 15;");
         expect(collapsed).toContain("… +24 lines (to expand)");
-        expect(expanded).toContain("Added first.ts");
-        expect(expanded).toContain("Added fourth.ts");
+        expect(expanded).toContain("Patched first.ts");
+        expect(expanded).toContain("Patched fourth.ts");
         expect(expanded).toContain("export const first1 = 1;");
         expect(expanded).toContain("export const first30 = 30;");
     });
@@ -369,7 +460,7 @@ describe("apply_patch renderer", () => {
 
         expect(lines).toHaveLength(29);
         expect(rendered).toContain("file-1.ts");
-        expect(rendered).toContain("• Added file-10.ts (+1)");
+        expect(rendered).toContain("• Patched file-10.ts (+1)");
         expect(rendered).not.toMatch(/[├└]/u);
         expectLinesWithinWidth(lines, 120);
     });
@@ -391,10 +482,10 @@ describe("apply_patch renderer", () => {
             .render(120)
             .join("\n");
 
-        expect(collapsed).toContain("• Deleted first.ts");
-        expect(collapsed).toContain("• Deleted second.ts");
-        expect(expanded).toContain("• Deleted first.ts");
-        expect(expanded).toContain("• Deleted second.ts");
+        expect(collapsed).toContain("• Patched first.ts");
+        expect(collapsed).toContain("• Patched second.ts");
+        expect(expanded).toContain("• Patched first.ts");
+        expect(expanded).toContain("• Patched second.ts");
         expect(collapsed).not.toContain("(+0 -0)");
         expect(collapsed).not.toContain("files");
         expect(collapsed).not.toMatch(/[├└]/u);
@@ -414,9 +505,9 @@ describe("apply_patch renderer", () => {
             .render(120)
             .join("\n");
 
-        expect(rendered).toContain("• Added added.ts (+1)");
+        expect(rendered).toContain("• Patched added.ts (+1)");
         expect(rendered).toContain("+export const retained = true;");
-        expect(rendered).toContain("• Deleted removed.ts");
+        expect(rendered).toContain("• Patched removed.ts");
     });
 
     it("renders a single deleted file without fake statistics", () => {
@@ -431,11 +522,11 @@ describe("apply_patch renderer", () => {
             .render(120)
             .join("\n");
 
-        expect(rendered).toContain("• Deleted first.ts");
+        expect(rendered).toContain("• Patched first.ts");
         expect(rendered).not.toContain("(+0 -0)");
     });
 
-    it("retains readable deleted text with an honest removed-line count", () => {
+    it("retains readable deleted text with an honest removed-line count", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-delete-"));
         const filePath = path.join(cwd, "removed.ts");
         writeFileSync(filePath, "one\ntwo\nthree\n");
@@ -444,23 +535,17 @@ describe("apply_patch renderer", () => {
         });
         const patch = "*** Begin Patch\n*** Delete File: removed.ts\n*** End Patch";
         try {
-            const streaming = renderer.renderCall({ patch }, plainTheme, {
-                ...renderContext,
-                cwd,
-                argsComplete: false,
-                isPartial: true,
-            });
+            await captureApplyPatchPreimages(renderContext.toolCallId, cwd, { patch });
             unlinkSync(filePath);
             const rendered = renderer
                 .renderCall({ patch }, plainTheme, {
                     ...renderContext,
                     cwd,
-                    lastComponent: streaming,
                 })
                 .render(120)
                 .join("\n");
 
-            expect(rendered).toContain("• Deleted removed.ts (-3)");
+            expect(rendered).toContain("• Patched removed.ts (-3)");
             expect(rendered).toContain("-one");
             expect(rendered).toContain("-three");
             expect(rendered).not.toContain("+0");
@@ -492,7 +577,7 @@ describe("apply_patch renderer", () => {
         const rendered = lastComponent?.render(120).join("\n") ?? "";
         expect(lastComponent).toBe(firstComponent);
         expect(lastComponent?.render(120)).toHaveLength(7);
-        expect(rendered).toMatch(/• Editing src\/generated\.ts \(\+200\)/u);
+        expect(rendered).toMatch(/• Patching src\/generated\.ts \(\+200\)/u);
         expect(rendered).toContain("export const value195 = 195;");
         expect(rendered).toContain("export const value200 = 200;");
         expect(rendered).not.toContain("export const value1 = 1;");
@@ -655,7 +740,7 @@ describe("apply_patch renderer", () => {
             .render(100);
         const rendered = lines.join("\n");
 
-        expect(rendered).toContain("• Applied Patch 20003 patch lines");
+        expect(rendered).toContain("• Patched 20003 patch lines");
         expect(rendered).not.toContain("(+0 -0)");
         expect(rendered).not.toContain("huge.txt");
         expect(rendered).not.toContain("+line");
@@ -677,8 +762,8 @@ describe("apply_patch renderer", () => {
             .render(100)
             .join("\n");
 
-        expect(active).toContain("• Apply Patch");
-        expect(completed).toContain("• Apply Patch");
-        expect(completed).not.toContain("• Edited");
+        expect(active).toContain("• Patch");
+        expect(completed).toContain("• Patch");
+        expect(completed).not.toContain("• Patched");
     });
 });

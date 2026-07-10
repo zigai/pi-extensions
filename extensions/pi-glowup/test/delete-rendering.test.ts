@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import { captureDeletedTextPreview } from "../src/rendering/delete-preview.ts";
 
 describe("delete rendering", () => {
-    it("captures readable text before deletion with line counts", () => {
+    it("captures readable text before deletion with line counts", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-native-delete-"));
         try {
             writeFileSync(path.join(cwd, "removed.ts"), "one\ntwo\nthree\n");
-            const preview = captureDeletedTextPreview(cwd, "removed.ts");
+            const preview = await captureDeletedTextPreview(cwd, "removed.ts");
 
             expect(preview?.removed).toBe(3);
             expect(preview?.section.lines).toEqual(["-1 one", "-2 two", "-3 three"]);
@@ -18,12 +18,12 @@ describe("delete rendering", () => {
         }
     });
 
-    it("does not capture binary or out-of-project paths", () => {
+    it("does not capture binary or out-of-project paths", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-native-delete-"));
         try {
             writeFileSync(path.join(cwd, "binary.bin"), Buffer.from([1, 0, 2]));
-            expect(captureDeletedTextPreview(cwd, "binary.bin")).toBeUndefined();
-            expect(captureDeletedTextPreview(cwd, "../outside.ts")).toBeUndefined();
+            expect(await captureDeletedTextPreview(cwd, "binary.bin")).toBeUndefined();
+            expect(await captureDeletedTextPreview(cwd, "../outside.ts")).toBeUndefined();
         } finally {
             rmSync(cwd, { recursive: true, force: true });
         }

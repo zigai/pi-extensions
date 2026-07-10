@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { DiffSection } from "./core.ts";
 
@@ -14,11 +14,11 @@ export type DeletedTextPreview = {
 };
 
 /** Captures a bounded readable text file before deletion without leaving the working directory. */
-export function captureTextFilePreimage(
+export async function captureTextFilePreimage(
     cwd: string,
     filePath: string,
     maxBytes = MAX_DELETE_PREIMAGE_BYTES,
-): TextFilePreimage | undefined {
+): Promise<TextFilePreimage | undefined> {
     const resolvedCwd = path.resolve(cwd);
     const resolvedPath = path.resolve(resolvedCwd, filePath);
     const relativePath = path.relative(resolvedCwd, resolvedPath);
@@ -31,11 +31,11 @@ export function captureTextFilePreimage(
         return undefined;
     }
     try {
-        const stats = statSync(resolvedPath);
+        const stats = await stat(resolvedPath);
         if (!stats.isFile() || stats.size > maxBytes) {
             return undefined;
         }
-        const data = readFileSync(resolvedPath);
+        const data = await readFile(resolvedPath);
         if (data.includes(0)) {
             return undefined;
         }
@@ -54,11 +54,11 @@ export function captureTextFilePreimage(
 }
 
 /** Captures a bounded readable text file before deletion without leaving the working directory. */
-export function captureDeletedTextPreview(
+export async function captureDeletedTextPreview(
     cwd: string,
     filePath: string,
-): DeletedTextPreview | undefined {
-    const preimage = captureTextFilePreimage(cwd, filePath);
+): Promise<DeletedTextPreview | undefined> {
+    const preimage = await captureTextFilePreimage(cwd, filePath);
     if (preimage === undefined) {
         return undefined;
     }

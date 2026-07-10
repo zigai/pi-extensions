@@ -1,8 +1,12 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { CodexRenderTheme } from "../src/rendering/core.ts";
 import {
     renderStreamingEditCallPreview,
+    resolveStreamingEditLineNumber,
     summarizeEditCall,
 } from "../src/rendering/edit-call-rendering.ts";
 
@@ -157,6 +161,7 @@ describe("edit call rendering", () => {
                 argsComplete: false,
                 expanded: false,
                 labelMode: "lifecycle",
+                lineNumberStart: 20,
             },
         );
         const lines = component?.render(100) ?? [];
@@ -167,8 +172,65 @@ describe("edit call rendering", () => {
         expect(rendered).toContain("… +2 lines (to expand)");
         expect(rendered).toContain("new line 30");
         expect(rendered).not.toMatch(/\+new line 1(?:\s|$)/u);
+        expect(rendered).toContain("20 -old line 1");
+        expect(rendered).toContain("49 +new line 30");
         for (const line of lines) {
             expect(visibleWidth(line)).toBeLessThanOrEqual(100);
+        }
+    });
+
+    it("resolves streaming edit line numbers asynchronously from the real file", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-edit-lines-"));
+        try {
+            writeFileSync(path.join(cwd, "example.ts"), "one\ntwo\nthree\nfour\nfive\n");
+            const args = {
+                path: "example.ts",
+                edits: [{ oldText: "three\nfour", newText: "changed" }],
+            };
+            let notify: (() => void) | undefined;
+            const invalidated = new Promise<void>((resolve) => {
+                notify = resolve;
+            });
+
+            expect(
+                resolveStreamingEditLineNumber("edit-line-test", cwd, args, () => notify?.()),
+            ).toBeUndefined();
+            await invalidated;
+            expect(resolveStreamingEditLineNumber("edit-line-test", cwd, args, () => {})).toBe(3);
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
+    it("caches ambiguous streaming edit lookups as unresolved", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-edit-lines-"));
+        try {
+            writeFileSync(path.join(cwd, "example.ts"), "same\nmiddle\nsame\n");
+            const args = {
+                path: "example.ts",
+                edits: [{ oldText: "same", newText: "changed" }],
+            };
+            let invalidations = 0;
+            let notify: (() => void) | undefined;
+            const invalidated = new Promise<void>((resolve) => {
+                notify = resolve;
+            });
+            const invalidate = (): void => {
+                invalidations += 1;
+                notify?.();
+            };
+
+            expect(
+                resolveStreamingEditLineNumber("ambiguous-edit-test", cwd, args, invalidate),
+            ).toBeUndefined();
+            await invalidated;
+            expect(
+                resolveStreamingEditLineNumber("ambiguous-edit-test", cwd, args, invalidate),
+            ).toBeUndefined();
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            expect(invalidations).toBe(1);
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
         }
     });
 });

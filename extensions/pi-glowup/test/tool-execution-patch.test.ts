@@ -312,7 +312,7 @@ describe("tool execution patches", () => {
             .render(80)
             .join("\n");
 
-        expect(active).toContain("Calling custom_tool");
+        expect(active).toBe("");
         expect(completed).toContain("Called custom_tool");
     });
 
@@ -360,7 +360,7 @@ describe("tool execution patches", () => {
                 .call(instance)?.({ patch }, plainTheme, renderContext)
                 .render(100)
                 .join("\n"),
-        ).toContain("Apply Patch README.md (+1 -1)");
+        ).toContain("Patch README.md (+1 -1)");
     });
 
     it("uses explicit Codex-look plugins over native built-in renderers", () => {
@@ -387,7 +387,7 @@ describe("tool execution patches", () => {
                 .call(instance)?.({ patch }, plainTheme, renderContext)
                 .render(100)
                 .join("\n"),
-        ).toContain("Apply Patch src/new.ts (+1)");
+        ).toContain("Patch src/new.ts (+1)");
     });
 
     it("uses passive Codex-look adapters over native third-party renderers", () => {

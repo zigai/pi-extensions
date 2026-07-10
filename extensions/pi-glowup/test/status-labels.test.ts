@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isActiveToolCall, toolStatusLabel } from "../src/rendering/status-labels.ts";
+import {
+    isActiveToolCall,
+    shouldDeferSimpleToolCall,
+    toolStatusLabel,
+} from "../src/rendering/status-labels.ts";
 
 const labels = {
     static: "Explore",
@@ -23,5 +27,11 @@ describe("tool status labels", () => {
         expect(
             toolStatusLabel("lifecycle", { isPartial: false, argsComplete: false }, labels),
         ).toBe("Exploring");
+    });
+
+    it("defers simple calls until arguments are complete", () => {
+        expect(shouldDeferSimpleToolCall({ isPartial: true, argsComplete: false })).toBe(true);
+        expect(shouldDeferSimpleToolCall({ isPartial: false, argsComplete: false })).toBe(true);
+        expect(shouldDeferSimpleToolCall({ isPartial: false, argsComplete: true })).toBe(false);
     });
 });

@@ -24,6 +24,39 @@ export type CodexRenderTheme = {
     readonly bold: (text: string) => string;
 };
 
+export type RenderingAppearance = {
+    readonly addedRowBackground: string | null;
+    readonly deletedRowBackground: string | null;
+    readonly instructionPathColor: string | null;
+};
+
+let renderingAppearance: RenderingAppearance = {
+    addedRowBackground: "#213A2B",
+    deletedRowBackground: null,
+    instructionPathColor: null,
+};
+
+/** Applies user-configured semantic colors used by all renderer families. */
+export function configureRenderingAppearance(appearance: RenderingAppearance): void {
+    renderingAppearance = { ...appearance };
+}
+
+function trueColorOpen(hex: string, background: boolean): string {
+    const [red, green, blue] = ansiStyles.hexToRgb(hex);
+    return background
+        ? ansiStyles.bgColor.ansi16m(red, green, blue)
+        : ansiStyles.color.ansi16m(red, green, blue);
+}
+
+/** Returns a configured semantic diff background ANSI opener when overridden. */
+export function configuredDiffBackgroundAnsi(kind: "insert" | "delete"): string | undefined {
+    const color =
+        kind === "insert"
+            ? renderingAppearance.addedRowBackground
+            : renderingAppearance.deletedRowBackground;
+    return color === null ? undefined : trueColorOpen(color, true);
+}
+
 export type DiffSection = {
     readonly path?: string;
     readonly lines: ReadonlyArray<string>;
@@ -223,6 +256,9 @@ function pathText(theme: CodexRenderTheme, text: string): string {
 }
 
 function instructionPathText(theme: CodexRenderTheme, text: string): string {
+    if (renderingAppearance.instructionPathColor !== null) {
+        return `${trueColorOpen(renderingAppearance.instructionPathColor, false)}${text}${ansiStyles.color.close}`;
+    }
     return fg(theme, "customMessageLabel", text);
 }
 
@@ -455,7 +491,7 @@ function collapsedPreviewLines(
     const tailCount = Math.floor(visibleCount / 2);
     const tailLines = tailCount === 0 ? [] : lines.slice(lines.length - tailCount);
     const omitted = lines.length - headCount - tailLines.length;
-    return [...lines.slice(0, headCount), `… +${omitted} lines (${omittedHint})`, ...tailLines];
+    return [...lines.slice(0, headCount), ...tailLines, `… +${omitted} lines (${omittedHint})`];
 }
 
 type CollapsedTextPreview =
@@ -580,8 +616,8 @@ function collapsedPreviewLinesFromText(
         isEmpty: false,
         lines: [
             ...headLines,
-            `… +${lineCount - headLines.length - tailLines.length} lines (${omittedHint})`,
             ...tailLines,
+            `… +${lineCount - headLines.length - tailLines.length} lines (${omittedHint})`,
         ],
     };
 }
@@ -895,8 +931,8 @@ function renderCollapsedWrappedPreview(
     if (allContent.length <= visibleBudget) {
         return [
             ...before,
-            marker(before.length === 0 ? options.prefixFirst : options.prefixRest),
             ...after,
+            marker(allContent.length === 0 ? options.prefixFirst : options.prefixRest),
         ];
     }
 
@@ -905,20 +941,11 @@ function renderCollapsedWrappedPreview(
         return [...head, marker(head.length === 0 ? options.prefixFirst : options.prefixRest)];
     }
 
-    const headPool = before;
-    const tailPool = metaIndex === -1 ? before : after;
-    let headCount = Math.min(headPool.length, Math.ceil(visibleBudget / 2));
-    let tailCount = Math.min(tailPool.length, visibleBudget - headCount);
-    let remaining = visibleBudget - headCount - tailCount;
-
-    const additionalHead = Math.min(remaining, headPool.length - headCount);
-    headCount += additionalHead;
-    remaining -= additionalHead;
-    tailCount += Math.min(remaining, tailPool.length - tailCount);
-
-    const head = headPool.slice(0, headCount);
-    const tail = tailCount === 0 ? [] : tailPool.slice(tailPool.length - tailCount);
-    return [...head, marker(head.length === 0 ? options.prefixFirst : options.prefixRest), ...tail];
+    const headCount = Math.ceil(visibleBudget / 2);
+    const tailCount = Math.floor(visibleBudget / 2);
+    const head = allContent.slice(0, headCount);
+    const tail = tailCount === 0 ? [] : allContent.slice(allContent.length - tailCount);
+    return [...head, ...tail, marker(options.prefixRest)];
 }
 
 export function renderCodexOutput(
@@ -1730,7 +1757,13 @@ function isLeadingImportLine(language: string, line: string): boolean {
     return false;
 }
 
-function collapsedScriptPreview(invocation: ScriptInvocation): ScriptPreview {
+function collapsedScriptPreview(
+    invocation: ScriptInvocation,
+    maxCodePreviewLines: number,
+): ScriptPreview {
+    if (trimEdgeBlankLines(invocation.code.split("\n")).length <= maxCodePreviewLines) {
+        return { code: invocation.code };
+    }
     let lineStart = 0;
     let previewStart = 0;
     let sawImport = false;
@@ -1772,16 +1805,21 @@ function hasNonWhitespaceText(text: string): boolean {
     return false;
 }
 
-function scriptPreviewForRender(invocation: ScriptInvocation, expanded: boolean): ScriptPreview {
+function scriptPreviewForRender(
+    invocation: ScriptInvocation,
+    expanded: boolean,
+    maxCodePreviewLines: number,
+): ScriptPreview {
     if (expanded) {
         return { code: invocation.code };
     }
-    return collapsedScriptPreview(invocation);
+    return collapsedScriptPreview(invocation, maxCodePreviewLines);
 }
 
 function retainedScriptInvocation(
     invocation: ScriptInvocation,
     expanded: boolean,
+    maxCodePreviewLines: number,
 ): ScriptInvocation {
     if (expanded) {
         return invocation;
@@ -1790,7 +1828,9 @@ function retainedScriptInvocation(
     return {
         label: invocation.label,
         language: invocation.language,
-        code: detachedScriptPreviewCode(collapsedScriptPreview(invocation).code),
+        code: detachedScriptPreviewCode(
+            collapsedScriptPreview(invocation, maxCodePreviewLines).code,
+        ),
     };
 }
 
@@ -1857,16 +1897,16 @@ export function renderScriptCall(
     },
 ): Component {
     const expanded = options.expanded;
-    const retained = retainedScriptInvocation(invocation, expanded);
     const state = options.state;
     const maxCodePreviewLines = options.maxCodePreviewLines ?? 8;
+    const retained = retainedScriptInvocation(invocation, expanded, maxCodePreviewLines);
     const omittedHint = options.omittedHint ?? "truncated";
     const headerLayoutOption = options.headerLayout ?? "auto";
     scheduleScriptPreviewSyntaxLoads(retained, options.invalidate);
 
     return makeComponent((width) => {
         const header = renderScriptHeader(theme, state, retained.label);
-        const preview = scriptPreviewForRender(retained, expanded);
+        const preview = scriptPreviewForRender(retained, expanded, maxCodePreviewLines);
 
         if (preview.code.length === 0) {
             return wrapPrefixedLine("", width, header, "  ");
@@ -2353,7 +2393,7 @@ function renderDiffRow(
     },
 ): string[] {
     const parsed = parseDiffLine(line);
-    const rowWidth = Math.max(1, width - 1);
+    const rowWidth = Math.max(1, width);
     const prefixWidth = visibleWidth(leftPrefix);
     const contentWidth = Math.max(1, rowWidth - prefixWidth);
 
@@ -2420,10 +2460,17 @@ function paintDiffRowBackground(
     rowWidth: number,
     theme: CodexRenderTheme,
 ): string {
-    if (theme.bg === undefined || kind === "context") {
+    if (kind === "context") {
         return row;
     }
     const padding = " ".repeat(Math.max(0, rowWidth - visibleWidth(row)));
+    const configuredBackground = configuredDiffBackgroundAnsi(kind);
+    if (configuredBackground !== undefined) {
+        return `${configuredBackground}${row}${padding}${ansiStyles.bgColor.close}`;
+    }
+    if (theme.bg === undefined) {
+        return row;
+    }
     return theme.bg(kind === "insert" ? "toolSuccessBg" : "toolErrorBg", `${row}${padding}`);
 }
 
@@ -2534,6 +2581,14 @@ export function selectSemanticDiffIndices(
         return kinds.map((_kind, index) => index);
     }
 
+    const contentIndices = kinds
+        .map((kind, index) => ({ kind, index }))
+        .filter((entry) => entry.kind !== "meta")
+        .map((entry) => entry.index);
+    if (contentIndices.length <= lineBudget) {
+        return contentIndices;
+    }
+
     const changed = kinds
         .map((kind, index) => ({ kind, index }))
         .filter((entry) => entry.kind === "insert" || entry.kind === "delete")
@@ -2542,10 +2597,8 @@ export function selectSemanticDiffIndices(
         const headCount = Math.ceil(lineBudget / 2);
         const tailCount = Math.floor(lineBudget / 2);
         return [
-            ...kinds.slice(0, headCount).map((_kind, index) => index),
-            ...kinds
-                .slice(kinds.length - tailCount)
-                .map((_kind, index) => kinds.length - tailCount + index),
+            ...contentIndices.slice(0, headCount),
+            ...contentIndices.slice(contentIndices.length - tailCount),
         ];
     }
 
@@ -2564,7 +2617,12 @@ export function selectSemanticDiffIndices(
     const lastChange = changed.at(-1) ?? firstChange;
     while (selected.size < lineBudget && distance <= kinds.length) {
         for (const index of [firstChange - distance, lastChange + distance]) {
-            if (index >= 0 && index < kinds.length && !selected.has(index)) {
+            if (
+                index >= 0 &&
+                index < kinds.length &&
+                kinds[index] !== "meta" &&
+                !selected.has(index)
+            ) {
                 selected.add(index);
                 if (selected.size >= lineBudget) {
                     break;
@@ -2608,7 +2666,10 @@ export function renderCodexDiff(
             (count, section) => count + section.lines.length,
             0,
         );
-        const collapsedLineBudget = Math.max(1, Math.floor(options.collapsedLineBudget ?? 18));
+        const collapsedLineBudget = Math.max(
+            1,
+            Math.floor(options.collapsedLineBudget ?? MUTATION_DIFF_PREVIEW_ROWS),
+        );
         const shouldCollapse = !expanded && allDiffLineCount > collapsedLineBudget;
         const collapsedIndices = shouldCollapse
             ? collapsedDiffLineIndices(sections, collapsedLineBudget)
@@ -2648,8 +2709,17 @@ export function renderCodexDiff(
                 rendered.push("");
             }
             if (sections.length > 1) {
-                const stats = `(${green(theme, `+${section.added}`)} ${red(theme, `-${section.removed}`)})`;
-                const header = `${dim(theme, "  └ ")}${pathText(theme, collapseHome(section.path ?? "file"))} ${stats}`;
+                const stats = formatMutationStats(
+                    theme,
+                    {
+                        label: "",
+                        path: "",
+                        added: section.added,
+                        removed: section.removed,
+                    },
+                    undefined,
+                );
+                const header = `${dim(theme, "  └ ")}${pathText(theme, collapseHome(section.path ?? "file"))}${stats.length === 0 ? "" : ` ${stats}`}`;
                 rendered.push(...wrapPrefixedLine(header, width, "", "    "));
             }
             renderedSection = true;

@@ -16,6 +16,11 @@ export function isActiveToolCall(context: ToolLifecycleContext): boolean {
     return context.isPartial || context.argsComplete === false;
 }
 
+/** Defers compact one-shot calls until their argument object is complete. */
+export function shouldDeferSimpleToolCall(context: ToolLifecycleContext): boolean {
+    return isActiveToolCall(context);
+}
+
 /** Selects a stable label or the active/completed lifecycle form. */
 export function toolStatusLabel(
     mode: ToolLabelMode,

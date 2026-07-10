@@ -19,6 +19,7 @@ export type ToolNameMatcher = string | RegExp | ((toolName: string) => boolean);
 export type ThirdPartyToolRenderContext = CodexLookRenderContext & {
     readonly lastComponent?: Component | undefined;
     readonly cwd?: string;
+    readonly invalidate?: () => void;
 };
 
 /** Minimal result shape consumed by Codex-look third-party renderers. */
