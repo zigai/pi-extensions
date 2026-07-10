@@ -175,6 +175,7 @@ export type RemoteCompactionRequestParts = {
     readonly fast: boolean;
     readonly reasoning?: RemoteCompactionReasoning | undefined;
     readonly tools?: readonly ResponsesTool[] | undefined;
+    readonly clientMetadata?: Readonly<Record<string, string>> | undefined;
 };
 
 export type RemoteCompactionPreflightResult = {

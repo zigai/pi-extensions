@@ -53,10 +53,12 @@ test("creates native compaction using remote compaction v2", async () => {
     let requestUrl = "";
     let requestBody: unknown;
     let requestAccountId: string | null = null;
+    let requestHeaders = new Headers();
     const runtime = makeTestRuntime(async (input, init) => {
         requestUrl = String(input);
         requestBody = JSON.parse(String(init?.body)) as unknown;
-        requestAccountId = new Headers(init?.headers).get("ChatGPT-Account-ID");
+        requestHeaders = new Headers(init?.headers);
+        requestAccountId = requestHeaders.get("ChatGPT-Account-ID");
         const body = [
             "event: response.output_item.done",
             'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed"}}',
@@ -81,6 +83,24 @@ test("creates native compaction using remote compaction v2", async () => {
 
     assert.equal(requestUrl, "https://chatgpt.com/backend-api/codex/responses");
     assert.equal(requestAccountId, "account");
+    assert.equal(requestHeaders.get("x-codex-beta-features"), "remote_compaction_v2");
+    assert.equal(requestHeaders.get("x-codex-window-id"), "pi_codex_window_session-1");
+    assert.equal(requestHeaders.get("session-id"), "session-1");
+    assert.equal(requestHeaders.get("thread-id"), "session-1");
+    assert.deepEqual(JSON.parse(requestHeaders.get("x-codex-turn-metadata") ?? "null"), {
+        installation_id: "session-1",
+        session_id: "session-1",
+        thread_id: "session-1",
+        window_id: "pi_codex_window_session-1",
+        request_kind: "compaction",
+        compaction: {
+            trigger: "manual",
+            reason: "user_requested",
+            implementation: "responses_compaction_v2",
+            phase: "standalone_turn",
+            strategy: "memento",
+        },
+    });
     assert.ok(isRecord(requestBody));
     assert.equal(requestBody.model, "gpt-5.5");
     assert.deepEqual((requestBody.input as unknown[]).at(-1), {
@@ -99,6 +119,12 @@ test("creates native compaction using remote compaction v2", async () => {
             strict: null,
         },
     ]);
+    assert.ok(isRecord(requestBody.client_metadata));
+    assert.equal(requestBody.client_metadata["x-codex-window-id"], "pi_codex_window_session-1");
+    assert.equal(
+        requestBody.client_metadata["x-codex-turn-metadata"],
+        requestHeaders.get("x-codex-turn-metadata"),
+    );
     assert.equal(result?.compaction?.details.strategy, "pi-codex-core-remote-compaction-v2");
     assert.equal(result?.compaction?.details.model, "gpt-5.5");
     assert.deepEqual(result?.compaction?.details.compactedWindow, [
@@ -120,9 +146,12 @@ test("creates native compaction using remote compaction v2", async () => {
 test("creates GPT-5.6 native compaction with Responses Lite", async () => {
     let requestBody: unknown;
     let responsesLiteHeader: string | null = null;
+    let turnMetadataHeader: string | null = null;
     const runtime = makeTestRuntime(async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as unknown;
-        responsesLiteHeader = new Headers(init?.headers).get(CODEX_RESPONSES_LITE_HEADER);
+        const headers = new Headers(init?.headers);
+        responsesLiteHeader = headers.get(CODEX_RESPONSES_LITE_HEADER);
+        turnMetadataHeader = headers.get("x-codex-turn-metadata");
         return new Response(
             [
                 "event: response.output_item.done",
@@ -137,7 +166,7 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
     });
 
     const result = await handleCodexNativeCompaction(
-        makeBeforeCompactEvent(),
+        makeBeforeCompactEvent({ reason: "overflow" }),
         makeNativeCompactionContext({ modelId: "gpt-5.6-sol", contextWindow: 272_000 }),
         {
             ...DEFAULT_CODEX_CORE_CONFIG,
@@ -152,14 +181,23 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
     );
 
     assert.equal(responsesLiteHeader, "true");
+    const turnMetadata: unknown = JSON.parse(turnMetadataHeader ?? "null");
+    assert.ok(isRecord(turnMetadata));
+    assert.deepEqual(turnMetadata.compaction, {
+        trigger: "auto",
+        reason: "context_limit",
+        implementation: "responses_compaction_v2",
+        phase: "standalone_turn",
+        strategy: "memento",
+    });
     assert.ok(isRecord(requestBody));
     assert.equal(Object.hasOwn(requestBody, "instructions"), false);
     assert.equal(Object.hasOwn(requestBody, "tools"), false);
     assert.equal(requestBody.parallel_tool_calls, false);
     assert.deepEqual(requestBody.reasoning, { effort: "low", context: "all_turns" });
-    assert.deepEqual(requestBody.client_metadata, {
-        [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
-    });
+    assert.ok(isRecord(requestBody.client_metadata));
+    assert.equal(requestBody.client_metadata[CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY], "true");
+    assert.equal(requestBody.client_metadata["x-codex-window-id"], "pi_codex_window_session-1");
     const input = responseInput(requestBody);
     assert.deepEqual(input[0], {
         type: "additional_tools",
@@ -185,6 +223,48 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
     });
     assert.deepEqual(input.at(-1), { type: "compaction_trigger" });
     assert.equal(result?.compaction?.details.model, "gpt-5.6-sol");
+});
+
+test("reports bounded redacted remote compaction HTTP error details", async () => {
+    const runtime = makeTestRuntime(
+        async () =>
+            new Response(
+                JSON.stringify({
+                    error: {
+                        type: "invalid_request_error",
+                        code: "missing_beta",
+                        message: "Requires remote_compaction_v2; Bearer secret-token must not leak",
+                    },
+                }),
+                {
+                    status: 400,
+                    headers: { "x-request-id": "request-123" },
+                },
+            ),
+    );
+    const request = buildRemoteCompactionV2Request({
+        model: "gpt-5.6-sol",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+
+    const result = await executeRemoteCompactionV2(
+        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        request,
+        new AbortController().signal,
+        runtime,
+    );
+
+    assert.ok(result.isErr());
+    assert.match(result.error.message, /type=invalid_request_error/);
+    assert.match(result.error.message, /code=missing_beta/);
+    assert.match(result.error.message, /Requires remote_compaction_v2/);
+    assert.match(result.error.message, /Bearer \[redacted\]/);
+    assert.match(result.error.message, /request_id=request-123/);
+    assert.doesNotMatch(result.error.message, /secret-token/);
 });
 
 test("streams remote compaction SSE without buffering response text", async () => {
@@ -1313,7 +1393,7 @@ function makeBeforeCompactEvent(
             },
             settings: { enabled: true, reserveTokens: 10_000, keepRecentTokens: 20_000 },
         },
-        reason: "manual",
+        reason: options.reason ?? "manual",
         willRetry: false,
         signal: new AbortController().signal,
     };

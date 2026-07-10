@@ -44,6 +44,7 @@ export function buildRemoteCompactionV2Request(input: {
     readonly fast: boolean;
     readonly reasoning?: RemoteCompactionReasoning | undefined;
     readonly tools?: readonly ResponsesTool[] | undefined;
+    readonly clientMetadata?: Readonly<Record<string, string>> | undefined;
 }): RemoteCompactionV2Request {
     const profile = codexModelRequestProfile(input.model);
     const serviceTier =
@@ -82,6 +83,7 @@ export function buildRemoteCompactionV2Request(input: {
             ...serviceTier,
             ...(input.reasoning ? { reasoning: input.reasoning } : {}),
             client_metadata: {
+                ...input.clientMetadata,
                 [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
             },
         };
@@ -100,6 +102,7 @@ export function buildRemoteCompactionV2Request(input: {
         ...serviceTier,
         ...(input.reasoning ? { reasoning: input.reasoning } : {}),
         ...(input.tools && input.tools.length > 0 ? { tools: input.tools } : {}),
+        ...(input.clientMetadata ? { client_metadata: input.clientMetadata } : {}),
     };
 }
 

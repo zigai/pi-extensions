@@ -44,6 +44,10 @@ import {
     stashPendingNativeWindow,
 } from "./replay-window.ts";
 import { shutdownCodexTokenizer } from "./tokenizer.ts";
+import {
+    applyRemoteCompactionTransportHeaders,
+    buildRemoteCompactionTransportMetadata,
+} from "./transport-metadata.ts";
 import type {
     NativeCompactionDetails,
     NativeCompactionMatch,
@@ -97,6 +101,12 @@ export async function handleCodexNativeCompaction(
     const requestProfile = codexModelRequestProfile(compactionModel);
     const contextWindow = requestProfile?.effectiveContextWindow ?? targetModel?.contextWindow;
     const latestNativeCompaction = findLatestNativeCompactionEntry(event.branchEntries, match);
+    const sessionId = ctx.sessionManager.getSessionId();
+    const transportMetadata = buildRemoteCompactionTransportMetadata({
+        sessionId,
+        windowId: latestNativeCompaction?.entry.details.windowId ?? `pi_codex_window_${sessionId}`,
+        reason: event.reason,
+    });
     let promptInput = buildRemoteCompactionPromptInput(event, targetModel, latestNativeCompaction);
     if (promptInput.input.length === 0) return undefined;
     const instructions = buildCompactionInstructions(
@@ -104,7 +114,7 @@ export async function handleCodexNativeCompaction(
         event.customInstructions,
     );
     const tools = buildCompactionTools(pi);
-    const promptCacheKey = safePromptCacheKey(ctx.sessionManager.getSessionId());
+    const promptCacheKey = safePromptCacheKey(sessionId);
     const reasoning = buildReasoning(config, compactionModel).reasoning;
     let tokenCache = createTokenEstimateCache();
     const preflight = await rewriteRemoteCompactionToolOutputsForContextWindow(
@@ -117,6 +127,7 @@ export async function handleCodexNativeCompaction(
             fast: config.openai.fast,
             reasoning,
             tools,
+            clientMetadata: transportMetadata.clientMetadata,
         },
         contextWindow,
         tokenCache,
@@ -132,6 +143,7 @@ export async function handleCodexNativeCompaction(
         fast: config.openai.fast,
         reasoning,
         tools,
+        clientMetadata: transportMetadata.clientMetadata,
     });
     const shrink = await shrinkRemoteCompactionRequestForContextWindow(
         request,
@@ -157,6 +169,7 @@ export async function handleCodexNativeCompaction(
         if (requestProfile?.useResponsesLite) {
             headers.set(CODEX_RESPONSES_LITE_HEADER, "true");
         }
+        applyRemoteCompactionTransportHeaders(headers, transportMetadata);
         const responseResult = await executeRemoteCompactionV2(
             { responsesUrl: runtime.value.responsesUrl, headers },
             shrink.request,
