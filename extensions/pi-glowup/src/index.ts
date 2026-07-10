@@ -29,6 +29,7 @@ import {
     formatLsAction,
     formatPathTarget,
     formatReadAction,
+    makeComponent,
     parseDiffSections,
     parseScriptInvocation,
     renderCodexCall,
@@ -37,6 +38,7 @@ import {
     renderCodexOutput,
     renderMutationCall,
     renderScriptCall,
+    MUTATION_DIFF_PREVIEW_ROWS,
     type CodexRenderTheme,
     type FindActionArgs,
     type GrepActionArgs,
@@ -45,13 +47,17 @@ import {
     type ReadActionArgs,
     type ScriptPreviewHeaderLayout,
 } from "./rendering/core.ts";
+import { captureDeletedTextPreview, type DeletedTextPreview } from "./rendering/delete-preview.ts";
 import {
     isActiveToolCall,
     toolStatusLabel,
     type ToolLabelMode,
 } from "./rendering/status-labels.ts";
 import { buildEditPreview, EditPreviewStore } from "./rendering/edit-preview.ts";
-import { summarizeEditCall } from "./rendering/edit-call-rendering.ts";
+import {
+    renderStreamingEditCallPreview,
+    summarizeEditCall,
+} from "./rendering/edit-call-rendering.ts";
 import { buildLargeDiffSummaryPayload } from "./diffs/diff.ts";
 import {
     clearQueuedDiffHighlights,
@@ -344,7 +350,7 @@ function markMutationResultRendered(context: BuiltInRenderContext): void {
 
     if (state[MUTATION_RESULT_RENDERED_KEY] !== true) {
         state[MUTATION_RESULT_RENDERED_KEY] = true;
-        context.invalidate();
+        queueMicrotask(context.invalidate);
     }
 }
 
@@ -623,6 +629,13 @@ function renderBuiltInToolResult(settings: {
             case "edit":
                 return renderEditResult(result, options, theme, context);
             case "delete":
+                return context.isError
+                    ? renderCodexOutput(theme, textOutput(result), {
+                          expanded: options.expanded,
+                          mode: "head",
+                          maxPreviewLines: 5,
+                      })
+                    : emptyComponent();
             case "webSearch":
                 return renderCodexOutput(theme, textOutput(result), {
                     expanded: options.expanded,
@@ -641,6 +654,31 @@ function callState(context: BuiltInRenderContext) {
           : "success";
 }
 
+const nativeDeletePreviews = new Map<string, DeletedTextPreview>();
+
+function nativeDeletePreview(
+    toolCallId: string,
+    cwd: string,
+    filePath: string | undefined,
+): DeletedTextPreview | undefined {
+    const existing = nativeDeletePreviews.get(toolCallId);
+    if (existing !== undefined || filePath === undefined || filePath.length === 0) {
+        return existing;
+    }
+    const preview = captureDeletedTextPreview(cwd, filePath);
+    if (preview !== undefined) {
+        nativeDeletePreviews.set(toolCallId, preview);
+        while (nativeDeletePreviews.size > 300) {
+            const oldest = nativeDeletePreviews.keys().next().value;
+            if (typeof oldest !== "string") {
+                break;
+            }
+            nativeDeletePreviews.delete(oldest);
+        }
+    }
+    return preview;
+}
+
 function renderDeleteCall(
     args: unknown,
     theme: BuiltInRenderTheme,
@@ -648,15 +686,25 @@ function renderDeleteCall(
     labelMode: ToolLabelMode,
 ) {
     registerExplorationBoundary(context.toolCallId);
-    return renderCodexCall(theme, {
+    const filePath = pathField(args);
+    const preview = nativeDeletePreview(context.toolCallId, context.cwd, filePath);
+    const header = renderCodexCall(theme, {
         state: callState(context),
         statusText: toolStatusLabel(labelMode, context, {
             static: "Delete",
             active: "Deleting",
             completed: "Deleted",
         }),
-        body: formatPathTarget(theme, pathField(args)),
+        body: `${formatPathTarget(theme, filePath)}${preview === undefined || preview.removed === 0 ? "" : ` (${theme.fg("toolDiffRemoved", `-${preview.removed}`)})`}`,
     });
+    if (preview === undefined || preview.section.lines.length === 0) {
+        return header;
+    }
+    const body = renderCodexDiff(theme, [preview.section], context.expanded, {
+        collapsedLineBudget: MUTATION_DIFF_PREVIEW_ROWS,
+        maxWrappedRows: 1,
+    });
+    return makeComponent((width) => [...header.render(width), ...body.render(width)]);
 }
 
 function renderWebSearchCall(
@@ -825,11 +873,23 @@ function renderEditCall(
             {
                 ...(labelColumnWidth === undefined ? {} : { labelColumnWidth }),
                 ...(statDigitWidth === undefined ? {} : { statDigitWidth }),
+                state: "success",
             },
         );
     }
 
-    const summary = summarizeEditCall(normalizedEditArgs(args), {
+    const normalizedArgs = normalizedEditArgs(args);
+    if (isActiveToolCall(context)) {
+        const streamingPreview = renderStreamingEditCallPreview(normalizedArgs, theme, {
+            ...context,
+            labelMode,
+        });
+        if (streamingPreview !== undefined) {
+            return streamingPreview;
+        }
+    }
+
+    const summary = summarizeEditCall(normalizedArgs, {
         ...context,
         labelMode,
     });
@@ -877,11 +937,11 @@ function renderEditResult(
         if (summaryPayload !== undefined) {
             return renderPierreDiff(summaryPayload, theme, { expanded: options.expanded }, context);
         }
-        return renderCodexDiff(
-            theme,
-            parseDiffSections(result.details.diff, path),
-            options.expanded,
-        );
+        const sections = parseDiffSections(result.details.diff, path);
+        return renderCodexDiff(theme, sections, options.expanded, {
+            collapsedLineBudget: MUTATION_DIFF_PREVIEW_ROWS,
+            maxWrappedRows: 1,
+        });
     }
     return renderCodexOutput(theme, textOutput(result), {
         expanded: options.expanded,
@@ -914,6 +974,7 @@ function errorMessage(cause: unknown): string {
 }
 
 function clearSessionState(): void {
+    nativeDeletePreviews.clear();
     editPreviews.clear();
     scriptPreviews.clear();
     explorationGroups.clear();

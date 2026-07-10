@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const SYNTAX_THEME_NAME = "pi-codex-look-darker-modern";
+export const SYNTAX_THEME_APPEARANCE = "dark" as const;
 
 const BUNDLED_THEME_DIRECTORY = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),

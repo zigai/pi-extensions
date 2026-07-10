@@ -1,5 +1,22 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { summarizeEditCall } from "../src/rendering/edit-call-rendering.ts";
+import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import {
+    renderStreamingEditCallPreview,
+    summarizeEditCall,
+} from "../src/rendering/edit-call-rendering.ts";
+
+const plainTheme: CodexRenderTheme = {
+    fg(_token: string, text: string): string {
+        return text;
+    },
+    bg(_token: string, text: string): string {
+        return text;
+    },
+    bold(text: string): string {
+        return text;
+    },
+};
 
 describe("edit call rendering", () => {
     it("counts only structurally valid edit entries", () => {
@@ -41,6 +58,25 @@ describe("edit call rendering", () => {
     it("uses the active edit label in lifecycle mode", () => {
         const summary = summarizeEditCall(
             { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
+            {
+                isError: false,
+                isPartial: true,
+                argsComplete: false,
+                labelMode: "lifecycle",
+            },
+        );
+
+        expect(summary).toEqual({
+            statusText: "Editing",
+            path: "src/rendering.ts",
+            suffix: "",
+            hasInvalidEdits: false,
+        });
+    });
+
+    it("treats an unfinished edit entry as pending while arguments stream", () => {
+        const summary = summarizeEditCall(
+            { path: "src/rendering.ts", edits: [{ oldText: "old" }] },
             {
                 isError: false,
                 isPartial: true,
@@ -103,5 +139,36 @@ describe("edit call rendering", () => {
             suffix: " (2 edits)",
             hasInvalidEdits: false,
         });
+    });
+
+    it("shows the latest replacement lines while edit arguments stream", () => {
+        const oldText = Array.from({ length: 10 }, (_value, index) => `old line ${index + 1}`).join(
+            "\n",
+        );
+        const newText = Array.from({ length: 30 }, (_value, index) => `new line ${index + 1}`).join(
+            "\n",
+        );
+        const component = renderStreamingEditCallPreview(
+            { path: "src/rendering.ts", edits: [{ oldText, newText }] },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: true,
+                argsComplete: false,
+                expanded: false,
+                labelMode: "lifecycle",
+            },
+        );
+        const lines = component?.render(100) ?? [];
+        const rendered = lines.join("\n");
+
+        expect(rendered).toContain("• Editing src/rendering.ts");
+        expect(rendered).toContain("old line 1");
+        expect(rendered).toContain("… +2 lines (to expand)");
+        expect(rendered).toContain("new line 30");
+        expect(rendered).not.toMatch(/\+new line 1(?:\s|$)/u);
+        for (const line of lines) {
+            expect(visibleWidth(line)).toBeLessThanOrEqual(100);
+        }
     });
 });

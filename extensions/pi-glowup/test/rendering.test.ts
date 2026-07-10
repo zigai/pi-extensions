@@ -1,6 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import {
+    collapseHome,
     formatGrepAction,
     formatReadAction,
     highlightShell,
@@ -188,11 +189,41 @@ describe("Codex rendering helpers", () => {
         const summary = { label: "Wrote", path: "src/example.ts", added: 1, removed: 0 };
 
         expect(renderMutationCall(plainTheme, summary).render(80)[0]).toContain(
-            "Wrote src/example.ts (+1 -0)",
+            "Wrote src/example.ts (+1)",
         );
         expect(
             renderMutationCall(plainTheme, summary, { labelColumnWidth: 7 }).render(80)[0],
-        ).toContain("Wrote   src/example.ts (+1 -0)");
+        ).toContain("Wrote   src/example.ts (+1)");
+    });
+
+    it("renders mutation state and aligned statistics", () => {
+        const styledTheme: CodexRenderTheme = {
+            ...tokenTheme,
+            bold(text: string): string {
+                return `<bold>${text}</bold>`;
+            },
+        };
+        const rendered = renderMutationCall(
+            styledTheme,
+            { label: "Wrote", path: "file.ts", added: 3, removed: 12 },
+            { state: "success", statDigitWidth: 2 },
+        ).render(300)[0];
+
+        expect(rendered).toContain("<success><bold>•</bold></success>");
+        expect(rendered).toContain("+ 3");
+        expect(rendered).toContain("-12");
+    });
+
+    it("collapses home paths only at a path boundary", () => {
+        const previousHome = process.env.HOME;
+        process.env.HOME = "/home/user";
+        try {
+            expect(collapseHome("/home/user/file.ts")).toBe("~/file.ts");
+            expect(collapseHome("/home/user2/file.ts")).toBe("/home/user2/file.ts");
+        } finally {
+            if (previousHome === undefined) delete process.env.HOME;
+            else process.env.HOME = previousHome;
+        }
     });
 
     it("marks collapsed call previews as truncated instead of expandable", () => {
@@ -947,20 +978,70 @@ describe("Codex rendering helpers", () => {
         expect(sections[0]?.lines).toEqual(["+10 first", "   ...", "+90 second"]);
     });
 
-    it("fills fallback diff added blank lines with the insertion background", () => {
+    it("fills fallback changed rows without creating extra blank rows", () => {
         const sections = parseDiffSections(
             "+1 from pathlib import Path\n+2 \n+3 def greet():",
             "file.py",
         );
         const lines = renderCodexDiff(plainTheme, sections, false).render(80);
         const blankAddition = lines.find((line) => line.trimEnd() === "    2 +");
+        const contentAddition = lines.find((line) => line.includes("from pathlib import Path"));
 
         expect(blankAddition).toBeDefined();
         expect(visibleWidth(blankAddition ?? "")).toBe(79);
+        expect(visibleWidth(contentAddition ?? "")).toBe(79);
         expect(lines).not.toContain("");
         expect(lines[lines.findIndex((line) => line.trimEnd() === "    2 +") + 1]?.trimEnd()).toBe(
             "    3 +def greet():",
         );
+    });
+
+    it("paints insertion and deletion rows without painting context", () => {
+        const backgroundTheme: CodexRenderTheme = {
+            ...plainTheme,
+            bg(token, text) {
+                return `${token === "toolSuccessBg" ? "\u001b[42m" : "\u001b[41m"}${text}\u001b[49m`;
+            },
+        };
+        const sections = [
+            {
+                path: "file.ts",
+                lines: ["-1 old", " 1 unchanged", "+2 new"],
+                added: 1,
+                removed: 1,
+            },
+        ];
+        const rendered = renderCodexDiff(backgroundTheme, sections, true).render(80).join("\n");
+
+        expect(rendered).toContain("\u001b[42m    2 +new");
+        expect(rendered).toContain("\u001b[41m    1 -old");
+        expect(rendered).toContain("    1  unchanged");
+        expect(rendered).not.toContain("\u001b[42m    1  unchanged");
+        expect(rendered).not.toContain("\u001b[41m    1  unchanged");
+        expect(
+            renderCodexDiff(backgroundTheme, sections, true)
+                .render(80)
+                .filter((line) => line.includes("\u001b[4"))
+                .every((line) => visibleWidth(line) === 79),
+        ).toBe(true);
+    });
+
+    it("renders partial diff omission metadata without a code gutter", () => {
+        const lines = renderCodexDiff(
+            plainTheme,
+            [
+                {
+                    path: "file.ts",
+                    lines: ["  … +12 earlier patch lines", "+13 export const value = 13;"],
+                    added: 13,
+                    removed: 0,
+                },
+            ],
+            true,
+        ).render(100);
+
+        expect(lines[0]).toBe("    … +12 earlier patch lines");
+        expect(lines[1]).toContain("13 +export const value = 13;");
     });
 
     it("dims fallback diff line numbers for inserted and deleted rows", () => {
@@ -995,6 +1076,26 @@ describe("Codex rendering helpers", () => {
         expect(lines.every((line) => visibleWidth(line) < width)).toBe(true);
     });
 
+    it("preserves every character when diff content wraps", () => {
+        const content = "abcdefghijklmnopqrstuvwxyz".repeat(4);
+        const lines = renderCodexDiff(
+            plainTheme,
+            [{ lines: [`+1 ${content}`], added: 1, removed: 0 }],
+            true,
+        ).render(20);
+        const reconstructed = lines
+            .map((line, index) => {
+                if (index === 0) {
+                    return line.slice(line.indexOf("+") + 1);
+                }
+                return line.trim();
+            })
+            .join("");
+
+        expect(reconstructed).toBe(content);
+        expect(lines.every((line) => visibleWidth(line) < 20)).toBe(true);
+    });
+
     it("caps wrapped diff rows in collapsed previews", () => {
         const sections = parseDiffSections(
             `-1 ${"x".repeat(1_000)}\n+1 ${"y".repeat(1_000)}`,
@@ -1007,5 +1108,48 @@ describe("Codex rendering helpers", () => {
         expect(lines.length).toBeLessThanOrEqual(8);
         expectLinesWithinWidth(lines, 20);
         expect(lines.every((line) => visibleWidth(line) < 20)).toBe(true);
+    });
+
+    it("keeps the head and tail of collapsed diffs with an expansion hint", () => {
+        const sections = parseDiffSections(
+            Array.from(
+                { length: 40 },
+                (_value, index) => `+${index + 1} added line ${index + 1}`,
+            ).join("\n"),
+            "file.ts",
+        );
+        const rendered = renderCodexDiff(plainTheme, sections, false).render(120).join("\n");
+
+        expect(rendered).toContain("added line 1");
+        expect(rendered).toContain("added line 40");
+        expect(rendered).not.toContain("added line 20");
+        expect(rendered).toContain("… +22 lines (to expand)");
+    });
+
+    it("prioritizes changed rows when context dominates a collapsed diff", () => {
+        const section = {
+            path: "file.ts",
+            lines: [
+                " 1 context one",
+                " 2 context two",
+                " 3 context three",
+                "-4 old value",
+                "+4 new value",
+                " 5 context four",
+                " 6 context five",
+                " 7 context six",
+            ],
+            added: 1,
+            removed: 1,
+        };
+        const rendered = renderCodexDiff(plainTheme, [section], false, {
+            collapsedLineBudget: 4,
+        })
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("-old value");
+        expect(rendered).toContain("+new value");
+        expect(rendered).toContain("to expand");
     });
 });

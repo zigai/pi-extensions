@@ -40,7 +40,7 @@ describe("write rendering", () => {
 
         const rendered = component.render(100).join("\n");
 
-        expect(rendered).toContain("Write src/example.ts (+1 -0)");
+        expect(rendered).toContain("Write src/example.ts (+1)");
         expect(rendered).toContain("export const value = 1;");
     });
 
@@ -51,10 +51,29 @@ describe("write rendering", () => {
             { isError: false, isPartial: false, expanded: false, labelMode: "lifecycle" },
         );
 
-        expect(component.render(100).join("\n")).toContain("Wrote src/example.ts (+1 -0)");
+        expect(component.render(100).join("\n")).toContain("Wrote src/example.ts (+1)");
     });
 
-    it("dims write preview guide prefixes", () => {
+    it("uses addition backgrounds for written content", () => {
+        const backgroundTheme: CodexRenderTheme = {
+            ...plainTheme,
+            bg(token, text) {
+                return `<${token}>${text}</${token}>`;
+            },
+        };
+        const rendered = renderWriteCallPreview(
+            { path: "src/example.ts", content: "export const value = 1;\n" },
+            backgroundTheme,
+            { isError: false, isPartial: false, expanded: false },
+        )
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("<toolSuccessBg>");
+        expect(rendered).not.toContain("<toolErrorBg>");
+    });
+
+    it("renders write previews as numbered addition rows", () => {
         const completed = renderWriteCallPreview(
             { path: "src/example.ts", content: "export const value = 1;\n" },
             dimMarkerTheme,
@@ -66,8 +85,8 @@ describe("write rendering", () => {
             { isError: false, isPartial: true, expanded: false },
         );
 
-        expect(completed.render(140).join("\n")).toContain("<dim>  │ </dim>");
-        expect(streaming.render(140).join("\n")).toContain("<dim>  │ </dim>");
+        expect(completed.render(140).join("\n")).toContain("<dim>1 </dim>+");
+        expect(streaming.render(140).join("\n")).toContain("<dim>1 </dim>+");
     });
 
     it("renders streaming write content with a moving tail viewport", () => {
@@ -91,13 +110,12 @@ describe("write rendering", () => {
 
         const rendered = lastComponent?.render(120).join("\n") ?? "";
 
-        expect(rendered).toContain("Writing src/generated.ts (+200 -0)");
+        expect(rendered).toMatch(/Writing src\/generated\.ts \(\+200\)/u);
         expect(rendered).not.toContain("export const value1 = 1;");
         expect(rendered).not.toContain("export const value3 = 3;");
-        expect(rendered).toContain("export const value182 = 182;");
-        expect(rendered).toContain("export const value185 = 185;");
+        expect(rendered).toContain("export const value195 = 195;");
         expect(rendered).toContain("export const value200 = 200;");
-        expect(rendered).toContain("… +181 lines (to expand)");
+        expect(rendered).toContain("… +194 lines (to expand)");
         expect(rendered).not.toContain("export const value19 = 19;");
         expect(rendered).not.toContain("export const value100 = 100;");
     });
@@ -125,12 +143,52 @@ describe("write rendering", () => {
         const rendered = lastComponent?.render(120).join("\n") ?? "";
 
         expect(rendered).toContain("export const value1 = 1;");
-        expect(rendered).toContain("export const value19 = 19;");
-        expect(rendered).toContain("… +181 lines (to expand)");
-        expect(rendered).not.toContain("export const value185 = 185;");
+        expect(rendered).toContain("export const value6 = 6;");
+        expect(rendered).toContain("… +194 lines (to expand)");
+        expect(rendered).not.toContain("export const value7 = 7;");
     });
 
-    it("keeps streaming mutation counter spacing compact", () => {
+    it("reveals the full streaming write when expanded", () => {
+        const content = Array.from(
+            { length: 40 },
+            (_value, index) => `export const value${index + 1} = ${index + 1};`,
+        ).join("\n");
+        const component = renderWriteCallPreview(
+            { path: "src/generated.ts", content },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: true,
+                expanded: true,
+                labelMode: "lifecycle",
+            },
+        );
+        const rendered = component.render(120).join("\n");
+
+        expect(rendered).toContain("export const value1 = 1;");
+        expect(rendered).toContain("export const value40 = 40;");
+        expect(rendered).not.toContain("to expand");
+    });
+
+    it("keeps both ends of a completed collapsed write", () => {
+        const content = Array.from(
+            { length: 40 },
+            (_value, index) => `export const value${index + 1} = ${index + 1};`,
+        ).join("\n");
+        const component = renderWriteCallPreview(
+            { path: "src/generated.ts", content },
+            plainTheme,
+            { isError: false, isPartial: false, expanded: false, labelMode: "lifecycle" },
+        );
+        const rendered = component.render(120).join("\n");
+
+        expect(rendered).toContain("export const value1 = 1;");
+        expect(rendered).toContain("export const value40 = 40;");
+        expect(rendered).not.toContain("export const value20 = 20;");
+        expect(rendered).toContain("lines (to expand)");
+    });
+
+    it("keeps streaming mutation counters aligned", () => {
         const singleDigit = renderWriteCallPreview(
             { path: "src/generated.ts", content: "one\n" },
             plainTheme,
@@ -157,8 +215,8 @@ describe("write rendering", () => {
             },
         );
 
-        expect(singleDigit.render(120).join("\n")).toContain("(+1 -0)");
-        expect(tripleDigit.render(120).join("\n")).toContain("(+100 -0)");
+        expect(singleDigit.render(120).join("\n")).toContain("(+  1)");
+        expect(tripleDigit.render(120).join("\n")).toContain("(+100)");
     });
 
     it("does not double-count split CRLF line endings while streaming", () => {
@@ -180,7 +238,7 @@ describe("write rendering", () => {
             },
         );
 
-        expect(lastComponent.render(120).join("\n")).toContain("Writing src/generated.ts (+1 -0)");
+        expect(lastComponent.render(120).join("\n")).toContain("Writing src/generated.ts (+1)");
     });
 
     it("hides successful byte-count output after rendering write content", () => {

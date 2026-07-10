@@ -1,5 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { PierreAppearance } from "./types.ts";
+import { SYNTAX_THEME_APPEARANCE } from "../syntax/theme-assets.ts";
 
 /** Terminal color palette derived from Pi's active theme. */
 export type PierreTerminalPalette = {
@@ -20,8 +21,8 @@ export type PierreTerminalPalette = {
 };
 
 /** Resolves the closest Pierre syntax-highlighting appearance for the active Pi theme. */
-export function getPierreAppearance(theme: Theme): PierreAppearance {
-    return theme.name?.toLowerCase().includes("light") === true ? "light" : "dark";
+export function getPierreAppearance(_theme: Theme): PierreAppearance {
+    return SYNTAX_THEME_APPEARANCE satisfies PierreAppearance;
 }
 
 /** Resolves diff terminal styling from Pi theme tokens. */

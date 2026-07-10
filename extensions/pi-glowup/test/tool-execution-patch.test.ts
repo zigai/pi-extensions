@@ -387,7 +387,7 @@ describe("tool execution patches", () => {
                 .call(instance)?.({ patch }, plainTheme, renderContext)
                 .render(100)
                 .join("\n"),
-        ).toContain("Apply Patch src/new.ts (+1 -0)");
+        ).toContain("Apply Patch src/new.ts (+1)");
     });
 
     it("uses passive Codex-look adapters over native third-party renderers", () => {

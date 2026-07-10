@@ -16,7 +16,7 @@ import {
     shouldRenderSideBySideDiff,
 } from "../src/diffs/renderer.ts";
 import { loadHighlightedDiff } from "../src/diffs/highlight.ts";
-import { getPierrePalette } from "../src/diffs/theme.ts";
+import { getPierreAppearance, getPierrePalette } from "../src/diffs/theme.ts";
 
 type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
 
@@ -44,6 +44,14 @@ function stripAnsi(text: string): string {
 }
 
 describe("Pierre diff rendering", () => {
+    it("uses the bundled syntax theme appearance instead of the Pi theme name", () => {
+        const misleadingTheme = new Theme(fgColors, bgColors, "truecolor", {
+            name: "custom-light",
+        });
+
+        expect(getPierreAppearance(misleadingTheme)).toBe("dark");
+    });
+
     it("builds compact replayable metadata without storing snapshots", () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
@@ -297,11 +305,36 @@ describe("Pierre diff rendering", () => {
 
         expect(stripAnsi(narrow.join("\n"))).not.toContain(" │ ");
         expect(stripAnsi(collapsedWide.join("\n"))).not.toContain(" │ ");
-        expect(stripAnsi(collapsedWide.join("\n"))).toContain("expand to inspect");
+        expect(stripAnsi(collapsedWide.join("\n"))).toContain("old");
         expect(stripAnsi(expandedWide.join("\n"))).toContain(" │ ");
         expectLinesWithinWidth(narrow, 80);
         expectLinesWithinWidth(collapsedWide, 180);
         expectLinesWithinWidth(expandedWide, 180);
+    });
+
+    it("keeps collapsed semantic rows to one physical terminal row", () => {
+        const payload = buildPierreDiffPayload({
+            path: "long.ts",
+            oldContent: `${"old ".repeat(100)}\n`,
+            newContent: `${"new ".repeat(100)}\n`,
+            oldSizeBytes: 401,
+            newSizeBytes: 401,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
+        const lines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined },
+        ).render(40);
+        const rendered = stripAnsi(lines.join("\n"));
+
+        expect(lines.length).toBeLessThanOrEqual(7);
+        expect(rendered).toContain("old");
+        expect(rendered).toContain("new");
+        expectLinesWithinWidth(lines, 40);
     });
 
     it("hides edge collapsed markers but keeps middle collapsed markers", () => {

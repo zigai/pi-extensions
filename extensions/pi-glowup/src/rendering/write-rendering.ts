@@ -4,9 +4,13 @@ import {
     emptyComponent,
     formatPathTarget,
     renderCodexCall,
+    renderCodexDiff,
     renderCodexOutput,
     renderMutationCall,
+    MUTATION_DIFF_PREVIEW_ROWS,
+    toolExpandHint,
     type CodexRenderTheme,
+    type DiffSection,
 } from "./core.ts";
 import { isActiveToolCall, toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
 
@@ -14,6 +18,7 @@ const MAX_WRITE_PREVIEW_BYTES = 64 * 1024;
 const WRITE_PREVIEW_TRUNCATION_SUFFIX = "\n… write preview truncated";
 
 type WriteCallContext = {
+    readonly toolCallId?: string;
     readonly isError: boolean;
     readonly isPartial: boolean;
     readonly argsComplete?: boolean;
@@ -26,13 +31,14 @@ type WriteCallContext = {
     readonly invalidate?: () => void;
 };
 
-const PARTIAL_WRITE_PREVIEW_LINES = 20;
-const PARTIAL_WRITE_HEAD_LINES = PARTIAL_WRITE_PREVIEW_LINES - 1;
-const PARTIAL_WRITE_MOVING_TAIL_LINES = PARTIAL_WRITE_PREVIEW_LINES - 1;
+const PARTIAL_WRITE_PREVIEW_LINES = MUTATION_DIFF_PREVIEW_ROWS;
+const PARTIAL_WRITE_HEAD_LINES = PARTIAL_WRITE_PREVIEW_LINES;
+const PARTIAL_WRITE_MOVING_TAIL_LINES = PARTIAL_WRITE_PREVIEW_LINES;
 const PARTIAL_WRITE_SUFFIX_CHARS = 32;
 const MAX_PARTIAL_WRITE_LINE_CHARS = 2_000;
 
 type PartialWritePreviewUpdate = {
+    readonly toolCallId: string;
     readonly theme: CodexRenderTheme;
     readonly path: string;
     readonly content: string;
@@ -40,6 +46,7 @@ type PartialWritePreviewUpdate = {
     readonly mutationLabelColumnWidth: number | undefined;
     readonly mutationStatDigitWidth: number | undefined;
     readonly movingViewport: boolean;
+    readonly expanded: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -88,8 +95,29 @@ function boundedPartialWriteLine(line: string): string {
     return `${line.slice(0, Math.max(0, MAX_PARTIAL_WRITE_LINE_CHARS - 1))}…`;
 }
 
-function writePreviewPrefix(theme: CodexRenderTheme): string {
-    return theme.fg("dim", "  │ ");
+function writeDiffSection(path: string, preview: string, totalLines: number): DiffSection {
+    const previewLines = preview.split("\n");
+    if (previewLines.length > totalLines && previewLines.at(-1) === "") {
+        previewLines.pop();
+    }
+    const contentLineCount = previewLines.filter((line) => !line.startsWith("… ")).length;
+    let lineNumber =
+        previewLines[0]?.startsWith("… ") === true
+            ? Math.max(1, totalLines - contentLineCount + 1)
+            : 1;
+    return {
+        path,
+        lines: previewLines.map((line) => {
+            if (line.startsWith("… ")) {
+                return `  ${line}`;
+            }
+            const rendered = `+${lineNumber} ${line}`;
+            lineNumber += 1;
+            return rendered;
+        }),
+        added: totalLines,
+        removed: 0,
+    };
 }
 
 class PartialWriteContentPreview {
@@ -138,7 +166,10 @@ class PartialWriteContentPreview {
         if (snapshot.lineCount <= lines.length) {
             return lines.join("\n");
         }
-        return [...lines, `… +${snapshot.lineCount - lines.length} lines (to expand)`].join("\n");
+        return [
+            ...lines,
+            `… +${snapshot.lineCount - lines.length} lines (${toolExpandHint()})`,
+        ].join("\n");
     }
 
     private movingPreviewText(snapshot: PreviewSnapshot): string {
@@ -146,9 +177,10 @@ class PartialWriteContentPreview {
             return snapshot.headLines.slice(0, snapshot.lineCount).join("\n");
         }
         const tailLines = snapshot.tailLines.slice(-PARTIAL_WRITE_MOVING_TAIL_LINES);
-        return [`… +${snapshot.lineCount - tailLines.length} lines (to expand)`, ...tailLines].join(
-            "\n",
-        );
+        return [
+            `… +${snapshot.lineCount - tailLines.length} lines (${toolExpandHint()})`,
+            ...tailLines,
+        ].join("\n");
     }
 
     private canAppend(content: string): boolean {
@@ -284,18 +316,26 @@ type PreviewSnapshot = {
 
 class PartialWriteCallPreviewComponent implements Component {
     private readonly preview = new PartialWriteContentPreview();
+    private readonly toolCallId: string;
     private theme: CodexRenderTheme;
     private path = "";
     private labelMode: ToolLabelMode = "static";
     private mutationLabelColumnWidth: number | undefined;
     private mutationStatDigitWidth: number | undefined;
     private movingViewport = true;
+    private expanded = false;
+    private expandedContent = "";
     private cachedWidth: number | undefined;
     private cachedLines: string[] | undefined;
 
     constructor(update: PartialWritePreviewUpdate) {
+        this.toolCallId = update.toolCallId;
         this.theme = update.theme;
         this.update(update);
+    }
+
+    belongsTo(toolCallId: string): boolean {
+        return this.toolCallId === toolCallId;
     }
 
     update(update: PartialWritePreviewUpdate): void {
@@ -305,6 +345,8 @@ class PartialWriteCallPreviewComponent implements Component {
         this.mutationLabelColumnWidth = update.mutationLabelColumnWidth;
         this.mutationStatDigitWidth = update.mutationStatDigitWidth;
         this.movingViewport = update.movingViewport;
+        this.expanded = update.expanded;
+        this.expandedContent = update.expanded ? boundedWriteContentPreview(update.content) : "";
         this.preview.update(update.content);
         this.invalidate();
     }
@@ -319,6 +361,26 @@ class PartialWriteCallPreviewComponent implements Component {
             this.mutationStatDigitWidth === undefined
                 ? undefined
                 : Math.max(this.mutationStatDigitWidth, digitCount(added));
+        const previewText = this.expanded
+            ? this.expandedContent
+            : this.preview.previewText({ movingViewport: this.movingViewport });
+        const body =
+            previewText.length === 0
+                ? renderCodexOutput(this.theme, "", {
+                      expanded: false,
+                      mode: "head",
+                      maxPreviewLines: 1,
+                      noOutputLabel: "(empty file)",
+                  })
+                : renderCodexDiff(
+                      this.theme,
+                      [writeDiffSection(this.path, previewText, added)],
+                      true,
+                      {
+                          collapsedLineBudget: PARTIAL_WRITE_PREVIEW_LINES,
+                          maxWrappedRows: 1,
+                      },
+                  );
         const component = renderMutationCall(
             this.theme,
             {
@@ -340,21 +402,8 @@ class PartialWriteCallPreviewComponent implements Component {
                     ? {}
                     : { labelColumnWidth: this.mutationLabelColumnWidth }),
                 ...(statDigitWidth === undefined ? {} : { statDigitWidth }),
-                body: renderCodexOutput(
-                    this.theme,
-                    this.preview.previewText({
-                        movingViewport: this.movingViewport,
-                    }),
-                    {
-                        expanded: false,
-                        mode: "head",
-                        maxPreviewLines: PARTIAL_WRITE_PREVIEW_LINES,
-                        prefixFirst: writePreviewPrefix(this.theme),
-                        prefixRest: writePreviewPrefix(this.theme),
-                        noOutputLabel: "(empty file)",
-                        syntax: { path: this.path },
-                    },
-                ),
+                body,
+                state: "running",
             },
         );
         const lines = component.render(width);
@@ -425,6 +474,7 @@ export function renderWriteCallPreview(
 
     if (context.isPartial) {
         const update = {
+            toolCallId: context.toolCallId ?? "",
             theme,
             path,
             content,
@@ -432,8 +482,12 @@ export function renderWriteCallPreview(
             mutationLabelColumnWidth: context.mutationLabelColumnWidth,
             mutationStatDigitWidth: context.mutationStatDigitWidth,
             movingViewport: context.movingViewport !== false,
+            expanded: context.expanded,
         };
-        if (context.lastComponent instanceof PartialWriteCallPreviewComponent) {
+        if (
+            context.lastComponent instanceof PartialWriteCallPreviewComponent &&
+            context.lastComponent.belongsTo(context.toolCallId ?? "")
+        ) {
             context.lastComponent.update(update);
             return context.lastComponent;
         }
@@ -445,6 +499,24 @@ export function renderWriteCallPreview(
         context.mutationStatDigitWidth === undefined
             ? undefined
             : Math.max(context.mutationStatDigitWidth, digitCount(added));
+    const boundedContent = boundedWriteContentPreview(content);
+    const body =
+        boundedContent.length === 0
+            ? renderCodexOutput(theme, "", {
+                  expanded: false,
+                  mode: "head",
+                  maxPreviewLines: 1,
+                  noOutputLabel: "(empty file)",
+              })
+            : renderCodexDiff(
+                  theme,
+                  [writeDiffSection(path, boundedContent, added)],
+                  context.expanded,
+                  {
+                      collapsedLineBudget: PARTIAL_WRITE_PREVIEW_LINES,
+                      maxWrappedRows: 1,
+                  },
+              );
     return renderMutationCall(
         theme,
         {
@@ -458,15 +530,8 @@ export function renderWriteCallPreview(
                 ? {}
                 : { labelColumnWidth: context.mutationLabelColumnWidth }),
             ...(statDigitWidth === undefined ? {} : { statDigitWidth }),
-            body: renderCodexOutput(theme, boundedWriteContentPreview(content), {
-                expanded: context.expanded,
-                mode: "head",
-                maxPreviewLines: 20,
-                prefixFirst: writePreviewPrefix(theme),
-                prefixRest: writePreviewPrefix(theme),
-                noOutputLabel: "(empty file)",
-                syntax: { path },
-            }),
+            body,
+            state: "success",
         },
     );
 }

@@ -15,8 +15,11 @@ export {
 /** Matcher used to opt selected third-party tools out of Codex-look conversion. */
 export type ToolNameMatcher = string | RegExp | ((toolName: string) => boolean);
 
-/** Minimal render context consumed by Codex-look third-party renderers. */
-export type ThirdPartyToolRenderContext = CodexLookRenderContext;
+/** Render context consumed by Codex-look's internal third-party renderers. */
+export type ThirdPartyToolRenderContext = CodexLookRenderContext & {
+    readonly lastComponent?: Component | undefined;
+    readonly cwd?: string;
+};
 
 /** Minimal result shape consumed by Codex-look third-party renderers. */
 export type ThirdPartyToolResult = CodexLookToolResult;

@@ -31,6 +31,8 @@ export type DiffSection = {
     readonly removed: number;
 };
 
+export const MUTATION_DIFF_PREVIEW_ROWS = 6;
+
 export type ReadActionArgs = {
     readonly path?: string;
     readonly offset?: number;
@@ -78,6 +80,7 @@ type ScriptPreview = {
 
 const diffLinePattern = /^([+\- ])(\s*\d*)\s(.*)$/;
 const ellipsisLinePattern = /^\s+\.\.\.$/;
+const omissionLinePattern = /^\s+…(?:\s+.*)?$/u;
 const addCountPattern = /^\+\s*\d+\s/;
 const removeCountPattern = /^-\s*\d+\s/;
 const heredocOpenPattern =
@@ -97,13 +100,6 @@ const RETAINED_OUTPUT_LOG_ENV = "PI_CODEX_LOOK_RETAINED_OUTPUT_LOG";
 
 function fg(theme: CodexRenderTheme, token: ThemeColor, text: string): string {
     return theme.fg(token, text);
-}
-
-function bg(theme: CodexRenderTheme, token: CodexRenderBg, text: string): string {
-    if (theme.bg === undefined) {
-        return text;
-    }
-    return theme.bg(token, text);
 }
 
 function actionText(
@@ -244,7 +240,11 @@ function success(theme: CodexRenderTheme, text: string): string {
 
 export function collapseHome(path: string): string {
     const home = process.env.HOME ?? process.env.USERPROFILE;
-    if (home !== undefined && home.length > 0 && path.startsWith(home)) {
+    if (
+        home !== undefined &&
+        home.length > 0 &&
+        (path === home || path.startsWith(`${home}/`) || path.startsWith(`${home}\\`))
+    ) {
         return `~${path.slice(home.length)}`;
     }
     return path;
@@ -306,16 +306,6 @@ function wrapStyledText(text: string, width: number): string[] {
         return [""];
     }
     return wrapped.map((line) => truncateToWidth(line, safeWidth, ""));
-}
-
-function fitToWidth(text: string, width: number): string {
-    const safeWidth = Math.max(1, Math.floor(width));
-    const truncated = truncateToWidth(text, safeWidth, "");
-    const remaining = Math.max(0, safeWidth - visibleWidth(truncated));
-    if (remaining === 0) {
-        return truncated;
-    }
-    return `${truncated}${" ".repeat(remaining)}`;
 }
 
 function wrapSinglePhysicalLine(
@@ -402,7 +392,7 @@ function wrapPreviewPhysicalLines(
     ];
 }
 
-function toolExpandHint(): string {
+export function toolExpandHint(): string {
     try {
         return keyHint("app.tools.expand", "to expand");
     } catch {
@@ -817,6 +807,7 @@ export function renderMutationCall(
         readonly body?: Component;
         readonly labelColumnWidth?: number;
         readonly statDigitWidth?: number;
+        readonly state?: CodexCallState;
     } = {},
 ): Component {
     return makeComponent((width) => {
@@ -826,7 +817,7 @@ export function renderMutationCall(
             options.labelColumnWidth === undefined
                 ? summary.label
                 : summary.label.padEnd(options.labelColumnWidth, " ");
-        const prefix = `${dim(theme, "• ")}${actionText(theme, label, { bold: true })} `;
+        const prefix = `${renderBullet(theme, options.state ?? "muted")} ${actionText(theme, label, { bold: true })} `;
         return [
             ...wrapPrefixedLine(body, width, prefix, "  "),
             ...(options.body?.render(width) ?? []),
@@ -837,9 +828,20 @@ export function renderMutationCall(
 function formatMutationStats(
     theme: CodexRenderTheme,
     summary: MutationSummary,
-    _statDigitWidth: number | undefined,
+    statDigitWidth: number | undefined,
 ): string {
-    return `(${green(theme, `+${summary.added}`)} ${red(theme, `-${summary.removed}`)})`;
+    const width = Math.max(
+        1,
+        statDigitWidth ?? 1,
+        String(summary.added).length,
+        String(summary.removed).length,
+    );
+    const added = green(theme, `+${String(summary.added).padStart(width)}`);
+    const removed = red(theme, `-${String(summary.removed).padStart(width)}`);
+    if (summary.added <= 0) {
+        return summary.removed <= 0 ? "" : `(${removed})`;
+    }
+    return summary.removed <= 0 ? `(${added})` : `(${added} ${removed})`;
 }
 
 type WrappedPreviewLine = {
@@ -2276,9 +2278,13 @@ function parseDiffLine(line: string):
           readonly content: string;
       }
     | { readonly kind: "ellipsis" }
+    | { readonly kind: "omission"; readonly content: string }
     | null {
     if (ellipsisLinePattern.test(line)) {
         return { kind: "ellipsis" };
+    }
+    if (omissionLinePattern.test(line)) {
+        return { kind: "omission", content: line.trimStart() };
     }
 
     const match = diffLinePattern.exec(line);
@@ -2317,7 +2323,7 @@ function diffLineNumberWidth(lines: ReadonlyArray<string>): number {
     let width = 0;
     for (const line of lines) {
         const parsed = parseDiffLine(line);
-        if (parsed === null || parsed.kind === "ellipsis") {
+        if (parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission") {
             continue;
         }
         width = Math.max(width, normalizedDiffLineNumber(parsed.lineNumber).length);
@@ -2347,17 +2353,25 @@ function renderDiffRow(
     },
 ): string[] {
     const parsed = parseDiffLine(line);
+    const rowWidth = Math.max(1, width - 1);
     const prefixWidth = visibleWidth(leftPrefix);
-    const contentWidth = Math.max(1, width - prefixWidth);
+    const contentWidth = Math.max(1, rowWidth - prefixWidth);
 
     if (!parsed) {
         return wrapDiffText(muted(theme, line), contentWidth, options?.maxWrappedRows).map((row) =>
-            truncateToWidth(`${leftPrefix}${row}`, width, ""),
+            truncateToWidth(`${leftPrefix}${row}`, rowWidth, ""),
         );
     }
 
     if (parsed.kind === "ellipsis") {
-        return [truncateToWidth(`${leftPrefix}${muted(theme, "⋮")}`, width, "")];
+        return [truncateToWidth(`${leftPrefix}${muted(theme, "⋮")}`, rowWidth, "")];
+    }
+    if (parsed.kind === "omission") {
+        return wrapDiffText(
+            muted(theme, parsed.content),
+            contentWidth,
+            options?.maxWrappedRows,
+        ).map((row) => truncateToWidth(`${leftPrefix}${row}`, rowWidth, ""));
     }
 
     let sign = " ";
@@ -2383,14 +2397,8 @@ function renderDiffRow(
     );
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);
-        const row = truncateToWidth(`${leftPrefix}${styledGutter}`, width, "");
-        if (parsed.kind === "insert") {
-            return [bg(theme, "toolSuccessBg", fitToWidth(row, Math.max(1, width - 1)))];
-        }
-        if (parsed.kind === "delete") {
-            return [bg(theme, "toolErrorBg", fitToWidth(row, Math.max(1, width - 1)))];
-        }
-        return [row];
+        const row = truncateToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
+        return [paintDiffRowBackground(parsed.kind, row, rowWidth, theme)];
     }
 
     const wrappedContent = wrapDiffText(styledContent, availableWidth, options?.maxWrappedRows);
@@ -2401,15 +2409,22 @@ function renderDiffRow(
                 ? styleDiffGutter(parsed.kind, lineNumber, sign, theme)
                 : dim(theme, wrapPrefix);
         const row = `${leftPrefix}${styledGutter}${chunk}`;
-        const fitted = fitToWidth(row, Math.max(1, width - 1));
-        if (parsed.kind === "insert") {
-            return bg(theme, "toolSuccessBg", fitted);
-        }
-        if (parsed.kind === "delete") {
-            return bg(theme, "toolErrorBg", fitted);
-        }
-        return fitted;
+        const bounded = truncateToWidth(row, rowWidth, "");
+        return paintDiffRowBackground(parsed.kind, bounded, rowWidth, theme);
     });
+}
+
+function paintDiffRowBackground(
+    kind: "insert" | "delete" | "context",
+    row: string,
+    rowWidth: number,
+    theme: CodexRenderTheme,
+): string {
+    if (theme.bg === undefined || kind === "context") {
+        return row;
+    }
+    const padding = " ".repeat(Math.max(0, rowWidth - visibleWidth(row)));
+    return theme.bg(kind === "insert" ? "toolSuccessBg" : "toolErrorBg", `${row}${padding}`);
 }
 
 function styleDiffContent(
@@ -2465,7 +2480,7 @@ function highlightDiffContents(
         if (parsed === null) {
             continue;
         }
-        if (parsed.kind === "ellipsis") {
+        if (parsed.kind === "ellipsis" || parsed.kind === "omission") {
             flushRun();
             continue;
         }
@@ -2509,59 +2524,174 @@ function styleDiffGutter(
     return `${dim(theme, lineNumber)}${marker}`;
 }
 
+export type SemanticDiffRowKind = "insert" | "delete" | "context" | "meta";
+
+export function selectSemanticDiffIndices(
+    kinds: readonly SemanticDiffRowKind[],
+    lineBudget: number,
+): readonly number[] {
+    if (kinds.length <= lineBudget) {
+        return kinds.map((_kind, index) => index);
+    }
+
+    const changed = kinds
+        .map((kind, index) => ({ kind, index }))
+        .filter((entry) => entry.kind === "insert" || entry.kind === "delete")
+        .map((entry) => entry.index);
+    if (changed.length === 0) {
+        const headCount = Math.ceil(lineBudget / 2);
+        const tailCount = Math.floor(lineBudget / 2);
+        return [
+            ...kinds.slice(0, headCount).map((_kind, index) => index),
+            ...kinds
+                .slice(kinds.length - tailCount)
+                .map((_kind, index) => kinds.length - tailCount + index),
+        ];
+    }
+
+    const selected = new Set<number>();
+    const changedHeadCount = Math.ceil(Math.min(lineBudget, changed.length) / 2);
+    const changedTailCount = Math.min(lineBudget, changed.length) - changedHeadCount;
+    for (const index of changed.slice(0, changedHeadCount)) {
+        selected.add(index);
+    }
+    for (const index of changed.slice(changed.length - changedTailCount)) {
+        selected.add(index);
+    }
+
+    let distance = 1;
+    const firstChange = changed[0] ?? 0;
+    const lastChange = changed.at(-1) ?? firstChange;
+    while (selected.size < lineBudget && distance <= kinds.length) {
+        for (const index of [firstChange - distance, lastChange + distance]) {
+            if (index >= 0 && index < kinds.length && !selected.has(index)) {
+                selected.add(index);
+                if (selected.size >= lineBudget) {
+                    break;
+                }
+            }
+        }
+        distance += 1;
+    }
+
+    return [...selected].sort((left, right) => left - right);
+}
+
+function collapsedDiffLineIndices(
+    sections: ReadonlyArray<DiffSection>,
+    lineBudget: number,
+): readonly number[] {
+    return selectSemanticDiffIndices(
+        sections.flatMap((section) =>
+            section.lines.map((line): SemanticDiffRowKind => {
+                const parsed = parseDiffLine(line);
+                return parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission"
+                    ? "meta"
+                    : parsed.kind;
+            }),
+        ),
+        lineBudget,
+    );
+}
+
 export function renderCodexDiff(
     theme: CodexRenderTheme,
     sections: ReadonlyArray<DiffSection>,
     expanded: boolean,
+    options: {
+        readonly collapsedLineBudget?: number;
+        readonly maxWrappedRows?: number;
+    } = {},
 ): Component {
     return makeComponent((width) => {
         const allDiffLineCount = sections.reduce(
             (count, section) => count + section.lines.length,
             0,
         );
-        const collapsedLineBudget = 18;
+        const collapsedLineBudget = Math.max(1, Math.floor(options.collapsedLineBudget ?? 18));
         const shouldCollapse = !expanded && allDiffLineCount > collapsedLineBudget;
-        let remainingBudget = collapsedLineBudget;
+        const collapsedIndices = shouldCollapse
+            ? collapsedDiffLineIndices(sections, collapsedLineBudget)
+            : [];
+        const collapsedRanks = new Map(
+            collapsedIndices.map((lineIndex, rank) => [lineIndex, rank] as const),
+        );
+        const collapsedHeadCount = Math.ceil(collapsedIndices.length / 2);
         const rendered: string[] = [];
+        let sectionOffset = 0;
+        let renderedSection = false;
+        let renderedOmission = false;
 
-        for (const [sectionIndex, section] of sections.entries()) {
-            if (sections.length > 1) {
-                if (sectionIndex > 0) {
-                    rendered.push("");
+        const renderOmission = (): void => {
+            const omitted = allDiffLineCount - collapsedIndices.length;
+            const hint = toolExpandHint();
+            rendered.push(
+                truncateToWidth(
+                    `${dim(theme, "    ")} ${muted(theme, `… +${omitted} lines (`)}${hint}${muted(theme, ")")}`,
+                    width,
+                    "…",
+                ),
+            );
+            renderedOmission = true;
+        };
+
+        for (const section of sections) {
+            const headLines: string[] = [];
+            const tailLines: string[] = [];
+            for (const [lineIndex, line] of section.lines.entries()) {
+                const globalLineIndex = sectionOffset + lineIndex;
+                const collapsedRank = collapsedRanks.get(globalLineIndex);
+                if (
+                    !shouldCollapse ||
+                    (collapsedRank !== undefined && collapsedRank < collapsedHeadCount)
+                ) {
+                    headLines.push(line);
+                } else if (collapsedRank !== undefined) {
+                    tailLines.push(line);
                 }
+            }
+            sectionOffset += section.lines.length;
+
+            if (headLines.length === 0 && tailLines.length === 0) {
+                continue;
+            }
+            if (shouldCollapse && headLines.length === 0 && !renderedOmission) {
+                renderOmission();
+            }
+
+            if (renderedSection) {
+                rendered.push("");
+            }
+            if (sections.length > 1) {
                 const stats = `(${green(theme, `+${section.added}`)} ${red(theme, `-${section.removed}`)})`;
                 const header = `${dim(theme, "  └ ")}${pathText(theme, collapseHome(section.path ?? "file"))} ${stats}`;
                 rendered.push(...wrapPrefixedLine(header, width, "", "    "));
             }
+            renderedSection = true;
 
-            const visibleLines = shouldCollapse
-                ? section.lines.slice(0, Math.min(remainingBudget, section.lines.length))
-                : [...section.lines];
             const sectionLineNumberWidth = diffLineNumberWidth(section.lines);
-            const highlightedContents = highlightDiffContents(visibleLines, section.path);
-
-            for (const [lineIndex, line] of visibleLines.entries()) {
-                if (shouldCollapse && remainingBudget <= 0) {
-                    break;
+            const renderLines = (lines: readonly string[]): void => {
+                const highlightedContents = highlightDiffContents(lines, section.path);
+                const maxWrappedRows = options.maxWrappedRows ?? (expanded ? undefined : 4);
+                for (const [lineIndex, line] of lines.entries()) {
+                    rendered.push(
+                        ...renderDiffRow(line, width, "    ", theme, {
+                            ...(section.path === undefined ? {} : { path: section.path }),
+                            lineNumberWidth: sectionLineNumberWidth,
+                            ...(highlightedContents[lineIndex] === undefined
+                                ? {}
+                                : { highlightedContent: highlightedContents[lineIndex] }),
+                            ...(maxWrappedRows === undefined ? {} : { maxWrappedRows }),
+                        }),
+                    );
                 }
-                rendered.push(
-                    ...renderDiffRow(line, width, "    ", theme, {
-                        ...(section.path === undefined ? {} : { path: section.path }),
-                        lineNumberWidth: sectionLineNumberWidth,
-                        ...(highlightedContents[lineIndex] === undefined
-                            ? {}
-                            : { highlightedContent: highlightedContents[lineIndex] }),
-                        ...(expanded ? {} : { maxWrappedRows: 4 }),
-                    }),
-                );
-                remainingBudget -= 1;
-            }
-        }
+            };
 
-        if (shouldCollapse && allDiffLineCount > collapsedLineBudget) {
-            rendered.push(
-                `${dim(theme, "    ")} ${muted(theme, `… +${allDiffLineCount - collapsedLineBudget} lines`)}`,
-            );
+            renderLines(headLines);
+            if (shouldCollapse && tailLines.length > 0 && !renderedOmission) {
+                renderOmission();
+            }
+            renderLines(tailLines);
         }
 
         return rendered;

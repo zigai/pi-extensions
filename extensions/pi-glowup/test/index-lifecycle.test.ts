@@ -121,7 +121,7 @@ describe("extension lifecycle", () => {
         await disposeSyntaxHighlighting();
     });
 
-    it("initializes syntax highlighting and starts default diagnostic sampling", async () => {
+    it("initializes syntax highlighting without diagnostics by default", async () => {
         vi.useFakeTimers();
         const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
         const agentDir = join(root, "agent");
@@ -135,32 +135,32 @@ describe("extension lifecycle", () => {
 
         await pi.startSession(join(root, "project"), false);
 
-        expect(vi.getTimerCount()).toBe(1);
+        expect(vi.getTimerCount()).toBe(0);
         expect(isSyntaxHighlightingReady()).toBe(true);
-        expect(readLogEvents(join(agentDir, "pi-codex-look", "debug.log"))).toEqual(
-            expect.arrayContaining(["config_applied", "extension_loaded", "session_start"]),
-        );
+        expect(existsSync(join(agentDir, "pi-codex-look", "debug.log"))).toBe(false);
 
         await pi.shutdownSession();
 
         expect(vi.getTimerCount()).toBe(0);
     });
 
-    it("respects disabled debug logging from global config", async () => {
+    it("starts diagnostic logging only when explicitly enabled", async () => {
         vi.useFakeTimers();
         const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
         const agentDir = join(root, "agent");
         process.env[AGENT_DIR_ENV] = agentDir;
         const configPath = getCodexLookGlobalConfigPath(agentDir);
         mkdirSync(join(agentDir, "pi-codex-look"), { recursive: true });
-        writeFileSync(configPath, JSON.stringify({ debugLog: { enabled: false } }));
+        writeFileSync(configPath, JSON.stringify({ debugLog: { enabled: true } }));
         const pi = new FakeExtensionApi();
 
         await codexLookExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(join(root, "project"), false);
 
-        expect(vi.getTimerCount()).toBe(0);
-        expect(existsSync(join(agentDir, "pi-codex-look", "debug.log"))).toBe(false);
+        expect(vi.getTimerCount()).toBe(1);
+        expect(readLogEvents(join(agentDir, "pi-codex-look", "debug.log"))).toEqual(
+            expect.arrayContaining(["config_applied", "extension_loaded", "session_start"]),
+        );
 
         await pi.shutdownSession();
     });

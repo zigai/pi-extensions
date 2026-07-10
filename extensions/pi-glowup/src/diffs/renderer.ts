@@ -23,6 +23,11 @@ import type {
     UnifiedDiffRow,
 } from "./types.ts";
 import { getPierrePalette, type PierreTerminalPalette } from "./theme.ts";
+import {
+    MUTATION_DIFF_PREVIEW_ROWS,
+    selectSemanticDiffIndices,
+    type SemanticDiffRowKind,
+} from "../rendering/core.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const DIFF_STYLE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.color.close}${ansiStyles.bgColor.close}`;
@@ -54,6 +59,32 @@ type RenderSegment = DiffSpan & {
     readonly bold?: boolean;
 };
 
+function collapsedPierreRows<T>(
+    rows: readonly T[],
+    kinds: readonly SemanticDiffRowKind[],
+    rowBudget: number,
+    omission: (count: number) => T,
+): readonly T[] {
+    if (rows.length <= rowBudget) {
+        return rows;
+    }
+    const selected = selectSemanticDiffIndices(kinds, Math.max(1, rowBudget - 1));
+    const split = Math.ceil(selected.length / 2);
+    const head = selected
+        .slice(0, split)
+        .map((index) => rows[index])
+        .filter(isDefined);
+    const tail = selected
+        .slice(split)
+        .map((index) => rows[index])
+        .filter(isDefined);
+    return [...head, omission(rows.length - selected.length), ...tail];
+}
+
+function isDefined<T>(value: T | undefined): value is T {
+    return value !== undefined;
+}
+
 /** Context fields Pierre's lazy renderer consumes from Pi's public render context. */
 export type PierreDiffRenderContext = {
     readonly lastComponent: Component | undefined;
@@ -77,11 +108,9 @@ export function renderPierreDiff(
         return renderPierreDiffSummary(payload, theme);
     }
 
-    if (!options.expanded) {
-        return renderPierreCollapsedPreview(payload, theme);
-    }
-
-    const maxVisibleLines = maxVisibleDiffLines(options.expanded);
+    const maxVisibleLines = options.expanded
+        ? maxVisibleDiffLines(true)
+        : MUTATION_DIFF_PREVIEW_ROWS + 1;
     const component =
         context.lastComponent instanceof PierreDiffComponent
             ? context.lastComponent
@@ -187,9 +216,10 @@ class PierreDiffComponent implements Component {
         }
 
         const highlighted = this.highlighted[this.palette.appearance];
-        const bodyLines = shouldRenderSideBySideDiff(safeWidth)
-            ? this.renderSplitBody(safeWidth, highlighted)
-            : this.renderUnifiedBody(safeWidth, highlighted);
+        const bodyLines =
+            this.expanded && shouldRenderSideBySideDiff(safeWidth)
+                ? this.renderSplitBody(safeWidth, highlighted)
+                : this.renderUnifiedBody(safeWidth, highlighted);
         const lines = bodyLines;
 
         if (lines.length <= this.maxVisibleLines) {
@@ -238,22 +268,67 @@ class PierreDiffComponent implements Component {
     }
 
     private renderUnifiedBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
-        const rows = buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette, {
-            maxRows: this.maxVisibleLines + 1,
+        const sourceRows = buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette, {
+            maxRows: this.expanded ? this.maxVisibleLines + 1 : MAX_EXPANDED_DIFF_RENDER_LINES,
         });
-        return renderUnifiedRows(rows, this.payload.metadata, width, this.maxVisibleLines + 1);
+        const rows = this.expanded
+            ? sourceRows
+            : collapsedPierreRows(
+                  sourceRows,
+                  sourceRows.map((row): SemanticDiffRowKind => {
+                      if (row.kind !== "line") return "meta";
+                      if (row.lineType === "addition") return "insert";
+                      if (row.lineType === "deletion") return "delete";
+                      return "context";
+                  }),
+                  this.maxVisibleLines,
+                  (count): UnifiedDiffRow => ({
+                      kind: "collapsed",
+                      text: `… +${count} lines (${pierreExpandHint()})`,
+                      fg: this.palette.metadataFg,
+                      bg: this.palette.metadataBg,
+                  }),
+              );
+        return renderUnifiedRows(
+            rows,
+            this.payload.metadata,
+            width,
+            this.maxVisibleLines + 1,
+            this.expanded ? undefined : 1,
+        );
     }
 
     private renderSplitBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
-        const rows = buildSplitDiffRows(this.payload.metadata, highlighted, this.palette, {
-            maxRows: this.maxVisibleLines + 1,
+        const sourceRows = buildSplitDiffRows(this.payload.metadata, highlighted, this.palette, {
+            maxRows: this.expanded ? this.maxVisibleLines + 1 : MAX_EXPANDED_DIFF_RENDER_LINES,
         });
+        const rows = this.expanded
+            ? sourceRows
+            : collapsedPierreRows(
+                  sourceRows,
+                  sourceRows.map((row): SemanticDiffRowKind => {
+                      if (row.kind !== "line") return "meta";
+                      const hasAddition = row.addition.lineType === "addition";
+                      const hasDeletion = row.deletion.lineType === "deletion";
+                      if (hasAddition && !hasDeletion) return "insert";
+                      if (hasDeletion && !hasAddition) return "delete";
+                      return hasAddition ? "insert" : "context";
+                  }),
+                  this.maxVisibleLines,
+                  (count): SplitDiffRow => ({
+                      kind: "collapsed",
+                      text: `… +${count} lines (${pierreExpandHint()})`,
+                      fg: this.palette.metadataFg,
+                      bg: this.palette.metadataBg,
+                  }),
+              );
         return renderSplitRows(
             rows,
             this.payload.metadata,
             width,
             this.palette,
             this.maxVisibleLines + 1,
+            this.expanded ? undefined : 1,
         );
     }
 
@@ -328,32 +403,6 @@ function renderPierreDiffSummary(payload: PierreSummaryDiffPayload, theme: Theme
                 truncateToWidth(headline, safeWidth, ""),
                 truncateToWidth(`  └ ${theme.fg("muted", summaryDetail(payload))}`, safeWidth, ""),
                 truncateToWidth(`    ${theme.fg("muted", hint)}`, safeWidth, ""),
-            ];
-        },
-        invalidate() {},
-    };
-}
-
-function renderPierreCollapsedPreview(
-    payload: PierreRenderableDiffPayload,
-    theme: Theme,
-): Component {
-    const path = payload.path;
-    const added = payload.stats.added;
-    const removed = payload.stats.removed;
-    const lineCount = payload.stats.lineCount;
-    const sizeBytes = payload.stats.sizeBytes;
-    const expandHint = pierreExpandHint();
-
-    return {
-        render(width: number): string[] {
-            const safeWidth = Math.max(24, Math.floor(width));
-            const changeStats = `${added.toLocaleString("en-US")} + / ${removed.toLocaleString("en-US")} -`;
-            const headline = `${theme.fg("toolDiffContext", path)} ${theme.fg("muted", changeStats)}`;
-            const detail = `${lineCount.toLocaleString("en-US")} diff lines, ${formatDiffSize(sizeBytes)} (${expandHint})`;
-            return [
-                truncateToWidth(headline, safeWidth, ""),
-                truncateToWidth(`  └ ${theme.fg("muted", detail)}`, safeWidth, ""),
             ];
         },
         invalidate() {},
@@ -508,13 +557,15 @@ function renderUnifiedRows(
     metadata: PierreRenderableDiffPayload["metadata"],
     width: number,
     maxRenderedLines: number,
+    maxRowsPerDiffRow: number | undefined,
 ): string[] {
     const rendered: string[] = [];
     for (const row of rows) {
+        const rowLines = renderUnifiedRow(row, metadata, width);
         if (
             appendBudgetedRenderedLines(
                 rendered,
-                renderUnifiedRow(row, metadata, width),
+                maxRowsPerDiffRow === undefined ? rowLines : rowLines.slice(0, maxRowsPerDiffRow),
                 maxRenderedLines,
             )
         ) {
@@ -530,13 +581,15 @@ function renderSplitRows(
     width: number,
     palette: PierreTerminalPalette,
     maxRenderedLines: number,
+    maxRowsPerDiffRow: number | undefined,
 ): string[] {
     const rendered: string[] = [];
     for (const row of rows) {
+        const rowLines = renderSplitRow(row, metadata, width, palette);
         if (
             appendBudgetedRenderedLines(
                 rendered,
-                renderSplitRow(row, metadata, width, palette),
+                maxRowsPerDiffRow === undefined ? rowLines : rowLines.slice(0, maxRowsPerDiffRow),
                 maxRenderedLines,
             )
         ) {

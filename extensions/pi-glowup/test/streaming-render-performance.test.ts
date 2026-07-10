@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import { renderStreamingEditCallPreview } from "../src/rendering/edit-call-rendering.ts";
 import { clearSyntaxHighlightCache, syntaxHighlightCacheStats } from "../src/syntax/highlighter.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
@@ -89,11 +90,54 @@ function runStreamingApplyPatchScenario(iterations: number): StreamingRenderMetr
     const startedHeap = heapUsed();
     const startedMs = performance.now();
     let patch = "*** Begin Patch\n*** Update File: src/generated.ts\n@@\n";
+    let lastComponent: Component | undefined;
     let lines: string[] = [];
 
     for (let index = 1; index <= iterations; index += 1) {
         patch += `+export const generatedValue${index} = ${index};\n`;
-        lines = renderer.renderCall({ patch }, plainTheme, renderContext).render(120);
+        lastComponent = renderer.renderCall({ patch }, plainTheme, {
+            ...renderContext,
+            lastComponent,
+        });
+        lines = lastComponent.render(120);
+    }
+
+    const cache = syntaxHighlightCacheStats();
+    return {
+        iterations,
+        elapsedMs: performance.now() - startedMs,
+        heapDeltaBytes: heapUsed() - startedHeap,
+        renderedLines: lines.length,
+        renderedCharacters: renderedCharacters(lines),
+        syntaxCacheEntries: cache.entries,
+        syntaxCacheBytes: cache.bytes,
+    };
+}
+
+function runStreamingEditScenario(iterations: number): StreamingRenderMetrics {
+    clearSyntaxHighlightCache();
+    const startedHeap = heapUsed();
+    const startedMs = performance.now();
+    let newText = "";
+    let lines: string[] = [];
+
+    for (let index = 1; index <= iterations; index += 1) {
+        newText += `export const generatedValue${index} = ${index};\n`;
+        lines =
+            renderStreamingEditCallPreview(
+                {
+                    path: "src/generated.ts",
+                    edits: [{ oldText: "export const previous = true;", newText }],
+                },
+                plainTheme,
+                {
+                    isError: false,
+                    isPartial: true,
+                    argsComplete: false,
+                    expanded: false,
+                    labelMode: "lifecycle",
+                },
+            )?.render(120) ?? [];
     }
 
     const cache = syntaxHighlightCacheStats();
@@ -121,8 +165,17 @@ describe("streaming render performance harness", () => {
     it("keeps synthetic partial apply_patch rendering bounded", () => {
         const metrics = runStreamingApplyPatchScenario(300);
 
-        expect(metrics.renderedLines).toBeLessThanOrEqual(1);
-        expect(metrics.renderedCharacters).toBeLessThan(200);
+        expect(metrics.renderedLines).toBeLessThanOrEqual(20);
+        expect(metrics.renderedCharacters).toBeLessThan(6_000);
+        expect(metrics.syntaxCacheEntries).toBe(0);
+        expect(metrics.syntaxCacheBytes).toBe(0);
+    });
+
+    it("keeps synthetic partial edit rendering bounded", () => {
+        const metrics = runStreamingEditScenario(300);
+
+        expect(metrics.renderedLines).toBeLessThanOrEqual(20);
+        expect(metrics.renderedCharacters).toBeLessThan(6_000);
         expect(metrics.syntaxCacheEntries).toBe(0);
         expect(metrics.syntaxCacheBytes).toBe(0);
     });
