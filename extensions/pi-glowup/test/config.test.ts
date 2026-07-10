@@ -29,7 +29,7 @@ describe("codex look config", () => {
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview).toEqual({ movingViewport: true });
         expect(config.syntax).toEqual({
-            preloadLanguages: ["markdown", "bash", "python", "typescript"],
+            preloadLanguages: ["markdown", "bash", "python", "typescript", "javascript", "json"],
             projectLanguageDetection: { enabled: true },
         });
         expect(config.patches).toEqual({
@@ -67,6 +67,8 @@ describe("codex look config", () => {
             "bash",
             "python",
             "typescript",
+            "javascript",
+            "json",
         ]);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
@@ -121,6 +123,8 @@ describe("codex look config", () => {
             "bash",
             "python",
             "typescript",
+            "javascript",
+            "json",
         ]);
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");

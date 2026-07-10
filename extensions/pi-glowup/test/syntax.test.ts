@@ -219,7 +219,14 @@ describe("central syntax highlighting", () => {
         expect(normalizeSyntaxLanguage("rs")).toBe("rust");
         expect(normalizeSyntaxLanguage("go")).toBe("go");
         expect(normalizeSyntaxLanguage("golang")).toBe("go");
-        expect(PRELOADED_SYNTAX_LANGUAGES).toEqual(["markdown", "bash", "python", "typescript"]);
+        expect(PRELOADED_SYNTAX_LANGUAGES).toEqual([
+            "markdown",
+            "bash",
+            "python",
+            "typescript",
+            "javascript",
+            "json",
+        ]);
     });
 
     it("injects the central highlighter into Markdown code fences", () => {
