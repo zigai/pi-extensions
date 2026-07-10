@@ -1,5 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    renameSync,
+    statSync,
+    unlinkSync,
+    writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -375,11 +384,11 @@ export function readCodexCoreConfigWithDiagnostics(
     options: string | CodexCoreConfigReadOptions = {},
 ): CodexCoreConfigParseResult<CodexCoreConfig> {
     if (typeof options === "string") {
-        return parseCodexCoreConfigWithDiagnostics(readConfigInput(options) ?? {});
+        return parseReadConfigInput(readConfigInput(options));
     }
 
     if (options.configPath !== undefined) {
-        return parseCodexCoreConfigWithDiagnostics(readConfigInput(options.configPath) ?? {});
+        return parseReadConfigInput(readConfigInput(options.configPath));
     }
 
     ensureCodexCoreGlobalConfigFiles(options.agentDir);
@@ -388,9 +397,17 @@ export function readCodexCoreConfigWithDiagnostics(
         options.cwd === undefined
             ? undefined
             : readConfigInput(getCodexCoreProjectConfigPath(options.cwd));
-    return parseCodexCoreConfigWithDiagnostics(
-        mergeConfigInputs(globalInput ?? {}, projectInput ?? {}),
+    const parsed = parseCodexCoreConfigWithDiagnostics(
+        mergeConfigInputs(globalInput.value ?? {}, projectInput?.value ?? {}),
     );
+    return {
+        config: parsed.config,
+        diagnostics: [
+            ...globalInput.diagnostics,
+            ...(projectInput?.diagnostics ?? []),
+            ...parsed.diagnostics,
+        ],
+    };
 }
 
 /** Resolves `current` or missing model selections to the active Codex request model. */
@@ -424,12 +441,14 @@ export function writeCodexCoreConfig(
     config: CodexCoreConfig,
     configPath: string = getCodexCoreConfigPath(),
 ): { readonly ok: true } | { readonly ok: false; readonly error: string } {
+    const unsafeExistingConfig = existingConfigWriteBlocker(configPath);
+    if (unsafeExistingConfig) return { ok: false, error: unsafeExistingConfig };
     try {
         mkdirSync(dirname(configPath), { recursive: true });
-        writeFileSync(
+        writeFileAtomically(
             configPath,
             `${JSON.stringify({ $schema: CODEX_CORE_CONFIG_SCHEMA_REFERENCE, ...parseCodexCoreConfig(config) }, null, 2)}\n`,
-            "utf8",
+            existingFileMode(configPath, 0o600),
         );
         return { ok: true };
     } catch (cause: unknown) {
@@ -437,6 +456,16 @@ export function writeCodexCoreConfig(
         console.warn(`[pi-codex-core] Failed to write ${configPath}: ${message}`);
         return { ok: false, error: message };
     }
+}
+
+function existingConfigWriteBlocker(configPath: string): string | undefined {
+    if (!existsSync(configPath)) return undefined;
+    const unsafeDiagnostic = readConfigInput(configPath).diagnostics.find(
+        (diagnostic) =>
+            diagnostic.reason === "malformed-json" || diagnostic.reason === "unreadable",
+    );
+    if (!unsafeDiagnostic) return undefined;
+    return `Refusing to overwrite ${unsafeDiagnostic.reason === "malformed-json" ? "malformed" : "unreadable"} config: ${configPath}`;
 }
 
 function serializeJson(value: unknown): string {
@@ -465,23 +494,70 @@ function writeJsonFileIfChanged(filePath: string, value: unknown): void {
     try {
         if (existsSync(filePath) && readFileSync(filePath, "utf8") === nextContent) return;
         mkdirSync(dirname(filePath), { recursive: true });
-        writeFileSync(filePath, nextContent, "utf8");
+        writeFileAtomically(filePath, nextContent, existingFileMode(filePath, 0o644));
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
         console.warn(`[pi-codex-core] Failed to write ${filePath}: ${message}`);
     }
 }
 
-function readConfigInput(configPath: string): unknown {
-    if (!existsSync(configPath)) return undefined;
+type ConfigInputReadResult = {
+    readonly value: unknown;
+    readonly diagnostics: readonly CodexConfigDiagnostic[];
+};
+
+function readConfigInput(configPath: string): ConfigInputReadResult {
+    if (!existsSync(configPath)) return { value: undefined, diagnostics: [] };
 
     try {
         const rawConfig: unknown = JSON.parse(readFileSync(configPath, "utf8"));
-        return rawConfig;
+        return { value: rawConfig, diagnostics: [] };
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
         console.warn(`[pi-codex-core] Failed to read ${configPath}: ${message}`);
-        return undefined;
+        const reason = cause instanceof SyntaxError ? "malformed-json" : "unreadable";
+        return {
+            value: undefined,
+            diagnostics: [makeConfigDiagnostic(configPath, reason, message)],
+        };
+    }
+}
+
+function parseReadConfigInput(
+    input: ConfigInputReadResult,
+): CodexCoreConfigParseResult<CodexCoreConfig> {
+    const parsed = parseCodexCoreConfigWithDiagnostics(input.value ?? {});
+    return {
+        config: parsed.config,
+        diagnostics: [...input.diagnostics, ...parsed.diagnostics],
+    };
+}
+
+function writeFileAtomically(filePath: string, content: string, mode: number): void {
+    const directory = dirname(filePath);
+    const temporaryPath = join(
+        directory,
+        `.${basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
+    );
+    try {
+        writeFileSync(temporaryPath, content, { encoding: "utf8", flag: "wx", mode });
+        renameSync(temporaryPath, filePath);
+    } finally {
+        if (existsSync(temporaryPath)) {
+            try {
+                unlinkSync(temporaryPath);
+            } catch {
+                // Preserve the original write failure when temporary-file cleanup also fails.
+            }
+        }
+    }
+}
+
+function existingFileMode(filePath: string, fallback: number): number {
+    try {
+        return statSync(filePath).mode & 0o777;
+    } catch {
+        return fallback;
     }
 }
 

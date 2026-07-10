@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import {
     readCodexCoreConfig,
+    readCodexCoreConfigWithDiagnostics,
     type CodexCoreConfig,
     writeCodexCoreConfig,
 } from "../config/config.ts";
@@ -45,7 +46,20 @@ function saveAndApply(
     ctx: ExtensionContext,
     options: CodexCommandOptions,
 ): CodexSettingsSaveResult {
-    const globalConfig = readCodexCoreConfig();
+    const globalRead = readCodexCoreConfigWithDiagnostics();
+    const unsafeDiagnostic = globalRead.diagnostics.find(
+        (diagnostic) =>
+            diagnostic.reason === "malformed-json" || diagnostic.reason === "unreadable",
+    );
+    if (unsafeDiagnostic) {
+        notify(
+            ctx,
+            `Codex settings were not saved because ${unsafeDiagnostic.path} is ${unsafeDiagnostic.reason === "malformed-json" ? "malformed" : "unreadable"}.`,
+            "error",
+        );
+        return { ok: false };
+    }
+    const globalConfig = globalRead.config;
     const configToPersist = applyChangedConfigValues(globalConfig, options.getConfig(), config);
     const result = writeCodexCoreConfig(configToPersist);
     if (!result.ok) {

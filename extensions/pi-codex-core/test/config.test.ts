@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -14,6 +14,8 @@ import {
     getCodexCoreProjectConfigPath,
     parseCodexCoreConfig,
     readCodexCoreConfig,
+    readCodexCoreConfigWithDiagnostics,
+    writeCodexCoreConfig,
 } from "../src/config/config.ts";
 import { makeExtensionHarness, makeExtensionContext } from "./helpers.ts";
 
@@ -102,10 +104,37 @@ test("does not overwrite malformed existing codex config", async () => {
         await mkdir(join(configPath, ".."), { recursive: true });
         await writeFile(configPath, "{not json");
 
-        const config = readCodexCoreConfig({ agentDir });
+        const readResult = readCodexCoreConfigWithDiagnostics({ agentDir });
 
-        assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
+        assert.deepEqual(readResult.config, DEFAULT_CODEX_CORE_CONFIG);
+        assert.equal(readResult.diagnostics.length, 1);
+        assert.equal(readResult.diagnostics[0]?.reason, "malformed-json");
+        assert.equal(readResult.diagnostics[0]?.path, configPath);
+        const writeResult = writeCodexCoreConfig(DEFAULT_CODEX_CORE_CONFIG, configPath);
+        assert.ok(!writeResult.ok);
+        assert.match(writeResult.error, /Refusing to overwrite malformed config/);
         assert.equal(await readFile(configPath, "utf8"), "{not json");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("replaces user config atomically without leaving temporary files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const configPath = join(root, "config.json");
+        await writeFile(configPath, "{}\n", { mode: 0o640 });
+        const nextConfig = {
+            ...DEFAULT_CODEX_CORE_CONFIG,
+            tools: { ...DEFAULT_CODEX_CORE_CONFIG.tools, webSearch: false },
+        };
+
+        const result = writeCodexCoreConfig(nextConfig, configPath);
+
+        assert.deepEqual(result, { ok: true });
+        assert.equal(readCodexCoreConfig(configPath).tools.webSearch, false);
+        assert.equal((await stat(configPath)).mode & 0o777, 0o640);
+        assert.deepEqual(await readdir(root), ["config.json"]);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
