@@ -1,6 +1,12 @@
 import { renderCodexOutput } from "../../../rendering/core.ts";
+import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
 import type { ThirdPartyToolRenderer, ThirdPartyToolResult } from "../../types.ts";
-import { callState, renderSimpleResult, renderThirdPartyCall } from "../../call-rendering.ts";
+import {
+    callState,
+    renderSimpleResult,
+    renderThirdPartyCall,
+    thirdPartyStatusLabel,
+} from "../../call-rendering.ts";
 import { textOutput } from "../../previews.ts";
 import {
     baseToolName,
@@ -97,30 +103,41 @@ function formatGoalResult(goal: GoalRecord | null | undefined): string | undefin
     return `${goal.status}: ${goal.objective}${suffix}`;
 }
 
-function goalCallLabel(toolName: string, args: unknown): string {
+function goalCallLabels(toolName: string, args: unknown): ToolLifecycleLabels {
     const normalized = normalizeGoalToolName(toolName);
     if (normalized === "get_goal") {
-        return "Goal Check";
+        return { static: "Check Goal", active: "Checking Goal", completed: "Checked Goal" };
     }
     if (normalized === "create_goal") {
-        return "Goal Create";
+        return { static: "Create Goal", active: "Creating Goal", completed: "Created Goal" };
     }
     if (normalized === "update_goal") {
         if (isRecord(args) && getString(args, "status") === "complete") {
-            return "Goal Complete";
+            return {
+                static: "Complete Goal",
+                active: "Completing Goal",
+                completed: "Completed Goal",
+            };
         }
-        return "Goal Update";
+        return { static: "Update Goal", active: "Updating Goal", completed: "Updated Goal" };
     }
-    return "Goal";
+    return { static: "Goal", active: "Updating Goal", completed: "Updated Goal" };
 }
 
-export function createGoalRenderer(toolName: string): ThirdPartyToolRenderer {
+export function createGoalRenderer(
+    toolName: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const body = isRecord(args) ? getString(args, "objective") : undefined;
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: goalCallLabel(toolName, args),
+                statusText: thirdPartyStatusLabel(
+                    labelMode,
+                    context,
+                    goalCallLabels(toolName, args),
+                ),
                 body,
                 maxRenderedLines: 3,
                 expanded: context.expanded,

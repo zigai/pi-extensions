@@ -1,5 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import type { CodexRenderTheme } from "../rendering/core.ts";
+import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import type { CodexLookRenderContext, CodexLookToolResult } from "../tool-rendering/protocol.ts";
 
 export {
@@ -39,7 +40,10 @@ export type ThirdPartyToolRenderer = {
 export type ThirdPartyToolRendererPlugin = {
     readonly name: string;
     readonly matches: (toolName: string) => boolean;
-    readonly createRenderer: (toolName: string) => ThirdPartyToolRenderer;
+    readonly createRenderer: (
+        toolName: string,
+        options?: ThirdPartyToolRenderingOptions,
+    ) => ThirdPartyToolRenderer;
 };
 
 /** Policy for automatic third-party tool renderer conversion. */
@@ -47,4 +51,5 @@ export type ThirdPartyToolRenderingOptions = {
     readonly enabled?: boolean;
     readonly preserveTools?: ReadonlyArray<ToolNameMatcher>;
     readonly renderers?: ReadonlyArray<ThirdPartyToolRendererPlugin>;
+    readonly labelMode?: ToolLabelMode;
 };

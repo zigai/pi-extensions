@@ -6,7 +6,7 @@ export type EditCallRenderContext = {
     readonly isError: boolean;
     readonly isPartial: boolean;
     readonly argsComplete?: boolean;
-    readonly dynamicStatusLabels?: boolean;
+    readonly labelMode?: ToolLabelMode;
 };
 
 export type EditCallSummary = {
@@ -56,7 +56,11 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
     const validEdits = edits?.filter(hasEditTextPair).length ?? 0;
     const invalidEdits = edits === undefined ? 0 : edits.length - validEdits;
 
-    const editLabel = context.dynamicStatusLabels === true ? "Editing" : "Edit";
+    const editLabel = toolStatusLabel(context.labelMode ?? "static", context, {
+        static: "Edit",
+        active: "Editing",
+        completed: "Edited",
+    });
 
     if (invalidEdits > 0) {
         return {
@@ -69,7 +73,7 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
 
     if (context.isError) {
         return {
-            statusText: context.dynamicStatusLabels === true ? "Edit Failed" : editLabel,
+            statusText: editLabel,
             path,
             suffix: formatEditCount(validEdits),
             hasInvalidEdits: false,
@@ -92,3 +96,4 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
         hasInvalidEdits: false,
     };
 }
+import { toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";

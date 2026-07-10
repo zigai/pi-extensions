@@ -5,6 +5,7 @@ import {
     formatReadAction,
     highlightShell,
     isInstructionFilePath,
+    isPartialInstructionFilePath,
     makeComponent,
     parseDiffSections,
     parseScriptInvocation,
@@ -82,6 +83,33 @@ describe("Codex rendering helpers", () => {
         expect(formatReadAction(tokenTheme, { path: "src/rendering.ts" })).toBe(
             "<toolTitle>Read</toolTitle> <accent>src/rendering.ts</accent>",
         );
+    });
+
+    it("does not flash the ordinary path accent while instruction paths stream", () => {
+        expect(isPartialInstructionFilePath("/home/me/.pi/agent/skills/typescript")).toBe(true);
+        expect(
+            isPartialInstructionFilePath(
+                "/home/me/.pi/agent/npm/node_modules/pi-autoresearch/skills/autoresearch-create",
+            ),
+        ).toBe(true);
+        expect(isPartialInstructionFilePath("src/AGENTS.")).toBe(true);
+        expect(isPartialInstructionFilePath("src/rendering")).toBe(false);
+
+        expect(
+            formatReadAction(
+                tokenTheme,
+                { path: "/home/me/.pi/agent/skills/typescript" },
+                { isPartial: true },
+            ),
+        ).toContain(
+            "<customMessageLabel>/home/me/.pi/agent/skills/typescript</customMessageLabel>",
+        );
+        expect(
+            formatReadAction(tokenTheme, { path: "/home/me/.pi/agent/sk" }, { isPartial: true }),
+        ).toContain("<muted>/home/me/.pi/agent/sk</muted>");
+        expect(
+            formatReadAction(tokenTheme, { path: "src/rendering" }, { isPartial: true }),
+        ).toContain("<muted>src/rendering</muted>");
     });
 
     it("parses built-in Pi diff strings into sections", () => {

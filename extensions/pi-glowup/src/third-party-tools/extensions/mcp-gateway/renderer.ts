@@ -1,5 +1,12 @@
+import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
+import { browserLifecycleLabels } from "../../browser-labels.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../../types.ts";
-import { callState, renderSimpleResult, renderThirdPartyCall } from "../../call-rendering.ts";
+import {
+    callState,
+    renderSimpleResult,
+    renderThirdPartyCall,
+    thirdPartyStatusLabel,
+} from "../../call-rendering.ts";
 import { previewArgsForContext } from "../../previews.ts";
 import { baseToolName, getNonEmptyString, isRecord } from "../../tool-values.ts";
 
@@ -53,13 +60,34 @@ function summarizeMcpGatewayArgs(
     return { label: "MCP", body: previewArgsForContext(args, context) };
 }
 
-export function createMcpGatewayRenderer(_toolName: string): ThirdPartyToolRenderer {
+function mcpLifecycleLabels(staticLabel: string): ToolLifecycleLabels {
+    if (staticLabel.startsWith("Browser ")) {
+        return browserLifecycleLabels(staticLabel);
+    }
+    if (staticLabel === "MCP Connect") {
+        return { static: staticLabel, active: "Connecting MCP", completed: "Connected MCP" };
+    }
+    return {
+        static: staticLabel,
+        active: `Calling ${staticLabel}`,
+        completed: `Called ${staticLabel}`,
+    };
+}
+
+export function createMcpGatewayRenderer(
+    _toolName: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const summary = summarizeMcpGatewayArgs(args, context);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: summary.label,
+                statusText: thirdPartyStatusLabel(
+                    labelMode,
+                    context,
+                    mcpLifecycleLabels(summary.label),
+                ),
                 body: summary.body,
                 maxRenderedLines: 4,
                 expanded: context.expanded,
@@ -71,14 +99,17 @@ export function createMcpGatewayRenderer(_toolName: string): ThirdPartyToolRende
     };
 }
 
-export function createChromeDevtoolsMcpRenderer(toolName: string): ThirdPartyToolRenderer {
+export function createChromeDevtoolsMcpRenderer(
+    toolName: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const command = baseToolName(toolName).replace(/^chrome[-_]?devtools(?:__|[_-])?/i, "");
             const label = MCP_COMMAND_LABELS.get(command) ?? `MCP ${baseToolName(toolName)}`;
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: label,
+                statusText: thirdPartyStatusLabel(labelMode, context, mcpLifecycleLabels(label)),
                 body: previewArgsForContext(args, context),
                 maxRenderedLines: 4,
                 expanded: context.expanded,

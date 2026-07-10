@@ -287,8 +287,33 @@ describe("tool execution patches", () => {
 
         const renderer = prototype.getCallRenderer.call(instance);
         expect(renderer?.({ value: 1 }, plainTheme, renderContext).render(80).join("\n")).toContain(
-            "Called custom_tool",
+            "• custom_tool",
         );
+    });
+
+    it("passes lifecycle label mode through the third-party renderer patch", () => {
+        const prototype = createPrototype();
+        installThirdPartyToolRendererPatch({ labelMode: "lifecycle" }, prototype);
+        const instance: FakeToolExecutionInstance = {
+            toolName: "custom_tool",
+            toolDefinition: {},
+        };
+
+        const active = prototype.getCallRenderer
+            .call(instance)?.({}, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(80)
+            .join("\n");
+        const completed = prototype.getCallRenderer
+            .call(instance)?.({}, plainTheme, renderContext)
+            .render(80)
+            .join("\n");
+
+        expect(active).toContain("Calling custom_tool");
+        expect(completed).toContain("Called custom_tool");
     });
 
     it("preserves native third-party renderers unless they opt in", () => {
@@ -335,7 +360,7 @@ describe("tool execution patches", () => {
                 .call(instance)?.({ patch }, plainTheme, renderContext)
                 .render(100)
                 .join("\n"),
-        ).toContain("Edited README.md (+1 -1)");
+        ).toContain("Apply Patch README.md (+1 -1)");
     });
 
     it("uses explicit Codex-look plugins over native built-in renderers", () => {
@@ -362,7 +387,7 @@ describe("tool execution patches", () => {
                 .call(instance)?.({ patch }, plainTheme, renderContext)
                 .render(100)
                 .join("\n"),
-        ).toContain("Added src/new.ts (+1 -0)");
+        ).toContain("Apply Patch src/new.ts (+1 -0)");
     });
 
     it("uses passive Codex-look adapters over native third-party renderers", () => {

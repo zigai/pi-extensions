@@ -1,10 +1,16 @@
 import { renderCodexOutput, type CodexRenderTheme } from "../../../rendering/core.ts";
+import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
 import type {
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
     ThirdPartyToolResult,
 } from "../../types.ts";
-import { callState, renderSimpleResult, renderThirdPartyCall } from "../../call-rendering.ts";
+import {
+    callState,
+    renderSimpleResult,
+    renderThirdPartyCall,
+    thirdPartyStatusLabel,
+} from "../../call-rendering.ts";
 import { previewArgsForContext, textOutput } from "../../previews.ts";
 import {
     getArray,
@@ -220,12 +226,15 @@ function summarizeAskUserQuestionResult(
     return lines.join("\n");
 }
 
-export function createAskUserQuestionRenderer(statusText: string): ThirdPartyToolRenderer {
+export function createAskUserQuestionRenderer(
+    labels: ToolLifecycleLabels,
+    labelMode: ToolLabelMode,
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText,
+                statusText: thirdPartyStatusLabel(labelMode, context, labels),
                 body: summarizeAskUserQuestionArgs(args, theme, context.expanded, context),
                 maxRenderedLines: 5,
                 expanded: context.expanded,

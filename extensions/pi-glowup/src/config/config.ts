@@ -6,6 +6,7 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import type TypeboxSchema from "typebox/schema";
 import type { ScriptPreviewHeaderLayout } from "../rendering/core.ts";
+import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import {
     parseScriptFormatterCommandsValue,
     type ScriptFormatterCommands,
@@ -28,7 +29,7 @@ export type CodexLookConfig = {
     readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
     readonly scriptMaxCodePreviewLines: number;
     readonly toolLabels: {
-        readonly dynamicStatus: boolean;
+        readonly mode: ToolLabelMode;
     };
     readonly writePreview: {
         readonly movingViewport: boolean;
@@ -73,13 +74,13 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
         memorySampleIntervalMs: 10_000,
     },
     toolLabels: {
-        dynamicStatus: false,
+        mode: "static",
     },
     writePreview: {
         movingViewport: true,
     },
     syntax: {
-        preloadLanguages: ["markdown", "bash", "python"],
+        preloadLanguages: ["markdown", "bash", "python", "typescript"],
         projectLanguageDetection: {
             enabled: true,
         },
@@ -122,7 +123,7 @@ const DebugLogConfigSchema = Type.Object(
 );
 const ToolLabelsConfigSchema = Type.Object(
     {
-        dynamicStatus: Type.Optional(Type.Boolean()),
+        mode: Type.Optional(Type.Union([Type.Literal("static"), Type.Literal("lifecycle")])),
     },
     { additionalProperties: false },
 );
@@ -194,7 +195,9 @@ const CodexLookConfigJsonSchema = Type.Object(
         toolLabels: Type.Optional(
             Type.Object(
                 {
-                    dynamicStatus: Type.Optional(Type.Boolean()),
+                    mode: Type.Optional(
+                        Type.Union([Type.Literal("static"), Type.Literal("lifecycle")]),
+                    ),
                 },
                 { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels },
             ),
@@ -379,8 +382,7 @@ export function parseCodexLookConfig(
             scriptPreview.maxCodePreviewLines ??
             DEFAULT_CODEX_LOOK_CONFIG_JSON.scriptPreview.maxCodePreviewLines,
         toolLabels: {
-            dynamicStatus:
-                toolLabels.dynamicStatus ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.dynamicStatus,
+            mode: toolLabels.mode ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.mode,
         },
         writePreview: {
             movingViewport:

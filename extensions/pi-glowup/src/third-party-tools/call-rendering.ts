@@ -5,6 +5,11 @@ import {
     type CodexCallState,
     type CodexRenderTheme,
 } from "../rendering/core.ts";
+import {
+    toolStatusLabel,
+    type ToolLabelMode,
+    type ToolLifecycleLabels,
+} from "../rendering/status-labels.ts";
 import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
 import type {
     ThirdPartyToolRenderContext,
@@ -36,6 +41,14 @@ export function callState(context: ThirdPartyToolRenderContext): CodexCallState 
         return "running";
     }
     return "success";
+}
+
+export function thirdPartyStatusLabel(
+    mode: ToolLabelMode,
+    context: ThirdPartyToolRenderContext,
+    labels: ToolLifecycleLabels,
+): string {
+    return toolStatusLabel(mode, context, labels);
 }
 
 export function renderSimpleResult(
@@ -86,12 +99,21 @@ export function renderThirdPartyCall(theme: CodexRenderTheme, options: CallOptio
     });
 }
 
-export function createGenericRenderer(toolName: string, label?: string): ThirdPartyToolRenderer {
+export function createGenericRenderer(
+    toolName: string,
+    label?: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
+            const staticLabel = label ?? displayToolName(toolName);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: label ?? `Called ${displayToolName(toolName)}`,
+                statusText: thirdPartyStatusLabel(labelMode, context, {
+                    static: staticLabel,
+                    active: `Calling ${staticLabel}`,
+                    completed: `Called ${staticLabel}`,
+                }),
                 body: previewArgsForContext(args, context),
                 maxRenderedLines: 4,
                 expanded: context.expanded,

@@ -1,8 +1,11 @@
+import type { ToolLabelMode } from "../../../rendering/status-labels.ts";
+import { browserLifecycleLabels } from "../../browser-labels.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../../types.ts";
 import {
     callState,
     renderSimpleResult,
     renderThirdPartyCall,
+    thirdPartyStatusLabel,
     type CallSummary,
 } from "../../call-rendering.ts";
 import { previewArgs, previewArgsForContext } from "../../previews.ts";
@@ -77,13 +80,20 @@ function summarizeAgentBrowserArgs(
     return { label: "Browser", body: previewArgsForContext(args, context) };
 }
 
-export function createAgentBrowserRenderer(_toolName: string): ThirdPartyToolRenderer {
+export function createAgentBrowserRenderer(
+    _toolName: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const summary = summarizeAgentBrowserArgs(args, context);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: summary.label,
+                statusText: thirdPartyStatusLabel(
+                    labelMode,
+                    context,
+                    browserLifecycleLabels(summary.label),
+                ),
                 body: summary.body,
                 maxRenderedLines: 4,
                 expanded: context.expanded,

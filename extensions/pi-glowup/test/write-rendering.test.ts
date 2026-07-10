@@ -48,7 +48,7 @@ describe("write rendering", () => {
         const component = renderWriteCallPreview(
             { path: "src/example.ts", content: "export const value = 1;\n" },
             plainTheme,
-            { isError: false, isPartial: false, expanded: false, dynamicStatusLabels: true },
+            { isError: false, isPartial: false, expanded: false, labelMode: "lifecycle" },
         );
 
         expect(component.render(100).join("\n")).toContain("Wrote src/example.ts (+1 -0)");
@@ -82,7 +82,7 @@ describe("write rendering", () => {
                     isError: false,
                     isPartial: true,
                     expanded: false,
-                    dynamicStatusLabels: true,
+                    labelMode: "lifecycle",
                     lastComponent,
                 },
             );
@@ -114,7 +114,7 @@ describe("write rendering", () => {
                     isError: false,
                     isPartial: true,
                     expanded: false,
-                    dynamicStatusLabels: true,
+                    labelMode: "lifecycle",
                     movingViewport: false,
                     lastComponent,
                 },
@@ -138,7 +138,7 @@ describe("write rendering", () => {
                 isError: false,
                 isPartial: true,
                 expanded: false,
-                dynamicStatusLabels: true,
+                labelMode: "lifecycle",
                 mutationStatDigitWidth: 3,
             },
         );
@@ -152,7 +152,7 @@ describe("write rendering", () => {
                 isError: false,
                 isPartial: true,
                 expanded: false,
-                dynamicStatusLabels: true,
+                labelMode: "lifecycle",
                 mutationStatDigitWidth: 3,
             },
         );
@@ -165,7 +165,7 @@ describe("write rendering", () => {
         let lastComponent = renderWriteCallPreview(
             { path: "src/generated.ts", content: "export const value = 1;\r" },
             plainTheme,
-            { isError: false, isPartial: true, expanded: false, dynamicStatusLabels: true },
+            { isError: false, isPartial: true, expanded: false, labelMode: "lifecycle" },
         );
 
         lastComponent = renderWriteCallPreview(
@@ -175,7 +175,7 @@ describe("write rendering", () => {
                 isError: false,
                 isPartial: true,
                 expanded: false,
-                dynamicStatusLabels: true,
+                labelMode: "lifecycle",
                 lastComponent,
             },
         );

@@ -2,6 +2,12 @@
 
 Third-party extensions can add `codexLookRendering` to a tool definition to control how that tool appears when `pi-codex-look` is installed. Pi ignores this property when the extension is not installed.
 
+Tool labels support two vocabulary modes. `static` keeps a stable operation label such as
+`Explore`, `Edit`, or `Check Agent`. `lifecycle` changes that label as execution progresses,
+for example `Exploring` → `Explored`, `Editing` → `Edited`, and `Checking Agent` →
+`Checked Agent`. Script previews intentionally keep their interpreter label (`Bash`, `Python`,
+`Node`, and similar) in both modes.
+
 ## Rendering Paths
 
 `pi-codex-look` has four rendering paths:
@@ -77,6 +83,8 @@ const codexLookRendering = {
     return {
       kind: "call",
       label: `Query ${database}`,
+      activeLabel: `Querying ${database}`,
+      completedLabel: `Queried ${database}`,
       body: sql,
       maxRenderedLines: 6,
     };
@@ -100,7 +108,7 @@ pi.registerTool({
 });
 ```
 
-In this example the adapter intentionally shows `database`, `sql`, row count, and timing. It omits fields like `params` and `connectionId` from the collapsed call because the fallback renderer cannot know whether those fields are useful, noisy, or sensitive.
+In this example the adapter intentionally shows `database`, `sql`, row count, and timing. It omits fields like `params` and `connectionId` from the collapsed call because the fallback renderer cannot know whether those fields are useful, noisy, or sensitive. `label` is used in static mode; lifecycle mode uses `activeLabel` and `completedLabel`. When those lifecycle labels are omitted, the adapter falls back to `Calling {label}` and `Called {label}`.
 
 ## Untyped Boundaries
 

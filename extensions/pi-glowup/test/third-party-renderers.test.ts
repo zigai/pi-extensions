@@ -32,6 +32,10 @@ const renderContext = {
     isError: false,
 };
 
+function createLifecycleRenderer(toolName: string) {
+    return createThirdPartyToolRenderer(toolName, { labelMode: "lifecycle" });
+}
+
 function stripAccentStyle(text: string): string {
     return text.replaceAll("<accent>", "").replaceAll("</accent>", "");
 }
@@ -93,8 +97,40 @@ describe("third-party tool renderers", () => {
         ).toContain("3 rows");
     });
 
+    it("uses adapter-specific lifecycle labels when configured", () => {
+        const rendering = {
+            version: 1,
+            renderCall() {
+                return {
+                    kind: "call",
+                    label: "DB Query",
+                    activeLabel: "Querying DB",
+                    completedLabel: "Queried DB",
+                };
+            },
+        } satisfies CodexLookRenderingAdapter;
+        const renderer = createThirdPartyToolRenderer(
+            "db_query",
+            { labelMode: "lifecycle" },
+            { [CODEX_LOOK_RENDERING_PROPERTY]: rendering },
+        );
+
+        const active = renderer
+            .renderCall({}, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(80)
+            .join("\n");
+        const completed = renderer.renderCall({}, plainTheme, renderContext).render(80).join("\n");
+
+        expect(active).toContain("Querying DB");
+        expect(completed).toContain("Queried DB");
+    });
+
     it("renders unknown tools as compact Codex-style calls", () => {
-        const renderer = createThirdPartyToolRenderer("custom_tool");
+        const renderer = createLifecycleRenderer("custom_tool");
 
         const lines = renderer
             .renderCall({ action: "run", value: 42 }, plainTheme, renderContext)
@@ -102,6 +138,40 @@ describe("third-party tool renderers", () => {
 
         expect(lines.join("\n")).toContain("• Called custom_tool");
         expect(lines.join("\n")).toContain('"action": "run"');
+    });
+
+    it("keeps generic tool names stable in static mode", () => {
+        const renderer = createThirdPartyToolRenderer("custom_tool", { labelMode: "static" });
+        const active = renderer
+            .renderCall({}, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(80)
+            .join("\n");
+        const completed = renderer.renderCall({}, plainTheme, renderContext).render(80).join("\n");
+
+        expect(active).toContain("• custom_tool");
+        expect(completed).toContain("• custom_tool");
+        expect(active).not.toContain("Calling");
+        expect(completed).not.toContain("Called");
+    });
+
+    it("updates generic tool verbs in lifecycle mode", () => {
+        const renderer = createLifecycleRenderer("custom_tool");
+        const active = renderer
+            .renderCall({}, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(80)
+            .join("\n");
+        const completed = renderer.renderCall({}, plainTheme, renderContext).render(80).join("\n");
+
+        expect(active).toContain("• Calling custom_tool");
+        expect(completed).toContain("• Called custom_tool");
     });
 
     it("bounds huge generic third-party tool call argument previews", () => {
@@ -172,6 +242,28 @@ describe("third-party tool renderers", () => {
 
         expect(lines[0]).toContain("Browser Snapshot");
         expect(lines.join("\n")).toContain('"-i"');
+    });
+
+    it("updates browser-specific verbs in lifecycle mode", () => {
+        const renderer = createThirdPartyToolRenderer("agent_browser", {
+            labelMode: "lifecycle",
+        });
+        const args = { args: ["snapshot", "-i"] };
+        const active = renderer
+            .renderCall(args, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100)
+            .join("\n");
+        const completed = renderer
+            .renderCall(args, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        expect(active).toContain("Taking Browser Snapshot");
+        expect(completed).toContain("Took Browser Snapshot");
     });
 
     it("uses shallow previews for partial agent browser job arguments", () => {
@@ -248,7 +340,7 @@ describe("third-party tool renderers", () => {
     });
 
     it("summarizes agent launch calls without dumping JSON", () => {
-        const renderer = createThirdPartyToolRenderer("Agent");
+        const renderer = createLifecycleRenderer("Agent");
 
         const lines = renderer
             .renderCall(
@@ -272,8 +364,23 @@ describe("third-party tool renderers", () => {
         expect(rendered).not.toContain("prompt");
     });
 
+    it("uses the active agent verb in lifecycle mode", () => {
+        const renderer = createLifecycleRenderer("Agent");
+        const rendered = renderer
+            .renderCall({ description: "Inspect labels" }, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("Launching Agent");
+        expect(rendered).not.toContain("Launched Agent");
+    });
+
     it("bounds huge subagent steering messages", () => {
-        const renderer = createThirdPartyToolRenderer("steer_subagent");
+        const renderer = createLifecycleRenderer("steer_subagent");
         const message = `  ${Array.from({ length: 10_000 }, (_value, index) => `word${index}`).join(
             "\n",
         )}  `;
@@ -292,7 +399,7 @@ describe("third-party tool renderers", () => {
     });
 
     it("summarizes subagent result checks without dumping JSON", () => {
-        const renderer = createThirdPartyToolRenderer("get_subagent_result");
+        const renderer = createLifecycleRenderer("get_subagent_result");
 
         const lines = renderer
             .renderCall(
@@ -427,7 +534,7 @@ describe("third-party tool renderers", () => {
     });
 
     it("renders finalized plans without duplicating markdown arguments", () => {
-        const renderer = createThirdPartyToolRenderer("finalize_plan");
+        const renderer = createLifecycleRenderer("finalize_plan");
 
         const lines = renderer
             .renderCall(
@@ -438,7 +545,7 @@ describe("third-party tool renderers", () => {
             .render(100);
 
         const rendered = lines.join("\n");
-        expect(rendered).toContain("Plan Finalized");
+        expect(rendered).toContain("Finalized Plan");
         expect(rendered).not.toContain("Refactor Plan");
         expect(rendered).not.toContain("markdown");
         expect(rendered).not.toContain("expand");
@@ -460,7 +567,7 @@ describe("third-party tool renderers", () => {
     });
 
     it("renders ask_user_question calls as readable choices instead of JSON", () => {
-        const renderer = createThirdPartyToolRenderer("ask_user_question");
+        const renderer = createLifecycleRenderer("ask_user_question");
 
         const lines = renderer
             .renderCall(

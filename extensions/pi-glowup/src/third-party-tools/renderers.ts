@@ -39,42 +39,46 @@ const DEFAULT_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
     {
         name: "apply-patch",
         matches: isApplyPatchTool,
-        createRenderer: createApplyPatchRenderer,
+        createRenderer: (toolName, options) =>
+            createApplyPatchRenderer(toolName, options?.labelMode),
     },
     {
         name: "agent-browser",
         matches: (toolName) => toolName === "agent_browser",
-        createRenderer: createAgentBrowserRenderer,
+        createRenderer: (toolName, options) =>
+            createAgentBrowserRenderer(toolName, options?.labelMode),
     },
     {
         name: "mcp-gateway",
         matches: (toolName) => toolName === "mcp",
-        createRenderer: createMcpGatewayRenderer,
+        createRenderer: (toolName, options) =>
+            createMcpGatewayRenderer(toolName, options?.labelMode),
     },
     {
         name: "chrome-devtools-mcp-tools",
         matches: hasChromeDevtoolsName,
-        createRenderer: createChromeDevtoolsMcpRenderer,
+        createRenderer: (toolName, options) =>
+            createChromeDevtoolsMcpRenderer(toolName, options?.labelMode),
     },
     {
         name: "pi-core-tools",
         matches: isPiCoreTool,
-        createRenderer: createPiCoreRenderer,
+        createRenderer: (toolName, options) => createPiCoreRenderer(toolName, options?.labelMode),
     },
     {
         name: "goal-tools",
         matches: isGoalTool,
-        createRenderer: createGoalRenderer,
+        createRenderer: (toolName, options) => createGoalRenderer(toolName, options?.labelMode),
     },
     {
         name: "codex-tools",
         matches: isCodexTool,
-        createRenderer: createCodexRenderer,
+        createRenderer: (toolName, options) => createCodexRenderer(toolName, options?.labelMode),
     },
     {
         name: "agent-tools",
         matches: isAgentTool,
-        createRenderer: createAgentRenderer,
+        createRenderer: (toolName, options) => createAgentRenderer(toolName, options?.labelMode),
     },
 ];
 
@@ -155,7 +159,11 @@ export function createThirdPartyToolRenderer(
 ): ThirdPartyToolRenderer {
     const plugins = rendererPlugins(options);
     const plugin = plugins.find((candidate) => candidate.matches(toolName));
-    const fallback = plugin?.createRenderer(toolName) ?? createGenericRenderer(toolName);
+    const fallback =
+        plugin?.createRenderer(toolName, options) ??
+        createGenericRenderer(toolName, undefined, options?.labelMode);
     const adapter = codexLookRenderingAdapter(toolDefinition, CODEX_LOOK_RENDERING_PROPERTY);
-    return adapter === undefined ? fallback : createProtocolRenderer(adapter, fallback);
+    return adapter === undefined
+        ? fallback
+        : createProtocolRenderer(adapter, fallback, options?.labelMode);
 }

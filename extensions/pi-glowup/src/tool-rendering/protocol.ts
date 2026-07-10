@@ -38,6 +38,8 @@ export type CodexLookSyntax = {
 export type CodexLookCallView = {
     readonly kind: "call";
     readonly label: string;
+    readonly activeLabel?: string;
+    readonly completedLabel?: string;
     readonly body?: string;
     readonly state?: CodexLookCallState;
     readonly maxRenderedLines?: number;

@@ -1,12 +1,15 @@
 export type ExplorationRenderContext = {
     readonly toolCallId: string;
     readonly invalidate: () => void;
+    readonly isPartial?: boolean;
+    readonly argsComplete?: boolean;
 };
 
 export type ExplorationGroupDecision =
     | {
           readonly kind: "owner";
           readonly actions: ReadonlyArray<string>;
+          readonly active: boolean;
       }
     | {
           readonly kind: "child";
@@ -17,6 +20,7 @@ const DEFAULT_MAX_RETAINED_TOOL_CALLS = 300;
 type ExplorationGroup = {
     readonly ownerToolCallId: string;
     readonly actionsByToolCallId: Map<string, string>;
+    readonly activeByToolCallId: Map<string, boolean>;
     readonly orderedToolCallIds: string[];
     ownerInvalidate: (() => void) | undefined;
 };
@@ -25,6 +29,7 @@ export class ExplorationGroupStore {
     private activeGroup: ExplorationGroup | undefined;
     private readonly groupsByToolCallId = new Map<string, ExplorationGroup>();
     private readonly groupsInInsertionOrder: ExplorationGroup[] = [];
+    private readonly boundaryToolCallIds = new Set<string>();
     private readonly maxRetainedToolCalls: number;
 
     constructor(maxRetainedToolCalls = DEFAULT_MAX_RETAINED_TOOL_CALLS) {
@@ -37,8 +42,8 @@ export class ExplorationGroupStore {
             if (existingGroup.ownerToolCallId === context.toolCallId) {
                 existingGroup.ownerInvalidate = context.invalidate;
             }
-            const actionChanged = this.updateAction(existingGroup, context.toolCallId, action);
-            if (actionChanged && existingGroup.ownerToolCallId !== context.toolCallId) {
+            const entryChanged = this.updateEntry(existingGroup, context, action);
+            if (entryChanged && existingGroup.ownerToolCallId !== context.toolCallId) {
                 existingGroup.ownerInvalidate?.();
             }
             this.trimRetainedGroups();
@@ -47,9 +52,9 @@ export class ExplorationGroupStore {
 
         const group = this.activeGroup ?? this.createGroup(context);
         this.groupsByToolCallId.set(context.toolCallId, group);
-        const actionChanged = this.updateAction(group, context.toolCallId, action);
+        const entryChanged = this.updateEntry(group, context, action);
 
-        if (actionChanged && group.ownerToolCallId !== context.toolCallId) {
+        if (entryChanged && group.ownerToolCallId !== context.toolCallId) {
             group.ownerInvalidate?.();
         }
 
@@ -64,10 +69,26 @@ export class ExplorationGroupStore {
         this.activeGroup = undefined;
     }
 
+    /**
+     * Closes the active group the first time a non-exploration tool call is observed.
+     *
+     * Tool components are rendered repeatedly as Pi redraws the transcript. Remembering
+     * the boundary by call ID prevents an older component from closing a newer group on
+     * every repaint.
+     */
+    registerBoundary(toolCallId: string): void {
+        if (this.boundaryToolCallIds.has(toolCallId)) {
+            return;
+        }
+        this.boundaryToolCallIds.add(toolCallId);
+        this.closeActiveGroup();
+    }
+
     clear(): void {
         this.activeGroup = undefined;
         this.groupsByToolCallId.clear();
         this.groupsInInsertionOrder.length = 0;
+        this.boundaryToolCallIds.clear();
     }
 
     stats(): { readonly groups: number; readonly toolCalls: number } {
@@ -81,6 +102,7 @@ export class ExplorationGroupStore {
         const group: ExplorationGroup = {
             ownerToolCallId: context.toolCallId,
             actionsByToolCallId: new Map(),
+            activeByToolCallId: new Map(),
             orderedToolCallIds: [],
             ownerInvalidate: context.invalidate,
         };
@@ -121,16 +143,23 @@ export class ExplorationGroupStore {
         }
     }
 
-    private updateAction(group: ExplorationGroup, toolCallId: string, action: string): boolean {
-        const previousAction = group.actionsByToolCallId.get(toolCallId);
-        if (previousAction === action) {
+    private updateEntry(
+        group: ExplorationGroup,
+        context: ExplorationRenderContext,
+        action: string,
+    ): boolean {
+        const previousAction = group.actionsByToolCallId.get(context.toolCallId);
+        const active = context.isPartial === true || context.argsComplete === false;
+        const previousActive = group.activeByToolCallId.get(context.toolCallId);
+        if (previousAction === action && previousActive === active) {
             return false;
         }
 
         if (previousAction === undefined) {
-            group.orderedToolCallIds.push(toolCallId);
+            group.orderedToolCallIds.push(context.toolCallId);
         }
-        group.actionsByToolCallId.set(toolCallId, action);
+        group.actionsByToolCallId.set(context.toolCallId, action);
+        group.activeByToolCallId.set(context.toolCallId, active);
         return true;
     }
 
@@ -143,6 +172,12 @@ export class ExplorationGroupStore {
             const action = group.actionsByToolCallId.get(orderedToolCallId);
             return action === undefined ? [] : [action];
         });
-        return { kind: "owner", actions };
+        return {
+            kind: "owner",
+            actions,
+            active: group.orderedToolCallIds.some(
+                (orderedToolCallId) => group.activeByToolCallId.get(orderedToolCallId) === true,
+            ),
+        };
     }
 }

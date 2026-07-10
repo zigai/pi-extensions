@@ -49,13 +49,22 @@
     "toolLabels": {
       "type": "object",
       "properties": {
-        "dynamicStatus": {
-          "type": "boolean"
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "static"
+            },
+            {
+              "type": "string",
+              "const": "lifecycle"
+            }
+          ]
         }
       },
       "additionalProperties": false,
       "default": {
-        "dynamicStatus": false
+        "mode": "static"
       }
     },
     "writePreview": {
@@ -94,7 +103,7 @@
       },
       "additionalProperties": false,
       "default": {
-        "preloadLanguages": ["markdown", "bash", "python"],
+        "preloadLanguages": ["markdown", "bash", "python", "typescript"],
         "projectLanguageDetection": {
           "enabled": true
         }

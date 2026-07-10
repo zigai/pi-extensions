@@ -38,14 +38,14 @@ describe("edit call rendering", () => {
         });
     });
 
-    it("uses dynamic status labels when enabled", () => {
+    it("uses the active edit label in lifecycle mode", () => {
         const summary = summarizeEditCall(
             { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
             {
                 isError: false,
                 isPartial: true,
                 argsComplete: false,
-                dynamicStatusLabels: true,
+                labelMode: "lifecycle",
             },
         );
 
@@ -55,6 +55,20 @@ describe("edit call rendering", () => {
             suffix: "",
             hasInvalidEdits: false,
         });
+    });
+
+    it("uses the completed edit label in lifecycle mode", () => {
+        const summary = summarizeEditCall(
+            { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
+            {
+                isError: false,
+                isPartial: false,
+                argsComplete: true,
+                labelMode: "lifecycle",
+            },
+        );
+
+        expect(summary.statusText).toBe("Edited");
     });
 
     it("marks restored completed edit calls as no longer pending", () => {

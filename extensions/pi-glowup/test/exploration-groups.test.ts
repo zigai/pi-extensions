@@ -23,9 +23,13 @@ describe("exploration groups", () => {
             "Read a.ts",
         );
 
-        expect(first).toEqual({ kind: "owner", actions: ["Read a.ts"] });
+        expect(first).toEqual({ kind: "owner", actions: ["Read a.ts"], active: false });
         expect(second).toEqual({ kind: "child" });
-        expect(refreshedFirst).toEqual({ kind: "owner", actions: ["Read a.ts", "Search needle"] });
+        expect(refreshedFirst).toEqual({
+            kind: "owner",
+            actions: ["Read a.ts", "Search needle"],
+            active: false,
+        });
         expect(invalidations).toBe(1);
     });
 
@@ -73,6 +77,7 @@ describe("exploration groups", () => {
         expect(refreshedFirst).toEqual({
             kind: "owner",
             actions: ["Read a.ts", "Search haystack"],
+            active: false,
         });
         expect(invalidations).toBe(2);
     });
@@ -84,7 +89,40 @@ describe("exploration groups", () => {
         store.closeActiveGroup();
         const second = store.register({ toolCallId: "second", invalidate: noop }, "Read b.ts");
 
-        expect(second).toEqual({ kind: "owner", actions: ["Read b.ts"] });
+        expect(second).toEqual({ kind: "owner", actions: ["Read b.ts"], active: false });
+    });
+
+    it("does not let a repainted older boundary close a newer exploration group", () => {
+        const store = new ExplorationGroupStore();
+
+        store.registerBoundary("earlier-bash");
+        store.register({ toolCallId: "first", invalidate: noop }, "Read a.ts");
+        store.register({ toolCallId: "second", invalidate: noop }, "Search needle");
+
+        // Pi repaints the complete transcript after the child invalidates its owner.
+        store.registerBoundary("earlier-bash");
+        const third = store.register({ toolCallId: "third", invalidate: noop }, "List src");
+        const refreshedFirst = store.register(
+            { toolCallId: "first", invalidate: noop },
+            "Read a.ts",
+        );
+
+        expect(third).toEqual({ kind: "child" });
+        expect(refreshedFirst).toEqual({
+            kind: "owner",
+            actions: ["Read a.ts", "Search needle", "List src"],
+            active: false,
+        });
+    });
+
+    it("closes a group when a new boundary tool call is observed", () => {
+        const store = new ExplorationGroupStore();
+
+        store.register({ toolCallId: "first", invalidate: noop }, "Read a.ts");
+        store.registerBoundary("bash");
+        const second = store.register({ toolCallId: "second", invalidate: noop }, "Read b.ts");
+
+        expect(second).toEqual({ kind: "owner", actions: ["Read b.ts"], active: false });
     });
 
     it("does not retain closed group invalidation callbacks", () => {
@@ -121,6 +159,40 @@ describe("exploration groups", () => {
             "Search needle",
         );
 
-        expect(firstChildAgain).toEqual({ kind: "owner", actions: ["Search needle"] });
+        expect(firstChildAgain).toEqual({
+            kind: "owner",
+            actions: ["Search needle"],
+            active: false,
+        });
+    });
+
+    it("updates the owner when a child moves from active to completed", () => {
+        let invalidations = 0;
+        const store = new ExplorationGroupStore();
+        const invalidate = (): void => {
+            invalidations += 1;
+        };
+
+        store.register(
+            {
+                toolCallId: "first",
+                invalidate,
+            },
+            "Read a.ts",
+        );
+        store.register(
+            { toolCallId: "second", invalidate: noop, isPartial: true },
+            "Search needle",
+        );
+        const activeOwner = store.register({ toolCallId: "first", invalidate }, "Read a.ts");
+        store.register(
+            { toolCallId: "second", invalidate: noop, isPartial: false },
+            "Search needle",
+        );
+        const completedOwner = store.register({ toolCallId: "first", invalidate }, "Read a.ts");
+
+        expect(activeOwner).toMatchObject({ kind: "owner", active: true });
+        expect(completedOwner).toMatchObject({ kind: "owner", active: false });
+        expect(invalidations).toBe(2);
     });
 });

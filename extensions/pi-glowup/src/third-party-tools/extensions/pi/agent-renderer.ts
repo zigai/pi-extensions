@@ -1,10 +1,16 @@
 import { renderCodexOutput } from "../../../rendering/core.ts";
+import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
 import type {
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
     ThirdPartyToolResult,
 } from "../../types.ts";
-import { callState, renderSimpleResult, renderThirdPartyCall } from "../../call-rendering.ts";
+import {
+    callState,
+    renderSimpleResult,
+    renderThirdPartyCall,
+    thirdPartyStatusLabel,
+} from "../../call-rendering.ts";
 import {
     compactQuotedText,
     previewArgsForContext,
@@ -24,11 +30,17 @@ import {
     isRecord,
 } from "../../tool-values.ts";
 
-const AGENT_TOOL_LABELS = new Map<string, string>([
-    ["Agent", "Launched Agent"],
-    ["agent", "Launched Agent"],
-    ["get_subagent_result", "Checked Agent"],
-    ["steer_subagent", "Steered Agent"],
+const AGENT_TOOL_LABELS = new Map<string, ToolLifecycleLabels>([
+    ["Agent", { static: "Launch Agent", active: "Launching Agent", completed: "Launched Agent" }],
+    ["agent", { static: "Launch Agent", active: "Launching Agent", completed: "Launched Agent" }],
+    [
+        "get_subagent_result",
+        { static: "Check Agent", active: "Checking Agent", completed: "Checked Agent" },
+    ],
+    [
+        "steer_subagent",
+        { static: "Steer Agent", active: "Steering Agent", completed: "Steered Agent" },
+    ],
 ]);
 
 /** Returns whether a tool name belongs to Pi subagent management. */
@@ -36,8 +48,15 @@ export function isAgentTool(toolName: string): boolean {
     return AGENT_TOOL_LABELS.has(baseToolName(toolName));
 }
 
-function agentCallLabel(toolName: string): string {
-    return AGENT_TOOL_LABELS.get(baseToolName(toolName)) ?? `Called ${displayToolName(toolName)}`;
+function agentCallLabels(toolName: string): ToolLifecycleLabels {
+    const staticLabel = displayToolName(toolName);
+    return (
+        AGENT_TOOL_LABELS.get(baseToolName(toolName)) ?? {
+            static: staticLabel,
+            active: `Calling ${staticLabel}`,
+            completed: `Called ${staticLabel}`,
+        }
+    );
 }
 
 function displaySubagentType(value: string | undefined): string | undefined {
@@ -258,12 +277,15 @@ function agentResultSummary(result: ThirdPartyToolResult): string | undefined {
     return subagentCompletionSummary(output) ?? subagentLaunchSummary(output);
 }
 
-export function createAgentRenderer(toolName: string): ThirdPartyToolRenderer {
+export function createAgentRenderer(
+    toolName: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: agentCallLabel(toolName),
+                statusText: thirdPartyStatusLabel(labelMode, context, agentCallLabels(toolName)),
                 body: agentCallBody(toolName, args, context),
                 maxRenderedLines: 4,
                 expanded: context.expanded,

@@ -45,6 +45,11 @@ import {
     type ReadActionArgs,
     type ScriptPreviewHeaderLayout,
 } from "./rendering/core.ts";
+import {
+    isActiveToolCall,
+    toolStatusLabel,
+    type ToolLabelMode,
+} from "./rendering/status-labels.ts";
 import { buildEditPreview, EditPreviewStore } from "./rendering/edit-preview.ts";
 import { summarizeEditCall } from "./rendering/edit-call-rendering.ts";
 import { buildLargeDiffSummaryPayload } from "./diffs/diff.ts";
@@ -182,7 +187,7 @@ function configDiagnostics(config: CodexLookConfig): DebugLogFields {
             formatterCount: config.scriptFormatters.size,
         },
         toolLabels: {
-            dynamicStatus: config.toolLabels.dynamicStatus,
+            mode: config.toolLabels.mode,
         },
         writePreview: {
             movingViewport: config.writePreview.movingViewport,
@@ -281,9 +286,9 @@ function isMutableRenderState(value: unknown): value is MutableRenderState {
 
 function mutationLabelColumnWidth(
     context: BuiltInRenderContext,
-    dynamicStatusLabels: boolean,
+    labelMode: ToolLabelMode,
 ): number | undefined {
-    if (!dynamicStatusLabels) {
+    if (labelMode !== "lifecycle") {
         return undefined;
     }
 
@@ -326,10 +331,7 @@ function mutationStatDigitWidth(context: BuiltInRenderContext): number | undefin
     return typeof digitWidth === "number" ? digitWidth : undefined;
 }
 
-function markMutationResultRendered(
-    context: BuiltInRenderContext,
-    _dynamicStatusLabels: boolean,
-): void {
+function markMutationResultRendered(context: BuiltInRenderContext): void {
     const state = isMutableRenderState(context.state) ? context.state : undefined;
     if (state === undefined) {
         return;
@@ -350,21 +352,30 @@ function renderExplorationCall(
     theme: CodexRenderTheme,
     context: ExplorationRenderContext,
     action: string,
+    labelMode: ToolLabelMode,
 ) {
     const decision = explorationGroups.register(context, action);
     if (decision.kind === "child") {
         return emptyComponent();
     }
-    return renderCodexExplore(theme, decision.actions);
+    return renderCodexExplore(theme, decision.actions, {
+        statusText: toolStatusLabel(
+            labelMode,
+            { isPartial: decision.active },
+            { static: "Explore", active: "Exploring", completed: "Explored" },
+        ),
+        state: decision.active ? "running" : "muted",
+    });
 }
 
-function closeExplorationGroup(): void {
-    explorationGroups.closeActiveGroup();
+function registerExplorationBoundary(toolCallId: string): void {
+    explorationGroups.registerBoundary(toolCallId);
 }
 
 function thirdPartyToolRenderingOptions(config: CodexLookConfig): ThirdPartyToolRenderingOptions {
     const preservedFromEnv = process.env[PRESERVE_TOOLS_ENV];
     return {
+        labelMode: config.toolLabels.mode,
         preserveTools:
             preservedFromEnv === undefined
                 ? config.preserveTools
@@ -528,7 +539,7 @@ function scriptPreviewHeaderLayout(config: CodexLookConfig): ScriptPreviewHeader
 function renderBuiltInToolCall(options: {
     readonly headerLayout: () => ScriptPreviewHeaderLayout;
     readonly maxCodePreviewLines: () => number;
-    readonly dynamicStatusLabels: boolean;
+    readonly labelMode: ToolLabelMode;
     readonly movingWriteViewport: boolean;
     readonly recordRender: (kind: "call", toolName: BuiltInToolName) => void;
 }): BuiltInToolRendererOptions["renderCall"] {
@@ -539,25 +550,31 @@ function renderBuiltInToolCall(options: {
                 return renderExplorationCall(
                     theme,
                     context,
-                    formatReadAction(theme, readActionArgs(args)),
+                    formatReadAction(theme, readActionArgs(args), {
+                        isPartial: isActiveToolCall(context),
+                    }),
+                    options.labelMode,
                 );
             case "find":
                 return renderExplorationCall(
                     theme,
                     context,
                     formatFindAction(theme, findActionArgs(args)),
+                    options.labelMode,
                 );
             case "grep":
                 return renderExplorationCall(
                     theme,
                     context,
                     formatGrepAction(theme, grepActionArgs(args)),
+                    options.labelMode,
                 );
             case "ls":
                 return renderExplorationCall(
                     theme,
                     context,
                     formatLsAction(theme, lsActionArgs(args)),
+                    options.labelMode,
                 );
             case "bash":
                 return renderBashCall(
@@ -569,22 +586,21 @@ function renderBuiltInToolCall(options: {
                 );
             case "write":
                 return renderWriteCall(args, theme, context, {
-                    dynamicStatusLabels: options.dynamicStatusLabels,
+                    labelMode: options.labelMode,
                     movingViewport: options.movingWriteViewport,
                 });
             case "edit":
-                return renderEditCall(args, theme, context, options.dynamicStatusLabels);
+                return renderEditCall(args, theme, context, options.labelMode);
             case "delete":
-                return renderDeleteCall(args, theme, context);
+                return renderDeleteCall(args, theme, context, options.labelMode);
             case "webSearch":
-                return renderWebSearchCall(args, theme, context);
+                return renderWebSearchCall(args, theme, context, options.labelMode);
         }
     };
 }
 
 function renderBuiltInToolResult(settings: {
     readonly headerLayout: () => ScriptPreviewHeaderLayout;
-    readonly dynamicStatusLabels: boolean;
     readonly recordRender: (kind: "result", toolName: BuiltInToolName) => void;
 }): BuiltInToolRendererOptions["renderResult"] {
     return (toolName, result, options, theme, context) => {
@@ -603,21 +619,9 @@ function renderBuiltInToolResult(settings: {
             case "bash":
                 return renderBashResult(result, options, theme, context, settings.headerLayout);
             case "write":
-                return renderWriteResult(
-                    result,
-                    options,
-                    theme,
-                    context,
-                    settings.dynamicStatusLabels,
-                );
+                return renderWriteResult(result, options, theme, context);
             case "edit":
-                return renderEditResult(
-                    result,
-                    options,
-                    theme,
-                    context,
-                    settings.dynamicStatusLabels,
-                );
+                return renderEditResult(result, options, theme, context);
             case "delete":
             case "webSearch":
                 return renderCodexOutput(theme, textOutput(result), {
@@ -630,14 +634,27 @@ function renderBuiltInToolResult(settings: {
 }
 
 function callState(context: BuiltInRenderContext) {
-    return context.isError ? "error" : context.isPartial ? "muted" : "success";
+    return context.isError
+        ? "error"
+        : context.isPartial || !context.argsComplete
+          ? "running"
+          : "success";
 }
 
-function renderDeleteCall(args: unknown, theme: BuiltInRenderTheme, context: BuiltInRenderContext) {
-    closeExplorationGroup();
+function renderDeleteCall(
+    args: unknown,
+    theme: BuiltInRenderTheme,
+    context: BuiltInRenderContext,
+    labelMode: ToolLabelMode,
+) {
+    registerExplorationBoundary(context.toolCallId);
     return renderCodexCall(theme, {
         state: callState(context),
-        statusText: "Delete",
+        statusText: toolStatusLabel(labelMode, context, {
+            static: "Delete",
+            active: "Deleting",
+            completed: "Deleted",
+        }),
         body: formatPathTarget(theme, pathField(args)),
     });
 }
@@ -646,13 +663,21 @@ function renderWebSearchCall(
     args: unknown,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
+    labelMode: ToolLabelMode,
 ) {
-    closeExplorationGroup();
+    registerExplorationBoundary(context.toolCallId);
     const query = webSearchQuery(args);
+    const active = context.isPartial || !context.argsComplete;
     return renderCodexCall(theme, {
         state: callState(context),
-        statusText: "Web Search",
-        ...(query === undefined ? {} : { body: query }),
+        statusText: toolStatusLabel(labelMode, context, {
+            static: "Web Search",
+            active: "Searching the web",
+            completed: "Searched the web",
+        }),
+        ...(query === undefined
+            ? {}
+            : { body: labelMode === "lifecycle" && !active ? `for ${query}` : query }),
     });
 }
 
@@ -663,7 +688,7 @@ function renderBashCall(
     headerLayout: () => ScriptPreviewHeaderLayout,
     maxCodePreviewLines: () => number,
 ) {
-    closeExplorationGroup();
+    registerExplorationBoundary(context.toolCallId);
     const state = context.isError ? "error" : context.isPartial ? "running" : "success";
     const command = commandField(args) ?? "";
     if (context.isPartial && scriptPreviews.get(context.toolCallId) === undefined) {
@@ -735,14 +760,14 @@ function renderWriteCall(
     args: unknown,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
-    options: { readonly dynamicStatusLabels: boolean; readonly movingViewport: boolean },
+    options: { readonly labelMode: ToolLabelMode; readonly movingViewport: boolean },
 ) {
-    closeExplorationGroup();
-    const labelColumnWidth = mutationLabelColumnWidth(context, options.dynamicStatusLabels);
+    registerExplorationBoundary(context.toolCallId);
+    const labelColumnWidth = mutationLabelColumnWidth(context, options.labelMode);
     const statDigitWidth = mutationStatDigitWidth(context);
     return renderWriteCallPreview(normalizedWriteArgs(args), theme, {
         ...context,
-        dynamicStatusLabels: options.dynamicStatusLabels,
+        labelMode: options.labelMode,
         movingViewport: options.movingViewport,
         ...(labelColumnWidth === undefined ? {} : { mutationLabelColumnWidth: labelColumnWidth }),
         ...(statDigitWidth === undefined ? {} : { mutationStatDigitWidth: statDigitWidth }),
@@ -754,10 +779,9 @@ function renderWriteResult(
     options: BuiltInResultOptions,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
-    dynamicStatusLabels: boolean,
 ) {
     if (!options.isPartial) {
-        markMutationResultRendered(context, dynamicStatusLabels);
+        markMutationResultRendered(context);
     }
 
     const pierrePayload = !context.isError
@@ -783,17 +807,17 @@ function renderEditCall(
     args: unknown,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
-    dynamicStatusLabels: boolean,
+    labelMode: ToolLabelMode,
 ) {
-    closeExplorationGroup();
-    const labelColumnWidth = mutationLabelColumnWidth(context, dynamicStatusLabels);
+    registerExplorationBoundary(context.toolCallId);
+    const labelColumnWidth = mutationLabelColumnWidth(context, labelMode);
     const statDigitWidth = mutationStatDigitWidth(context);
     const preview = editPreviews.get(context.toolCallId);
     if (!context.isPartial && preview) {
         return renderMutationCall(
             theme,
             makeMutationSummary({
-                label: dynamicStatusLabels ? "Edited" : "Edit",
+                label: labelMode === "lifecycle" ? "Edited" : "Edit",
                 path: preview.path,
                 added: preview.added,
                 removed: preview.removed,
@@ -807,9 +831,14 @@ function renderEditCall(
 
     const summary = summarizeEditCall(normalizedEditArgs(args), {
         ...context,
-        dynamicStatusLabels,
+        labelMode,
     });
-    const state = summary.hasInvalidEdits || context.isError ? "error" : "muted";
+    const state =
+        summary.hasInvalidEdits || context.isError
+            ? "error"
+            : isActiveToolCall(context)
+              ? "running"
+              : "success";
     return renderCodexCall(theme, {
         state,
         statusText: summary.statusText,
@@ -822,10 +851,9 @@ function renderEditResult(
     options: BuiltInResultOptions,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
-    dynamicStatusLabels: boolean,
 ) {
     if (!options.isPartial) {
-        markMutationResultRendered(context, dynamicStatusLabels);
+        markMutationResultRendered(context);
     }
 
     const pierrePayload = !context.isError
@@ -941,6 +969,30 @@ function diagnosticBuiltInToolName(toolName: string): BuiltInToolName | undefine
     }
 }
 
+function isExplorationToolName(toolName: string): boolean {
+    const builtInToolName = diagnosticBuiltInToolName(toolName);
+    return (
+        builtInToolName === "read" ||
+        builtInToolName === "find" ||
+        builtInToolName === "grep" ||
+        builtInToolName === "ls"
+    );
+}
+
+function hasVisibleAssistantText(message: unknown): boolean {
+    if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content)) {
+        return false;
+    }
+
+    return message.content.some(
+        (content) =>
+            isRecord(content) &&
+            content.type === "text" &&
+            typeof content.text === "string" &&
+            content.text.trim().length > 0,
+    );
+}
+
 export default async function codexLookExtension(pi: ExtensionAPI): Promise<void> {
     // SAFETY: The symbol property is extension-private metadata on the concrete
     // ExtensionAPI object. It does not alter Pi's public API or handler semantics.
@@ -979,13 +1031,12 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
             renderCall: renderBuiltInToolCall({
                 headerLayout: () => headerLayout,
                 maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
-                dynamicStatusLabels: config.toolLabels.dynamicStatus,
+                labelMode: config.toolLabels.mode,
                 movingWriteViewport: config.writePreview.movingViewport,
                 recordRender: recordBuiltInRender,
             }),
             renderResult: renderBuiltInToolResult({
                 headerLayout: () => headerLayout,
-                dynamicStatusLabels: config.toolLabels.dynamicStatus,
                 recordRender: recordBuiltInRender,
             }),
         });
@@ -998,6 +1049,12 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     applyConfig(config);
     debugLogger.record("extension_loaded", diagnosticSnapshot());
 
+    pi.on("tool_execution_start", (event) => {
+        if (!isExplorationToolName(event.toolName)) {
+            registerExplorationBoundary(event.toolCallId);
+        }
+    });
+
     pi.on("tool_call", (event) => {
         const command = commandField(event.input);
         debugLogger.record("tool_call", {
@@ -1008,6 +1065,9 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
             commandBytes: textByteLength(command),
             ...diagnosticSnapshot(),
         });
+        if (!isExplorationToolName(event.toolName)) {
+            registerExplorationBoundary(event.toolCallId);
+        }
         if (
             !isToolCallEventType("bash", event) &&
             compatBuiltInToolName(event.toolName) !== "bash"
@@ -1090,13 +1150,21 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         debugLogger.record("session_start", { phase: "after_syntax", ...diagnosticSnapshot() });
     });
 
+    pi.on("agent_start", () => {
+        explorationGroups.closeActiveGroup();
+    });
+
+    pi.on("message_end", (event) => {
+        if (hasVisibleAssistantText(event.message)) {
+            explorationGroups.closeActiveGroup();
+        }
+    });
+
     pi.on("turn_start", () => {
-        closeExplorationGroup();
         debugLogger.record("turn_start", diagnosticSnapshot());
     });
 
     pi.on("turn_end", () => {
-        closeExplorationGroup();
         debugLogger.record("turn_end", diagnosticSnapshot());
     });
 

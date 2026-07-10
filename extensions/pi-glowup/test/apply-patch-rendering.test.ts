@@ -44,23 +44,51 @@ function expectLinesWithinWidth(lines: ReadonlyArray<string>, width: number): vo
 
 describe("apply_patch renderer", () => {
     it("renders a Codex-style patch summary and per-file diff", () => {
-        const renderer = createThirdPartyToolRenderer("apply_patch");
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
         const lines = renderer
             .renderCall({ patch: samplePatch }, plainTheme, renderContext)
             .render(100);
         const rendered = lines.join("\n");
 
-        expect(rendered).toContain("• Edited 2 files (+3 -1)");
-        expect(rendered).toContain("  └ README.md (+1 -1)");
-        expect(rendered).toContain("  └ src/new.ts (+2 -0)");
+        expect(rendered).toContain("• Edited README.md (+1 -1)");
+        expect(rendered).toContain("• Added src/new.ts (+2 -0)");
+        expect(rendered).not.toContain("Edited 2 files");
         expect(rendered).toContain("-old heading");
         expect(rendered).toContain("+new heading");
         expect(rendered).toContain("+export const answer = 42;");
         expectLinesWithinWidth(lines, 100);
     });
 
+    it("does not invent separators between update chunks", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
+        const patch = `*** Begin Patch
+*** Update File: src/example.ts
+@@
+-const one = 1;
++const one = 2;
+@@
+-const two = 2;
++const two = 3;
+*** End Patch`;
+        const rendered = renderer
+            .renderCall({ patch }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("-const one = 1;");
+        expect(rendered).toContain("+const two = 3;");
+        expect(rendered).not.toContain("⋮");
+        expect(rendered).not.toContain("...");
+    });
+
     it("leaves successful results empty when the call already rendered the patch", () => {
-        const renderer = createThirdPartyToolRenderer("pi-codex-core__apply_patch");
+        const renderer = createThirdPartyToolRenderer("pi-codex-core__apply_patch", {
+            labelMode: "lifecycle",
+        });
         const result = renderer
             .renderResult(
                 {
@@ -81,7 +109,9 @@ describe("apply_patch renderer", () => {
     });
 
     it("renders failed applications with the Codex failure title", () => {
-        const renderer = createThirdPartyToolRenderer("apply_patch");
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
         const lines = renderer
             .renderResult(
                 { content: [{ type: "text", text: "Invalid patch: missing header" }] },
@@ -99,7 +129,9 @@ describe("apply_patch renderer", () => {
     });
 
     it("keeps incomplete streaming patch calls on the cheap fallback path", () => {
-        const renderer = createThirdPartyToolRenderer("apply_patch");
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
         const partialPatch = `${samplePatch.replace("*** End Patch", "")}\n${"+extra\n".repeat(1_000)}`;
         const lines = renderer
             .renderCall({ patch: partialPatch }, plainTheme, {
@@ -117,7 +149,9 @@ describe("apply_patch renderer", () => {
     });
 
     it("keeps oversized completed patch calls on the cheap fallback path", () => {
-        const renderer = createThirdPartyToolRenderer("apply_patch");
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
         const largePatch = `*** Begin Patch\n*** Add File: huge.txt\n${"+line\n".repeat(20_000)}*** End Patch`;
         const lines = renderer
             .renderCall({ patch: largePatch }, plainTheme, renderContext)
@@ -128,5 +162,25 @@ describe("apply_patch renderer", () => {
         expect(rendered).not.toContain("huge.txt");
         expect(rendered).not.toContain("+line");
         expectLinesWithinWidth(lines, 100);
+    });
+
+    it("keeps the apply-patch label stable in static mode", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", { labelMode: "static" });
+        const active = renderer
+            .renderCall({ patch: samplePatch }, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100)
+            .join("\n");
+        const completed = renderer
+            .renderCall({ patch: samplePatch }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        expect(active).toContain("• Apply Patch");
+        expect(completed).toContain("• Apply Patch");
+        expect(completed).not.toContain("• Edited");
     });
 });

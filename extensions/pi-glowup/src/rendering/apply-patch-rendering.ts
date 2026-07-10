@@ -14,6 +14,7 @@ import type {
     ThirdPartyToolRenderContext,
     ThirdPartyToolResult,
 } from "../third-party-tools/types.ts";
+import { toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
 
 type ApplyPatchKind = "add" | "delete" | "update";
 
@@ -23,8 +24,6 @@ type ApplyPatchSection = DiffSection & {
 
 type ApplyPatchSummary = {
     readonly sections: readonly ApplyPatchSection[];
-    readonly added: number;
-    readonly removed: number;
 };
 
 const MAX_PARTIAL_PATCH_PARSE_CHARS = 8 * 1024;
@@ -39,7 +38,6 @@ type MutableApplyPatchSection = {
     removed: number;
     oldLine: number;
     newLine: number;
-    sawUpdateChunk: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -102,7 +100,6 @@ function makeSection(kind: ApplyPatchKind, path: string): MutableApplyPatchSecti
         removed: 0,
         oldLine: 1,
         newLine: 1,
-        sawUpdateChunk: false,
     };
 }
 
@@ -192,10 +189,6 @@ function parseApplyPatchSummary(patchText: string): ApplyPatchSummary | undefine
         }
 
         if (line === "@@" || line.startsWith("@@ ")) {
-            if (current.sawUpdateChunk && current.lines.at(-1) !== "   ...") {
-                current.lines.push("   ...");
-            }
-            current.sawUpdateChunk = true;
             continue;
         }
 
@@ -233,11 +226,7 @@ function parseApplyPatchSummary(patchText: string): ApplyPatchSummary | undefine
         return undefined;
     }
 
-    return {
-        sections,
-        added: sections.reduce((total, section) => total + section.added, 0),
-        removed: sections.reduce((total, section) => total + section.removed, 0),
-    };
+    return { sections };
 }
 
 function verbForSection(section: ApplyPatchSection): "Added" | "Deleted" | "Edited" {
@@ -254,28 +243,33 @@ function renderApplyPatchSummary(
     summary: ApplyPatchSummary,
     theme: CodexRenderTheme,
     expanded: boolean,
+    context: ThirdPartyToolRenderContext,
+    labelMode: ToolLabelMode,
 ): Component {
-    const [singleSection] = summary.sections;
-    const label =
-        summary.sections.length === 1 && singleSection !== undefined
-            ? verbForSection(singleSection)
-            : "Edited";
-    const path =
-        summary.sections.length === 1 && singleSection !== undefined
-            ? (singleSection.path ?? "file")
-            : `${summary.sections.length} ${summary.sections.length === 1 ? "file" : "files"}`;
+    const sections = summary.sections.map((section) =>
+        renderMutationCall(
+            theme,
+            {
+                label: toolStatusLabel(labelMode, context, {
+                    static: "Apply Patch",
+                    active: "Editing",
+                    completed: verbForSection(section),
+                }),
+                path: section.path ?? "file",
+                added: section.added,
+                removed: section.removed,
+            },
+            {
+                body: renderCodexDiff(theme, [section], expanded),
+            },
+        ),
+    );
 
-    return renderMutationCall(
-        theme,
-        {
-            label,
-            path,
-            added: summary.added,
-            removed: summary.removed,
-        },
-        {
-            body: renderCodexDiff(theme, summary.sections, expanded),
-        },
+    return makeComponent((width) =>
+        sections.flatMap((section, index) => [
+            ...(index === 0 ? [] : [""]),
+            ...section.render(width),
+        ]),
     );
 }
 
@@ -283,12 +277,17 @@ function renderApplyPatchFallbackCall(
     args: unknown,
     theme: CodexRenderTheme,
     context: ThirdPartyToolRenderContext,
+    labelMode: ToolLabelMode,
 ): Component {
     const patch = patchTextFromArgs(args);
     const lines =
         patch === undefined || context.isPartial || !context.argsComplete ? 0 : lineCount(patch);
     return renderMutationCall(theme, {
-        label: context.isPartial || !context.argsComplete ? "Editing" : "Edited",
+        label: toolStatusLabel(labelMode, context, {
+            static: "Apply Patch",
+            active: "Editing",
+            completed: "Edited",
+        }),
         path: lines > 0 ? `${lines} patch lines` : "patch",
         added: 0,
         removed: 0,
@@ -310,11 +309,12 @@ function renderApplyPatchFailure(
     result: ThirdPartyToolResult,
     options: { readonly expanded: boolean },
     theme: CodexRenderTheme,
+    labelMode: ToolLabelMode,
 ): Component {
     return makeComponent((width) => [
         ...renderCodexCall(theme, {
             state: "error",
-            statusText: "Failed to apply patch",
+            statusText: labelMode === "lifecycle" ? "Failed to apply patch" : "Apply Patch",
         }).render(width),
         ...renderCodexOutput(theme, textOutput(result), {
             expanded: options.expanded,
@@ -327,7 +327,10 @@ function renderApplyPatchFailure(
     ]);
 }
 
-export function createApplyPatchRenderer(): ThirdPartyToolRenderer {
+export function createApplyPatchRenderer(
+    _toolName?: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             const patch = patchTextFromArgs(args);
@@ -336,12 +339,12 @@ export function createApplyPatchRenderer(): ThirdPartyToolRenderer {
                     ? undefined
                     : parseApplyPatchSummary(patch);
             return summary === undefined
-                ? renderApplyPatchFallbackCall(args, theme, context)
-                : renderApplyPatchSummary(summary, theme, context.expanded);
+                ? renderApplyPatchFallbackCall(args, theme, context, labelMode)
+                : renderApplyPatchSummary(summary, theme, context.expanded, context, labelMode);
         },
         renderResult(result, options, theme, context) {
             if (context.isError) {
-                return renderApplyPatchFailure(result, options, theme);
+                return renderApplyPatchFailure(result, options, theme, labelMode);
             }
             const patch = patchTextFromArgs(context.args);
             if (

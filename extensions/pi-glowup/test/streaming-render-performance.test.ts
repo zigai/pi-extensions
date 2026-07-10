@@ -65,7 +65,7 @@ function runStreamingWriteScenario(iterations: number): StreamingRenderMetrics {
             isError: false,
             isPartial: true,
             expanded: false,
-            dynamicStatusLabels: true,
+            labelMode: "lifecycle",
             lastComponent,
         });
         lines = lastComponent.render(120);

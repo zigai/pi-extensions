@@ -790,12 +790,13 @@ export function renderCodexBody(theme: CodexRenderTheme, text: string | undefine
 export function renderCodexExplore(
     theme: CodexRenderTheme,
     actions: ReadonlyArray<string | undefined>,
+    options: { readonly statusText?: string; readonly state?: CodexCallState } = {},
 ): Component {
     return makeComponent((width) => {
         const rendered = wrapPrefixedLine(
-            actionText(theme, "Explored", { bold: true }),
+            actionText(theme, options.statusText ?? "Explored", { bold: true }),
             width,
-            `${dim(theme, "•")} `,
+            `${renderBullet(theme, options.state ?? "muted")} `,
             "  ",
         );
         const visibleActions = actions.filter((action): action is string => Boolean(action));
@@ -1042,10 +1043,32 @@ export function isInstructionFilePath(path: string | undefined): boolean {
     );
 }
 
-export function formatPathTarget(theme: CodexRenderTheme, path: string | undefined): string {
+export function isPartialInstructionFilePath(path: string | undefined): boolean {
+    const normalized = (path ?? "").replace(/\\/g, "/");
+    const basename = normalized.split("/").at(-1) ?? "";
+    if (basename === "AGENTS" || basename.startsWith("AGENTS.")) {
+        return true;
+    }
+
+    return /(?:^|\/|~\/)\.pi\/agent\/(?:skills(?:\/|$)|(?:git|npm\/node_modules)\/.+\/skills(?:\/|$))/u.test(
+        normalized,
+    );
+}
+
+export function formatPathTarget(
+    theme: CodexRenderTheme,
+    path: string | undefined,
+    options: { readonly isPartial?: boolean } = {},
+): string {
     const displayPath = collapseHome(path ?? "");
-    if (isInstructionFilePath(path)) {
+    if (
+        isInstructionFilePath(path) ||
+        (options.isPartial === true && isPartialInstructionFilePath(path))
+    ) {
         return instructionPathText(theme, displayPath);
+    }
+    if (options.isPartial === true) {
+        return muted(theme, displayPath);
     }
     return pathText(theme, displayPath);
 }
@@ -2126,8 +2149,12 @@ function previewShellCommandForHighlight(command: string): string {
     ].join("\n");
 }
 
-export function formatReadAction(theme: CodexRenderTheme, args: ReadActionArgs): string {
-    const target = formatPathTarget(theme, args.path);
+export function formatReadAction(
+    theme: CodexRenderTheme,
+    args: ReadActionArgs,
+    options: { readonly isPartial?: boolean } = {},
+): string {
+    const target = formatPathTarget(theme, args.path, options);
     const range = formatLineRange(args.offset, args.limit);
     if (range !== undefined) {
         return `${actionText(theme, "Read")} ${target}${muted(theme, range)}`;

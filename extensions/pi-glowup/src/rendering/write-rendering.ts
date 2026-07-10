@@ -8,6 +8,7 @@ import {
     renderMutationCall,
     type CodexRenderTheme,
 } from "./core.ts";
+import { isActiveToolCall, toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
 
 const MAX_WRITE_PREVIEW_BYTES = 64 * 1024;
 const WRITE_PREVIEW_TRUNCATION_SUFFIX = "\n… write preview truncated";
@@ -15,9 +16,10 @@ const WRITE_PREVIEW_TRUNCATION_SUFFIX = "\n… write preview truncated";
 type WriteCallContext = {
     readonly isError: boolean;
     readonly isPartial: boolean;
+    readonly argsComplete?: boolean;
     readonly expanded: boolean;
     readonly lastComponent?: Component | undefined;
-    readonly dynamicStatusLabels?: boolean;
+    readonly labelMode?: ToolLabelMode;
     readonly mutationLabelColumnWidth?: number;
     readonly mutationStatDigitWidth?: number;
     readonly movingViewport?: boolean;
@@ -34,7 +36,7 @@ type PartialWritePreviewUpdate = {
     readonly theme: CodexRenderTheme;
     readonly path: string;
     readonly content: string;
-    readonly dynamicStatusLabels: boolean;
+    readonly labelMode: ToolLabelMode;
     readonly mutationLabelColumnWidth: number | undefined;
     readonly mutationStatDigitWidth: number | undefined;
     readonly movingViewport: boolean;
@@ -284,7 +286,7 @@ class PartialWriteCallPreviewComponent implements Component {
     private readonly preview = new PartialWriteContentPreview();
     private theme: CodexRenderTheme;
     private path = "";
-    private dynamicStatusLabels = false;
+    private labelMode: ToolLabelMode = "static";
     private mutationLabelColumnWidth: number | undefined;
     private mutationStatDigitWidth: number | undefined;
     private movingViewport = true;
@@ -299,7 +301,7 @@ class PartialWriteCallPreviewComponent implements Component {
     update(update: PartialWritePreviewUpdate): void {
         this.theme = update.theme;
         this.path = update.path;
-        this.dynamicStatusLabels = update.dynamicStatusLabels;
+        this.labelMode = update.labelMode;
         this.mutationLabelColumnWidth = update.mutationLabelColumnWidth;
         this.mutationStatDigitWidth = update.mutationStatDigitWidth;
         this.movingViewport = update.movingViewport;
@@ -320,7 +322,15 @@ class PartialWriteCallPreviewComponent implements Component {
         const component = renderMutationCall(
             this.theme,
             {
-                label: this.dynamicStatusLabels ? "Writing" : "Write",
+                label: toolStatusLabel(
+                    this.labelMode,
+                    { isPartial: true },
+                    {
+                        static: "Write",
+                        active: "Writing",
+                        completed: "Wrote",
+                    },
+                ),
                 path: this.path,
                 added,
                 removed: 0,
@@ -398,11 +408,16 @@ export function renderWriteCallPreview(
 ): Component {
     const path = stringField(args, "path") ?? "";
     const content = writeContentFromArgs(args);
-    const dynamicStatusLabels = context.dynamicStatusLabels === true;
+    const labelMode = context.labelMode ?? "static";
+    const statusText = toolStatusLabel(labelMode, context, {
+        static: "Write",
+        active: "Writing",
+        completed: "Wrote",
+    });
     if (content === undefined || context.isError) {
         return renderCodexCall(theme, {
-            state: context.isError ? "error" : context.isPartial ? "muted" : "success",
-            statusText: dynamicStatusLabels && !context.isPartial ? "Wrote" : "Write",
+            state: context.isError ? "error" : isActiveToolCall(context) ? "running" : "success",
+            statusText,
             body: formatPathTarget(theme, path),
         });
     }
@@ -413,7 +428,7 @@ export function renderWriteCallPreview(
             theme,
             path,
             content,
-            dynamicStatusLabels,
+            labelMode,
             mutationLabelColumnWidth: context.mutationLabelColumnWidth,
             mutationStatDigitWidth: context.mutationStatDigitWidth,
             movingViewport: context.movingViewport !== false,
@@ -433,7 +448,7 @@ export function renderWriteCallPreview(
     return renderMutationCall(
         theme,
         {
-            label: dynamicStatusLabels ? (context.isPartial ? "Writing" : "Wrote") : "Write",
+            label: statusText,
             path,
             added,
             removed: 0,

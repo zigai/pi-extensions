@@ -8,6 +8,7 @@ import type {
     ThirdPartyToolRenderer,
     ThirdPartyToolResult,
 } from "../../types.ts";
+import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
 import {
     imagegenResultSummary,
     summarizeImagegenArgs,
@@ -18,14 +19,25 @@ import {
     webRunResultSummary,
     WEB_RUN_COLLAPSED_SOURCE_LIMIT,
 } from "./web-run-renderer.ts";
-import { callState, renderSimpleResult, renderThirdPartyCall } from "../../call-rendering.ts";
+import {
+    callState,
+    renderSimpleResult,
+    renderThirdPartyCall,
+    thirdPartyStatusLabel,
+} from "../../call-rendering.ts";
 import { previewArgsForContext } from "../../previews.ts";
 import { baseToolName, displayToolName } from "../../tool-values.ts";
 
-const CODEX_TOOL_LABELS = new Map<string, string>([
-    ["web_run", "Web Search"],
-    ["imagegen", "Image Generate"],
-    ["view_image", "View Image"],
+const CODEX_TOOL_LABELS = new Map<string, ToolLifecycleLabels>([
+    [
+        "web_run",
+        { static: "Web Search", active: "Searching the web", completed: "Searched the web" },
+    ],
+    [
+        "imagegen",
+        { static: "Image Generate", active: "Generating Image", completed: "Generated Image" },
+    ],
+    ["view_image", { static: "View Image", active: "Viewing Image", completed: "Viewed Image" }],
 ]);
 
 /** Returns whether a tool name belongs to Codex-provided tools. */
@@ -33,8 +45,15 @@ export function isCodexTool(toolName: string): boolean {
     return CODEX_TOOL_LABELS.has(baseToolName(toolName));
 }
 
-function codexCallLabel(toolName: string): string {
-    return CODEX_TOOL_LABELS.get(baseToolName(toolName)) ?? `Called ${displayToolName(toolName)}`;
+function codexCallLabels(toolName: string): ToolLifecycleLabels {
+    const staticLabel = displayToolName(toolName);
+    return (
+        CODEX_TOOL_LABELS.get(baseToolName(toolName)) ?? {
+            static: staticLabel,
+            active: `Calling ${staticLabel}`,
+            completed: `Called ${staticLabel}`,
+        }
+    );
 }
 
 function codexCallBody(
@@ -76,12 +95,15 @@ function codexResultPreviewLines(toolName: string): number {
     return baseToolName(toolName) === "web_run" ? WEB_RUN_COLLAPSED_SOURCE_LIMIT + 2 : 2;
 }
 
-export function createCodexRenderer(toolName: string): ThirdPartyToolRenderer {
+export function createCodexRenderer(
+    toolName: string,
+    labelMode: ToolLabelMode = "static",
+): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: codexCallLabel(toolName),
+                statusText: thirdPartyStatusLabel(labelMode, context, codexCallLabels(toolName)),
                 body: codexCallBody(toolName, args, theme, context),
                 maxRenderedLines: 4,
                 expanded: context.expanded,

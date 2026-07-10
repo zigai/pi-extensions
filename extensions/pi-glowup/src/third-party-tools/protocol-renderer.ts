@@ -4,7 +4,8 @@ import {
     type CodexCallState,
     type CodexRenderTheme,
 } from "../rendering/core.ts";
-import { callState, renderThirdPartyCall } from "./call-rendering.ts";
+import type { ToolLabelMode } from "../rendering/status-labels.ts";
+import { callState, renderThirdPartyCall, thirdPartyStatusLabel } from "./call-rendering.ts";
 import type {
     CodexLookRenderingAdapter,
     CodexLookSection,
@@ -18,12 +19,17 @@ function renderCodexLookView(
     theme: CodexRenderTheme,
     context: ThirdPartyToolRenderContext,
     options: { readonly expanded: boolean; readonly isPartial: boolean },
+    labelMode: ToolLabelMode,
 ) {
     switch (view.kind) {
         case "call":
             return renderThirdPartyCall(theme, {
                 state: view.state ?? callState(context),
-                statusText: view.label,
+                statusText: thirdPartyStatusLabel(labelMode, context, {
+                    static: view.label,
+                    active: view.activeLabel ?? `Calling ${view.label}`,
+                    completed: view.completedLabel ?? `Called ${view.label}`,
+                }),
                 body: view.body,
                 maxRenderedLines: view.maxRenderedLines ?? 4,
                 expanded: context.expanded,
@@ -71,6 +77,7 @@ function formatSection(section: CodexLookSection, theme: CodexRenderTheme): stri
 export function createProtocolRenderer(
     adapter: CodexLookRenderingAdapter,
     fallback: ThirdPartyToolRenderer,
+    labelMode: ToolLabelMode = "static",
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
@@ -78,17 +85,23 @@ export function createProtocolRenderer(
             if (view === undefined) {
                 return fallback.renderCall(args, theme, context);
             }
-            return renderCodexLookView(view, theme, context, {
-                expanded: context.expanded,
-                isPartial: context.isPartial,
-            });
+            return renderCodexLookView(
+                view,
+                theme,
+                context,
+                {
+                    expanded: context.expanded,
+                    isPartial: context.isPartial,
+                },
+                labelMode,
+            );
         },
         renderResult(result, options, theme, context) {
             const view = adapter.renderResult?.(result, options, context);
             if (view === undefined) {
                 return fallback.renderResult(result, options, theme, context);
             }
-            return renderCodexLookView(view, theme, context, options);
+            return renderCodexLookView(view, theme, context, options, labelMode);
         },
     };
 }
