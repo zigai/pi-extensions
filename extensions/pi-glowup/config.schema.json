@@ -12,6 +12,50 @@
         "type": "string"
       }
     },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "addedRowBackground": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deletedRowBackground": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "instructionPathColor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "addedRowBackground": "#213A2B",
+        "deletedRowBackground": null,
+        "instructionPathColor": null
+      }
+    },
     "debugLog": {
       "type": "object",
       "properties": {

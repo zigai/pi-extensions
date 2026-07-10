@@ -17,6 +17,11 @@ describe("codex look config", () => {
         const config = parseCodexLookConfig({});
 
         expect(config.preserveTools).toEqual([]);
+        expect(config.appearance).toEqual({
+            addedRowBackground: "#213A2B",
+            deletedRowBackground: null,
+            instructionPathColor: null,
+        });
         expect(config.debugLog).toEqual({
             enabled: false,
             path: "debug.log",
@@ -39,6 +44,30 @@ describe("codex look config", () => {
             markdownSyntax: true,
             thirdPartyToolRenderers: true,
         });
+    });
+
+    it("parses user-configured rendering colors", () => {
+        const config = parseCodexLookConfig({
+            appearance: {
+                addedRowBackground: "#123456",
+                deletedRowBackground: "#654321",
+                instructionPathColor: "#AABBCC",
+            },
+        });
+
+        expect(config.appearance).toEqual({
+            addedRowBackground: "#123456",
+            deletedRowBackground: "#654321",
+            instructionPathColor: "#AABBCC",
+        });
+    });
+
+    it("allows the added-row background to inherit Pi explicitly", () => {
+        const config = parseCodexLookConfig({
+            appearance: { addedRowBackground: null },
+        });
+
+        expect(config.appearance.addedRowBackground).toBeNull();
     });
 
     it("ignores invalid config shapes with a safe warning", () => {

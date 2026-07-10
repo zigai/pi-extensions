@@ -19,6 +19,11 @@ const Schema = loadTypeboxSchema();
 
 export type CodexLookConfig = {
     readonly preserveTools: readonly string[];
+    readonly appearance: {
+        readonly addedRowBackground: string | null;
+        readonly deletedRowBackground: string | null;
+        readonly instructionPathColor: string | null;
+    };
     readonly debugLog: {
         readonly enabled: boolean;
         readonly path: string;
@@ -67,6 +72,11 @@ const MIN_SCRIPT_PREVIEW_CODE_LINES = 4;
 export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
+    appearance: {
+        addedRowBackground: "#213A2B",
+        deletedRowBackground: null,
+        instructionPathColor: null,
+    },
     debugLog: {
         enabled: false,
         path: "debug.log",
@@ -105,6 +115,10 @@ const ScriptPreviewHeaderLayoutSchema = Type.Union([
     Type.Literal("block"),
 ]);
 const SchemaReferenceSchema = Type.String();
+const OptionalHexColorSchema = Type.Union([
+    Type.String({ pattern: "^#[0-9A-Fa-f]{6}$" }),
+    Type.Null(),
+]);
 const StringArraySchema = Type.Array(Type.String());
 const FormatterCommandSchema = Type.Array(Type.String({ minLength: 1 }), { minItems: 1 });
 const FormatterCommandsSchema = Type.Record(Type.String(), FormatterCommandSchema);
@@ -164,10 +178,19 @@ const ScriptPreviewConfigSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+const AppearanceConfigSchema = Type.Object(
+    {
+        addedRowBackground: Type.Optional(OptionalHexColorSchema),
+        deletedRowBackground: Type.Optional(OptionalHexColorSchema),
+        instructionPathColor: Type.Optional(OptionalHexColorSchema),
+    },
+    { additionalProperties: false },
+);
 const CodexLookConfigSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
+        appearance: Type.Optional(AppearanceConfigSchema),
         debugLog: Type.Optional(DebugLogConfigSchema),
         toolLabels: Type.Optional(ToolLabelsConfigSchema),
         writePreview: Type.Optional(WritePreviewConfigSchema),
@@ -181,6 +204,19 @@ const CodexLookConfigJsonSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
+        appearance: Type.Optional(
+            Type.Object(
+                {
+                    addedRowBackground: Type.Optional(OptionalHexColorSchema),
+                    deletedRowBackground: Type.Optional(OptionalHexColorSchema),
+                    instructionPathColor: Type.Optional(OptionalHexColorSchema),
+                },
+                {
+                    additionalProperties: false,
+                    default: DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance,
+                },
+            ),
+        ),
         debugLog: Type.Optional(
             Type.Object(
                 {
@@ -349,6 +385,7 @@ export function parseCodexLookConfig(
     } = {},
 ): CodexLookConfig {
     const config = parseCodexLookConfigInput(input, options);
+    const appearance = config.appearance ?? {};
     const scriptPreview = config.scriptPreview ?? {};
     const debugLog = config.debugLog ?? {};
     const toolLabels = config.toolLabels ?? {};
@@ -363,6 +400,18 @@ export function parseCodexLookConfig(
                   (value) => value.trim().length > 0,
               )
             : [],
+        appearance: {
+            addedRowBackground:
+                appearance.addedRowBackground === undefined
+                    ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.addedRowBackground
+                    : appearance.addedRowBackground,
+            deletedRowBackground:
+                appearance.deletedRowBackground ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedRowBackground,
+            instructionPathColor:
+                appearance.instructionPathColor ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.instructionPathColor,
+        },
         debugLog: {
             enabled: debugLog.enabled ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.enabled,
             path: debugLog.path ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.path,
