@@ -229,6 +229,7 @@ describe("third-party tool renderers", () => {
             .join("\n");
 
         expect(collapsed).toContain("… +");
+        expect(collapsed).toContain("to expand");
         expect(expanded).toContain("line 10");
         expect(expanded).not.toContain("… +");
     });
@@ -668,6 +669,59 @@ describe("third-party tool renderers", () => {
         expect(visible).toContain("~/Projects/theme/preview.png · detail: high");
         expect(rendered).not.toContain(" • high");
         expect(rendered).not.toContain(" • detail: high");
+    });
+
+    it("follows the latest imagegen prompt text while arguments stream", () => {
+        const renderer = createThirdPartyToolRenderer("imagegen", {
+            labelMode: "lifecycle",
+        });
+        const prompt = `opening composition ${"middle detail ".repeat(
+            100,
+        )}latest lighting direction`;
+        const active = renderer
+            .renderCall({ prompt }, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100)
+            .join("\n");
+        const completed = renderer
+            .renderCall({ prompt }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        const compactActive = compactRenderedText(active);
+        const compactCompleted = compactRenderedText(completed);
+        expect(active).toContain("Generating Image");
+        expect(compactActive).toContain("latest lighting direction");
+        expect(compactActive).not.toContain("opening composition");
+        expect(completed).toContain("Generated Image");
+        expect(compactCompleted).toContain("opening composition");
+        expect(compactCompleted).toContain("latest lighting direction");
+        expect(active.split("\n").length).toBeGreaterThan(3);
+    });
+
+    it("renders imagegen prompts as an unquoted multiline block", () => {
+        const renderer = createThirdPartyToolRenderer("imagegen", {
+            labelMode: "lifecycle",
+        });
+        const lines = renderer
+            .renderCall(
+                {
+                    prompt: "First composition line.\nSecond lighting line.\nThird material line.",
+                },
+                plainTheme,
+                renderContext,
+            )
+            .render(160);
+        const rendered = lines.join("\n");
+
+        expect(lines[0]?.trimEnd()).toBe("• Generated Image");
+        expect(lines.some((line) => line.includes("First composition line."))).toBe(true);
+        expect(lines.some((line) => line.includes("Second lighting line."))).toBe(true);
+        expect(lines.some((line) => line.includes("Third material line."))).toBe(true);
+        expect(rendered).not.toContain('"First composition line.');
     });
 
     it("hides successful view_image attachment text results", () => {

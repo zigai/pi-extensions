@@ -95,6 +95,10 @@ function codexResultPreviewLines(toolName: string): number {
     return baseToolName(toolName) === "web_run" ? WEB_RUN_COLLAPSED_SOURCE_LIMIT + 2 : 2;
 }
 
+function codexCallPreviewLines(toolName: string): number {
+    return baseToolName(toolName) === "imagegen" ? 7 : 4;
+}
+
 export function createCodexRenderer(
     toolName: string,
     labelMode: ToolLabelMode = "static",
@@ -105,7 +109,7 @@ export function createCodexRenderer(
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, codexCallLabels(toolName)),
                 body: codexCallBody(toolName, args, theme, context),
-                maxRenderedLines: 4,
+                maxRenderedLines: codexCallPreviewLines(toolName),
                 expanded: context.expanded,
             });
         },

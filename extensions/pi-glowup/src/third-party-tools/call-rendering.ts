@@ -2,6 +2,7 @@ import type { Component } from "@earendil-works/pi-tui";
 import {
     renderCodexCall,
     renderCodexOutput,
+    toolExpandHint,
     type CodexCallState,
     type CodexRenderTheme,
 } from "../rendering/core.ts";
@@ -81,6 +82,7 @@ export function renderThirdPartyCall(theme: CodexRenderTheme, options: CallOptio
             state: options.state,
             statusText: options.statusText,
             maxRenderedLines,
+            omittedHint: options.expandable === false ? "truncated" : toolExpandHint(),
         });
     }
 
@@ -96,6 +98,7 @@ export function renderThirdPartyCall(theme: CodexRenderTheme, options: CallOptio
         statusText: options.statusText,
         body: options.body,
         maxRenderedLines,
+        omittedHint: options.expandable === false ? "truncated" : toolExpandHint(),
     });
 }
 
