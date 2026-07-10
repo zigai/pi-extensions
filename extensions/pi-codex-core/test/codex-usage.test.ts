@@ -1,0 +1,177 @@
+import assert from "node:assert/strict";
+import { test } from "vitest";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+    fetchCodexUsage,
+    formatCodexUsage,
+    parseCodexRateLimitResetCreditsPayload,
+    parseCodexUsagePayload,
+} from "../src/codex/usage.ts";
+import { makeTestRuntime } from "./helpers.ts";
+
+test("formats codex usage payloads", () => {
+    const resetBase = Math.floor(Date.now() / 1000);
+    const snapshot = parseCodexUsagePayload({
+        plan_type: "pro",
+        rate_limit_reset_credits: { available_count: 2 },
+        rate_limit: {
+            primary_window: {
+                used_percent: 25,
+                limit_window_seconds: 18_000,
+                resets_at: resetBase + 10_800,
+            },
+            secondary_window: {
+                used_percent: 1,
+                window_minutes: 10_080,
+                resets_at: resetBase + 604_800,
+            },
+        },
+        additional_rate_limits: [
+            {
+                metered_feature: "gpt-5.3-codex-spark",
+                limit_name: "gpt-5.3-codex-spark",
+                rate_limit: {
+                    primary_window: {
+                        used_percent: 0,
+                        limit_window_seconds: 18_000,
+                        resets_at: resetBase + 10_800,
+                    },
+                    secondary_window: {
+                        used_percent: 0,
+                        window_minutes: 10_080,
+                        resets_at: resetBase + 604_800,
+                    },
+                },
+            },
+        ],
+    });
+
+    assert.equal(snapshot.planType, "pro");
+    assert.equal(snapshot.resetCredits?.availableCount, 2);
+    assert.equal(snapshot.limits.length, 2);
+    const formatted = formatCodexUsage(snapshot);
+    const lines = formatted.split("\n");
+    assert.equal(lines[0], "Codex usage (Pro):");
+    assert.match(formatCodexUsage({ ...snapshot, planType: "plus" }), /^Codex usage \(Plus\):/);
+    assert.match(lines[1] ?? "", /^- Codex: {15}5h: 75% left {2}\(/);
+    assert.match(lines[2] ?? "", /^- GPT-5\.3-Codex-Spark: 5h: 100% left \(/);
+    assert.equal(lines.at(-1), "- Resets available: 2");
+    assert.doesNotMatch(formatted, /\b300m\b|\b10080m\b/);
+});
+
+test("formats Codex reset credit expiration metadata", () => {
+    const explicitExpiration = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    const grantedAt = new Date().toISOString();
+    const credits = parseCodexRateLimitResetCreditsPayload({
+        available_count: "2",
+        credits: [
+            {
+                id: "RateLimitResetCredit_1",
+                status: "available",
+                granted_at: grantedAt,
+                expires_at: explicitExpiration,
+                redeem_started_at: null,
+                redeemed_at: null,
+            },
+            {
+                id: "RateLimitResetCredit_2",
+                status: "available",
+                granted_at: grantedAt,
+                redeem_started_at: null,
+                redeemed_at: null,
+            },
+            {
+                id: "RateLimitResetCredit_3",
+                status: "redeemed",
+                granted_at: grantedAt,
+                expires_at: new Date(Date.now() + 60_000).toISOString(),
+                redeemed_at: new Date().toISOString(),
+            },
+        ],
+    });
+
+    assert.ok(credits);
+    assert.equal(credits.credits.length, 3);
+    const firstCredit = credits.credits[0];
+    assert.ok(firstCredit);
+    assert.equal(firstCredit.expiresAt, explicitExpiration);
+    assert.equal(firstCredit.redeemStartedAt, undefined);
+    const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} });
+
+    assert.match(
+        formatted,
+        /- Resets available: 2\n  - Reset 1: expires in ~5d \([^\n]+\)\n  - Reset 2: expires in ~30d \(/,
+    );
+    assert.doesNotMatch(formatted, /~1m/);
+});
+
+test("formats Codex reset credit expiration from granted time", () => {
+    const grantedAt = new Date().toISOString();
+    const credits = parseCodexRateLimitResetCreditsPayload({
+        available_count: 1,
+        credits: [
+            {
+                id: "RateLimitResetCredit_1",
+                status: "available",
+                granted_at: grantedAt,
+                redeem_started_at: null,
+                redeemed_at: null,
+            },
+        ],
+    });
+
+    assert.ok(credits);
+    const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} });
+
+    assert.match(formatted, /- Resets available: 1\n  - Reset 1: expires in ~30d \(/);
+});
+
+test("fetches Codex usage from the selected provider base URL", async () => {
+    const urls: string[] = [];
+    const runtime = makeTestRuntime(async (input) => {
+        urls.push(String(input));
+        if (String(input).endsWith("/wham/usage")) {
+            return new Response(
+                JSON.stringify({ rate_limit_reset_credits: { available_count: 1 } }),
+                { status: 200 },
+            );
+        }
+        if (String(input).endsWith("/wham/rate-limit-reset-credits")) {
+            return new Response(JSON.stringify({ available_count: 1, credits: [] }), {
+                status: 200,
+            });
+        }
+        return new Response("not found", { status: 404 });
+    });
+
+    const result = await fetchCodexUsage(makeUsageContext("https://proxy.example/backend-api"), {
+        runtime,
+    });
+
+    assert.ok(result.isOk());
+    assert.deepEqual(urls, [
+        "https://proxy.example/backend-api/wham/usage",
+        "https://proxy.example/backend-api/wham/rate-limit-reset-credits",
+    ]);
+});
+
+function makeUsageContext(modelBaseUrl: string): ExtensionContext {
+    const ctx = {
+        model: {
+            provider: "openai-codex",
+            api: "openai-codex-responses",
+            id: "gpt-5.5",
+            baseUrl: modelBaseUrl,
+            headers: {},
+        },
+        modelRegistry: {
+            getApiKeyAndHeaders: async () => ({
+                ok: true,
+                apiKey: "usage-token",
+                headers: { "chatgpt-account-id": "usage-account" },
+            }),
+        },
+    };
+    // SAFETY: This test context supplies the model and auth fields read by Codex usage.
+    return ctx as unknown as ExtensionContext;
+}

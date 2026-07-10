@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -8,11 +8,12 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
     ApplyPatchError,
+    ApplyPatchExecutionError,
     applyPatchText,
     formatApplyPatchError,
     parseApplyPatch,
-} from "../src/apply-patch.ts";
-import { createApplyPatchTool } from "../src/tools/apply-patch.ts";
+} from "../src/tools/apply-patch/engine.ts";
+import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
 
 function wrapPatch(body: string): string {
     return `*** Begin Patch\n${body}\n*** End Patch`;
@@ -107,10 +108,170 @@ test("apply_patch update matching follows Codex whitespace and Unicode lenience"
     }
 });
 
+test("preflights every hunk before mutating any file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-preflight-"));
+    try {
+        const patch = wrapPatch(`*** Add File: would-have-been-created.txt
++created
+*** Update File: missing.txt
+@@
+-missing
++updated`);
+
+        await assert.rejects(applyPatchText(patch, root), ApplyPatchError);
+        await assert.rejects(readFile(join(root, "would-have-been-created.txt"), "utf8"));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("preflight rejects sequential hunks that depend on earlier writes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-dependent-"));
+    try {
+        const filePath = join(root, "sequential.txt");
+        await writeFile(filePath, "original\n");
+        const patch = wrapPatch(`*** Update File: sequential.txt
+@@
+-original
++intermediate
+*** Update File: sequential.txt
+@@
+-intermediate
++final`);
+
+        await assert.rejects(applyPatchText(patch, root), ApplyPatchError);
+        assert.equal(await readFile(filePath, "utf8"), "original\n");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("rejects parsed environment IDs before mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-environment-"));
+    try {
+        const patch = `*** Begin Patch
+*** Environment ID: remote-environment
+*** Add File: rejected.txt
++not written
+*** End Patch`;
+
+        await assert.rejects(
+            applyPatchText(patch, root),
+            (cause: unknown) =>
+                cause instanceof ApplyPatchError &&
+                cause.kind === "invalidPatch" &&
+                /no environment selector/.test(cause.message),
+        );
+        await assert.rejects(readFile(join(root, "rejected.txt"), "utf8"));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("denies traversal and external absolute paths while allowing absolute paths in cwd", async () => {
+    const base = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-boundary-"));
+    const root = join(base, "root");
+    const outside = join(base, "outside");
+    await mkdir(root);
+    await mkdir(outside);
+    try {
+        await assert.rejects(
+            applyPatchText(wrapPatch("*** Add File: ../outside/traversal.txt\n+denied"), root),
+            (cause: unknown) =>
+                cause instanceof ApplyPatchError && cause.kind === "unauthorizedPath",
+        );
+        await assert.rejects(
+            applyPatchText(
+                wrapPatch(`*** Add File: ${join(outside, "absolute.txt")}\n+denied`),
+                root,
+            ),
+            (cause: unknown) =>
+                cause instanceof ApplyPatchError && cause.kind === "unauthorizedPath",
+        );
+        await assert.rejects(readFile(join(outside, "traversal.txt"), "utf8"));
+        await assert.rejects(readFile(join(outside, "absolute.txt"), "utf8"));
+
+        const absoluteInsidePath = join(root, "absolute-inside.txt");
+        await applyPatchText(wrapPatch(`*** Add File: ${absoluteInsidePath}\n+allowed`), root);
+        assert.equal(await readFile(absoluteInsidePath, "utf8"), "allowed\n");
+    } finally {
+        await rm(base, { recursive: true, force: true });
+    }
+});
+
+test("denies paths that escape cwd through an existing symlink", async () => {
+    const base = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-symlink-"));
+    const root = join(base, "root");
+    const outside = join(base, "outside");
+    await mkdir(root);
+    await mkdir(outside);
+    await symlink(outside, join(root, "escape"), "dir");
+    try {
+        await assert.rejects(
+            applyPatchText(wrapPatch("*** Add File: escape/through-link.txt\n+denied"), root),
+            (cause: unknown) =>
+                cause instanceof ApplyPatchError && cause.kind === "unauthorizedPath",
+        );
+        await assert.rejects(readFile(join(outside, "through-link.txt"), "utf8"));
+    } finally {
+        await rm(base, { recursive: true, force: true });
+    }
+});
+
+test("checks cancellation before the first filesystem mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-cancelled-"));
+    const controller = new AbortController();
+    controller.abort();
+    try {
+        await assert.rejects(
+            applyPatchText(wrapPatch("*** Add File: cancelled.txt\n+not written"), root, {
+                signal: controller.signal,
+            }),
+            (cause: unknown) => cause instanceof ApplyPatchError && cause.kind === "cancelled",
+        );
+        await assert.rejects(readFile(join(root, "cancelled.txt"), "utf8"));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("reports committed changes when a later filesystem mutation fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-partial-"));
+    const blockedPath = join(root, "blocked.txt");
+    await writeFile(blockedPath, "unchanged\n");
+    await chmod(blockedPath, 0o444);
+    try {
+        const patch = wrapPatch(`*** Add File: committed.txt
++committed
+*** Add File: blocked.txt
++cannot replace`);
+
+        let caught: unknown;
+        try {
+            await applyPatchText(patch, root);
+        } catch (cause: unknown) {
+            caught = cause;
+        }
+
+        assert.ok(caught instanceof ApplyPatchExecutionError);
+        assert.deepEqual(caught.committedResult.affectedPaths, {
+            added: ["committed.txt"],
+            modified: [],
+            deleted: [],
+        });
+        assert.match(formatApplyPatchError(caught), /after committing[\s\S]*A committed\.txt/);
+        assert.equal(await readFile(join(root, "committed.txt"), "utf8"), "committed\n");
+        assert.equal(await readFile(blockedPath, "utf8"), "unchanged\n");
+    } finally {
+        await chmod(blockedPath, 0o644);
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("apply_patch tool executes patch argument and formats parser errors", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-tool-"));
     try {
-        const tool = createApplyPatchTool({ cwd: root });
+        const tool = createApplyPatchTool();
         const params = tool.prepareArguments?.({
             patch: wrapPatch("*** Add File: hello.txt\n+hi"),
         });

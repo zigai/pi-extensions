@@ -8,13 +8,12 @@ import {
     withFileMutationQueue,
     type ExtensionAPI,
     type ExtensionContext,
-    type SessionEntry,
     type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
-import { resolveCodexRequestModel, type CodexCoreConfig } from "../config.ts";
-import { codexToolProviderHeaders, resolveCodexToolProvider } from "../codex-auth.ts";
-import { resolveCodexCoreArtifactPath, sanitizeArtifactPathPart } from "../artifacts.ts";
+import { resolveCodexRequestModel, type CodexCoreConfig } from "../../config/config.ts";
+import { codexToolProviderHeaders, resolveCodexToolProvider } from "../../codex/auth.ts";
+import { resolveCodexCoreArtifactPath, sanitizeArtifactPathPart } from "../../artifacts.ts";
 import {
     CodexHttpRequestFailed,
     CodexInvalidJson,
@@ -26,16 +25,19 @@ import {
     isAbortCause,
     ok,
     type CodexResult,
-} from "../failures.ts";
-import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
-import { formatWebRunToolOutput } from "./web-run-output.ts";
+} from "../../codex/failures.ts";
+import { defaultCodexRuntime, type CodexRuntime } from "../../runtime.ts";
+import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
+import { recentWebSearchInput } from "./history.ts";
+import { formatWebRunToolOutput } from "./output.ts";
 
 export const WEB_RUN_TOOL_NAME = "web_run";
 
 const SearchQueryParameters = Type.Object({
     q: Type.String({ description: "Search query." }),
-    recency: Type.Optional(Type.Number({ description: "Number of recent days to filter by." })),
+    recency: Type.Optional(
+        Type.Integer({ minimum: 0, description: "Number of recent days to filter by." }),
+    ),
     domains: Type.Optional(Type.Array(Type.String(), { description: "Domains to filter by." })),
 });
 
@@ -47,12 +49,16 @@ const WEB_RUN_PARAMETERS = Type.Object({
         Type.Array(SearchQueryParameters, { description: "Image search queries." }),
     ),
     open: Type.Optional(
-        Type.Array(Type.Object({ ref_id: Type.String(), lineno: Type.Optional(Type.Number()) }), {
-            description: "Open pages by ref id or URL.",
-        }),
+        Type.Array(
+            Type.Object({
+                ref_id: Type.String(),
+                lineno: Type.Optional(Type.Integer({ minimum: 0 })),
+            }),
+            { description: "Open pages by ref id or URL." },
+        ),
     ),
     click: Type.Optional(
-        Type.Array(Type.Object({ ref_id: Type.String(), id: Type.Number() }), {
+        Type.Array(Type.Object({ ref_id: Type.String(), id: Type.Integer({ minimum: 0 }) }), {
             description: "Open numbered links from previously opened pages.",
         }),
     ),
@@ -62,7 +68,7 @@ const WEB_RUN_PARAMETERS = Type.Object({
         }),
     ),
     screenshot: Type.Optional(
-        Type.Array(Type.Object({ ref_id: Type.String(), pageno: Type.Number() }), {
+        Type.Array(Type.Object({ ref_id: Type.String(), pageno: Type.Integer({ minimum: 0 }) }), {
             description: "Take screenshots of PDF pages.",
         }),
     ),
@@ -80,13 +86,14 @@ const WEB_RUN_PARAMETERS = Type.Object({
             Type.Object({
                 location: Type.String(),
                 start: Type.Optional(Type.String()),
-                duration: Type.Optional(Type.Number()),
+                duration: Type.Optional(Type.Integer({ minimum: 0 })),
             }),
         ),
     ),
     sports: Type.Optional(
         Type.Array(
             Type.Object({
+                tool: Type.Optional(Type.Literal("sports")),
                 fn: StringEnum(["schedule", "standings"] as const),
                 league: StringEnum([
                     "nba",
@@ -103,7 +110,7 @@ const WEB_RUN_PARAMETERS = Type.Object({
                 opponent: Type.Optional(Type.String()),
                 date_from: Type.Optional(Type.String()),
                 date_to: Type.Optional(Type.String()),
-                num_games: Type.Optional(Type.Number()),
+                num_games: Type.Optional(Type.Integer({ minimum: 0 })),
                 locale: Type.Optional(Type.String()),
             }),
         ),
@@ -112,11 +119,6 @@ const WEB_RUN_PARAMETERS = Type.Object({
     response_length: Type.Optional(
         StringEnum(["short", "medium", "long"] as const, {
             description: "Length of returned response.",
-        }),
-    ),
-    settings: Type.Optional(
-        Type.Object({
-            search_context_size: Type.Optional(StringEnum(["low", "medium", "high"] as const)),
         }),
     ),
 });
@@ -140,17 +142,14 @@ const TextContentBlockSchema = compileSchema(
 );
 const SearchOutputSchema = compileSchema(
     Type.Object({
-        output: Type.Optional(Type.String()),
-        output_text: Type.Optional(Type.String()),
-        text: Type.Optional(Type.String()),
+        output: Type.String(),
+        encrypted_output: Type.Optional(Type.String()),
     }),
 );
-const MessageTextContextSchema = compileSchema(
-    Type.Object({
-        role: Type.Optional(Type.String()),
-        content: Type.Optional(Type.Union([Type.String(), Type.Array(Type.Unknown())])),
-    }),
-);
+
+const WEB_RUN_MAX_OUTPUT_TOKENS = 10_000;
+const WEB_RUN_MAX_ATTEMPTS = 4;
+const WEB_RUN_INITIAL_RETRY_DELAY_MS = 100;
 
 type WebRunParams = Static<typeof WEB_RUN_PARAMETERS>;
 
@@ -201,7 +200,10 @@ export function createWebRunTool(
         },
         renderResult(result, { expanded, isPartial }, theme, _context) {
             if (isPartial) return new Text(theme.fg("warning", "Searching web..."), 0, 0);
-            const output = firstTextContent(result.content);
+            const rawOutput = firstTextContent(result.content);
+            const output = rawOutput
+                ? formatWebRunToolOutput(rawOutput, result.details.fullOutputPath).text
+                : undefined;
             if (expanded) return new Text(theme.fg("toolOutput", output ?? "No web output."), 0, 0);
 
             const cards = parseWebRunSourceCards(output);
@@ -236,7 +238,8 @@ export function createWebRunTool(
                 options.agentDir,
             );
             return {
-                content: [{ type: "text", text: output.text }],
+                // Preserve Codex's response verbatim for follow-up open/click/find reference ids.
+                content: [{ type: "text", text: response.value.output }],
                 details: {
                     fullOutputPath: output.fullOutputPath,
                     outputCharacters: response.value.output.length,
@@ -265,46 +268,30 @@ async function executeWebRun(
     if (provider.isErr()) return provider;
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
-    const { settings, commands, responseLength } = splitSearchRequest(params);
-    const input = recentSearchContext(ctx);
+    const commands = splitSearchRequest(params);
+    const input = await recentWebSearchInput(ctx);
     const model = resolveCodexRequestModel(config.openai.webSearchModel, provider.value.model);
 
-    let response: Response;
-    try {
-        response = await runtime.fetch(`${provider.value.baseUrl}/alpha/search`, {
-            method: "POST",
-            headers,
-            ...(signal ? { signal } : {}),
-            body: JSON.stringify({
-                id: safeSessionId(ctx.sessionManager.getSessionId()),
-                model,
-                ...(input ? { input } : {}),
-                commands,
-                ...(responseLength ? { response_length: responseLength } : {}),
-                ...(settings ? { settings } : {}),
-            }),
-        });
-    } catch (cause: unknown) {
-        if (isAbortCause(cause)) {
-            return fail(
-                new CodexRequestCancelled({
-                    operation: "webRun",
-                    message: "web_run request was cancelled.",
-                    cause,
-                }),
-            );
-        }
-        return fail(
-            new CodexNetworkUnavailable({
-                operation: "webRun",
-                provider: "openai-codex",
-                message: "web_run network request failed.",
-                cause,
-            }),
-        );
-    }
-
-    const responseText = await response.text();
+    const requestBody = JSON.stringify({
+        id: ctx.sessionManager.getSessionId(),
+        model,
+        ...(input ? { input } : {}),
+        commands,
+        settings: {
+            allowed_callers: ["direct"],
+            external_web_access: true,
+        },
+        max_output_tokens: WEB_RUN_MAX_OUTPUT_TOKENS,
+    });
+    const fetched = await fetchWebRunWithRetries(
+        `${provider.value.baseUrl}/alpha/search`,
+        headers,
+        requestBody,
+        signal,
+        runtime,
+    );
+    if (fetched.isErr()) return fetched;
+    const { response, responseText } = fetched.value;
     if (!response.ok) {
         return fail(
             new CodexHttpRequestFailed({
@@ -329,7 +316,7 @@ async function executeWebRun(
         );
     }
     const output = parseSearchOutput(rawSearchPayload);
-    if (!output) {
+    if (output === undefined) {
         return fail(
             new CodexUnexpectedResponse({
                 operation: "webRun",
@@ -339,6 +326,92 @@ async function executeWebRun(
         );
     }
     return ok({ output });
+}
+
+async function fetchWebRunWithRetries(
+    url: string,
+    headers: Headers,
+    body: string,
+    signal: AbortSignal | undefined,
+    runtime: CodexRuntime,
+): Promise<CodexResult<{ readonly response: Response; readonly responseText: string }>> {
+    for (let attempt = 0; attempt < WEB_RUN_MAX_ATTEMPTS; attempt += 1) {
+        let response: Response;
+        try {
+            response = await runtime.fetch(url, {
+                method: "POST",
+                headers,
+                ...(signal ? { signal } : {}),
+                body,
+            });
+        } catch (cause: unknown) {
+            if (isAbortCause(cause) || signal?.aborted) return cancelledWebRun(cause);
+            if (attempt + 1 < WEB_RUN_MAX_ATTEMPTS) {
+                const waited = await waitBeforeRetry(attempt, signal);
+                if (!waited) return cancelledWebRun(signal?.reason);
+                continue;
+            }
+            return unavailableWebRun(cause);
+        }
+
+        let responseText: string;
+        try {
+            responseText = await response.text();
+        } catch (cause: unknown) {
+            if (isAbortCause(cause) || signal?.aborted) return cancelledWebRun(cause);
+            if (attempt + 1 < WEB_RUN_MAX_ATTEMPTS) {
+                const waited = await waitBeforeRetry(attempt, signal);
+                if (!waited) return cancelledWebRun(signal?.reason);
+                continue;
+            }
+            return unavailableWebRun(cause);
+        }
+
+        if (response.status >= 500 && attempt + 1 < WEB_RUN_MAX_ATTEMPTS) {
+            const waited = await waitBeforeRetry(attempt, signal);
+            if (!waited) return cancelledWebRun(signal?.reason);
+            continue;
+        }
+        return ok({ response, responseText });
+    }
+    return unavailableWebRun(new Error("web_run retry limit exhausted."));
+}
+
+function cancelledWebRun(cause: unknown): CodexResult<never> {
+    return fail(
+        new CodexRequestCancelled({
+            operation: "webRun",
+            message: "web_run request was cancelled.",
+            cause,
+        }),
+    );
+}
+
+function unavailableWebRun(cause: unknown): CodexResult<never> {
+    return fail(
+        new CodexNetworkUnavailable({
+            operation: "webRun",
+            provider: "openai-codex",
+            message: "web_run network request failed.",
+            cause,
+        }),
+    );
+}
+
+async function waitBeforeRetry(attempt: number, signal: AbortSignal | undefined): Promise<boolean> {
+    if (signal?.aborted) return false;
+    const delay = WEB_RUN_INITIAL_RETRY_DELAY_MS * 2 ** attempt;
+    return await new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve(true);
+        }, delay);
+        const onAbort = () => {
+            clearTimeout(timeout);
+            resolve(false);
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+    });
 }
 
 function summarizeWebRunCall(args: WebRunParams): string {
@@ -398,8 +471,6 @@ function summarizeWebRunCall(args: WebRunParams): string {
         args.time?.map((request) => request.utc_offset),
     );
     if (args.response_length) parts.push(`length=${args.response_length}`);
-    if (args.settings?.search_context_size)
-        parts.push(`context=${args.settings.search_context_size}`);
     return parts.join(" • ");
 }
 
@@ -467,11 +538,7 @@ function firstTextContent(content: readonly unknown[]): string | undefined {
     return undefined;
 }
 
-function splitSearchRequest(params: WebRunParams): {
-    readonly commands: Record<string, unknown>;
-    readonly responseLength?: WebRunParams["response_length"] | undefined;
-    readonly settings?: Record<string, unknown>;
-} {
+function splitSearchRequest(params: WebRunParams): Record<string, unknown> {
     if (!hasRealWebRunCommand(params)) {
         throw new Error("web_run requires at least one non-empty command.");
     }
@@ -483,14 +550,8 @@ function splitSearchRequest(params: WebRunParams): {
         if (Array.isArray(value) && value.length === 0) continue;
         commands[key] = value;
     }
-    const settings = params.settings?.search_context_size
-        ? { search_context_size: params.settings.search_context_size }
-        : undefined;
-    return {
-        commands,
-        ...(params.response_length ? { responseLength: params.response_length } : {}),
-        ...(settings && Object.keys(settings).length > 0 ? { settings } : {}),
-    };
+    if (params.response_length) commands.response_length = params.response_length;
+    return commands;
 }
 
 function hasRealWebRunCommand(params: WebRunParams): boolean {
@@ -506,7 +567,6 @@ async function prepareWebRunOutput(
     ctx: ExtensionContext,
     agentDir: string | undefined,
 ): Promise<{
-    readonly text: string;
     readonly fullOutputPath: string;
     readonly sourceCount: number;
 }> {
@@ -517,7 +577,7 @@ async function prepareWebRunOutput(
         agentDir,
     );
     const formatted = formatWebRunToolOutput(output, fullOutputPath);
-    return { text: formatted.text, fullOutputPath, sourceCount: formatted.sourceCount };
+    return { fullOutputPath, sourceCount: formatted.sourceCount };
 }
 
 async function saveFullWebRunOutput(
@@ -541,46 +601,5 @@ async function saveFullWebRunOutput(
 
 function parseSearchOutput(value: unknown): string | undefined {
     const output = parseWithSchema(SearchOutputSchema, value);
-    if (!output) return undefined;
-    if (output.output && output.output.trim().length > 0) return output.output;
-    if (output.output_text && output.output_text.trim().length > 0) return output.output_text;
-    if (output.text && output.text.trim().length > 0) return output.text;
-    return undefined;
-}
-
-function recentSearchContext(ctx: ExtensionContext): string | undefined {
-    const lines: string[] = [];
-    const branch = ctx.sessionManager.getBranch();
-    for (let index = branch.length - 1; index >= 0 && lines.length < 8; index -= 1) {
-        const entry = branch[index];
-        if (!entry) continue;
-        const text = textFromMessageEntry(entry);
-        if (text) lines.push(text);
-    }
-    const context = lines.reverse().join("\n\n").slice(-4_000).trim();
-    return context.length > 0 ? context : undefined;
-}
-
-function textFromMessageEntry(entry: SessionEntry): string | undefined {
-    if (entry.type !== "message") return undefined;
-    const message = parseWithSchema(MessageTextContextSchema, entry.message);
-    if (!message || message.role === "toolResult") return undefined;
-    const role = message.role ?? "message";
-    const text = textFromContent(message.content);
-    return text ? `[${role}] ${text}` : undefined;
-}
-
-function textFromContent(content: string | readonly unknown[] | undefined): string | undefined {
-    if (typeof content === "string") return content.trim() || undefined;
-    if (!Array.isArray(content)) return undefined;
-    const parts = content.flatMap((item) => {
-        const block = parseWithSchema(TextContentBlockSchema, item);
-        return block ? [block.text] : [];
-    });
-    const text = parts.join("\n").trim();
-    return text.length > 0 ? text : undefined;
-}
-
-function safeSessionId(id: string): string {
-    return sanitizeArtifactPathPart(id, "web_run");
+    return output?.output;
 }

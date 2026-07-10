@@ -6,7 +6,7 @@ import {
 import { SettingsList, truncateToWidth, type SettingItem } from "@earendil-works/pi-tui";
 import { Result, type Result as ResultType } from "better-result";
 
-import type { CodexFailure } from "./failures.ts";
+import type { CodexFailure } from "../codex/failures.ts";
 
 import {
     CODEX_APPLY_PATCH_MODES,
@@ -14,9 +14,9 @@ import {
     CODEX_CURRENT_MODEL_SELECTION,
     CODEX_PERSONALITIES,
     type CodexCoreConfig,
-} from "./config.ts";
-import { CODEX_TEXT_MODEL_CHOICES } from "./codex-models.ts";
-import { supportsCodexPromptPersonality } from "./codex-personality.ts";
+} from "../config/config.ts";
+import { CODEX_TEXT_MODEL_CHOICES } from "../codex/models.ts";
+import { supportsCodexPromptPersonality } from "../prompt/personality.ts";
 import {
     consumeCodexRateLimitResetCredit,
     createCodexRateLimitResetRedeemRequestId,
@@ -25,7 +25,7 @@ import {
     formatResetConsumeResult,
     type CodexRateLimitResetConsumeResult,
     type CodexUsageSnapshot,
-} from "./usage.ts";
+} from "../codex/usage.ts";
 
 export type CodexSettingsTab = "general" | "tools" | "openai" | "usage";
 
@@ -329,6 +329,12 @@ function buildItems(
                 "Up to 1.5× faster token velocity; credit usage is higher and varies by model and pricing.",
                 config.openai.fast,
             ),
+            toggleItem(
+                "reasoningTraces",
+                "GPT reasoning traces",
+                "Show streamed reasoning summaries for GPT Responses models.",
+                config.openai.showReasoningTraces,
+            ),
             {
                 id: "verbosity",
                 label: "Verbosity",
@@ -439,6 +445,12 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
     if (id === "applyPatch" && (value === "off" || value === "openai" || value === "all"))
         return { ...config, tools: { ...config.tools, applyPatch: value } };
     if (id === "fast") return { ...config, openai: { ...config.openai, fast: value === "on" } };
+    if (id === "reasoningTraces") {
+        return {
+            ...config,
+            openai: { ...config.openai, showReasoningTraces: value === "on" },
+        };
+    }
     if (id === "verbosity" && (value === "low" || value === "medium" || value === "high")) {
         return { ...config, openai: { ...config.openai, verbosity: value } };
     }

@@ -1,21 +1,22 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { syncCodexCoreTools } from "./activation.ts";
-import { registerCodexCommand } from "./codex-command.ts";
-import { readCodexCoreConfig, type CodexCoreConfig } from "./config.ts";
-import { registerNativeCompactionDisplay } from "./compaction-display.ts";
-import { buildCodexCoreSystemPrompt } from "./prompt.ts";
-import { CODEX_RESPONSES_LITE_HEADER, rewriteCodexResponsesPayload } from "./responses-compat.ts";
-import { applyCodexModelMetadataCompatibility, codexModelRequestProfile } from "./codex-models.ts";
-import { registerApplyPatchTool } from "./tools/apply-patch.ts";
-import { registerImagegenTool } from "./tools/imagegen.ts";
+import { applyCodexModelMetadataCompatibility, codexModelRequestProfile } from "./codex/models.ts";
 import {
-    clearDeferredViewImagesForSession,
-    registerViewImageTool,
-    rewriteProviderRequestWithDeferredViewImages,
-} from "./tools/view-image.ts";
-import { registerWebRunTool } from "./tools/web-run.ts";
-import { shutdownCodexTokenizer, warmCodexTokenizer } from "./tokenizer.ts";
+    CODEX_RESPONSES_LITE_HEADER,
+    omitReasoningSummary,
+    rewriteCodexResponsesPayload,
+} from "./codex/responses-compat.ts";
+import { registerNativeCompactionDisplay } from "./compaction/display.ts";
+import { shutdownCodexTokenizer, warmCodexTokenizer } from "./compaction/tokenizer.ts";
+import { readCodexCoreConfig, type CodexCoreConfig } from "./config/config.ts";
+import { rewriteProviderImageDetails } from "./images/detail.ts";
+import { buildCodexCoreSystemPrompt } from "./prompt/system-prompt.ts";
+import { registerCodexCommand } from "./settings/command.ts";
+import { registerApplyPatchTool } from "./tools/apply-patch/tool.ts";
+import { registerImagegenTool } from "./tools/imagegen.ts";
+import { registerViewImageTool } from "./tools/view-image/tool.ts";
+import { registerWebRunTool } from "./tools/web-run/tool.ts";
 
 /** Package display name used in user-visible extension messages. */
 export const extensionName = "Pi Codex Core";
@@ -24,15 +25,15 @@ export const extensionName = "Pi Codex Core";
 export const packageName = "pi-codex-core";
 
 const FAST_MODE_STARTUP_WARNING =
-    "Fast mode is enabled: supported Codex calls can deliver up to 1.5× faster token velocity, with higher credit usage that varies by model and pricing.";
+    "Fast mode is enabled: supported Codex calls can deliver up to 1.5x faster token velocity, with higher credit usage that varies by model and pricing.";
 
-type CompactionModule = typeof import("./compaction.ts");
+type CompactionModule = typeof import("./compaction/service.ts");
 
 let compactionModulePromise: Promise<CompactionModule> | undefined;
 const activatedApis = new WeakSet<ExtensionAPI>();
 
 function loadCompactionModule(): Promise<CompactionModule> {
-    compactionModulePromise ??= import("./compaction.ts");
+    compactionModulePromise ??= import("./compaction/service.ts");
     return compactionModulePromise;
 }
 
@@ -120,23 +121,28 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("before_provider_request", async (event, ctx) => {
-        const imagePayload = rewriteProviderRequestWithDeferredViewImages(event.payload, ctx);
-        const payload = imagePayload ?? event.payload;
+        const imageDetailPayload = rewriteProviderImageDetails(event.payload);
+        const payload = imageDetailPayload ?? event.payload;
         const responsesPayload = isActiveCodexResponsesModel(ctx)
             ? rewriteCodexResponsesPayload(payload, ctx.model?.id)
             : undefined;
         const compatiblePayload = responsesPayload ?? payload;
+        const reasoningTracePayload =
+            !config.openai.showReasoningTraces && isActiveGptResponsesModel(ctx)
+                ? omitReasoningSummary(compatiblePayload, ctx.model?.id)
+                : undefined;
+        const requestPayload = reasoningTracePayload ?? compatiblePayload;
         if (!config.compaction.enabled) {
-            return responsesPayload ?? imagePayload;
+            return reasoningTracePayload ?? responsesPayload ?? imageDetailPayload;
         }
         const { rewriteProviderRequestWithNativeCompaction } = await loadCompactionModule();
         const compactionPayload = await rewriteProviderRequestWithNativeCompaction(
-            compatiblePayload,
+            requestPayload,
             ctx,
             config,
             pi,
         );
-        return compactionPayload ?? responsesPayload ?? imagePayload;
+        return compactionPayload ?? reasoningTracePayload ?? responsesPayload ?? imageDetailPayload;
     });
 
     pi.on("session_shutdown", async (event, ctx) => {
@@ -149,7 +155,6 @@ export default function extension(pi: ExtensionAPI): void {
                 clearCodexCompactionSessionState(ctx.sessionManager.getSessionId());
             }
         }
-        clearDeferredViewImagesForSession(ctx.sessionManager.getSessionId());
         await shutdownCodexTokenizer();
     });
 }
@@ -161,5 +166,16 @@ function isActiveCodexResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[
     );
 }
 
-export { parseCodexCoreConfig, readCodexCoreConfig, writeCodexCoreConfig } from "./config.ts";
-export { parseCodexUsagePayload, formatCodexUsage } from "./usage.ts";
+function isActiveGptResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]): boolean {
+    return (
+        ctx.model?.id.trim().toLowerCase().startsWith("gpt-") === true &&
+        String(ctx.model.api).toLowerCase().includes("responses")
+    );
+}
+
+export { formatCodexUsage, parseCodexUsagePayload } from "./codex/usage.ts";
+export {
+    parseCodexCoreConfig,
+    readCodexCoreConfig,
+    writeCodexCoreConfig,
+} from "./config/config.ts";

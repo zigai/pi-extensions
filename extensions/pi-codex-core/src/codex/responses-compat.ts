@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 
-import { codexModelRequestProfile, codexReasoningEffortForRequest } from "./codex-models.ts";
-import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
+import { codexModelRequestProfile, codexReasoningEffortForRequest } from "./models.ts";
+import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 
 export const CODEX_RESPONSES_LITE_HEADER = "x-openai-internal-codex-responses-lite";
 export const CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY =
@@ -67,6 +67,26 @@ export function rewriteCodexResponsesPayload(
             [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
         },
         ...(request.service_tier === "priority" ? { service_tier: "priority" } : {}),
+    };
+}
+
+/** Removes the visible reasoning summary request while preserving hidden reasoning controls. */
+export function omitReasoningSummary(
+    payload: unknown,
+    expectedModelId?: string,
+): Record<string, unknown> | undefined {
+    const request = parseWithSchema(UnknownRecordSchema, payload);
+    if (!request || typeof request.model !== "string") return undefined;
+    if (expectedModelId !== undefined && request.model !== expectedModelId) return undefined;
+
+    const reasoning = parseWithSchema(UnknownRecordSchema, request.reasoning);
+    if (!reasoning || !Object.hasOwn(reasoning, "summary")) return undefined;
+
+    return {
+        ...request,
+        reasoning: Object.fromEntries(
+            Object.entries(reasoning).filter(([key]) => key !== "summary"),
+        ),
     };
 }
 

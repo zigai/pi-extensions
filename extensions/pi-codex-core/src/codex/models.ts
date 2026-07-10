@@ -3,6 +3,7 @@ export type CodexModelRequestProfile = {
     readonly defaultReasoningEffort?: string | undefined;
     readonly effectiveContextWindow?: number | undefined;
     readonly supportsPriorityServiceTier: boolean;
+    readonly supportsImageDetailOriginal: boolean;
 };
 
 const GPT_5_6_EFFECTIVE_CONTEXT_WINDOW = 353_400;
@@ -13,33 +14,39 @@ const CODEX_MODEL_REQUEST_PROFILES: Readonly<Record<string, CodexModelRequestPro
         defaultReasoningEffort: "low",
         effectiveContextWindow: GPT_5_6_EFFECTIVE_CONTEXT_WINDOW,
         supportsPriorityServiceTier: true,
+        supportsImageDetailOriginal: true,
     },
     "gpt-5.6-terra": {
         useResponsesLite: true,
         defaultReasoningEffort: "medium",
         effectiveContextWindow: GPT_5_6_EFFECTIVE_CONTEXT_WINDOW,
         supportsPriorityServiceTier: true,
+        supportsImageDetailOriginal: true,
     },
     "gpt-5.6-luna": {
         useResponsesLite: true,
         defaultReasoningEffort: "medium",
         effectiveContextWindow: GPT_5_6_EFFECTIVE_CONTEXT_WINDOW,
         supportsPriorityServiceTier: true,
+        supportsImageDetailOriginal: true,
     },
     "gpt-5.5": {
         useResponsesLite: false,
         defaultReasoningEffort: "medium",
         supportsPriorityServiceTier: true,
+        supportsImageDetailOriginal: true,
     },
     "gpt-5.4": {
         useResponsesLite: false,
         defaultReasoningEffort: "medium",
         supportsPriorityServiceTier: true,
+        supportsImageDetailOriginal: true,
     },
     "gpt-5.4-mini": {
         useResponsesLite: false,
         defaultReasoningEffort: "medium",
         supportsPriorityServiceTier: false,
+        supportsImageDetailOriginal: true,
     },
 };
 

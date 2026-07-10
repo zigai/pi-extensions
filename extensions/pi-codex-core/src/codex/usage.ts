@@ -2,7 +2,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { extractAccountId, resolveCodexApiProviderBaseUrl } from "./codex-auth.ts";
+import { extractAccountId, resolveCodexApiProviderBaseUrl } from "./auth.ts";
 import {
     CodexAuthUnavailable,
     CodexHttpRequestFailed,
@@ -15,8 +15,8 @@ import {
     ok,
     type CodexResult,
 } from "./failures.ts";
-import { defaultCodexRuntime, type CodexRuntime, type IdGenerator } from "./runtime.ts";
-import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
+import { defaultCodexRuntime, type CodexRuntime, type IdGenerator } from "../runtime.ts";
+import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 
 const RESET_CREDITS_CACHE_MS = 5_000;
 const RESET_CREDIT_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;

@@ -9,27 +9,25 @@ import {
     type BuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 
-import type { CodexCoreConfig } from "./config.ts";
-import { supportsCodexPromptPersonality } from "./codex-personality.ts";
-import { defaultCodexRuntime, type Clock } from "./runtime.ts";
+import type { CodexCoreConfig } from "../config/config.ts";
+import { supportsCodexPromptPersonality } from "./personality.ts";
+import { defaultCodexRuntime, type Clock } from "../runtime.ts";
 
 const FALLBACK_CODEX_PROMPT_PATH = fileURLToPath(
-    new URL("./prompt/codex-fallback-prompt.md", import.meta.url),
+    new URL("./codex-fallback-prompt.md", import.meta.url),
 );
-const GPT_5_5_CODEX_PROMPT_PATH = fileURLToPath(
-    new URL("./prompt/codex-gpt-5.5.md", import.meta.url),
-);
+const GPT_5_5_CODEX_PROMPT_PATH = fileURLToPath(new URL("./codex-gpt-5.5.md", import.meta.url));
 const GPT_5_6_SOL_CODEX_PROMPT_PATH = fileURLToPath(
-    new URL("./prompt/codex-gpt-5.6-sol.md", import.meta.url),
+    new URL("./codex-gpt-5.6-sol.md", import.meta.url),
 );
 const GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH = fileURLToPath(
-    new URL("./prompt/codex-gpt-5.6-terra-luna.md", import.meta.url),
+    new URL("./codex-gpt-5.6-terra-luna.md", import.meta.url),
 );
 const GPT_5_5_FRIENDLY_PERSONALITY_PATH = fileURLToPath(
-    new URL("./prompt/codex-gpt-5.5-personality-friendly.md", import.meta.url),
+    new URL("./codex-gpt-5.5-personality-friendly.md", import.meta.url),
 );
 const GPT_5_5_PRAGMATIC_PERSONALITY_PATH = fileURLToPath(
-    new URL("./prompt/codex-gpt-5.5-personality-pragmatic.md", import.meta.url),
+    new URL("./codex-gpt-5.5-personality-pragmatic.md", import.meta.url),
 );
 const CODEX_PROMPT_PATHS_BY_MODEL: Readonly<Record<string, string>> = {
     "gpt-5.5": GPT_5_5_CODEX_PROMPT_PATH,

@@ -10,19 +10,21 @@ import {
     type CodexResult,
 } from "./failures.ts";
 import { Redacted } from "./redacted.ts";
-import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
-import { CODEX_TEXT_MODEL_CHOICES } from "./codex-models.ts";
+import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import { CODEX_TEXT_MODEL_CHOICES } from "./models.ts";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 const CODEX_ORIGINATOR = "codex_cli_rs";
 const OPENAI_CODEX_PROVIDER = "openai-codex";
+const PI_CODEX_CORE_VERSION = "0.1.0";
 
 export type CodexToolProvider = {
     readonly baseUrl: string;
     readonly model: string;
-    readonly token: Redacted<string>;
+    readonly token?: Redacted<string> | undefined;
     readonly accountId: string;
+    readonly providerHeaders?: Readonly<Record<string, string>> | undefined;
 };
 
 export type CodexResponsesProvider = CodexToolProvider & {
@@ -61,14 +63,14 @@ export function resolveCodexResponsesUrl(providerBaseUrl: string): string {
 }
 
 export function codexToolProviderHeaders(provider: CodexToolProvider): Headers {
-    const headers = new Headers();
-    headers.set("Authorization", `Bearer ${provider.token.reveal()}`);
+    const headers = new Headers(provider.providerHeaders);
+    if (provider.token) headers.set("Authorization", `Bearer ${provider.token.reveal()}`);
     if (provider.accountId.trim().length > 0) {
         headers.set("ChatGPT-Account-ID", provider.accountId);
     }
     headers.set("originator", CODEX_ORIGINATOR);
     headers.set("User-Agent", codexUserAgent(CODEX_ORIGINATOR));
-    headers.set("version", "0.0.0");
+    headers.set("version", PI_CODEX_CORE_VERSION);
     headers.set("content-type", "application/json");
     return headers;
 }
@@ -88,19 +90,45 @@ export function codexUserAgent(originator: string = CODEX_ORIGINATOR): string {
             : term && term.length > 0
               ? term
               : "unknown";
-    return `${originator}/0.0.0 (${platform} unknown; ${process.arch}) ${terminal}`;
+    return `${originator}/${PI_CODEX_CORE_VERSION} (${platform} unknown; ${process.arch}) ${terminal}`;
 }
 
 export async function resolveCodexToolProvider(
     ctx: ExtensionContext,
+    options: { readonly requireAccountId?: boolean; readonly useActiveModel?: boolean } = {},
 ): Promise<CodexResult<CodexToolProvider>> {
-    const model = resolveCodexToolAuthModel(ctx);
+    const model = options.useActiveModel
+        ? resolveActiveCompatibleToolModel(ctx)
+        : resolveCodexToolAuthModel(ctx);
     if (model.isErr()) return model;
     return resolveCodexProviderForModel(ctx, model.value, {
-        requireAccountId: true,
+        requireAccountId:
+            options.requireAccountId ??
+            isChatGptBackend(model.value.baseUrl ?? DEFAULT_CODEX_BASE_URL),
         tokenUnavailableMessage:
             "Codex tools require /login openai-codex or an OpenAI Codex-compatible token.",
     });
+}
+
+function isChatGptBackend(baseUrl: string): boolean {
+    try {
+        return new URL(baseUrl).hostname.toLowerCase() === "chatgpt.com";
+    } catch {
+        return false;
+    }
+}
+
+function resolveActiveCompatibleToolModel(ctx: ExtensionContext): CodexResult<RuntimeModel> {
+    const model = ctx.model;
+    if (model && String(model.api).toLowerCase().includes("responses")) {
+        return ok(model as RuntimeModel);
+    }
+    return fail(
+        new CodexUnsupportedModel({
+            operation: "codexAuth",
+            message: "Codex tools require an active OpenAI-compatible Responses model.",
+        }),
+    );
 }
 
 /** Resolve the active OpenAI Codex responses provider and prepared response headers. */
@@ -162,9 +190,10 @@ async function resolveCodexProviderForModel(
         );
     }
 
-    const token =
-        auth.apiKey ?? headerValue(auth.headers, "Authorization")?.replace(/^Bearer\s+/i, "");
-    if (!token) {
+    const authorization = headerValue(auth.headers, "Authorization");
+    const bearerToken = /^Bearer\s+(.+)$/i.exec(authorization ?? "")?.[1]?.trim();
+    const token = auth.apiKey ?? bearerToken;
+    if (!token && !hasCredentialHeader(auth.headers)) {
         return fail(
             new CodexAuthUnavailable({
                 operation: "codexAuth",
@@ -173,7 +202,9 @@ async function resolveCodexProviderForModel(
         );
     }
 
-    const accountId = headerValue(auth.headers, "chatgpt-account-id") ?? extractAccountId(token);
+    const accountId =
+        headerValue(auth.headers, "chatgpt-account-id") ??
+        (token ? extractAccountId(token) : undefined);
     if (options.requireAccountId && !accountId) {
         return fail(
             new CodexAuthUnavailable({
@@ -186,9 +217,20 @@ async function resolveCodexProviderForModel(
     return ok({
         baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
         model: model.id,
-        token: Redacted.of(token),
+        ...(token ? { token: Redacted.of(token) } : {}),
         accountId: accountId ?? "",
+        ...(auth.headers ? { providerHeaders: auth.headers } : {}),
     });
+}
+
+function hasCredentialHeader(headers: Record<string, string> | undefined): boolean {
+    return [
+        "authorization",
+        "api-key",
+        "x-api-key",
+        "x-openai-api-key",
+        "cf-aig-authorization",
+    ].some((name) => headerValue(headers, name) !== undefined);
 }
 
 function resolveCodexToolAuthModel(ctx: ExtensionContext): CodexResult<RuntimeModel> {

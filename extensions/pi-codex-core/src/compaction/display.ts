@@ -1,9 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import {
-    NATIVE_COMPACTION_MESSAGE_TEXT,
-    NATIVE_COMPACTION_MESSAGE_TYPE,
-} from "./compaction-messages.ts";
+import { NATIVE_COMPACTION_MESSAGE_TEXT, NATIVE_COMPACTION_MESSAGE_TYPE } from "./messages.ts";
 
 /** Register the renderer for Codex native-compaction checkpoint messages. */
 export function registerNativeCompactionDisplay(pi: ExtensionAPI): void {

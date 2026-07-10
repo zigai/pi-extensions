@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs";
-
 import { Type } from "typebox";
 
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
 import { StringEnum, type ImageContent } from "@earendil-works/pi-ai";
 import {
     Container,
@@ -19,13 +17,13 @@ import type {
     ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
-import { defaultCapabilitiesProvider, type CapabilitiesProvider } from "../capabilities.ts";
-import { resolveCodexRequestModel, type CodexCoreConfig } from "../config.ts";
+import { defaultCapabilitiesProvider, type CapabilitiesProvider } from "./capabilities.ts";
+import { resolveCodexRequestModel, type CodexCoreConfig } from "../../config/config.ts";
 import {
     codexToolProviderHeaders,
     resolveCodexResponsesUrl,
     resolveCodexToolProvider,
-} from "../codex-auth.ts";
+} from "../../codex/auth.ts";
 import {
     CodexHttpRequestFailed,
     CodexInvalidJson,
@@ -37,7 +35,7 @@ import {
     isAbortCause,
     ok,
     type CodexResult,
-} from "../failures.ts";
+} from "../../codex/failures.ts";
 import {
     imageContentToDataUrl,
     loadImageContent,
@@ -45,10 +43,15 @@ import {
     prepareCodexPromptImageContent,
     type ImageDetail,
     type LoadedImage,
-} from "../image-content.ts";
-import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
-import { CODEX_RESPONSES_LITE_HEADER, rewriteCodexResponsesPayload } from "../responses-compat.ts";
-import { codexModelRequestProfile } from "../codex-models.ts";
+} from "../../images/content.ts";
+import { defaultCodexRuntime, type CodexRuntime } from "../../runtime.ts";
+import {
+    CODEX_RESPONSES_LITE_HEADER,
+    rewriteCodexResponsesPayload,
+} from "../../codex/responses-compat.ts";
+import { codexModelRequestProfile } from "../../codex/models.ts";
+import { fetchTextWithRetries } from "../../codex/http-retry.ts";
+import { imageDetailMarker, isImageDetailMarker } from "../../images/detail.ts";
 
 const IMAGE_DESCRIPTION_PROMPT =
     "Describe this image in detail. Output only the image description, no other commentary.";
@@ -64,7 +67,7 @@ const ViewImageArgumentsSchema = compileSchema(
         path: Type.Optional(Type.String()),
         file_path: Type.Optional(Type.String()),
         image_path: Type.Optional(Type.String()),
-        detail: Type.Optional(StringEnum(["auto", "high", "original"] as const)),
+        detail: Type.Optional(StringEnum(["high", "original"] as const)),
     }),
 );
 const DescriptionResponseSchema = compileSchema(
@@ -82,16 +85,19 @@ const DescriptionResponseSchema = compileSchema(
     }),
 );
 
-const VIEW_IMAGE_PARAMETERS = Type.Object({
-    path: Type.String({ description: "Path to a local image file." }),
-    detail: Type.Optional(
-        StringEnum(["auto", "high", "original"] as const, { description: "Image detail level." }),
-    ),
-});
+const VIEW_IMAGE_PARAMETERS = Type.Object(
+    {
+        path: Type.String({ description: "Path to a local image file." }),
+        detail: Type.Optional(
+            StringEnum(["high", "original"] as const, { description: "Image detail level." }),
+        ),
+    },
+    { additionalProperties: false },
+);
 
 type ViewImageParams = {
     readonly path: string;
-    readonly detail?: "auto" | "high" | "original";
+    readonly detail?: "high" | "original";
 };
 
 type ViewImageDetails = {
@@ -99,15 +105,7 @@ type ViewImageDetails = {
     readonly absolutePath: string;
     readonly described: boolean;
     readonly mimeType?: string | undefined;
-    readonly deferredImage?: boolean | undefined;
-};
-
-type DeferredViewImage = {
-    readonly sessionId: string;
-    readonly callId: string;
-    readonly marker: string;
-    readonly image: ImageContent;
-    readonly createdAtMs: number;
+    readonly detail?: "high" | "original" | undefined;
 };
 
 type ViewImageRenderState = {
@@ -128,9 +126,6 @@ type ViewImageToolOptions = {
 };
 
 export const VIEW_IMAGE_TOOL_NAME = "view_image";
-const DEFERRED_VIEW_IMAGE_MAX_AGE_MS = 5 * 60 * 1000;
-const DEFERRED_VIEW_IMAGE_MARKER_PREFIX = "[view_image image attached";
-const deferredViewImages = new Map<string, DeferredViewImage>();
 
 export function registerViewImageTool(pi: ExtensionAPI, options: ViewImageToolOptions): void {
     pi.registerTool(createViewImageTool(options));
@@ -162,8 +157,7 @@ export function createViewImageTool(
         renderResult(result, { expanded, isPartial }, theme, context) {
             if (isPartial) return new Text(theme.fg("warning", "Loading image..."), 0, 0);
             const path = result.details.path || context.args.path || "image";
-            const displayedImage =
-                firstImageContent(result.content) ?? previewImageFromDetails(result.details);
+            const displayedImage = firstImageContent(result.content);
             const capabilities = (
                 options.capabilities ?? defaultCapabilitiesProvider
             ).getCapabilities();
@@ -181,9 +175,7 @@ export function createViewImageTool(
             }
             const rawDescription = firstTextContent(result.content);
             const description =
-                rawDescription && !isDeferredViewImageMarker(rawDescription)
-                    ? rawDescription
-                    : undefined;
+                rawDescription && !isImageDetailMarker(rawDescription) ? rawDescription : undefined;
             if (description) {
                 lines.push(
                     theme.fg("toolOutput", expanded ? description : compactText(description, 180)),
@@ -207,25 +199,27 @@ export function createViewImageTool(
             );
             return container;
         },
-        async execute(toolCallId, params, signal, _onUpdate, ctx) {
+        async execute(_toolCallId, params, signal, _onUpdate, ctx) {
             const image = await loadImageContent(params.path, ctx.cwd);
             const detail = params.detail ?? "high";
             if (modelSupportsImages(ctx.model)) {
+                if (
+                    detail === "original" &&
+                    codexModelRequestProfile(ctx.model?.id)?.supportsImageDetailOriginal !== true
+                ) {
+                    throw new Error(
+                        `view_image detail "original" is not supported by ${ctx.model?.id ?? "the active model"}.`,
+                    );
+                }
                 const content = await prepareCodexPromptImageContent(image, detail);
-                const marker = rememberDeferredViewImage({
-                    ctx,
-                    toolCallId,
-                    path: params.path,
-                    image: content,
-                });
                 return {
-                    content: [{ type: "text", text: marker }],
+                    content: [content, { type: "text", text: imageDetailMarker(detail) }],
                     details: {
                         path: params.path,
                         absolutePath: image.absolutePath,
                         described: false,
                         mimeType: content.mimeType,
-                        deferredImage: true,
+                        detail,
                     },
                 };
             }
@@ -253,6 +247,7 @@ export function createViewImageTool(
                     absolutePath: image.absolutePath,
                     described: true,
                     mimeType: image.mimeType,
+                    detail,
                 },
             };
         },
@@ -270,117 +265,6 @@ function defaultViewImageComponentFactory(args: {
         { fallbackColor: (value: string) => args.theme.fg("toolOutput", value) },
         { maxWidthCells: 60, filename: args.path },
     );
-}
-
-function previewImageFromDetails(details: ViewImageDetails): ImageContent | undefined {
-    if (details.described || details.mimeType === undefined) return undefined;
-    try {
-        return {
-            type: "image",
-            data: readFileSync(details.absolutePath).toString("base64"),
-            mimeType: details.mimeType,
-        };
-    } catch {
-        return undefined;
-    }
-}
-
-function rememberDeferredViewImage(args: {
-    readonly ctx: ExtensionContext;
-    readonly toolCallId: string;
-    readonly path: string;
-    readonly image: ImageContent;
-}): string {
-    const sessionId = args.ctx.sessionManager.getSessionId();
-    const callId = providerCallIdFromToolCallId(args.toolCallId);
-    const marker = `${DEFERRED_VIEW_IMAGE_MARKER_PREFIX}: ${args.path}]`;
-    pruneDeferredViewImages(Date.now());
-    deferredViewImages.set(deferredViewImageKey(sessionId, callId), {
-        sessionId,
-        callId,
-        marker,
-        image: args.image,
-        createdAtMs: Date.now(),
-    });
-    return marker;
-}
-
-export function clearDeferredViewImagesForSession(sessionId: string): void {
-    for (const [key, image] of deferredViewImages) {
-        if (image.sessionId === sessionId) deferredViewImages.delete(key);
-    }
-}
-
-export function rewriteProviderRequestWithDeferredViewImages(
-    payload: unknown,
-    ctx: ExtensionContext,
-): unknown {
-    pruneDeferredViewImages(Date.now());
-    if (!isRecord(payload) || !Array.isArray(payload.input)) return undefined;
-    const sessionId = ctx.sessionManager.getSessionId();
-    let changed = false;
-    const inputItems: readonly unknown[] = payload.input;
-    const input = inputItems.map((item): unknown => {
-        const replacement = rewriteDeferredViewImageOutput(item, sessionId);
-        if (replacement !== undefined) {
-            changed = true;
-            return replacement;
-        }
-        return item;
-    });
-    return changed ? { ...payload, input } : undefined;
-}
-
-function rewriteDeferredViewImageOutput(item: unknown, sessionId: string): unknown {
-    if (
-        !isRecord(item) ||
-        item.type !== "function_call_output" ||
-        typeof item.call_id !== "string"
-    ) {
-        return undefined;
-    }
-    const deferredImage = deferredViewImages.get(deferredViewImageKey(sessionId, item.call_id));
-    if (!deferredImage || !outputContainsDeferredMarker(item.output, deferredImage.marker)) {
-        return undefined;
-    }
-    return {
-        ...item,
-        output: [
-            { type: "input_text", text: deferredImage.marker },
-            {
-                type: "input_image",
-                detail: "auto",
-                image_url: imageContentToDataUrl(deferredImage.image),
-            },
-        ],
-    };
-}
-
-function outputContainsDeferredMarker(output: unknown, marker: string): boolean {
-    if (typeof output === "string") return output.includes(marker);
-    if (!Array.isArray(output)) return false;
-    return output.some((part) => isRecord(part) && part.text === marker);
-}
-
-function pruneDeferredViewImages(nowMs: number): void {
-    for (const [key, image] of deferredViewImages) {
-        if (nowMs - image.createdAtMs > DEFERRED_VIEW_IMAGE_MAX_AGE_MS) {
-            deferredViewImages.delete(key);
-        }
-    }
-}
-
-function providerCallIdFromToolCallId(toolCallId: string): string {
-    const [callId] = toolCallId.split("|");
-    return callId && callId.length > 0 ? callId : toolCallId;
-}
-
-function deferredViewImageKey(sessionId: string, callId: string): string {
-    return `${sessionId}:${callId}`;
-}
-
-function isDeferredViewImageMarker(value: string): boolean {
-    return value.startsWith(DEFERRED_VIEW_IMAGE_MARKER_PREFIX);
 }
 
 export function prepareViewImageArguments(args: unknown): ViewImageParams {
@@ -465,7 +349,7 @@ async function describeImage(
                     {
                         type: "input_image",
                         image_url: imageContentToDataUrl(promptImage),
-                        detail: detail === "original" ? "high" : detail,
+                        detail,
                     },
                 ],
             },
@@ -474,15 +358,18 @@ async function describeImage(
     const compatibleRequestBody = rewriteCodexResponsesPayload(requestBody, model) ?? requestBody;
 
     let response: Response;
+    let responseText: string;
     try {
-        response = await runtime.fetch(resolveCodexResponsesUrl(provider.value.baseUrl), {
-            method: "POST",
-            headers,
-            ...(signal ? { signal } : {}),
-            body: JSON.stringify(compatibleRequestBody),
-        });
+        const fetched = await fetchTextWithRetries(
+            runtime,
+            resolveCodexResponsesUrl(provider.value.baseUrl),
+            { method: "POST", headers, body: JSON.stringify(compatibleRequestBody) },
+            signal,
+        );
+        response = fetched.response;
+        responseText = fetched.text;
     } catch (cause: unknown) {
-        if (isAbortCause(cause)) {
+        if (isAbortCause(cause) || signal?.aborted) {
             return fail(
                 new CodexRequestCancelled({
                     operation: "viewImageDescription",
@@ -501,7 +388,6 @@ async function describeImage(
         );
     }
 
-    const responseText = await response.text();
     if (!response.ok) {
         return fail(
             new CodexHttpRequestFailed({
@@ -551,8 +437,4 @@ function extractOutputText(value: unknown): string | undefined {
     }
     const text = parts.join("").trim();
     return text.length > 0 ? text : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

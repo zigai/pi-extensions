@@ -19,8 +19,8 @@ import {
     type ApplyPatchAffectedPaths,
     type AppliedPatchFileChange,
     type ApplyPatchHunk,
-} from "../apply-patch.ts";
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+} from "./engine.ts";
+import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
 
 export const APPLY_PATCH_TOOL_NAME = "apply_patch";
 
@@ -72,20 +72,14 @@ type ApplyPatchDiffSummary = {
 
 const COMPACT_DIFF_LINE_LIMIT = 80;
 
-type ApplyPatchToolOptions = {
-    readonly cwd?: string | undefined;
-};
-
-export function registerApplyPatchTool(
-    pi: ExtensionAPI,
-    options: ApplyPatchToolOptions = {},
-): void {
-    pi.registerTool(createApplyPatchTool(options));
+export function registerApplyPatchTool(pi: ExtensionAPI): void {
+    pi.registerTool(createApplyPatchTool());
 }
 
-export function createApplyPatchTool(
-    options: ApplyPatchToolOptions = {},
-): ToolDefinition<typeof APPLY_PATCH_PARAMETERS, ApplyPatchToolDetails> {
+export function createApplyPatchTool(): ToolDefinition<
+    typeof APPLY_PATCH_PARAMETERS,
+    ApplyPatchToolDetails
+> {
     return {
         name: APPLY_PATCH_TOOL_NAME,
         label: "Apply Patch",
@@ -100,11 +94,14 @@ export function createApplyPatchTool(
         parameters: APPLY_PATCH_PARAMETERS,
         prepareArguments: prepareApplyPatchArguments,
         async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-            const cwd = resolve(options.cwd ?? ctx.cwd);
+            const cwd = resolve(ctx.cwd);
             return withFileMutationQueue(cwd, async () => {
                 try {
                     const parsed = parseApplyPatch(params.patch);
-                    const result = await applyPatchHunks(parsed.hunks, cwd, { signal });
+                    const result = await applyPatchHunks(parsed.hunks, cwd, {
+                        signal,
+                        environmentId: parsed.environmentId,
+                    });
                     const diffSummary = summarizeAppliedPatchDiff(result.changes, parsed.hunks);
                     return {
                         content: [{ type: "text", text: result.summary }],

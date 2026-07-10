@@ -1,0 +1,189 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import assert from "node:assert/strict";
+import { test } from "vitest";
+import extension from "../src/index.ts";
+import {
+    CODEX_CURRENT_MODEL_SELECTION,
+    DEFAULT_CODEX_CORE_CONFIG,
+    DEFAULT_CODEX_CORE_CONFIG_JSON,
+    codexCoreConfigJsonSchema,
+    getCodexCoreConfigPath,
+    getCodexCoreGlobalConfigSchemaPath,
+    getCodexCoreProjectConfigPath,
+    parseCodexCoreConfig,
+    readCodexCoreConfig,
+} from "../src/config/config.ts";
+import { makeExtensionHarness, makeExtensionContext } from "./helpers.ts";
+
+test("parses codex config with safe defaults", () => {
+    const config = parseCodexCoreConfig({
+        scope: { tools: "all" },
+        tools: { webSearch: false, viewImageDescriptions: true },
+        prompt: { mode: "codex", personality: "friendly" },
+        compaction: { enabled: true, auto: false, thresholdPercent: 90 },
+        openai: { verbosity: "high", compactionReasoning: "low" },
+    });
+
+    assert.equal(config.scope.tools, "all");
+    assert.equal(config.tools.webSearch, false);
+    assert.equal(config.tools.imageGeneration, DEFAULT_CODEX_CORE_CONFIG.tools.imageGeneration);
+    assert.equal(config.tools.viewImageDescriptions, true);
+    assert.equal(config.tools.applyPatch, "off");
+    assert.equal(config.prompt.mode, "codex");
+    assert.equal(config.prompt.personality, "friendly");
+    assert.equal(config.compaction.enabled, true);
+    assert.equal(config.compaction.auto, false);
+    assert.equal(config.compaction.thresholdPercent, 90);
+    assert.equal(parseCodexCoreConfig({}).compaction.enabled, true);
+    assert.equal(parseCodexCoreConfig({}).compaction.thresholdPercent, 80);
+    assert.equal(parseCodexCoreConfig({}).prompt.mode, "codex");
+    assert.equal(parseCodexCoreConfig({}).prompt.personality, "pragmatic");
+    assert.equal(
+        parseCodexCoreConfig({ prompt: { personality: "verbose" } }).prompt.personality,
+        "pragmatic",
+    );
+    assert.equal(parseCodexCoreConfig({}).openai.compactionReasoning, "medium");
+    assert.equal(parseCodexCoreConfig({}).openai.showReasoningTraces, true);
+    assert.equal(
+        parseCodexCoreConfig({ openai: { showReasoningTraces: false } }).openai.showReasoningTraces,
+        false,
+    );
+    assert.equal(
+        parseCodexCoreConfig({ openai: { showReasoningTraces: "no" } }).openai.showReasoningTraces,
+        true,
+    );
+    assert.equal(
+        parseCodexCoreConfig({ openai: { verbosity: "high" } }).openai.compactionModel,
+        CODEX_CURRENT_MODEL_SELECTION,
+    );
+    assert.equal(config.openai.webSearchModel, CODEX_CURRENT_MODEL_SELECTION);
+    assert.equal(config.openai.imageDescriptionModel, CODEX_CURRENT_MODEL_SELECTION);
+    assert.equal(config.openai.compactionModel, CODEX_CURRENT_MODEL_SELECTION);
+    assert.equal(config.openai.verbosity, "high");
+    assert.equal(config.openai.compactionReasoning, "low");
+    assert.equal(
+        parseCodexCoreConfig({ openai: { compactionReasoning: "future-effort" } }).openai
+            .compactionReasoning,
+        "future-effort",
+    );
+    assert.equal(
+        parseCodexCoreConfig({ openai: { compactionReasoning: " " } }).openai.compactionReasoning,
+        "medium",
+    );
+});
+
+test("reads codex config as optional defaults and scaffolds global files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const agentDir = join(root, "agent");
+        const config = readCodexCoreConfig({ agentDir });
+
+        assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
+        assert.deepEqual(
+            JSON.parse(await readFile(getCodexCoreConfigPath(agentDir), "utf8")),
+            DEFAULT_CODEX_CORE_CONFIG_JSON,
+        );
+        assert.deepEqual(
+            JSON.parse(await readFile(getCodexCoreGlobalConfigSchemaPath(agentDir), "utf8")),
+            codexCoreConfigJsonSchema(),
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("does not overwrite malformed existing codex config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const agentDir = join(root, "agent");
+        const configPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(join(configPath, ".."), { recursive: true });
+        await writeFile(configPath, "{not json");
+
+        const config = readCodexCoreConfig({ agentDir });
+
+        assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
+        assert.equal(await readFile(configPath, "utf8"), "{not json");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("refreshes stale codex config schema without rewriting user config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const agentDir = join(root, "agent");
+        const configPath = getCodexCoreConfigPath(agentDir);
+        const schemaPath = getCodexCoreGlobalConfigSchemaPath(agentDir);
+        await mkdir(join(configPath, ".."), { recursive: true });
+        await writeFile(configPath, "{not json");
+        await writeFile(schemaPath, "{}\n");
+
+        const config = readCodexCoreConfig({ agentDir });
+
+        assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
+        assert.equal(await readFile(configPath, "utf8"), "{not json");
+        assert.deepEqual(
+            JSON.parse(await readFile(schemaPath, "utf8")),
+            codexCoreConfigJsonSchema(),
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("keeps codex config schema file aligned with TypeBox source", async () => {
+    const schema = JSON.parse(await readFile("config.schema.json", "utf8"));
+
+    assert.deepEqual(schema, codexCoreConfigJsonSchema());
+});
+
+test("merges project codex config over global config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        const projectConfigPath = getCodexCoreProjectConfigPath(cwd);
+        await mkdir(join(globalConfigPath, ".."), { recursive: true });
+        await mkdir(join(projectConfigPath, ".."), { recursive: true });
+        await writeFile(globalConfigPath, JSON.stringify({ prompt: { mode: "codex" } }));
+        await writeFile(projectConfigPath, JSON.stringify({ tools: { webSearch: false } }));
+
+        const config = readCodexCoreConfig({ agentDir, cwd });
+
+        assert.equal(config.prompt.mode, "codex");
+        assert.equal(config.tools.webSearch, false);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("ignores project codex config when session cwd is untrusted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        const projectConfigPath = getCodexCoreProjectConfigPath(cwd);
+        await mkdir(join(globalConfigPath, ".."), { recursive: true });
+        await mkdir(join(projectConfigPath, ".."), { recursive: true });
+        await writeFile(globalConfigPath, JSON.stringify({ tools: { webSearch: true } }));
+        await writeFile(projectConfigPath, JSON.stringify({ tools: { webSearch: false } }));
+
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        await harness.startSession(makeExtensionContext(cwd, false));
+
+        assert.ok(harness.activeTools.includes("web_run"));
+        assert.equal(harness.activeTools.includes("apply_patch"), false);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});

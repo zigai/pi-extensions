@@ -8,8 +8,8 @@ import {
     makeConfigDiagnostic,
     type CodexConfigDiagnostic,
     type CodexCoreConfigParseResult,
-} from "./config-diagnostics.ts";
-import { compileSchema, parseWithSchema } from "./schema-parsing.ts";
+} from "./diagnostics.ts";
+import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 
 export type CodexPromptMode = "pi" | "codex";
 export type CodexPersonality = "friendly" | "pragmatic" | "none";
@@ -65,6 +65,7 @@ export type CodexCoreConfig = {
         readonly compactionReasoning: CodexCompactionReasoning;
         readonly verbosity: CodexVerbosity;
         readonly fast: boolean;
+        readonly showReasoningTraces: boolean;
     };
 };
 
@@ -112,11 +113,11 @@ const CodexCoreConfigJsonSchema = Type.Object(
         ),
         prompt: Type.Object(
             { mode: CodexPromptModeSchema, personality: CodexPersonalitySchema },
-            { additionalProperties: false, default: { mode: "pi", personality: "pragmatic" } },
+            { additionalProperties: false, default: { mode: "codex", personality: "pragmatic" } },
         ),
         compaction: Type.Object(
             {
-                enabled: Type.Boolean({ default: false }),
+                enabled: Type.Boolean({ default: true }),
                 auto: Type.Boolean({ default: true }),
                 thresholdPercent: Type.Integer({ minimum: 1, maximum: 99, default: 80 }),
             },
@@ -131,6 +132,7 @@ const CodexCoreConfigJsonSchema = Type.Object(
                 compactionReasoning: CodexCompactionReasoningSchema,
                 verbosity: CodexVerbositySchema,
                 fast: Type.Boolean({ default: false }),
+                showReasoningTraces: Type.Boolean({ default: true }),
             },
             { additionalProperties: false },
         ),
@@ -152,8 +154,8 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
         viewImageDescriptions: false,
         applyPatch: "off",
     },
-    prompt: { mode: "pi", personality: "pragmatic" },
-    compaction: { enabled: false, auto: true, thresholdPercent: 80 },
+    prompt: { mode: "codex", personality: "pragmatic" },
+    compaction: { enabled: true, auto: true, thresholdPercent: 80 },
     openai: {
         webSearchModel: CODEX_CURRENT_MODEL_SELECTION,
         imageModel: "gpt-image-2",
@@ -162,6 +164,7 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
         compactionReasoning: "medium",
         verbosity: "low",
         fast: false,
+        showReasoningTraces: true,
     },
 };
 
@@ -342,6 +345,12 @@ export function parseCodexCoreConfigWithDiagnostics(
                     openai.fast,
                     DEFAULT_CODEX_CORE_CONFIG.openai.fast,
                     "$.openai.fast",
+                    diagnostics,
+                ),
+                showReasoningTraces: parseBoolean(
+                    openai.showReasoningTraces,
+                    DEFAULT_CODEX_CORE_CONFIG.openai.showReasoningTraces,
+                    "$.openai.showReasoningTraces",
                     diagnostics,
                 ),
             },

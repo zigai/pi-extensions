@@ -1,12 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { formatCodexModelSelection, type CodexCoreConfig } from "./config.ts";
-import { supportsCodexPromptPersonality } from "./codex-personality.ts";
-import { APPLY_PATCH_TOOL_NAME } from "./tools/apply-patch.ts";
+import { formatCodexModelSelection, type CodexCoreConfig } from "./config/config.ts";
+import { supportsCodexPromptPersonality } from "./prompt/personality.ts";
+import { APPLY_PATCH_TOOL_NAME } from "./tools/apply-patch/tool.ts";
 import { IMAGEGEN_TOOL_NAME } from "./tools/imagegen.ts";
-import { VIEW_IMAGE_TOOL_NAME } from "./tools/view-image.ts";
-import { WEB_RUN_TOOL_NAME } from "./tools/web-run.ts";
-import { modelSupportsImages } from "./image-content.ts";
+import { VIEW_IMAGE_TOOL_NAME } from "./tools/view-image/tool.ts";
+import { WEB_RUN_TOOL_NAME } from "./tools/web-run/tool.ts";
+import { modelSupportsImages } from "./images/content.ts";
 
 export const CODEX_CORE_TOOL_NAMES = [
     WEB_RUN_TOOL_NAME,

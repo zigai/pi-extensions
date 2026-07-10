@@ -1,5 +1,5 @@
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, normalize, resolve } from "node:path";
+import { lstat, mkdir, readFile, readlink, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, normalize, relative, resolve, sep } from "node:path";
 
 const BEGIN_PATCH_MARKER = "*** Begin Patch";
 const END_PATCH_MARKER = "*** End Patch";
@@ -12,7 +12,13 @@ const CHANGE_CONTEXT_MARKER = "@@ ";
 const EMPTY_CHANGE_CONTEXT_MARKER = "@@";
 const ENVIRONMENT_ID_MARKER = "*** Environment ID:";
 
-type ApplyPatchErrorKind = "invalidPatch" | "invalidHunk" | "compute" | "io";
+type ApplyPatchErrorKind =
+    | "invalidPatch"
+    | "invalidHunk"
+    | "compute"
+    | "unauthorizedPath"
+    | "cancelled"
+    | "io";
 
 /** Expected apply_patch parse or application failure. */
 export class ApplyPatchError extends Error {
@@ -90,6 +96,19 @@ export type ApplyPatchResult = {
     readonly changes: readonly AppliedPatchFileChange[];
 };
 
+/** Failure raised after one or more filesystem mutations have already committed. */
+export class ApplyPatchExecutionError extends ApplyPatchError {
+    readonly committedResult: ApplyPatchResult;
+    override readonly cause: ApplyPatchError;
+
+    constructor(cause: ApplyPatchError, committedResult: ApplyPatchResult) {
+        super(cause.kind, cause.message, cause.lineNumber);
+        this.name = "ApplyPatchExecutionError";
+        this.cause = cause;
+        this.committedResult = committedResult;
+    }
+}
+
 type StreamingParserMode =
     | { readonly type: "notStarted" }
     | { readonly type: "startedPatch" }
@@ -133,6 +152,43 @@ type Replacement = {
 
 type ApplyPatchOptions = {
     readonly signal?: AbortSignal | undefined;
+    readonly environmentId?: string | undefined;
+};
+
+type AuthorizedPatchRoot = {
+    readonly lexicalPath: string;
+    readonly physicalPath: string;
+};
+
+type PlannedPatchMutation =
+    | {
+          readonly type: "add";
+          readonly patchPath: string;
+          readonly absolutePath: string;
+          readonly contents: string;
+          readonly overwrittenContent: string | undefined;
+      }
+    | {
+          readonly type: "delete";
+          readonly patchPath: string;
+          readonly absolutePath: string;
+          readonly content: string;
+      }
+    | {
+          readonly type: "update";
+          readonly patchPath: string;
+          readonly absolutePath: string;
+          readonly movePatchPath: string | undefined;
+          readonly absoluteMovePath: string | undefined;
+          readonly originalContents: string;
+          readonly newContents: string;
+          readonly overwrittenMoveContent: string | undefined;
+      };
+
+type CommittedPatchChange = {
+    readonly action: "added" | "modified" | "deleted";
+    readonly patchPath: string;
+    readonly change: AppliedPatchFileChange;
 };
 
 /** Incremental parser for Codex's apply_patch patch language. */
@@ -432,7 +488,10 @@ export async function applyPatchText(
     options: ApplyPatchOptions = {},
 ): Promise<ApplyPatchResult> {
     const args = parseApplyPatch(patchText);
-    return applyPatchHunks(args.hunks, cwd, options);
+    return applyPatchHunks(args.hunks, cwd, {
+        ...options,
+        environmentId: args.environmentId ?? options.environmentId,
+    });
 }
 
 /** Applies parsed apply_patch hunks to the local filesystem rooted at cwd. */
@@ -441,96 +500,58 @@ export async function applyPatchHunks(
     cwd: string,
     options: ApplyPatchOptions = {},
 ): Promise<ApplyPatchResult> {
+    if (options.environmentId !== undefined) {
+        throw invalidPatch(
+            "apply_patch environment_id is not supported because Pi has no environment selector",
+        );
+    }
     if (hunks.length === 0) throw new ApplyPatchError("compute", "No files were modified.");
 
-    const added: string[] = [];
-    const modified: string[] = [];
-    const deleted: string[] = [];
-    const changes: AppliedPatchFileChange[] = [];
-    const absoluteCwd = resolve(cwd);
+    throwIfAborted(options.signal);
+    const root = await authorizePatchRoot(cwd);
+    const plan = await preflightPatchHunks(hunks, root, options.signal);
+    const committed: CommittedPatchChange[] = [];
 
-    for (const hunk of hunks) {
-        throwIfAborted(options.signal);
-        if (hunk.type === "add") {
-            const absolutePath = resolvePatchPath(absoluteCwd, hunk.path);
-            const overwrittenContent = await readOptionalFileText(absolutePath);
-            throwIfAborted(options.signal);
-            await writeFileWithMissingParentRetry(absolutePath, hunk.contents);
-            throwIfAborted(options.signal);
-            changes.push({
-                type: "add",
-                path: absolutePath,
-                content: hunk.contents,
-                overwrittenContent,
-            });
-            added.push(hunk.path);
-            continue;
+    try {
+        for (const mutation of plan) {
+            await executePlannedMutation(mutation, root, committed, options.signal);
         }
-
-        if (hunk.type === "delete") {
-            const absolutePath = resolvePatchPath(absoluteCwd, hunk.path);
-            const content = await readFileForPatch(absolutePath, `Failed to read ${absolutePath}`);
-            throwIfAborted(options.signal);
-            await ensureNotDirectory(absolutePath, `Failed to delete file ${absolutePath}`);
-            await removeFile(absolutePath, `Failed to delete file ${absolutePath}`);
-            throwIfAborted(options.signal);
-            changes.push({ type: "delete", path: absolutePath, content });
-            deleted.push(hunk.path);
-            continue;
+    } catch (cause: unknown) {
+        const error = classifyApplyPatchFailure(cause);
+        if (committed.length > 0) {
+            throw new ApplyPatchExecutionError(error, buildApplyPatchResult(committed));
         }
-
-        const absolutePath = resolvePatchPath(absoluteCwd, hunk.path);
-        const applied = await deriveNewContentsFromChunks(absolutePath, hunk.chunks);
-        throwIfAborted(options.signal);
-        if (hunk.movePath !== undefined) {
-            const absoluteMovePath = resolvePatchPath(absoluteCwd, hunk.movePath);
-            const overwrittenMoveContent = await readOptionalFileText(absoluteMovePath);
-            throwIfAborted(options.signal);
-            await writeFileWithMissingParentRetry(absoluteMovePath, applied.newContents);
-            throwIfAborted(options.signal);
-            await ensureNotDirectory(absolutePath, `Failed to remove original ${absolutePath}`);
-            await removeFile(absolutePath, `Failed to remove original ${absolutePath}`);
-            throwIfAborted(options.signal);
-            changes.push({
-                type: "update",
-                path: absolutePath,
-                movePath: absoluteMovePath,
-                oldContent: applied.originalContents,
-                newContent: applied.newContents,
-                overwrittenMoveContent,
-            });
-            modified.push(hunk.movePath);
-        } else {
-            await writeFileWithContext(absolutePath, applied.newContents);
-            throwIfAborted(options.signal);
-            changes.push({
-                type: "update",
-                path: absolutePath,
-                movePath: undefined,
-                oldContent: applied.originalContents,
-                newContent: applied.newContents,
-                overwrittenMoveContent: undefined,
-            });
-            modified.push(hunk.path);
-        }
+        throw error;
     }
 
-    const affectedPaths = { added, modified, deleted };
-    return {
-        summary: formatApplyPatchSummary(affectedPaths),
-        affectedPaths,
-        changes,
-    };
+    return buildApplyPatchResult(committed);
 }
 
 /** Formats an apply_patch failure as model-visible tool output text. */
 export function formatApplyPatchError(error: ApplyPatchError): string {
+    if (error instanceof ApplyPatchExecutionError) {
+        const failure = formatApplyPatchFailure(error.cause);
+        return `${failure}\n\n${formatCommittedPatchSummary(error.committedResult.affectedPaths)}`;
+    }
+    return formatApplyPatchFailure(error);
+}
+
+function formatApplyPatchFailure(error: ApplyPatchError): string {
     if (error.kind === "invalidPatch") return `Invalid patch: ${error.message}`;
     if (error.kind === "invalidHunk") {
         const line = error.lineNumber ?? 0;
         return `Invalid patch hunk on line ${line}: ${error.message}`;
     }
+    if (error.kind === "cancelled") return `Patch application cancelled: ${error.message}`;
     return error.message;
+}
+
+function formatCommittedPatchSummary(affected: ApplyPatchAffectedPaths): string {
+    const successSummary = formatApplyPatchSummary(affected).trimEnd();
+    return successSummary.replace(
+        "Success. Updated the following files:",
+        "Patch stopped after committing the following changes:",
+    );
 }
 
 /** Returns the native Codex success summary for affected paths. */
@@ -636,10 +657,300 @@ function ensureCurrentUpdateChunk(hunk: MutableUpdateFileHunk): MutableUpdateFil
     return chunk;
 }
 
-function resolvePatchPath(cwd: string, patchPath: string): string {
-    const resolved =
-        patchPath.length === 0 ? cwd : isAbsolute(patchPath) ? patchPath : resolve(cwd, patchPath);
-    return normalize(resolved);
+async function authorizePatchRoot(cwd: string): Promise<AuthorizedPatchRoot> {
+    const lexicalPath = normalize(resolve(cwd));
+    try {
+        return { lexicalPath, physicalPath: normalize(await realpath(lexicalPath)) };
+    } catch (cause: unknown) {
+        throw ioError(`Failed to resolve apply_patch working directory ${lexicalPath}`, cause);
+    }
+}
+
+async function preflightPatchHunks(
+    hunks: readonly ApplyPatchHunk[],
+    root: AuthorizedPatchRoot,
+    signal: AbortSignal | undefined,
+): Promise<PlannedPatchMutation[]> {
+    const plan: PlannedPatchMutation[] = [];
+
+    for (const hunk of hunks) {
+        throwIfAborted(signal);
+        const absolutePath = await authorizePatchPath(root, hunk.path);
+
+        if (hunk.type === "add") {
+            const overwrittenContent = await readOptionalFileText(absolutePath);
+            plan.push({
+                type: "add",
+                patchPath: hunk.path,
+                absolutePath,
+                contents: hunk.contents,
+                overwrittenContent,
+            });
+            continue;
+        }
+
+        if (hunk.type === "delete") {
+            const content = await readFileForPatch(absolutePath, `Failed to read ${absolutePath}`);
+            await ensureNotDirectory(absolutePath, `Failed to delete file ${absolutePath}`);
+            plan.push({ type: "delete", patchPath: hunk.path, absolutePath, content });
+            continue;
+        }
+
+        const applied = await deriveNewContentsFromChunks(absolutePath, hunk.chunks);
+        await ensureNotDirectory(absolutePath, `Failed to update file ${absolutePath}`);
+        const absoluteMovePath =
+            hunk.movePath === undefined ? undefined : await authorizePatchPath(root, hunk.movePath);
+        const overwrittenMoveContent =
+            absoluteMovePath === undefined
+                ? undefined
+                : await readOptionalFileText(absoluteMovePath);
+        plan.push({
+            type: "update",
+            patchPath: hunk.path,
+            absolutePath,
+            movePatchPath: hunk.movePath,
+            absoluteMovePath,
+            originalContents: applied.originalContents,
+            newContents: applied.newContents,
+            overwrittenMoveContent,
+        });
+    }
+
+    return plan;
+}
+
+async function executePlannedMutation(
+    mutation: PlannedPatchMutation,
+    root: AuthorizedPatchRoot,
+    committed: CommittedPatchChange[],
+    signal: AbortSignal | undefined,
+): Promise<void> {
+    if (mutation.type === "add") {
+        await authorizeAbsolutePatchPath(root, mutation.absolutePath);
+        throwIfAborted(signal);
+        await writeFileWithMissingParentRetry(mutation.absolutePath, mutation.contents, signal);
+        committed.push({
+            action: "added",
+            patchPath: mutation.patchPath,
+            change: {
+                type: "add",
+                path: mutation.absolutePath,
+                content: mutation.contents,
+                overwrittenContent: mutation.overwrittenContent,
+            },
+        });
+        return;
+    }
+
+    if (mutation.type === "delete") {
+        await authorizeAbsolutePatchPath(root, mutation.absolutePath);
+        await ensureNotDirectory(
+            mutation.absolutePath,
+            `Failed to delete file ${mutation.absolutePath}`,
+        );
+        throwIfAborted(signal);
+        await removeFile(mutation.absolutePath, `Failed to delete file ${mutation.absolutePath}`);
+        committed.push({
+            action: "deleted",
+            patchPath: mutation.patchPath,
+            change: { type: "delete", path: mutation.absolutePath, content: mutation.content },
+        });
+        return;
+    }
+
+    if (mutation.absoluteMovePath === undefined || mutation.movePatchPath === undefined) {
+        await authorizeAbsolutePatchPath(root, mutation.absolutePath);
+        throwIfAborted(signal);
+        await writeFileWithContext(mutation.absolutePath, mutation.newContents, signal);
+        committed.push({
+            action: "modified",
+            patchPath: mutation.patchPath,
+            change: {
+                type: "update",
+                path: mutation.absolutePath,
+                movePath: undefined,
+                oldContent: mutation.originalContents,
+                newContent: mutation.newContents,
+                overwrittenMoveContent: undefined,
+            },
+        });
+        return;
+    }
+
+    await authorizeAbsolutePatchPath(root, mutation.absoluteMovePath);
+    throwIfAborted(signal);
+    await writeFileWithMissingParentRetry(mutation.absoluteMovePath, mutation.newContents, signal);
+    committed.push(destinationWriteChange(mutation));
+
+    await authorizeAbsolutePatchPath(root, mutation.absolutePath);
+    await ensureNotDirectory(
+        mutation.absolutePath,
+        `Failed to remove original ${mutation.absolutePath}`,
+    );
+    throwIfAborted(signal);
+    await removeFile(mutation.absolutePath, `Failed to remove original ${mutation.absolutePath}`);
+
+    committed.pop();
+    committed.push({
+        action: "modified",
+        patchPath: mutation.movePatchPath,
+        change: {
+            type: "update",
+            path: mutation.absolutePath,
+            movePath: mutation.absoluteMovePath,
+            oldContent: mutation.originalContents,
+            newContent: mutation.newContents,
+            overwrittenMoveContent: mutation.overwrittenMoveContent,
+        },
+    });
+}
+
+function destinationWriteChange(
+    mutation: Extract<PlannedPatchMutation, { readonly type: "update" }>,
+): CommittedPatchChange {
+    const movePath = mutation.absoluteMovePath;
+    const movePatchPath = mutation.movePatchPath;
+    if (movePath === undefined || movePatchPath === undefined) {
+        throw new ApplyPatchError("compute", "Move destination was not planned");
+    }
+    if (mutation.overwrittenMoveContent === undefined) {
+        return {
+            action: "added",
+            patchPath: movePatchPath,
+            change: {
+                type: "add",
+                path: movePath,
+                content: mutation.newContents,
+                overwrittenContent: undefined,
+            },
+        };
+    }
+    return {
+        action: "modified",
+        patchPath: movePatchPath,
+        change: {
+            type: "update",
+            path: movePath,
+            movePath: undefined,
+            oldContent: mutation.overwrittenMoveContent,
+            newContent: mutation.newContents,
+            overwrittenMoveContent: undefined,
+        },
+    };
+}
+
+async function authorizePatchPath(root: AuthorizedPatchRoot, patchPath: string): Promise<string> {
+    const candidate = normalize(
+        patchPath.length === 0
+            ? root.lexicalPath
+            : isAbsolute(patchPath)
+              ? patchPath
+              : resolve(root.lexicalPath, patchPath),
+    );
+    return authorizeAbsolutePatchPath(root, candidate);
+}
+
+async function authorizeAbsolutePatchPath(
+    root: AuthorizedPatchRoot,
+    absolutePath: string,
+): Promise<string> {
+    if (
+        !isPathWithin(root.lexicalPath, absolutePath) &&
+        !isPathWithin(root.physicalPath, absolutePath)
+    ) {
+        throw unauthorizedPath(absolutePath, root.physicalPath);
+    }
+
+    const physicalPath = await resolvePhysicalPath(absolutePath, new Set<string>());
+    if (!isPathWithin(root.physicalPath, physicalPath)) {
+        throw unauthorizedPath(absolutePath, root.physicalPath);
+    }
+    return absolutePath;
+}
+
+async function resolvePhysicalPath(absolutePath: string, seenLinks: Set<string>): Promise<string> {
+    try {
+        return normalize(await realpath(absolutePath));
+    } catch (cause: unknown) {
+        if (hasNodeErrorCode(cause, "ELOOP")) {
+            throw new ApplyPatchError(
+                "unauthorizedPath",
+                `apply_patch denied path with a symbolic-link loop: ${absolutePath}`,
+            );
+        }
+        if (!hasNodeErrorCode(cause, "ENOENT") && !hasNodeErrorCode(cause, "ENOTDIR")) {
+            throw ioError(`Failed to authorize apply_patch path ${absolutePath}`, cause);
+        }
+    }
+
+    try {
+        const metadata = await lstat(absolutePath);
+        if (metadata.isSymbolicLink()) {
+            if (seenLinks.has(absolutePath)) {
+                throw new ApplyPatchError(
+                    "unauthorizedPath",
+                    `apply_patch denied path with a symbolic-link loop: ${absolutePath}`,
+                );
+            }
+            seenLinks.add(absolutePath);
+            const linkTarget = await readlink(absolutePath);
+            return resolvePhysicalPath(resolve(dirname(absolutePath), linkTarget), seenLinks);
+        }
+        throw new ApplyPatchError(
+            "unauthorizedPath",
+            `apply_patch could not safely resolve path: ${absolutePath}`,
+        );
+    } catch (cause: unknown) {
+        if (cause instanceof ApplyPatchError) throw cause;
+        if (!hasNodeErrorCode(cause, "ENOENT") && !hasNodeErrorCode(cause, "ENOTDIR")) {
+            throw ioError(`Failed to authorize apply_patch path ${absolutePath}`, cause);
+        }
+    }
+
+    const parent = dirname(absolutePath);
+    if (parent === absolutePath) return absolutePath;
+    const physicalParent = await resolvePhysicalPath(parent, seenLinks);
+    return normalize(resolve(physicalParent, basename(absolutePath)));
+}
+
+function isPathWithin(root: string, candidate: string): boolean {
+    const relativePath = relative(root, candidate);
+    return (
+        relativePath.length === 0 ||
+        (!isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${sep}`))
+    );
+}
+
+function unauthorizedPath(path: string, cwd: string): ApplyPatchError {
+    return new ApplyPatchError(
+        "unauthorizedPath",
+        `apply_patch path is outside the working directory '${cwd}': ${path}`,
+    );
+}
+
+function buildApplyPatchResult(committed: readonly CommittedPatchChange[]): ApplyPatchResult {
+    const affectedPaths: ApplyPatchAffectedPaths = {
+        added: committed
+            .filter((entry) => entry.action === "added")
+            .map((entry) => entry.patchPath),
+        modified: committed
+            .filter((entry) => entry.action === "modified")
+            .map((entry) => entry.patchPath),
+        deleted: committed
+            .filter((entry) => entry.action === "deleted")
+            .map((entry) => entry.patchPath),
+    };
+    return {
+        summary: formatApplyPatchSummary(affectedPaths),
+        affectedPaths,
+        changes: committed.map((entry) => entry.change),
+    };
+}
+
+function classifyApplyPatchFailure(cause: unknown): ApplyPatchError {
+    return cause instanceof ApplyPatchError
+        ? cause
+        : ioError("Failed while executing apply_patch mutation plan", cause);
 }
 
 async function deriveNewContentsFromChunks(
@@ -769,7 +1080,9 @@ async function removeFile(absolutePath: string, context: string): Promise<void> 
 async function writeFileWithMissingParentRetry(
     absolutePath: string,
     contents: string,
+    signal: AbortSignal | undefined,
 ): Promise<void> {
+    throwIfAborted(signal);
     try {
         await writeFile(absolutePath, contents, "utf8");
     } catch (cause: unknown) {
@@ -777,15 +1090,22 @@ async function writeFileWithMissingParentRetry(
             throw ioError(`Failed to write file ${absolutePath}`, cause);
         }
         try {
+            throwIfAborted(signal);
             await mkdir(dirname(absolutePath), { recursive: true });
         } catch (mkdirCause: unknown) {
+            if (mkdirCause instanceof ApplyPatchError) throw mkdirCause;
             throw ioError(`Failed to create parent directories for ${absolutePath}`, mkdirCause);
         }
-        await writeFileWithContext(absolutePath, contents);
+        await writeFileWithContext(absolutePath, contents, signal);
     }
 }
 
-async function writeFileWithContext(absolutePath: string, contents: string): Promise<void> {
+async function writeFileWithContext(
+    absolutePath: string,
+    contents: string,
+    signal: AbortSignal | undefined,
+): Promise<void> {
+    throwIfAborted(signal);
     try {
         await writeFile(absolutePath, contents, "utf8");
     } catch (cause: unknown) {
@@ -794,7 +1114,7 @@ async function writeFileWithContext(absolutePath: string, contents: string): Pro
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
-    if (signal?.aborted) throw new Error("Operation aborted");
+    if (signal?.aborted) throw new ApplyPatchError("cancelled", "operation was aborted");
 }
 
 function sequenceMatches(

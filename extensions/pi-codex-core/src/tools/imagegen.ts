@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 
 import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -9,8 +9,10 @@ import type {
     ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
-import type { CodexCoreConfig } from "../config.ts";
-import { codexToolProviderHeaders, resolveCodexToolProvider } from "../codex-auth.ts";
+import type { CodexCoreConfig } from "../config/config.ts";
+import { codexToolProviderHeaders, resolveCodexToolProvider } from "../codex/auth.ts";
+import { fetchTextWithRetries } from "../codex/http-retry.ts";
+import { imageDetailMarker } from "../images/detail.ts";
 import {
     CodexHttpRequestFailed,
     CodexInvalidJson,
@@ -22,39 +24,40 @@ import {
     isAbortCause,
     ok,
     type CodexResult,
-} from "../failures.ts";
+} from "../codex/failures.ts";
 import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
 import {
     imageContentToDataUrl,
+    generatedPngContent,
     loadImageContent,
     prepareCodexPromptImageContent,
     recentImageContents,
     saveGeneratedImage,
-} from "../image-content.ts";
+} from "../images/content.ts";
 
 export const IMAGEGEN_TOOL_NAME = "imagegen";
 
-const IMAGEGEN_PARAMETERS = Type.Object({
-    prompt: Type.String({ description: "Detailed image generation or edit instruction." }),
-    referenced_image_paths: Type.Optional(
-        Type.Array(Type.String(), { description: "Local image paths to edit." }),
-    ),
-    num_last_images_to_include: Type.Optional(
-        Type.Number({ description: "Use the last N conversation images for editing, 1 to 5." }),
-    ),
-    images: Type.Optional(
-        Type.Array(Type.String(), {
-            description: "Compatibility alias for referenced_image_paths.",
-        }),
-    ),
-    action: Type.Optional(
-        Type.String({
-            description: "Compatibility field; generation/edit is inferred from image inputs.",
-        }),
-    ),
-});
+const IMAGEGEN_PARAMETERS = Type.Object(
+    {
+        prompt: Type.String({ description: "Detailed image generation or edit instruction." }),
+        referenced_image_paths: Type.Optional(
+            Type.Array(Type.String(), {
+                maxItems: 5,
+                description: "Local image paths to edit.",
+            }),
+        ),
+        num_last_images_to_include: Type.Optional(
+            Type.Integer({
+                minimum: 1,
+                maximum: 5,
+                description: "Use the last N conversation images for editing.",
+            }),
+        ),
+    },
+    { additionalProperties: false },
+);
 
-const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
+const ImagegenParametersValidator = compileSchema(IMAGEGEN_PARAMETERS);
 const ImagegenResponseSchema = compileSchema(
     Type.Object({
         data: Type.Array(Type.Object({ b64_json: Type.Optional(Type.String()) })),
@@ -64,13 +67,7 @@ const ImagegenResponseSchema = compileSchema(
     }),
 );
 
-type ImagegenParams = {
-    readonly prompt: string;
-    readonly referenced_image_paths?: string[];
-    readonly num_last_images_to_include?: number;
-    readonly images?: string[];
-    readonly action?: string;
-};
+type ImagegenParams = Static<typeof IMAGEGEN_PARAMETERS>;
 
 type SavedImage = {
     readonly path: string;
@@ -81,6 +78,8 @@ type SavedImage = {
 
 type ImagegenDetails = {
     readonly images: readonly SavedImage[];
+    readonly generatedCount: number;
+    readonly saveErrors: readonly string[];
     readonly background?: string | undefined;
     readonly quality?: string | undefined;
     readonly size?: string | undefined;
@@ -102,11 +101,16 @@ export function createImagegenTool(
     return {
         name: IMAGEGEN_TOOL_NAME,
         label: "Image Generation",
-        description: "Generate images or edit local/recent images through Codex image generation.",
+        description:
+            "Generate images from descriptions or edit existing local/recent images using specific instructions.",
         promptSnippet: "Generate or edit images through Codex image generation.",
         promptGuidelines: [
-            "Use imagegen directly when the user requests a new image or an image edit; do not ask for confirmation unless required source images are missing.",
-            "Use imagegen referenced_image_paths for local image edits after inspecting unfamiliar images with view_image.",
+            "Use imagegen for requested images and image edits; omit both image selectors for a new image.",
+            "For edits, use referenced_image_paths when every target has a local path, and inspect unfamiliar local images with view_image first.",
+            "Use num_last_images_to_include only when a target has no local path; choose the smallest count that includes every target, up to 5.",
+            "Never provide both image selectors. If neither can include every target, ask the user to attach the missing images again.",
+            "Generate directly without reconfirmation unless required images are missing. Always use imagegen for image editing unless the user explicitly requests another method.",
+            "After imagegen succeeds, do not mention downloads, summarize the image, ask a follow-up question, or add any other prose.",
         ],
         parameters: IMAGEGEN_PARAMETERS,
         prepareArguments: prepareImagegenArguments,
@@ -122,7 +126,7 @@ export function createImagegenTool(
         renderResult(result, { expanded, isPartial }, theme, _context) {
             if (isPartial) return new Text(theme.fg("warning", "Generating image..."), 0, 0);
             const images = result.details.images;
-            const count = images.length;
+            const count = result.details.generatedCount;
             const firstImage = images.at(0);
             const metadata = imagegenResultMetadata(result.details);
             let text = theme.fg("success", `Generated ${count} image${count === 1 ? "" : "s"}`);
@@ -132,6 +136,9 @@ export function createImagegenTool(
                 for (const image of images) {
                     text += `\n${theme.fg("dim", `image: ${image.path}`)}`;
                     text += `\n${theme.fg("dim", `latest: ${image.latestPath}`)}`;
+                }
+                for (const error of result.details.saveErrors) {
+                    text += `\n${theme.fg("warning", `save warning: ${error}`)}`;
                 }
             }
             return new Text(text, 0, 0);
@@ -150,21 +157,33 @@ export function createImagegenTool(
             if (response.isErr()) throw codexFailureToError(response.error);
             const saveImage = options.saveImage ?? saveGeneratedImage;
             const savedImages: SavedImage[] = [];
-            for (const [index, base64] of response.value.images.entries()) {
-                savedImages.push(
-                    await saveImage({
-                        sessionId: ctx.sessionManager.getSessionId(),
-                        toolCallId,
-                        index,
-                        base64,
-                    }),
-                );
+            const saveErrors: string[] = [];
+            const generatedImages = response.value.images.map(generatedPngContent);
+            for (const [index, image] of generatedImages.entries()) {
+                try {
+                    savedImages.push(
+                        await saveImage({
+                            sessionId: ctx.sessionManager.getSessionId(),
+                            toolCallId,
+                            index,
+                            base64: image.data,
+                        }),
+                    );
+                } catch (cause: unknown) {
+                    saveErrors.push(cause instanceof Error ? cause.message : String(cause));
+                }
             }
-            const text = formatImagegenOutput(savedImages, response.value);
+            const text = formatImagegenOutput(savedImages, saveErrors, response.value);
             return {
-                content: [{ type: "text", text }],
+                content: [
+                    ...generatedImages,
+                    { type: "text" as const, text: imageDetailMarker("original") },
+                    ...(text ? [{ type: "text" as const, text }] : []),
+                ],
                 details: {
                     images: savedImages,
+                    generatedCount: generatedImages.length,
+                    saveErrors,
                     background: response.value.background,
                     quality: response.value.quality,
                     size: response.value.size,
@@ -175,34 +194,27 @@ export function createImagegenTool(
 }
 
 export function prepareImagegenArguments(args: unknown): ImagegenParams {
-    const input = parseWithSchema(UnknownRecordSchema, args);
+    const input = parseWithSchema(ImagegenParametersValidator, args);
     if (!input) throw new Error("Invalid imagegen arguments.");
-    const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+    const prompt = input.prompt.trim();
     if (prompt.length === 0) throw new Error("imagegen requires a non-empty prompt.");
-    const referencedPaths = [
-        ...(parseOptionalStringArray(input.referenced_image_paths, "referenced_image_paths") ?? []),
-        ...(parseOptionalStringArray(input.images, "images") ?? []),
-    ];
-    const recentCount = parseOptionalNumber(
-        input.num_last_images_to_include,
-        "num_last_images_to_include",
-    );
-    const action = parseOptionalString(input.action, "action");
     return {
         prompt,
-        ...(referencedPaths.length > 0 ? { referenced_image_paths: referencedPaths } : {}),
-        ...(recentCount !== undefined ? { num_last_images_to_include: recentCount } : {}),
-        ...(action ? { action } : {}),
+        ...(input.referenced_image_paths
+            ? { referenced_image_paths: input.referenced_image_paths }
+            : {}),
+        ...(input.num_last_images_to_include !== undefined
+            ? { num_last_images_to_include: input.num_last_images_to_include }
+            : {}),
     };
 }
 
 function summarizeImagegenOptions(args: ImagegenParams): string {
     const parts: string[] = [];
-    const referencedPaths = args.referenced_image_paths ?? args.images ?? [];
+    const referencedPaths = args.referenced_image_paths ?? [];
     if (referencedPaths.length > 0) parts.push(`refs=${referencedPaths.length}`);
     if (args.num_last_images_to_include !== undefined)
         parts.push(`recent=${args.num_last_images_to_include}`);
-    if (args.action) parts.push(`action=${args.action}`);
     return parts.join(" • ");
 }
 
@@ -235,7 +247,7 @@ async function resolveEditImages(
         const editImages: ImageContent[] = [];
         for (const path of paths) {
             const image = await loadImageContent(path, ctx.cwd);
-            editImages.push(await prepareCodexPromptImageContent(image));
+            editImages.push(await prepareCodexPromptImageContent(image, "original"));
         }
         return editImages;
     }
@@ -264,7 +276,9 @@ async function requestImageGeneration(
         readonly size?: string;
     }>
 > {
-    const provider = await resolveCodexToolProvider(ctx);
+    const provider = await resolveCodexToolProvider(ctx, {
+        useActiveModel: true,
+    });
     if (provider.isErr()) return provider;
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
@@ -288,15 +302,18 @@ async function requestImageGeneration(
           };
 
     let response: Response;
+    let responseText: string;
     try {
-        response = await runtime.fetch(`${provider.value.baseUrl}/${path}`, {
-            method: "POST",
-            headers,
-            ...(signal ? { signal } : {}),
-            body: JSON.stringify(body),
-        });
+        const fetched = await fetchTextWithRetries(
+            runtime,
+            `${provider.value.baseUrl}/${path}`,
+            { method: "POST", headers, body: JSON.stringify(body) },
+            signal,
+        );
+        response = fetched.response;
+        responseText = fetched.text;
     } catch (cause: unknown) {
-        if (isAbortCause(cause)) {
+        if (isAbortCause(cause) || signal?.aborted) {
             return fail(
                 new CodexRequestCancelled({
                     operation: "imagegen",
@@ -315,7 +332,6 @@ async function requestImageGeneration(
         );
     }
 
-    const responseText = await response.text();
     if (!response.ok) {
         return fail(
             new CodexHttpRequestFailed({
@@ -378,13 +394,16 @@ function parseImageResponse(value: unknown): CodexResult<{
 
 function formatImagegenOutput(
     savedImages: readonly SavedImage[],
+    saveErrors: readonly string[],
     response: { readonly background?: string; readonly quality?: string; readonly size?: string },
 ): string {
-    const lines = ["Generated image output:"];
+    const lines: string[] = [];
+    if (savedImages.length > 0) lines.push("Generated image output:");
     for (const image of savedImages) {
         lines.push(`- image: ${image.path}`);
         lines.push(`- latest image: ${image.latestPath}`);
     }
+    for (const error of saveErrors) lines.push(`- save warning: ${error}`);
     const metadata = [
         response.size ? `size=${response.size}` : undefined,
         response.quality ? `quality=${response.quality}` : undefined,
@@ -393,33 +412,4 @@ function formatImagegenOutput(
         .join(", ");
     if (metadata) lines.push(`- ${metadata}`);
     return lines.join("\n");
-}
-
-function parseOptionalStringArray(value: unknown, fieldName: string): string[] | undefined {
-    if (value === undefined) return undefined;
-    if (!Array.isArray(value)) {
-        throw new Error(`imagegen ${fieldName} must be an array of strings.`);
-    }
-    const strings: string[] = [];
-    for (const item of value) {
-        if (typeof item !== "string") {
-            throw new Error(`imagegen ${fieldName} must be an array of strings.`);
-        }
-        const text = item.trim();
-        if (text.length > 0) strings.push(text);
-    }
-    return strings.length > 0 ? strings : undefined;
-}
-
-function parseOptionalNumber(value: unknown, fieldName: string): number | undefined {
-    if (value === undefined) return undefined;
-    if (typeof value !== "number") throw new Error(`imagegen ${fieldName} must be a number.`);
-    return value;
-}
-
-function parseOptionalString(value: unknown, fieldName: string): string | undefined {
-    if (value === undefined) return undefined;
-    if (typeof value !== "string") throw new Error(`imagegen ${fieldName} must be a string.`);
-    const text = value.trim();
-    return text.length > 0 ? text : undefined;
 }

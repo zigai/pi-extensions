@@ -106,7 +106,7 @@
       },
       "additionalProperties": false,
       "default": {
-        "mode": "pi",
+        "mode": "codex",
         "personality": "pragmatic"
       }
     },
@@ -116,7 +116,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": false
+          "default": true
         },
         "auto": {
           "type": "boolean",
@@ -140,7 +140,8 @@
         "compactionModel",
         "compactionReasoning",
         "verbosity",
-        "fast"
+        "fast",
+        "showReasoningTraces"
       ],
       "properties": {
         "webSearchModel": {
@@ -183,6 +184,10 @@
         "fast": {
           "type": "boolean",
           "default": false
+        },
+        "showReasoningTraces": {
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false
