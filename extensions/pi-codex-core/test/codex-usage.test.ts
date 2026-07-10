@@ -155,7 +155,35 @@ test("fetches Codex usage from the selected provider base URL", async () => {
     ]);
 });
 
-function makeUsageContext(modelBaseUrl: string): ExtensionContext {
+test("preserves an explicitly selected account over the token claim", async () => {
+    const accountIds: Array<string | null> = [];
+    const runtime = makeTestRuntime(async (input, init) => {
+        accountIds.push(new Headers(init?.headers).get("chatgpt-account-id"));
+        if (String(input).endsWith("/wham/usage")) {
+            return new Response(JSON.stringify({ rate_limit: {} }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ available_count: 0, credits: [] }), {
+            status: 200,
+        });
+    });
+    const token = makeCodexJwtAccountToken("token-account");
+
+    const result = await fetchCodexUsage(
+        makeUsageContext("https://proxy.example/backend-api", {
+            apiKey: token,
+            accountId: "selected-account",
+        }),
+        { runtime },
+    );
+
+    assert.ok(result.isOk());
+    assert.deepEqual(accountIds, ["selected-account", "selected-account"]);
+});
+
+function makeUsageContext(
+    modelBaseUrl: string,
+    auth: { readonly apiKey?: string; readonly accountId?: string } = {},
+): ExtensionContext {
     const ctx = {
         model: {
             provider: "openai-codex",
@@ -167,11 +195,20 @@ function makeUsageContext(modelBaseUrl: string): ExtensionContext {
         modelRegistry: {
             getApiKeyAndHeaders: async () => ({
                 ok: true,
-                apiKey: "usage-token",
-                headers: { "chatgpt-account-id": "usage-account" },
+                apiKey: auth.apiKey ?? "usage-token",
+                headers: { "chatgpt-account-id": auth.accountId ?? "usage-account" },
             }),
         },
     };
     // SAFETY: This test context supplies the model and auth fields read by Codex usage.
     return ctx as unknown as ExtensionContext;
+}
+
+function makeCodexJwtAccountToken(accountId: string): string {
+    const payload = Buffer.from(
+        JSON.stringify({
+            "https://api.openai.com/auth": { chatgpt_account_id: accountId },
+        }),
+    ).toString("base64url");
+    return `header.${payload}.signature`;
 }

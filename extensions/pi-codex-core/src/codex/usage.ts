@@ -350,7 +350,9 @@ async function buildCodexUsageHeaders(
     if (auth.apiKey) headers.set("authorization", `Bearer ${auth.apiKey}`);
     const token = auth.apiKey ?? extractBearerToken(headers);
     const accountId = token ? extractAccountId(token) : undefined;
-    if (accountId) headers.set("chatgpt-account-id", accountId);
+    if (!headers.has("chatgpt-account-id") && accountId) {
+        headers.set("chatgpt-account-id", accountId);
+    }
     headers.set("accept", "application/json");
     headers.set("OAI-Language", "en");
     headers.set("originator", "pi");
