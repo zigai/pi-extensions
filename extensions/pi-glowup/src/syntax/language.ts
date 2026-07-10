@@ -86,6 +86,8 @@ export const PRELOADED_SYNTAX_LANGUAGES = [
     "bash",
     "python",
     "typescript",
+    "javascript",
+    "json",
 ] as const satisfies ReadonlyArray<BundledLanguage>;
 
 /** Normalizes a Markdown/tool language hint to a Shiki bundled language when known. */

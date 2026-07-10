@@ -80,7 +80,7 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
         movingViewport: true,
     },
     syntax: {
-        preloadLanguages: ["markdown", "bash", "python", "typescript"],
+        preloadLanguages: ["markdown", "bash", "python", "typescript", "javascript", "json"],
         projectLanguageDetection: {
             enabled: true,
         },

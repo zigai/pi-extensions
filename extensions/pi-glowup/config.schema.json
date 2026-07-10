@@ -103,7 +103,7 @@
       },
       "additionalProperties": false,
       "default": {
-        "preloadLanguages": ["markdown", "bash", "python", "typescript"],
+        "preloadLanguages": ["markdown", "bash", "python", "typescript", "javascript", "json"],
         "projectLanguageDetection": {
           "enabled": true
         }
