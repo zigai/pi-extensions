@@ -20,6 +20,7 @@ import type {
 
 const MAX_SSE_TAIL_CHARS = 1_000_000;
 const MAX_SSE_EVENT_CHARS = 2_000_000;
+const MAX_HTTP_ERROR_BODY_BYTES = 8 * 1024;
 
 type ServerSentEvent = {
     readonly event: string;
@@ -60,17 +61,75 @@ export async function executeRemoteCompactionV2(
         );
     }
     if (!response.ok) {
+        const detail = await readSafeHttpErrorDetail(response);
         return fail(
             new CodexHttpRequestFailed({
                 operation: "nativeCompaction",
                 provider: "openai-codex",
                 status: response.status,
-                message: `Codex remote compaction failed with HTTP ${response.status}.`,
+                message: `Codex remote compaction failed with HTTP ${response.status}.${detail ? ` ${detail}` : ""}`,
             }),
         );
     }
     if (!response.body) return collectRemoteCompactionV2Output(await response.text());
     return collectRemoteCompactionV2OutputFromStream(response.body);
+}
+
+async function readSafeHttpErrorDetail(response: Response): Promise<string | undefined> {
+    const requestId = safeDiagnosticValue(response.headers.get("x-request-id"));
+    let payload: unknown;
+    try {
+        const body = await readResponseTextPrefix(response, MAX_HTTP_ERROR_BODY_BYTES);
+        payload = JSON.parse(body);
+    } catch {
+        return requestId ? `request_id=${requestId}` : undefined;
+    }
+    const root = parseJsonObject(payload);
+    if (!root) return requestId ? `request_id=${requestId}` : undefined;
+    const nestedError = parseJsonObject(root.error);
+    const error = nestedError ?? root;
+    const type = safeDiagnosticValue(error.type);
+    const code = safeDiagnosticValue(error.code);
+    const message = safeDiagnosticValue(error.message, 500);
+    const fields = [
+        type ? `type=${type}` : undefined,
+        code ? `code=${code}` : undefined,
+        message ? `message=${message}` : undefined,
+        requestId ? `request_id=${requestId}` : undefined,
+    ].filter((field): field is string => field !== undefined);
+    return fields.length > 0 ? fields.join(" ") : undefined;
+}
+
+async function readResponseTextPrefix(response: Response, maxBytes: number): Promise<string> {
+    if (!response.body) return "";
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let remaining = maxBytes;
+    let text = "";
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return text + decoder.decode();
+        if (!value || value.length === 0) continue;
+        const retained = value.subarray(0, remaining);
+        text += decoder.decode(retained, { stream: retained.length === value.length });
+        remaining -= retained.length;
+        if (remaining === 0) {
+            await reader.cancel();
+            return text + decoder.decode();
+        }
+    }
+}
+
+function safeDiagnosticValue(value: unknown, maxCharacters = 128): string | undefined {
+    if (typeof value !== "string" && typeof value !== "number") return undefined;
+    const normalized = String(value)
+        .replaceAll(/Bearer\s+[^\s,;]+/gi, "Bearer [redacted]")
+        .replaceAll(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
+        .replaceAll(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted]")
+        .replaceAll(/\s+/g, " ")
+        .trim();
+    if (normalized.length === 0) return undefined;
+    return Array.from(normalized).slice(0, maxCharacters).join("");
 }
 
 async function collectRemoteCompactionV2OutputFromStream(

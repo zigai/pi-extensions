@@ -14,6 +14,8 @@ import {
     rewriteProviderRequestWithNativeCompaction,
     scheduleCodexAutoCompaction,
 } from "../src/compaction/service.ts";
+import { executeRemoteCompactionV2 } from "../src/compaction/remote-client.ts";
+import { buildRemoteCompactionV2Request } from "../src/compaction/request-budget.ts";
 import {
     CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY,
     CODEX_RESPONSES_LITE_HEADER,
@@ -1372,6 +1374,7 @@ function makeBeforeCompactEvent(
     options: {
         readonly branchEntries?: readonly unknown[];
         readonly firstKeptEntryId?: string;
+        readonly reason?: SessionBeforeCompactEvent["reason"];
     } = {},
 ): SessionBeforeCompactEvent {
     const branchEntries = options.branchEntries ?? [
