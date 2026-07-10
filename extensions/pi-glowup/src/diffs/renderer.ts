@@ -104,9 +104,16 @@ export function renderPierreDiff(
         ? maxVisibleDiffLines(true)
         : MUTATION_DIFF_PREVIEW_ROWS + 1;
     const component =
-        context.lastComponent instanceof PierreDiffComponent
+        context.lastComponent instanceof PierreDiffComponent &&
+        context.lastComponent.belongsTo(context.toolCallId)
             ? context.lastComponent
-            : new PierreDiffComponent(payload, theme, maxVisibleLines, options.expanded);
+            : new PierreDiffComponent(
+                  payload,
+                  theme,
+                  maxVisibleLines,
+                  options.expanded,
+                  context.toolCallId,
+              );
 
     component.update(payload, theme, maxVisibleLines, options.expanded);
     return component;
@@ -144,21 +151,28 @@ class PierreDiffComponent implements Component {
     private refreshKey: string | undefined;
     private cachedWidth: number | undefined;
     private cachedLines: string[] | undefined;
+    private readonly toolCallId: string | undefined;
 
     constructor(
         payload: PierreRenderableDiffPayload,
         theme: Theme,
         maxVisibleLines: number,
         expanded: boolean,
+        toolCallId: string | undefined,
     ) {
         this.payload = payload;
         this.palette = getPierrePalette(theme);
         this.highlighted = emptyHighlightedDiffSet();
         this.maxVisibleLines = maxVisibleLines;
         this.expanded = expanded;
+        this.toolCallId = toolCallId;
         if (this.expanded) {
             this.maybeRefreshHighlightedDiff();
         }
+    }
+
+    belongsTo(toolCallId: string | undefined): boolean {
+        return this.toolCallId === toolCallId;
     }
 
     update(
@@ -208,10 +222,9 @@ class PierreDiffComponent implements Component {
         }
 
         const highlighted = this.highlighted[this.palette.appearance];
-        const bodyLines =
-            this.expanded && shouldRenderSideBySideDiff(safeWidth)
-                ? this.renderSplitBody(safeWidth, highlighted)
-                : this.renderUnifiedBody(safeWidth, highlighted);
+        const bodyLines = shouldRenderSideBySideDiff(safeWidth)
+            ? this.renderSplitBody(safeWidth, highlighted)
+            : this.renderUnifiedBody(safeWidth, highlighted);
         const lines = bodyLines;
 
         if (lines.length <= this.maxVisibleLines) {
@@ -762,7 +775,7 @@ function renderFullWidthLine(
 }
 
 function padRenderedLine(line: string, width: number, base: AnsiStyle): string {
-    const targetWidth = Math.max(1, width - 1);
+    const targetWidth = Math.max(1, width);
     const truncated = truncateToWidth(line, targetWidth, "");
     const padding = Math.max(0, targetWidth - visibleWidth(truncated));
     return `${truncated}${openAnsi(base)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;

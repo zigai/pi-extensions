@@ -214,6 +214,33 @@ describe("Pierre diff rendering", () => {
         expect(secondLines).toEqual(firstLines);
     });
 
+    it("does not reuse a Pierre component across tool calls", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "old\n",
+            newContent: "new\n",
+            oldSizeBytes: 4,
+            newSizeBytes: 4,
+            canBuildPierreDiff: true,
+        });
+        if (!payload) throw new Error("expected Pierre payload");
+
+        const first = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined, toolCallId: "first" },
+        );
+        const second = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: first, toolCallId: "second" },
+        );
+
+        expect(second).not.toBe(first);
+    });
+
     it("rerenders a cached expanded diff side-by-side after the terminal widens", () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
@@ -304,7 +331,7 @@ describe("Pierre diff rendering", () => {
         ).render(180);
 
         expect(stripAnsi(narrow.join("\n"))).not.toContain(" │ ");
-        expect(stripAnsi(collapsedWide.join("\n"))).not.toContain(" │ ");
+        expect(stripAnsi(collapsedWide.join("\n"))).toContain(" │ ");
         expect(stripAnsi(collapsedWide.join("\n"))).toContain("old");
         expect(stripAnsi(expandedWide.join("\n"))).toContain(" │ ");
         expectLinesWithinWidth(narrow, 80);
@@ -390,6 +417,17 @@ describe("Pierre diff rendering", () => {
         expect(rows[0]?.kind).not.toBe("collapsed");
         expect(rows.at(-1)?.kind).not.toBe("collapsed");
         expect(rows.some((row) => row.kind === "collapsed")).toBe(true);
+
+        const rendered = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined },
+        )
+            .render(80)
+            .map(stripAnsi);
+        expect(rendered.slice(0, -1).every((line) => !line.includes("…"))).toBe(true);
+        expect(rendered.at(-1)).toContain("…");
     });
 
     it("renders source blank lines as one compact numbered row after highlighting", async () => {
@@ -442,8 +480,8 @@ describe("Pierre diff rendering", () => {
         const blankAddition = lines.find((line) => stripAnsi(line).trimEnd() === "+2");
 
         expect(blankAddition).toBeDefined();
-        expect(blankAddition).toContain("48;2;0;34;0");
-        expect(visibleWidth(blankAddition ?? "")).toBe(width - 1);
+        expect(blankAddition).toContain("48;2;33;58;43");
+        expect(visibleWidth(blankAddition ?? "")).toBe(width);
     });
 
     it("keeps context blank rows compact to avoid autowrap blanks", () => {
@@ -469,6 +507,6 @@ describe("Pierre diff rendering", () => {
 
         expect(lines.length).toBeGreaterThan(1);
         expect(lines.some((line) => stripAnsi(line).trimEnd() === " 2")).toBe(true);
-        expect(lines.every((line) => visibleWidth(line) < width)).toBe(true);
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     });
 });
