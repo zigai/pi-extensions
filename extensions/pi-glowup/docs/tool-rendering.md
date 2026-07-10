@@ -5,7 +5,8 @@ Third-party extensions can add `codexLookRendering` to a tool definition to cont
 Tool labels support two vocabulary modes. `static` keeps a stable operation label such as
 `Explore`, `Edit`, or `Check Agent`. `lifecycle` changes that label as execution progresses,
 for example `Exploring` → `Explored`, `Editing` → `Edited`, and `Checking Agent` →
-`Checked Agent`. Script previews intentionally keep their interpreter label (`Bash`, `Python`,
+`Checked Agent`. Patch calls use `Patch` in static mode and `Patching` → `Patched` in lifecycle
+mode. Script previews intentionally keep their interpreter label (`Bash`, `Python`,
 `Node`, and similar) in both modes.
 
 ## Rendering Paths

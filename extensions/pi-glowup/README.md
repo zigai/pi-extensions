@@ -14,6 +14,9 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | Option                                    | Default                                                         | Purpose                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.                 |
+| `appearance.addedRowBackground`           | `"#213A2B"`                                                     | Override added-row backgrounds with a `#RRGGBB` color; `null` uses Pi.      |
+| `appearance.deletedRowBackground`         | `null`                                                          | Override deleted-row backgrounds with a `#RRGGBB` color; `null` uses Pi.    |
+| `appearance.instructionPathColor`         | `null`                                                          | Override Skill/AGENTS path text with a `#RRGGBB` color; `null` uses Pi.     |
 | `debugLog.enabled`                        | `false`                                                         | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
 | `debugLog.path`                           | `"debug.log"`                                                   | File for diagnostics; relative paths resolve beside the global config.      |
 | `debugLog.maxBytes`                       | `null`                                                          | Rotate the diagnostics file to `.1` after this size; `null` means no cap.   |
@@ -35,6 +38,11 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 {
   "$schema": "./config.schema.json",
   "preserveTools": [],
+  "appearance": {
+    "addedRowBackground": "#213A2B",
+    "deletedRowBackground": null,
+    "instructionPathColor": null
+  },
   "debugLog": {
     "enabled": false,
     "path": "debug.log",
