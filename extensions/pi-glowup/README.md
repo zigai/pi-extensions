@@ -11,25 +11,25 @@ Compact Codex-style rendering for Pi tool calls and results.
 
 Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 
-| Option                                    | Default                                     | Purpose                                                                     |
-| ----------------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------- |
-| `preserveTools`                           | `[]`                                        | Keep selected third-party tools on their original renderer.                 |
-| `debugLog.enabled`                        | `true`                                      | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
-| `debugLog.path`                           | `"debug.log"`                               | File for diagnostics; relative paths resolve beside the global config.      |
-| `debugLog.maxBytes`                       | `null`                                      | Rotate the diagnostics file to `.1` after this size; `null` means no cap.   |
-| `debugLog.memorySampleIntervalMs`         | `10000`                                     | Sample memory while a session is active; use `0` to disable sampling.       |
-| `toolLabels.mode`                         | `"static"`                                  | Use `static` labels or `lifecycle` active/completed verb pairs.             |
-| `writePreview.movingViewport`             | `true`                                      | Follow the latest lines while a large write streams; disable for head-only. |
-| `syntax.preloadLanguages`                 | `["markdown","bash","python","typescript"]` | Language ids or aliases to preload for synchronous syntax highlighting.     |
-| `syntax.projectLanguageDetection.enabled` | `true`                                      | Add languages inferred from project filenames to the preload set.           |
-| `patches.assistantSeparator`              | `true`                                      | Add separators and spacing around assistant messages.                       |
-| `patches.workingWidgetSpacing`            | `false`                                     | Remove one blank line near the working indicator with a global TUI patch.   |
-| `patches.autocompleteCleanup`             | `true`                                      | Force a cleanup redraw after slash autocomplete closes.                     |
-| `patches.markdownSyntax`                  | `true`                                      | Add syntax highlighting to Markdown code fences.                            |
-| `patches.thirdPartyToolRenderers`         | `true`                                      | Apply compact renderers to compatible third-party tools.                    |
-| `scriptPreview.headerLayout`              | `"auto"`                                    | Choose script header placement: `auto`, `inline`, or `block`.               |
-| `scriptPreview.maxCodePreviewLines`       | `8`                                         | Maximum collapsed script preview lines before truncation; minimum is `4`.   |
-| `scriptPreview.formatters`                | `{}`                                        | Format script previews by sending code to the configured command on stdin.  |
+| Option                                    | Default                                                         | Purpose                                                                     |
+| ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.                 |
+| `debugLog.enabled`                        | `true`                                                          | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
+| `debugLog.path`                           | `"debug.log"`                                                   | File for diagnostics; relative paths resolve beside the global config.      |
+| `debugLog.maxBytes`                       | `null`                                                          | Rotate the diagnostics file to `.1` after this size; `null` means no cap.   |
+| `debugLog.memorySampleIntervalMs`         | `10000`                                                         | Sample memory while a session is active; use `0` to disable sampling.       |
+| `toolLabels.mode`                         | `"static"`                                                      | Use `static` labels or `lifecycle` active/completed verb pairs.             |
+| `writePreview.movingViewport`             | `true`                                                          | Follow the latest lines while a large write streams; disable for head-only. |
+| `syntax.preloadLanguages`                 | `["markdown","bash","python","typescript","javascript","json"]` | Language ids or aliases to preload for synchronous syntax highlighting.     |
+| `syntax.projectLanguageDetection.enabled` | `true`                                                          | Add languages inferred from project filenames to the preload set.           |
+| `patches.assistantSeparator`              | `true`                                                          | Add separators and spacing around assistant messages.                       |
+| `patches.workingWidgetSpacing`            | `false`                                                         | Remove one blank line near the working indicator with a global TUI patch.   |
+| `patches.autocompleteCleanup`             | `true`                                                          | Force a cleanup redraw after slash autocomplete closes.                     |
+| `patches.markdownSyntax`                  | `true`                                                          | Add syntax highlighting to Markdown code fences.                            |
+| `patches.thirdPartyToolRenderers`         | `true`                                                          | Apply compact renderers to compatible third-party tools.                    |
+| `scriptPreview.headerLayout`              | `"auto"`                                                        | Choose script header placement: `auto`, `inline`, or `block`.               |
+| `scriptPreview.maxCodePreviewLines`       | `8`                                                             | Maximum collapsed script preview lines before truncation; minimum is `4`.   |
+| `scriptPreview.formatters`                | `{}`                                                            | Format script previews by sending code to the configured command on stdin.  |
 
 ```json
 {
@@ -48,7 +48,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
     "movingViewport": true
   },
   "syntax": {
-    "preloadLanguages": ["markdown", "bash", "python", "typescript"],
+    "preloadLanguages": ["markdown", "bash", "python", "typescript", "javascript", "json"],
     "projectLanguageDetection": {
       "enabled": true
     }
