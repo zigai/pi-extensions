@@ -21,7 +21,7 @@ const MAX_CODE_BYTES = 40 * 1024;
 const MAX_CACHEABLE_CODE_BYTES = 8 * 1024;
 const MAX_CACHE_BYTES = 512 * 1024;
 const MAX_LINE_LENGTH = 2_000;
-const TOKENIZE_MAX_LINE_LENGTH = 1_000;
+const TOKENIZE_MAX_LINE_LENGTH = MAX_LINE_LENGTH;
 const CACHE_LIMIT = 100;
 
 export type SyntaxHighlightOptions = {

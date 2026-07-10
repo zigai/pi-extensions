@@ -12,7 +12,7 @@ export type CodeOutputSyntax = {
 };
 
 const MAX_STRUCTURED_OUTPUT_DETECTION_CHARS = 64 * 1024;
-const pendingCodeOutputSyntaxLoads = new Set<string>();
+const pendingCodeOutputSyntaxLoads = new Map<string, Set<() => void>>();
 
 /** Highlights code-like output when a language or path is known; otherwise returns normalized plain lines. */
 export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | undefined): string[] {
@@ -36,15 +36,20 @@ export function scheduleCodeOutputSyntaxLoad(
     if (getLoadedSyntaxHighlighterForLanguage(normalizedLanguage) !== undefined) {
         return;
     }
-    if (pendingCodeOutputSyntaxLoads.has(normalizedLanguage)) {
+    const pendingInvalidations = pendingCodeOutputSyntaxLoads.get(normalizedLanguage);
+    if (pendingInvalidations !== undefined) {
+        pendingInvalidations.add(invalidate);
         return;
     }
 
-    pendingCodeOutputSyntaxLoads.add(normalizedLanguage);
+    const invalidations = new Set([invalidate]);
+    pendingCodeOutputSyntaxLoads.set(normalizedLanguage, invalidations);
     void loadSyntaxLanguageIfReady(normalizedLanguage)
         .then((loaded) => {
             if (loaded) {
-                invalidate();
+                for (const invalidatePendingPreview of invalidations) {
+                    invalidatePendingPreview();
+                }
             }
         })
         .catch(() => {})

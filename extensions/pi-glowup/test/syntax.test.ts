@@ -154,6 +154,16 @@ describe("central syntax highlighting", () => {
         expect(lines.join("\n")).toContain("const");
     });
 
+    it("highlights accepted one-line scripts longer than 1000 characters", () => {
+        const code = `const values = [${Array.from({ length: 140 }, (_value, index) => `"value-${index}"`).join(",")}];`;
+
+        expect(code.length).toBeGreaterThan(1_000);
+        expect(code.length).toBeLessThanOrEqual(2_000);
+        expect(highlightSyntaxCode(code, "javascript").join("\n")).toContain(
+            TYPESCRIPT_KEYWORD_COLOR,
+        );
+    });
+
     it("does not reset surrounding backgrounds after highlighted lines", () => {
         const rendered = highlightSyntaxCode('const value = "ok";', "typescript").join("\n");
 
@@ -209,7 +219,7 @@ describe("central syntax highlighting", () => {
         expect(normalizeSyntaxLanguage("rs")).toBe("rust");
         expect(normalizeSyntaxLanguage("go")).toBe("go");
         expect(normalizeSyntaxLanguage("golang")).toBe("go");
-        expect(PRELOADED_SYNTAX_LANGUAGES).toEqual(["markdown", "bash", "python"]);
+        expect(PRELOADED_SYNTAX_LANGUAGES).toEqual(["markdown", "bash", "python", "typescript"]);
     });
 
     it("injects the central highlighter into Markdown code fences", () => {

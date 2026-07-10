@@ -341,6 +341,50 @@ describe("syntax highlighter lifecycle", () => {
         expect(rendered).toContain("const");
     });
 
+    it("invalidates every preview waiting on the same dynamic language", async () => {
+        let releaseLoad: (() => void) | undefined;
+        let resolveLoadStarted: (() => void) | undefined;
+        const loadStarted = new Promise<void>((resolve) => {
+            resolveLoadStarted = resolve;
+        });
+        const factory: SyntaxHighlighterFactory = async () =>
+            fakeHighlighter({
+                loadedLanguages: ["markdown"],
+                async loadLanguage() {
+                    resolveLoadStarted?.();
+                    await new Promise<void>((resolve) => {
+                        releaseLoad = resolve;
+                    });
+                },
+            });
+        await initializeSyntaxHighlighting({}, { createHighlighter: factory });
+
+        let firstInvalidations = 0;
+        let secondInvalidations = 0;
+        const preview = { label: "Node", language: "javascript", code: "const value = 1;" };
+        renderScriptCall(plainTheme, preview, {
+            state: "success",
+            expanded: false,
+            invalidate() {
+                firstInvalidations += 1;
+            },
+        });
+        await loadStarted;
+        renderScriptCall(plainTheme, preview, {
+            state: "success",
+            expanded: false,
+            invalidate() {
+                secondInvalidations += 1;
+            },
+        });
+
+        releaseLoad?.();
+        await waitForCondition(() => firstInvalidations > 0 && secondInvalidations > 0);
+
+        expect(firstInvalidations).toBe(1);
+        expect(secondInvalidations).toBe(1);
+    });
+
     it("dynamically loads syntax for TypeScript embedded in bash heredocs", async () => {
         await initializeSyntaxHighlighting(process.env, { preloadLanguages: ["bash"] });
         let invalidations = 0;
