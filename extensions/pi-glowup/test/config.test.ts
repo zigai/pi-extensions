@@ -18,7 +18,7 @@ describe("codex look config", () => {
 
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog).toEqual({
-            enabled: true,
+            enabled: false,
             path: "debug.log",
             maxBytes: null,
             memorySampleIntervalMs: 10_000,
@@ -56,7 +56,7 @@ describe("codex look config", () => {
         );
 
         expect(config.preserveTools).toEqual([]);
-        expect(config.debugLog.enabled).toBe(true);
+        expect(config.debugLog.enabled).toBe(false);
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
@@ -115,7 +115,7 @@ describe("codex look config", () => {
         });
 
         expect(config.preserveTools).toEqual([]);
-        expect(config.debugLog.enabled).toBe(true);
+        expect(config.debugLog.enabled).toBe(false);
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.preloadLanguages).toEqual([

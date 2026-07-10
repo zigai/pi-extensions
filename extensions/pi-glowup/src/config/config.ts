@@ -68,7 +68,7 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
     debugLog: {
-        enabled: true,
+        enabled: false,
         path: "debug.log",
         maxBytes: null,
         memorySampleIntervalMs: 10_000,

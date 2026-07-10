@@ -14,7 +14,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | Option                                    | Default                                                         | Purpose                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.                 |
-| `debugLog.enabled`                        | `true`                                                          | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
+| `debugLog.enabled`                        | `false`                                                         | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
 | `debugLog.path`                           | `"debug.log"`                                                   | File for diagnostics; relative paths resolve beside the global config.      |
 | `debugLog.maxBytes`                       | `null`                                                          | Rotate the diagnostics file to `.1` after this size; `null` means no cap.   |
 | `debugLog.memorySampleIntervalMs`         | `10000`                                                         | Sample memory while a session is active; use `0` to disable sampling.       |
@@ -36,7 +36,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
   "$schema": "./config.schema.json",
   "preserveTools": [],
   "debugLog": {
-    "enabled": true,
+    "enabled": false,
     "path": "debug.log",
     "maxBytes": null,
     "memorySampleIntervalMs": 10000

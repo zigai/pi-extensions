@@ -40,7 +40,7 @@
       },
       "additionalProperties": false,
       "default": {
-        "enabled": true,
+        "enabled": false,
         "path": "debug.log",
         "maxBytes": null,
         "memorySampleIntervalMs": 10000
