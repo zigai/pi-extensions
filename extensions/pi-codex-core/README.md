@@ -1,17 +1,34 @@
 # Pi Codex Core
 
-Slim Pi-native Codex extras for Pi coding agent.
+Everything GPT models need to feel at home in Pi.
 
 ## Features
 
-- `web_run` — Codex-backed web search via the OpenAI Codex search endpoint. Tool output is compacted into readable source cards, with raw Codex output saved outside the active workspace under `~/.pi/agent/pi-codex-core/web-run/<session>/`.
-- `imagegen` — Codex image generation/editing. Images are saved outside the active workspace under `~/.pi/agent/pi-codex-core/imagegen/<session>/`, with `latest.png` kept in that artifact directory.
-- `view_image` — native image return for local files, plus optional Codex-backed descriptions.
-- `apply_patch` — optional TypeScript port of the Codex native apply_patch edit tool. When enabled, it replaces Pi's native `edit` tool.
-- `/codex` — Pi-native tabbed settings UI for tools, prompt mode, supported personalities, OpenAI options, usage, reset expiration, and reset spending.
-- Optional model-aware Codex prompt mode using the matching bundled GPT-5.6 Sol/Terra/Luna or GPT-5.5 prompt, adapted to Pi's active tools and runtime context.
-- Optional Codex remote compaction v2 replay for OpenAI Codex responses models, with chaining, metadata, fallbacks, world-state injection, auto-compaction, and token-aware shrinking.
+### Tools
+
+- `web_run` — Codex-backed web search via the OpenAI Codex search endpoint.
+- `imagegen` — Codex image generation/editing.
+- `view_image` — native image return for local files.
+- `apply_patch` — optional port of the Codex native `apply_patch` edit tool. If enabled, it replaces Pi's native `edit` tool.
+
+### System Prompt
+
+Model-aware Codex prompt mode uses the matching bundled GPT-5.6 Sol/Terra/Luna or GPT-5.5 system prompt, adapted to Pi's active tools and runtime context.
+
+### Compaction
+
+Optional Codex remote compaction v2 replay supports OpenAI Codex responses models, with chaining, metadata, fallbacks, world-state injection, auto-compaction, and token-aware shrinking.
+
+### `/codex` Slash Command
+
+- Configure extension settings through a dedicated settings UI.
+- View current usage and reset expiration dates.
+- Activate available usage resets.
+
+### Other
+
 - GPT-5.6 Responses Lite compatibility for ordinary Pi turns, image descriptions, and native compaction.
+- Optional GPT-only reasoning trace suppression without disabling hidden model reasoning.
 
 ## Configuration
 
@@ -25,9 +42,9 @@ Use global config at `~/.pi/agent/pi-codex-core/config.json`.
 | `tools.viewImage`              | `true`          | Enable local image viewing.                                                                  |
 | `tools.viewImageDescriptions`  | `false`         | Add Codex-generated descriptions when viewing images.                                        |
 | `tools.applyPatch`             | `"off"`         | Use `apply_patch` instead of `edit`: `"off"`, `"openai"`, or `"all"`.                        |
-| `prompt.mode`                  | `"pi"`          | Use Pi's normal prompt; use `"codex"` for model-aware Codex prompts on GPT models.           |
+| `prompt.mode`                  | `"codex"`       | Use model-aware Codex prompts on GPT models; use `"pi"` for Pi's normal prompt.              |
 | `prompt.personality`           | `"pragmatic"`   | Codex communication style: `"friendly"`, `"pragmatic"`, or `"none"`; currently GPT-5.5 only. |
-| `compaction.enabled`           | `false`         | Enable Codex-style conversation compaction.                                                  |
+| `compaction.enabled`           | `true`          | Enable Codex-style conversation compaction.                                                  |
 | `compaction.auto`              | `true`          | Automatically compact when token usage reaches the threshold.                                |
 | `compaction.thresholdPercent`  | `80`            | Token usage percentage that triggers auto-compaction.                                        |
 | `openai.webSearchModel`        | `"current"`     | Model for `web_run`; `"current"` uses the active Codex model.                                |
@@ -37,6 +54,7 @@ Use global config at `~/.pi/agent/pi-codex-core/config.json`.
 | `openai.compactionReasoning`   | `"medium"`      | Model-supported reasoning effort; also accepts `"current"`, `"max"`, and `"ultra"`.          |
 | `openai.verbosity`             | `"low"`         | Verbosity for Codex-backed requests.                                                         |
 | `openai.fast`                  | `false`         | Use up to 1.5× faster token velocity; credit usage varies by model and current pricing.      |
+| `openai.showReasoningTraces`   | `true`          | Show streamed reasoning summaries for GPT Responses models.                                  |
 
 ```json
 {
@@ -52,11 +70,11 @@ Use global config at `~/.pi/agent/pi-codex-core/config.json`.
     "applyPatch": "off"
   },
   "prompt": {
-    "mode": "pi",
+    "mode": "codex",
     "personality": "pragmatic"
   },
   "compaction": {
-    "enabled": false,
+    "enabled": true,
     "auto": true,
     "thresholdPercent": 80
   },
@@ -67,7 +85,12 @@ Use global config at `~/.pi/agent/pi-codex-core/config.json`.
     "compactionModel": "current",
     "compactionReasoning": "medium",
     "verbosity": "low",
-    "fast": false
+    "fast": false,
+    "showReasoningTraces": true
   }
 }
 ```
+
+## License
+
+MIT
