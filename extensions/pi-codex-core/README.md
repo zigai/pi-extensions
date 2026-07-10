@@ -30,6 +30,10 @@ Optional Codex remote compaction v2 replay supports OpenAI Codex responses model
 - GPT-5.6 Responses Lite compatibility for ordinary Pi turns, image descriptions, and native compaction.
 - Optional GPT-only reasoning trace suppression without disabling hidden model reasoning.
 
+## Acknowledgements
+
+The initial version of this extension was based on [Igor Warzocha's `pi-codex-conversion`](https://github.com/IgorWarzocha/howaboua-pi-stuff/tree/main/packages/pi-codex-conversion), which remains actively developed.
+
 ## Configuration
 
 Use global config at `~/.pi/agent/pi-codex-core/config.json`.
