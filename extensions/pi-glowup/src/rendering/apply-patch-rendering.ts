@@ -23,7 +23,12 @@ import {
     type ToolLabelMode,
     type ToolLifecycleContext,
 } from "./status-labels.ts";
-import { captureDeletedTextPreview, type DeletedTextPreview } from "./delete-preview.ts";
+import {
+    captureDeletedTextPreview,
+    captureTextFilePreimage,
+    type DeletedTextPreview,
+    type TextFilePreimage,
+} from "./delete-preview.ts";
 
 type ApplyPatchKind = "add" | "delete" | "update";
 
@@ -42,6 +47,7 @@ const MAX_PARTIAL_PATCH_PREVIEW_LINES = MUTATION_DIFF_PREVIEW_ROWS;
 const MAX_PARTIAL_PATCH_LINE_CHARS = 2_000;
 const PARTIAL_PATCH_SUFFIX_CHARS = 32;
 const MAX_DELETE_PREIMAGE_CALLS = 100;
+const MAX_UPDATE_PREIMAGE_BYTES = 4 * 1024 * 1024;
 
 type MutableApplyPatchSection = {
     kind: ApplyPatchKind;
@@ -56,6 +62,7 @@ type MutableApplyPatchSection = {
 };
 
 const deletePreimages = new Map<string, Map<string, DeletedTextPreview>>();
+const updatePreimages = new Map<string, Map<string, TextFilePreimage>>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -78,30 +85,47 @@ function patchTextFromArgs(args: unknown): string | undefined {
     );
 }
 
-function captureDeletePreimages(toolCallId: string, cwd: string, patch: string): void {
-    let previews = deletePreimages.get(toolCallId);
-    if (previews === undefined) {
-        previews = new Map();
-        deletePreimages.set(toolCallId, previews);
-        while (deletePreimages.size > MAX_DELETE_PREIMAGE_CALLS) {
-            const oldest = deletePreimages.keys().next().value;
-            if (typeof oldest !== "string") {
-                break;
-            }
-            deletePreimages.delete(oldest);
-        }
+function boundedPreimageMap<T>(
+    store: Map<string, Map<string, T>>,
+    toolCallId: string,
+): Map<string, T> {
+    let previews = store.get(toolCallId);
+    if (previews !== undefined) {
+        return previews;
     }
+    previews = new Map();
+    store.set(toolCallId, previews);
+    while (store.size > MAX_DELETE_PREIMAGE_CALLS) {
+        const oldest = store.keys().next().value;
+        if (typeof oldest !== "string") {
+            break;
+        }
+        store.delete(oldest);
+    }
+    return previews;
+}
+
+function capturePatchPreimages(toolCallId: string, cwd: string, patch: string): void {
+    const deletePreviews = boundedPreimageMap(deletePreimages, toolCallId);
+    const updatePreviews = boundedPreimageMap(updatePreimages, toolCallId);
     for (const line of patch.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n")) {
-        if (!line.startsWith("*** Delete File: ")) {
-            continue;
+        if (line.startsWith("*** Delete File: ")) {
+            const filePath = line.slice("*** Delete File: ".length);
+            if (filePath.length > 0 && !deletePreviews.has(filePath)) {
+                const preview = captureDeletedTextPreview(cwd, filePath);
+                if (preview !== undefined) {
+                    deletePreviews.set(filePath, preview);
+                }
+            }
         }
-        const filePath = line.slice("*** Delete File: ".length);
-        if (filePath.length === 0 || previews.has(filePath)) {
-            continue;
-        }
-        const preview = captureDeletedTextPreview(cwd, filePath);
-        if (preview !== undefined) {
-            previews.set(filePath, preview);
+        if (line.startsWith("*** Update File: ")) {
+            const filePath = line.slice("*** Update File: ".length);
+            if (filePath.length > 0 && !updatePreviews.has(filePath)) {
+                const preview = captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES);
+                if (preview !== undefined) {
+                    updatePreviews.set(filePath, preview);
+                }
+            }
         }
     }
 }
@@ -326,6 +350,169 @@ function parseApplyPatchSummary(patchText: string): ApplyPatchSummary | undefine
     }
 
     return { sections };
+}
+
+type UpdateHunkRow = {
+    readonly sign: "+" | "-" | " ";
+    readonly content: string;
+};
+
+type UpdateHunk = {
+    readonly oldStart: number | undefined;
+    readonly newStart: number | undefined;
+    readonly rows: readonly UpdateHunkRow[];
+};
+
+type UpdatePatchSection = {
+    readonly path: string;
+    readonly hunks: readonly UpdateHunk[];
+};
+
+function completedUpdateSections(patchText: string): readonly UpdatePatchSection[] {
+    const sections: UpdatePatchSection[] = [];
+    let path: string | undefined;
+    let hunks: UpdateHunk[] = [];
+    let rows: UpdateHunkRow[] | undefined;
+    let oldStart: number | undefined;
+    let newStart: number | undefined;
+
+    function flushHunk(): void {
+        if (rows !== undefined) {
+            hunks.push({ oldStart, newStart, rows });
+        }
+        rows = undefined;
+        oldStart = undefined;
+        newStart = undefined;
+    }
+
+    function flushSection(): void {
+        flushHunk();
+        if (path !== undefined) {
+            sections.push({ path, hunks });
+        }
+        path = undefined;
+        hunks = [];
+    }
+
+    const normalized = patchText.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
+    for (const line of normalized.split("\n")) {
+        if (line.startsWith("*** Update File: ")) {
+            flushSection();
+            path = line.slice("*** Update File: ".length);
+            continue;
+        }
+        if (
+            line.startsWith("*** Add File: ") ||
+            line.startsWith("*** Delete File: ") ||
+            line === "*** End Patch"
+        ) {
+            flushSection();
+            continue;
+        }
+        if (path === undefined || line === "*** End of File" || line.startsWith("*** Move to: ")) {
+            continue;
+        }
+        if (line === "@@" || line.startsWith("@@ ")) {
+            flushHunk();
+            rows = [];
+            const match = /^@@ -(?<oldLine>\d+)(?:,\d+)? \+(?<newLine>\d+)(?:,\d+)?(?: @@|$)/u.exec(
+                line,
+            );
+            const parsedOldStart = Number(match?.groups?.oldLine);
+            const parsedNewStart = Number(match?.groups?.newLine);
+            oldStart = Number.isSafeInteger(parsedOldStart) ? parsedOldStart : undefined;
+            newStart = Number.isSafeInteger(parsedNewStart) ? parsedNewStart : undefined;
+            continue;
+        }
+        const sign = line.charAt(0);
+        if (sign === "+" || sign === "-" || sign === " ") {
+            rows ??= [];
+            rows.push({ sign, content: line.slice(1) });
+            continue;
+        }
+        if (line.length === 0 && rows !== undefined) {
+            rows.push({ sign: " ", content: "" });
+        }
+    }
+    flushSection();
+    return sections;
+}
+
+function matchingLineSequence(
+    source: readonly string[],
+    needle: readonly string[],
+    fromIndex: number,
+): number | undefined {
+    if (needle.length === 0) {
+        return Math.min(fromIndex, source.length);
+    }
+    for (const searchStart of [fromIndex, 0]) {
+        for (let index = searchStart; index + needle.length <= source.length; index += 1) {
+            if (needle.every((line, offset) => source[index + offset] === line)) {
+                return index;
+            }
+        }
+    }
+    return undefined;
+}
+
+function numberedUpdateHunks(
+    hunks: readonly UpdateHunk[],
+    preimage: TextFilePreimage | undefined,
+): readonly string[] | undefined {
+    const lines: string[] = [];
+    let oldCursor = 0;
+    let lineDelta = 0;
+
+    for (const hunk of hunks) {
+        const oldNeedle = hunk.rows.filter((row) => row.sign !== "+").map((row) => row.content);
+        const matchedIndex =
+            hunk.oldStart === undefined && preimage !== undefined
+                ? matchingLineSequence(preimage.lines, oldNeedle, oldCursor)
+                : undefined;
+        const oldStart =
+            hunk.oldStart ?? (matchedIndex === undefined ? undefined : matchedIndex + 1);
+        if (oldStart === undefined) {
+            return undefined;
+        }
+        const newStart = hunk.newStart ?? oldStart + lineDelta;
+        let oldLine = oldStart;
+        let newLine = newStart;
+        for (const row of hunk.rows) {
+            lines.push(
+                numberedDiffLine(row.sign, row.sign === "-" ? oldLine : newLine, row.content, true),
+            );
+            if (row.sign !== "+") oldLine += 1;
+            if (row.sign !== "-") newLine += 1;
+        }
+        oldCursor = oldLine - 1;
+        lineDelta = newLine - oldLine;
+    }
+    return lines;
+}
+
+function hydrateUpdateLineNumbers(
+    summary: ApplyPatchSummary,
+    patchText: string,
+    toolCallId: string,
+): ApplyPatchSummary {
+    const updates = completedUpdateSections(patchText);
+    const preimages = updatePreimages.get(toolCallId);
+    let updateIndex = 0;
+    return {
+        sections: summary.sections.map((section) => {
+            if (section.kind !== "update") {
+                return section;
+            }
+            const update = updates[updateIndex];
+            updateIndex += 1;
+            if (update === undefined) {
+                return section;
+            }
+            const lines = numberedUpdateHunks(update.hunks, preimages?.get(update.path));
+            return lines === undefined ? section : { ...section, lines };
+        }),
+    };
 }
 
 type PartialApplyPatchSection = MutableApplyPatchSection & {
@@ -936,8 +1123,10 @@ export function createApplyPatchRenderer(
     return {
         renderCall(args, theme, context) {
             const patch = patchTextFromArgs(args);
+            if (patch !== undefined) {
+                capturePatchPreimages(context.toolCallId, context.cwd ?? process.cwd(), patch);
+            }
             if (patch !== undefined && isActiveToolCall(context)) {
-                captureDeletePreimages(context.toolCallId, context.cwd ?? process.cwd(), patch);
                 return renderPartialApplyPatchCall(patch, theme, context, labelMode);
             }
             const parsedSummary =
@@ -947,7 +1136,11 @@ export function createApplyPatchRenderer(
             const summary =
                 parsedSummary === undefined
                     ? undefined
-                    : hydrateDeletePreimages(parsedSummary, context.toolCallId);
+                    : hydrateUpdateLineNumbers(
+                          hydrateDeletePreimages(parsedSummary, context.toolCallId),
+                          patch ?? "",
+                          context.toolCallId,
+                      );
             return summary === undefined
                 ? renderApplyPatchFallbackCall(args, theme, context, labelMode)
                 : renderApplyPatchSummary(summary, theme, context.expanded, context, labelMode);

@@ -4,16 +4,21 @@ import type { DiffSection } from "./core.ts";
 
 const MAX_DELETE_PREIMAGE_BYTES = 256 * 1024;
 
+export type TextFilePreimage = {
+    readonly lines: readonly string[];
+};
+
 export type DeletedTextPreview = {
     readonly section: DiffSection;
     readonly removed: number;
 };
 
 /** Captures a bounded readable text file before deletion without leaving the working directory. */
-export function captureDeletedTextPreview(
+export function captureTextFilePreimage(
     cwd: string,
     filePath: string,
-): DeletedTextPreview | undefined {
+    maxBytes = MAX_DELETE_PREIMAGE_BYTES,
+): TextFilePreimage | undefined {
     const resolvedCwd = path.resolve(cwd);
     const resolvedPath = path.resolve(resolvedCwd, filePath);
     const relativePath = path.relative(resolvedCwd, resolvedPath);
@@ -27,7 +32,7 @@ export function captureDeletedTextPreview(
     }
     try {
         const stats = statSync(resolvedPath);
-        if (!stats.isFile() || stats.size > MAX_DELETE_PREIMAGE_BYTES) {
+        if (!stats.isFile() || stats.size > maxBytes) {
             return undefined;
         }
         const data = readFileSync(resolvedPath);
@@ -42,16 +47,28 @@ export function captureDeletedTextPreview(
         if (lines.at(-1) === "") {
             lines.pop();
         }
-        return {
-            section: {
-                path: filePath,
-                lines: lines.map((line, index) => `-${index + 1} ${line}`),
-                added: 0,
-                removed: lines.length,
-            },
-            removed: lines.length,
-        };
+        return { lines };
     } catch {
         return undefined;
     }
+}
+
+/** Captures a bounded readable text file before deletion without leaving the working directory. */
+export function captureDeletedTextPreview(
+    cwd: string,
+    filePath: string,
+): DeletedTextPreview | undefined {
+    const preimage = captureTextFilePreimage(cwd, filePath);
+    if (preimage === undefined) {
+        return undefined;
+    }
+    return {
+        section: {
+            path: filePath,
+            lines: preimage.lines.map((line, index) => `-${index + 1} ${line}`),
+            added: 0,
+            removed: preimage.lines.length,
+        },
+        removed: preimage.lines.length,
+    };
 }

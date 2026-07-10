@@ -104,7 +104,7 @@ describe("apply_patch renderer", () => {
         expect(rendered).not.toMatch(/\d+ -const/u);
     });
 
-    it("uses real line numbers only when hunk coordinates provide them", () => {
+    it("uses line numbers supplied by hunk coordinates", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",
         });
@@ -121,6 +121,91 @@ describe("apply_patch renderer", () => {
 
         expect(rendered).toContain("20 -const value = 1;");
         expect(rendered).toContain("30 +const value = 2;");
+    });
+
+    it("derives real line numbers for coordinate-less edit hunks from the preimage", () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
+        try {
+            writeFileSync(
+                path.join(cwd, "example.ts"),
+                "line one\nline two\nline three\nline four\nline five\nline six\n",
+            );
+            const renderer = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            });
+            const patch = `*** Begin Patch
+*** Update File: example.ts
+@@
+ line three
+-line four
++changed four
+ line five
+*** End Patch`;
+            const context = { ...renderContext, cwd, toolCallId: "coordinate-less-update" };
+
+            renderer.renderCall({ patch }, plainTheme, {
+                ...context,
+                argsComplete: false,
+                isPartial: true,
+            });
+            const rendered = renderer
+                .renderCall({ patch }, plainTheme, context)
+                .render(100)
+                .join("\n");
+
+            expect(rendered).toContain("3  line three");
+            expect(rendered).toContain("4 -line four");
+            expect(rendered).toContain("4 +changed four");
+            expect(rendered).toContain("5  line five");
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
+    it("accounts for earlier hunk line shifts when deriving later line numbers", () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
+        try {
+            writeFileSync(
+                path.join(cwd, "example.ts"),
+                Array.from({ length: 8 }, (_value, index) => `line ${index + 1}`).join("\n") + "\n",
+            );
+            const renderer = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            });
+            const patch = `*** Begin Patch
+*** Update File: example.ts
+@@
+ line 2
+-line 3
++line 3a
++line 3b
+ line 4
+@@
+ line 7
+-line 8
++changed 8
+*** End Patch`;
+            const context = { ...renderContext, cwd, toolCallId: "shifted-coordinate-less-update" };
+
+            renderer.renderCall({ patch }, plainTheme, {
+                ...context,
+                argsComplete: false,
+                isPartial: true,
+            });
+            const rendered = renderer
+                .renderCall({ patch }, plainTheme, { ...context, expanded: true })
+                .render(100)
+                .join("\n");
+
+            expect(rendered).toContain("3 -line 3");
+            expect(rendered).toContain("3 +line 3a");
+            expect(rendered).toContain("4 +line 3b");
+            expect(rendered).toContain("8  line 7");
+            expect(rendered).toContain("8 -line 8");
+            expect(rendered).toContain("9 +changed 8");
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
     });
 
     it("leaves successful results empty when the call already rendered the patch", () => {
@@ -206,6 +291,7 @@ describe("apply_patch renderer", () => {
         expect(rendered).toContain("export const value40 = 40;");
         expect(rendered).not.toContain("export const value20 = 20;");
         expect(rendered).toContain("… +34 lines (to expand)");
+        expect(rendered.trimEnd().endsWith("… +34 lines (to expand)")).toBe(true);
     });
 
     it("shows a six-line replacement without an unnecessary omission", () => {
