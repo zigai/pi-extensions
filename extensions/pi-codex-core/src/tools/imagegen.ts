@@ -10,7 +10,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import type { CodexCoreConfig } from "../config/config.ts";
-import { codexToolProviderHeaders, resolveCodexToolProvider } from "../codex/auth.ts";
+import {
+    codexToolProviderHeaders,
+    resolveCodexToolProvider,
+    type CodexToolProvider,
+} from "../codex/auth.ts";
 import { fetchTextWithRetries } from "../codex/http-retry.ts";
 import { imageDetailMarker } from "../images/detail.ts";
 import {
@@ -276,9 +280,7 @@ async function requestImageGeneration(
         readonly size?: string;
     }>
 > {
-    const provider = await resolveCodexToolProvider(ctx, {
-        useActiveModel: true,
-    });
+    const provider = await resolveImageGenerationProvider(ctx);
     if (provider.isErr()) return provider;
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
@@ -356,6 +358,20 @@ async function requestImageGeneration(
         );
     }
     return parseImageResponse(rawImagePayload);
+}
+
+async function resolveImageGenerationProvider(
+    ctx: ExtensionContext,
+): Promise<CodexResult<CodexToolProvider>> {
+    if (
+        String(ctx.model?.api ?? "")
+            .toLowerCase()
+            .includes("responses")
+    ) {
+        const activeProvider = await resolveCodexToolProvider(ctx, { useActiveModel: true });
+        if (activeProvider.isOk()) return activeProvider;
+    }
+    return resolveCodexToolProvider(ctx);
 }
 
 function parseImageResponse(value: unknown): CodexResult<{

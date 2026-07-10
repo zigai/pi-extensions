@@ -736,6 +736,65 @@ test("imagegen returns model-visible images and saved paths", async () => {
     }
 });
 
+test("imagegen uses an available Codex provider under a non-Responses model", async () => {
+    const base64 = solidPngBytes(1, 1, [20, 40, 60, 255]).toString("base64");
+    let requestUrl = "";
+    const runtime = makeTestRuntime(async (input) => {
+        requestUrl = String(input);
+        return new Response(JSON.stringify({ data: [{ b64_json: base64 }] }), { status: 200 });
+    });
+    const codexModel = {
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        id: "gpt-5.5",
+        baseUrl: "https://chatgpt.com/backend-api",
+    };
+    const ctx = {
+        cwd: "/workspace",
+        model: {
+            provider: "anthropic",
+            api: "anthropic-messages",
+            id: "claude-sonnet",
+        },
+        modelRegistry: {
+            find: (provider: string, modelId: string) =>
+                provider === "openai-codex" && modelId === "gpt-5.5" ? codexModel : undefined,
+            getApiKeyAndHeaders: async () => ({
+                ok: true,
+                apiKey: "token",
+                headers: { "chatgpt-account-id": "account" },
+            }),
+        },
+        sessionManager: {
+            getSessionId: () => "session/1",
+            getBranch: () => [],
+        },
+    } as unknown as ExtensionContext;
+    const imagegenTool = createImagegenTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+        runtime,
+        async saveImage(args) {
+            return {
+                path: `/tmp/${args.index}.png`,
+                absolutePath: `/tmp/${args.index}.png`,
+                latestPath: "/tmp/latest.png",
+                latestAbsolutePath: "/tmp/latest.png",
+            };
+        },
+    });
+
+    const result = await imagegenTool.execute(
+        "call/1",
+        { prompt: "Draw a blue robot" },
+        undefined,
+        undefined,
+        ctx,
+    );
+
+    assert.equal(result.details.generatedCount, 1);
+    assert.equal(requestUrl, "https://chatgpt.com/backend-api/codex/images/generations");
+});
+
 test("imagegen saves generated images sequentially", async () => {
     const base64A = solidPngBytes(1, 1, [255, 0, 0, 255]).toString("base64");
     const base64B = solidPngBytes(1, 1, [0, 255, 0, 255]).toString("base64");
