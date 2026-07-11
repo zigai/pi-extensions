@@ -37,14 +37,15 @@ export async function executeRemoteCompactionV2(
     signal: AbortSignal,
     services: CodexRuntime,
 ): Promise<CodexResult<RemoteCompactionV2Response>> {
+    const encodedRequest = encodeRemoteCompactionRequest(request, runtime.headers);
     let lastResult: CodexResult<RemoteCompactionV2Response> | undefined;
     for (let attempt = 0; attempt <= MAX_REMOTE_COMPACTION_STREAM_RETRIES; attempt += 1) {
         const linkedAttempt = createLinkedAttemptController(signal);
         let result: CodexResult<RemoteCompactionV2Response>;
         try {
             result = await executeRemoteCompactionV2Attempt(
-                runtime,
-                request,
+                runtime.responsesUrl,
+                encodedRequest,
                 linkedAttempt.controller,
                 signal,
                 services,
@@ -89,9 +90,34 @@ export async function executeRemoteCompactionV2(
     );
 }
 
-async function executeRemoteCompactionV2Attempt(
-    runtime: { readonly responsesUrl: string; readonly headers: Headers },
+type EncodedRemoteCompactionRequest = {
+    readonly body: BodyInit;
+    readonly headers: Headers;
+};
+
+function encodeRemoteCompactionRequest(
     request: RemoteCompactionV2Request,
+    sourceHeaders: Headers,
+): EncodedRemoteCompactionRequest {
+    const serialized = JSON.stringify(request);
+    const headers = new Headers(sourceHeaders);
+    headers.set("Accept", "text/event-stream");
+    try {
+        const zlib = process.getBuiltinModule("node:zlib");
+        const body = zlib.zstdCompressSync(serialized, {
+            params: { [zlib.constants.ZSTD_c_compressionLevel]: 3 },
+        });
+        headers.set("Content-Encoding", "zstd");
+        return { body, headers };
+    } catch {
+        headers.delete("Content-Encoding");
+        return { body: serialized, headers };
+    }
+}
+
+async function executeRemoteCompactionV2Attempt(
+    responsesUrl: string,
+    request: EncodedRemoteCompactionRequest,
     attemptController: AbortController,
     parentSignal: AbortSignal,
     services: CodexRuntime,
@@ -99,11 +125,11 @@ async function executeRemoteCompactionV2Attempt(
     const signal = attemptController.signal;
     let response: Response;
     try {
-        response = await services.fetch(runtime.responsesUrl, {
+        response = await services.fetch(responsesUrl, {
             method: "POST",
-            headers: runtime.headers,
+            headers: request.headers,
             signal,
-            body: JSON.stringify(request),
+            body: request.body,
         });
     } catch (cause: unknown) {
         if (isCodexAbortCause(cause) || parentSignal.aborted) {
