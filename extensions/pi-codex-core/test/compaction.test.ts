@@ -87,6 +87,7 @@ test("creates native compaction using remote compaction v2", async () => {
     assert.equal(requestUrl, "https://chatgpt.com/backend-api/codex/responses");
     assert.equal(requestAccountId, "account");
     assert.equal(requestHeaders.get("x-codex-beta-features"), "remote_compaction_v2");
+    assert.equal(requestHeaders.has("version"), false);
     assert.equal(requestHeaders.get("x-codex-window-id"), "00000000-0000-7000-8000-000000000001");
     assert.equal(requestHeaders.get("x-client-request-id"), "session-1");
     assert.equal(requestHeaders.get("session-id"), "session-1");

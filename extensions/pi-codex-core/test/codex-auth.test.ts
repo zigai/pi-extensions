@@ -23,7 +23,11 @@ test("Codex web auth supports API keys and preserves provider headers", async ()
     const result = await resolveCodexToolProvider(
         makeToolAuthContext({
             apiKey: "token",
-            headers: { "OpenAI-Organization": "org_test", "X-Custom-Auth": "custom" },
+            headers: {
+                "OpenAI-Organization": "org_test",
+                "X-Custom-Auth": "custom",
+                version: "stale-provider-version",
+            },
         }),
         { requireAccountId: false },
     );
@@ -33,7 +37,7 @@ test("Codex web auth supports API keys and preserves provider headers", async ()
     assert.equal(headers.get("OpenAI-Organization"), "org_test");
     assert.equal(headers.get("X-Custom-Auth"), "custom");
     assert.equal(headers.get("Authorization"), "Bearer token");
-    assert.equal(headers.get("version"), "0.1.0");
+    assert.equal(headers.has("version"), false);
     assert.match(headers.get("User-Agent") ?? "", /^codex_cli_rs\/0\.1\.0 /);
 });
 

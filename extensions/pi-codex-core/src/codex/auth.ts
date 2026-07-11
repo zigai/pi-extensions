@@ -70,7 +70,7 @@ export function codexToolProviderHeaders(provider: CodexToolProvider): Headers {
     }
     headers.set("originator", CODEX_ORIGINATOR);
     headers.set("User-Agent", codexUserAgent(CODEX_ORIGINATOR));
-    headers.set("version", PI_CODEX_CORE_VERSION);
+    headers.delete("version");
     headers.set("content-type", "application/json");
     return headers;
 }
