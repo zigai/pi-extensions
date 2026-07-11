@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+    lstat,
+    mkdir,
+    mkdtemp,
+    readFile,
+    readlink,
+    realpath,
+    rm,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -12,11 +22,28 @@ import {
     applyPatchText,
     formatApplyPatchError,
     parseApplyPatch,
+    type ApplyPatchFileSystem,
 } from "../src/tools/apply-patch/engine.ts";
 import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
 
 function wrapPatch(body: string): string {
     return `*** Begin Patch\n${body}\n*** End Patch`;
+}
+
+function createNodeFileSystem(): ApplyPatchFileSystem {
+    return {
+        readFile: (path) => readFile(path, "utf8"),
+        writeFile: (path, contents) => writeFile(path, contents, "utf8"),
+        lstat: (path) => lstat(path),
+        mkdir: async (path) => {
+            await mkdir(path, { recursive: true });
+        },
+        readlink: (path) => readlink(path),
+        realpath: (path) => realpath(path),
+        removeFile: async (path) => {
+            await rm(path, { force: false, recursive: false });
+        },
+    };
 }
 
 test("parses Codex apply_patch add, delete, update, and move hunks", () => {
@@ -125,8 +152,31 @@ test("preflights every hunk before mutating any file", async () => {
     }
 });
 
-test("preflight rejects sequential hunks that depend on earlier writes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-dependent-"));
+test("applies an add followed by a dependent update to the same path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-add-update-"));
+    try {
+        const patch = wrapPatch(`*** Add File: sequential.txt
++initial
+*** Update File: sequential.txt
+@@
+-initial
++final`);
+
+        const result = await applyPatchText(patch, root);
+
+        assert.equal(await readFile(join(root, "sequential.txt"), "utf8"), "final\n");
+        assert.deepEqual(result.affectedPaths, {
+            added: ["sequential.txt"],
+            modified: ["sequential.txt"],
+            deleted: [],
+        });
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("applies sequential dependent updates to the same path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-update-update-"));
     try {
         const filePath = join(root, "sequential.txt");
         await writeFile(filePath, "original\n");
@@ -139,8 +189,32 @@ test("preflight rejects sequential hunks that depend on earlier writes", async (
 -intermediate
 +final`);
 
-        await assert.rejects(applyPatchText(patch, root), ApplyPatchError);
-        assert.equal(await readFile(filePath, "utf8"), "original\n");
+        await applyPatchText(patch, root);
+
+        assert.equal(await readFile(filePath, "utf8"), "final\n");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("applies an operation to the destination of an earlier move", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-move-update-"));
+    try {
+        await writeFile(join(root, "source.txt"), "original\n");
+        const patch = wrapPatch(`*** Update File: source.txt
+*** Move to: destination.txt
+@@
+-original
++intermediate
+*** Update File: destination.txt
+@@
+-intermediate
++final`);
+
+        await applyPatchText(patch, root);
+
+        await assert.rejects(readFile(join(root, "source.txt"), "utf8"));
+        assert.equal(await readFile(join(root, "destination.txt"), "utf8"), "final\n");
     } finally {
         await rm(root, { recursive: true, force: true });
     }
@@ -235,35 +309,76 @@ test("checks cancellation before the first filesystem mutation", async () => {
     }
 });
 
-test("reports committed changes when a later filesystem mutation fails", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-partial-"));
-    const blockedPath = join(root, "blocked.txt");
-    await writeFile(blockedPath, "unchanged\n");
-    await chmod(blockedPath, 0o444);
+test("rejects a stale preflight snapshot before overwriting an external mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-conflict-"));
+    const filePath = join(root, "stale.txt");
+    await writeFile(filePath, "original\n");
     try {
-        const patch = wrapPatch(`*** Add File: committed.txt
-+committed
-*** Add File: blocked.txt
-+cannot replace`);
+        const baseFileSystem = createNodeFileSystem();
+        let injectedMutation = false;
+        const fileSystem: ApplyPatchFileSystem = {
+            ...baseFileSystem,
+            readFile: async (path) => {
+                const contents = await baseFileSystem.readFile(path);
+                if (path === filePath && !injectedMutation) {
+                    injectedMutation = true;
+                    await baseFileSystem.writeFile(path, "external\n");
+                }
+                return contents;
+            },
+        };
+        const patch = wrapPatch(`*** Update File: stale.txt
+@@
+-original
++patched`);
+
+        await assert.rejects(
+            applyPatchText(patch, root, { fileSystem }),
+            (cause: unknown) =>
+                cause instanceof ApplyPatchError &&
+                cause.kind === "conflict" &&
+                /concurrent change/.test(cause.message),
+        );
+        assert.equal(await readFile(filePath, "utf8"), "external\n");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("reports a failed write as uncertain even when no mutation was confirmed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-partial-"));
+    const filePath = join(root, "uncertain.txt");
+    await writeFile(filePath, "original\n");
+    try {
+        const baseFileSystem = createNodeFileSystem();
+        const fileSystem: ApplyPatchFileSystem = {
+            ...baseFileSystem,
+            writeFile: async (path, contents) => {
+                await baseFileSystem.writeFile(path, contents);
+                throw new Error("simulated failure after a potentially partial write");
+            },
+        };
+        const patch = wrapPatch(`*** Update File: uncertain.txt
+@@
+-original
++replacement`);
 
         let caught: unknown;
         try {
-            await applyPatchText(patch, root);
+            await applyPatchText(patch, root, { fileSystem });
         } catch (cause: unknown) {
             caught = cause;
         }
 
         assert.ok(caught instanceof ApplyPatchExecutionError);
-        assert.deepEqual(caught.committedResult.affectedPaths, {
-            added: ["committed.txt"],
-            modified: [],
-            deleted: [],
-        });
-        assert.match(formatApplyPatchError(caught), /after committing[\s\S]*A committed\.txt/);
-        assert.equal(await readFile(join(root, "committed.txt"), "utf8"), "committed\n");
-        assert.equal(await readFile(blockedPath, "utf8"), "unchanged\n");
+        assert.deepEqual(caught.committedResult.changes, []);
+        assert.deepEqual(caught.uncertainPaths, [filePath]);
+        assert.match(
+            formatApplyPatchError(caught),
+            /state is uncertain:[\s\S]*\? .*uncertain\.txt/,
+        );
+        assert.equal(await readFile(filePath, "utf8"), "replacement\n");
     } finally {
-        await chmod(blockedPath, 0o644);
         await rm(root, { recursive: true, force: true });
     }
 });
