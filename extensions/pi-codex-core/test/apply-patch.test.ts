@@ -292,6 +292,34 @@ test("denies paths that escape cwd through an existing symlink", async () => {
     }
 });
 
+test("rejects sequential hunks that alias the same file before mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-alias-"));
+    try {
+        const filePath = join(root, "real.txt");
+        await writeFile(filePath, "original\n");
+        await symlink(filePath, join(root, "alias.txt"));
+        const patch = wrapPatch(`*** Update File: real.txt
+@@
+-original
++first
+*** Update File: alias.txt
+@@
+-original
++second`);
+
+        await assert.rejects(
+            applyPatchText(patch, root),
+            (cause: unknown) =>
+                cause instanceof ApplyPatchError &&
+                cause.kind === "compute" &&
+                /same filesystem target/.test(cause.message),
+        );
+        assert.equal(await readFile(filePath, "utf8"), "original\n");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("checks cancellation before the first filesystem mutation", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-cancelled-"));
     const controller = new AbortController();

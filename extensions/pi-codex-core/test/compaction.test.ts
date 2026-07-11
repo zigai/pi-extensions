@@ -776,6 +776,55 @@ test("chains previous native compaction into the next remote v2 request", async 
     ]);
 });
 
+test("refuses incompatible models when creating or chaining native compaction", async () => {
+    for (const testCase of [
+        {
+            name: "configured compaction model",
+            event: makeBeforeCompactEvent(),
+            configModel: "gpt-5.5",
+        },
+        {
+            name: "previous legacy checkpoint",
+            event: makeBeforeCompactEvent({
+                branchEntries: [
+                    nativeCompactionEntry({
+                        id: "compact-legacy",
+                        firstKeptEntryId: "entry-old",
+                        model: "gpt-5.5",
+                    }),
+                    messageEntry("entry-tail", "compact-legacy", userMessage("new live tail")),
+                ],
+                firstKeptEntryId: "entry-tail",
+            }),
+            configModel: "current",
+        },
+    ] as const) {
+        let requestCount = 0;
+        const runtime = makeTestRuntime(async () => {
+            requestCount += 1;
+            return new Response("unexpected request", { status: 500 });
+        });
+
+        const result = await handleCodexNativeCompaction(
+            testCase.event,
+            makeNativeCompactionContext({ modelId: "gpt-5.6-sol" }),
+            {
+                ...DEFAULT_CODEX_CORE_CONFIG,
+                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+                openai: {
+                    ...DEFAULT_CODEX_CORE_CONFIG.openai,
+                    compactionModel: testCase.configModel,
+                },
+            },
+            makeCompactionApi(),
+            runtime,
+        );
+
+        assert.equal(result, undefined, testCase.name);
+        assert.equal(requestCount, 0, testCase.name);
+    }
+});
+
 test("uses Pi's active summary boundary instead of superseded raw history", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
@@ -1695,6 +1744,44 @@ test("rejects native compaction replay across incompatible model families", asyn
             name: "CodexNativeCompactionIncompatible",
             message:
                 "Codex native compaction checkpoint from gpt-5.6-sol is incompatible with gpt-5.4-mini. Start a new session or compact again with the active model.",
+        },
+    );
+});
+
+test("rejects incompatible legacy checkpoints using their recorded model", async () => {
+    const ctx = makeCompactionContext({
+        branchEntries: [
+            messageEntry("pre", null, userMessage("pre kept")),
+            nativeCompactionEntry({
+                id: "compact",
+                parentId: "pre",
+                firstKeptEntryId: "pre",
+                model: "gpt-5.5",
+            }),
+            messageEntry("tail", "compact", userMessage("post tail")),
+        ],
+    });
+
+    await assert.rejects(
+        rewriteProviderRequestWithNativeCompaction(
+            {
+                model: "gpt-5.6-luna",
+                input: [
+                    {
+                        role: "user",
+                        content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
+                    },
+                    { role: "user", content: [{ type: "input_text", text: "pre kept" }] },
+                ],
+            },
+            ctx,
+            DEFAULT_CODEX_CORE_CONFIG,
+            makeCompactionApi(),
+        ),
+        {
+            name: "CodexNativeCompactionIncompatible",
+            message:
+                "Codex native compaction checkpoint from gpt-5.5 is incompatible with gpt-5.6-luna. Start a new session or compact again with the active model.",
         },
     );
 });

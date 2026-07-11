@@ -113,6 +113,23 @@ export async function handleCodexNativeCompaction(
         event.branchEntries,
         match,
     );
+    const incompatibleActiveModel = nativeCompactionCompatibilityFailure(
+        compactionModel,
+        requestProfile?.compHash,
+        runtime.value.model,
+    );
+    const incompatibleCheckpoint = latestNativeCompaction
+        ? nativeCompactionCompatibilityFailure(
+              latestNativeCompaction.entry.details.model,
+              resolvedNativeCompactionHash(latestNativeCompaction.entry.details),
+              compactionModel,
+          )
+        : undefined;
+    const incompatibility = incompatibleActiveModel ?? incompatibleCheckpoint;
+    if (incompatibility) {
+        notifyCompactionFallback(ctx, incompatibility.message);
+        return undefined;
+    }
     const sessionId = ctx.sessionManager.getSessionId();
     const previousWindowId = latestNativeCompaction?.entry.details.windowId;
     const transportMetadata = buildRemoteCompactionTransportMetadata({
@@ -308,22 +325,37 @@ function assertNativeCompactionCompatibility(
     details: NativeCompactionDetails,
     requestModel: string,
 ): void {
+    const failure = nativeCompactionCompatibilityFailure(
+        details.model,
+        resolvedNativeCompactionHash(details),
+        requestModel,
+    );
+    if (failure) throw codexFailureToError(failure);
+}
+
+function resolvedNativeCompactionHash(details: NativeCompactionDetails): string | undefined {
+    return details.compHash ?? codexModelRequestProfile(details.model)?.compHash;
+}
+
+function nativeCompactionCompatibilityFailure(
+    checkpointModel: string,
+    checkpointCompHash: string | undefined,
+    requestModel: string,
+): CodexNativeCompactionIncompatible | undefined {
     const requestCompHash = codexModelRequestProfile(requestModel)?.compHash;
     if (
-        details.compHash === undefined ||
+        checkpointCompHash === undefined ||
         requestCompHash === undefined ||
-        details.compHash === requestCompHash
+        checkpointCompHash === requestCompHash
     ) {
-        return;
+        return undefined;
     }
-    throw codexFailureToError(
-        new CodexNativeCompactionIncompatible({
-            operation: "nativeCompaction",
-            checkpointModel: details.model,
-            requestModel,
-            message: `Codex native compaction checkpoint from ${details.model} is incompatible with ${requestModel}. Start a new session or compact again with the active model.`,
-        }),
-    );
+    return new CodexNativeCompactionIncompatible({
+        operation: "nativeCompaction",
+        checkpointModel,
+        requestModel,
+        message: `Codex native compaction checkpoint from ${checkpointModel} is incompatible with ${requestModel}. Start a new session or compact again with the active model.`,
+    });
 }
 
 export function cancelScheduledCodexAutoCompaction(): void {

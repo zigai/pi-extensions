@@ -750,6 +750,21 @@ async function preflightPatchHunks(
 ): Promise<PlannedPatchMutation[]> {
     const plan: PlannedPatchMutation[] = [];
     const virtualFiles = new Map<string, FileSnapshot>();
+    const lexicalPathByPhysicalPath = new Map<string, string>();
+
+    const registerPath = async (absolutePath: string): Promise<void> => {
+        const physicalPath = normalize(
+            await resolvePhysicalPath(fileSystem, absolutePath, new Set<string>()),
+        );
+        const existingLexicalPath = lexicalPathByPhysicalPath.get(physicalPath);
+        if (existingLexicalPath !== undefined && existingLexicalPath !== absolutePath) {
+            throw new ApplyPatchError(
+                "compute",
+                `Patch paths ${existingLexicalPath} and ${absolutePath} resolve to the same filesystem target`,
+            );
+        }
+        lexicalPathByPhysicalPath.set(physicalPath, absolutePath);
+    };
 
     const snapshot = async (absolutePath: string): Promise<FileSnapshot> => {
         const existing = virtualFiles.get(absolutePath);
@@ -762,6 +777,7 @@ async function preflightPatchHunks(
     for (const hunk of hunks) {
         throwIfAborted(signal);
         const absolutePath = await authorizePatchPath(root, hunk.path, fileSystem);
+        await registerPath(absolutePath);
         const before = await snapshot(absolutePath);
 
         if (hunk.type === "add") {
@@ -801,6 +817,7 @@ async function preflightPatchHunks(
         if (absoluteMovePath === absolutePath) {
             throw new ApplyPatchError("compute", `Cannot move ${absolutePath} onto the same path`);
         }
+        if (absoluteMovePath !== undefined) await registerPath(absoluteMovePath);
         const moveBefore =
             absoluteMovePath === undefined ? undefined : await snapshot(absoluteMovePath);
         plan.push({
