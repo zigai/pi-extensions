@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { zstdDecompressSync } from "node:zlib";
 import { test } from "vitest";
 import {
     type ExtensionAPI,
@@ -59,7 +60,7 @@ test("creates native compaction using remote compaction v2", async () => {
     let requestHeaders = new Headers();
     const runtime = makeTestRuntime(async (input, init) => {
         requestUrl = String(input);
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         requestHeaders = new Headers(init?.headers);
         requestAccountId = requestHeaders.get("ChatGPT-Account-ID");
         const body = [
@@ -86,6 +87,8 @@ test("creates native compaction using remote compaction v2", async () => {
 
     assert.equal(requestUrl, "https://chatgpt.com/backend-api/codex/responses");
     assert.equal(requestAccountId, "account");
+    assert.equal(requestHeaders.get("accept"), "text/event-stream");
+    assert.equal(requestHeaders.get("content-encoding"), "zstd");
     assert.equal(requestHeaders.get("x-codex-beta-features"), "remote_compaction_v2");
     assert.equal(requestHeaders.has("version"), false);
     assert.equal(requestHeaders.get("x-codex-window-id"), "00000000-0000-7000-8000-000000000001");
@@ -182,7 +185,7 @@ test("cancels an invalid retained-context boundary", async () => {
 test("removes response item ids from remote compaction history", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         return new Response(
             [
                 "event: response.output_item.done",
@@ -241,7 +244,7 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
     let responsesLiteHeader: string | null = null;
     let turnMetadataHeader: string | null = null;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         const headers = new Headers(init?.headers);
         responsesLiteHeader = headers.get(CODEX_RESPONSES_LITE_HEADER);
         turnMetadataHeader = headers.get("x-codex-turn-metadata");
@@ -395,8 +398,15 @@ test("reports top-level Codex compatibility error details", async () => {
 
 test("retries transient remote compaction failures", async () => {
     let attempts = 0;
-    const runtime = makeTestRuntime(async () => {
+    const requestBodies: BodyInit[] = [];
+    const decodedRequests: unknown[] = [];
+    const requestHeaders: Headers[] = [];
+    const runtime = makeTestRuntime(async (_input, init) => {
         attempts += 1;
+        assert.ok(init?.body);
+        requestBodies.push(init.body);
+        decodedRequests.push(decodeRequestBody(init));
+        requestHeaders.push(new Headers(init.headers));
         if (attempts === 1) return new Response("temporary", { status: 500 });
         return new Response(
             [
@@ -419,8 +429,12 @@ test("retries transient remote compaction failures", async () => {
         fast: false,
     });
 
+    const sourceHeaders = new Headers({
+        "content-type": "application/json",
+        "x-existing-header": "preserved",
+    });
     const result = await executeRemoteCompactionV2(
-        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        { responsesUrl: "https://example.test/responses", headers: sourceHeaders },
         request,
         new AbortController().signal,
         runtime,
@@ -428,6 +442,17 @@ test("retries transient remote compaction failures", async () => {
 
     assert.ok(result.isOk());
     assert.equal(attempts, 2);
+    assert.equal(requestBodies.length, 2);
+    assert.equal(requestBodies.at(0), requestBodies.at(1));
+    assert.deepEqual(decodedRequests, [request, request]);
+    for (const headers of requestHeaders) {
+        assert.equal(headers.get("accept"), "text/event-stream");
+        assert.equal(headers.get("content-encoding"), "zstd");
+        assert.equal(headers.get("content-type"), "application/json");
+        assert.equal(headers.get("x-existing-header"), "preserved");
+    }
+    assert.equal(sourceHeaders.get("accept"), null);
+    assert.equal(sourceHeaders.get("content-encoding"), null);
     assert.equal(result.value.compactionOutput.encrypted_content, "retried");
 });
 
@@ -703,7 +728,7 @@ test("cancels remote compaction streams with oversized pending SSE events", asyn
 test("chains previous native compaction into the next remote v2 request", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         const body = [
             "event: response.output_item.done",
             'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-new"}}',
@@ -752,7 +777,7 @@ test("chains previous native compaction into the next remote v2 request", async 
 test("uses Pi's active summary boundary instead of superseded raw history", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         return new Response(
             [
                 "event: response.output_item.done",
@@ -808,7 +833,7 @@ test("uses Pi's active summary boundary instead of superseded raw history", asyn
 test("native compaction inserts synthetic output for missing tool results", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         const body = [
             "event: response.output_item.done",
             'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-missing-tool-result"}}',
@@ -877,7 +902,7 @@ test("native compaction inserts synthetic output for missing tool results", asyn
 test("falls back when a previous native anchor plus semantic input cannot fit", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         const body = [
             "event: response.output_item.done",
             'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-after-trim"}}',
@@ -918,7 +943,7 @@ test("falls back when a previous native anchor plus semantic input cannot fit", 
 test("shrinks oversized tool outputs before remote v2 compaction", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         const body = [
             "event: response.output_item.done",
             'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed"}}',
@@ -982,11 +1007,11 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
 });
 
 test("rewrites multiple oversized tool outputs before serializing remote v2 compaction", async () => {
-    let requestBodyText = "";
+    let requestBody: unknown;
     const firstHugeOutput = `first huge output ${"a ".repeat(3_000)}`;
     const secondHugeOutput = `second huge output ${"b ".repeat(3_000)}`;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBodyText = String(init?.body);
+        requestBody = decodeRequestBody(init);
         const body = [
             "event: response.output_item.done",
             'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-multi-tool"}}',
@@ -1051,9 +1076,10 @@ test("rewrites multiple oversized tool outputs before serializing remote v2 comp
 
     assert.ok(result?.compaction);
     assert.equal(result.compaction.details.requestMeta?.rewrittenToolOutputs, 2);
+    const requestBodyText = JSON.stringify(requestBody);
     assert.doesNotMatch(requestBodyText, /first huge output/);
     assert.doesNotMatch(requestBodyText, /second huge output/);
-    const requestInput = responseInput(JSON.parse(requestBodyText) as unknown);
+    const requestInput = responseInput(requestBody);
     const outputItems = requestInput.filter(
         (item) => isRecord(item) && item.type === "function_call_output",
     );
@@ -1067,7 +1093,7 @@ test("rewrites multiple oversized tool outputs before serializing remote v2 comp
 test("falls back instead of trimming oversized semantic input", async () => {
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = decodeRequestBody(init);
         const body = [
             "event: response.output_item.done",
             'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-trimmed"}}',
@@ -2140,6 +2166,17 @@ function makeCompactionContext(
     };
     // SAFETY: This test exercises a function that only reads model, UI notification, and sessionManager fields.
     return ctx as unknown as ExtensionContext;
+}
+
+function decodeRequestBody(init: RequestInit | undefined): unknown {
+    const body = init?.body;
+    assert.ok(typeof body === "string" || body instanceof Uint8Array);
+    const bytes = typeof body === "string" ? Buffer.from(body) : Buffer.from(body);
+    const contentEncoding = new Headers(init?.headers).get("content-encoding");
+    assert.ok(contentEncoding === null || contentEncoding === "zstd");
+    const serialized =
+        contentEncoding === "zstd" ? zstdDecompressSync(bytes).toString() : bytes.toString();
+    return JSON.parse(serialized) as unknown;
 }
 
 function responseInput(value: unknown): unknown[] {
