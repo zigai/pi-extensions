@@ -224,30 +224,40 @@ describe("apply_patch renderer", () => {
         expect(result).toEqual([]);
     });
 
-    it("renders failed applications with the Codex failure title", () => {
+    it("renders failed applications without claiming the attempted patch succeeded", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",
         });
-        const lines = renderer
+        const context = {
+            ...renderContext,
+            args: { patch: samplePatch },
+            isError: true,
+        };
+        const callLines = renderer
+            .renderCall({ patch: samplePatch }, plainTheme, context)
+            .render(80);
+        const resultLines = renderer
             .renderResult(
                 { content: [{ type: "text", text: "Invalid patch: missing header" }] },
                 { expanded: false, isPartial: false },
                 plainTheme,
-                { ...renderContext, args: { patch: "bad" }, isError: true },
+                context,
             )
             .render(80);
-        const rendered = lines.join("\n");
+        const rendered = [...callLines, ...resultLines].join("\n");
 
-        expect(lines[0]?.trimEnd()).toBe("• Failed to patch");
+        expect(callLines[0]?.trimEnd()).toBe("• Patch README.md (+1 -1)");
+        expect(resultLines[0]?.trimEnd()).toBe("• Failed to patch");
+        expect(rendered).not.toContain("Patched");
         expect(rendered).toContain("Invalid patch: missing header");
-        expectLinesWithinWidth(lines, 80);
+        expectLinesWithinWidth([...callLines, ...resultLines], 80);
     });
 
-    it("shows the latest file and diff tail while patch arguments stream", () => {
+    it("shows the current file diff tail while patch arguments stream", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",
         });
-        const partialPatch = `${samplePatch.replace("*** End Patch", "")}\n${"+extra\n".repeat(1_000)}`;
+        const partialPatch = `*** Begin Patch\n*** Add File: src/new.ts\n${"+extra\n".repeat(1_000)}`;
         const lines = renderer
             .renderCall({ patch: partialPatch }, plainTheme, {
                 ...renderContext,
@@ -257,12 +267,12 @@ describe("apply_patch renderer", () => {
             .render(100);
         const rendered = lines.join("\n");
 
-        expect(rendered).toMatch(/• Patching src\/new\.ts \(\+1002\)/u);
+        expect(rendered).toContain("• Patching src/new.ts");
+        expect(rendered).not.toContain("(+1000)");
         expect(lines).toHaveLength(7);
-        expect(rendered).toContain("997 +extra");
-        expect(rendered).toContain("1002 +extra");
+        expect(rendered).toContain("995 +extra");
+        expect(rendered).toContain("1000 +extra");
         expect(rendered).not.toContain("earlier patch lines");
-        expect(rendered).not.toContain("README.md");
         expectLinesWithinWidth(lines, 100);
     });
 
@@ -554,7 +564,7 @@ describe("apply_patch renderer", () => {
         }
     });
 
-    it("incrementally updates one component with newly streamed patch lines", () => {
+    it("replays bounded newly streamed patch lines without reusing components", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",
         });
@@ -575,9 +585,10 @@ describe("apply_patch renderer", () => {
         }
 
         const rendered = lastComponent?.render(120).join("\n") ?? "";
-        expect(lastComponent).toBe(firstComponent);
+        expect(lastComponent).not.toBe(firstComponent);
         expect(lastComponent?.render(120)).toHaveLength(7);
-        expect(rendered).toMatch(/• Patching src\/generated\.ts \(\+200\)/u);
+        expect(rendered).toContain("• Patching src/generated.ts");
+        expect(rendered).not.toContain("(+200)");
         expect(rendered).toContain("export const value195 = 195;");
         expect(rendered).toContain("export const value200 = 200;");
         expect(rendered).not.toContain("export const value1 = 1;");
@@ -606,7 +617,7 @@ describe("apply_patch renderer", () => {
         expect(second).not.toBe(first);
     });
 
-    it("keeps a constant seven-row stream across file boundaries", () => {
+    it("keeps coherent bounded frames across partial file boundaries", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",
         });
@@ -621,6 +632,18 @@ describe("apply_patch renderer", () => {
             argsComplete: false,
             isPartial: true,
         });
+        const firstFrame = firstComponent.render(120);
+        const partialHeaderComponent = renderer.renderCall(
+            { patch: `${firstPatch}*** Add File: sec` },
+            plainTheme,
+            {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+                lastComponent: firstComponent,
+            },
+        );
+        const partialHeaderFrame = partialHeaderComponent.render(120);
         const secondHeaderPatch = `${firstPatch}*** Add File: second.ts
 `;
         const secondHeaderComponent = renderer.renderCall(
@@ -630,9 +653,10 @@ describe("apply_patch renderer", () => {
                 ...renderContext,
                 argsComplete: false,
                 isPartial: true,
-                lastComponent: firstComponent,
+                lastComponent: partialHeaderComponent,
             },
         );
+        const secondHeaderFrame = secondHeaderComponent.render(120);
         const secondLineComponent = renderer.renderCall(
             { patch: `${secondHeaderPatch}+export const second = 2;` },
             plainTheme,
@@ -643,14 +667,23 @@ describe("apply_patch renderer", () => {
                 lastComponent: secondHeaderComponent,
             },
         );
+        const secondLineFrame = secondLineComponent.render(120);
 
-        expect(secondHeaderComponent).toBe(firstComponent);
-        expect(secondLineComponent).toBe(firstComponent);
-        expect(firstComponent.render(120)).toHaveLength(7);
-        expect(secondHeaderComponent.render(120)).toHaveLength(7);
-        expect(secondLineComponent.render(120)).toHaveLength(7);
-        expect(secondLineComponent.render(120).join("\n")).toContain("second.ts (+1)");
-        expect(secondLineComponent.render(120).join("\n")).not.toContain("first.ts");
+        expect(partialHeaderComponent).not.toBe(firstComponent);
+        expect(secondHeaderComponent).not.toBe(firstComponent);
+        expect(secondLineComponent).not.toBe(firstComponent);
+        expect(firstFrame.length).toBeLessThanOrEqual(7);
+        expect(partialHeaderFrame.length).toBeLessThanOrEqual(7);
+        expect(secondHeaderFrame.length).toBeLessThanOrEqual(7);
+        expect(secondLineFrame.length).toBeLessThanOrEqual(7);
+        expect(partialHeaderFrame.join("\n")).toContain("Patching first.ts");
+        expect(partialHeaderFrame.join("\n")).not.toContain("Patch sec");
+        expect(secondHeaderFrame.join("\n")).toContain("Patching first.ts");
+        expect(secondLineFrame.join("\n")).toContain("Patching first.ts");
+        expect(secondLineFrame.join("\n")).toContain("export const first1 = 1;");
+        expect(secondLineFrame.join("\n")).not.toContain("second.ts");
+        expect(secondLineFrame.join("\n")).not.toContain("(+1)");
+        expect(secondLineFrame.at(-1)?.trim().length).toBeGreaterThan(0);
     });
 
     it("resets the live patch preview when partial arguments are rewritten", () => {
@@ -674,8 +707,9 @@ describe("apply_patch renderer", () => {
         });
         const rendered = secondComponent.render(100).join("\n");
 
-        expect(secondComponent).toBe(firstComponent);
-        expect(rendered).toContain("src/second.ts (+1)");
+        expect(secondComponent).not.toBe(firstComponent);
+        expect(rendered).toContain("Patching src/second.ts");
+        expect(rendered).not.toContain("(+1)");
         expect(rendered).toContain("export const second = true;");
         expect(rendered).not.toContain("src/first.ts");
         expect(rendered).not.toContain("export const first = true;");
@@ -699,7 +733,8 @@ describe("apply_patch renderer", () => {
             lastComponent: firstComponent,
         });
 
-        expect(secondComponent.render(100).join("\n")).toContain("src/generated.ts (+1)");
+        expect(secondComponent.render(100).join("\n")).toContain("Patching src/generated.ts");
+        expect(secondComponent.render(100).join("\n")).not.toContain("(+1)");
     });
 
     it("updates the visible patch line before its newline arrives", () => {

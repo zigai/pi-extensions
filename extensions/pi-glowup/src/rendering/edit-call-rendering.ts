@@ -5,10 +5,8 @@ import {
     formatPathTarget,
     makeComponent,
     renderCodexCall,
-    renderCodexDiff,
-    MUTATION_DIFF_PREVIEW_ROWS,
+    renderCodexOutput,
     type CodexRenderTheme,
-    type DiffSection,
 } from "./core.ts";
 import { isActiveToolCall, toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
 
@@ -29,8 +27,7 @@ type TextLineWindow = {
 
 const MAX_PARTIAL_EDIT_SCAN_CHARS = 16 * 1024;
 const MAX_PARTIAL_EDIT_LINE_CHARS = 2_000;
-const PARTIAL_EDIT_OLD_LINES = 3;
-const PARTIAL_EDIT_NEW_LINES = 3;
+const PARTIAL_EDIT_NEW_LINES = 6;
 const MAX_EDIT_PREIMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_EDIT_LINE_NUMBER_CALLS = 100;
 
@@ -207,26 +204,6 @@ function physicalLines(text: string): string[] {
     return lines.length === 0 ? [""] : lines;
 }
 
-function physicalLineCount(text: string): number {
-    const normalized = text.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
-    if (normalized.length === 0) return 1;
-    let count = normalized.endsWith("\n") ? 0 : 1;
-    for (let index = 0; index < normalized.length; index += 1) {
-        if (normalized.charCodeAt(index) === 10) count += 1;
-    }
-    return Math.max(1, count);
-}
-
-function headLineWindow(text: string, maxLines: number): TextLineWindow {
-    const bounded = text.slice(0, MAX_PARTIAL_EDIT_SCAN_CHARS);
-    const lines = physicalLines(bounded);
-    return {
-        lines: lines.slice(0, maxLines),
-        omittedBefore: false,
-        omittedAfter: text.length > bounded.length || lines.length > maxLines,
-    };
-}
-
 function tailLineWindow(text: string, maxLines: number): TextLineWindow {
     const start = Math.max(0, text.length - MAX_PARTIAL_EDIT_SCAN_CHARS);
     const lines = physicalLines(text.slice(start));
@@ -237,41 +214,19 @@ function tailLineWindow(text: string, maxLines: number): TextLineWindow {
     };
 }
 
-function boundedEditLine(line: string, edge: "head" | "tail"): string {
+function boundedEditLine(line: string): string {
     if (line.length <= MAX_PARTIAL_EDIT_LINE_CHARS) {
         return line;
-    }
-    if (edge === "head") {
-        return `${line.slice(0, MAX_PARTIAL_EDIT_LINE_CHARS - 1)}…`;
     }
     return `…${line.slice(-(MAX_PARTIAL_EDIT_LINE_CHARS - 1))}`;
 }
 
-function streamingEditDiffSection(
-    path: string | undefined,
-    pair: EditTextPair,
-    startLine: number,
-): DiffSection {
-    const oldText = headLineWindow(pair.oldText, PARTIAL_EDIT_OLD_LINES);
+function streamingReplacementDraft(pair: EditTextPair): string {
     const newText = tailLineWindow(pair.newText, PARTIAL_EDIT_NEW_LINES);
-    const removedLines = oldText.lines.map(
-        (line, index) => `-${startLine + index} ${boundedEditLine(line, "head")}`,
-    );
-    const addedStartLine = startLine + physicalLineCount(pair.newText) - newText.lines.length;
-    const addedLines = newText.lines.map(
-        (line, index) => `+${addedStartLine + index} ${boundedEditLine(line, "tail")}`,
-    );
-    return {
-        ...(path === undefined ? {} : { path }),
-        lines: [
-            ...removedLines,
-            ...(oldText.omittedAfter ? ["  … removed text truncated"] : []),
-            ...(newText.omittedBefore ? ["  … earlier replacement lines omitted"] : []),
-            ...addedLines,
-        ],
-        added: addedLines.length,
-        removed: removedLines.length,
-    };
+    return [
+        ...(newText.omittedBefore ? ["… earlier replacement lines omitted"] : []),
+        ...newText.lines.map(boundedEditLine),
+    ].join("\n");
 }
 
 function formatEditCount(validEdits: number): string {
@@ -357,10 +312,14 @@ export function renderStreamingEditCallPreview(
         }),
         body: formatPathTarget(theme, path),
     });
-    const section = streamingEditDiffSection(path, pair, context.lineNumberStart);
-    const diff = renderCodexDiff(theme, [section], context.expanded, {
-        collapsedLineBudget: MUTATION_DIFF_PREVIEW_ROWS,
-        maxWrappedRows: 1,
+    const draft = renderCodexOutput(theme, streamingReplacementDraft(pair), {
+        expanded: context.expanded,
+        mode: "head",
+        maxPreviewLines: PARTIAL_EDIT_NEW_LINES + 1,
+        prefixFirst: theme.fg("dim", "  │ "),
+        prefixRest: theme.fg("dim", "  │ "),
+        dimContent: false,
+        ...(path === undefined ? {} : { syntax: { path } }),
     });
-    return makeComponent((width) => [...header.render(width), ...diff.render(width)]);
+    return makeComponent((width) => [...header.render(width), ...draft.render(width)]);
 }

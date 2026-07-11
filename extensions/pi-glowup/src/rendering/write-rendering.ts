@@ -26,7 +26,6 @@ type WriteCallContext = {
     readonly lastComponent?: Component | undefined;
     readonly labelMode?: ToolLabelMode;
     readonly mutationLabelColumnWidth?: number;
-    readonly mutationStatDigitWidth?: number;
     readonly movingViewport?: boolean;
     readonly invalidate?: () => void;
 };
@@ -44,7 +43,6 @@ type PartialWritePreviewUpdate = {
     readonly content: string;
     readonly labelMode: ToolLabelMode;
     readonly mutationLabelColumnWidth: number | undefined;
-    readonly mutationStatDigitWidth: number | undefined;
     readonly movingViewport: boolean;
     readonly expanded: boolean;
 };
@@ -73,10 +71,6 @@ function countContentLines(content: string): number {
         }
     }
     return lineCount;
-}
-
-function digitCount(value: number): number {
-    return String(Math.abs(Math.trunc(value))).length;
 }
 
 function hasNonWhitespaceText(text: string): boolean {
@@ -321,7 +315,6 @@ class PartialWriteCallPreviewComponent implements Component {
     private path = "";
     private labelMode: ToolLabelMode = "static";
     private mutationLabelColumnWidth: number | undefined;
-    private mutationStatDigitWidth: number | undefined;
     private movingViewport = true;
     private expanded = false;
     private expandedContent = "";
@@ -343,7 +336,6 @@ class PartialWriteCallPreviewComponent implements Component {
         this.path = update.path;
         this.labelMode = update.labelMode;
         this.mutationLabelColumnWidth = update.mutationLabelColumnWidth;
-        this.mutationStatDigitWidth = update.mutationStatDigitWidth;
         this.movingViewport = update.movingViewport;
         this.expanded = update.expanded;
         this.expandedContent = update.expanded ? boundedWriteContentPreview(update.content) : "";
@@ -357,10 +349,6 @@ class PartialWriteCallPreviewComponent implements Component {
         }
 
         const added = this.preview.lineCount();
-        const statDigitWidth =
-            this.mutationStatDigitWidth === undefined
-                ? undefined
-                : Math.max(this.mutationStatDigitWidth, digitCount(added));
         const previewText = this.expanded
             ? this.expandedContent
             : this.preview.previewText({ movingViewport: this.movingViewport });
@@ -401,7 +389,6 @@ class PartialWriteCallPreviewComponent implements Component {
                 ...(this.mutationLabelColumnWidth === undefined
                     ? {}
                     : { labelColumnWidth: this.mutationLabelColumnWidth }),
-                ...(statDigitWidth === undefined ? {} : { statDigitWidth }),
                 body,
                 state: "running",
             },
@@ -463,9 +450,12 @@ export function renderWriteCallPreview(
         active: "Writing",
         completed: "Wrote",
     });
+    if (content === undefined && isActiveToolCall(context)) {
+        return emptyComponent();
+    }
     if (content === undefined || context.isError) {
         return renderCodexCall(theme, {
-            state: context.isError ? "error" : isActiveToolCall(context) ? "running" : "success",
+            state: context.isError ? "error" : "success",
             statusText,
             body: formatPathTarget(theme, path),
         });
@@ -480,7 +470,6 @@ export function renderWriteCallPreview(
             content,
             labelMode,
             mutationLabelColumnWidth: context.mutationLabelColumnWidth,
-            mutationStatDigitWidth: context.mutationStatDigitWidth,
             movingViewport: context.movingViewport !== false,
             expanded: context.expanded,
         };
@@ -495,10 +484,6 @@ export function renderWriteCallPreview(
     }
 
     const added = countContentLines(content);
-    const statDigitWidth =
-        context.mutationStatDigitWidth === undefined
-            ? undefined
-            : Math.max(context.mutationStatDigitWidth, digitCount(added));
     const boundedContent = boundedWriteContentPreview(content);
     const body =
         boundedContent.length === 0
@@ -529,7 +514,6 @@ export function renderWriteCallPreview(
             ...(context.mutationLabelColumnWidth === undefined
                 ? {}
                 : { labelColumnWidth: context.mutationLabelColumnWidth }),
-            ...(statDigitWidth === undefined ? {} : { statDigitWidth }),
             body,
             state: "success",
         },

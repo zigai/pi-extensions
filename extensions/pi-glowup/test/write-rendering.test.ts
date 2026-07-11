@@ -44,6 +44,17 @@ describe("write rendering", () => {
         expect(rendered).toContain("export const value = 1;");
     });
 
+    it("defers partial write paths until content starts streaming", () => {
+        const component = renderWriteCallPreview({ path: "/tmp/part" }, plainTheme, {
+            isError: false,
+            isPartial: true,
+            argsComplete: false,
+            expanded: false,
+        });
+
+        expect(component.render(100)).toEqual([]);
+    });
+
     it("uses dynamic write labels when enabled", () => {
         const component = renderWriteCallPreview(
             { path: "src/example.ts", content: "export const value = 1;\n" },
@@ -69,7 +80,7 @@ describe("write rendering", () => {
             .render(100)
             .join("\n");
 
-        expect(rendered).toContain("48;2;33;58;43");
+        expect(rendered).toContain("<toolSuccessBg>");
         expect(rendered).not.toContain("<toolErrorBg>");
     });
 
@@ -188,7 +199,7 @@ describe("write rendering", () => {
         expect(rendered).toContain("lines (to expand)");
     });
 
-    it("keeps streaming mutation counters aligned", () => {
+    it("keeps streaming mutation counters compact without internal padding", () => {
         const singleDigit = renderWriteCallPreview(
             { path: "src/generated.ts", content: "one\n" },
             plainTheme,
@@ -197,7 +208,6 @@ describe("write rendering", () => {
                 isPartial: true,
                 expanded: false,
                 labelMode: "lifecycle",
-                mutationStatDigitWidth: 3,
             },
         );
         const tripleDigit = renderWriteCallPreview(
@@ -211,11 +221,12 @@ describe("write rendering", () => {
                 isPartial: true,
                 expanded: false,
                 labelMode: "lifecycle",
-                mutationStatDigitWidth: 3,
             },
         );
+        const singleRendered = singleDigit.render(120).join("\n");
 
-        expect(singleDigit.render(120).join("\n")).toContain("(+  1)");
+        expect(singleRendered).toContain("(+1)");
+        expect(singleRendered).not.toContain("(+  1)");
         expect(tripleDigit.render(120).join("\n")).toContain("(+100)");
     });
 

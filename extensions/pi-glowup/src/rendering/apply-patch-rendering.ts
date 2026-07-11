@@ -726,6 +726,7 @@ class PartialApplyPatchPreview {
     private currentLineTruncated = false;
     private skipLineFeed = false;
     private section: PartialApplyPatchSection | undefined;
+    private lastRenderableSection: PartialApplyPatchSection | undefined;
 
     update(patch: string): void {
         const appendLength = patch.length - this.scannedLength;
@@ -742,13 +743,12 @@ class PartialApplyPatchPreview {
 
     snapshot(): ApplyPatchSection | undefined {
         const currentLine = this.displayCurrentLine();
-        const header = partialPatchSectionHeader(currentLine);
-        if (header !== undefined) {
-            return finalizedPartialSection(makePartialSection(header.kind, header.path));
+        if (partialPatchSectionHeader(currentLine) !== undefined) {
+            return this.lastRenderableSnapshot();
         }
 
         if (this.section === undefined) {
-            return undefined;
+            return this.lastRenderableSnapshot();
         }
 
         const section = copyPartialSection(this.section);
@@ -757,7 +757,24 @@ class PartialApplyPatchPreview {
         } else if (currentLine.length > 0) {
             applyPartialPatchBodyLine(section, currentLine);
         }
+        if (section.lines.length === 0) {
+            return this.lastRenderableSnapshot();
+        }
+        const stable = this.stableSnapshot();
+        if (stable !== undefined && stable.path !== displayPath(section)) {
+            return stable;
+        }
         return finalizedPartialSection(section);
+    }
+
+    stableSnapshot(): ApplyPatchSection | undefined {
+        return this.lastRenderableSection === undefined
+            ? undefined
+            : finalizedPartialSection(this.lastRenderableSection);
+    }
+
+    private lastRenderableSnapshot(): ApplyPatchSection | undefined {
+        return this.stableSnapshot();
     }
 
     private canAppend(patch: string): boolean {
@@ -778,6 +795,7 @@ class PartialApplyPatchPreview {
         this.currentLineTruncated = false;
         this.skipLineFeed = false;
         this.section = undefined;
+        this.lastRenderableSection = undefined;
     }
 
     private consume(patch: string, start: number): void {
@@ -816,6 +834,9 @@ class PartialApplyPatchPreview {
     private commitLine(line: string): void {
         const header = partialPatchSectionHeader(line);
         if (header !== undefined) {
+            if (this.section !== undefined && this.section.lines.length > 0) {
+                this.lastRenderableSection = copyPartialSection(this.section);
+            }
             this.section = makePartialSection(header.kind, header.path);
             return;
         }
@@ -830,6 +851,16 @@ class PartialApplyPatchPreview {
         }
 
         applyPartialPatchBodyLine(this.section, line);
+        const stablePath =
+            this.lastRenderableSection === undefined
+                ? undefined
+                : displayPath(this.lastRenderableSection);
+        if (
+            this.section.lines.length > 0 &&
+            (stablePath === undefined || stablePath === displayPath(this.section))
+        ) {
+            this.lastRenderableSection = copyPartialSection(this.section);
+        }
     }
 }
 
@@ -857,10 +888,6 @@ class PartialApplyPatchCallPreviewComponent implements Component {
         this.update(update);
     }
 
-    belongsTo(toolCallId: string): boolean {
-        return this.toolCallId === toolCallId;
-    }
-
     update(update: PartialApplyPatchPreviewUpdate): void {
         this.theme = update.theme;
         this.expanded = update.expanded;
@@ -875,15 +902,10 @@ class PartialApplyPatchCallPreviewComponent implements Component {
             return this.cachedLines;
         }
 
-        const snapshot = this.preview.snapshot();
-        const hydratedSection =
-            snapshot === undefined
-                ? undefined
-                : hydrateUpdateLineNumbers({ sections: [snapshot] }, this.patch, this.toolCallId)
-                      .sections[0];
+        const hydratedSection = this.hydrate(this.preview.snapshot());
         const section =
             hydratedSection?.kind === "update" && hasUnnumberedDiffRows(hydratedSection)
-                ? { ...hydratedSection, lines: [] }
+                ? this.coherentStableSection()
                 : hydratedSection;
         const component =
             section === undefined
@@ -920,6 +942,18 @@ class PartialApplyPatchCallPreviewComponent implements Component {
         this.cachedWidth = undefined;
         this.cachedLines = undefined;
     }
+
+    private hydrate(section: ApplyPatchSection | undefined): ApplyPatchSection | undefined {
+        return section === undefined
+            ? undefined
+            : hydrateUpdateLineNumbers({ sections: [section] }, this.patch, this.toolCallId)
+                  .sections[0];
+    }
+
+    private coherentStableSection(): ApplyPatchSection | undefined {
+        const stable = this.hydrate(this.preview.stableSnapshot());
+        return stable?.kind === "update" && hasUnnumberedDiffRows(stable) ? undefined : stable;
+    }
 }
 
 function renderPartialPatchViewport(header: Component, body: Component): Component {
@@ -931,11 +965,7 @@ function renderPartialPatchViewport(header: Component, body: Component): Compone
                 ? firstHeaderLine
                 : truncateToWidth(`${firstHeaderLine}…`, width, "…");
         const bodyLines = body.render(width).slice(0, MAX_PARTIAL_PATCH_PREVIEW_LINES);
-        const padding = Array.from(
-            { length: MAX_PARTIAL_PATCH_PREVIEW_LINES - bodyLines.length },
-            () => "",
-        );
-        return [boundedHeader, ...bodyLines, ...padding];
+        return [boundedHeader, ...bodyLines];
     });
 }
 
@@ -965,10 +995,25 @@ function completedSectionDiff(
     });
 }
 
+type PatchCallLifecycleContext = ToolLifecycleContext & {
+    readonly isError?: boolean;
+};
+
+function patchCallLabel(labelMode: ToolLabelMode, context: PatchCallLifecycleContext): string {
+    if (context.isError === true) {
+        return "Patch";
+    }
+    return toolStatusLabel(labelMode, context, {
+        static: "Patch",
+        active: "Patching",
+        completed: "Patched",
+    });
+}
+
 function renderCompletedPatchViewport(
     summary: ApplyPatchSummary,
     theme: CodexRenderTheme,
-    context: ToolLifecycleContext,
+    context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
 ): Component {
     const firstSection = summary.sections[0];
@@ -989,14 +1034,10 @@ function completedPatchSection(
     section: ApplyPatchSection,
     theme: CodexRenderTheme,
     expanded: boolean,
-    context: ToolLifecycleContext,
+    context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
 ): Component {
-    const label = toolStatusLabel(labelMode, context, {
-        static: "Patch",
-        active: "Patching",
-        completed: "Patched",
-    });
+    const label = patchCallLabel(labelMode, context);
     const diff = expanded
         ? section.lines.length === 0
             ? undefined
@@ -1005,7 +1046,7 @@ function completedPatchSection(
     const header =
         section.kind === "delete" && !section.countsKnown
             ? renderCodexCall(theme, {
-                  state: "success",
+                  state: context.isError === true ? "muted" : "success",
                   statusText: label,
                   body: `${formatPathTarget(theme, section.path ?? "file")}${deleteStats(theme, section)}`,
               })
@@ -1017,7 +1058,7 @@ function completedPatchSection(
                       added: section.added,
                       removed: section.removed,
                   },
-                  { state: "success" },
+                  { state: context.isError === true ? "muted" : "success" },
               );
     if (diff === undefined) {
         return header;
@@ -1032,7 +1073,7 @@ function renderStandalonePatchSections(
     sections: readonly ApplyPatchSection[],
     theme: CodexRenderTheme,
     expanded: boolean,
-    context: ToolLifecycleContext,
+    context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
 ): Component {
     const components = sections.map((section) =>
@@ -1050,14 +1091,10 @@ function renderSinglePatchSection(
     section: ApplyPatchSection,
     theme: CodexRenderTheme,
     expanded: boolean,
-    context: ToolLifecycleContext,
+    context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
 ): Component {
-    const label = toolStatusLabel(labelMode, context, {
-        static: "Patch",
-        active: "Patching",
-        completed: "Patched",
-    });
+    const label = patchCallLabel(labelMode, context);
     if (isActiveToolCall(context)) {
         const header =
             section.kind === "delete"
@@ -1071,8 +1108,8 @@ function renderSinglePatchSection(
                       {
                           label,
                           path: section.path ?? "file",
-                          added: section.added,
-                          removed: section.removed,
+                          added: 0,
+                          removed: 0,
                       },
                       { state: "running" },
                   );
@@ -1102,7 +1139,7 @@ function renderSinglePatchSection(
             added: section.added,
             removed: section.removed,
         },
-        { body, state: "success" },
+        { body, state: context.isError === true ? "muted" : "success" },
     );
 }
 
@@ -1110,7 +1147,7 @@ function renderApplyPatchSummary(
     summary: ApplyPatchSummary,
     theme: CodexRenderTheme,
     expanded: boolean,
-    context: ToolLifecycleContext,
+    context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
 ): Component {
     if (!expanded && !isActiveToolCall(context)) {
@@ -1138,11 +1175,7 @@ function renderApplyPatchFallbackCall(
         patch === undefined || context.isPartial || !context.argsComplete ? 0 : lineCount(patch);
     return renderCodexCall(theme, {
         state: isActiveToolCall(context) ? "running" : "muted",
-        statusText: toolStatusLabel(labelMode, context, {
-            static: "Patch",
-            active: "Patching",
-            completed: "Patched",
-        }),
+        statusText: patchCallLabel(labelMode, context),
         body: lines > 0 ? `${lines} patch lines` : "patch",
     });
 }
@@ -1161,13 +1194,6 @@ function renderPartialApplyPatchCall(
         labelMode,
         toolCallId: context.toolCallId,
     };
-    if (
-        context.lastComponent instanceof PartialApplyPatchCallPreviewComponent &&
-        context.lastComponent.belongsTo(context.toolCallId)
-    ) {
-        context.lastComponent.update(update);
-        return context.lastComponent;
-    }
     return new PartialApplyPatchCallPreviewComponent(update);
 }
 

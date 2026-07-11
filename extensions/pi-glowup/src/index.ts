@@ -99,6 +99,7 @@ import {
     rememberRawScriptPreview,
     scheduleFormattedScriptPreview,
 } from "./script-preview/events.ts";
+import { StreamingScriptIdentityStore } from "./script-preview/streaming-identity.ts";
 
 type TextResult = {
     readonly content?: unknown;
@@ -117,13 +118,12 @@ const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
 const MUTATION_LABEL_COLUMN_WIDTH = "Writing".length;
-const MUTATION_STAT_DIGIT_WIDTH = 3;
 const ACTIVE_MUTATION_ALIGNMENT_KEY = "codexLookActiveMutationAlignment";
 const MUTATION_RESULT_RENDERED_KEY = "codexLookMutationResultRendered";
-const ACTIVE_MUTATION_STAT_DIGIT_WIDTH_KEY = "codexLookActiveMutationStatDigitWidth";
 const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-codex-look.extension-loaded");
 const builtInRenderCallCounts: Record<string, number> = {};
 const builtInRenderResultCounts: Record<string, number> = {};
+const streamingScriptIdentities = new StreamingScriptIdentityStore();
 
 function recordBuiltInRender(kind: "call" | "result", toolName: BuiltInToolName): void {
     const counts = kind === "call" ? builtInRenderCallCounts : builtInRenderResultCounts;
@@ -322,34 +322,13 @@ function mutationLabelColumnWidth(
     return undefined;
 }
 
-function mutationStatDigitWidth(context: BuiltInRenderContext): number | undefined {
-    const state = isMutableRenderState(context.state) ? context.state : undefined;
-    if (state === undefined) {
-        return undefined;
-    }
-
-    if (context.isPartial) {
-        state[ACTIVE_MUTATION_STAT_DIGIT_WIDTH_KEY] = MUTATION_STAT_DIGIT_WIDTH;
-        state[MUTATION_RESULT_RENDERED_KEY] = false;
-    }
-
-    if (state[MUTATION_RESULT_RENDERED_KEY] === true) {
-        return undefined;
-    }
-
-    const digitWidth = state[ACTIVE_MUTATION_STAT_DIGIT_WIDTH_KEY];
-    return typeof digitWidth === "number" ? digitWidth : undefined;
-}
-
 function markMutationResultRendered(context: BuiltInRenderContext): void {
     const state = isMutableRenderState(context.state) ? context.state : undefined;
     if (state === undefined) {
         return;
     }
 
-    const hadActiveMutationLayout =
-        state[ACTIVE_MUTATION_ALIGNMENT_KEY] === true ||
-        state[ACTIVE_MUTATION_STAT_DIGIT_WIDTH_KEY] !== undefined;
+    const hadActiveMutationLayout = state[ACTIVE_MUTATION_ALIGNMENT_KEY] === true;
     if (!hadActiveMutationLayout) return;
 
     if (state[MUTATION_RESULT_RENDERED_KEY] !== true) {
@@ -748,21 +727,20 @@ function renderBashCall(
     const state = context.isError ? "error" : context.isPartial ? "running" : "success";
     const command = commandField(args) ?? "";
     if (context.isPartial && scriptPreviews.get(context.toolCallId) === undefined) {
-        return renderScriptCall(
-            theme,
-            {
-                label: "Bash",
-                language: "bash",
-                code: partialBashCommandPreview(command),
-            },
-            {
-                state,
-                expanded: false,
-                maxCodePreviewLines: maxCodePreviewLines(),
-                headerLayout: headerLayout(),
-                invalidate: context.invalidate,
-            },
+        const partialScript = streamingScriptIdentities.resolve(
+            context.toolCallId,
+            partialBashCommandPreview(command),
         );
+        if (partialScript === undefined) {
+            return emptyComponent();
+        }
+        return renderScriptCall(theme, partialScript, {
+            state,
+            expanded: false,
+            maxCodePreviewLines: maxCodePreviewLines(),
+            headerLayout: headerLayout(),
+            invalidate: context.invalidate,
+        });
     }
     const parsedScript = parseScriptInvocation(
         context.expanded ? command : partialBashCommandPreview(command),
@@ -782,7 +760,10 @@ function renderBashCall(
                       code: partialBashCommandPreview(command),
                   },
               ));
-    return renderScriptCall(theme, script, {
+    const stableScript = streamingScriptIdentities.has(context.toolCallId)
+        ? streamingScriptIdentities.lock(context.toolCallId, script)
+        : script;
+    return renderScriptCall(theme, stableScript, {
         state,
         expanded: context.expanded,
         maxCodePreviewLines: maxCodePreviewLines(),
@@ -820,13 +801,11 @@ function renderWriteCall(
 ) {
     registerExplorationBoundary(context.toolCallId);
     const labelColumnWidth = mutationLabelColumnWidth(context, options.labelMode);
-    const statDigitWidth = mutationStatDigitWidth(context);
     return renderWriteCallPreview(normalizedWriteArgs(args), theme, {
         ...context,
         labelMode: options.labelMode,
         movingViewport: options.movingViewport,
         ...(labelColumnWidth === undefined ? {} : { mutationLabelColumnWidth: labelColumnWidth }),
-        ...(statDigitWidth === undefined ? {} : { mutationStatDigitWidth: statDigitWidth }),
     });
 }
 
@@ -867,7 +846,6 @@ function renderEditCall(
 ) {
     registerExplorationBoundary(context.toolCallId);
     const labelColumnWidth = mutationLabelColumnWidth(context, labelMode);
-    const statDigitWidth = mutationStatDigitWidth(context);
     const preview = editPreviews.get(context.toolCallId);
     if (!context.isPartial && preview) {
         return renderMutationCall(
@@ -880,7 +858,6 @@ function renderEditCall(
             }),
             {
                 ...(labelColumnWidth === undefined ? {} : { labelColumnWidth }),
-                ...(statDigitWidth === undefined ? {} : { statDigitWidth }),
                 state: "success",
             },
         );
@@ -902,6 +879,7 @@ function renderEditCall(
         if (streamingPreview !== undefined) {
             return streamingPreview;
         }
+        return emptyComponent();
     }
 
     const summary = summarizeEditCall(normalizedArgs, {
@@ -992,6 +970,7 @@ function clearSessionState(): void {
     nativeDeletePreviews.clear();
     editPreviews.clear();
     scriptPreviews.clear();
+    streamingScriptIdentities.clear();
     explorationGroups.clear();
     clearQueuedDiffHighlights();
 }

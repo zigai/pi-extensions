@@ -168,12 +168,12 @@ describe("edit call rendering", () => {
         const rendered = lines.join("\n");
 
         expect(rendered).toContain("• Editing src/rendering.ts");
-        expect(rendered).toContain("old line 1");
-        expect(rendered).toContain("… +2 lines (to expand)");
+        expect(rendered).toContain("… earlier replacement lines omitted");
         expect(rendered).toContain("new line 30");
-        expect(rendered).not.toMatch(/\+new line 1(?:\s|$)/u);
-        expect(rendered).toContain("20 -old line 1");
-        expect(rendered).toContain("49 +new line 30");
+        expect(rendered).not.toContain("old line 1");
+        expect(rendered).not.toMatch(/\d+ [+-]/u);
+        expect(rendered).not.toContain("(+");
+        expect(rendered).not.toContain("(-");
         for (const line of lines) {
             expect(visibleWidth(line)).toBeLessThanOrEqual(100);
         }
