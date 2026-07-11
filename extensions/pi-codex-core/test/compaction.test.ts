@@ -363,6 +363,36 @@ test("reports bounded redacted remote compaction HTTP error details", async () =
     assert.doesNotMatch(result.error.message, /secret-token/);
 });
 
+test("reports top-level Codex compatibility error details", async () => {
+    const runtime = makeTestRuntime(
+        async () =>
+            new Response(
+                JSON.stringify({
+                    detail: "The model requires a newer version of Codex.",
+                }),
+                { status: 400 },
+            ),
+    );
+    const request = buildRemoteCompactionV2Request({
+        model: "gpt-5.6-sol",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+
+    const result = await executeRemoteCompactionV2(
+        { responsesUrl: "https://example.test/responses", headers: new Headers() },
+        request,
+        new AbortController().signal,
+        runtime,
+    );
+
+    assert.ok(result.isErr());
+    assert.match(result.error.message, /message=The model requires a newer version of Codex/);
+});
+
 test("retries transient remote compaction failures", async () => {
     let attempts = 0;
     const runtime = makeTestRuntime(async () => {

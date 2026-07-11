@@ -339,7 +339,7 @@ async function readSafeHttpErrorDetail(
     const error = nestedError ?? root;
     const type = safeDiagnosticValue(error.type);
     const code = safeDiagnosticValue(error.code);
-    const message = safeDiagnosticValue(error.message, 500);
+    const message = safeDiagnosticValue(error.message ?? error.detail, 500);
     const fields = [
         type ? `type=${type}` : undefined,
         code ? `code=${code}` : undefined,
