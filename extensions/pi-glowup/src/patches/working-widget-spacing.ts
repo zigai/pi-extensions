@@ -89,7 +89,7 @@ export function configureWorkingWidgetSpacingPatch(
         width: number,
     ): string[] {
         if (!nextState.enabled) {
-            return originalRender.call(this, width) as string[];
+            return originalRender.call(this, width);
         }
 
         const lines: string[] = [];
@@ -113,7 +113,7 @@ export function configureWorkingWidgetSpacingPatch(
 
     nextState = {
         enabled: true,
-        originalRender: originalRender as typeof Container.prototype.render,
+        originalRender: originalRender,
         wrapperRender,
     };
     containerPrototype.render = wrapperRender;

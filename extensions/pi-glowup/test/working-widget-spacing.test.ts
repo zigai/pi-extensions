@@ -95,7 +95,7 @@ describe("working widget spacing patch", () => {
             throw new Error("expected Codex-look working-widget wrapper");
         }
         prototype.render = function renderWithLaterWrapper(width: number): string[] {
-            return codexRender.call(this, width) as string[];
+            return codexRender.call(this, width);
         };
         const laterRender = Reflect.get(prototype, "render");
 
