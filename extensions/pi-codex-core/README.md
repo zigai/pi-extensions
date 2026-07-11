@@ -6,7 +6,7 @@ Everything GPT models need to feel at home in Pi.
 
 ### Tools
 
-- `web_run` — Codex-backed web search via the OpenAI Codex search endpoint.
+- `web_run` — Codex-backed web search via the OpenAI Codex search endpoint, with cached, indexed, and live modes.
 - `imagegen` — Codex image generation/editing.
 - `view_image` — native image return for local files.
 - `apply_patch` — optional port of the Codex native `apply_patch` edit tool. If enabled, it replaces Pi's native `edit` tool.
@@ -42,6 +42,7 @@ Use global config at `~/.pi/agent/pi-codex-core/config.json`.
 | ------------------------------ | --------------- | -------------------------------------------------------------------------------------------- |
 | `scope.tools`                  | `"codex"`       | Show Codex tools only for Codex-like models; use `"all"` to expose them for every model.     |
 | `tools.webSearch`              | `true`          | Enable the `web_run` search tool.                                                            |
+| `tools.webSearchMode`          | `"live"`        | Standalone search mode: `"cached"`, `"indexed"`, or `"live"`.                                |
 | `tools.imageGeneration`        | `true`          | Enable the `imagegen` generation/editing tool.                                               |
 | `tools.viewImage`              | `true`          | Enable local image viewing.                                                                  |
 | `tools.viewImageDescriptions`  | `false`         | Add Codex-generated descriptions when viewing images.                                        |
@@ -68,6 +69,7 @@ Use global config at `~/.pi/agent/pi-codex-core/config.json`.
   },
   "tools": {
     "webSearch": true,
+    "webSearchMode": "live",
     "imageGeneration": true,
     "viewImage": true,
     "viewImageDescriptions": false,

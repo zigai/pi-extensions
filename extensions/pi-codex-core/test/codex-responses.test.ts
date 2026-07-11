@@ -7,12 +7,23 @@ import {
     rewriteCodexResponsesPayload,
 } from "../src/codex/responses-compat.ts";
 import { ResponsesLiteRequestPolicy } from "../src/codex/responses-lite-policy.ts";
+import { codexModelRequestProfile } from "../src/codex/models.ts";
 
 test("resolves current Codex model selections", () => {
     assert.equal(resolveCodexRequestModel("current", "gpt-5.5"), "gpt-5.5");
     assert.equal(resolveCodexRequestModel(undefined, "gpt-5.5"), "gpt-5.5");
     assert.equal(resolveCodexRequestModel("", "gpt-5.5"), "gpt-5.5");
     assert.equal(resolveCodexRequestModel("gpt-5.4-mini", "gpt-5.5"), "gpt-5.4-mini");
+});
+
+test("tracks upstream native compaction compatibility families", () => {
+    for (const model of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+        assert.equal(codexModelRequestProfile(model)?.compHash, "3000");
+    }
+    for (const model of ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]) {
+        assert.equal(codexModelRequestProfile(model)?.compHash, "2911");
+    }
+    assert.equal(codexModelRequestProfile("future-model"), undefined);
 });
 
 test("rewrites GPT-5.6 requests to the Responses Lite layout", () => {

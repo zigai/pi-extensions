@@ -93,6 +93,7 @@ export type NativeCompactionDetails = {
     readonly provider: string;
     readonly api: string;
     readonly model: string;
+    readonly compHash?: string | undefined;
     readonly baseUrl: string;
     readonly compactedWindow: readonly ResponsesInputItem[];
     readonly windowNumber: number;

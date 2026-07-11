@@ -279,7 +279,7 @@ async function executeWebRun(
         commands,
         settings: {
             allowed_callers: ["direct"],
-            external_web_access: true,
+            external_web_access: externalWebAccess(config.tools.webSearchMode),
         },
         max_output_tokens: WEB_RUN_MAX_OUTPUT_TOKENS,
     });
@@ -326,6 +326,12 @@ async function executeWebRun(
         );
     }
     return ok({ output });
+}
+
+function externalWebAccess(mode: CodexCoreConfig["tools"]["webSearchMode"]): boolean | "indexed" {
+    if (mode === "cached") return false;
+    if (mode === "indexed") return "indexed";
+    return true;
 }
 
 async function fetchWebRunWithRetries(

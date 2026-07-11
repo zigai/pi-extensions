@@ -13,6 +13,7 @@ import {
     CODEX_COMPACTION_REASONING_LEVELS,
     CODEX_CURRENT_MODEL_SELECTION,
     CODEX_PERSONALITIES,
+    CODEX_WEB_SEARCH_MODES,
     type CodexCoreConfig,
 } from "../config/config.ts";
 import { CODEX_TEXT_MODEL_CHOICES } from "../codex/models.ts";
@@ -292,6 +293,14 @@ function buildItems(
                 "Codex web.run / web_run search tool.",
                 config.tools.webSearch,
             ),
+            {
+                id: "webSearchMode",
+                label: "Web search mode",
+                description:
+                    "Use cached, indexed, or live results for standalone web_run searches.",
+                currentValue: config.tools.webSearchMode,
+                values: [...CODEX_WEB_SEARCH_MODES],
+            },
             toggleItem(
                 "imageGeneration",
                 "Image generation",
@@ -436,6 +445,10 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
     }
     if (id === "webSearch")
         return { ...config, tools: { ...config.tools, webSearch: value === "on" } };
+    if (id === "webSearchMode") {
+        const webSearchMode = CODEX_WEB_SEARCH_MODES.find((mode) => mode === value);
+        return webSearchMode ? { ...config, tools: { ...config.tools, webSearchMode } } : config;
+    }
     if (id === "imageGeneration")
         return { ...config, tools: { ...config.tools, imageGeneration: value === "on" } };
     if (id === "viewImage")

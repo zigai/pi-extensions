@@ -24,6 +24,7 @@ export type CodexPromptMode = "pi" | "codex";
 export type CodexPersonality = "friendly" | "pragmatic" | "none";
 export type CodexToolScope = "codex" | "all";
 export type CodexApplyPatchMode = "off" | "openai" | "all";
+export type CodexWebSearchMode = "cached" | "indexed" | "live";
 export type CodexVerbosity = "low" | "medium" | "high";
 export type CodexCompactionReasoning = string;
 
@@ -31,6 +32,7 @@ export type CodexCompactionReasoning = string;
 export const CODEX_CURRENT_MODEL_SELECTION = "current";
 export const CODEX_TOOL_SCOPES: readonly CodexToolScope[] = ["codex", "all"];
 export const CODEX_APPLY_PATCH_MODES: readonly CodexApplyPatchMode[] = ["off", "openai", "all"];
+export const CODEX_WEB_SEARCH_MODES: readonly CodexWebSearchMode[] = ["cached", "indexed", "live"];
 export const CODEX_PROMPT_MODES: readonly CodexPromptMode[] = ["pi", "codex"];
 export const CODEX_PERSONALITIES: readonly CodexPersonality[] = ["friendly", "pragmatic", "none"];
 export const CODEX_VERBOSITY_LEVELS: readonly CodexVerbosity[] = ["low", "medium", "high"];
@@ -52,6 +54,7 @@ export type CodexCoreConfig = {
     };
     readonly tools: {
         readonly webSearch: boolean;
+        readonly webSearchMode: CodexWebSearchMode;
         readonly imageGeneration: boolean;
         readonly viewImage: boolean;
         readonly viewImageDescriptions: boolean;
@@ -92,6 +95,10 @@ const CodexApplyPatchModeSchema = Type.Union([
     Type.Literal("openai"),
     Type.Literal("all"),
 ]);
+const CodexWebSearchModeSchema = Type.Union(
+    [Type.Literal("cached"), Type.Literal("indexed"), Type.Literal("live")],
+    { default: "live" },
+);
 const CodexPromptModeSchema = Type.Union([Type.Literal("pi"), Type.Literal("codex")]);
 const CodexPersonalitySchema = Type.Union([
     Type.Literal("friendly"),
@@ -113,6 +120,7 @@ const CodexCoreConfigJsonSchema = Type.Object(
         tools: Type.Object(
             {
                 webSearch: Type.Boolean({ default: true }),
+                webSearchMode: CodexWebSearchModeSchema,
                 imageGeneration: Type.Boolean({ default: true }),
                 viewImage: Type.Boolean({ default: true }),
                 viewImageDescriptions: Type.Boolean({ default: false }),
@@ -158,6 +166,7 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
     scope: { tools: "codex" },
     tools: {
         webSearch: true,
+        webSearchMode: "live",
         imageGeneration: true,
         viewImage: true,
         viewImageDescriptions: false,
@@ -248,6 +257,13 @@ export function parseCodexCoreConfigWithDiagnostics(
                     tools.webSearch,
                     DEFAULT_CODEX_CORE_CONFIG.tools.webSearch,
                     "$.tools.webSearch",
+                    diagnostics,
+                ),
+                webSearchMode: parseStringEnum(
+                    tools.webSearchMode,
+                    CODEX_WEB_SEARCH_MODES,
+                    DEFAULT_CODEX_CORE_CONFIG.tools.webSearchMode,
+                    "$.tools.webSearchMode",
                     diagnostics,
                 ),
                 imageGeneration: parseBoolean(

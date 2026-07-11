@@ -21,6 +21,15 @@ export class CodexUnsupportedModel extends TaggedError("CodexUnsupportedModel")<
     readonly message: string;
 }>() {}
 
+export class CodexNativeCompactionIncompatible extends TaggedError(
+    "CodexNativeCompactionIncompatible",
+)<{
+    readonly operation: "nativeCompaction";
+    readonly checkpointModel: string;
+    readonly requestModel: string;
+    readonly message: string;
+}>() {}
+
 export class CodexRequestCancelled extends TaggedError("CodexRequestCancelled")<{
     readonly operation: CodexOperation;
     readonly message: string;
@@ -57,6 +66,7 @@ export class CodexUnexpectedResponse extends TaggedError("CodexUnexpectedRespons
 export type CodexFailure =
     | CodexAuthUnavailable
     | CodexUnsupportedModel
+    | CodexNativeCompactionIncompatible
     | CodexRequestCancelled
     | CodexNetworkUnavailable
     | CodexHttpRequestFailed

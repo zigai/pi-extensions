@@ -110,6 +110,7 @@ test("creates native compaction using remote compaction v2", async () => {
     });
     assert.ok(isRecord(requestBody));
     assert.equal(requestBody.model, "gpt-5.5");
+    assert.doesNotMatch(JSON.stringify(requestBody), /comp_?hash/i);
     assert.deepEqual((requestBody.input as unknown[]).at(-1), {
         type: "compaction_trigger",
     });
@@ -137,6 +138,7 @@ test("creates native compaction using remote compaction v2", async () => {
     );
     assert.equal(result?.compaction?.details.strategy, "pi-codex-core-remote-compaction-v2");
     assert.equal(result?.compaction?.details.model, "gpt-5.5");
+    assert.equal(result?.compaction?.details.compHash, "2911");
     assert.deepEqual(result?.compaction?.details.compactedWindow, [
         {
             role: "user",
@@ -1580,8 +1582,20 @@ test("auto compaction skips interrupted assistant turns", async () => {
     cancelScheduledCodexAutoCompaction();
 });
 
-test("rewrites responses payload with native compaction replay matching", async () => {
-    const ctx = makeCompactionContext();
+test("replays native compaction across models in the same compatibility family", async () => {
+    const ctx = makeCompactionContext({
+        branchEntries: [
+            messageEntry("pre", null, userMessage("pre kept")),
+            nativeCompactionEntry({
+                id: "compact",
+                parentId: "pre",
+                firstKeptEntryId: "pre",
+                model: "gpt-5.5",
+                compHash: "2911",
+            }),
+            messageEntry("tail", "compact", userMessage("post tail")),
+        ],
+    });
     const payload = {
         model: "gpt-5.4-mini",
         input: [
@@ -1617,6 +1631,95 @@ test("rewrites responses payload with native compaction replay matching", async 
         { role: "user", content: [{ type: "input_text", text: "post tail" }] },
         { role: "user", content: [{ type: "input_text", text: "current payload tail" }] },
     ]);
+});
+
+test("rejects native compaction replay across incompatible model families", async () => {
+    const ctx = makeCompactionContext({
+        branchEntries: [
+            messageEntry("pre", null, userMessage("pre kept")),
+            nativeCompactionEntry({
+                id: "compact",
+                parentId: "pre",
+                firstKeptEntryId: "pre",
+                model: "gpt-5.6-sol",
+                compHash: "3000",
+            }),
+            messageEntry("tail", "compact", userMessage("post tail")),
+        ],
+    });
+    const payload = {
+        model: "gpt-5.4-mini",
+        input: [
+            {
+                role: "user",
+                content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
+            },
+            { role: "user", content: [{ type: "input_text", text: "pre kept" }] },
+        ],
+    };
+
+    await assert.rejects(
+        rewriteProviderRequestWithNativeCompaction(
+            payload,
+            ctx,
+            DEFAULT_CODEX_CORE_CONFIG,
+            makeCompactionApi(),
+        ),
+        {
+            name: "CodexNativeCompactionIncompatible",
+            message:
+                "Codex native compaction checkpoint from gpt-5.6-sol is incompatible with gpt-5.4-mini. Start a new session or compact again with the active model.",
+        },
+    );
+});
+
+test("keeps native replay non-triggering when compatibility metadata is unknown", async () => {
+    for (const testCase of [
+        {
+            requestModel: "gpt-5.4-mini",
+            checkpointModel: "gpt-5.5",
+            compHash: undefined,
+        },
+        {
+            requestModel: "future-codex-model",
+            checkpointModel: "gpt-5.6-sol",
+            compHash: "3000",
+        },
+    ] as const) {
+        const ctx = makeCompactionContext({
+            modelId: testCase.requestModel,
+            branchEntries: [
+                messageEntry("pre", null, userMessage("pre kept")),
+                nativeCompactionEntry({
+                    id: "compact",
+                    parentId: "pre",
+                    firstKeptEntryId: "pre",
+                    model: testCase.checkpointModel,
+                    compHash: testCase.compHash,
+                }),
+                messageEntry("tail", "compact", userMessage("post tail")),
+            ],
+        });
+        const rewritten = await rewriteProviderRequestWithNativeCompaction(
+            {
+                model: testCase.requestModel,
+                input: [
+                    {
+                        role: "user",
+                        content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
+                    },
+                    { role: "user", content: [{ type: "input_text", text: "pre kept" }] },
+                ],
+            },
+            ctx,
+            DEFAULT_CODEX_CORE_CONFIG,
+            makeCompactionApi(),
+        );
+
+        const firstInput = responseInput(rewritten)[0];
+        assert.ok(isRecord(firstInput));
+        assert.equal(firstInput.type, "compaction");
+    }
 });
 
 test("rewrites native compaction replay in long payloads", async () => {
@@ -1863,6 +1966,7 @@ function nativeCompactionEntry(options: {
     readonly parentId?: string | null;
     readonly firstKeptEntryId: string;
     readonly model?: string;
+    readonly compHash?: string | undefined;
 }): Record<string, unknown> {
     const worldState = worldStateInput("window: 1");
     return {
@@ -1878,6 +1982,7 @@ function nativeCompactionEntry(options: {
             provider: "openai-codex",
             api: "openai-codex-responses",
             model: options.model ?? "gpt-5.5",
+            compHash: options.compHash,
             baseUrl: "https://chatgpt.com/backend-api/codex",
             compactedWindow: [{ type: "compaction", encrypted_content: "opaque" }],
             replacementInput: [{ type: "compaction", encrypted_content: "opaque" }, worldState],
@@ -2100,9 +2205,11 @@ function makeCompactionContext(
     options: {
         readonly warnings?: string[];
         readonly sessionId?: string;
+        readonly modelId?: string;
         readonly branchEntries?: readonly Record<string, unknown>[];
     } = {},
 ): ExtensionContext {
+    const modelId = options.modelId ?? "gpt-5.4-mini";
     const ctx = {
         hasUI: Boolean(options.warnings),
         ...(options.warnings
@@ -2118,7 +2225,7 @@ function makeCompactionContext(
         model: {
             provider: "openai-codex",
             api: "openai-codex-responses",
-            id: "gpt-5.4-mini",
+            id: modelId,
             baseUrl: "https://chatgpt.com/backend-api",
             input: ["text", "image"],
             contextWindow: 200_000,

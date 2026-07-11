@@ -8,7 +8,12 @@ import {
     resolveActiveCodexResponsesProvider,
     resolveCodexApiProviderBaseUrl,
 } from "../codex/auth.ts";
-import { isAbortCause as isCodexAbortCause, safeCauseMessage } from "../codex/failures.ts";
+import {
+    CodexNativeCompactionIncompatible,
+    codexFailureToError,
+    isAbortCause as isCodexAbortCause,
+    safeCauseMessage,
+} from "../codex/failures.ts";
 import { codexModelRequestProfile } from "../codex/models.ts";
 import { CODEX_RESPONSES_LITE_HEADER } from "../codex/responses-compat.ts";
 import { resolveCodexRequestModel, type CodexCoreConfig } from "../config/config.ts";
@@ -218,6 +223,7 @@ export async function handleCodexNativeCompaction(
                     provider: runtime.value.provider,
                     api: runtime.value.api,
                     model: compactionModel,
+                    compHash: requestProfile?.compHash,
                     baseUrl: runtime.value.baseUrl,
                     compactedWindow,
                     windowNumber: lifecycle.windowNumber,
@@ -273,6 +279,10 @@ export async function rewriteProviderRequestWithNativeCompaction(
 
     const responsesPayload = asResponsesPayload(payload);
     if (!responsesPayload) return undefined;
+    assertNativeCompactionCompatibility(
+        latestNativeCompaction.entry.details,
+        responsesPayload.model,
+    );
 
     const replacementInput = buildFreshReplacementInput(
         latestNativeCompaction.entry.details,
@@ -292,6 +302,28 @@ export async function rewriteProviderRequestWithNativeCompaction(
 
     notifyNativeReplayFallbackOnce(ctx, latestNativeCompaction.entry.id, replay.reason);
     return buildLenientNativeReplayPayload(responsesPayload, replacementInput);
+}
+
+function assertNativeCompactionCompatibility(
+    details: NativeCompactionDetails,
+    requestModel: string,
+): void {
+    const requestCompHash = codexModelRequestProfile(requestModel)?.compHash;
+    if (
+        details.compHash === undefined ||
+        requestCompHash === undefined ||
+        details.compHash === requestCompHash
+    ) {
+        return;
+    }
+    throw codexFailureToError(
+        new CodexNativeCompactionIncompatible({
+            operation: "nativeCompaction",
+            checkpointModel: details.model,
+            requestModel,
+            message: `Codex native compaction checkpoint from ${details.model} is incompatible with ${requestModel}. Start a new session or compact again with the active model.`,
+        }),
+    );
 }
 
 export function cancelScheduledCodexAutoCompaction(): void {

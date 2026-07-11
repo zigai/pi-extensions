@@ -93,6 +93,11 @@ function applyChangedConfigValues(
                 previousEffectiveConfig.tools.webSearch,
                 nextEffectiveConfig.tools.webSearch,
             ),
+            webSearchMode: changedValue(
+                globalConfig.tools.webSearchMode,
+                previousEffectiveConfig.tools.webSearchMode,
+                nextEffectiveConfig.tools.webSearchMode,
+            ),
             imageGeneration: changedValue(
                 globalConfig.tools.imageGeneration,
                 previousEffectiveConfig.tools.imageGeneration,

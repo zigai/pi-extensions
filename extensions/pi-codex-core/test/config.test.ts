@@ -22,7 +22,7 @@ import { makeExtensionHarness, makeExtensionContext } from "./helpers.ts";
 test("parses codex config with safe defaults", () => {
     const config = parseCodexCoreConfig({
         scope: { tools: "all" },
-        tools: { webSearch: false, viewImageDescriptions: true },
+        tools: { webSearch: false, webSearchMode: "indexed", viewImageDescriptions: true },
         prompt: { mode: "codex", personality: "friendly" },
         compaction: { enabled: true, auto: false, thresholdPercent: 90 },
         openai: { verbosity: "high", compactionReasoning: "low" },
@@ -30,6 +30,7 @@ test("parses codex config with safe defaults", () => {
 
     assert.equal(config.scope.tools, "all");
     assert.equal(config.tools.webSearch, false);
+    assert.equal(config.tools.webSearchMode, "indexed");
     assert.equal(config.tools.imageGeneration, DEFAULT_CODEX_CORE_CONFIG.tools.imageGeneration);
     assert.equal(config.tools.viewImageDescriptions, true);
     assert.equal(config.tools.applyPatch, "off");
@@ -38,6 +39,11 @@ test("parses codex config with safe defaults", () => {
     assert.equal(config.compaction.enabled, true);
     assert.equal(config.compaction.auto, false);
     assert.equal(config.compaction.thresholdPercent, 90);
+    assert.equal(parseCodexCoreConfig({}).tools.webSearchMode, "live");
+    assert.equal(
+        parseCodexCoreConfig({ tools: { webSearchMode: "offline" } }).tools.webSearchMode,
+        "live",
+    );
     assert.equal(parseCodexCoreConfig({}).compaction.enabled, true);
     assert.equal(parseCodexCoreConfig({}).compaction.thresholdPercent, 80);
     assert.equal(parseCodexCoreConfig({}).prompt.mode, "codex");

@@ -599,6 +599,45 @@ test("saves web_run raw output outside workspace", async () => {
     }
 });
 
+test("web_run maps standalone search modes at the request boundary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-web-modes-"));
+    try {
+        for (const [mode, expected] of [
+            ["cached", false],
+            ["indexed", "indexed"],
+            ["live", true],
+        ] as const) {
+            let requestBody: unknown;
+            const runtime = makeTestRuntime(async (_input, init) => {
+                requestBody = JSON.parse(String(init?.body)) as unknown;
+                return new Response(JSON.stringify({ output: "done" }), { status: 200 });
+            });
+            const webRunTool = createWebRunTool({
+                getConfig: () => ({
+                    ...DEFAULT_CODEX_CORE_CONFIG,
+                    tools: { ...DEFAULT_CODEX_CORE_CONFIG.tools, webSearchMode: mode },
+                }),
+                runtime,
+                agentDir: join(root, mode),
+            });
+
+            await webRunTool.execute(
+                `call/${mode}`,
+                { search_query: [{ q: "Pi docs" }] },
+                undefined,
+                undefined,
+                makeWebRunContext(root),
+            );
+
+            assert.ok(isRecord(requestBody));
+            assert.ok(isRecord(requestBody.settings));
+            assert.equal(requestBody.settings.external_web_access, expected);
+        }
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("web_run sends Codex-compatible recent visible history", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-web-history-"));
     let requestBody: unknown;
