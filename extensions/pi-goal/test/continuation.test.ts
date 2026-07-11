@@ -278,6 +278,27 @@ test("goal tools return Codex-shaped response details", async () => {
   assert.match(String(completed.details.completionBudgetReport), /^Goal achieved\. Report final budget usage to the user:/);
 });
 
+test("agent_end, not agent_settled, drives deliberate per-run goal continuation", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  const queued = harness.sentMessages[0];
+  assert.ok(queued);
+  await harness.emit("message_start", {
+    type: "message_start",
+    message: queuedCustomMessage(queued),
+  });
+  harness.sentMessages.length = 0;
+
+  await harness.emit("agent_settled", { type: "agent_settled" });
+  assert.equal(harness.sentMessages.length, 0);
+
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [assistantMessage("stop", { input: 30, output: 12 })],
+  });
+  assert.equal(harness.sentMessages.length, 1);
+});
+
 test("agent end waits for idle before continuing active goals", async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   try {

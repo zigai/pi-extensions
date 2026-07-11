@@ -153,6 +153,9 @@ export function createRuntimeHarness(options: {
     getThinkingLevel: () => "medium",
     on,
     registerCommand,
+    registerEntryRenderer() {
+      unsupportedHarnessMethod("pi.registerEntryRenderer");
+    },
     registerFlag() {
       unsupportedHarnessMethod("pi.registerFlag");
     },
@@ -199,6 +202,7 @@ export function createRuntimeHarness(options: {
   };
 
   const sessionManager: ExtensionCommandContext["sessionManager"] = {
+    buildContextEntries: () => entries,
     getBranch: () => entries,
     getCwd: () => "/tmp",
     getEntries: () => entries,

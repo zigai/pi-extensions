@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Update the development and documented compatibility baseline to Pi 0.80.6 after auditing current lifecycle, tool, persistence, session replacement, compaction, queued-work, concurrency, and TUI contracts.
+- Preserve deliberate per-low-level-run `agent_end` continuation handling; add regression coverage proving `agent_settled` does not replace that hook.
+
 ## 0.1.34 - 2026-07-06
 
 - Proactively compact mid-run: when a tool-use turn ends during an active goal with estimated context usage within 50k tokens of the context window, trigger host compaction immediately instead of waiting for the run boundary. Closes the gap where long autonomous runs grew past the context window mid-run and died on hard overflow errors (the pi host only checks its compaction threshold between runs). The compaction-triggered abort does not pause the goal; the existing `session_compact` continuation path resumes it, and a failed proactive compaction pauses the goal for user attention.
