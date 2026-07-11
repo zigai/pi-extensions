@@ -84,6 +84,38 @@ test("settings screen refreshes draft from effective config after save", async (
     assert.equal(webSearchLine.includes("on"), false);
 });
 
+test("settings screen saves standalone web search mode", async () => {
+    initTheme(undefined, false);
+    const ctx = {
+        ui: {
+            custom: async (
+                factory: (
+                    tui: unknown,
+                    theme: Theme,
+                    keybindings: unknown,
+                    done: () => void,
+                ) => { readonly handleInput?: (data: string) => void },
+            ) => {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                component.handleInput?.("\x1b[B");
+                component.handleInput?.(" ");
+            },
+        },
+    };
+    let savedMode = "";
+
+    await openCodexSettingsScreen(ctx as unknown as ExtensionContext, {
+        initialConfig: DEFAULT_CODEX_CORE_CONFIG,
+        initialTab: "tools",
+        onChange: (nextConfig) => {
+            savedMode = nextConfig.tools.webSearchMode;
+            return { ok: true, effectiveConfig: nextConfig };
+        },
+    });
+
+    assert.equal(savedMode, "cached");
+});
+
 test("settings screen shows personality only for supported bundled prompts", async () => {
     const renderForModel = async (modelId: string): Promise<string> => {
         let rendered = "";
@@ -126,6 +158,7 @@ test("settings screen renders a description for every setting", async () => {
         ],
         tools: [
             "Codex web.run / web_run search tool.",
+            "Use cached, indexed, or live results for standalone web_run searches.",
             "Generate or edit images through Codex image APIs.",
             "Return local images to image-capable models.",
             "Fallback image descriptions for text-only models.",

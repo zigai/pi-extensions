@@ -2,6 +2,7 @@ export type CodexModelRequestProfile = {
     readonly useResponsesLite: boolean;
     readonly defaultReasoningEffort?: string | undefined;
     readonly effectiveContextWindow?: number | undefined;
+    readonly compHash?: string | undefined;
     readonly supportsPriorityServiceTier: boolean;
     readonly supportsImageDetailOriginal: boolean;
 };
@@ -13,6 +14,7 @@ const CODEX_MODEL_REQUEST_PROFILES: Readonly<Record<string, CodexModelRequestPro
         useResponsesLite: true,
         defaultReasoningEffort: "low",
         effectiveContextWindow: GPT_5_6_EFFECTIVE_CONTEXT_WINDOW,
+        compHash: "3000",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
     },
@@ -20,6 +22,7 @@ const CODEX_MODEL_REQUEST_PROFILES: Readonly<Record<string, CodexModelRequestPro
         useResponsesLite: true,
         defaultReasoningEffort: "medium",
         effectiveContextWindow: GPT_5_6_EFFECTIVE_CONTEXT_WINDOW,
+        compHash: "3000",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
     },
@@ -27,24 +30,28 @@ const CODEX_MODEL_REQUEST_PROFILES: Readonly<Record<string, CodexModelRequestPro
         useResponsesLite: true,
         defaultReasoningEffort: "medium",
         effectiveContextWindow: GPT_5_6_EFFECTIVE_CONTEXT_WINDOW,
+        compHash: "3000",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
     },
     "gpt-5.5": {
         useResponsesLite: false,
         defaultReasoningEffort: "medium",
+        compHash: "2911",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
     },
     "gpt-5.4": {
         useResponsesLite: false,
         defaultReasoningEffort: "medium",
+        compHash: "2911",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
     },
     "gpt-5.4-mini": {
         useResponsesLite: false,
         defaultReasoningEffort: "medium",
+        compHash: "2911",
         supportsPriorityServiceTier: false,
         supportsImageDetailOriginal: true,
     },

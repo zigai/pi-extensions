@@ -30,6 +30,7 @@
       "type": "object",
       "required": [
         "webSearch",
+        "webSearchMode",
         "imageGeneration",
         "viewImage",
         "viewImageDescriptions",
@@ -39,6 +40,23 @@
         "webSearch": {
           "type": "boolean",
           "default": true
+        },
+        "webSearchMode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "cached"
+            },
+            {
+              "type": "string",
+              "const": "indexed"
+            },
+            {
+              "type": "string",
+              "const": "live"
+            }
+          ],
+          "default": "live"
         },
         "imageGeneration": {
           "type": "boolean",
