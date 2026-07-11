@@ -123,7 +123,7 @@ describe("assistant separator patch", () => {
 
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([
             "",
-            "\u001b[2m──────────────\u001b[0m",
+            "\u001b[2m──────\u001b[0m",
             "",
             "assistant text",
         ]);
@@ -135,18 +135,18 @@ describe("assistant separator patch", () => {
 
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([
             "",
-            "\u001b[2m──────────────\u001b[0m",
+            "\u001b[2m──────\u001b[0m",
             "",
             "assistant text",
         ]);
     });
 
-    it("extends the separator to wider rendered assistant content", () => {
+    it("keeps the separator within the current render width when content is wider", () => {
         const prototype = createPrototype(["short", "assistant content that exceeds local width"]);
         installAssistantSeparatorPatch(prototype);
 
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)[1]).toBe(
-            "\u001b[2m──────────────────────────────────────────\u001b[0m",
+            "\u001b[2m──────\u001b[0m",
         );
     });
 

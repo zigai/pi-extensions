@@ -76,14 +76,6 @@ function renderSeparator(width: number): string {
     return `${ansiStyles.modifier.dim.open}${"─".repeat(Math.max(1, Math.floor(width)))}${ansiStyles.modifier.reset.open}`;
 }
 
-function separatorWidth(lines: readonly string[], width: number): number {
-    let measuredWidth = Math.max(1, Math.floor(width));
-    for (const line of lines) {
-        measuredWidth = Math.max(measuredWidth, visibleWidth(line));
-    }
-    return measuredWidth;
-}
-
 function startsWithBlankLine(lines: readonly string[]): boolean {
     const [firstLine] = lines;
     return firstLine !== undefined && visibleWidth(firstLine.trim()) === 0;
@@ -91,7 +83,7 @@ function startsWithBlankLine(lines: readonly string[]): boolean {
 
 function linesWithSeparatorSpacing(lines: readonly string[], width: number): string[] {
     const contentLines = startsWithBlankLine(lines) ? [...lines] : ["", ...lines];
-    return ["", renderSeparator(separatorWidth(lines, width)), ...contentLines];
+    return ["", renderSeparator(width), ...contentLines];
 }
 
 function hasNonWhitespaceText(text: string): boolean {
