@@ -14,7 +14,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | Option                                    | Default                                                         | Purpose                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.                 |
-| `appearance.addedRowBackground`           | `"#213A2B"`                                                     | Override added-row backgrounds with a `#RRGGBB` color; `null` uses Pi.      |
+| `appearance.addedRowBackground`           | `null`                                                          | Override added-row backgrounds with a `#RRGGBB` color; `null` uses Pi.      |
 | `appearance.deletedRowBackground`         | `null`                                                          | Override deleted-row backgrounds with a `#RRGGBB` color; `null` uses Pi.    |
 | `appearance.instructionPathColor`         | `null`                                                          | Override Skill/AGENTS path text with a `#RRGGBB` color; `null` uses Pi.     |
 | `debugLog.enabled`                        | `false`                                                         | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
@@ -39,7 +39,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
   "$schema": "./config.schema.json",
   "preserveTools": [],
   "appearance": {
-    "addedRowBackground": "#213A2B",
+    "addedRowBackground": null,
     "deletedRowBackground": null,
     "instructionPathColor": null
   },

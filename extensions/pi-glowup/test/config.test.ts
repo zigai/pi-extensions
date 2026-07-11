@@ -18,7 +18,7 @@ describe("codex look config", () => {
 
         expect(config.preserveTools).toEqual([]);
         expect(config.appearance).toEqual({
-            addedRowBackground: "#213A2B",
+            addedRowBackground: null,
             deletedRowBackground: null,
             instructionPathColor: null,
         });

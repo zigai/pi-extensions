@@ -54,7 +54,7 @@ describe("write rendering", () => {
         expect(component.render(100).join("\n")).toContain("Wrote src/example.ts (+1)");
     });
 
-    it("uses addition backgrounds for written content", () => {
+    it("uses the Pi addition background for written content", () => {
         const backgroundTheme: CodexRenderTheme = {
             ...plainTheme,
             bg(token, text) {

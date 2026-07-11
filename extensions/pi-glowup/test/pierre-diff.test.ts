@@ -480,7 +480,7 @@ describe("Pierre diff rendering", () => {
         const blankAddition = lines.find((line) => stripAnsi(line).trimEnd() === "+2");
 
         expect(blankAddition).toBeDefined();
-        expect(blankAddition).toContain("48;2;33;58;43");
+        expect(blankAddition).toContain("48;2;0;34;0");
         expect(visibleWidth(blankAddition ?? "")).toBe(width);
     });
 

@@ -73,7 +73,7 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
     appearance: {
-        addedRowBackground: "#213A2B",
+        addedRowBackground: null,
         deletedRowBackground: null,
         instructionPathColor: null,
     },

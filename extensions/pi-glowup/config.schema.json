@@ -51,7 +51,7 @@
       },
       "additionalProperties": false,
       "default": {
-        "addedRowBackground": "#213A2B",
+        "addedRowBackground": null,
         "deletedRowBackground": null,
         "instructionPathColor": null
       }

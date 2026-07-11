@@ -31,7 +31,7 @@ export type RenderingAppearance = {
 };
 
 let renderingAppearance: RenderingAppearance = {
-    addedRowBackground: "#213A2B",
+    addedRowBackground: null,
     deletedRowBackground: null,
     instructionPathColor: null,
 };
