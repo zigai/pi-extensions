@@ -22,8 +22,11 @@ import type {
     SplitDiffRow,
     UnifiedDiffRow,
 } from "./types.ts";
+import { shouldRenderSideBySide, type SideBySideLayout } from "./layout.ts";
 import { getPierrePalette, type PierreTerminalPalette } from "./theme.ts";
 import {
+    configuredNarrowDiffLayout,
+    configuredSideBySideLayout,
     MUTATION_DIFF_PREVIEW_ROWS,
     selectSemanticDiffIndices,
     type SemanticDiffRowKind,
@@ -31,7 +34,6 @@ import {
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const DIFF_STYLE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.color.close}${ansiStyles.bgColor.close}`;
-const SIDE_BY_SIDE_MIN_WIDTH = 140;
 const INITIAL_TTY_DIFF_HIGHLIGHT_DEFER_MS = 1_500;
 const MAX_QUEUED_DIFF_HIGHLIGHTS = 50;
 const MAX_ACTIVE_DIFF_HIGHLIGHT_TIMERS = 16;
@@ -53,6 +55,7 @@ type AnsiStyle = {
     readonly fg: string | undefined;
     readonly bg: string | undefined;
     readonly bold: boolean | undefined;
+    readonly dim: boolean | undefined;
 };
 
 type RenderSegment = DiffSpan & {
@@ -84,9 +87,13 @@ export type PierreDiffRenderContext = {
     readonly toolCallId?: string;
 };
 
-/** Returns whether a terminal width is wide enough for side-by-side diffs. */
-export function shouldRenderSideBySideDiff(width: number): boolean {
-    return width >= SIDE_BY_SIDE_MIN_WIDTH;
+/** Returns whether the configured width/content policy permits a split diff. */
+export function shouldRenderSideBySideDiff(
+    width: number,
+    metadata: PierreRenderableDiffPayload["metadata"],
+    layout: SideBySideLayout,
+): boolean {
+    return shouldRenderSideBySide(width, metadata, layout);
 }
 
 /** Renders a replayable Pierre diff payload with lazy syntax highlighting. */
@@ -113,9 +120,10 @@ export function renderPierreDiff(
                   maxVisibleLines,
                   options.expanded,
                   context.toolCallId,
+                  context.invalidate,
               );
 
-    component.update(payload, theme, maxVisibleLines, options.expanded);
+    component.update(payload, theme, maxVisibleLines, options.expanded, context.invalidate);
     return component;
 }
 
@@ -152,6 +160,7 @@ class PierreDiffComponent implements Component {
     private cachedWidth: number | undefined;
     private cachedLines: string[] | undefined;
     private readonly toolCallId: string | undefined;
+    private requestRender: (() => void) | undefined;
 
     constructor(
         payload: PierreRenderableDiffPayload,
@@ -159,6 +168,7 @@ class PierreDiffComponent implements Component {
         maxVisibleLines: number,
         expanded: boolean,
         toolCallId: string | undefined,
+        requestRender: (() => void) | undefined,
     ) {
         this.payload = payload;
         this.palette = getPierrePalette(theme);
@@ -166,7 +176,8 @@ class PierreDiffComponent implements Component {
         this.maxVisibleLines = maxVisibleLines;
         this.expanded = expanded;
         this.toolCallId = toolCallId;
-        if (this.expanded) {
+        this.requestRender = requestRender;
+        if (this.expanded || this.usesChangedSpanBackgrounds()) {
             this.maybeRefreshHighlightedDiff();
         }
     }
@@ -180,6 +191,7 @@ class PierreDiffComponent implements Component {
         theme: Theme,
         maxVisibleLines: number,
         expanded: boolean,
+        requestRender: (() => void) | undefined,
     ): void {
         const previousPayload = this.payload;
         const previousKey = refreshKeyFor(previousPayload);
@@ -195,7 +207,8 @@ class PierreDiffComponent implements Component {
         this.palette = nextPalette;
         this.maxVisibleLines = maxVisibleLines;
         this.expanded = expanded;
-        if (!this.expanded) {
+        this.requestRender = requestRender;
+        if (!this.expanded && !this.usesChangedSpanBackgrounds()) {
             this.highlighted = emptyHighlightedDiffSet();
             this.refreshPromise = undefined;
             this.clearRefreshTimer();
@@ -209,7 +222,7 @@ class PierreDiffComponent implements Component {
             this.clearRefreshTimer();
             this.refreshKey = undefined;
         }
-        if (this.expanded) {
+        if (this.expanded || this.usesChangedSpanBackgrounds()) {
             this.maybeRefreshHighlightedDiff();
         }
     }
@@ -222,7 +235,11 @@ class PierreDiffComponent implements Component {
         }
 
         const highlighted = this.highlighted[this.palette.appearance];
-        const bodyLines = shouldRenderSideBySideDiff(safeWidth)
+        const bodyLines = shouldRenderSideBySideDiff(
+            safeWidth,
+            this.payload.metadata,
+            configuredSideBySideLayout(),
+        )
             ? this.renderSplitBody(safeWidth, highlighted)
             : this.renderUnifiedBody(safeWidth, highlighted);
         const lines = bodyLines;
@@ -258,9 +275,6 @@ class PierreDiffComponent implements Component {
     }
 
     private highlightVisibleRenderIfPossible(): void {
-        if (!this.expanded) {
-            return;
-        }
         if (hasHighlightedLines(this.highlighted)) {
             return;
         }
@@ -275,6 +289,7 @@ class PierreDiffComponent implements Component {
     private renderUnifiedBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
         const sourceRows = buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette, {
             maxRows: this.expanded ? this.maxVisibleLines + 1 : MAX_EXPANDED_DIFF_RENDER_LINES,
+            narrowLayout: configuredNarrowDiffLayout(),
         });
         const rows = this.expanded
             ? sourceRows
@@ -338,7 +353,7 @@ class PierreDiffComponent implements Component {
     }
 
     private maybeRefreshHighlightedDiff(): void {
-        if (!this.expanded) {
+        if (!this.expanded && !this.usesChangedSpanBackgrounds()) {
             return;
         }
         if (hasHighlightedLines(this.highlighted)) {
@@ -373,6 +388,7 @@ class PierreDiffComponent implements Component {
                     }
                     this.highlighted = highlighted;
                     this.invalidate();
+                    this.requestRender?.();
                 }),
             )
                 .catch(() => {})
@@ -385,6 +401,10 @@ class PierreDiffComponent implements Component {
         timer.unref?.();
         this.refreshTimer = timer;
         activeDiffHighlightTimers.add(timer);
+    }
+
+    private usesChangedSpanBackgrounds(): boolean {
+        return this.palette.additionRowBg.length === 0 && this.palette.additionSpanBg.length > 0;
     }
 
     private clearRefreshTimer(): void {
@@ -567,13 +587,8 @@ function renderUnifiedRows(
     const rendered: string[] = [];
     for (const row of rows) {
         const rowLines = renderUnifiedRow(row, metadata, width);
-        if (
-            appendBudgetedRenderedLines(
-                rendered,
-                maxRowsPerDiffRow === undefined ? rowLines : rowLines.slice(0, maxRowsPerDiffRow),
-                maxRenderedLines,
-            )
-        ) {
+        const visibleLines = limitDiffRowLines(rowLines, maxRowsPerDiffRow, width);
+        if (appendBudgetedRenderedLines(rendered, visibleLines, maxRenderedLines)) {
             break;
         }
     }
@@ -591,17 +606,31 @@ function renderSplitRows(
     const rendered: string[] = [];
     for (const row of rows) {
         const rowLines = renderSplitRow(row, metadata, width, palette);
-        if (
-            appendBudgetedRenderedLines(
-                rendered,
-                maxRowsPerDiffRow === undefined ? rowLines : rowLines.slice(0, maxRowsPerDiffRow),
-                maxRenderedLines,
-            )
-        ) {
+        const visibleLines = limitDiffRowLines(rowLines, maxRowsPerDiffRow, width);
+        if (appendBudgetedRenderedLines(rendered, visibleLines, maxRenderedLines)) {
             break;
         }
     }
     return rendered;
+}
+
+function limitDiffRowLines(
+    lines: ReadonlyArray<string>,
+    maxRows: number | undefined,
+    width: number,
+): ReadonlyArray<string> {
+    if (maxRows === undefined || lines.length <= maxRows) {
+        return lines;
+    }
+
+    const visible = lines.slice(0, Math.max(1, maxRows));
+    const lastIndex = visible.length - 1;
+    const lastLine = visible[lastIndex];
+    if (lastLine === undefined) {
+        return visible;
+    }
+    visible[lastIndex] = `${truncateToWidth(lastLine, Math.max(1, width - 1), "")}…`;
+    return visible;
 }
 
 function appendBudgetedRenderedLines(
@@ -789,6 +818,7 @@ function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle)
                 fg: segment.fg ?? base.fg,
                 bg: segment.bg ?? base.bg,
                 bold: segment.bold ?? base.bold,
+                dim: segment.dim ?? base.dim,
             }),
         );
         output += segment.text;
@@ -801,8 +831,14 @@ function openAnsi(style: AnsiStyle): string {
     const fg = toRgb(style.fg);
     const bg = toRgb(style.bg);
 
+    const intensity =
+        style.bold === true
+            ? ansiStyles.modifier.bold.open
+            : style.dim === true
+              ? ansiStyles.modifier.dim.open
+              : ansiStyles.modifier.bold.close;
     return [
-        style.bold === true ? ansiStyles.modifier.bold.open : ansiStyles.modifier.bold.close,
+        intensity,
         isAnsiStyle(style.fg)
             ? style.fg
             : fg === undefined
@@ -824,11 +860,13 @@ function baseStyle(input: {
     readonly fg: string | undefined;
     readonly bg: string | undefined;
     readonly bold?: boolean | undefined;
+    readonly dim?: boolean | undefined;
 }): AnsiStyle {
     return {
         fg: input.fg,
         bg: input.bg,
         bold: input.bold,
+        dim: input.dim,
     };
 }
 
@@ -899,8 +937,10 @@ function pierrePalettesEqual(left: PierreTerminalPalette, right: PierreTerminalP
         left.contextRowBg === right.contextRowBg &&
         left.additionFg === right.additionFg &&
         left.additionRowBg === right.additionRowBg &&
+        left.additionSpanBg === right.additionSpanBg &&
         left.deletionFg === right.deletionFg &&
         left.deletionRowBg === right.deletionRowBg &&
+        left.deletionSpanBg === right.deletionSpanBg &&
         left.emptyFg === right.emptyFg &&
         left.emptyRowBg === right.emptyRowBg &&
         left.lineNumberFg === right.lineNumberFg &&

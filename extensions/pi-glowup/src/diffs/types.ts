@@ -58,6 +58,8 @@ export type DiffSpan = {
     readonly text: string;
     readonly fg?: string;
     readonly bg?: string;
+    readonly bold?: boolean;
+    readonly dim?: boolean;
 };
 
 /** Unified diff row ready for terminal rendering. */

@@ -533,7 +533,7 @@ describe("central syntax highlighting", () => {
                     invalidate() {},
                 },
             );
-            const rendered = component.render(120).join("\n");
+            const rendered = component.render(100).join("\n");
 
             expect(rendered).toContain(TYPESCRIPT_KEYWORD_RGB_CODE);
             expect(rendered).toContain(BRACKET_PAIR_1_RGB_CODE);

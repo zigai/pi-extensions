@@ -31,6 +31,8 @@ type UnknownRecord = {
 type SpanStyle = {
     readonly fg: string | undefined;
     readonly bg: string | undefined;
+    readonly emphasized: boolean;
+    readonly dimUnchanged: boolean;
 };
 
 /** Returns an empty highlighted set used while lazy highlighting is pending or unavailable. */
@@ -73,6 +75,7 @@ export function flattenHighlightedLine(
     emphasisBg: string,
     fallbackText: string,
     language?: string,
+    options: { readonly dimUnchanged?: boolean } = {},
 ): ReadonlyArray<DiffSpan> {
     const spans: DiffSpan[] = [];
     const colorVariable = appearance === "light" ? "--diffs-token-light" : "--diffs-token-dark";
@@ -94,11 +97,14 @@ export function flattenHighlightedLine(
 
         const properties = isRecord(current.properties) ? current.properties : {};
         const styles = parseStyleValue(properties.style);
+        const emphasized =
+            Object.prototype.hasOwnProperty.call(properties, "data-diff-span") ||
+            inherited.emphasized;
         const nextStyle: SpanStyle = {
             fg: styles.get(colorVariable) ?? styles.get("color") ?? inherited.fg,
-            bg: Object.prototype.hasOwnProperty.call(properties, "data-diff-span")
-                ? emphasisBg
-                : inherited.bg,
+            bg: emphasized ? emphasisBg : inherited.bg,
+            emphasized,
+            dimUnchanged: inherited.dimUnchanged,
         };
         const children = Array.isArray(current.children) ? current.children : [];
         for (const child of children) {
@@ -106,12 +112,29 @@ export function flattenHighlightedLine(
         }
     }
 
-    visit(node, { fg: undefined, bg: undefined });
+    visit(node, {
+        fg: undefined,
+        bg: undefined,
+        emphasized: false,
+        dimUnchanged: options.dimUnchanged === true,
+    });
 
     if (spans.length > 0) {
         return enhanceSyntaxSegments(spans, language);
     }
-    return fallbackText.length > 0 ? enhanceSyntaxSegments([{ text: fallbackText }], language) : [];
+    return fallbackText.length > 0
+        ? enhanceSyntaxSegments(
+              [
+                  makeDiffSpan(fallbackText, {
+                      fg: undefined,
+                      bg: undefined,
+                      emphasized: false,
+                      dimUnchanged: options.dimUnchanged === true,
+                  }),
+              ],
+              language,
+          )
+        : [];
 }
 
 /** Normalizes a Pierre metadata line for terminal display. */
@@ -180,6 +203,8 @@ function makeDiffSpan(text: string, style: SpanStyle): DiffSpan {
         text,
         ...(style.fg === undefined ? {} : { fg: style.fg }),
         ...(style.bg === undefined ? {} : { bg: style.bg }),
+        ...(style.emphasized && style.dimUnchanged ? { bold: true } : {}),
+        ...(style.dimUnchanged && !style.emphasized ? { dim: true } : {}),
     };
 }
 
@@ -189,7 +214,13 @@ function mergeSpan(target: DiffSpan[], next: DiffSpan): void {
     }
 
     const previous = target[target.length - 1];
-    if (previous && previous.fg === next.fg && previous.bg === next.bg) {
+    if (
+        previous &&
+        previous.fg === next.fg &&
+        previous.bg === next.bg &&
+        previous.bold === next.bold &&
+        previous.dim === next.dim
+    ) {
         target[target.length - 1] = { ...previous, text: `${previous.text}${next.text}` };
         return;
     }

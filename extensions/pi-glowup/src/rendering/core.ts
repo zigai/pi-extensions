@@ -12,6 +12,12 @@ import {
     type CodeOutputSyntax,
 } from "../syntax/code-component.ts";
 import { highlightSyntaxCode } from "../syntax/highlighter.ts";
+import {
+    applyBackgroundToTextRanges,
+    changedTextRanges,
+    type TextRange,
+} from "../diffs/intraline.ts";
+import type { NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
@@ -24,13 +30,21 @@ export type CodexRenderTheme = {
     readonly bold: (text: string) => string;
 };
 
+export type DiffBackgroundStyle = "changed-spans" | "full-row";
+
 export type RenderingAppearance = {
+    readonly diffBackgroundStyle: DiffBackgroundStyle;
+    readonly narrowDiffLayout: NarrowDiffLayout;
+    readonly sideBySideLayout: SideBySideLayout;
     readonly addedRowBackground: string | null;
     readonly deletedRowBackground: string | null;
     readonly instructionPathColor: string | null;
 };
 
 let renderingAppearance: RenderingAppearance = {
+    diffBackgroundStyle: "changed-spans",
+    narrowDiffLayout: "paired",
+    sideBySideLayout: "content-aware",
     addedRowBackground: null,
     deletedRowBackground: null,
     instructionPathColor: null,
@@ -55,6 +69,21 @@ export function configuredDiffBackgroundAnsi(kind: "insert" | "delete"): string 
             ? renderingAppearance.addedRowBackground
             : renderingAppearance.deletedRowBackground;
     return color === null ? undefined : trueColorOpen(color, true);
+}
+
+/** Returns the configured placement strategy for semantic diff backgrounds. */
+export function configuredDiffBackgroundStyle(): DiffBackgroundStyle {
+    return renderingAppearance.diffBackgroundStyle;
+}
+
+/** Returns how replacement rows are ordered when a diff uses one column. */
+export function configuredNarrowDiffLayout(): NarrowDiffLayout {
+    return renderingAppearance.narrowDiffLayout;
+}
+
+/** Returns how side-by-side eligibility responds to terminal width and content. */
+export function configuredSideBySideLayout(): SideBySideLayout {
+    return renderingAppearance.sideBySideLayout;
 }
 
 export type DiffSection = {
@@ -2371,6 +2400,58 @@ function diffLineNumberWidth(lines: ReadonlyArray<string>): number {
     return width;
 }
 
+function changedRangesForDiffLines(
+    lines: ReadonlyArray<string>,
+): ReadonlyArray<readonly TextRange[] | undefined> {
+    const ranges: Array<readonly TextRange[] | undefined> = Array.from(
+        { length: lines.length },
+        () => undefined,
+    );
+    let deletions: Array<{ readonly index: number; readonly content: string }> = [];
+    let insertions: Array<{ readonly index: number; readonly content: string }> = [];
+
+    const flush = (): void => {
+        const pairCount = Math.max(deletions.length, insertions.length);
+        for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+            const deletion = deletions[pairIndex];
+            const insertion = insertions[pairIndex];
+            if (deletion !== undefined && insertion !== undefined) {
+                const changed = changedTextRanges(deletion.content, insertion.content);
+                ranges[deletion.index] = changed.before;
+                ranges[insertion.index] = changed.after;
+                continue;
+            }
+            if (deletion !== undefined && deletion.content.length > 0) {
+                ranges[deletion.index] = [{ start: 0, end: deletion.content.length }];
+            }
+            if (insertion !== undefined && insertion.content.length > 0) {
+                ranges[insertion.index] = [{ start: 0, end: insertion.content.length }];
+            }
+        }
+        deletions = [];
+        insertions = [];
+    };
+
+    for (const [index, line] of lines.entries()) {
+        const parsed = parseDiffLine(line);
+        if (parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission") {
+            flush();
+            continue;
+        }
+        if (parsed.kind === "delete") {
+            deletions.push({ index, content: parsed.content });
+            continue;
+        }
+        if (parsed.kind === "insert") {
+            insertions.push({ index, content: parsed.content });
+            continue;
+        }
+        flush();
+    }
+    flush();
+    return ranges;
+}
+
 function wrapDiffText(text: string, width: number, maxWrappedRows: number | undefined): string[] {
     if (maxWrappedRows === undefined) {
         return wrapStyledText(text, width);
@@ -2390,6 +2471,7 @@ function renderDiffRow(
         readonly lineNumberWidth?: number;
         readonly maxWrappedRows?: number;
         readonly highlightedContent?: string;
+        readonly changedRanges?: readonly TextRange[];
     },
 ): string[] {
     const parsed = parseDiffLine(line);
@@ -2430,11 +2512,16 @@ function renderDiffRow(
     const rowPrefix = `${lineNumber}${sign}`;
     const wrapPrefix = `${" ".repeat(lineNumberWidth)} `;
     const availableWidth = Math.max(1, contentWidth - visibleWidth(rowPrefix));
-    const styledContent = styleDiffContent(
+    const baseContent = styleDiffContent(
         parsed.kind,
         options?.highlightedContent ?? highlightDiffContent(parsed.content, options?.path),
         theme,
     );
+    const background = diffSpanBackground(parsed.kind, theme);
+    const styledContent =
+        background === undefined || options?.changedRanges === undefined
+            ? baseContent
+            : applyBackgroundToTextRanges(baseContent, options.changedRanges, background);
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);
         const row = truncateToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
@@ -2454,13 +2541,40 @@ function renderDiffRow(
     });
 }
 
+function diffSpanBackground(
+    kind: "insert" | "delete" | "context",
+    theme: CodexRenderTheme,
+): { readonly open: string; readonly close: string } | undefined {
+    if (kind === "context" || configuredDiffBackgroundStyle() !== "changed-spans") {
+        return undefined;
+    }
+    const configuredBackground = configuredDiffBackgroundAnsi(kind);
+    if (configuredBackground !== undefined) {
+        return { open: configuredBackground, close: ansiStyles.bgColor.close };
+    }
+    if (theme.bg === undefined) {
+        return undefined;
+    }
+
+    const sentinel = "__PI_CODEX_LOOK_DIFF_SPAN__";
+    const wrapped = theme.bg(kind === "insert" ? "toolSuccessBg" : "toolErrorBg", sentinel);
+    const sentinelIndex = wrapped.indexOf(sentinel);
+    if (sentinelIndex < 0) {
+        return undefined;
+    }
+    return {
+        open: wrapped.slice(0, sentinelIndex),
+        close: wrapped.slice(sentinelIndex + sentinel.length),
+    };
+}
+
 function paintDiffRowBackground(
     kind: "insert" | "delete" | "context",
     row: string,
     rowWidth: number,
     theme: CodexRenderTheme,
 ): string {
-    if (kind === "context") {
+    if (kind === "context" || configuredDiffBackgroundStyle() !== "full-row") {
         return row;
     }
     const padding = " ".repeat(Math.max(0, rowWidth - visibleWidth(row)));
@@ -2692,11 +2806,11 @@ export function renderCodexDiff(
         };
 
         for (const section of sections) {
-            const visibleLines: string[] = [];
+            const visibleLines: Array<{ readonly line: string; readonly index: number }> = [];
             for (const [lineIndex, line] of section.lines.entries()) {
                 const globalLineIndex = sectionOffset + lineIndex;
                 if (!shouldCollapse || collapsedLineIndexSet.has(globalLineIndex)) {
-                    visibleLines.push(line);
+                    visibleLines.push({ line, index: lineIndex });
                 }
             }
             sectionOffset += section.lines.length;
@@ -2725,17 +2839,23 @@ export function renderCodexDiff(
             renderedSection = true;
 
             const sectionLineNumberWidth = diffLineNumberWidth(section.lines);
-            const renderLines = (lines: readonly string[]): void => {
-                const highlightedContents = highlightDiffContents(lines, section.path);
+            const highlightedContents = highlightDiffContents(section.lines, section.path);
+            const changedRanges = changedRangesForDiffLines(section.lines);
+            const renderLines = (
+                lines: ReadonlyArray<{ readonly line: string; readonly index: number }>,
+            ): void => {
                 const maxWrappedRows = options.maxWrappedRows ?? (expanded ? undefined : 4);
-                for (const [lineIndex, line] of lines.entries()) {
+                for (const { line, index } of lines) {
                     rendered.push(
                         ...renderDiffRow(line, width, "    ", theme, {
                             ...(section.path === undefined ? {} : { path: section.path }),
                             lineNumberWidth: sectionLineNumberWidth,
-                            ...(highlightedContents[lineIndex] === undefined
+                            ...(highlightedContents[index] === undefined
                                 ? {}
-                                : { highlightedContent: highlightedContents[lineIndex] }),
+                                : { highlightedContent: highlightedContents[index] }),
+                            ...(changedRanges[index] === undefined
+                                ? {}
+                                : { changedRanges: changedRanges[index] }),
                             ...(maxWrappedRows === undefined ? {} : { maxWrappedRows }),
                         }),
                     );

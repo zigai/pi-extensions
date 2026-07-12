@@ -15,6 +15,42 @@
     "appearance": {
       "type": "object",
       "properties": {
+        "diffBackgroundStyle": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "changed-spans"
+            },
+            {
+              "type": "string",
+              "const": "full-row"
+            }
+          ]
+        },
+        "narrowDiffLayout": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "paired"
+            },
+            {
+              "type": "string",
+              "const": "traditional"
+            }
+          ]
+        },
+        "sideBySideLayout": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "content-aware"
+            },
+            {
+              "type": "string",
+              "const": "fixed"
+            }
+          ]
+        },
         "addedRowBackground": {
           "anyOf": [
             {
@@ -51,6 +87,9 @@
       },
       "additionalProperties": false,
       "default": {
+        "diffBackgroundStyle": "changed-spans",
+        "narrowDiffLayout": "paired",
+        "sideBySideLayout": "content-aware",
         "addedRowBackground": null,
         "deletedRowBackground": null,
         "instructionPathColor": null

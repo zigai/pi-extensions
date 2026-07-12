@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import type TypeboxSchema from "typebox/schema";
-import type { ScriptPreviewHeaderLayout } from "../rendering/core.ts";
+import type { NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
+import type { DiffBackgroundStyle, ScriptPreviewHeaderLayout } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import {
     parseScriptFormatterCommandsValue,
@@ -20,6 +21,9 @@ const Schema = loadTypeboxSchema();
 export type CodexLookConfig = {
     readonly preserveTools: readonly string[];
     readonly appearance: {
+        readonly diffBackgroundStyle: DiffBackgroundStyle;
+        readonly narrowDiffLayout: NarrowDiffLayout;
+        readonly sideBySideLayout: SideBySideLayout;
         readonly addedRowBackground: string | null;
         readonly deletedRowBackground: string | null;
         readonly instructionPathColor: string | null;
@@ -73,6 +77,9 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
     appearance: {
+        diffBackgroundStyle: "changed-spans",
+        narrowDiffLayout: "paired",
+        sideBySideLayout: "content-aware",
         addedRowBackground: null,
         deletedRowBackground: null,
         instructionPathColor: null,
@@ -114,6 +121,12 @@ const ScriptPreviewHeaderLayoutSchema = Type.Union([
     Type.Literal("inline"),
     Type.Literal("block"),
 ]);
+const DiffBackgroundStyleSchema = Type.Union([
+    Type.Literal("changed-spans"),
+    Type.Literal("full-row"),
+]);
+const NarrowDiffLayoutSchema = Type.Union([Type.Literal("paired"), Type.Literal("traditional")]);
+const SideBySideLayoutSchema = Type.Union([Type.Literal("content-aware"), Type.Literal("fixed")]);
 const SchemaReferenceSchema = Type.String();
 const OptionalHexColorSchema = Type.Union([
     Type.String({ pattern: "^#[0-9A-Fa-f]{6}$" }),
@@ -180,6 +193,9 @@ const ScriptPreviewConfigSchema = Type.Object(
 );
 const AppearanceConfigSchema = Type.Object(
     {
+        diffBackgroundStyle: Type.Optional(DiffBackgroundStyleSchema),
+        narrowDiffLayout: Type.Optional(NarrowDiffLayoutSchema),
+        sideBySideLayout: Type.Optional(SideBySideLayoutSchema),
         addedRowBackground: Type.Optional(OptionalHexColorSchema),
         deletedRowBackground: Type.Optional(OptionalHexColorSchema),
         instructionPathColor: Type.Optional(OptionalHexColorSchema),
@@ -207,6 +223,9 @@ const CodexLookConfigJsonSchema = Type.Object(
         appearance: Type.Optional(
             Type.Object(
                 {
+                    diffBackgroundStyle: Type.Optional(DiffBackgroundStyleSchema),
+                    narrowDiffLayout: Type.Optional(NarrowDiffLayoutSchema),
+                    sideBySideLayout: Type.Optional(SideBySideLayoutSchema),
                     addedRowBackground: Type.Optional(OptionalHexColorSchema),
                     deletedRowBackground: Type.Optional(OptionalHexColorSchema),
                     instructionPathColor: Type.Optional(OptionalHexColorSchema),
@@ -401,6 +420,15 @@ export function parseCodexLookConfig(
               )
             : [],
         appearance: {
+            diffBackgroundStyle:
+                appearance.diffBackgroundStyle ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.diffBackgroundStyle,
+            narrowDiffLayout:
+                appearance.narrowDiffLayout ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.narrowDiffLayout,
+            sideBySideLayout:
+                appearance.sideBySideLayout ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.sideBySideLayout,
             addedRowBackground:
                 appearance.addedRowBackground === undefined
                     ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.addedRowBackground

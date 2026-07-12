@@ -14,8 +14,11 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | Option                                    | Default                                                         | Purpose                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.                 |
-| `appearance.addedRowBackground`           | `null`                                                          | Override added-row backgrounds with a `#RRGGBB` color; `null` uses Pi.      |
-| `appearance.deletedRowBackground`         | `null`                                                          | Override deleted-row backgrounds with a `#RRGGBB` color; `null` uses Pi.    |
+| `appearance.diffBackgroundStyle`          | `"changed-spans"`                                               | Highlight `changed-spans` only or paint each `full-row`.                    |
+| `appearance.narrowDiffLayout`             | `"paired"`                                                      | Pair similar old/new rows or use `traditional` block ordering.              |
+| `appearance.sideBySideLayout`             | `"content-aware"`                                               | Use content-aware split selection or the `fixed` 140-column cutoff.         |
+| `appearance.addedRowBackground`           | `null`                                                          | Override addition backgrounds with a `#RRGGBB` color; `null` uses Pi.       |
+| `appearance.deletedRowBackground`         | `null`                                                          | Override deletion backgrounds with a `#RRGGBB` color; `null` uses Pi.       |
 | `appearance.instructionPathColor`         | `null`                                                          | Override Skill/AGENTS path text with a `#RRGGBB` color; `null` uses Pi.     |
 | `debugLog.enabled`                        | `false`                                                         | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
 | `debugLog.path`                           | `"debug.log"`                                                   | File for diagnostics; relative paths resolve beside the global config.      |
@@ -39,6 +42,9 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
   "$schema": "./config.schema.json",
   "preserveTools": [],
   "appearance": {
+    "diffBackgroundStyle": "changed-spans",
+    "narrowDiffLayout": "paired",
+    "sideBySideLayout": "content-aware",
     "addedRowBackground": null,
     "deletedRowBackground": null,
     "instructionPathColor": null

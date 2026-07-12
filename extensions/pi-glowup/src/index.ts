@@ -57,12 +57,14 @@ import {
     type ToolLabelMode,
 } from "./rendering/status-labels.ts";
 import { buildEditPreview, EditPreviewStore } from "./rendering/edit-preview.ts";
+import { summarizeEditCall } from "./rendering/edit-call-rendering.ts";
 import {
-    renderStreamingEditCallPreview,
-    resolveStreamingEditLineNumber,
-    summarizeEditCall,
-} from "./rendering/edit-call-rendering.ts";
-import { buildLargeDiffSummaryPayload } from "./diffs/diff.ts";
+    buildLargeDiffSummaryPayload,
+    buildPierreDiffPayload,
+    createEditSnapshot,
+    type EditSnapshotState,
+} from "./diffs/diff.ts";
+import type { PierreDiffPayload } from "./diffs/types.ts";
 import {
     clearQueuedDiffHighlights,
     getPierreDiffPayloadFromDetails,
@@ -150,6 +152,8 @@ function diagnosticSnapshot(): DebugLogFields {
         stores: {
             editPreviewEntries: editStats.entries,
             editPreviewBytes: editStats.bytes,
+            nativeEditSnapshots: nativeEditSnapshots.size,
+            nativeEditPierrePayloads: nativeEditPierrePayloads.size,
             scriptPreviewEntries: scriptStats.entries,
             scriptPreviewBytes: scriptStats.bytes,
             explorationGroups: explorationStats.groups,
@@ -186,6 +190,11 @@ function diagnosticSnapshot(): DebugLogFields {
 
 function configDiagnostics(config: CodexLookConfig): DebugLogFields {
     return {
+        appearance: {
+            diffBackgroundStyle: config.appearance.diffBackgroundStyle,
+            narrowDiffLayout: config.appearance.narrowDiffLayout,
+            sideBySideLayout: config.appearance.sideBySideLayout,
+        },
         debugLog: {
             enabled: config.debugLog.enabled,
             maxBytes: config.debugLog.maxBytes,
@@ -640,6 +649,48 @@ function callState(context: BuiltInRenderContext) {
 }
 
 const nativeDeletePreviews = new Map<string, DeletedTextPreview>();
+const nativeEditSnapshots = new Map<string, EditSnapshotState>();
+const nativeEditPierrePayloads = new Map<string, PierreDiffPayload>();
+
+function nativeEditPierrePayload(toolCallId: string): PierreDiffPayload | undefined {
+    return nativeEditPierrePayloads.get(toolCallId);
+}
+
+async function captureNativeEditSnapshot(
+    toolCallId: string,
+    cwd: string,
+    filePath: string | undefined,
+): Promise<void> {
+    if (nativeEditSnapshots.has(toolCallId) || filePath === undefined || filePath.length === 0) {
+        return;
+    }
+    const snapshot = await createEditSnapshot(cwd, filePath);
+    nativeEditSnapshots.set(toolCallId, snapshot);
+    trimOldestMapEntries(nativeEditSnapshots, 300);
+}
+
+async function finishNativeEditSnapshot(toolCallId: string, isError: boolean): Promise<void> {
+    const snapshot = nativeEditSnapshots.get(toolCallId);
+    nativeEditSnapshots.delete(toolCallId);
+    if (snapshot === undefined || isError) {
+        return;
+    }
+    const payload = buildPierreDiffPayload(await snapshot.finish());
+    if (payload !== undefined) {
+        nativeEditPierrePayloads.set(toolCallId, payload);
+        trimOldestMapEntries(nativeEditPierrePayloads, 300);
+    }
+}
+
+function trimOldestMapEntries<T>(entries: Map<string, T>, limit: number): void {
+    while (entries.size > limit) {
+        const oldest = entries.keys().next().value;
+        if (typeof oldest !== "string") {
+            return;
+        }
+        entries.delete(oldest);
+    }
+}
 
 function nativeDeletePreview(toolCallId: string): DeletedTextPreview | undefined {
     return nativeDeletePreviews.get(toolCallId);
@@ -865,21 +916,15 @@ function renderEditCall(
 
     const normalizedArgs = normalizedEditArgs(args);
     if (isActiveToolCall(context)) {
-        const lineNumberStart = resolveStreamingEditLineNumber(
-            context.toolCallId,
-            context.cwd,
-            normalizedArgs,
-            context.invalidate,
-        );
-        const streamingPreview = renderStreamingEditCallPreview(normalizedArgs, theme, {
-            ...context,
-            labelMode,
-            ...(lineNumberStart === undefined ? {} : { lineNumberStart }),
+        return renderCodexCall(theme, {
+            state: "running",
+            statusText: toolStatusLabel(labelMode, context, {
+                static: "Edit",
+                active: "Editing",
+                completed: "Edited",
+            }),
+            body: formatPathTarget(theme, pathField(normalizedArgs)),
         });
-        if (streamingPreview !== undefined) {
-            return streamingPreview;
-        }
-        return emptyComponent();
     }
 
     const summary = summarizeEditCall(normalizedArgs, {
@@ -910,7 +955,8 @@ function renderEditResult(
     }
 
     const pierrePayload = !context.isError
-        ? getPierreDiffPayloadFromDetails(result.details)
+        ? (nativeEditPierrePayload(context.toolCallId) ??
+          getPierreDiffPayloadFromDetails(result.details))
         : undefined;
     if (pierrePayload) {
         return renderPierreDiff(pierrePayload, theme, { expanded: options.expanded }, context);
@@ -968,6 +1014,8 @@ function errorMessage(cause: unknown): string {
 
 function clearSessionState(): void {
     nativeDeletePreviews.clear();
+    nativeEditSnapshots.clear();
+    nativeEditPierrePayloads.clear();
     editPreviews.clear();
     scriptPreviews.clear();
     streamingScriptIdentities.clear();
@@ -1113,11 +1161,14 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
 
     pi.on("tool_call", (event, ctx) => {
         const command = commandField(event.input);
+        const builtInToolName = diagnosticBuiltInToolName(event.toolName);
         const preimageCapture = event.toolName.toLowerCase().includes("apply_patch")
             ? captureApplyPatchPreimages(event.toolCallId, ctx.cwd, event.input)
-            : compatBuiltInToolName(event.toolName) === "delete"
-              ? captureNativeDeletePreview(event.toolCallId, ctx.cwd, pathField(event.input))
-              : undefined;
+            : builtInToolName === "edit"
+              ? captureNativeEditSnapshot(event.toolCallId, ctx.cwd, pathField(event.input))
+              : builtInToolName === "delete"
+                ? captureNativeDeletePreview(event.toolCallId, ctx.cwd, pathField(event.input))
+                : undefined;
         debugLogger.record("tool_call", {
             toolName: event.toolName,
             builtInToolName: diagnosticBuiltInToolName(event.toolName),
@@ -1146,7 +1197,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         return preimageCapture;
     });
 
-    pi.on("tool_result", (event, ctx) => {
+    pi.on("tool_result", async (event, ctx) => {
         let scheduledFormattedPreview = false;
         let storedEditPreview = false;
         if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
@@ -1166,6 +1217,9 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
 
         const rendersAsEdit =
             isEditToolResult(event) || compatBuiltInToolName(event.toolName) === "edit";
+        if (rendersAsEdit) {
+            await finishNativeEditSnapshot(event.toolCallId, event.isError === true);
+        }
         if (
             rendersAsEdit &&
             !event.isError &&

@@ -8,6 +8,7 @@ import {
     type FileDiffMetadata,
 } from "@pierre/diffs";
 import { cleanDiffLine, flattenHighlightedLine } from "./highlight.ts";
+import { pairReplacementLines, type NarrowDiffLayout } from "./layout.ts";
 import type {
     HighlightedDiffCode,
     PierreDiffPayload,
@@ -35,7 +36,10 @@ type FileSnapshot = {
 
 type DiffRowBuildOptions = {
     readonly maxRows?: number;
+    readonly narrowLayout?: NarrowDiffLayout;
 };
+
+type UnifiedLineRow = Extract<UnifiedDiffRow, { readonly kind: "line" }>;
 
 /** In-flight snapshot for edit tool execution. */
 export type EditSnapshotState = {
@@ -275,44 +279,47 @@ export function buildUnifiedDiffRows(
                 continue;
             }
 
-            for (let offset = 0; offset < content.deletions; offset += 1) {
-                if (
-                    pushRow(
-                        makeUnifiedLine({
-                            lineType: "deletion",
-                            lineNumber: deletionLineNumber + offset,
-                            spans: flattenHighlightedLine(
-                                highlighted.deletionLines[deletionLineIndex + offset],
-                                palette.appearance,
-                                palette.deletionRowBg,
-                                cleanDiffLine(metadata.deletionLines[deletionLineIndex + offset]),
-                                metadata.lang,
-                            ),
-                            palette,
-                        }),
-                    )
-                ) {
-                    return trimEdgeCollapsedRows(rows);
-                }
-            }
-
-            for (let offset = 0; offset < content.additions; offset += 1) {
-                if (
-                    pushRow(
-                        makeUnifiedLine({
-                            lineType: "addition",
-                            lineNumber: additionLineNumber + offset,
-                            spans: flattenHighlightedLine(
-                                highlighted.additionLines[additionLineIndex + offset],
-                                palette.appearance,
-                                palette.additionRowBg,
-                                cleanDiffLine(metadata.additionLines[additionLineIndex + offset]),
-                                metadata.lang,
-                            ),
-                            palette,
-                        }),
-                    )
-                ) {
+            const deletionRows = Array.from(
+                { length: content.deletions },
+                (_value, offset): UnifiedLineRow =>
+                    makeUnifiedLine({
+                        lineType: "deletion",
+                        lineNumber: deletionLineNumber + offset,
+                        spans: flattenHighlightedLine(
+                            highlighted.deletionLines[deletionLineIndex + offset],
+                            palette.appearance,
+                            palette.deletionSpanBg,
+                            cleanDiffLine(metadata.deletionLines[deletionLineIndex + offset]),
+                            metadata.lang,
+                            { dimUnchanged: palette.deletionRowBg.length === 0 },
+                        ),
+                        palette,
+                    }),
+            );
+            const additionRows = Array.from(
+                { length: content.additions },
+                (_value, offset): UnifiedLineRow =>
+                    makeUnifiedLine({
+                        lineType: "addition",
+                        lineNumber: additionLineNumber + offset,
+                        spans: flattenHighlightedLine(
+                            highlighted.additionLines[additionLineIndex + offset],
+                            palette.appearance,
+                            palette.additionSpanBg,
+                            cleanDiffLine(metadata.additionLines[additionLineIndex + offset]),
+                            metadata.lang,
+                            { dimUnchanged: palette.additionRowBg.length === 0 },
+                        ),
+                        palette,
+                    }),
+            );
+            const replacementRows = orderUnifiedReplacementRows(
+                deletionRows,
+                additionRows,
+                options.narrowLayout ?? "traditional",
+            );
+            for (const row of replacementRows) {
+                if (pushRow(row)) {
                     return trimEdgeCollapsedRows(rows);
                 }
             }
@@ -428,11 +435,12 @@ export function buildSplitDiffRows(
                                       spans: flattenHighlightedLine(
                                           highlighted.deletionLines[deletionLineIndex + offset],
                                           palette.appearance,
-                                          palette.deletionRowBg,
+                                          palette.deletionSpanBg,
                                           cleanDiffLine(
                                               metadata.deletionLines[deletionLineIndex + offset],
                                           ),
                                           metadata.lang,
+                                          { dimUnchanged: palette.deletionRowBg.length === 0 },
                                       ),
                                       palette,
                                   })
@@ -445,11 +453,12 @@ export function buildSplitDiffRows(
                                       spans: flattenHighlightedLine(
                                           highlighted.additionLines[additionLineIndex + offset],
                                           palette.appearance,
-                                          palette.additionRowBg,
+                                          palette.additionSpanBg,
                                           cleanDiffLine(
                                               metadata.additionLines[additionLineIndex + offset],
                                           ),
                                           metadata.lang,
+                                          { dimUnchanged: palette.additionRowBg.length === 0 },
                                       ),
                                       palette,
                                   })
@@ -490,6 +499,45 @@ export function buildSplitDiffRows(
     }
 
     return trimEdgeCollapsedRows(rows);
+}
+
+function orderUnifiedReplacementRows(
+    deletions: readonly UnifiedLineRow[],
+    additions: readonly UnifiedLineRow[],
+    layout: NarrowDiffLayout,
+): readonly UnifiedLineRow[] {
+    if (layout === "traditional") {
+        return [...deletions, ...additions];
+    }
+
+    const pairs = pairReplacementLines(
+        deletions.map(unifiedRowText),
+        additions.map(unifiedRowText),
+    );
+    if (pairs === undefined) {
+        return [...deletions, ...additions];
+    }
+
+    const rows: UnifiedLineRow[] = [];
+    let deletionIndex = 0;
+    let additionIndex = 0;
+    for (const pair of pairs) {
+        rows.push(...deletions.slice(deletionIndex, pair.deletionIndex));
+        rows.push(...additions.slice(additionIndex, pair.additionIndex));
+        const deletion = deletions[pair.deletionIndex];
+        const addition = additions[pair.additionIndex];
+        if (deletion !== undefined) rows.push(deletion);
+        if (addition !== undefined) rows.push(addition);
+        deletionIndex = pair.deletionIndex + 1;
+        additionIndex = pair.additionIndex + 1;
+    }
+    rows.push(...deletions.slice(deletionIndex));
+    rows.push(...additions.slice(additionIndex));
+    return rows;
+}
+
+function unifiedRowText(row: UnifiedLineRow): string {
+    return row.spans.map((span) => span.text).join("");
 }
 
 function pushBudgetedRow<TRow>(rows: TRow[], row: TRow, maxRows: number | undefined): boolean {
@@ -830,7 +878,7 @@ function makeUnifiedLine(options: {
         readonly bg?: string;
     }>;
     readonly palette: PierreTerminalPalette;
-}): UnifiedDiffRow {
+}): UnifiedLineRow {
     const colors = colorsForLineType(options.lineType, options.palette);
     return {
         kind: "line",
@@ -839,7 +887,7 @@ function makeUnifiedLine(options: {
         spans: options.spans,
         rowFg: colors.fg,
         rowBg: colors.bg,
-        lineNumberFg: options.palette.lineNumberFg,
+        lineNumberFg: options.lineType === "context" ? options.palette.lineNumberFg : colors.fg,
     };
 }
 
@@ -860,7 +908,7 @@ function makeSplitCell(options: {
         spans: options.spans,
         rowFg: colors.fg,
         rowBg: colors.bg,
-        lineNumberFg: options.palette.lineNumberFg,
+        lineNumberFg: options.lineType === "context" ? options.palette.lineNumberFg : colors.fg,
     };
 }
 

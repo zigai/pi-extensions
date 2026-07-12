@@ -18,6 +18,9 @@ describe("codex look config", () => {
 
         expect(config.preserveTools).toEqual([]);
         expect(config.appearance).toEqual({
+            diffBackgroundStyle: "changed-spans",
+            narrowDiffLayout: "paired",
+            sideBySideLayout: "content-aware",
             addedRowBackground: null,
             deletedRowBackground: null,
             instructionPathColor: null,
@@ -49,6 +52,9 @@ describe("codex look config", () => {
     it("parses user-configured rendering colors", () => {
         const config = parseCodexLookConfig({
             appearance: {
+                diffBackgroundStyle: "full-row",
+                narrowDiffLayout: "traditional",
+                sideBySideLayout: "fixed",
                 addedRowBackground: "#123456",
                 deletedRowBackground: "#654321",
                 instructionPathColor: "#AABBCC",
@@ -56,6 +62,9 @@ describe("codex look config", () => {
         });
 
         expect(config.appearance).toEqual({
+            diffBackgroundStyle: "full-row",
+            narrowDiffLayout: "traditional",
+            sideBySideLayout: "fixed",
             addedRowBackground: "#123456",
             deletedRowBackground: "#654321",
             instructionPathColor: "#AABBCC",

@@ -89,6 +89,9 @@ describe("Codex rendering helpers", () => {
 
     it("applies configured instruction and diff colors", () => {
         configureRenderingAppearance({
+            diffBackgroundStyle: "full-row",
+            narrowDiffLayout: "paired",
+            sideBySideLayout: "content-aware",
             addedRowBackground: "#123456",
             deletedRowBackground: "#654321",
             instructionPathColor: "#AABBCC",
@@ -106,6 +109,9 @@ describe("Codex rendering helpers", () => {
             expect(diff[1]).toContain("\u001b[48;2;101;67;33m");
         } finally {
             configureRenderingAppearance({
+                diffBackgroundStyle: "changed-spans",
+                narrowDiffLayout: "paired",
+                sideBySideLayout: "content-aware",
                 addedRowBackground: null,
                 deletedRowBackground: null,
                 instructionPathColor: null,
@@ -1025,52 +1031,81 @@ describe("Codex rendering helpers", () => {
         expect(sections[0]?.lines).toEqual(["+10 first", "   ...", "+90 second"]);
     });
 
-    it("fills fallback changed rows without creating extra blank rows", () => {
+    it("keeps fallback blank changed rows without adding padding rows", () => {
         const sections = parseDiffSections(
             "+1 from pathlib import Path\n+2 \n+3 def greet():",
             "file.py",
         );
         const lines = renderCodexDiff(plainTheme, sections, false).render(80);
         const blankAddition = lines.find((line) => line.trimEnd() === "    2 +");
-        const contentAddition = lines.find((line) => line.includes("from pathlib import Path"));
 
         expect(blankAddition).toBeDefined();
-        expect(visibleWidth(blankAddition ?? "")).toBe(80);
-        expect(visibleWidth(contentAddition ?? "")).toBe(80);
         expect(lines).not.toContain("");
         expect(lines[lines.findIndex((line) => line.trimEnd() === "    2 +") + 1]?.trimEnd()).toBe(
             "    3 +def greet():",
         );
     });
 
-    it("paints insertion and deletion rows without painting context", () => {
+    it("paints only changed spans while preserving unchanged syntax", () => {
         const backgroundTheme: CodexRenderTheme = {
             ...plainTheme,
             bg(token, text) {
                 return `${token === "toolSuccessBg" ? "\u001b[42m" : "\u001b[41m"}${text}\u001b[49m`;
             },
         };
-        const sections = [
-            {
-                path: "file.ts",
-                lines: ["-1 old", " 1 unchanged", "+2 new"],
-                added: 1,
-                removed: 1,
-            },
-        ];
+        const sections = parseDiffSections(
+            "-1 const limit = args.limit ?? 2000;\n+1 const limit = args.limit ?? 4000;",
+            "file.ts",
+        );
         const rendered = renderCodexDiff(backgroundTheme, sections, true).render(80).join("\n");
 
-        expect(rendered).toContain("\u001b[42m    2 +new");
-        expect(rendered).toContain("\u001b[41m    1 -old");
-        expect(rendered).toContain("    1  unchanged");
-        expect(rendered).not.toContain("\u001b[42m    1  unchanged");
-        expect(rendered).not.toContain("\u001b[41m    1  unchanged");
-        expect(
-            renderCodexDiff(backgroundTheme, sections, true)
-                .render(80)
-                .filter((line) => line.includes("\u001b[4"))
-                .every((line) => visibleWidth(line) === 80),
-        ).toBe(true);
+        expect(rendered).toContain("\u001b[41m2000\u001b[49m");
+        expect(rendered).toContain("\u001b[42m4000\u001b[49m");
+        expect(rendered).not.toContain("\u001b[41m    1 -");
+        expect(rendered).not.toContain("\u001b[42m    1 +");
+        expect(rendered).toContain("const limit = args.limit ??");
+    });
+
+    it("keeps full-row diff backgrounds as an option", () => {
+        configureRenderingAppearance({
+            diffBackgroundStyle: "full-row",
+            narrowDiffLayout: "paired",
+            sideBySideLayout: "content-aware",
+            addedRowBackground: null,
+            deletedRowBackground: null,
+            instructionPathColor: null,
+        });
+        try {
+            const backgroundTheme: CodexRenderTheme = {
+                ...plainTheme,
+                bg(token, text) {
+                    return `${token === "toolSuccessBg" ? "\u001b[42m" : "\u001b[41m"}${text}\u001b[49m`;
+                },
+            };
+            const sections = parseDiffSections("-1 old\n 1 unchanged\n+2 new", "file.ts");
+            const renderedLines = renderCodexDiff(backgroundTheme, sections, true).render(80);
+            const rendered = renderedLines.join("\n");
+
+            expect(rendered).toContain("\u001b[42m    2 +new");
+            expect(rendered).toContain("\u001b[41m    1 -old");
+            expect(rendered).toContain("    1  unchanged");
+            expect(rendered).not.toContain("\u001b[42m    1  unchanged");
+            expect(rendered).not.toContain("\u001b[41m    1  unchanged");
+            expect(
+                renderedLines
+                    .filter((line) => line.includes("\u001b[4"))
+                    .every((line) => visibleWidth(line) === 80),
+            ).toBe(true);
+        } finally {
+            configureRenderingAppearance({
+                diffBackgroundStyle: "changed-spans",
+                narrowDiffLayout: "paired",
+                sideBySideLayout: "content-aware",
+                addedRowBackground: null,
+                deletedRowBackground: null,
+                instructionPathColor: null,
+            });
+        }
     });
 
     it("renders partial diff omission metadata without a code gutter", () => {
@@ -1120,7 +1155,6 @@ describe("Codex rendering helpers", () => {
 
         expect(lines.length).toBeGreaterThan(1);
         expectLinesWithinWidth(lines, width);
-        expect(lines.some((line) => visibleWidth(line) === width)).toBe(true);
     });
 
     it("preserves every character when diff content wraps", () => {
