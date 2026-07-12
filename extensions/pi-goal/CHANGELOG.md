@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.35 - 2026-07-11
+
 - Update the development and documented compatibility baseline to Pi 0.80.6 after auditing current lifecycle, tool, persistence, session replacement, compaction, queued-work, concurrency, and TUI contracts.
 - Preserve deliberate per-low-level-run `agent_end` continuation handling; add regression coverage proving `agent_settled` does not replace that hook.
 
