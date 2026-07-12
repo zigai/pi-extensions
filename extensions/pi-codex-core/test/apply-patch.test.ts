@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "vitest";
 
 import { withFileMutationQueue, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { Result as BetterResult } from "better-result";
 
 import {
     ApplyPatchError,
@@ -25,9 +26,20 @@ import {
     type ApplyPatchFileSystem,
 } from "../src/tools/apply-patch/engine.ts";
 import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
+import { makeExtensionContext } from "./helpers.ts";
 
 function wrapPatch(body: string): string {
     return `*** Begin Patch\n${body}\n*** End Patch`;
+}
+
+function expectApplyPatchSuccess<T>(result: BetterResult<T, ApplyPatchError>): T {
+    if (result.isErr()) assert.fail(formatApplyPatchError(result.error));
+    return result.value;
+}
+
+function expectApplyPatchFailure<T>(result: BetterResult<T, ApplyPatchError>): ApplyPatchError {
+    if (result.isOk()) assert.fail("Expected apply_patch to fail.");
+    return result.error;
 }
 
 function createNodeFileSystem(): ApplyPatchFileSystem {
@@ -56,7 +68,7 @@ test("parses Codex apply_patch add, delete, update, and move hunks", () => {
 -old
 +new`);
 
-    const parsed = parseApplyPatch(patch);
+    const parsed = expectApplyPatchSuccess(parseApplyPatch(patch));
 
     assert.deepEqual(parsed.hunks, [
         { type: "add", path: "add.txt", contents: "hello\n" },
@@ -99,7 +111,7 @@ test("applies Codex apply_patch changes to the local filesystem", async () => {
 -old name
 +new name`);
 
-        const result = await applyPatchText(patch, root);
+        const result = expectApplyPatchSuccess(await applyPatchText(patch, root));
 
         assert.equal(await readFile(join(root, "nested", "add.txt"), "utf8"), "created\n");
         await assert.rejects(readFile(join(root, "delete.txt"), "utf8"));
@@ -127,7 +139,7 @@ test("apply_patch update matching follows Codex whitespace and Unicode lenience"
 -import asyncio  # local import - avoids top-level dep
 +import asyncio  # ok`);
 
-        await applyPatchText(patch, root);
+        expectApplyPatchSuccess(await applyPatchText(patch, root));
 
         assert.equal(await readFile(join(root, "unicode.txt"), "utf8"), "import asyncio  # ok\n");
     } finally {
@@ -145,7 +157,9 @@ test("preflights every hunk before mutating any file", async () => {
 -missing
 +updated`);
 
-        await assert.rejects(applyPatchText(patch, root), ApplyPatchError);
+        assert.ok(
+            expectApplyPatchFailure(await applyPatchText(patch, root)) instanceof ApplyPatchError,
+        );
         await assert.rejects(readFile(join(root, "would-have-been-created.txt"), "utf8"));
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -162,7 +176,7 @@ test("applies an add followed by a dependent update to the same path", async () 
 -initial
 +final`);
 
-        const result = await applyPatchText(patch, root);
+        const result = expectApplyPatchSuccess(await applyPatchText(patch, root));
 
         assert.equal(await readFile(join(root, "sequential.txt"), "utf8"), "final\n");
         assert.deepEqual(result.affectedPaths, {
@@ -189,7 +203,7 @@ test("applies sequential dependent updates to the same path", async () => {
 -intermediate
 +final`);
 
-        await applyPatchText(patch, root);
+        expectApplyPatchSuccess(await applyPatchText(patch, root));
 
         assert.equal(await readFile(filePath, "utf8"), "final\n");
     } finally {
@@ -211,7 +225,7 @@ test("applies an operation to the destination of an earlier move", async () => {
 -intermediate
 +final`);
 
-        await applyPatchText(patch, root);
+        expectApplyPatchSuccess(await applyPatchText(patch, root));
 
         await assert.rejects(readFile(join(root, "source.txt"), "utf8"));
         assert.equal(await readFile(join(root, "destination.txt"), "utf8"), "final\n");
@@ -229,13 +243,9 @@ test("rejects parsed environment IDs before mutation", async () => {
 +not written
 *** End Patch`;
 
-        await assert.rejects(
-            applyPatchText(patch, root),
-            (cause: unknown) =>
-                cause instanceof ApplyPatchError &&
-                cause.kind === "invalidPatch" &&
-                /no environment selector/.test(cause.message),
-        );
+        const failure = expectApplyPatchFailure(await applyPatchText(patch, root));
+        assert.equal(failure.kind, "invalidPatch");
+        assert.match(failure.message, /no environment selector/);
         await assert.rejects(readFile(join(root, "rejected.txt"), "utf8"));
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -249,24 +259,27 @@ test("denies traversal and external absolute paths while allowing absolute paths
     await mkdir(root);
     await mkdir(outside);
     try {
-        await assert.rejects(
-            applyPatchText(wrapPatch("*** Add File: ../outside/traversal.txt\n+denied"), root),
-            (cause: unknown) =>
-                cause instanceof ApplyPatchError && cause.kind === "unauthorizedPath",
+        const traversalFailure = expectApplyPatchFailure(
+            await applyPatchText(
+                wrapPatch("*** Add File: ../outside/traversal.txt\n+denied"),
+                root,
+            ),
         );
-        await assert.rejects(
-            applyPatchText(
+        assert.equal(traversalFailure.kind, "unauthorizedPath");
+        const absoluteFailure = expectApplyPatchFailure(
+            await applyPatchText(
                 wrapPatch(`*** Add File: ${join(outside, "absolute.txt")}\n+denied`),
                 root,
             ),
-            (cause: unknown) =>
-                cause instanceof ApplyPatchError && cause.kind === "unauthorizedPath",
         );
+        assert.equal(absoluteFailure.kind, "unauthorizedPath");
         await assert.rejects(readFile(join(outside, "traversal.txt"), "utf8"));
         await assert.rejects(readFile(join(outside, "absolute.txt"), "utf8"));
 
         const absoluteInsidePath = join(root, "absolute-inside.txt");
-        await applyPatchText(wrapPatch(`*** Add File: ${absoluteInsidePath}\n+allowed`), root);
+        expectApplyPatchSuccess(
+            await applyPatchText(wrapPatch(`*** Add File: ${absoluteInsidePath}\n+allowed`), root),
+        );
         assert.equal(await readFile(absoluteInsidePath, "utf8"), "allowed\n");
     } finally {
         await rm(base, { recursive: true, force: true });
@@ -281,11 +294,10 @@ test("denies paths that escape cwd through an existing symlink", async () => {
     await mkdir(outside);
     await symlink(outside, join(root, "escape"), "dir");
     try {
-        await assert.rejects(
-            applyPatchText(wrapPatch("*** Add File: escape/through-link.txt\n+denied"), root),
-            (cause: unknown) =>
-                cause instanceof ApplyPatchError && cause.kind === "unauthorizedPath",
+        const failure = expectApplyPatchFailure(
+            await applyPatchText(wrapPatch("*** Add File: escape/through-link.txt\n+denied"), root),
         );
+        assert.equal(failure.kind, "unauthorizedPath");
         await assert.rejects(readFile(join(outside, "through-link.txt"), "utf8"));
     } finally {
         await rm(base, { recursive: true, force: true });
@@ -307,13 +319,9 @@ test("rejects sequential hunks that alias the same file before mutation", async 
 -original
 +second`);
 
-        await assert.rejects(
-            applyPatchText(patch, root),
-            (cause: unknown) =>
-                cause instanceof ApplyPatchError &&
-                cause.kind === "compute" &&
-                /same filesystem target/.test(cause.message),
-        );
+        const failure = expectApplyPatchFailure(await applyPatchText(patch, root));
+        assert.equal(failure.kind, "compute");
+        assert.match(failure.message, /same filesystem target/);
         assert.equal(await readFile(filePath, "utf8"), "original\n");
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -325,12 +333,12 @@ test("checks cancellation before the first filesystem mutation", async () => {
     const controller = new AbortController();
     controller.abort();
     try {
-        await assert.rejects(
-            applyPatchText(wrapPatch("*** Add File: cancelled.txt\n+not written"), root, {
+        const failure = expectApplyPatchFailure(
+            await applyPatchText(wrapPatch("*** Add File: cancelled.txt\n+not written"), root, {
                 signal: controller.signal,
             }),
-            (cause: unknown) => cause instanceof ApplyPatchError && cause.kind === "cancelled",
         );
+        assert.equal(failure.kind, "cancelled");
         await assert.rejects(readFile(join(root, "cancelled.txt"), "utf8"));
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -360,13 +368,9 @@ test("rejects a stale preflight snapshot before overwriting an external mutation
 -original
 +patched`);
 
-        await assert.rejects(
-            applyPatchText(patch, root, { fileSystem }),
-            (cause: unknown) =>
-                cause instanceof ApplyPatchError &&
-                cause.kind === "conflict" &&
-                /concurrent change/.test(cause.message),
-        );
+        const failure = expectApplyPatchFailure(await applyPatchText(patch, root, { fileSystem }));
+        assert.equal(failure.kind, "conflict");
+        assert.match(failure.message, /concurrent change/);
         assert.equal(await readFile(filePath, "utf8"), "external\n");
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -391,18 +395,12 @@ test("reports a failed write as uncertain even when no mutation was confirmed", 
 -original
 +replacement`);
 
-        let caught: unknown;
-        try {
-            await applyPatchText(patch, root, { fileSystem });
-        } catch (cause: unknown) {
-            caught = cause;
-        }
-
-        assert.ok(caught instanceof ApplyPatchExecutionError);
-        assert.deepEqual(caught.committedResult.changes, []);
-        assert.deepEqual(caught.uncertainPaths, [filePath]);
+        const failure = expectApplyPatchFailure(await applyPatchText(patch, root, { fileSystem }));
+        assert.ok(failure instanceof ApplyPatchExecutionError);
+        assert.deepEqual(failure.committedResult.changes, []);
+        assert.deepEqual(failure.uncertainPaths, [filePath]);
         assert.match(
-            formatApplyPatchError(caught),
+            formatApplyPatchError(failure),
             /state is uncertain:[\s\S]*\? .*uncertain\.txt/,
         );
         assert.equal(await readFile(filePath, "utf8"), "replacement\n");
@@ -421,7 +419,7 @@ test("apply_patch tool executes patch argument and formats parser errors", async
         assert.ok(params);
 
         const ctx = { cwd: root };
-        // SAFETY: This fixture supplies the ExtensionContext cwd read by apply_patch execution.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture supplies the ExtensionContext cwd read by apply_patch execution.
         const executionContext = ctx as unknown as ExtensionContext;
         const result = await tool.execute("call-1", params, undefined, undefined, executionContext);
 
@@ -444,20 +442,39 @@ test("apply_patch tool executes patch argument and formats parser errors", async
             unknownRemovedFileCount: 0,
         });
 
-        let caught: unknown;
-        try {
-            parseApplyPatch("bad");
-        } catch (cause: unknown) {
-            caught = cause;
-        }
-        assert.ok(caught instanceof ApplyPatchError);
+        const failure = expectApplyPatchFailure(parseApplyPatch("bad"));
         assert.equal(
-            formatApplyPatchError(caught),
+            formatApplyPatchError(failure),
             "Invalid patch: The first line of the patch must be '*** Begin Patch'",
+        );
+        await assert.rejects(
+            tool.execute("call-invalid", { patch: "bad" }, undefined, undefined, executionContext),
+            (cause: unknown) =>
+                cause instanceof Error &&
+                cause.message ===
+                    "Invalid patch: The first line of the patch must be '*** Begin Patch'",
         );
     } finally {
         await rm(root, { recursive: true, force: true });
     }
+});
+
+test("apply_patch argument preparation accepts compatibility shapes and rejects ambiguity", () => {
+    const prepareArguments = createApplyPatchTool().prepareArguments;
+    assert.ok(prepareArguments);
+    const patch = wrapPatch("*** Add File: compatible.txt\n+compatible");
+
+    assert.deepEqual(prepareArguments(patch), { patch });
+    assert.deepEqual(prepareArguments({ patch }), { patch });
+    assert.deepEqual(prepareArguments({ input: patch }), { patch });
+    assert.deepEqual(prepareArguments({ command: patch }), { patch });
+
+    assert.throws(() => prepareArguments({ patch, extra: true }), /Invalid apply_patch arguments/);
+    assert.throws(() => prepareArguments({ patch, input: patch }), /Invalid apply_patch arguments/);
+    assert.throws(
+        () => prepareArguments({ command: patch, obsolete: patch }),
+        /Invalid apply_patch arguments/,
+    );
 });
 
 test("apply_patch shares target-file locks with Pi write operations", async () => {
@@ -485,7 +502,7 @@ test("apply_patch shares target-file locks with Pi write operations", async () =
 @@
 -before
 +after`);
-        const ctx = { cwd: root } as unknown as ExtensionContext;
+        const ctx = makeExtensionContext(root, true);
         const patchResult = tool.execute("call-lock", { patch }, undefined, undefined, ctx);
         releaseBlocker?.();
 

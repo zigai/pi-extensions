@@ -33,7 +33,7 @@ import {
     rewriteRemoteCompactionToolOutputsForContextWindow,
     shrinkRemoteCompactionRequestForContextWindow,
 } from "./request-budget.ts";
-import { asResponsesPayload, buildRemoteCompactionPromptInput } from "./responses-input.ts";
+import { buildRemoteCompactionPromptInput, parseResponsesPayload } from "./responses-input.ts";
 import {
     buildLenientNativeReplayPayload,
     buildWindowLifecycle,
@@ -43,7 +43,7 @@ import {
     notifyNativeReplayFallbackOnce,
     rewriteResponsesPayloadWithNativeReplay,
 } from "./replay-window.ts";
-import { shutdownCodexTokenizer } from "./tokenizer.ts";
+import type { CodexTokenizer } from "./tokenizer.ts";
 import {
     applyRemoteCompactionTransportHeaders,
     buildRemoteCompactionTransportMetadata,
@@ -70,7 +70,10 @@ export async function handleCodexNativeCompaction(
     ctx: ExtensionContext,
     config: CodexCoreConfig,
     pi: ExtensionAPI,
-    runtimeServices: CodexRuntime = defaultCodexRuntime,
+    options: {
+        readonly tokenizer: CodexTokenizer;
+        readonly runtime?: CodexRuntime | undefined;
+    },
 ): Promise<
     | {
           readonly cancel?: true;
@@ -83,6 +86,7 @@ export async function handleCodexNativeCompaction(
       }
     | undefined
 > {
+    const runtimeServices = options.runtime ?? defaultCodexRuntime;
     if (!config.compaction.enabled) return undefined;
     if (event.signal.aborted) return { cancel: true };
     if (!event.branchEntries.some((entry) => entry.id === event.preparation.firstKeptEntryId)) {
@@ -165,6 +169,7 @@ export async function handleCodexNativeCompaction(
         },
         contextWindow,
         tokenCache,
+        { tokenizer: options.tokenizer, signal: event.signal },
     );
     promptInput = { ...promptInput, input: preflight.input };
 
@@ -183,14 +188,13 @@ export async function handleCodexNativeCompaction(
         request,
         contextWindow,
         tokenCache,
-        preflight,
+        { tokenizer: options.tokenizer, signal: event.signal, preflight },
     );
     if (shrink.kind === "too_large") {
         notifyCompactionFallback(
             ctx,
             `Codex remote compaction v2 request is too large for the context window (${shrink.estimatedTokensAfter}/${shrink.budgetTokens} estimated tokens).`,
         );
-        await shutdownCodexTokenizer();
         return undefined;
     }
     tokenCache = createTokenEstimateCache();
@@ -203,12 +207,10 @@ export async function handleCodexNativeCompaction(
         const responseResult = await executeRemoteCompactionV2(
             { responsesUrl: runtime.value.responsesUrl, headers },
             shrink.request,
-            event.signal,
-            runtimeServices,
+            { signal: event.signal, services: runtimeServices },
         );
         if (responseResult.isErr()) {
             notifyCompactionFallback(ctx, responseResult.error.message);
-            await shutdownCodexTokenizer();
             return responseResult.error._tag === "CodexRequestCancelled"
                 ? { cancel: true }
                 : undefined;
@@ -218,18 +220,17 @@ export async function handleCodexNativeCompaction(
             shrink.promptInput,
             response.compactionOutput,
             tokenCache,
+            { tokenizer: options.tokenizer, signal: event.signal },
         );
         if (compactedWindow.length === 0 || !hasCompactionOutputItem(compactedWindow)) {
             notifyCompactionFallback(
                 ctx,
                 "Codex remote compaction v2 returned no usable compacted context",
             );
-            await shutdownCodexTokenizer();
             return undefined;
         }
         const worldState = captureNativeCompactionWorldState(ctx, pi, runtimeServices, event);
         const lifecycle = buildWindowLifecycle(latestNativeCompaction, runtimeServices);
-        await shutdownCodexTokenizer();
         return {
             compaction: {
                 summary: NATIVE_COMPACTION_SHIM_SUMMARY,
@@ -263,13 +264,11 @@ export async function handleCodexNativeCompaction(
             },
         };
     } catch (cause: unknown) {
-        if (isCodexAbortCause(cause)) {
-            await shutdownCodexTokenizer();
+        if (isCodexAbortCause(cause) || event.signal.aborted) {
             return { cancel: true };
         }
         const message = safeCauseMessage(cause);
         notifyCompactionFallback(ctx, `Codex remote compaction v2 failed: ${message}`);
-        await shutdownCodexTokenizer();
         return undefined;
     }
 }
@@ -284,9 +283,11 @@ export async function rewriteProviderRequestWithNativeCompaction(
     if (!config.compaction.enabled) return undefined;
     const model = ctx.model;
     if (!model) return undefined;
+    const modelApi = typeof model.api === "string" ? model.api : undefined;
+    if (modelApi === undefined) return undefined;
     const match: NativeCompactionMatch = {
         provider: model.provider,
-        api: model.api,
+        api: modelApi,
         baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
     };
 
@@ -294,7 +295,7 @@ export async function rewriteProviderRequestWithNativeCompaction(
     const latestNativeCompaction = findLatestActiveNativeCompactionEntry(branchEntries, match);
     if (!latestNativeCompaction) return undefined;
 
-    const responsesPayload = asResponsesPayload(payload);
+    const responsesPayload = parseResponsesPayload(payload);
     if (!responsesPayload) return undefined;
     assertNativeCompactionCompatibility(
         latestNativeCompaction.entry.details,

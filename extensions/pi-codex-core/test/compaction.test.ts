@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { zstdDecompressSync } from "node:zlib";
-import { test } from "vitest";
+import { afterAll, test } from "vitest";
 import {
     type ExtensionAPI,
     type ExtensionContext,
@@ -9,7 +9,7 @@ import {
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
 import {
     cancelScheduledCodexAutoCompaction,
-    handleCodexNativeCompaction,
+    handleCodexNativeCompaction as handleCodexNativeCompactionWithServices,
     isNativeCompactionDetails,
     maybeTriggerCodexAutoCompaction,
     NATIVE_COMPACTION_SHIM_SUMMARY,
@@ -23,33 +23,78 @@ import {
     CODEX_RESPONSES_LITE_HEADER,
 } from "../src/codex/responses-compat.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
-import {
-    countCodexTextTokens,
-    shutdownCodexTokenizer,
-    truncateCodexTextToTokenBudget,
-    warmCodexTokenizer,
-} from "../src/compaction/tokenizer.ts";
-import { makeTestRuntime, messageEntry, isRecord } from "./helpers.ts";
+import { CodexTokenizer } from "../src/compaction/tokenizer.ts";
+import { makeTestRuntime, messageEntry } from "./helpers.ts";
+
+const compactionTokenizer = new CodexTokenizer();
+
+afterAll(async () => {
+    await compactionTokenizer.shutdown();
+});
+
+async function handleCodexNativeCompaction(
+    event: SessionBeforeCompactEvent,
+    ctx: ExtensionContext,
+    config: Parameters<typeof handleCodexNativeCompactionWithServices>[2],
+    pi: ExtensionAPI,
+    runtime: CodexRuntime,
+) {
+    return handleCodexNativeCompactionWithServices(event, ctx, config, pi, {
+        tokenizer: compactionTokenizer,
+        runtime,
+    });
+}
 
 test("Codex tokenizer worker restarts after shutdown", async () => {
-    await shutdownCodexTokenizer();
+    const tokenizer = new CodexTokenizer();
+    await tokenizer.shutdown();
     try {
         const text = "alpha beta gamma delta epsilon zeta eta theta";
-        warmCodexTokenizer();
-        const countBeforeShutdown = await countCodexTextTokens(text);
-        const truncatedBeforeShutdown = await truncateCodexTextToTokenBudget(text, 3);
+        tokenizer.warm();
+        const countBeforeShutdown = await tokenizer.count(text);
+        const truncatedBeforeShutdown = await tokenizer.truncate(text, 3);
 
-        await shutdownCodexTokenizer();
+        await tokenizer.shutdown();
 
-        const countAfterShutdown = await countCodexTextTokens(text);
-        const truncatedAfterShutdown = await truncateCodexTextToTokenBudget(text, 3);
+        const countAfterShutdown = await tokenizer.count(text);
+        const truncatedAfterShutdown = await tokenizer.truncate(text, 3);
 
         assert.ok(countBeforeShutdown > 3);
         assert.equal(countAfterShutdown, countBeforeShutdown);
         assert.equal(truncatedAfterShutdown, truncatedBeforeShutdown);
         assert.ok(truncatedAfterShutdown.length < text.length);
     } finally {
-        await shutdownCodexTokenizer();
+        await tokenizer.shutdown();
+    }
+});
+
+test("Codex tokenizer cancels pending work without affecting later requests", async () => {
+    const tokenizer = new CodexTokenizer();
+    try {
+        await tokenizer.count("warm worker");
+        const controller = new AbortController();
+        const pending = tokenizer.count("token ".repeat(1_000_000), {
+            signal: controller.signal,
+        });
+        await Promise.resolve();
+        controller.abort(new Error("cancel token work"));
+
+        await assert.rejects(pending, /cancel token work/);
+        assert.ok((await tokenizer.count("later request")) > 0);
+    } finally {
+        await tokenizer.shutdown();
+    }
+});
+
+test("shutting down one Codex tokenizer does not affect another owner", async () => {
+    const first = new CodexTokenizer();
+    const second = new CodexTokenizer();
+    try {
+        await Promise.all([first.count("first"), second.count("second")]);
+        await first.shutdown();
+        assert.ok((await second.count("still active")) > 0);
+    } finally {
+        await Promise.all([first.shutdown(), second.shutdown()]);
     }
 });
 
@@ -114,7 +159,7 @@ test("creates native compaction using remote compaction v2", async () => {
     assert.ok(isRecord(requestBody));
     assert.equal(requestBody.model, "gpt-5.5");
     assert.doesNotMatch(JSON.stringify(requestBody), /comp_?hash/i);
-    assert.deepEqual((requestBody.input as unknown[]).at(-1), {
+    assert.deepEqual(responseInput(requestBody).at(-1), {
         type: "compaction_trigger",
     });
     assert.deepEqual(requestBody.tools, [
@@ -355,8 +400,7 @@ test("reports bounded redacted remote compaction HTTP error details", async () =
     const result = await executeRemoteCompactionV2(
         { responsesUrl: "https://example.test/responses", headers: new Headers() },
         request,
-        new AbortController().signal,
-        runtime,
+        { signal: new AbortController().signal, services: runtime },
     );
 
     assert.ok(result.isErr());
@@ -390,8 +434,7 @@ test("reports top-level Codex compatibility error details", async () => {
     const result = await executeRemoteCompactionV2(
         { responsesUrl: "https://example.test/responses", headers: new Headers() },
         request,
-        new AbortController().signal,
-        runtime,
+        { signal: new AbortController().signal, services: runtime },
     );
 
     assert.ok(result.isErr());
@@ -438,8 +481,7 @@ test("retries transient remote compaction failures", async () => {
     const result = await executeRemoteCompactionV2(
         { responsesUrl: "https://example.test/responses", headers: sourceHeaders },
         request,
-        new AbortController().signal,
-        runtime,
+        { signal: new AbortController().signal, services: runtime },
     );
 
     assert.ok(result.isOk());
@@ -479,8 +521,7 @@ test("does not retry HTTP 429 compaction responses", async () => {
     const result = await executeRemoteCompactionV2(
         { responsesUrl: "https://example.test/responses", headers: new Headers() },
         request,
-        new AbortController().signal,
-        runtime,
+        { signal: new AbortController().signal, services: runtime },
     );
 
     assert.ok(result.isErr());
@@ -525,8 +566,7 @@ test("times out and retries idle remote compaction streams", async () => {
     const result = await executeRemoteCompactionV2(
         { responsesUrl: "https://example.test/responses", headers: new Headers() },
         request,
-        new AbortController().signal,
-        runtime,
+        { signal: new AbortController().signal, services: runtime },
     );
 
     assert.ok(result.isErr());
@@ -567,8 +607,7 @@ test("does not retry unexpected stream-processing exceptions", async () => {
         executeRemoteCompactionV2(
             { responsesUrl: "https://example.test/responses", headers: new Headers() },
             request,
-            new AbortController().signal,
-            runtime,
+            { signal: new AbortController().signal, services: runtime },
         ),
         /scheduler defect/,
     );
@@ -603,8 +642,7 @@ test("rejects malformed remote compaction output items", async () => {
     const result = await executeRemoteCompactionV2(
         { responsesUrl: "https://example.test/responses", headers: new Headers() },
         request,
-        new AbortController().signal,
-        runtime,
+        { signal: new AbortController().signal, services: runtime },
     );
 
     assert.ok(result.isErr());
@@ -666,7 +704,7 @@ test("streams remote compaction SSE without buffering response text", async () =
         },
     };
     const runtime = makeTestRuntime(async () => {
-        // SAFETY: This fixture implements the Response members read by remote compaction streaming.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the Response members read by remote compaction streaming.
         return response as unknown as Response;
     });
 
@@ -708,7 +746,7 @@ test("cancels remote compaction streams with oversized pending SSE events", asyn
         },
     };
     const runtime = makeTestRuntime(async () => {
-        // SAFETY: This fixture implements the Response members read by remote compaction streaming.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the Response members read by remote compaction streaming.
         return response as unknown as Response;
     });
 
@@ -760,7 +798,7 @@ test("chains previous native compaction into the next remote v2 request", async 
     );
 
     assert.ok(isRecord(requestBody));
-    assert.deepEqual((requestBody.input as unknown[]).slice(0, 3), [
+    assert.deepEqual(responseInput(requestBody).slice(0, 3), [
         { type: "compaction", encrypted_content: "opaque" },
         { role: "user", content: [{ type: "input_text", text: "new live tail" }] },
         { type: "compaction_trigger" },
@@ -1040,7 +1078,7 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
     );
 
     assert.ok(isRecord(requestBody));
-    const callItem = (requestBody.input as unknown[]).find(
+    const callItem = responseInput(requestBody).find(
         (item) => isRecord(item) && item.type === "function_call",
     );
     assert.deepEqual(callItem, {
@@ -1049,7 +1087,7 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
         name: "read",
         arguments: JSON.stringify({ path: "big.txt" }),
     });
-    const outputItem = (requestBody.input as unknown[]).find(
+    const outputItem = responseInput(requestBody).find(
         (item) => isRecord(item) && item.type === "function_call_output",
     );
     assert.ok(isRecord(outputItem));
@@ -1452,14 +1490,11 @@ test("skips provider payload parsing when no native compaction state exists", as
     assert.equal(rewritten, undefined);
 });
 
-test("native replay matching does not JSON-stringify provider items", async () => {
+test("native replay rejects malformed nested provider values", async () => {
     const ctx = makeCompactionContext();
-    const poisonReplayItem = {
+    const malformedReplayItem = {
         role: "user",
-        content: [{ type: "input_text", text: "inserted context" }],
-        toJSON() {
-            throw new Error("provider item should not be JSON-stringified");
-        },
+        content: [{ type: "input_text", text: "inserted context", malformed: () => undefined }],
     };
 
     const rewritten = await rewriteProviderRequestWithNativeCompaction(
@@ -1471,7 +1506,7 @@ test("native replay matching does not JSON-stringify provider items", async () =
                     role: "user",
                     content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
                 },
-                poisonReplayItem,
+                malformedReplayItem,
                 { role: "user", content: [{ type: "input_text", text: "pre kept" }] },
                 { role: "user", content: [{ type: "input_text", text: "post tail" }] },
             ],
@@ -1484,14 +1519,7 @@ test("native replay matching does not JSON-stringify provider items", async () =
         makeCompactionApi(),
     );
 
-    const rewrittenInput = responseInput(rewritten);
-    assert.deepEqual(rewrittenInput.slice(0, 2), [
-        { role: "developer", content: "system" },
-        { type: "compaction", encrypted_content: "opaque" },
-    ]);
-    const rewrittenText = rewrittenInput.map(textFromResponseItem).join("\n");
-    assert.match(rewrittenText, /inserted context/);
-    assert.doesNotMatch(rewrittenText, /pre kept/);
+    assert.equal(rewritten, undefined);
 });
 
 test("auto compaction defers until Pi is idle after agent_end", async () => {
@@ -1533,13 +1561,7 @@ test("auto compaction defers until Pi is idle after agent_end", async () => {
 
 test("auto compaction ignores stale session contexts", () => {
     const compactCalls: unknown[] = [];
-    const ctx = makeAutoCompactionContext(
-        compactCalls,
-        { value: true },
-        {
-            sessionId: "stale-auto-session",
-        },
-    );
+    const fixture = makeStaleAutoCompactionFixture(compactCalls);
     const scheduledTasks: Array<() => void> = [];
     const runtime = {
         ...makeTestRuntime(),
@@ -1555,11 +1577,8 @@ test("auto compaction ignores stale session contexts", () => {
         compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true, auto: true },
     };
 
-    assert.equal(scheduleCodexAutoCompaction(ctx, config, runtime), true);
-    // SAFETY: Simulates Pi invalidating an extension context during a session switch.
-    (ctx as unknown as { isIdle: () => boolean }).isIdle = () => {
-        throw new Error("Extension context is stale");
-    };
+    assert.equal(scheduleCodexAutoCompaction(fixture.context, config, runtime), true);
+    fixture.invalidate();
 
     assert.doesNotThrow(() => scheduledTasks.shift()?.());
     assert.equal(compactCalls.length, 0);
@@ -2070,7 +2089,7 @@ function makeBeforeCompactEvent(
         willRetry: false,
         signal: new AbortController().signal,
     };
-    // SAFETY: This fixture supplies the fields read by handleCodexNativeCompaction.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture supplies the fields read by handleCodexNativeCompaction.
     return event as unknown as SessionBeforeCompactEvent;
 }
 
@@ -2130,7 +2149,7 @@ function worldStateInput(extraLine = ""): Record<string, unknown> {
                     extraLine,
                     "</codex_core_world_state>",
                 ]
-                    .filter(Boolean)
+                    .filter((line) => line.length > 0)
                     .join("\n"),
             },
         ],
@@ -2221,7 +2240,7 @@ function makeCompactionApi(): ExtensionAPI {
             },
         ],
     };
-    // SAFETY: Compaction tests only exercise getActiveTools and getAllTools.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Compaction tests only exercise getActiveTools and getAllTools.
     return api as unknown as ExtensionAPI;
 }
 
@@ -2269,7 +2288,7 @@ function makeNativeCompactionContext(
         },
         getSystemPrompt: () => "system prompt",
     };
-    // SAFETY: This test exercises a function that only reads these context fields.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test exercises a function that only reads these context fields.
     return ctx as unknown as ExtensionContext;
 }
 
@@ -2299,19 +2318,48 @@ function makeAutoCompactionContext(
             const tokens = options.usageTokens?.() ?? 90;
             return { tokens, contextWindow, percent: (tokens / contextWindow) * 100 };
         },
-        compact: (options: unknown) => {
-            compactCalls.push(options);
-            if (isRecord(options) && typeof options.onComplete === "function") {
-                options.onComplete({ summary: "ok", firstKeptEntryId: "entry", tokensBefore: 90 });
-            }
+        compact: (compactOptions: Parameters<ExtensionContext["compact"]>[0]) => {
+            compactCalls.push(compactOptions);
+            compactOptions?.onComplete?.({
+                summary: "ok",
+                firstKeptEntryId: "entry",
+                tokensBefore: 90,
+            });
         },
         sessionManager: {
             getSessionId: () => options.sessionId ?? "auto-session-1",
             getBranch: () => [{ type: "message", id: options.latestEntryId?.() ?? "entry-auto" }],
         },
     };
-    // SAFETY: This test exercises only fields read by scheduleCodexAutoCompaction.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test exercises only fields read by scheduleCodexAutoCompaction.
     return ctx as unknown as ExtensionContext;
+}
+
+function makeStaleAutoCompactionFixture(compactCalls: unknown[]): {
+    readonly context: ExtensionContext;
+    readonly invalidate: () => void;
+} {
+    let valid = true;
+    const baseContext = makeAutoCompactionContext(
+        compactCalls,
+        { value: true },
+        {
+            sessionId: "stale-auto-session",
+        },
+    );
+    const context: ExtensionContext = {
+        ...baseContext,
+        isIdle: () => {
+            if (!valid) throw new Error("Extension context is stale");
+            return true;
+        },
+    };
+    return {
+        context,
+        invalidate: () => {
+            valid = false;
+        },
+    };
 }
 
 function makeCompactionContext(
@@ -2358,7 +2406,7 @@ function makeCompactionContext(
                 ],
         },
     };
-    // SAFETY: This test exercises a function that only reads model, UI notification, and sessionManager fields.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test exercises a function that only reads model, UI notification, and sessionManager fields.
     return ctx as unknown as ExtensionContext;
 }
 
@@ -2370,7 +2418,11 @@ function decodeRequestBody(init: RequestInit | undefined): unknown {
     assert.ok(contentEncoding === null || contentEncoding === "zstd");
     const serialized =
         contentEncoding === "zstd" ? zstdDecompressSync(bytes).toString() : bytes.toString();
-    return JSON.parse(serialized) as unknown;
+    return JSON.parse(serialized);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function responseInput(value: unknown): unknown[] {

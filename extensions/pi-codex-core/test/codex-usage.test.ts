@@ -9,8 +9,14 @@ import {
 } from "../src/codex/usage.ts";
 import { makeTestRuntime } from "./helpers.ts";
 
+const FIXED_NOW_MS = 1_700_000_000_000;
+const FIXED_CLOCK = {
+    nowMs: () => FIXED_NOW_MS,
+    nowDate: () => new Date(FIXED_NOW_MS),
+};
+
 test("formats codex usage payloads", () => {
-    const resetBase = Math.floor(Date.now() / 1000);
+    const resetBase = Math.floor(FIXED_NOW_MS / 1000);
     const snapshot = parseCodexUsagePayload({
         plan_type: "pro",
         rate_limit_reset_credits: { available_count: 2 },
@@ -49,10 +55,13 @@ test("formats codex usage payloads", () => {
     assert.equal(snapshot.planType, "pro");
     assert.equal(snapshot.resetCredits?.availableCount, 2);
     assert.equal(snapshot.limits.length, 2);
-    const formatted = formatCodexUsage(snapshot);
+    const formatted = formatCodexUsage(snapshot, FIXED_CLOCK);
     const lines = formatted.split("\n");
     assert.equal(lines[0], "Codex usage (Pro):");
-    assert.match(formatCodexUsage({ ...snapshot, planType: "plus" }), /^Codex usage \(Plus\):/);
+    assert.match(
+        formatCodexUsage({ ...snapshot, planType: "plus" }, FIXED_CLOCK),
+        /^Codex usage \(Plus\):/,
+    );
     assert.match(lines[1] ?? "", /^- Codex: {15}5h: 75% left {2}\(/);
     assert.match(lines[2] ?? "", /^- GPT-5\.3-Codex-Spark: 5h: 100% left \(/);
     assert.equal(lines.at(-1), "- Resets available: 2");
@@ -60,8 +69,8 @@ test("formats codex usage payloads", () => {
 });
 
 test("formats Codex reset credit expiration metadata", () => {
-    const explicitExpiration = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
-    const grantedAt = new Date().toISOString();
+    const explicitExpiration = new Date(FIXED_NOW_MS + 5 * 24 * 60 * 60 * 1000).toISOString();
+    const grantedAt = new Date(FIXED_NOW_MS).toISOString();
     const credits = parseCodexRateLimitResetCreditsPayload({
         available_count: "2",
         credits: [
@@ -84,8 +93,8 @@ test("formats Codex reset credit expiration metadata", () => {
                 id: "RateLimitResetCredit_3",
                 status: "redeemed",
                 granted_at: grantedAt,
-                expires_at: new Date(Date.now() + 60_000).toISOString(),
-                redeemed_at: new Date().toISOString(),
+                expires_at: new Date(FIXED_NOW_MS + 60_000).toISOString(),
+                redeemed_at: new Date(FIXED_NOW_MS).toISOString(),
             },
         ],
     });
@@ -96,7 +105,7 @@ test("formats Codex reset credit expiration metadata", () => {
     assert.ok(firstCredit);
     assert.equal(firstCredit.expiresAt, explicitExpiration);
     assert.equal(firstCredit.redeemStartedAt, undefined);
-    const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} });
+    const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} }, FIXED_CLOCK);
 
     assert.match(
         formatted,
@@ -106,7 +115,7 @@ test("formats Codex reset credit expiration metadata", () => {
 });
 
 test("formats Codex reset credit expiration from granted time", () => {
-    const grantedAt = new Date().toISOString();
+    const grantedAt = new Date(FIXED_NOW_MS).toISOString();
     const credits = parseCodexRateLimitResetCreditsPayload({
         available_count: 1,
         credits: [
@@ -121,7 +130,7 @@ test("formats Codex reset credit expiration from granted time", () => {
     });
 
     assert.ok(credits);
-    const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} });
+    const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} }, FIXED_CLOCK);
 
     assert.match(formatted, /- Resets available: 1\n  - Reset 1: expires in ~30d \(/);
 });
@@ -200,7 +209,7 @@ function makeUsageContext(
             }),
         },
     };
-    // SAFETY: This test context supplies the model and auth fields read by Codex usage.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test context supplies the model and auth fields read by Codex usage.
     return ctx as unknown as ExtensionContext;
 }
 

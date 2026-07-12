@@ -6,7 +6,7 @@ import { APPLY_PATCH_TOOL_NAME } from "./tools/apply-patch/tool.ts";
 import { IMAGEGEN_TOOL_NAME } from "./tools/imagegen.ts";
 import { VIEW_IMAGE_TOOL_NAME } from "./tools/view-image/tool.ts";
 import { WEB_RUN_TOOL_NAME } from "./tools/web-run/tool.ts";
-import { modelSupportsImages } from "./images/content.ts";
+import { modelSupportsImages } from "./images/codex-prompt.ts";
 
 export const CODEX_CORE_TOOL_NAMES = [
     WEB_RUN_TOOL_NAME,
@@ -77,7 +77,7 @@ export function shouldExposeApplyPatch(ctx: ExtensionContext, config: CodexCoreC
 export function isCodexLikeModel(model: ExtensionContext["model"]): boolean {
     if (!model) return false;
     const provider = model.provider.toLowerCase();
-    const api = String(model.api).toLowerCase();
+    const api = typeof model.api === "string" ? model.api.toLowerCase() : "";
     const id = model.id.toLowerCase();
     if (provider.includes("codex")) return true;
     if (api.includes("codex")) return true;
@@ -111,5 +111,12 @@ function setCodexStatus(ctx: ExtensionContext, config: CodexCoreConfig): void {
 }
 
 function isCodexCoreToolName(toolName: string): toolName is CodexCoreToolName {
-    return (CODEX_CORE_TOOL_NAMES as readonly string[]).includes(toolName);
+    return isOneOf(CODEX_CORE_TOOL_NAMES, toolName);
+}
+
+function isOneOf<const TValue extends string>(
+    allowed: readonly TValue[],
+    value: string,
+): value is TValue {
+    return allowed.some((candidate) => candidate === value);
 }

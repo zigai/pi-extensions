@@ -9,10 +9,11 @@ import { getImageDimensions } from "@earendil-works/pi-tui";
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
 import {
     MAX_INPUT_IMAGE_BYTES,
-    codexPromptImageTargetDimensions,
     loadImageContent,
     saveGeneratedImage,
-} from "../src/images/content.ts";
+} from "../src/images/file-artifacts.ts";
+import { codexPromptImageTargetDimensions } from "../src/images/codex-prompt.ts";
+import { imageDimensionsFromBytes } from "../src/images/metadata.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
 import { createViewImageTool } from "../src/tools/view-image/tool.ts";
@@ -25,7 +26,6 @@ import {
     renderComponent,
     makeRenderContext,
     messageEntry,
-    isRecord,
 } from "./helpers.ts";
 
 test("renders compact invocation summaries for Codex tools", () => {
@@ -216,11 +216,19 @@ test("computes Codex prompt image target dimensions", () => {
     });
 });
 
-test("reads image dimensions without full-buffer base64 conversion", async () => {
-    const source = await readFile("src/images/metadata.ts", "utf8");
+test("reads image dimensions without full-buffer base64 conversion", () => {
+    const bytes = solidPngBytes(2, 3, [1, 2, 3, 255]);
+    const originalToString = bytes.toString.bind(bytes);
+    Object.defineProperty(bytes, "toString", {
+        value(encoding?: BufferEncoding, start?: number, end?: number): string {
+            if (encoding === "base64" && start === undefined && end === undefined) {
+                throw new Error("full-buffer base64 conversion attempted");
+            }
+            return originalToString(encoding, start, end);
+        },
+    });
 
-    assert.match(source, /export function imageDimensionsFromBytes/);
-    assert.doesNotMatch(source, /getImageDimensions|toString\("base64"\)/);
+    assert.deepEqual(imageDimensionsFromBytes(bytes, "image/png"), { width: 2, height: 3 });
 });
 
 test("rejects oversized and mislabeled image files", async () => {
@@ -361,7 +369,7 @@ test("restores durable image detail markers in provider requests", () => {
     });
 
     assert.ok(isRecord(rewritten));
-    assert.ok(Array.isArray(rewritten.input));
+    assert.ok(isUnknownArray(rewritten.input));
     const [output] = rewritten.input;
     assert.ok(isRecord(output));
     assert.deepEqual(output.output, [
@@ -549,7 +557,7 @@ test("saves web_run raw output outside workspace", async () => {
     const agentDir = join(root, "agent");
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = JSON.parse(String(init?.body));
         return new Response(JSON.stringify({ output: "1. Pi\n   URL: https://pi.dev/" }), {
             status: 200,
         });
@@ -609,7 +617,7 @@ test("web_run maps standalone search modes at the request boundary", async () =>
         ] as const) {
             let requestBody: unknown;
             const runtime = makeTestRuntime(async (_input, init) => {
-                requestBody = JSON.parse(String(init?.body)) as unknown;
+                requestBody = JSON.parse(String(init?.body));
                 return new Response(JSON.stringify({ output: "done" }), { status: 200 });
             });
             const webRunTool = createWebRunTool({
@@ -642,7 +650,7 @@ test("web_run sends Codex-compatible recent visible history", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-web-history-"));
     let requestBody: unknown;
     const runtime = makeTestRuntime(async (_input, init) => {
-        requestBody = JSON.parse(String(init?.body)) as unknown;
+        requestBody = JSON.parse(String(init?.body));
         return new Response(JSON.stringify({ output: "done" }), { status: 200 });
     });
     const ctx = makeWebRunContextWithBranch(root, [
@@ -782,33 +790,34 @@ test("imagegen uses an available Codex provider under a non-Responses model", as
         requestUrl = String(input);
         return new Response(JSON.stringify({ data: [{ b64_json: base64 }] }), { status: 200 });
     });
-    const codexModel = {
+    const codexModel: TestContextModel = {
+        name: "GPT-5.5",
         provider: "openai-codex",
         api: "openai-codex-responses",
         id: "gpt-5.5",
         baseUrl: "https://chatgpt.com/backend-api",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200_000,
+        maxTokens: 16_384,
     };
-    const ctx = {
-        cwd: "/workspace",
+    const ctx = makeWebRunContext("/workspace", {
         model: {
+            name: "Claude Sonnet",
             provider: "anthropic",
             api: "anthropic-messages",
             id: "claude-sonnet",
+            baseUrl: "https://api.anthropic.com",
+            reasoning: true,
+            input: ["text", "image"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 200_000,
+            maxTokens: 16_384,
         },
-        modelRegistry: {
-            find: (provider: string, modelId: string) =>
-                provider === "openai-codex" && modelId === "gpt-5.5" ? codexModel : undefined,
-            getApiKeyAndHeaders: async () => ({
-                ok: true,
-                apiKey: "token",
-                headers: { "chatgpt-account-id": "account" },
-            }),
-        },
-        sessionManager: {
-            getSessionId: () => "session/1",
-            getBranch: () => [],
-        },
-    } as unknown as ExtensionContext;
+        findModel: (provider, modelId) =>
+            provider === "openai-codex" && modelId === "gpt-5.5" ? codexModel : undefined,
+    });
     const imagegenTool = createImagegenTool({
         getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
         runtime,
@@ -966,7 +975,7 @@ test("imagegen edits recent generated image artifacts from tool details", async 
         let requestBody: unknown;
         const runtime = makeTestRuntime(async (input, init) => {
             requestUrl = String(input);
-            requestBody = JSON.parse(String(init?.body)) as unknown;
+            requestBody = JSON.parse(String(init?.body));
             return new Response(JSON.stringify({ data: [{ b64_json: editedBase64 }] }), {
                 status: 200,
             });
@@ -1007,7 +1016,7 @@ test("imagegen edits recent generated image artifacts from tool details", async 
 
         assert.match(requestUrl, /\/images\/edits$/);
         assert.ok(isRecord(requestBody));
-        assert.ok(Array.isArray(requestBody.images));
+        assert.ok(isUnknownArray(requestBody.images));
         const [editImage] = requestBody.images;
         assert.ok(isRecord(editImage));
         assert.equal(
@@ -1046,6 +1055,116 @@ test("saves generated images outside the workspace", async () => {
         assert.deepEqual(await readFile(saved.absolutePath), png);
         assert.deepEqual(await readFile(saved.latestAbsolutePath), png);
         assert.equal((await readFile(join(cwd, "latest.png"))).toString("utf8"), "do not replace");
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("cancelled generated image saves do not create artifacts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-imagegen-cancelled-"));
+    const agentDir = join(root, "agent");
+    const controller = new AbortController();
+    controller.abort();
+
+    try {
+        await assert.rejects(
+            saveGeneratedImage(
+                {
+                    sessionId: "session/1",
+                    toolCallId: "call/1",
+                    index: 0,
+                    base64: solidPngBytes(1, 1, [10, 20, 30, 255]).toString("base64"),
+                    agentDir,
+                },
+                { signal: controller.signal },
+            ),
+            /abort/i,
+        );
+        await assert.rejects(
+            readFile(join(agentDir, "pi-codex-core", "imagegen", "session_1", "call_1.png")),
+            { code: "ENOENT" },
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("imagegen propagates cancellation to generated image persistence", async () => {
+    const controller = new AbortController();
+    const base64 = solidPngBytes(1, 1, [10, 20, 30, 255]).toString("base64");
+    let receivedSignal: AbortSignal | undefined;
+    const tool = createImagegenTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+        runtime: makeTestRuntime(
+            async () =>
+                new Response(JSON.stringify({ data: [{ b64_json: base64 }] }), { status: 200 }),
+        ),
+        async saveImage(_args, options) {
+            receivedSignal = options?.signal;
+            controller.abort();
+            options?.signal?.throwIfAborted();
+            throw new Error("unreachable");
+        },
+    });
+
+    await assert.rejects(
+        tool.execute(
+            "call/1",
+            { prompt: "Draw a robot" },
+            controller.signal,
+            undefined,
+            makeWebRunContext("/workspace"),
+        ),
+        /abort/i,
+    );
+    assert.equal(receivedSignal, controller.signal);
+});
+
+test("view_image honors cancellation before loading local image content", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const tool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+
+    await assert.rejects(
+        tool.execute(
+            "call/1",
+            { path: "missing.png" },
+            controller.signal,
+            undefined,
+            makeImageContext("/workspace"),
+        ),
+        /abort/i,
+    );
+});
+
+test("web_run does not write its output artifact after cancellation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-web-cancelled-"));
+    const agentDir = join(root, "agent");
+    const controller = new AbortController();
+    const tool = createWebRunTool({
+        getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+        agentDir,
+        runtime: makeTestRuntime(async () => {
+            controller.abort();
+            return new Response(JSON.stringify({ output: "done" }), { status: 200 });
+        }),
+    });
+
+    try {
+        await assert.rejects(
+            tool.execute(
+                "call/1",
+                { search_query: [{ q: "Pi docs" }] },
+                controller.signal,
+                undefined,
+                makeWebRunContext(root),
+            ),
+            /abort/i,
+        );
+        await assert.rejects(
+            readFile(join(agentDir, "pi-codex-core", "web-run", "session_1", "call_1.txt")),
+            { code: "ENOENT" },
+        );
     } finally {
         await rm(root, { recursive: true, force: true });
     }
@@ -1105,20 +1224,38 @@ function makeImageContext(cwd: string): ExtensionContext {
             getSessionId: () => "session/1",
         },
     };
-    // SAFETY: This test only exercises cwd, model image support, and session id lookup.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test only exercises cwd, model image support, and session id lookup.
     return ctx as unknown as ExtensionContext;
 }
 
-function makeWebRunContext(cwd: string): ExtensionContext {
+type TestContextModel = NonNullable<ExtensionContext["model"]>;
+
+function makeWebRunContext(
+    cwd: string,
+    options: {
+        readonly model?: NonNullable<ExtensionContext["model"]> | undefined;
+        readonly findModel?: (
+            provider: string,
+            modelId: string,
+        ) => NonNullable<ExtensionContext["model"]> | undefined;
+    } = {},
+): ExtensionContext {
     const ctx = {
         cwd,
-        model: {
+        model: options.model ?? {
+            name: "GPT-5.5",
             provider: "openai-codex",
             api: "openai-codex-responses",
             id: "gpt-5.5",
             baseUrl: "https://chatgpt.com/backend-api",
+            reasoning: true,
+            input: ["text", "image"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 200_000,
+            maxTokens: 16_384,
         },
         modelRegistry: {
+            find: options.findModel,
             getApiKeyAndHeaders: async () => ({
                 ok: true,
                 apiKey: "token",
@@ -1130,7 +1267,7 @@ function makeWebRunContext(cwd: string): ExtensionContext {
             getBranch: () => [],
         },
     };
-    // SAFETY: This test exercises web_run execution fields only.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test exercises web_run execution fields only.
     return ctx as unknown as ExtensionContext;
 }
 
@@ -1146,7 +1283,7 @@ function makeWebRunContextWithBranch(
             getBranch: () => branchEntries,
         },
     };
-    // SAFETY: This test context changes only the session branch fixture used by image lookup.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test context changes only the session branch fixture used by image lookup.
     return ctx as unknown as ExtensionContext;
 }
 
@@ -1192,6 +1329,14 @@ function pngChunk(type: string, data: Buffer): Buffer {
     const checksum = Buffer.alloc(4);
     checksum.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])), 0);
     return Buffer.concat([length, typeBytes, data, checksum]);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+    return Array.isArray(value);
 }
 
 const CRC32_TABLE = makeCrc32Table();

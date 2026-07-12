@@ -5,13 +5,11 @@ import { CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY } from "../codex/responses-com
 import type { CodexCoreConfig } from "../config/config.ts";
 import {
     isJsonArray,
-    isJsonObject,
     isRemoteCompactionOutputItem,
-    parseJsonValue,
     sanitizeSurrogates,
     textFromResponsesContent,
 } from "./responses-input.ts";
-import { countCodexTextTokens, truncateCodexTextToTokenBudget } from "./tokenizer.ts";
+import type { CodexTokenizer } from "./tokenizer.ts";
 import { NATIVE_COMPACTION_SHIM_SUMMARY } from "./messages.ts";
 import type {
     JsonObject,
@@ -32,6 +30,11 @@ const TRUNCATED_TOOL_OUTPUT_MESSAGE = "[truncated]";
 const TOKEN_ESTIMATE_CHUNK_CHARS = 512 * 1024;
 const TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS = 8 * 1024;
 const INLINE_IMAGE_TOKEN_ESTIMATE_TEXT = "(inline image data omitted for token estimate)";
+
+type TokenWorkOptions = {
+    readonly tokenizer: CodexTokenizer;
+    readonly signal?: AbortSignal | undefined;
+};
 
 export function buildRemoteCompactionV2Request(input: {
     readonly model: string;
@@ -120,9 +123,38 @@ function toolInfoToResponsesTool(tool: ToolInfo): ResponsesTool {
         type: "function",
         name: tool.name,
         description: tool.description,
-        parameters: parseJsonValue(tool.parameters) ?? {},
+        parameters: parseToolParameterValue(tool.parameters) ?? {},
         strict: null,
     };
+}
+
+function parseToolParameterValue(value: unknown): JsonValue | undefined {
+    if (value === null) return null;
+    if (typeof value === "string" || typeof value === "boolean") return value;
+    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+    if (Array.isArray(value)) {
+        const items: JsonValue[] = [];
+        for (const item of value) {
+            const parsed = parseToolParameterValue(item);
+            if (parsed === undefined) return undefined;
+            items.push(parsed);
+        }
+        return items;
+    }
+    if (typeof value !== "object" || value === null) return undefined;
+    const record: Record<string, JsonValue> = {};
+    for (const key of Object.keys(value)) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        const nested: unknown = descriptor?.value;
+        const parsed = parseToolParameterValue(nested);
+        if (parsed === undefined) return undefined;
+        record[key] = parsed;
+    }
+    return record;
+}
+
+function isJsonObjectValue(value: JsonValue | undefined): value is JsonObject {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export async function rewriteRemoteCompactionToolOutputsForContextWindow(
@@ -130,10 +162,13 @@ export async function rewriteRemoteCompactionToolOutputsForContextWindow(
     requestParts: RemoteCompactionRequestParts,
     contextWindow: number | null | undefined,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<RemoteCompactionPreflightResult> {
+    options.signal?.throwIfAborted();
     const estimatedTokensBefore = await estimateRemoteCompactionRequestTokens(
         buildRemoteCompactionV2Request({ ...requestParts, input }),
         cache,
+        options,
     );
     const budgetTokens = compactRequestBudget(contextWindow);
     if (budgetTokens === undefined || estimatedTokensBefore <= budgetTokens) {
@@ -159,8 +194,8 @@ export async function rewriteRemoteCompactionToolOutputsForContextWindow(
         rewrittenInput[index] = rewrittenItem;
         rewrittenToolOutputs += 1;
         const [beforeTokens, afterTokens] = await Promise.all([
-            estimateResponsesInputItemTokens(item, cache),
-            estimateResponsesInputItemTokens(rewrittenItem, cache),
+            estimateResponsesInputItemTokens(item, cache, options),
+            estimateResponsesInputItemTokens(rewrittenItem, cache, options),
         ]);
         estimatedTokensAfter += afterTokens - beforeTokens;
     }
@@ -177,12 +212,16 @@ export async function shrinkRemoteCompactionRequestForContextWindow(
     request: RemoteCompactionV2Request,
     contextWindow: number | null | undefined,
     cache: TokenEstimateCache,
-    preflight?: RemoteCompactionPreflightResult,
+    options: TokenWorkOptions & {
+        readonly preflight?: RemoteCompactionPreflightResult | undefined;
+    },
 ): Promise<ShrinkRemoteCompactionRequestResult> {
+    options.signal?.throwIfAborted();
+    const { preflight } = options;
     const budgetTokens = compactRequestBudget(contextWindow);
     const estimatedTokensBefore =
         preflight?.estimatedTokensBefore ??
-        (await estimateRemoteCompactionRequestTokens(request, cache));
+        (await estimateRemoteCompactionRequestTokens(request, cache, options));
     let rewrittenToolOutputs = preflight?.rewrittenToolOutputs ?? 0;
     let estimatedTokensAfter = preflight?.estimatedTokensAfter ?? estimatedTokensBefore;
     const promptInput = request.input.filter((item) => item.type !== "compaction_trigger");
@@ -206,8 +245,8 @@ export async function shrinkRemoteCompactionRequestForContextWindow(
         input[index] = rewrittenItem;
         rewrittenToolOutputs += 1;
         const [beforeTokens, afterTokens] = await Promise.all([
-            estimateResponsesInputItemTokens(item, cache),
-            estimateResponsesInputItemTokens(rewrittenItem, cache),
+            estimateResponsesInputItemTokens(item, cache, options),
+            estimateResponsesInputItemTokens(rewrittenItem, cache, options),
         ]);
         estimatedTokensAfter += afterTokens - beforeTokens;
     }
@@ -238,12 +277,15 @@ export async function buildRemoteCompactionV2Window(
     promptInput: readonly ResponsesInputItem[],
     compactionOutput: ResponsesInputItem,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<ResponsesInputItem[]> {
+    options.signal?.throwIfAborted();
     const retained = promptInput.filter(isRetainedRemoteCompactionMessage);
     const truncated = await truncateRetainedMessages(
         retained,
         RETAINED_MESSAGE_TOKEN_BUDGET,
         cache,
+        options,
     );
     return [...truncated, compactionOutput];
 }
@@ -262,17 +304,23 @@ async function truncateRetainedMessages(
     items: readonly ResponsesInputItem[],
     maxTokens: number,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<ResponsesInputItem[]> {
     let remaining = maxTokens;
     const retainedReversed: ResponsesInputItem[] = [];
     for (const item of [...items].reverse()) {
         if (remaining <= 0) continue;
-        const tokenCount = Math.max(1, await messageTextTokenCount(item, cache));
+        const tokenCount = Math.max(1, await messageTextTokenCount(item, cache, options));
         if (tokenCount <= remaining) {
             retainedReversed.push(item);
             remaining -= tokenCount;
         } else {
-            const truncated = await truncateMessageTextToTokenBudget(item, remaining, cache);
+            const truncated = await truncateMessageTextToTokenBudget(
+                item,
+                remaining,
+                cache,
+                options,
+            );
             if (truncated) retainedReversed.push(truncated);
             remaining = 0;
         }
@@ -283,46 +331,51 @@ async function truncateRetainedMessages(
 async function messageTextTokenCount(
     item: ResponsesInputItem,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<number> {
     const content = item.content;
     if (!isJsonArray(content))
-        return typeof content === "string" ? estimateTextTokens(content, cache) : 0;
+        return typeof content === "string" ? estimateTextTokens(content, cache, options) : 0;
     let tokenCount = 0;
-    for (const part of content) tokenCount += await retainedContentPartTokenCount(part, cache);
+    for (const part of content) {
+        tokenCount += await retainedContentPartTokenCount(part, cache, options);
+    }
     return tokenCount;
 }
 
 async function retainedContentPartTokenCount(
     part: JsonValue,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<number> {
-    if (isResponsesTextPart(part)) return estimateTextTokens(part.text, cache);
+    if (isResponsesTextPart(part)) return estimateTextTokens(part.text, cache, options);
     if (isInputImagePart(part)) return 0;
-    return estimateTokenCount(part, cache);
+    return estimateTokenCount(part, cache, options);
 }
 
 function isResponsesTextPart(
     part: JsonValue,
 ): part is ResponsesInputItem & { readonly text: string } {
-    return isJsonObject(part) && typeof part.text === "string";
+    return isJsonObjectValue(part) && typeof part.text === "string";
 }
 
 function isInputImagePart(
     part: JsonValue,
 ): part is ResponsesInputItem & { readonly type: "input_image" } {
-    return isJsonObject(part) && part.type === "input_image";
+    return isJsonObjectValue(part) && part.type === "input_image";
 }
 
 async function truncateMessageTextToTokenBudget(
     item: ResponsesInputItem,
     maxTokens: number,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<ResponsesInputItem | undefined> {
     if (maxTokens <= 0) return undefined;
     const cloned = structuredClone(item);
     const content = cloned.content;
     if (typeof content === "string") {
-        const text = await truncateCodexTextToTokenBudget(content, maxTokens);
+        const text = await options.tokenizer.truncate(content, maxTokens, options);
         return text.length > 0 ? { ...cloned, content: text } : undefined;
     }
     if (!isJsonArray(content)) return cloned;
@@ -336,16 +389,16 @@ async function truncateMessageTextToTokenBudget(
         }
         if (remaining <= 0) continue;
         if (isResponsesTextPart(part)) {
-            const tokenCount = await estimateTextTokens(part.text, cache);
+            const tokenCount = await estimateTextTokens(part.text, cache, options);
             const text =
                 tokenCount <= remaining
                     ? part.text
-                    : await truncateCodexTextToTokenBudget(part.text, remaining);
+                    : await options.tokenizer.truncate(part.text, remaining, options);
             remaining -= Math.min(tokenCount, remaining);
             if (text.length > 0) nextContent.push({ ...part, text });
             continue;
         }
-        const tokenCount = await estimateTokenCount(part, cache);
+        const tokenCount = await estimateTokenCount(part, cache, options);
         if (tokenCount <= remaining) {
             nextContent.push(part);
             remaining -= tokenCount;
@@ -412,14 +465,14 @@ function stripResponsesLiteJsonObject(value: JsonObject): JsonObject {
 
 function stripResponsesLiteJsonValue(value: JsonValue | undefined): JsonValue | undefined {
     if (isJsonArray(value)) return value.map((item) => stripResponsesLiteJsonValue(item) ?? null);
-    if (isJsonObject(value)) return stripResponsesLiteJsonObject(value);
+    if (isJsonObjectValue(value)) return stripResponsesLiteJsonObject(value);
     return value;
 }
 
 function inputImageCount(item: ResponsesInputItem): number {
     const content = item.content;
     if (!isJsonArray(content)) return 0;
-    return content.filter((part) => isJsonObject(part) && part.type === "input_image").length;
+    return content.filter((part) => isJsonObjectValue(part) && part.type === "input_image").length;
 }
 
 function compactRequestBudget(contextWindow: number | null | undefined): number | undefined {
@@ -440,33 +493,45 @@ export function createTokenEstimateCache(): TokenEstimateCache {
     return { objectTokens: new WeakMap(), textTokens: new Map() };
 }
 
-function estimateTokenCount(value: unknown, cache?: TokenEstimateCache): Promise<number> {
+function estimateTokenCount(
+    value: JsonValue,
+    cache: TokenEstimateCache | undefined,
+    options: TokenWorkOptions,
+): Promise<number> {
     if (cache && typeof value === "object" && value !== null) {
         return cachedObjectTokenCount(value, cache, () => {
             const serialized = JSON.stringify(sanitizeForTokenEstimate(value)) ?? "";
-            return estimateTextTokens(serialized, cache);
+            return estimateTextTokens(serialized, cache, options);
         });
     }
     const serialized =
         typeof value === "string" ? value : (JSON.stringify(sanitizeForTokenEstimate(value)) ?? "");
-    return estimateTextTokens(serialized, cache);
+    return estimateTextTokens(serialized, cache, options);
 }
 
 async function estimateRemoteCompactionRequestTokens(
     request: RemoteCompactionV2Request,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<number> {
-    let total = await estimateTextTokens(JSON.stringify({ ...request, input: [] }) ?? "", cache);
-    for (const item of request.input) total += await estimateResponsesInputItemTokens(item, cache);
+    let total = await estimateTextTokens(
+        JSON.stringify({ ...request, input: [] }) ?? "",
+        cache,
+        options,
+    );
+    for (const item of request.input) {
+        total += await estimateResponsesInputItemTokens(item, cache, options);
+    }
     return total;
 }
 
 async function estimateResponsesInputItemTokens(
     item: ResponsesInputItem,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<number> {
     return cachedObjectTokenCount(item, cache, () =>
-        estimateTokenParts(responsesInputItemTokenParts(item), cache),
+        estimateTokenParts(responsesInputItemTokenParts(item), cache, options),
     );
 }
 
@@ -479,13 +544,13 @@ function* responsesInputItemTokenParts(item: ResponsesInputItem): Generator<stri
     yield JSON.stringify(sanitizeForTokenEstimate(item)) ?? "";
 }
 
-function sanitizeForTokenEstimate(value: unknown): unknown {
+function sanitizeForTokenEstimate(value: JsonValue): JsonValue {
     if (Array.isArray(value)) return value.map(sanitizeForTokenEstimate);
     if (typeof value !== "object" || value === null) return value;
 
-    const next: Record<string, unknown> = {};
-    // SAFETY: Token estimation only projects enumerable data into a JSON-like clone.
-    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    const next: Record<string, JsonValue> = {};
+    for (const [key, nested] of Object.entries(value)) {
+        if (nested === undefined) continue;
         next[key] =
             key === "image_url" && typeof nested === "string" && nested.startsWith("data:")
                 ? INLINE_IMAGE_TOKEN_ESTIMATE_TEXT
@@ -497,25 +562,26 @@ function sanitizeForTokenEstimate(value: unknown): unknown {
 async function estimateTokenParts(
     parts: Iterable<string>,
     cache: TokenEstimateCache,
+    options: TokenWorkOptions,
 ): Promise<number> {
     let total = 0;
     let chunk = "";
     for (const part of parts) {
         if (part.length >= TOKEN_ESTIMATE_CHUNK_CHARS) {
             if (chunk.length > 0) {
-                total += await estimateTextTokens(chunk, cache);
+                total += await estimateTextTokens(chunk, cache, options);
                 chunk = "";
             }
-            total += await estimateTextTokens(part, cache);
+            total += await estimateTextTokens(part, cache, options);
             continue;
         }
         if (chunk.length + part.length > TOKEN_ESTIMATE_CHUNK_CHARS) {
-            total += await estimateTextTokens(chunk, cache);
+            total += await estimateTextTokens(chunk, cache, options);
             chunk = "";
         }
         chunk += part;
     }
-    return chunk.length > 0 ? total + (await estimateTextTokens(chunk, cache)) : total;
+    return chunk.length > 0 ? total + (await estimateTextTokens(chunk, cache, options)) : total;
 }
 
 async function cachedObjectTokenCount(
@@ -530,13 +596,18 @@ async function cachedObjectTokenCount(
     return count;
 }
 
-async function estimateTextTokens(text: string, cache?: TokenEstimateCache): Promise<number> {
+async function estimateTextTokens(
+    text: string,
+    cache: TokenEstimateCache | undefined,
+    options: TokenWorkOptions,
+): Promise<number> {
+    options.signal?.throwIfAborted();
     if (!cache || text.length > TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS) {
-        return countCodexTextTokens(text);
+        return options.tokenizer.count(text, options);
     }
     const cached = cache.textTokens.get(text);
     if (cached !== undefined) return cached;
-    const count = await countCodexTextTokens(text);
+    const count = await options.tokenizer.count(text, options);
     cache.textTokens.set(text, count);
     return count;
 }

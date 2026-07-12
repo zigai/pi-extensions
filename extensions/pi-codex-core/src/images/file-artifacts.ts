@@ -1,6 +1,7 @@
 import { constants as fsConstants } from "node:fs";
-import { mkdir, open, realpath, writeFile } from "node:fs/promises";
+import { mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { resizeImage, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import {
@@ -26,21 +27,30 @@ export type LoadedImage = {
 /**
  * Resolves and loads an image file after validating its size and signature.
  */
-export async function loadImageContent(path: string, cwd: string): Promise<LoadedImage> {
+export async function loadImageContent(
+    path: string,
+    cwd: string,
+    options: { readonly signal?: AbortSignal | undefined } = {},
+): Promise<LoadedImage> {
+    options.signal?.throwIfAborted();
     const requestedPath = resolve(cwd, path);
-    const absolutePath = await authorizeImagePath(requestedPath, cwd);
+    const absolutePath = await authorizeImagePath(requestedPath, cwd, options);
+    options.signal?.throwIfAborted();
     const file = await open(absolutePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     try {
+        options.signal?.throwIfAborted();
         const fileStat = await file.stat();
+        options.signal?.throwIfAborted();
         if (!fileStat.isFile()) throw new Error(`Image path is not a file: ${path}`);
         if (fileStat.size > MAX_INPUT_IMAGE_BYTES) {
             throw new Error(
                 `Image is too large: ${path} (${fileStat.size} bytes; max ${MAX_INPUT_IMAGE_BYTES} bytes).`,
             );
         }
-        const bytes = await readBoundedFile(file, MAX_INPUT_IMAGE_BYTES);
+        const bytes = await readBoundedFile(file, MAX_INPUT_IMAGE_BYTES, options);
+        options.signal?.throwIfAborted();
         const mimeType = detectImageMimeType(bytes);
-        if (!mimeType || !(await imageFullyDecodes(bytes, mimeType))) {
+        if (!mimeType || !(await imageFullyDecodes(bytes, mimeType, options))) {
             throw new Error(`Unsupported or invalid image file: ${path}`);
         }
         return { absolutePath, bytes, mimeType };
@@ -53,18 +63,22 @@ export async function loadImageContent(path: string, cwd: string): Promise<Loade
  * Saves one generated PNG under a unique session artifact path and updates the
  * session's latest-image artifact.
  */
-export async function saveGeneratedImage(args: {
-    readonly sessionId: string;
-    readonly toolCallId: string;
-    readonly index: number;
-    readonly base64: string;
-    readonly agentDir?: string | undefined;
-}): Promise<{
+export async function saveGeneratedImage(
+    args: {
+        readonly sessionId: string;
+        readonly toolCallId: string;
+        readonly index: number;
+        readonly base64: string;
+        readonly agentDir?: string | undefined;
+    },
+    options: { readonly signal?: AbortSignal | undefined } = {},
+): Promise<{
     readonly path: string;
     readonly absolutePath: string;
     readonly latestPath: string;
     readonly latestAbsolutePath: string;
 }> {
+    options.signal?.throwIfAborted();
     const fileName = `${sanitizeArtifactPathPart(args.toolCallId, "image")}${args.index > 0 ? `-${args.index + 1}` : ""}.png`;
     const latestAbsolutePath = resolveCodexCoreArtifactPath({
         category: "imagegen",
@@ -74,14 +88,25 @@ export async function saveGeneratedImage(args: {
     });
     const bytes = decodeGeneratedPng(args.base64);
     return withFileMutationQueue(latestAbsolutePath, async () => {
-        const absolutePath = await writeUniqueGeneratedImage(fileName, bytes, args);
-        await writeFile(latestAbsolutePath, bytes);
-        return {
-            path: absolutePath,
-            absolutePath,
-            latestPath: latestAbsolutePath,
-            latestAbsolutePath,
-        };
+        options.signal?.throwIfAborted();
+        let absolutePath: string | undefined;
+        try {
+            absolutePath = await writeUniqueGeneratedImage(fileName, bytes, args, options);
+            options.signal?.throwIfAborted();
+            await writeLatestGeneratedImage(latestAbsolutePath, bytes, options);
+            options.signal?.throwIfAborted();
+            return {
+                path: absolutePath,
+                absolutePath,
+                latestPath: latestAbsolutePath,
+                latestAbsolutePath,
+            };
+        } catch (cause: unknown) {
+            if (absolutePath && options.signal?.aborted) {
+                await rm(absolutePath, { force: true });
+            }
+            throw cause;
+        }
     });
 }
 
@@ -95,6 +120,7 @@ async function writeUniqueGeneratedImage(
     baseFileName: string,
     bytes: Buffer,
     args: { readonly sessionId: string; readonly agentDir?: string | undefined },
+    options: { readonly signal?: AbortSignal | undefined },
 ): Promise<string> {
     const artifactName = parseArtifactName(baseFileName);
     const firstPath = resolveCodexCoreArtifactPath({
@@ -103,7 +129,9 @@ async function writeUniqueGeneratedImage(
         fileName: baseFileName,
         agentDir: args.agentDir,
     });
+    options.signal?.throwIfAborted();
     await mkdir(dirname(firstPath), { recursive: true });
+    options.signal?.throwIfAborted();
 
     for (let attempt = 0; attempt < 100; attempt += 1) {
         const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
@@ -115,9 +143,14 @@ async function writeUniqueGeneratedImage(
             agentDir: args.agentDir,
         });
         try {
-            await writeFile(absolutePath, bytes, { flag: "wx" });
+            await writeFile(absolutePath, bytes, { flag: "wx", signal: options.signal });
+            options.signal?.throwIfAborted();
             return absolutePath;
         } catch (cause: unknown) {
+            if (options.signal?.aborted) {
+                await rm(absolutePath, { force: true });
+                throw cause;
+            }
             if (!hasNodeErrorCode(cause, "EEXIST")) throw cause;
         }
     }
@@ -138,11 +171,18 @@ function isNodeError(cause: unknown): cause is NodeJS.ErrnoException {
     return typeof cause === "object" && cause !== null && "code" in cause;
 }
 
-async function authorizeImagePath(path: string, cwd: string): Promise<string> {
+async function authorizeImagePath(
+    path: string,
+    cwd: string,
+    options: { readonly signal?: AbortSignal | undefined },
+): Promise<string> {
+    options.signal?.throwIfAborted();
     const [realPath, realCwd] = await Promise.all([realpath(path), realpath(cwd)]);
+    options.signal?.throwIfAborted();
     if (isWithinRoot(realPath, realCwd)) return realPath;
     try {
         const artifactRoot = await realpath(resolveCodexCoreArtifactRoot());
+        options.signal?.throwIfAborted();
         if (isWithinRoot(realPath, artifactRoot)) return realPath;
     } catch {
         // The artifact root does not exist yet, so it cannot contain this existing file.
@@ -158,11 +198,14 @@ function isWithinRoot(path: string, root: string): boolean {
 async function readBoundedFile(
     file: Awaited<ReturnType<typeof open>>,
     maxBytes: number,
+    options: { readonly signal?: AbortSignal | undefined },
 ): Promise<Buffer> {
     const buffer = Buffer.alloc(maxBytes + 1);
     let offset = 0;
     while (offset < buffer.length) {
+        options.signal?.throwIfAborted();
         const { bytesRead } = await file.read(buffer, offset, buffer.length - offset, offset);
+        options.signal?.throwIfAborted();
         if (bytesRead === 0) break;
         offset += bytesRead;
     }
@@ -170,14 +213,36 @@ async function readBoundedFile(
     return buffer.subarray(0, offset);
 }
 
-async function imageFullyDecodes(bytes: Buffer, mimeType: string): Promise<boolean> {
-    return (
-        (await resizeImage(bytes, mimeType, {
-            maxWidth: 6000,
-            maxHeight: 6000,
-            maxBytes: IMAGE_VALIDATION_MAX_BYTES,
-        })) !== null
-    );
+async function imageFullyDecodes(
+    bytes: Buffer,
+    mimeType: string,
+    options: { readonly signal?: AbortSignal | undefined },
+): Promise<boolean> {
+    options.signal?.throwIfAborted();
+    const resized = await resizeImage(bytes, mimeType, {
+        maxWidth: 6000,
+        maxHeight: 6000,
+        maxBytes: IMAGE_VALIDATION_MAX_BYTES,
+    });
+    options.signal?.throwIfAborted();
+    return resized !== null;
+}
+
+async function writeLatestGeneratedImage(
+    latestAbsolutePath: string,
+    bytes: Buffer,
+    options: { readonly signal?: AbortSignal | undefined },
+): Promise<void> {
+    options.signal?.throwIfAborted();
+    const temporaryPath = `${latestAbsolutePath}.${randomUUID()}.tmp`;
+    try {
+        await writeFile(temporaryPath, bytes, { flag: "wx", signal: options.signal });
+        options.signal?.throwIfAborted();
+        await rename(temporaryPath, latestAbsolutePath);
+        options.signal?.throwIfAborted();
+    } finally {
+        await rm(temporaryPath, { force: true });
+    }
 }
 
 function decodeGeneratedPng(base64: string): Buffer {

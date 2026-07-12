@@ -426,6 +426,30 @@ export function readCodexCoreConfigWithDiagnostics(
     };
 }
 
+export class CodexConfigStartupError extends Error {
+    readonly path: string;
+    readonly reason: CodexConfigDiagnostic["reason"];
+
+    constructor(diagnostic: CodexConfigDiagnostic) {
+        super(
+            `Invalid Pi Codex Core config at ${diagnostic.path} (${diagnostic.reason}): ${diagnostic.message}`,
+        );
+        this.name = "CodexConfigStartupError";
+        this.path = diagnostic.path;
+        this.reason = diagnostic.reason;
+    }
+}
+
+/** Read startup configuration and surface safe diagnostics as startup defects. */
+export function readCodexCoreStartupConfig(
+    options: string | CodexCoreConfigReadOptions = {},
+): CodexCoreConfig {
+    const result = readCodexCoreConfigWithDiagnostics(options);
+    const diagnostic = result.diagnostics[0];
+    if (diagnostic) throw new CodexConfigStartupError(diagnostic);
+    return result.config;
+}
+
 /** Resolves `current` or missing model selections to the active Codex request model. */
 export function resolveCodexRequestModel(
     configuredModel: string | undefined,
@@ -629,11 +653,13 @@ function parsePercent(
 ): number {
     if (value === undefined) return fallback;
     const parsed = parseWithSchema(NumberSchema, value);
-    if (parsed === undefined || parsed < 1 || parsed > 99) {
-        diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a number from 1 to 99."));
+    if (parsed === undefined || !Number.isInteger(parsed) || parsed < 1 || parsed > 99) {
+        diagnostics.push(
+            makeConfigDiagnostic(path, "invalid", "Expected an integer from 1 to 99."),
+        );
         return fallback;
     }
-    return Math.trunc(parsed);
+    return parsed;
 }
 
 function parseNonEmptyString(
@@ -659,12 +685,16 @@ function parseStringEnum<const TValue extends string>(
 ): TValue {
     if (value === undefined) return fallback;
     const parsed = parseWithSchema(StringSchema, value);
-    if (parsed !== undefined && (allowed as readonly string[]).includes(parsed)) {
-        // SAFETY: The allowed-list membership check establishes TValue.
-        return parsed as TValue;
-    }
+    if (parsed !== undefined && isOneOf(allowed, parsed)) return parsed;
     diagnostics.push(
         makeConfigDiagnostic(path, "invalid", `Expected one of: ${allowed.join(", ")}.`),
     );
     return fallback;
+}
+
+function isOneOf<const TValue extends string>(
+    allowed: readonly TValue[],
+    value: string,
+): value is TValue {
+    return allowed.some((candidate) => candidate === value);
 }

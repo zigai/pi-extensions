@@ -29,9 +29,12 @@ const CODEX_ORIGINAL_DETAIL_LIMITS: CodexPromptImageResizeLimits = {
 export async function prepareCodexPromptImageContent(
     image: LoadedImage,
     detail: ImageDetail = "high",
+    options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<ImageContent> {
+    options.signal?.throwIfAborted();
     const limits = codexPromptImageResizeLimits(detail);
     const dimensions = imageDimensionsFromBytes(image.bytes, image.mimeType);
+    options.signal?.throwIfAborted();
     const target = codexPromptImageTargetDimensions(dimensions.width, dimensions.height, limits);
     if (target.width === dimensions.width && target.height === dimensions.height) {
         return imageContentFromBytes(image.bytes, image.mimeType);
@@ -42,6 +45,7 @@ export async function prepareCodexPromptImageContent(
         maxHeight: target.height,
         maxBytes: CODEX_PROMPT_IMAGE_MAX_BYTES,
     });
+    options.signal?.throwIfAborted();
     if (!resized) throw new Error(`Unable to resize image for view_image: ${image.absolutePath}`);
     return { type: "image", data: resized.data, mimeType: resized.mimeType };
 }

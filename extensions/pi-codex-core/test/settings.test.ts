@@ -19,19 +19,14 @@ test("codex command only opens settings UI for the bare command", async () => {
         getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
         applyConfig() {},
     });
-    const baseContext = makeExtensionContext("/workspace", true);
-    const ctx = {
-        ...baseContext,
-        hasUI: true,
-        ui: {
-            custom: async () => {
-                opened += 1;
-            },
-            notify(message: string, type: string) {
-                notifications.push({ message, type });
-            },
+    const ctx = makeSettingsContext({
+        run() {
+            opened += 1;
         },
-    } as unknown as ExtensionContext;
+        notify(message, type) {
+            notifications.push({ message, type });
+        },
+    });
 
     await command.run("", ctx);
     await command.run("traces", ctx);
@@ -49,28 +44,16 @@ test("settings screen refreshes draft from effective config after save", async (
     };
     initTheme(undefined, false);
     let rendered = "";
-    const ctx = {
-        ui: {
-            custom: async (
-                factory: (
-                    tui: unknown,
-                    theme: Theme,
-                    keybindings: unknown,
-                    done: () => void,
-                ) => {
-                    readonly render: (width: number) => readonly string[];
-                    readonly handleInput?: (data: string) => void;
-                },
-            ) => {
-                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
-                component.handleInput?.("\t");
-                component.handleInput?.(" ");
-                rendered = component.render(120).join("\n");
-            },
+    const ctx = makeSettingsContext({
+        run(factory) {
+            const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+            component.handleInput?.("\t");
+            component.handleInput?.(" ");
+            rendered = component.render(120).join("\n");
         },
-    };
+    });
 
-    await openCodexSettingsScreen(ctx as unknown as ExtensionContext, {
+    await openCodexSettingsScreen(ctx, {
         initialConfig,
         onChange: (nextConfig) => {
             assert.equal(nextConfig.tools.webSearch, true);
@@ -86,25 +69,16 @@ test("settings screen refreshes draft from effective config after save", async (
 
 test("settings screen saves standalone web search mode", async () => {
     initTheme(undefined, false);
-    const ctx = {
-        ui: {
-            custom: async (
-                factory: (
-                    tui: unknown,
-                    theme: Theme,
-                    keybindings: unknown,
-                    done: () => void,
-                ) => { readonly handleInput?: (data: string) => void },
-            ) => {
-                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
-                component.handleInput?.("\x1b[B");
-                component.handleInput?.(" ");
-            },
+    const ctx = makeSettingsContext({
+        run(factory) {
+            const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+            component.handleInput?.("\x1b[B");
+            component.handleInput?.(" ");
         },
-    };
+    });
     let savedMode = "";
 
-    await openCodexSettingsScreen(ctx as unknown as ExtensionContext, {
+    await openCodexSettingsScreen(ctx, {
         initialConfig: DEFAULT_CODEX_CORE_CONFIG,
         initialTab: "tools",
         onChange: (nextConfig) => {
@@ -119,23 +93,14 @@ test("settings screen saves standalone web search mode", async () => {
 test("settings screen shows personality only for supported bundled prompts", async () => {
     const renderForModel = async (modelId: string): Promise<string> => {
         let rendered = "";
-        const ctx = {
+        const ctx = makeSettingsContext({
             model: { ...DEFAULT_TEST_EXTENSION_MODEL, id: modelId },
-            ui: {
-                custom: async (
-                    factory: (
-                        tui: unknown,
-                        theme: Theme,
-                        keybindings: unknown,
-                        done: () => void,
-                    ) => { readonly render: (width: number) => readonly string[] },
-                ) => {
-                    const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
-                    rendered = component.render(120).join("\n");
-                },
+            run(factory) {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                rendered = component.render(120).join("\n");
             },
-        };
-        await openCodexSettingsScreen(ctx as unknown as ExtensionContext, {
+        });
+        await openCodexSettingsScreen(ctx, {
             initialConfig: DEFAULT_CODEX_CORE_CONFIG,
             onChange: () => ({ ok: false }),
         });
@@ -182,30 +147,18 @@ test("settings screen renders a description for every setting", async () => {
 
     for (const tab of ["general", "tools", "openai", "usage"] as const) {
         const renderedSelections: string[] = [];
-        const ctx = {
+        const ctx = makeSettingsContext({
             model: DEFAULT_TEST_EXTENSION_MODEL,
-            ui: {
-                custom: async (
-                    factory: (
-                        tui: unknown,
-                        theme: Theme,
-                        keybindings: unknown,
-                        done: () => void,
-                    ) => {
-                        readonly render: (width: number) => readonly string[];
-                        readonly handleInput?: (data: string) => void;
-                    },
-                ) => {
-                    const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
-                    for (const _description of descriptionsByTab[tab]) {
-                        renderedSelections.push(component.render(160).join("\n"));
-                        component.handleInput?.("\x1b[B");
-                    }
-                },
+            run(factory) {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                for (const _description of descriptionsByTab[tab]) {
+                    renderedSelections.push(component.render(160).join("\n"));
+                    component.handleInput?.("\x1b[B");
+                }
             },
-        };
+        });
 
-        await openCodexSettingsScreen(ctx as unknown as ExtensionContext, {
+        await openCodexSettingsScreen(ctx, {
             initialConfig: DEFAULT_CODEX_CORE_CONFIG,
             initialTab: tab,
             initialUsage: { error: "Usage unavailable in this UI test." },
@@ -221,6 +174,80 @@ test("settings screen renders a description for every setting", async () => {
         }
     }
 });
+
+test("settings screen cancels owned reset work when the custom UI closes", async () => {
+    let resetTaskCancelled = false;
+    const ctx = makeSettingsContext({
+        run(factory) {
+            const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+            component.handleInput?.("\x1b[B");
+            component.handleInput?.(" ");
+            component.handleInput?.("y");
+        },
+    });
+
+    await openCodexSettingsScreen(ctx, {
+        initialConfig: DEFAULT_CODEX_CORE_CONFIG,
+        initialTab: "usage",
+        initialUsage: {
+            limits: [],
+            resetCredits: { availableCount: 1, credits: [], raw: {} },
+            raw: {},
+        },
+        onChange: () => ({ ok: false }),
+        onConsumeResetCredit: async (_redeemRequestId, options) =>
+            await new Promise<never>((_resolve, reject) => {
+                const signal = options?.signal;
+                if (signal?.aborted) {
+                    resetTaskCancelled = true;
+                    reject(signal.reason);
+                    return;
+                }
+                signal?.addEventListener(
+                    "abort",
+                    () => {
+                        resetTaskCancelled = true;
+                        reject(signal.reason);
+                    },
+                    { once: true },
+                );
+            }),
+    });
+
+    assert.equal(resetTaskCancelled, true);
+});
+
+type SettingsScreenComponent = {
+    readonly render: (width: number) => readonly string[];
+    readonly handleInput?: (data: string) => void;
+};
+
+type SettingsScreenFactory = (
+    tui: { readonly requestRender: () => void },
+    theme: Theme,
+    keybindings: unknown,
+    done: () => void,
+) => SettingsScreenComponent;
+
+function makeSettingsContext(options: {
+    readonly model?: typeof DEFAULT_TEST_EXTENSION_MODEL | undefined;
+    readonly run: (factory: SettingsScreenFactory) => Promise<void> | void;
+    readonly notify?: ((message: string, type: string) => void) | undefined;
+}): ExtensionContext {
+    const ctx = makeExtensionContext("/workspace", true);
+    if (options.model) {
+        Object.defineProperty(ctx, "model", { configurable: true, value: options.model });
+    }
+    Object.defineProperty(ctx, "hasUI", { configurable: true, value: true });
+    Object.defineProperty(ctx, "ui", {
+        configurable: true,
+        value: {
+            custom: async (factory: SettingsScreenFactory) => await options.run(factory),
+            notify: options.notify ?? (() => {}),
+        },
+    });
+    return ctx;
+}
 
 type CodexCommandHandler = (args: string, ctx: ExtensionContext) => Promise<void> | void;
 
@@ -249,7 +276,7 @@ function makeCodexCommandHarness(): CodexCommandHarness {
         },
     };
     return {
-        // SAFETY: This fixture implements the ExtensionAPI member exercised by registerCodexCommand.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the ExtensionAPI member exercised by registerCodexCommand.
         api: api as unknown as ExtensionAPI,
         registeredCommands,
         get hasArgumentCompletions() {

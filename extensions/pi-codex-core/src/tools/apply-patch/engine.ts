@@ -9,6 +9,8 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, normalize, relative, resolve, sep } from "node:path";
 
+import { Result, type Result as BetterResult } from "better-result";
+
 const BEGIN_PATCH_MARKER = "*** Begin Patch";
 const END_PATCH_MARKER = "*** End Patch";
 const ADD_FILE_MARKER = "*** Add File: ";
@@ -20,7 +22,7 @@ const CHANGE_CONTEXT_MARKER = "@@ ";
 const EMPTY_CHANGE_CONTEXT_MARKER = "@@";
 const ENVIRONMENT_ID_MARKER = "*** Environment ID:";
 
-type ApplyPatchErrorKind =
+export type ApplyPatchErrorKind =
     | "invalidPatch"
     | "invalidHunk"
     | "compute"
@@ -516,40 +518,58 @@ export class StreamingPatchParser {
     }
 }
 
-/** Parses a Codex apply_patch document into executable hunks. */
-export function parseApplyPatch(patchText: string): ApplyPatchArgs {
-    const originalLines = trimmedLines(patchText);
-    const patchLines = checkPatchBoundariesLenient(originalLines);
-    const patch = patchLines.join("\n");
-    const parser = new StreamingPatchParser();
-    parser.pushDelta(patch);
-    const hunks = parser.finish();
-    return {
-        patch,
-        hunks,
-        workdir: undefined,
-        environmentId: parser.environmentId(),
-    };
+/** Parses a Codex apply_patch document into executable hunks or a typed parse failure. */
+export function parseApplyPatch(patchText: string): BetterResult<ApplyPatchArgs, ApplyPatchError> {
+    try {
+        const originalLines = trimmedLines(patchText);
+        const patchLines = checkPatchBoundariesLenient(originalLines);
+        const patch = patchLines.join("\n");
+        const parser = new StreamingPatchParser();
+        parser.pushDelta(patch);
+        const hunks = parser.finish();
+        return Result.ok({
+            patch,
+            hunks,
+            workdir: undefined,
+            environmentId: parser.environmentId(),
+        });
+    } catch (cause: unknown) {
+        if (cause instanceof ApplyPatchError) return Result.err(cause);
+        throw cause;
+    }
 }
 
-/** Applies a Codex apply_patch document to the local filesystem rooted at cwd. */
+/** Applies a patch document, returning expected parse and execution failures as values. */
 export async function applyPatchText(
     patchText: string,
     cwd: string,
     options: ApplyPatchOptions = {},
-): Promise<ApplyPatchResult> {
-    const args = parseApplyPatch(patchText);
-    return applyPatchHunks(args.hunks, cwd, {
+): Promise<BetterResult<ApplyPatchResult, ApplyPatchError>> {
+    const parsed = parseApplyPatch(patchText);
+    if (parsed.isErr()) return Result.err(parsed.error);
+    return applyPatchHunks(parsed.value.hunks, cwd, {
         ...options,
-        environmentId: args.environmentId ?? options.environmentId,
+        environmentId: parsed.value.environmentId ?? options.environmentId,
     });
 }
 
-/** Applies parsed apply_patch hunks to the local filesystem rooted at cwd. */
+/** Applies parsed hunks, returning expected execution failures as values. */
 export async function applyPatchHunks(
     hunks: readonly ApplyPatchHunk[],
     cwd: string,
     options: ApplyPatchOptions = {},
+): Promise<BetterResult<ApplyPatchResult, ApplyPatchError>> {
+    try {
+        return Result.ok(await applyPatchHunksOrThrow(hunks, cwd, options));
+    } catch (cause: unknown) {
+        return Result.err(classifyApplyPatchFailure(cause));
+    }
+}
+
+async function applyPatchHunksOrThrow(
+    hunks: readonly ApplyPatchHunk[],
+    cwd: string,
+    options: ApplyPatchOptions,
 ): Promise<ApplyPatchResult> {
     if (options.environmentId !== undefined) {
         throw invalidPatch(
@@ -636,7 +656,7 @@ export function formatApplyPatchSummary(affected: ApplyPatchAffectedPaths): stri
     return `${lines.join("\n")}\n`;
 }
 
-export function seekSequence(
+function seekSequence(
     lines: readonly string[],
     pattern: readonly string[],
     start: number,

@@ -13,6 +13,7 @@ import {
     getCodexCoreGlobalConfigSchemaPath,
     getCodexCoreProjectConfigPath,
     parseCodexCoreConfig,
+    parseCodexCoreConfigWithDiagnostics,
     readCodexCoreConfig,
     readCodexCoreConfigWithDiagnostics,
     writeCodexCoreConfig,
@@ -82,6 +83,22 @@ test("parses codex config with safe defaults", () => {
     );
 });
 
+test("rejects fractional compaction threshold percentages", () => {
+    const result = parseCodexCoreConfigWithDiagnostics({
+        compaction: { thresholdPercent: 80.9 },
+    });
+
+    assert.equal(result.config.compaction.thresholdPercent, 80);
+    assert.deepEqual(result.diagnostics, [
+        {
+            _tag: "CodexConfigDiagnostic",
+            path: "$.compaction.thresholdPercent",
+            reason: "invalid",
+            message: "Expected an integer from 1 to 99.",
+        },
+    ]);
+});
+
 test("reads codex config as optional defaults and scaffolds global files", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-"));
     try {
@@ -121,6 +138,34 @@ test("does not overwrite malformed existing codex config", async () => {
         assert.match(writeResult.error, /Refusing to overwrite malformed config/);
         assert.equal(await readFile(configPath, "utf8"), "{not json");
     } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("fails extension activation on malformed global config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-activation-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const configPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(join(configPath, ".."), { recursive: true });
+        await writeFile(configPath, "{not json");
+
+        assert.throws(
+            () => extension(makeExtensionHarness().api),
+            (cause) => {
+                assert.ok(cause instanceof Error);
+                assert.equal(cause.name, "CodexConfigStartupError");
+                assert.match(cause.message, /\(malformed-json\)/);
+                assert.match(cause.message, new RegExp(configPath.replaceAll("/", "\\/")));
+                assert.doesNotMatch(cause.message, /\{not json/);
+                return true;
+            },
+        );
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -170,7 +215,7 @@ test("refreshes stale codex config schema without rewriting user config", async 
 });
 
 test("keeps codex config schema file aligned with TypeBox source", async () => {
-    const schema = JSON.parse(await readFile("config.schema.json", "utf8"));
+    const schema: unknown = JSON.parse(await readFile("config.schema.json", "utf8"));
 
     assert.deepEqual(schema, codexCoreConfigJsonSchema());
 });
@@ -216,6 +261,36 @@ test("ignores project codex config when session cwd is untrusted", async () => {
 
         assert.ok(harness.activeTools.includes("web_run"));
         assert.equal(harness.activeTools.includes("apply_patch"), false);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("fails session startup on trusted project config diagnostics", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-config-startup-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        const projectConfigPath = getCodexCoreProjectConfigPath(cwd);
+        await mkdir(join(projectConfigPath, ".."), { recursive: true });
+        await writeFile(
+            projectConfigPath,
+            JSON.stringify({ compaction: { thresholdPercent: 1.5 } }),
+        );
+
+        await assert.rejects(harness.startSession(makeExtensionContext(cwd, true)), (cause) => {
+            assert.ok(cause instanceof Error);
+            assert.equal(cause.name, "CodexConfigStartupError");
+            assert.match(cause.message, /\$\.compaction\.thresholdPercent \(invalid\)/);
+            assert.doesNotMatch(cause.message, /1\.5/);
+            return true;
+        });
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

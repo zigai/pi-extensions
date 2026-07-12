@@ -16,7 +16,7 @@ export function compileSchema<const T extends TSchema>(schema: T): SchemaValidat
         Parse(value: unknown): Static<T> {
             if (!validator.Check(value)) throw new Error("Value does not match schema.");
             // oxlint-disable-next-line typescript/no-unsafe-return -- SAFETY: TypeBox's compiled validator checked the value against the schema that defines Static<T>.
-            return value as Static<T>;
+            return value;
         },
     };
 }

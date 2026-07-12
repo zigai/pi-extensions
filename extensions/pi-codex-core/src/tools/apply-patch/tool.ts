@@ -97,13 +97,19 @@ export function createApplyPatchTool(): ToolDefinition<
         async execute(_toolCallId, params, signal, _onUpdate, ctx) {
             const cwd = resolve(ctx.cwd);
             try {
-                const parsed = parseApplyPatch(params.patch);
+                const parsedResult = parseApplyPatch(params.patch);
+                if (parsedResult.isErr()) {
+                    throw new Error(formatApplyPatchError(parsedResult.error));
+                }
+                const parsed = parsedResult.value;
                 const mutationPaths = await resolvePatchMutationQueuePaths(parsed.hunks, cwd);
                 return await withFileMutationQueues(mutationPaths, async () => {
-                    const result = await applyPatchHunks(parsed.hunks, cwd, {
+                    const applied = await applyPatchHunks(parsed.hunks, cwd, {
                         signal,
                         environmentId: parsed.environmentId,
                     });
+                    if (applied.isErr()) throw new Error(formatApplyPatchError(applied.error));
+                    const result = applied.value;
                     const diffSummary = summarizeAppliedPatchDiff(result.changes, parsed.hunks);
                     return {
                         content: [{ type: "text", text: result.summary }],
@@ -209,43 +215,43 @@ function hasNodeErrorCode(cause: unknown, code: string): boolean {
 }
 
 function prepareApplyPatchArguments(args: unknown): ApplyPatchParams {
-    if (typeof args === "string") return { patch: args };
-    if (typeof args === "object" && args !== null) {
-        const patch =
-            readStringProperty(args, "patch") ??
-            readStringProperty(args, "input") ??
-            readStringProperty(args, "command");
-        if (patch !== undefined) return { patch };
-    }
-    const params = parseWithSchema(ApplyPatchParametersValidator, args);
+    const normalized = normalizeApplyPatchArguments(args);
+    const params = parseWithSchema(ApplyPatchParametersValidator, normalized);
     if (!params) throw new Error("Invalid apply_patch arguments.");
     return params;
 }
 
+function normalizeApplyPatchArguments(args: unknown): unknown {
+    if (typeof args === "string") return { patch: args };
+    if (typeof args !== "object" || args === null) return args;
+
+    const keys = Reflect.ownKeys(args);
+    if (keys.length !== 1) return args;
+    const key = keys[0];
+    if (key !== "patch" && key !== "input" && key !== "command") return args;
+    const patch = readStringProperty(args, key);
+    return patch === undefined ? args : { patch };
+}
+
 function readStringProperty(value: object, key: string): string | undefined {
-    const property = Object.getOwnPropertyDescriptor(value, key)?.value;
+    const property: unknown = Object.getOwnPropertyDescriptor(value, key)?.value;
     return typeof property === "string" ? property : undefined;
 }
 
 function summarizeApplyPatchCall(patch: string): string {
-    try {
-        const parsed = parseApplyPatch(patch);
-        return formatPatchCallSummary(summarizePlannedPatchLines(parsed.hunks));
-    } catch {
-        return "patch";
-    }
+    const parsed = parseApplyPatch(patch);
+    return parsed.isErr()
+        ? "patch"
+        : formatPatchCallSummary(summarizePlannedPatchLines(parsed.value.hunks));
 }
 
 function summarizePlannedPatchDiffPreview(patch: string): string {
-    try {
-        const parsed = parseApplyPatch(patch);
-        return parsed.hunks
-            .map((hunk) => formatPlannedPatchHunkDiff(hunk))
-            .filter((diff) => diff.length > 0)
-            .join("\n\n");
-    } catch {
-        return "";
-    }
+    const parsed = parseApplyPatch(patch);
+    if (parsed.isErr()) return "";
+    return parsed.value.hunks
+        .map((hunk) => formatPlannedPatchHunkDiff(hunk))
+        .filter((diff) => diff.length > 0)
+        .join("\n\n");
 }
 
 function formatPlannedPatchHunkDiff(hunk: ApplyPatchHunk): string {

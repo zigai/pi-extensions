@@ -16,7 +16,6 @@ import {
     TEST_THEME,
     makeExtensionHarness,
     makeExtensionContext,
-    isRecord,
 } from "./helpers.ts";
 
 test("exports extension metadata", () => {
@@ -47,7 +46,7 @@ test("registers extension handlers once per Pi API", () => {
         getAllTools: () => [],
     };
 
-    // SAFETY: This fixture implements only extension registration members used during activation.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements only extension registration members used during activation.
     const extensionApi = api as unknown as ExtensionAPI;
     extension(extensionApi);
     const countsAfterFirstActivation = {
@@ -144,19 +143,9 @@ test("shows a scrollable startup warning when fast mode is enabled", async () =>
         );
 
         const notifications: Array<{ readonly message: string; readonly type: string }> = [];
-        const baseContext = makeExtensionContext("/workspace", true);
-        const ctx = {
-            ...baseContext,
-            hasUI: true,
-            mode: "tui",
-            ui: {
-                theme: TEST_THEME,
-                setStatus() {},
-                notify(message: string, type: string) {
-                    notifications.push({ message, type });
-                },
-            },
-        } as unknown as ExtensionContext;
+        const ctx = makeStartupWarningContext((message, type) => {
+            notifications.push({ message, type });
+        });
         const harness = makeExtensionHarness();
         extension(harness.api);
 
@@ -175,6 +164,28 @@ test("shows a scrollable startup warning when fast mode is enabled", async () =>
         await rm(root, { recursive: true, force: true });
     }
 });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function makeStartupWarningContext(
+    onNotify: (message: string, type: string) => void,
+): ExtensionContext {
+    const baseContext = makeExtensionContext("/workspace", true);
+    const context = {
+        ...baseContext,
+        hasUI: true,
+        mode: "tui",
+        ui: {
+            theme: TEST_THEME,
+            setStatus() {},
+            notify: onNotify,
+        },
+    };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This adapter supplies every context/UI member read by the session-start warning path; Pi's broad ExtensionContext test seam cannot express a partial UI implementation.
+    return context as unknown as ExtensionContext;
+}
 
 test("applies GPT-5.6 Responses Lite compatibility through extension hooks", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-responses-lite-"));

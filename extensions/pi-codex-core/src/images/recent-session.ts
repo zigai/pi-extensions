@@ -28,9 +28,12 @@ type RecentImageRef =
 export async function recentImageContents(
     ctx: ExtensionContext,
     count: number,
+    options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<ImageContent[]> {
+    options.signal?.throwIfAborted();
     const imageRefs: RecentImageRef[] = [];
     const branch = ctx.sessionManager.getBranch();
+    options.signal?.throwIfAborted();
     for (let index = branch.length - 1; index >= 0 && imageRefs.length < count; index -= 1) {
         const entry = branch[index];
         if (!entry) continue;
@@ -42,12 +45,17 @@ export async function recentImageContents(
 
     const images: ImageContent[] = [];
     for (const imageRef of imageRefs.reverse()) {
+        options.signal?.throwIfAborted();
         if (imageRef.kind === "inline") {
             images.push(imageRef.content);
             continue;
         }
         images.push(
-            await prepareCodexPromptImageContent(await loadImageContent(imageRef.path, ctx.cwd)),
+            await prepareCodexPromptImageContent(
+                await loadImageContent(imageRef.path, ctx.cwd, options),
+                "high",
+                options,
+            ),
         );
     }
     return images;

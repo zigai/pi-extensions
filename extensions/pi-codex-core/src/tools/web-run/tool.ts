@@ -27,6 +27,7 @@ import {
     type CodexResult,
 } from "../../codex/failures.ts";
 import { defaultCodexRuntime, type CodexRuntime } from "../../runtime.ts";
+import { CodexTokenizer } from "../../compaction/tokenizer.ts";
 import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
 import { recentWebSearchInput } from "./history.ts";
 import { formatWebRunToolOutput } from "./output.ts";
@@ -167,6 +168,7 @@ type WebRunSourceCard = {
 type WebRunOptions = {
     readonly getConfig: () => CodexCoreConfig;
     readonly runtime?: CodexRuntime | undefined;
+    readonly tokenizer?: CodexTokenizer | undefined;
     readonly agentDir?: string | undefined;
 };
 
@@ -223,29 +225,36 @@ export function createWebRunTool(
             return new Text(lines.join("\n"), 0, 0);
         },
         async execute(toolCallId, params, signal, _onUpdate, ctx) {
-            const response = await executeWebRun(
-                params,
-                ctx,
-                options.getConfig(),
-                signal,
-                options.runtime ?? defaultCodexRuntime,
-            );
-            if (response.isErr()) throw codexFailureToError(response.error);
-            const output = await prepareWebRunOutput(
-                response.value.output,
-                toolCallId,
-                ctx,
-                options.agentDir,
-            );
-            return {
-                // Preserve Codex's response verbatim for follow-up open/click/find reference ids.
-                content: [{ type: "text", text: response.value.output }],
-                details: {
-                    fullOutputPath: output.fullOutputPath,
-                    outputCharacters: response.value.output.length,
-                    sourceCount: output.sourceCount,
-                },
-            };
+            const tokenizer = options.tokenizer ?? new CodexTokenizer();
+            try {
+                const response = await executeWebRun(
+                    params,
+                    ctx,
+                    options.getConfig(),
+                    signal,
+                    options.runtime ?? defaultCodexRuntime,
+                    tokenizer,
+                );
+                if (response.isErr()) throw codexFailureToError(response.error);
+                const output = await prepareWebRunOutput(
+                    response.value.output,
+                    toolCallId,
+                    ctx,
+                    options.agentDir,
+                    { signal },
+                );
+                return {
+                    // Preserve Codex's response verbatim for follow-up open/click/find reference ids.
+                    content: [{ type: "text", text: response.value.output }],
+                    details: {
+                        fullOutputPath: output.fullOutputPath,
+                        outputCharacters: response.value.output.length,
+                        sourceCount: output.sourceCount,
+                    },
+                };
+            } finally {
+                if (options.tokenizer === undefined) await tokenizer.shutdown();
+            }
         },
     };
 }
@@ -263,13 +272,14 @@ async function executeWebRun(
     config: CodexCoreConfig,
     signal: AbortSignal | undefined,
     runtime: CodexRuntime,
+    tokenizer: CodexTokenizer,
 ): Promise<CodexResult<{ readonly output: string }>> {
     const provider = await resolveCodexToolProvider(ctx);
     if (provider.isErr()) return provider;
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
     const commands = splitSearchRequest(params);
-    const input = await recentWebSearchInput(ctx);
+    const input = await recentWebSearchInput(ctx, tokenizer, { signal });
     const model = resolveCodexRequestModel(config.openai.webSearchModel, provider.value.model);
 
     const requestBody = JSON.stringify({
@@ -304,7 +314,7 @@ async function executeWebRun(
     }
     let rawSearchPayload: unknown;
     try {
-        rawSearchPayload = JSON.parse(responseText) as unknown;
+        rawSearchPayload = JSON.parse(responseText);
     } catch (cause: unknown) {
         return fail(
             new CodexInvalidJson({
@@ -572,6 +582,7 @@ async function prepareWebRunOutput(
     toolCallId: string,
     ctx: ExtensionContext,
     agentDir: string | undefined,
+    options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<{
     readonly fullOutputPath: string;
     readonly sourceCount: number;
@@ -581,6 +592,7 @@ async function prepareWebRunOutput(
         toolCallId,
         ctx.sessionManager.getSessionId(),
         agentDir,
+        options,
     );
     const formatted = formatWebRunToolOutput(output, fullOutputPath);
     return { fullOutputPath, sourceCount: formatted.sourceCount };
@@ -591,7 +603,9 @@ async function saveFullWebRunOutput(
     toolCallId: string,
     sessionId: string,
     agentDir: string | undefined,
+    options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<string> {
+    options.signal?.throwIfAborted();
     const absolutePath = resolveCodexCoreArtifactPath({
         category: "web-run",
         sessionId,
@@ -599,8 +613,11 @@ async function saveFullWebRunOutput(
         agentDir,
     });
     await withFileMutationQueue(absolutePath, async () => {
+        options.signal?.throwIfAborted();
         await mkdir(dirname(absolutePath), { recursive: true });
-        await writeFile(absolutePath, output, "utf8");
+        options.signal?.throwIfAborted();
+        await writeFile(absolutePath, output, { encoding: "utf8", signal: options.signal });
+        options.signal?.throwIfAborted();
     });
     return absolutePath;
 }

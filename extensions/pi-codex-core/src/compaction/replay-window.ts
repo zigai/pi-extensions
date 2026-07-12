@@ -376,11 +376,9 @@ function updateStableFingerprint(
     }
 
     hash.update("object{");
-    // SAFETY: Fingerprinting treats arbitrary object properties as unknown and never trusts them.
-    const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
-        left.localeCompare(right),
-    );
-    for (const [key, nested] of entries) {
+    const keys = Object.keys(value).sort((left, right) => left.localeCompare(right));
+    for (const key of keys) {
+        const nested: unknown = Reflect.get(value, key);
         updateStableFingerprint(hash, key, stats, seen);
         updateStableFingerprint(hash, nested, stats, seen);
     }

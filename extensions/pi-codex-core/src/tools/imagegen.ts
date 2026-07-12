@@ -30,14 +30,13 @@ import {
     type CodexResult,
 } from "../codex/failures.ts";
 import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
+import { imageContentToDataUrl, prepareCodexPromptImageContent } from "../images/codex-prompt.ts";
 import {
-    imageContentToDataUrl,
     generatedPngContent,
     loadImageContent,
-    prepareCodexPromptImageContent,
-    recentImageContents,
     saveGeneratedImage,
-} from "../images/content.ts";
+} from "../images/file-artifacts.ts";
+import { recentImageContents } from "../images/recent-session.ts";
 
 export const IMAGEGEN_TOOL_NAME = "imagegen";
 
@@ -149,7 +148,7 @@ export function createImagegenTool(
         },
         async execute(toolCallId, params, signal, _onUpdate, ctx) {
             const config = options.getConfig();
-            const editImages = await resolveEditImages(params, ctx);
+            const editImages = await resolveEditImages(params, ctx, { signal });
             const response = await requestImageGeneration(
                 params.prompt,
                 editImages,
@@ -164,16 +163,21 @@ export function createImagegenTool(
             const saveErrors: string[] = [];
             const generatedImages = response.value.images.map(generatedPngContent);
             for (const [index, image] of generatedImages.entries()) {
+                signal?.throwIfAborted();
                 try {
                     savedImages.push(
-                        await saveImage({
-                            sessionId: ctx.sessionManager.getSessionId(),
-                            toolCallId,
-                            index,
-                            base64: image.data,
-                        }),
+                        await saveImage(
+                            {
+                                sessionId: ctx.sessionManager.getSessionId(),
+                                toolCallId,
+                                index,
+                                base64: image.data,
+                            },
+                            { signal },
+                        ),
                     );
                 } catch (cause: unknown) {
+                    if (signal?.aborted || isAbortCause(cause)) throw cause;
                     saveErrors.push(cause instanceof Error ? cause.message : String(cause));
                 }
             }
@@ -239,7 +243,9 @@ function quoteDisplayText(value: string): string {
 async function resolveEditImages(
     params: ImagegenParams,
     ctx: ExtensionContext,
+    options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<ImageContent[]> {
+    options.signal?.throwIfAborted();
     const paths = params.referenced_image_paths ?? [];
     if (paths.length > 0 && params.num_last_images_to_include !== undefined) {
         throw new Error(
@@ -250,8 +256,9 @@ async function resolveEditImages(
     if (paths.length > 0) {
         const editImages: ImageContent[] = [];
         for (const path of paths) {
-            const image = await loadImageContent(path, ctx.cwd);
-            editImages.push(await prepareCodexPromptImageContent(image, "original"));
+            options.signal?.throwIfAborted();
+            const image = await loadImageContent(path, ctx.cwd, options);
+            editImages.push(await prepareCodexPromptImageContent(image, "original", options));
         }
         return editImages;
     }
@@ -259,7 +266,7 @@ async function resolveEditImages(
     const count = Math.trunc(params.num_last_images_to_include);
     if (count < 1 || count > 5)
         throw new Error("num_last_images_to_include must be between 1 and 5.");
-    const recent = await recentImageContents(ctx, count);
+    const recent = await recentImageContents(ctx, count, options);
     if (recent.length !== count)
         throw new Error(`Requested ${count} recent image(s), but only found ${recent.length}.`);
     return recent;
@@ -310,7 +317,7 @@ async function requestImageGeneration(
             runtime,
             `${provider.value.baseUrl}/${path}`,
             { method: "POST", headers, body: JSON.stringify(body) },
-            signal,
+            { signal },
         );
         response = fetched.response;
         responseText = fetched.text;
@@ -346,7 +353,7 @@ async function requestImageGeneration(
     }
     let rawImagePayload: unknown;
     try {
-        rawImagePayload = JSON.parse(responseText) as unknown;
+        rawImagePayload = JSON.parse(responseText);
     } catch (cause: unknown) {
         return fail(
             new CodexInvalidJson({

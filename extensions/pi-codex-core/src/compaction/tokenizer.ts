@@ -3,11 +3,7 @@ import { Worker } from "node:worker_threads";
 const TOKENIZER_WORKER_URL = new URL("./tokenizer-worker.js", import.meta.url);
 
 type TokenizerWorkerRequest =
-    | {
-          readonly id: number;
-          readonly op: "count";
-          readonly text: string;
-      }
+    | { readonly id: number; readonly op: "count"; readonly text: string }
     | {
           readonly id: number;
           readonly op: "truncate";
@@ -16,23 +12,14 @@ type TokenizerWorkerRequest =
       };
 
 type TokenizerWorkerMessage =
-    | {
-          readonly type: "ready";
-      }
-    | {
-          readonly id: number;
-          readonly type: "result";
-          readonly value: unknown;
-      }
-    | {
-          readonly id: number;
-          readonly type: "error";
-          readonly error: string;
-      };
+    | { readonly type: "ready" }
+    | { readonly id: number; readonly type: "result"; readonly value: unknown }
+    | { readonly id: number; readonly type: "error"; readonly error: string };
 
 type PendingTokenizerRequest = {
     readonly resolve: (value: unknown) => void;
-    readonly reject: (cause: Error) => void;
+    readonly reject: (cause: unknown) => void;
+    readonly disposeAbort: () => void;
 };
 
 type TokenEncoding = {
@@ -48,205 +35,274 @@ type TokenizerWorkerState = {
     readyReject: ((cause: Error) => void) | undefined;
 };
 
-let workerState: TokenizerWorkerState | undefined;
-let nextRequestId = 1;
-let warmupPromise: Promise<void> | undefined;
-let mainEncodingPromise: Promise<TokenEncoding> | undefined;
+export type TokenizerOperationOptions = {
+    readonly signal?: AbortSignal | undefined;
+};
 
-/** Start initializing the Codex tokenizer off the main thread without awaiting it. */
-export function warmCodexTokenizer(): void {
-    warmupPromise ??= ensureWorkerState().ready.catch(() => undefined);
-}
+/** Application-owned Codex tokenizer resource with a warm worker and exact lazy fallback. */
+export class CodexTokenizer {
+    private workerState: TokenizerWorkerState | undefined;
+    private nextRequestId = 1;
+    private warmupPromise: Promise<void> | undefined;
+    private mainEncodingPromise: Promise<TokenEncoding> | undefined;
 
-/** Terminate the background tokenizer worker and reject any pending requests. */
-export async function shutdownCodexTokenizer(): Promise<void> {
-    const state = workerState;
-    workerState = undefined;
-    warmupPromise = undefined;
-    mainEncodingPromise = undefined;
-    if (state === undefined) {
-        return;
+    /** Start initializing the tokenizer off the main thread without awaiting it. */
+    warm(): void {
+        this.warmupPromise ??= this.ensureWorkerState().ready.catch(() => undefined);
     }
-    rejectPendingRequests(state, new Error("Codex tokenizer worker was shut down."));
-    await state.worker.terminate();
-}
 
-/** Count text tokens using the warm worker when possible, with exact lazy fallback. */
-export async function countCodexTextTokens(text: string): Promise<number> {
-    try {
-        const value = await requestWorker({ id: nextRequestId++, op: "count", text });
-        return typeof value === "number" && Number.isFinite(value)
-            ? value
-            : await countTextTokensInMainThread(text);
-    } catch {
-        return countTextTokensInMainThread(text);
+    /** Terminate this tokenizer's worker and reject only this resource's pending requests. */
+    async shutdown(): Promise<void> {
+        const state = this.workerState;
+        this.workerState = undefined;
+        this.warmupPromise = undefined;
+        this.mainEncodingPromise = undefined;
+        if (state === undefined) return;
+        rejectPendingRequests(state, new Error("Codex tokenizer worker was shut down."));
+        await state.worker.terminate();
     }
-}
 
-/** Truncate text to a token budget using the warm worker when possible, with exact lazy fallback. */
-export async function truncateCodexTextToTokenBudget(
-    text: string,
-    maxTokens: number,
-): Promise<string> {
-    try {
-        const value = await requestWorker({ id: nextRequestId++, op: "truncate", text, maxTokens });
-        return typeof value === "string"
-            ? value
-            : await truncateTextToTokenBudgetInMainThread(text, maxTokens);
-    } catch {
-        return truncateTextToTokenBudgetInMainThread(text, maxTokens);
-    }
-}
-
-async function requestWorker(request: TokenizerWorkerRequest): Promise<unknown> {
-    const state = ensureWorkerState();
-    await state.ready;
-    return new Promise((resolve, reject) => {
-        state.pending.set(request.id, { resolve, reject });
+    async count(text: string, options: TokenizerOperationOptions = {}): Promise<number> {
         try {
-            state.worker.postMessage(request);
-        } catch (cause: unknown) {
-            state.pending.delete(request.id);
-            reject(cause instanceof Error ? cause : new Error(String(cause)));
+            const value = await this.requestWorker(
+                { id: this.nextRequestId++, op: "count", text },
+                options,
+            );
+            if (typeof value === "number" && Number.isFinite(value)) {
+                options.signal?.throwIfAborted();
+                return value;
+            }
+        } catch {
+            options.signal?.throwIfAborted();
         }
-    });
-}
-
-function ensureWorkerState(): TokenizerWorkerState {
-    if (workerState !== undefined) {
-        return workerState;
+        return this.countInMainThread(text, options);
     }
 
-    const worker = new Worker(TOKENIZER_WORKER_URL);
-    worker.unref();
-    const pending = new Map<number, PendingTokenizerRequest>();
-    let readyResolve: (() => void) | undefined;
-    let readyReject: ((cause: Error) => void) | undefined;
-    const ready = new Promise<void>((resolve, reject) => {
-        readyResolve = resolve;
-        readyReject = reject;
-    });
-
-    const state: TokenizerWorkerState = {
-        worker,
-        pending,
-        ready,
-        readyResolve,
-        readyReject,
-    };
-    workerState = state;
-
-    worker.on("message", (message: unknown) => handleWorkerMessage(state, message));
-    worker.on("error", (cause: Error) => markWorkerFailed(state, cause));
-    worker.on("exit", (code) => {
-        if (code !== 0 || state.readyReject !== undefined || state.pending.size > 0) {
-            markWorkerFailed(state, new Error(`Codex tokenizer worker exited with code ${code}.`));
+    async truncate(
+        text: string,
+        maxTokens: number,
+        options: TokenizerOperationOptions = {},
+    ): Promise<string> {
+        try {
+            const value = await this.requestWorker(
+                { id: this.nextRequestId++, op: "truncate", text, maxTokens },
+                options,
+            );
+            if (typeof value === "string") {
+                options.signal?.throwIfAborted();
+                return value;
+            }
+        } catch {
+            options.signal?.throwIfAborted();
         }
-    });
-
-    return state;
-}
-
-function handleWorkerMessage(state: TokenizerWorkerState, message: unknown): void {
-    if (!isWorkerMessage(message)) {
-        return;
+        return this.truncateInMainThread(text, maxTokens, options);
     }
-    if (message.type === "ready") {
-        state.readyResolve?.();
+
+    private async requestWorker(
+        request: TokenizerWorkerRequest,
+        options: TokenizerOperationOptions,
+    ): Promise<unknown> {
+        const { signal } = options;
+        signal?.throwIfAborted();
+        const state = this.ensureWorkerState();
+        await waitForPromise(state.ready, options);
+        signal?.throwIfAborted();
+        return new Promise((resolve, reject) => {
+            const abort = () => {
+                const pending = state.pending.get(request.id);
+                if (pending === undefined) return;
+                state.pending.delete(request.id);
+                pending.disposeAbort();
+                reject(signal?.reason);
+            };
+            const disposeAbort = () => signal?.removeEventListener("abort", abort);
+            state.pending.set(request.id, { resolve, reject, disposeAbort });
+            signal?.addEventListener("abort", abort, { once: true });
+            if (signal?.aborted) {
+                abort();
+                return;
+            }
+            try {
+                state.worker.postMessage(request);
+            } catch (cause: unknown) {
+                state.pending.delete(request.id);
+                disposeAbort();
+                reject(cause instanceof Error ? cause : new Error(String(cause)));
+            }
+        });
+    }
+
+    private ensureWorkerState(): TokenizerWorkerState {
+        if (this.workerState !== undefined) return this.workerState;
+
+        const worker = new Worker(TOKENIZER_WORKER_URL);
+        worker.unref();
+        const pending = new Map<number, PendingTokenizerRequest>();
+        let readyResolve: (() => void) | undefined;
+        let readyReject: ((cause: Error) => void) | undefined;
+        const ready = new Promise<void>((resolve, reject) => {
+            readyResolve = resolve;
+            readyReject = reject;
+        });
+        const state: TokenizerWorkerState = {
+            worker,
+            pending,
+            ready,
+            readyResolve,
+            readyReject,
+        };
+        this.workerState = state;
+
+        worker.on("message", (message: unknown) => this.handleWorkerMessage(state, message));
+        worker.on("error", (cause: Error) => this.markWorkerFailed(state, cause));
+        worker.on("exit", (code) => {
+            if (code !== 0 || state.readyReject !== undefined || state.pending.size > 0) {
+                this.markWorkerFailed(
+                    state,
+                    new Error(`Codex tokenizer worker exited with code ${code}.`),
+                );
+            }
+        });
+        return state;
+    }
+
+    private handleWorkerMessage(state: TokenizerWorkerState, message: unknown): void {
+        if (!isWorkerMessage(message)) return;
+        if (message.type === "ready") {
+            state.readyResolve?.();
+            state.readyResolve = undefined;
+            state.readyReject = undefined;
+            return;
+        }
+        const pendingRequest = state.pending.get(message.id);
+        if (pendingRequest === undefined) return;
+        state.pending.delete(message.id);
+        pendingRequest.disposeAbort();
+        if (message.type === "error") {
+            pendingRequest.reject(new Error(message.error));
+            return;
+        }
+        pendingRequest.resolve(message.value);
+    }
+
+    private markWorkerFailed(state: TokenizerWorkerState, cause: Error): void {
+        if (this.workerState === state) {
+            this.workerState = undefined;
+            this.warmupPromise = undefined;
+        }
+        state.readyReject?.(cause);
         state.readyResolve = undefined;
         state.readyReject = undefined;
-        return;
+        rejectPendingRequests(state, cause);
     }
 
-    const pendingRequest = state.pending.get(message.id);
-    if (pendingRequest === undefined) {
-        return;
+    private async countInMainThread(
+        text: string,
+        options: TokenizerOperationOptions,
+    ): Promise<number> {
+        options.signal?.throwIfAborted();
+        try {
+            const encoding = await this.loadMainThreadEncoding();
+            options.signal?.throwIfAborted();
+            const count = encoding.encode(text).length;
+            options.signal?.throwIfAborted();
+            return count;
+        } catch {
+            options.signal?.throwIfAborted();
+            const count = approximateTextTokens(text);
+            options.signal?.throwIfAborted();
+            return count;
+        }
     }
-    state.pending.delete(message.id);
-    if (message.type === "error") {
-        pendingRequest.reject(new Error(message.error));
-        return;
+
+    private async truncateInMainThread(
+        text: string,
+        maxTokens: number,
+        options: TokenizerOperationOptions,
+    ): Promise<string> {
+        options.signal?.throwIfAborted();
+        if (maxTokens <= 0) return "";
+        try {
+            const encoding = await this.loadMainThreadEncoding();
+            options.signal?.throwIfAborted();
+            const tokens = encoding.encode(text);
+            options.signal?.throwIfAborted();
+            if (tokens.length <= maxTokens) {
+                options.signal?.throwIfAborted();
+                return text;
+            }
+            if (maxTokens <= 3) {
+                const result = encoding.decode(tokens.slice(0, maxTokens));
+                options.signal?.throwIfAborted();
+                return result;
+            }
+            const marker = "\n…\n";
+            const markerTokens = encoding.encode(marker).length;
+            const remaining = Math.max(1, maxTokens - markerTokens);
+            const headCount = Math.ceil(remaining / 2);
+            const tailCount = Math.floor(remaining / 2);
+            const result = `${encoding.decode(tokens.slice(0, headCount))}${marker}${encoding.decode(
+                tokens.slice(tokens.length - tailCount),
+            )}`;
+            options.signal?.throwIfAborted();
+            return result;
+        } catch {
+            options.signal?.throwIfAborted();
+            const result = truncateTextByApproximateTokenBudget(text, maxTokens);
+            options.signal?.throwIfAborted();
+            return result;
+        }
     }
-    pendingRequest.resolve(message.value);
+
+    private loadMainThreadEncoding(): Promise<TokenEncoding> {
+        this.mainEncodingPromise ??= import("js-tiktoken").then(({ getEncoding }) => {
+            const encoding = getEncoding("o200k_base");
+            return {
+                encode: (text: string) => encoding.encode(text),
+                decode: (tokens: number[]) => encoding.decode(tokens),
+            };
+        });
+        return this.mainEncodingPromise;
+    }
 }
 
-function markWorkerFailed(state: TokenizerWorkerState, cause: Error): void {
-    if (workerState === state) {
-        workerState = undefined;
-        warmupPromise = undefined;
-    }
-    state.readyReject?.(cause);
-    state.readyResolve = undefined;
-    state.readyReject = undefined;
-    rejectPendingRequests(state, cause);
+function waitForPromise<T>(promise: Promise<T>, options: TokenizerOperationOptions): Promise<T> {
+    const { signal } = options;
+    if (signal === undefined) return promise;
+    signal.throwIfAborted();
+    return new Promise((resolve, reject) => {
+        const abort = () => {
+            signal.removeEventListener("abort", abort);
+            reject(signal.reason);
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        promise.then(
+            (value) => {
+                signal.removeEventListener("abort", abort);
+                resolve(value);
+            },
+            (cause: unknown) => {
+                signal.removeEventListener("abort", abort);
+                reject(cause);
+            },
+        );
+    });
 }
 
 function rejectPendingRequests(state: TokenizerWorkerState, cause: Error): void {
     for (const pendingRequest of state.pending.values()) {
+        pendingRequest.disposeAbort();
         pendingRequest.reject(cause);
     }
     state.pending.clear();
 }
 
 function isWorkerMessage(message: unknown): message is TokenizerWorkerMessage {
-    if (!isRecord(message) || typeof message.type !== "string") {
-        return false;
-    }
-    if (message.type === "ready") {
-        return true;
-    }
-    if (typeof message.id !== "number") {
-        return false;
-    }
-    if (message.type === "result") {
-        return true;
-    }
+    if (!isRecord(message) || typeof message.type !== "string") return false;
+    if (message.type === "ready") return true;
+    if (typeof message.id !== "number") return false;
+    if (message.type === "result") return true;
     return message.type === "error" && typeof message.error === "string";
-}
-
-async function countTextTokensInMainThread(text: string): Promise<number> {
-    try {
-        const encoding = await loadMainThreadEncoding();
-        return encoding.encode(text).length;
-    } catch {
-        return approximateTextTokens(text);
-    }
-}
-
-async function truncateTextToTokenBudgetInMainThread(
-    text: string,
-    maxTokens: number,
-): Promise<string> {
-    if (maxTokens <= 0) {
-        return "";
-    }
-    try {
-        const encoding = await loadMainThreadEncoding();
-        const tokens = encoding.encode(text);
-        if (tokens.length <= maxTokens) return text;
-        if (maxTokens <= 3) return encoding.decode(tokens.slice(0, maxTokens));
-        const marker = "\n…\n";
-        const markerTokens = encoding.encode(marker).length;
-        const remaining = Math.max(1, maxTokens - markerTokens);
-        const headCount = Math.ceil(remaining / 2);
-        const tailCount = Math.floor(remaining / 2);
-        const head = encoding.decode(tokens.slice(0, headCount));
-        const tail = encoding.decode(tokens.slice(tokens.length - tailCount));
-        return `${head}${marker}${tail}`;
-    } catch {
-        return truncateTextByApproximateTokenBudget(text, maxTokens);
-    }
-}
-
-async function loadMainThreadEncoding(): Promise<TokenEncoding> {
-    mainEncodingPromise ??= import("js-tiktoken").then(({ getEncoding }) => {
-        const encoding = getEncoding("o200k_base");
-        return {
-            encode: (text: string) => encoding.encode(text),
-            decode: (tokens: number[]) => encoding.decode(tokens),
-        };
-    });
-    return mainEncodingPromise;
 }
 
 function approximateTextTokens(text: string): number {
@@ -254,16 +310,10 @@ function approximateTextTokens(text: string): number {
 }
 
 function truncateTextByApproximateTokenBudget(text: string, maxTokens: number): string {
-    if (maxTokens <= 0) {
-        return "";
-    }
+    if (maxTokens <= 0) return "";
     const maxChars = Math.max(1, maxTokens * 4);
-    if (text.length <= maxChars) {
-        return text;
-    }
-    if (maxChars <= 3) {
-        return text.slice(0, maxChars);
-    }
+    if (text.length <= maxChars) return text;
+    if (maxChars <= 3) return text.slice(0, maxChars);
     const marker = "\n…\n";
     const remaining = Math.max(1, maxChars - marker.length);
     const headCount = Math.ceil(remaining / 2);

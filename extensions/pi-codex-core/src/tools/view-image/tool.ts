@@ -38,12 +38,11 @@ import {
 } from "../../codex/failures.ts";
 import {
     imageContentToDataUrl,
-    loadImageContent,
     modelSupportsImages,
     prepareCodexPromptImageContent,
     type ImageDetail,
-    type LoadedImage,
-} from "../../images/content.ts";
+} from "../../images/codex-prompt.ts";
+import { loadImageContent, type LoadedImage } from "../../images/file-artifacts.ts";
 import { defaultCodexRuntime, type CodexRuntime } from "../../runtime.ts";
 import {
     CODEX_RESPONSES_LITE_HEADER,
@@ -200,7 +199,7 @@ export function createViewImageTool(
             return container;
         },
         async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-            const image = await loadImageContent(params.path, ctx.cwd);
+            const image = await loadImageContent(params.path, ctx.cwd, { signal });
             const detail = params.detail ?? "high";
             if (modelSupportsImages(ctx.model)) {
                 if (
@@ -211,7 +210,7 @@ export function createViewImageTool(
                         `view_image detail "original" is not supported by ${ctx.model?.id ?? "the active model"}.`,
                     );
                 }
-                const content = await prepareCodexPromptImageContent(image, detail);
+                const content = await prepareCodexPromptImageContent(image, detail, { signal });
                 return {
                     content: [content, { type: "text", text: imageDetailMarker(detail) }],
                     details: {
@@ -316,7 +315,7 @@ async function describeImage(
     signal: AbortSignal | undefined,
     runtime: CodexRuntime,
 ): Promise<CodexResult<string>> {
-    const promptImage = await prepareCodexPromptImageContent(image, detail);
+    const promptImage = await prepareCodexPromptImageContent(image, detail, { signal });
     const provider = await resolveCodexToolProvider(ctx);
     if (provider.isErr()) return provider;
     const headers = codexToolProviderHeaders(provider.value);
@@ -364,7 +363,7 @@ async function describeImage(
             runtime,
             resolveCodexResponsesUrl(provider.value.baseUrl),
             { method: "POST", headers, body: JSON.stringify(compatibleRequestBody) },
-            signal,
+            { signal },
         );
         response = fetched.response;
         responseText = fetched.text;
@@ -400,7 +399,7 @@ async function describeImage(
     }
     let rawDescriptionPayload: unknown;
     try {
-        rawDescriptionPayload = JSON.parse(responseText) as unknown;
+        rawDescriptionPayload = JSON.parse(responseText);
     } catch (cause: unknown) {
         return fail(
             new CodexInvalidJson({

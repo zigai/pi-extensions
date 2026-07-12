@@ -423,17 +423,15 @@ function toolCallsFromContent(content: readonly CompactionContentBlock[]): Respo
     });
 }
 
-export function asResponsesPayload(value: unknown): ResponsesPayload | undefined {
-    if (!isJsonObject(value) || typeof value.model !== "string" || !Array.isArray(value.input)) {
-        return undefined;
-    }
-    if (!value.input.every(isJsonObject)) return undefined;
+export function parseResponsesPayload(value: unknown): ResponsesPayload | undefined {
+    const payload = parseJsonObject(value);
+    if (!payload || typeof payload.model !== "string") return undefined;
+    const input = parseResponsesInputItems(payload.input);
+    if (!input) return undefined;
     return {
-        ...value,
-        model: value.model,
-        // SAFETY: The provider request rewrite path only needs object-shaped response input items;
-        // recursively rebuilding long provider payloads here duplicates session-sized data.
-        input: value.input as readonly ResponsesInputItem[],
+        ...payload,
+        model: payload.model,
+        input,
     };
 }
 
@@ -486,7 +484,7 @@ export function sanitizeSurrogates(text: string): string {
     );
 }
 
-export function parseJsonValue(value: unknown): JsonValue | undefined {
+function parseJsonValue(value: unknown): JsonValue | undefined {
     if (value === null) return null;
     if (typeof value === "string" || typeof value === "boolean") return value;
     if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
@@ -502,18 +500,19 @@ export function parseJsonValue(value: unknown): JsonValue | undefined {
     return parseJsonObject(value);
 }
 
-export function parseJsonObject(value: unknown): JsonObject | undefined {
+function parseJsonObject(value: unknown): JsonObject | undefined {
     const record = parseWithSchema(JsonObjectValidator, value);
     if (!record) return undefined;
     const object: Record<string, JsonValue> = {};
     for (const [key, nested] of Object.entries(record)) {
         const parsed = parseJsonValue(nested);
-        if (parsed !== undefined) object[key] = parsed;
+        if (parsed === undefined) return undefined;
+        object[key] = parsed;
     }
     return object;
 }
 
-export function isJsonObject(value: unknown): value is Record<string, unknown> {
+function isJsonObject(value: unknown): value is Record<string, unknown> {
     return parseWithSchema(JsonObjectValidator, value) !== undefined;
 }
 

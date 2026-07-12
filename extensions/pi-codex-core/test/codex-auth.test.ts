@@ -33,6 +33,10 @@ test("Codex web auth supports API keys and preserves provider headers", async ()
     );
 
     assert.ok(result.isOk());
+    assert.equal(
+        JSON.stringify(result.value.redactedHeaders),
+        '{"OpenAI-Organization":"[redacted]","X-Custom-Auth":"[redacted]","version":"[redacted]"}',
+    );
     const headers = codexToolProviderHeaders(result.value);
     assert.equal(headers.get("OpenAI-Organization"), "org_test");
     assert.equal(headers.get("X-Custom-Auth"), "custom");
@@ -48,9 +52,30 @@ test("Codex tool auth preserves header-only provider credentials", async () => {
     );
 
     assert.ok(result.isOk());
+    assert.equal(JSON.stringify(result.value.redactedHeaders), '{"X-API-Key":"[redacted]"}');
     const headers = codexToolProviderHeaders(result.value);
     assert.equal(headers.get("X-API-Key"), "actor-token");
     assert.equal(headers.has("Authorization"), false);
+});
+
+test("Codex tool auth redacts and forwards authorization credentials", async () => {
+    const result = await resolveCodexToolProvider(
+        makeToolAuthContext({
+            headers: {
+                Authorization: "Basic credential",
+                "OpenAI-Organization": "org_test",
+            },
+        }),
+        { requireAccountId: false, useActiveModel: true },
+    );
+
+    assert.ok(result.isOk());
+    assert.equal(
+        JSON.stringify(result.value.redactedHeaders),
+        '{"Authorization":"[redacted]","OpenAI-Organization":"[redacted]"}',
+    );
+    const headers = codexToolProviderHeaders(result.value);
+    assert.equal(headers.get("Authorization"), "Basic credential");
 });
 
 function makeToolAuthContext(auth: {
@@ -73,6 +98,6 @@ function makeToolAuthContext(auth: {
             }),
         },
     };
-    // SAFETY: This test context supplies only the model registry fields read by Codex auth.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test context supplies only the model registry fields read by Codex auth.
     return ctx as unknown as ExtensionContext;
 }

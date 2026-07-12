@@ -9,8 +9,8 @@ import {
 } from "./codex/responses-compat.ts";
 import { ResponsesLiteRequestPolicy } from "./codex/responses-lite-policy.ts";
 import { registerNativeCompactionDisplay } from "./compaction/display.ts";
-import { shutdownCodexTokenizer, warmCodexTokenizer } from "./compaction/tokenizer.ts";
-import { readCodexCoreConfig, type CodexCoreConfig } from "./config/config.ts";
+import { CodexTokenizer } from "./compaction/tokenizer.ts";
+import { readCodexCoreStartupConfig, type CodexCoreConfig } from "./config/config.ts";
 import { rewriteProviderImageDetails } from "./images/detail.ts";
 import { buildCodexCoreSystemPrompt } from "./prompt/system-prompt.ts";
 import { registerCodexCommand } from "./settings/command.ts";
@@ -41,10 +41,10 @@ function loadCompactionModule(): Promise<CompactionModule> {
 /** Register the Pi Codex Core Pi extension. */
 export default function extension(pi: ExtensionAPI): void {
     if (activatedApis.has(pi)) return;
+    let config: CodexCoreConfig = readCodexCoreStartupConfig();
     activatedApis.add(pi);
-
-    let config: CodexCoreConfig = readCodexCoreConfig();
     const responsesLitePolicy = new ResponsesLiteRequestPolicy();
+    const tokenizer = new CodexTokenizer();
 
     const getConfig = (): CodexCoreConfig => config;
     const applyConfig = (
@@ -53,12 +53,12 @@ export default function extension(pi: ExtensionAPI): void {
     ): void => {
         config = nextConfig;
         if (config.compaction.enabled) {
-            warmCodexTokenizer();
+            tokenizer.warm();
         }
         syncCodexCoreTools(pi, ctx, config);
     };
 
-    registerWebRunTool(pi, { getConfig });
+    registerWebRunTool(pi, { getConfig, tokenizer });
     registerImagegenTool(pi, { getConfig });
     registerViewImageTool(pi, { getConfig });
     registerApplyPatchTool(pi);
@@ -68,10 +68,10 @@ export default function extension(pi: ExtensionAPI): void {
     pi.on("session_start", async (_event, ctx) => {
         responsesLitePolicy.clearSession(ctx.sessionManager.getSessionId());
         config = ctx.isProjectTrusted()
-            ? readCodexCoreConfig({ cwd: ctx.cwd })
-            : readCodexCoreConfig();
+            ? readCodexCoreStartupConfig({ cwd: ctx.cwd })
+            : readCodexCoreStartupConfig();
         if (config.compaction.enabled) {
-            warmCodexTokenizer();
+            tokenizer.warm();
         }
         applyCodexModelMetadataCompatibility(ctx.model);
         syncCodexCoreTools(pi, ctx, config);
@@ -114,7 +114,9 @@ export default function extension(pi: ExtensionAPI): void {
         }
         try {
             const { handleCodexNativeCompaction } = await loadCompactionModule();
-            const result = await handleCodexNativeCompaction(event, ctx, config, pi);
+            const result = await handleCodexNativeCompaction(event, ctx, config, pi, {
+                tokenizer,
+            });
             if (result === undefined) responsesLitePolicy.beginPiCompactionFallback(sessionId);
             return result;
         } catch {
@@ -191,21 +193,23 @@ export default function extension(pi: ExtensionAPI): void {
                 clearCodexCompactionSessionState(ctx.sessionManager.getSessionId());
             }
         }
-        await shutdownCodexTokenizer();
+        await tokenizer.shutdown();
     });
 }
 
 function isActiveCodexResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]): boolean {
     return (
         ctx.model?.provider.trim().toLowerCase() === "openai-codex" &&
-        String(ctx.model.api).toLowerCase().includes("responses")
+        typeof ctx.model.api === "string" &&
+        ctx.model.api.toLowerCase().includes("responses")
     );
 }
 
 function isActiveGptResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]): boolean {
     return (
         ctx.model?.id.trim().toLowerCase().startsWith("gpt-") === true &&
-        String(ctx.model.api).toLowerCase().includes("responses")
+        typeof ctx.model?.api === "string" &&
+        ctx.model.api.toLowerCase().includes("responses")
     );
 }
 

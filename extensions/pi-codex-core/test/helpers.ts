@@ -56,7 +56,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         getAllTools: () => [],
     };
     return {
-        // SAFETY: This fixture implements the ExtensionAPI members exercised during extension registration and session_start.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the ExtensionAPI members exercised during extension registration and session_start.
         api: api as unknown as ExtensionAPI,
         get activeTools() {
             return activeTools;
@@ -172,7 +172,7 @@ export function makeExtensionContext(
             getBranch: () => [],
         },
     };
-    // SAFETY: This fixture supplies the fields read by session_start tool synchronization.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture supplies the fields read by session_start tool synchronization.
     return ctx as unknown as ExtensionContext;
 }
 
@@ -221,19 +221,27 @@ export function renderComponent(component: { render(width: number): string[] }):
     return component.render(200).join("\n");
 }
 
-export function makeRenderContext<TArgs, TState extends object = Record<string, never>>(
+export function makeRenderContext<TArgs>(
     args: TArgs,
-    state?: TState,
+    state?: undefined,
+    options?: RenderContextOptions,
+): TestRenderContext<Record<string, never>, TArgs>;
+export function makeRenderContext<TArgs, TState extends object>(
+    args: TArgs,
+    state: TState,
+    options?: RenderContextOptions,
+): TestRenderContext<TState, TArgs>;
+export function makeRenderContext<TArgs>(
+    args: TArgs,
+    state: object | undefined,
     options: RenderContextOptions = {},
-): TestRenderContext<TState, TArgs> {
-    // SAFETY: Tests omit renderer state only for renderers that do not read custom state.
-    const renderState = state ?? ({} as TState);
+): TestRenderContext<object, TArgs> {
     return {
         args,
         toolCallId: "call-test",
         invalidate() {},
         lastComponent: undefined,
-        state: renderState,
+        state: state ?? {},
         cwd: process.cwd(),
         executionStarted: true,
         argsComplete: true,
@@ -259,7 +267,7 @@ function makeTestTheme(): Theme {
         getThinkingBorderColor: () => (text: string) => text,
         getBashModeBorderColor: () => (text: string) => text,
     };
-    // SAFETY: Renderer tests exercise only Theme's styling methods and do not rely on Theme identity.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Renderer tests exercise only Theme's styling methods and do not rely on Theme identity.
     return theme as unknown as Theme;
 }
 
@@ -277,6 +285,6 @@ export function messageEntry(
     };
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }

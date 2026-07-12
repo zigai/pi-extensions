@@ -11,7 +11,7 @@ fmt:
 
 # Check code for lint issues
 lint:
-    npm run lint
+    @npm run --silent lint
 
 # Run tests
 test:

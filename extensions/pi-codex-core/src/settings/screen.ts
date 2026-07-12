@@ -41,6 +41,7 @@ export type CodexSettingsScreenOptions = {
     readonly onChange: (config: CodexCoreConfig) => CodexSettingsSaveResult;
     readonly onConsumeResetCredit?: (
         redeemRequestId: string,
+        options?: { readonly signal?: AbortSignal | undefined },
     ) => Promise<ResultType<CodexRateLimitResetConsumeResult, CodexFailure>>;
 };
 
@@ -51,6 +52,7 @@ export async function openCodexSettingsScreen(
     ctx: ExtensionContext,
     options: CodexSettingsScreenOptions,
 ): Promise<void> {
+    const tasks = new SettingsScreenTaskOwner();
     let draft = options.initialConfig;
     let activeTab: CodexSettingsTab = options.initialTab ?? "general";
     let usageState = options.initialUsage;
@@ -60,169 +62,222 @@ export async function openCodexSettingsScreen(
     let resetMessage: { readonly kind: "info" | "error"; readonly text: string } | undefined;
     const personalitySupported = supportsCodexPromptPersonality(ctx.model?.id);
 
-    await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-        const loadUsage = (): void => {
-            if (usageLoading) return;
-            usageLoading = true;
-            resetMessage = undefined;
-            tui.requestRender();
-            fetchCodexUsage(ctx)
-                .then((usage) => {
-                    usageState = Result.isOk(usage) ? usage.value : { error: usage.error.message };
-                })
-                .catch((cause: unknown) => {
-                    usageState = { error: cause instanceof Error ? cause.message : String(cause) };
-                })
-                .finally(() => {
-                    usageLoading = false;
-                    settingsList = createSettingsList();
-                    tui.requestRender();
-                });
-        };
-
-        const consumeResetCredit = (): void => {
-            if (resetLoading) return;
-            if (!canConsumeResetCredit(usageState)) {
-                resetMessage = { kind: "info", text: "No banked Codex resets are available." };
-                pendingResetConfirm = false;
+    try {
+        await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+            const loadUsage = (): void => {
+                if (usageLoading || tasks.signal.aborted) return;
+                usageLoading = true;
+                resetMessage = undefined;
                 tui.requestRender();
-                return;
-            }
-            resetLoading = true;
-            pendingResetConfirm = false;
-            resetMessage = undefined;
-            usageState = undefined;
-            tui.requestRender();
-            const redeemRequestId = createCodexRateLimitResetRedeemRequestId();
-            (options.onConsumeResetCredit ?? ((id) => consumeCodexRateLimitResetCredit(ctx, id)))(
-                redeemRequestId,
-            )
-                .then((result) => {
-                    if (Result.isError(result)) {
-                        resetMessage = { kind: "error", text: result.error.message };
-                        return;
-                    }
-                    resetMessage = {
-                        kind:
-                            result.value.outcome === "reset" ||
-                            result.value.outcome === "already_redeemed"
-                                ? "info"
-                                : "error",
-                        text: formatResetConsumeResult(result.value),
-                    };
-                })
-                .catch((cause: unknown) => {
-                    resetMessage = {
-                        kind: "error",
-                        text: cause instanceof Error ? cause.message : String(cause),
-                    };
-                })
-                .finally(() => {
-                    resetLoading = false;
-                    loadUsage();
-                });
-        };
-
-        const createSettingsList = (): SettingsList =>
-            new SettingsList(
-                buildItems(
-                    activeTab,
-                    draft,
-                    usageState,
-                    usageLoading,
-                    resetLoading,
-                    personalitySupported,
-                ),
-                10,
-                getSettingsListTheme(),
-                (id, value) => {
-                    if (id === "refreshUsage") {
-                        loadUsage();
-                        return;
-                    }
-                    if (id === "useReset") {
-                        if (!canConsumeResetCredit(usageState)) {
-                            resetMessage = {
-                                kind: "info",
-                                text: "No banked Codex resets are available.",
-                            };
-                        } else {
-                            pendingResetConfirm = true;
-                            resetMessage = undefined;
+                tasks.start(async (signal) => {
+                    try {
+                        signal.throwIfAborted();
+                        const usage = await fetchCodexUsage(ctx, { signal });
+                        signal.throwIfAborted();
+                        if (signal.aborted) return;
+                        usageState = Result.isOk(usage)
+                            ? usage.value
+                            : { error: usage.error.message };
+                    } catch (cause: unknown) {
+                        if (signal.aborted) return;
+                        usageState = {
+                            error: cause instanceof Error ? cause.message : String(cause),
+                        };
+                    } finally {
+                        if (!signal.aborted) {
+                            usageLoading = false;
+                            settingsList = createSettingsList();
+                            tui.requestRender();
                         }
-                        tui.requestRender();
-                        return;
                     }
-                    const nextDraft = applySettingChange(id, value, draft);
-                    if (nextDraft === draft) return;
-                    const saveResult = options.onChange(nextDraft);
-                    if (saveResult.ok) draft = saveResult.effectiveConfig;
-                    settingsList = createSettingsList();
+                });
+            };
+
+            const consumeResetCredit = (): void => {
+                if (resetLoading) return;
+                if (!canConsumeResetCredit(usageState)) {
+                    resetMessage = { kind: "info", text: "No banked Codex resets are available." };
+                    pendingResetConfirm = false;
                     tui.requestRender();
-                },
-                () => done(undefined),
-            );
-
-        let settingsList = createSettingsList();
-        if (activeTab === "usage" && !usageState) loadUsage();
-
-        const switchTab = (): void => {
-            const currentIndex = TAB_ORDER.indexOf(activeTab);
-            activeTab = TAB_ORDER[(currentIndex + 1) % TAB_ORDER.length] ?? "general";
-            pendingResetConfirm = false;
-            settingsList = createSettingsList();
-            if (activeTab === "usage" && !usageState) loadUsage();
-            tui.requestRender();
-        };
-
-        return {
-            render(width: number): string[] {
-                const body = [
-                    rule(width, theme, "accent"),
-                    formatTabs(activeTab, theme),
-                    rule(width, theme, "borderMuted"),
-                    ...formatHeaderLines(activeTab, draft, theme, personalitySupported),
-                    ...(activeTab === "usage"
-                        ? formatUsageLines(
-                              theme,
-                              usageState,
-                              usageLoading,
-                              resetLoading,
-                              pendingResetConfirm,
-                              resetMessage,
-                          )
-                        : []),
-                    ...settingsList.render(width),
-                    rule(width, theme, "accent"),
-                ];
-                return body.map((line) => truncateToWidth(line, width, ""));
-            },
-            invalidate(): void {
-                settingsList.invalidate();
-            },
-            handleInput(data: string): void {
-                if (pendingResetConfirm) {
-                    const lowered = data.toLowerCase();
-                    if (lowered === "y") {
-                        consumeResetCredit();
-                        return;
-                    }
-                    if (lowered === "n" || data === "\x1b") {
-                        pendingResetConfirm = false;
-                        resetMessage = { kind: "info", text: "Codex reset cancelled." };
-                        tui.requestRender();
-                        return;
-                    }
-                }
-                if (data === "\t") {
-                    switchTab();
                     return;
                 }
-                settingsList.handleInput(data);
+                resetLoading = true;
+                pendingResetConfirm = false;
+                resetMessage = undefined;
+                usageState = undefined;
                 tui.requestRender();
-            },
-        };
-    });
+                const redeemRequestId = createCodexRateLimitResetRedeemRequestId();
+                tasks.start(async (signal) => {
+                    try {
+                        const result = await (
+                            options.onConsumeResetCredit ??
+                            (async (id, consumeOptions) => {
+                                consumeOptions?.signal?.throwIfAborted();
+                                const result = await consumeCodexRateLimitResetCredit(ctx, id, {
+                                    signal: consumeOptions?.signal,
+                                });
+                                consumeOptions?.signal?.throwIfAborted();
+                                return result;
+                            })
+                        )(redeemRequestId, { signal });
+                        if (signal.aborted) return;
+                        if (Result.isError(result)) {
+                            resetMessage = { kind: "error", text: result.error.message };
+                            return;
+                        }
+                        resetMessage = {
+                            kind:
+                                result.value.outcome === "reset" ||
+                                result.value.outcome === "already_redeemed"
+                                    ? "info"
+                                    : "error",
+                            text: formatResetConsumeResult(result.value),
+                        };
+                    } catch (cause: unknown) {
+                        if (signal.aborted) return;
+                        resetMessage = {
+                            kind: "error",
+                            text: cause instanceof Error ? cause.message : String(cause),
+                        };
+                    } finally {
+                        if (!signal.aborted) {
+                            resetLoading = false;
+                            loadUsage();
+                        }
+                    }
+                });
+            };
+
+            const createSettingsList = (): SettingsList =>
+                new SettingsList(
+                    buildItems(
+                        activeTab,
+                        draft,
+                        usageState,
+                        usageLoading,
+                        resetLoading,
+                        personalitySupported,
+                    ),
+                    10,
+                    getSettingsListTheme(),
+                    (id, value) => {
+                        if (id === "refreshUsage") {
+                            loadUsage();
+                            return;
+                        }
+                        if (id === "useReset") {
+                            if (!canConsumeResetCredit(usageState)) {
+                                resetMessage = {
+                                    kind: "info",
+                                    text: "No banked Codex resets are available.",
+                                };
+                            } else {
+                                pendingResetConfirm = true;
+                                resetMessage = undefined;
+                            }
+                            tui.requestRender();
+                            return;
+                        }
+                        const nextDraft = applySettingChange(id, value, draft);
+                        if (nextDraft === draft) return;
+                        const saveResult = options.onChange(nextDraft);
+                        if (saveResult.ok) draft = saveResult.effectiveConfig;
+                        settingsList = createSettingsList();
+                        tui.requestRender();
+                    },
+                    () => done(undefined),
+                );
+
+            let settingsList = createSettingsList();
+            if (activeTab === "usage" && !usageState) loadUsage();
+
+            const switchTab = (): void => {
+                const currentIndex = TAB_ORDER.indexOf(activeTab);
+                activeTab = TAB_ORDER[(currentIndex + 1) % TAB_ORDER.length] ?? "general";
+                pendingResetConfirm = false;
+                settingsList = createSettingsList();
+                if (activeTab === "usage" && !usageState) loadUsage();
+                tui.requestRender();
+            };
+
+            return {
+                render(width: number): string[] {
+                    const body = [
+                        rule(width, theme, "accent"),
+                        formatTabs(activeTab, theme),
+                        rule(width, theme, "borderMuted"),
+                        ...formatHeaderLines(activeTab, draft, theme, personalitySupported),
+                        ...(activeTab === "usage"
+                            ? formatUsageLines(
+                                  theme,
+                                  usageState,
+                                  usageLoading,
+                                  resetLoading,
+                                  pendingResetConfirm,
+                                  resetMessage,
+                              )
+                            : []),
+                        ...settingsList.render(width),
+                        rule(width, theme, "accent"),
+                    ];
+                    return body.map((line) => truncateToWidth(line, width, ""));
+                },
+                invalidate(): void {
+                    settingsList.invalidate();
+                },
+                handleInput(data: string): void {
+                    if (pendingResetConfirm) {
+                        const lowered = data.toLowerCase();
+                        if (lowered === "y") {
+                            consumeResetCredit();
+                            return;
+                        }
+                        if (lowered === "n" || data === "\x1b") {
+                            pendingResetConfirm = false;
+                            resetMessage = { kind: "info", text: "Codex reset cancelled." };
+                            tui.requestRender();
+                            return;
+                        }
+                    }
+                    if (data === "\t") {
+                        switchTab();
+                        return;
+                    }
+                    settingsList.handleInput(data);
+                    tui.requestRender();
+                },
+            };
+        });
+    } finally {
+        await tasks.dispose();
+    }
+}
+
+class SettingsScreenTaskOwner {
+    readonly #controller = new AbortController();
+    readonly #tasks = new Set<Promise<void>>();
+
+    get signal(): AbortSignal {
+        return this.#controller.signal;
+    }
+
+    start(task: (signal: AbortSignal) => Promise<void>): void {
+        if (this.signal.aborted) return;
+        const ownedTask = (async () => {
+            try {
+                await task(this.signal);
+            } catch {
+                // Each task handles its own expected rejection before returning to this owner.
+            }
+        })();
+        this.#tasks.add(ownedTask);
+    }
+
+    async dispose(): Promise<void> {
+        this.#controller.abort();
+        await Promise.allSettled(this.#tasks);
+        this.#tasks.clear();
+    }
 }
 
 function buildItems(

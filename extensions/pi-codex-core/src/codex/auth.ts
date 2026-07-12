@@ -24,7 +24,7 @@ export type CodexToolProvider = {
     readonly model: string;
     readonly token?: Redacted<string> | undefined;
     readonly accountId: string;
-    readonly providerHeaders?: Readonly<Record<string, string>> | undefined;
+    readonly redactedHeaders?: Readonly<Record<string, Redacted<string>>> | undefined;
 };
 
 export type CodexResponsesProvider = CodexToolProvider & {
@@ -63,7 +63,10 @@ export function resolveCodexResponsesUrl(providerBaseUrl: string): string {
 }
 
 export function codexToolProviderHeaders(provider: CodexToolProvider): Headers {
-    const headers = new Headers(provider.providerHeaders);
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(provider.redactedHeaders ?? {})) {
+        headers.set(name, value.reveal());
+    }
     if (provider.token) headers.set("Authorization", `Bearer ${provider.token.reveal()}`);
     if (provider.accountId.trim().length > 0) {
         headers.set("ChatGPT-Account-ID", provider.accountId);
@@ -120,8 +123,8 @@ function isChatGptBackend(baseUrl: string): boolean {
 
 function resolveActiveCompatibleToolModel(ctx: ExtensionContext): CodexResult<RuntimeModel> {
     const model = ctx.model;
-    if (model && String(model.api).toLowerCase().includes("responses")) {
-        return ok(model as RuntimeModel);
+    if (isModelWithStringApi(model) && model.api.toLowerCase().includes("responses")) {
+        return ok(model);
     }
     return fail(
         new CodexUnsupportedModel({
@@ -214,12 +217,13 @@ async function resolveCodexProviderForModel(
         );
     }
 
+    const redactedHeaders = redactProviderHeaders(auth.headers);
     return ok({
         baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
         model: model.id,
         ...(token ? { token: Redacted.of(token) } : {}),
         accountId: accountId ?? "",
-        ...(auth.headers ? { providerHeaders: auth.headers } : {}),
+        ...(Object.keys(redactedHeaders).length > 0 ? { redactedHeaders } : {}),
     });
 }
 
@@ -234,27 +238,21 @@ function hasCredentialHeader(headers: Record<string, string> | undefined): boole
 }
 
 function resolveCodexToolAuthModel(ctx: ExtensionContext): CodexResult<RuntimeModel> {
-    if (isUsableOpenAICodexModel(ctx.model)) return ok(ctx.model as RuntimeModel);
-
-    const registry = ctx.modelRegistry as {
-        readonly find?: (provider: string, modelId: string) => RuntimeModel | undefined;
-        readonly getAvailable?: () => RuntimeModel[];
-        readonly getAll?: () => RuntimeModel[];
-    };
+    if (isUsableOpenAICodexModel(ctx.model)) return ok(ctx.model);
 
     const currentId = ctx.model?.id;
-    const direct = currentId ? registry.find?.(OPENAI_CODEX_PROVIDER, currentId) : undefined;
+    const direct = currentId ? ctx.modelRegistry.find(OPENAI_CODEX_PROVIDER, currentId) : undefined;
     if (isUsableOpenAICodexModel(direct)) return ok(direct);
 
     for (const modelId of [...CODEX_TEXT_MODEL_CHOICES, "gpt-5.3-codex-spark"]) {
-        const model = registry.find?.(OPENAI_CODEX_PROVIDER, modelId);
+        const model = ctx.modelRegistry.find(OPENAI_CODEX_PROVIDER, modelId);
         if (isUsableOpenAICodexModel(model)) return ok(model);
     }
 
-    const availableModel = registry.getAvailable?.().find(isUsableOpenAICodexModel);
+    const availableModel = ctx.modelRegistry.getAvailable().find(isUsableOpenAICodexModel);
     if (availableModel) return ok(availableModel);
 
-    const registeredModel = registry.getAll?.().find(isUsableOpenAICodexModel);
+    const registeredModel = ctx.modelRegistry.getAll().find(isUsableOpenAICodexModel);
     if (registeredModel) return ok(registeredModel);
 
     return fail(
@@ -270,9 +268,27 @@ function isUsableOpenAICodexModel(
     model: ExtensionContext["model"] | undefined,
 ): model is RuntimeModel {
     return (
-        (model?.provider ?? "").trim().toLowerCase() === OPENAI_CODEX_PROVIDER &&
-        Boolean(model?.api?.includes("responses"))
+        isModelWithStringApi(model) &&
+        model.provider.trim().toLowerCase() === OPENAI_CODEX_PROVIDER &&
+        model.api.includes("responses")
     );
+}
+
+/** Refine Pi's upstream `Model<any>` boundary to a model with a checked string API. */
+export function isModelWithStringApi(
+    model: ExtensionContext["model"] | undefined,
+): model is RuntimeModel {
+    return model !== undefined && typeof model.api === "string";
+}
+
+function redactProviderHeaders(
+    headers: Record<string, string> | undefined,
+): Record<string, Redacted<string>> {
+    const redactedHeaders: Record<string, Redacted<string>> = {};
+    for (const [name, value] of Object.entries(headers ?? {})) {
+        redactedHeaders[name] = Redacted.of(value);
+    }
+    return redactedHeaders;
 }
 
 function headerValue(

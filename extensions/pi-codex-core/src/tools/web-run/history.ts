@@ -1,10 +1,7 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import {
-    countCodexTextTokens,
-    truncateCodexTextToTokenBudget,
-} from "../../compaction/tokenizer.ts";
+import type { CodexTokenizer, TokenizerOperationOptions } from "../../compaction/tokenizer.ts";
 import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
 
 const ASSISTANT_CONTEXT_TOKEN_LIMIT = 1_000;
@@ -38,6 +35,8 @@ export type WebSearchInputItem = {
 /** Build the same visible two-user-message history tail used by Codex web.run. */
 export async function recentWebSearchInput(
     ctx: ExtensionContext,
+    tokenizer: CodexTokenizer,
+    options: TokenizerOperationOptions = {},
 ): Promise<readonly WebSearchInputItem[] | undefined> {
     const messages = ctx.sessionManager.getBranch().flatMap((entry) => visibleMessage(entry) ?? []);
     const latestUserIndex = findPreviousUserIndex(messages, messages.length);
@@ -55,9 +54,9 @@ export async function recentWebSearchInput(
         let text = message.text;
         if (message.role === "assistant") {
             if (assistantTokensRemaining <= 0) continue;
-            const tokenCount = await countCodexTextTokens(text);
+            const tokenCount = await tokenizer.count(text, options);
             if (tokenCount > assistantTokensRemaining) {
-                text = await truncateCodexTextToTokenBudget(text, assistantTokensRemaining);
+                text = await tokenizer.truncate(text, assistantTokensRemaining, options);
                 assistantTokensRemaining = 0;
             } else {
                 assistantTokensRemaining -= tokenCount;
