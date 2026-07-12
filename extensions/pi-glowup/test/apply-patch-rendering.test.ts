@@ -765,6 +765,44 @@ describe("apply_patch renderer", () => {
         expect(secondComponent.render(100).join("\n")).toContain("export const generated = true;");
     });
 
+    it("keeps pre-section partial patch rendering header-only", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
+        const lines = renderer
+            .renderCall({ patch: "*** Begin Patch\n*** Add File: src/gen" }, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100);
+        const rendered = lines.join("\n");
+
+        expect(lines).toHaveLength(1);
+        expect(rendered).toContain("• Patching");
+        expect(rendered).not.toContain("Patch patch");
+        expect(rendered).not.toContain("…");
+    });
+
+    it("keeps undecodable partial patch calls header-only", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "static",
+        });
+        const lines = renderer
+            .renderCall({}, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100);
+        const rendered = lines.join("\n");
+
+        expect(lines).toHaveLength(1);
+        expect(rendered).toContain("• Patch");
+        expect(rendered).not.toContain("Patch patch");
+        expect(rendered).not.toContain("…");
+    });
+
     it("keeps oversized completed patch calls on the cheap fallback path", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",

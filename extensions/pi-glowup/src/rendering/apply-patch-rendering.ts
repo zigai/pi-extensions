@@ -909,22 +909,18 @@ class PartialApplyPatchCallPreviewComponent implements Component {
                 : hydratedSection;
         const component =
             section === undefined
-                ? renderPartialPatchViewport(
-                      renderCodexCall(this.theme, {
-                          state: "running",
-                          statusText: toolStatusLabel(
-                              this.labelMode,
-                              { isPartial: true, argsComplete: false },
-                              {
-                                  static: "Patch",
-                                  active: "Patching",
-                                  completed: "Patched",
-                              },
-                          ),
-                          body: "patch",
-                      }),
-                      renderCodexBody(this.theme, this.theme.fg("dim", "    …")),
-                  )
+                ? renderCodexCall(this.theme, {
+                      state: "running",
+                      statusText: toolStatusLabel(
+                          this.labelMode,
+                          { isPartial: true, argsComplete: false },
+                          {
+                              static: "Patch",
+                              active: "Patching",
+                              completed: "Patched",
+                          },
+                      ),
+                  })
                 : renderApplyPatchSummary(
                       { sections: [section] },
                       this.theme,
@@ -1171,11 +1167,16 @@ function renderApplyPatchFallbackCall(
     labelMode: ToolLabelMode,
 ): Component {
     const patch = patchTextFromArgs(args);
-    const lines =
-        patch === undefined || context.isPartial || !context.argsComplete ? 0 : lineCount(patch);
+    const active = context.isPartial || !context.argsComplete;
+    const lines = patch === undefined || active ? 0 : lineCount(patch);
+    const state = isActiveToolCall(context) ? "running" : "muted";
+    const statusText = patchCallLabel(labelMode, context);
+    if (active) {
+        return renderCodexCall(theme, { state, statusText });
+    }
     return renderCodexCall(theme, {
-        state: isActiveToolCall(context) ? "running" : "muted",
-        statusText: patchCallLabel(labelMode, context),
+        state,
+        statusText,
         body: lines > 0 ? `${lines} patch lines` : "patch",
     });
 }
