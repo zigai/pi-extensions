@@ -13,21 +13,27 @@ export type DeletedTextPreview = {
     readonly removed: number;
 };
 
-/** Captures a bounded readable text file before deletion without leaving the working directory. */
+type TextFilePreimageOptions = {
+    /** Allow callers that only need metadata to read mutation targets outside cwd. */
+    readonly allowOutsideCwd?: boolean;
+};
+
+/** Captures a bounded readable text file. By default, paths cannot leave the working directory. */
 export async function captureTextFilePreimage(
     cwd: string,
     filePath: string,
     maxBytes = MAX_DELETE_PREIMAGE_BYTES,
+    options: TextFilePreimageOptions = {},
 ): Promise<TextFilePreimage | undefined> {
     const resolvedCwd = path.resolve(cwd);
     const resolvedPath = path.resolve(resolvedCwd, filePath);
     const relativePath = path.relative(resolvedCwd, resolvedPath);
-    if (
+    const leavesCwd =
         relativePath.length === 0 ||
         relativePath === ".." ||
         relativePath.startsWith(`..${path.sep}`) ||
-        path.isAbsolute(relativePath)
-    ) {
+        path.isAbsolute(relativePath);
+    if (leavesCwd && options.allowOutsideCwd !== true) {
         return undefined;
     }
     try {

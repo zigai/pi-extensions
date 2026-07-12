@@ -148,9 +148,18 @@ export async function captureApplyPatchPreimages(
             const pending = pendingUpdates.get(filePath);
             if (pending !== undefined) await pending;
             if (updatePreviews.has(filePath) || unavailableUpdates.has(filePath)) return;
-            const preview = await captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES);
-            if (preview === undefined) unavailableUpdates.set(filePath, true);
-            else updatePreviews.set(filePath, preview);
+            const request = captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES, {
+                allowOutsideCwd: true,
+            })
+                .then((preview) => {
+                    if (preview === undefined) unavailableUpdates.set(filePath, true);
+                    else updatePreviews.set(filePath, preview);
+                })
+                .finally(() => {
+                    pendingUpdates.delete(filePath);
+                });
+            pendingUpdates.set(filePath, request);
+            await request;
         });
     }
 
@@ -184,15 +193,17 @@ function schedulePartialUpdatePreimages(
     for (const line of completeLines) {
         if (!line.startsWith("*** Update File: ")) continue;
         const filePath = line.slice("*** Update File: ".length);
-        if (
-            filePath.length === 0 ||
-            previews.has(filePath) ||
-            unavailable.has(filePath) ||
-            pending.has(filePath)
-        ) {
+        if (filePath.length === 0 || previews.has(filePath) || unavailable.has(filePath)) {
             continue;
         }
-        const request = captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES)
+        const pendingRequest = pending.get(filePath);
+        if (pendingRequest !== undefined) {
+            void pendingRequest.finally(invalidate);
+            continue;
+        }
+        const request = captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES, {
+            allowOutsideCwd: true,
+        })
             .then((preimage) => {
                 if (preimage === undefined) unavailable.set(filePath, true);
                 else previews.set(filePath, preimage);
@@ -1187,7 +1198,6 @@ function renderPartialApplyPatchCall(
     context: ThirdPartyToolRenderContext,
     labelMode: ToolLabelMode,
 ): Component {
-    schedulePartialUpdatePreimages(context.toolCallId, context.cwd, patch, context.invalidate);
     const update = {
         patch,
         theme,
@@ -1238,6 +1248,14 @@ export function createApplyPatchRenderer(
     return {
         renderCall(args, theme, context) {
             const patch = patchTextFromArgs(args);
+            if (patch !== undefined) {
+                schedulePartialUpdatePreimages(
+                    context.toolCallId,
+                    context.cwd,
+                    patch,
+                    context.invalidate,
+                );
+            }
             if (patch !== undefined && isActiveToolCall(context)) {
                 return renderPartialApplyPatchCall(patch, theme, context, labelMode);
             }

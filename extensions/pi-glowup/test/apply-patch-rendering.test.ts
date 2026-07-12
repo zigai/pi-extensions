@@ -1,5 +1,5 @@
 import { visibleWidth, type Component } from "@earendil-works/pi-tui";
-import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -154,6 +154,100 @@ describe("apply_patch renderer", () => {
             expect(rendered).toContain("4 -line four");
             expect(rendered).toContain("4 +changed four");
             expect(rendered).toContain("5  line five");
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
+    it("derives line numbers for coordinate-less update hunks outside cwd", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "pi-codex-look-outside-update-"));
+        const cwd = path.join(root, "workspace");
+        const targetDir = path.join(root, "global-config");
+        mkdirSync(cwd);
+        mkdirSync(targetDir);
+        try {
+            writeFileSync(
+                path.join(targetDir, "config.json"),
+                '{\n  "secret": "not shown",\n  "currentMode": "5.5",\n  "5.5": {\n    "modelId": "gpt-5.5"\n  }\n}\n',
+            );
+            const renderer = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            });
+            const patch = `*** Begin Patch
+*** Update File: ../global-config/config.json
+@@
+-  "currentMode": "5.5",
++  "currentMode": "luna",
+-  "5.5": {
++  "luna": {
+     "modelId": "gpt-5.5"
+*** End Patch`;
+            const context = { ...renderContext, cwd, toolCallId: "outside-update" };
+
+            await captureApplyPatchPreimages(context.toolCallId, cwd, { patch });
+            const rendered = renderer
+                .renderCall({ patch }, plainTheme, context)
+                .render(120)
+                .join("\n");
+
+            expect(rendered).toContain('3 -  "currentMode": "5.5",');
+            expect(rendered).toContain('3 +  "currentMode": "luna",');
+            expect(rendered).toContain('4 -  "5.5": {');
+            expect(rendered).toContain('4 +  "luna": {');
+            expect(rendered).not.toContain("not shown");
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("refreshes completed coordinate-less previews after a pending preimage capture", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
+        try {
+            writeFileSync(path.join(cwd, "example.ts"), "line one\nline two\nline three\n");
+            const patch = `*** Begin Patch
+*** Update File: example.ts
+@@
+ line one
+-line two
++changed two
+ line three
+*** End Patch`;
+            const renderer = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            });
+            let notify: (() => void) | undefined;
+            const invalidated = new Promise<void>((resolve) => {
+                notify = resolve;
+            });
+            const context = {
+                ...renderContext,
+                toolCallId: "completed-numbered-patch",
+                argsComplete: true,
+                isPartial: false,
+                cwd,
+                invalidate: () => notify?.(),
+            };
+
+            const capture = captureApplyPatchPreimages(context.toolCallId, cwd, { patch });
+            const initial = renderer
+                .renderCall({ patch }, plainTheme, context)
+                .render(100)
+                .join("\n");
+
+            expect(initial).toContain("-line two");
+            expect(initial).not.toContain("2 -line two");
+
+            await invalidated;
+            await capture;
+            const refreshed = renderer
+                .renderCall({ patch }, plainTheme, { ...context, invalidate: () => {} })
+                .render(100)
+                .join("\n");
+
+            expect(refreshed).toContain("1  line one");
+            expect(refreshed).toContain("2 -line two");
+            expect(refreshed).toContain("2 +changed two");
+            expect(refreshed).toContain("3  line three");
         } finally {
             rmSync(cwd, { recursive: true, force: true });
         }
