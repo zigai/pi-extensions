@@ -1,6 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { codexModelRequestProfile } from "../codex/models.ts";
 import type { CodexCoreConfig } from "../config/config.ts";
 import { defaultCodexRuntime, type CodexRuntime } from "../runtime.ts";
 import type {
@@ -89,11 +88,7 @@ export function maybeTriggerCodexAutoCompaction(
     if (!ctx.isIdle()) return false;
     const usage = ctx.getContextUsage();
     if (!usage) return false;
-    const effectiveContextWindow = codexModelRequestProfile(ctx.model?.id)?.effectiveContextWindow;
-    const usagePercent =
-        effectiveContextWindow && usage.tokens !== null
-            ? (usage.tokens / effectiveContextWindow) * 100
-            : usage.percent;
+    const usagePercent = usage.percent;
     if (usagePercent === null || usagePercent < config.compaction.thresholdPercent) return false;
 
     const sessionId = ctx.sessionManager.getSessionId();

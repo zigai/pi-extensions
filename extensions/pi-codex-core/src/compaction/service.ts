@@ -10,7 +10,6 @@ import {
 } from "../codex/auth.ts";
 import {
     CodexNativeCompactionIncompatible,
-    codexFailureToError,
     isAbortCause as isCodexAbortCause,
     safeCauseMessage,
 } from "../codex/failures.ts";
@@ -112,7 +111,7 @@ export async function handleCodexNativeCompaction(
     );
     const targetModel = resolveCompactionTargetModel(ctx, compactionModel);
     const requestProfile = codexModelRequestProfile(compactionModel);
-    const contextWindow = requestProfile?.effectiveContextWindow ?? targetModel?.contextWindow;
+    const contextWindow = targetModel?.contextWindow;
     const latestNativeCompaction = findLatestActiveNativeCompactionEntry(
         event.branchEntries,
         match,
@@ -297,10 +296,15 @@ export async function rewriteProviderRequestWithNativeCompaction(
 
     const responsesPayload = parseResponsesPayload(payload);
     if (!responsesPayload) return undefined;
-    assertNativeCompactionCompatibility(
-        latestNativeCompaction.entry.details,
+    const incompatibility = nativeCompactionCompatibilityFailure(
+        latestNativeCompaction.entry.details.model,
+        resolvedNativeCompactionHash(latestNativeCompaction.entry.details),
         responsesPayload.model,
     );
+    if (incompatibility) {
+        notifyNativeCompactionIncompatibility(ctx, incompatibility.message);
+        return undefined;
+    }
 
     const replacementInput = buildFreshReplacementInput(
         latestNativeCompaction.entry.details,
@@ -320,18 +324,6 @@ export async function rewriteProviderRequestWithNativeCompaction(
 
     notifyNativeReplayFallbackOnce(ctx, latestNativeCompaction.entry.id, replay.reason);
     return buildLenientNativeReplayPayload(responsesPayload, replacementInput);
-}
-
-function assertNativeCompactionCompatibility(
-    details: NativeCompactionDetails,
-    requestModel: string,
-): void {
-    const failure = nativeCompactionCompatibilityFailure(
-        details.model,
-        resolvedNativeCompactionHash(details),
-        requestModel,
-    );
-    if (failure) throw codexFailureToError(failure);
 }
 
 function resolvedNativeCompactionHash(details: NativeCompactionDetails): string | undefined {
@@ -444,6 +436,12 @@ function buildWorldStateInput(
 function notifyCompactionFallback(ctx: ExtensionContext, message: string): void {
     if (ctx.hasUI) {
         ctx.ui.notify(`${message}; Pi compaction will run.`, "warning");
+    }
+}
+
+function notifyNativeCompactionIncompatibility(ctx: ExtensionContext, message: string): void {
+    if (ctx.hasUI) {
+        ctx.ui.notify(message, "warning");
     }
 }
 

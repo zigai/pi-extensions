@@ -200,6 +200,7 @@ test("applies GPT-5.6 Responses Lite compatibility through extension hooks", asy
             {
                 ...DEFAULT_TEST_EXTENSION_MODEL,
                 id: "gpt-5.6-terra",
+                contextWindow: 240_000,
             },
             { agentActive: true },
         );
@@ -217,7 +218,7 @@ test("applies GPT-5.6 Responses Lite compatibility through extension hooks", asy
         );
 
         assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], "true");
-        assert.equal(ctx.model?.contextWindow, 353_400);
+        assert.equal(ctx.model?.contextWindow, 240_000);
         assert.ok(isRecord(rewritten));
         assert.equal(Object.hasOwn(rewritten, "instructions"), false);
         assert.equal(rewritten.parallel_tool_calls, false);

@@ -1584,14 +1584,15 @@ test("auto compaction ignores stale session contexts", () => {
     assert.equal(compactCalls.length, 0);
 });
 
-test("uses GPT-5.6 effective context for auto compaction", () => {
+test("uses Pi model context for GPT-5.6 auto compaction", () => {
     const compactCalls: unknown[] = [];
-    const usage = { tokens: 230_000 };
+    const usage = { tokens: 239_359 };
     const ctx = makeAutoCompactionContext(
         compactCalls,
         { value: true },
         {
             modelId: "gpt-5.6-sol",
+            contextWindow: 272_000,
             sessionId: "auto-session-gpt-5.6",
             usageTokens: () => usage.tokens,
         },
@@ -1601,12 +1602,12 @@ test("uses GPT-5.6 effective context for auto compaction", () => {
         compaction: {
             ...DEFAULT_CODEX_CORE_CONFIG.compaction,
             enabled: true,
-            thresholdPercent: 80,
+            thresholdPercent: 88,
         },
     };
 
     assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), false);
-    usage.tokens = 300_000;
+    usage.tokens = 239_360;
     assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), true);
     assert.equal(compactCalls.length, 1);
     cancelScheduledCodexAutoCompaction();
@@ -1727,8 +1728,10 @@ test("replays native compaction across models in the same compatibility family",
     ]);
 });
 
-test("rejects native compaction replay across incompatible model families", async () => {
+test("warns and skips native compaction replay across incompatible model families", async () => {
+    const warnings: string[] = [];
     const ctx = makeCompactionContext({
+        warnings,
         branchEntries: [
             messageEntry("pre", null, userMessage("pre kept")),
             nativeCompactionEntry({
@@ -1752,23 +1755,23 @@ test("rejects native compaction replay across incompatible model families", asyn
         ],
     };
 
-    await assert.rejects(
-        rewriteProviderRequestWithNativeCompaction(
-            payload,
-            ctx,
-            DEFAULT_CODEX_CORE_CONFIG,
-            makeCompactionApi(),
-        ),
-        {
-            name: "CodexNativeCompactionIncompatible",
-            message:
-                "Codex native compaction checkpoint from gpt-5.6-sol is incompatible with gpt-5.4-mini. Start a new session or compact again with the active model.",
-        },
+    const rewritten = await rewriteProviderRequestWithNativeCompaction(
+        payload,
+        ctx,
+        DEFAULT_CODEX_CORE_CONFIG,
+        makeCompactionApi(),
     );
+
+    assert.equal(rewritten, undefined);
+    assert.deepEqual(warnings, [
+        "Codex native compaction checkpoint from gpt-5.6-sol is incompatible with gpt-5.4-mini. Start a new session or compact again with the active model.",
+    ]);
 });
 
-test("rejects incompatible legacy checkpoints using their recorded model", async () => {
+test("warns for incompatible legacy checkpoints using their recorded model", async () => {
+    const warnings: string[] = [];
     const ctx = makeCompactionContext({
+        warnings,
         branchEntries: [
             messageEntry("pre", null, userMessage("pre kept")),
             nativeCompactionEntry({
@@ -1781,28 +1784,26 @@ test("rejects incompatible legacy checkpoints using their recorded model", async
         ],
     });
 
-    await assert.rejects(
-        rewriteProviderRequestWithNativeCompaction(
-            {
-                model: "gpt-5.6-luna",
-                input: [
-                    {
-                        role: "user",
-                        content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
-                    },
-                    { role: "user", content: [{ type: "input_text", text: "pre kept" }] },
-                ],
-            },
-            ctx,
-            DEFAULT_CODEX_CORE_CONFIG,
-            makeCompactionApi(),
-        ),
+    const rewritten = await rewriteProviderRequestWithNativeCompaction(
         {
-            name: "CodexNativeCompactionIncompatible",
-            message:
-                "Codex native compaction checkpoint from gpt-5.5 is incompatible with gpt-5.6-luna. Start a new session or compact again with the active model.",
+            model: "gpt-5.6-luna",
+            input: [
+                {
+                    role: "user",
+                    content: [{ type: "input_text", text: NATIVE_COMPACTION_SHIM_SUMMARY }],
+                },
+                { role: "user", content: [{ type: "input_text", text: "pre kept" }] },
+            ],
         },
+        ctx,
+        DEFAULT_CODEX_CORE_CONFIG,
+        makeCompactionApi(),
     );
+
+    assert.equal(rewritten, undefined);
+    assert.deepEqual(warnings, [
+        "Codex native compaction checkpoint from gpt-5.5 is incompatible with gpt-5.6-luna. Start a new session or compact again with the active model.",
+    ]);
 });
 
 test("keeps native replay non-triggering when compatibility metadata is unknown", async () => {
@@ -2297,12 +2298,13 @@ function makeAutoCompactionContext(
     idle: { readonly value: boolean },
     options: {
         readonly modelId?: string;
+        readonly contextWindow?: number;
         readonly sessionId?: string;
         readonly usageTokens?: () => number;
         readonly latestEntryId?: () => string;
     } = {},
 ): ExtensionContext {
-    const contextWindow = 100;
+    const contextWindow = options.contextWindow ?? 100;
     const ctx = {
         hasUI: false,
         cwd: "/workspace",
@@ -2312,6 +2314,7 @@ function makeAutoCompactionContext(
                   provider: "openai-codex",
                   api: "openai-codex-responses",
                   id: options.modelId,
+                  contextWindow,
               }
             : undefined,
         getContextUsage: () => {

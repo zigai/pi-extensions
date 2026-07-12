@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { syncCodexCoreTools } from "./activation.ts";
-import { applyCodexModelMetadataCompatibility, codexModelRequestProfile } from "./codex/models.ts";
+import { codexModelRequestProfile } from "./codex/models.ts";
 import {
     CODEX_RESPONSES_LITE_HEADER,
     omitReasoningSummary,
@@ -73,7 +73,6 @@ export default function extension(pi: ExtensionAPI): void {
         if (config.compaction.enabled) {
             tokenizer.warm();
         }
-        applyCodexModelMetadataCompatibility(ctx.model);
         syncCodexCoreTools(pi, ctx, config);
         if (config.openai.fast && ctx.hasUI) {
             ctx.ui.notify(FAST_MODE_STARTUP_WARNING, "warning");
@@ -81,7 +80,6 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("model_select", async (_event, ctx) => {
-        applyCodexModelMetadataCompatibility(ctx.model);
         syncCodexCoreTools(pi, ctx, config);
     });
 
