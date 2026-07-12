@@ -947,7 +947,8 @@ function pierrePalettesEqual(left: PierreTerminalPalette, right: PierreTerminalP
         left.metadataFg === right.metadataFg &&
         left.metadataBg === right.metadataBg &&
         left.dividerFg === right.dividerFg &&
-        left.dividerBg === right.dividerBg
+        left.dividerBg === right.dividerBg &&
+        left.dimUnchangedText === right.dimUnchangedText
     );
 }
 

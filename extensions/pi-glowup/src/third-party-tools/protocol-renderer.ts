@@ -5,7 +5,12 @@ import {
     type CodexRenderTheme,
 } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
-import { callState, renderThirdPartyCall, thirdPartyStatusLabel } from "./call-rendering.ts";
+import {
+    callState,
+    DEFAULT_TOOL_CALL_PREVIEW_LINES,
+    renderThirdPartyCall,
+    thirdPartyStatusLabel,
+} from "./call-rendering.ts";
 import type {
     CodexLookRenderingAdapter,
     CodexLookSection,
@@ -31,7 +36,7 @@ function renderCodexLookView(
                     completed: view.completedLabel ?? `Called ${view.label}`,
                 }),
                 body: view.body,
-                maxRenderedLines: view.maxRenderedLines ?? 4,
+                maxRenderedLines: view.maxRenderedLines ?? DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
                 ...(view.expandable === undefined ? {} : { expandable: view.expandable }),
             });

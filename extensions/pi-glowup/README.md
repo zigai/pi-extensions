@@ -20,10 +20,13 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | `appearance.addedRowBackground`           | `null`                                                          | Override addition backgrounds with a `#RRGGBB` color; `null` uses Pi.       |
 | `appearance.deletedRowBackground`         | `null`                                                          | Override deletion backgrounds with a `#RRGGBB` color; `null` uses Pi.       |
 | `appearance.instructionPathColor`         | `null`                                                          | Override Skill/AGENTS path text with a `#RRGGBB` color; `null` uses Pi.     |
+| `appearance.dimUnchangedDiffText`         | `false`                                                         | Dim unchanged text inside changed diff rows.                                |
 | `debugLog.enabled`                        | `false`                                                         | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
 | `debugLog.path`                           | `"debug.log"`                                                   | File for diagnostics; relative paths resolve beside the global config.      |
 | `debugLog.maxBytes`                       | `null`                                                          | Rotate the diagnostics file to `.1` after this size; `null` means no cap.   |
 | `debugLog.memorySampleIntervalMs`         | `10000`                                                         | Sample memory while a session is active; use `0` to disable sampling.       |
+| `toolCallIndicator.symbol`                | `"•"`                                                           | Text shown before every compact tool call.                                  |
+| `toolCallIndicator.bold`                  | `true`                                                          | Render the tool-call indicator in bold across all call states.              |
 | `toolLabels.mode`                         | `"static"`                                                      | Use `static` labels or `lifecycle` active/completed verb pairs.             |
 | `writePreview.movingViewport`             | `true`                                                          | Follow the latest lines while a large write streams; disable for head-only. |
 | `syntax.preloadLanguages`                 | `["markdown","bash","python","typescript","javascript","json"]` | Language ids or aliases to preload for synchronous syntax highlighting.     |
@@ -34,7 +37,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | `patches.markdownSyntax`                  | `true`                                                          | Add syntax highlighting to Markdown code fences.                            |
 | `patches.thirdPartyToolRenderers`         | `true`                                                          | Apply compact renderers to compatible third-party tools.                    |
 | `scriptPreview.headerLayout`              | `"auto"`                                                        | Choose script header placement: `auto`, `inline`, or `block`.               |
-| `scriptPreview.maxCodePreviewLines`       | `8`                                                             | Maximum collapsed script preview lines before truncation; minimum is `4`.   |
+| `scriptPreview.maxCodePreviewLines`       | `8`                                                             | Maximum collapsed script content lines; omission rows are added separately. |
 | `scriptPreview.formatters`                | `{}`                                                            | Format script previews by sending code to the configured command on stdin.  |
 
 ```json
@@ -47,13 +50,18 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
     "sideBySideLayout": "content-aware",
     "addedRowBackground": null,
     "deletedRowBackground": null,
-    "instructionPathColor": null
+    "instructionPathColor": null,
+    "dimUnchangedDiffText": false
   },
   "debugLog": {
     "enabled": false,
     "path": "debug.log",
     "maxBytes": null,
     "memorySampleIntervalMs": 10000
+  },
+  "toolCallIndicator": {
+    "symbol": "•",
+    "bold": true
   },
   "toolLabels": {
     "mode": "static"

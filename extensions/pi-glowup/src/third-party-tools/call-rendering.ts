@@ -22,6 +22,8 @@ import type {
 import { displayToolName } from "./tool-values.ts";
 import { previewArgsForContext, textOutput } from "./previews.ts";
 
+export const DEFAULT_TOOL_CALL_PREVIEW_LINES = 6;
+
 export type CallSummary = {
     readonly label: string;
     readonly body: string | undefined;
@@ -123,7 +125,7 @@ export function createGenericRenderer(
                     completed: `Called ${staticLabel}`,
                 }),
                 body: previewArgsForContext(args, context),
-                maxRenderedLines: 4,
+                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
             });
         },

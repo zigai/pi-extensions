@@ -6,7 +6,11 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import type TypeboxSchema from "typebox/schema";
 import type { NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
-import type { DiffBackgroundStyle, ScriptPreviewHeaderLayout } from "../rendering/core.ts";
+import type {
+    DiffBackgroundStyle,
+    ScriptPreviewHeaderLayout,
+    ToolCallIndicator,
+} from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import {
     parseScriptFormatterCommandsValue,
@@ -27,6 +31,7 @@ export type CodexLookConfig = {
         readonly addedRowBackground: string | null;
         readonly deletedRowBackground: string | null;
         readonly instructionPathColor: string | null;
+        readonly dimUnchangedDiffText: boolean;
     };
     readonly debugLog: {
         readonly enabled: boolean;
@@ -37,6 +42,7 @@ export type CodexLookConfig = {
     readonly scriptFormatters: ScriptFormatterCommands;
     readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
     readonly scriptMaxCodePreviewLines: number;
+    readonly toolCallIndicator: ToolCallIndicator;
     readonly toolLabels: {
         readonly mode: ToolLabelMode;
     };
@@ -83,12 +89,17 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
         addedRowBackground: null,
         deletedRowBackground: null,
         instructionPathColor: null,
+        dimUnchangedDiffText: false,
     },
     debugLog: {
         enabled: false,
         path: "debug.log",
         maxBytes: null,
         memorySampleIntervalMs: 10_000,
+    },
+    toolCallIndicator: {
+        symbol: "•",
+        bold: true,
     },
     toolLabels: {
         mode: "static",
@@ -139,12 +150,20 @@ const ScriptPreviewMaxCodePreviewLinesSchema = Type.Integer({
     minimum: MIN_SCRIPT_PREVIEW_CODE_LINES,
 });
 const DebugLogMaxBytesSchema = Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]);
+const ToolCallIndicatorSymbolSchema = Type.String({ minLength: 1, maxLength: 8, pattern: "\\S" });
 const DebugLogConfigSchema = Type.Object(
     {
         enabled: Type.Optional(Type.Boolean()),
         path: Type.Optional(Type.String({ minLength: 1 })),
         maxBytes: Type.Optional(DebugLogMaxBytesSchema),
         memorySampleIntervalMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    },
+    { additionalProperties: false },
+);
+const ToolCallIndicatorConfigSchema = Type.Object(
+    {
+        symbol: Type.Optional(ToolCallIndicatorSymbolSchema),
+        bold: Type.Optional(Type.Boolean()),
     },
     { additionalProperties: false },
 );
@@ -199,6 +218,7 @@ const AppearanceConfigSchema = Type.Object(
         addedRowBackground: Type.Optional(OptionalHexColorSchema),
         deletedRowBackground: Type.Optional(OptionalHexColorSchema),
         instructionPathColor: Type.Optional(OptionalHexColorSchema),
+        dimUnchangedDiffText: Type.Optional(Type.Boolean()),
     },
     { additionalProperties: false },
 );
@@ -208,6 +228,7 @@ const CodexLookConfigSchema = Type.Object(
         preserveTools: Type.Optional(StringArraySchema),
         appearance: Type.Optional(AppearanceConfigSchema),
         debugLog: Type.Optional(DebugLogConfigSchema),
+        toolCallIndicator: Type.Optional(ToolCallIndicatorConfigSchema),
         toolLabels: Type.Optional(ToolLabelsConfigSchema),
         writePreview: Type.Optional(WritePreviewConfigSchema),
         syntax: Type.Optional(SyntaxConfigSchema),
@@ -229,6 +250,7 @@ const CodexLookConfigJsonSchema = Type.Object(
                     addedRowBackground: Type.Optional(OptionalHexColorSchema),
                     deletedRowBackground: Type.Optional(OptionalHexColorSchema),
                     instructionPathColor: Type.Optional(OptionalHexColorSchema),
+                    dimUnchangedDiffText: Type.Optional(Type.Boolean()),
                 },
                 {
                     additionalProperties: false,
@@ -255,6 +277,18 @@ const CodexLookConfigJsonSchema = Type.Object(
                     ),
                 },
                 { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels },
+            ),
+        ),
+        toolCallIndicator: Type.Optional(
+            Type.Object(
+                {
+                    symbol: Type.Optional(ToolCallIndicatorSymbolSchema),
+                    bold: Type.Optional(Type.Boolean()),
+                },
+                {
+                    additionalProperties: false,
+                    default: DEFAULT_CODEX_LOOK_CONFIG_JSON.toolCallIndicator,
+                },
             ),
         ),
         writePreview: Type.Optional(
@@ -407,6 +441,7 @@ export function parseCodexLookConfig(
     const appearance = config.appearance ?? {};
     const scriptPreview = config.scriptPreview ?? {};
     const debugLog = config.debugLog ?? {};
+    const toolCallIndicator = config.toolCallIndicator ?? {};
     const toolLabels = config.toolLabels ?? {};
     const writePreview = config.writePreview ?? {};
     const syntax = config.syntax ?? {};
@@ -439,6 +474,9 @@ export function parseCodexLookConfig(
             instructionPathColor:
                 appearance.instructionPathColor ??
                 DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.instructionPathColor,
+            dimUnchangedDiffText:
+                appearance.dimUnchangedDiffText ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.dimUnchangedDiffText,
         },
         debugLog: {
             enabled: debugLog.enabled ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.enabled,
@@ -458,6 +496,11 @@ export function parseCodexLookConfig(
         scriptMaxCodePreviewLines:
             scriptPreview.maxCodePreviewLines ??
             DEFAULT_CODEX_LOOK_CONFIG_JSON.scriptPreview.maxCodePreviewLines,
+        toolCallIndicator: {
+            symbol:
+                toolCallIndicator.symbol ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolCallIndicator.symbol,
+            bold: toolCallIndicator.bold ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolCallIndicator.bold,
+        },
         toolLabels: {
             mode: toolLabels.mode ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.mode,
         },

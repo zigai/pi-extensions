@@ -7,6 +7,7 @@ import type {
 } from "../../types.ts";
 import {
     callState,
+    DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
     thirdPartyStatusLabel,
@@ -236,7 +237,7 @@ export function createAskUserQuestionRenderer(
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, labels),
                 body: summarizeAskUserQuestionArgs(args, theme, context.expanded, context),
-                maxRenderedLines: 5,
+                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
             });
         },

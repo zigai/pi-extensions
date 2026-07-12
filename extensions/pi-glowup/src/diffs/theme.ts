@@ -1,7 +1,11 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { PierreAppearance } from "./types.ts";
 import { SYNTAX_THEME_APPEARANCE } from "../syntax/theme-assets.ts";
-import { configuredDiffBackgroundAnsi, configuredDiffBackgroundStyle } from "../rendering/core.ts";
+import {
+    configuredDiffBackgroundAnsi,
+    configuredDiffBackgroundStyle,
+    configuredDimUnchangedDiffText,
+} from "../rendering/core.ts";
 
 /** Terminal color palette derived from Pi's active theme. */
 export type PierreTerminalPalette = {
@@ -21,6 +25,7 @@ export type PierreTerminalPalette = {
     readonly metadataBg: string;
     readonly dividerFg: string;
     readonly dividerBg: string;
+    readonly dimUnchangedText: boolean;
 };
 
 /** Resolves the closest Pierre syntax-highlighting appearance for the active Pi theme. */
@@ -52,5 +57,6 @@ export function getPierrePalette(theme: Theme): PierreTerminalPalette {
         metadataBg: "",
         dividerFg: theme.getFgAnsi("dim"),
         dividerBg: "",
+        dimUnchangedText: configuredDimUnchangedDiffText() && !fullRowBackground,
     };
 }

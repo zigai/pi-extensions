@@ -21,6 +21,7 @@ import {
 } from "./web-run-renderer.ts";
 import {
     callState,
+    DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
     thirdPartyStatusLabel,
@@ -95,8 +96,8 @@ function codexResultPreviewLines(toolName: string): number {
     return baseToolName(toolName) === "web_run" ? WEB_RUN_COLLAPSED_SOURCE_LIMIT + 2 : 2;
 }
 
-function codexCallPreviewLines(toolName: string): number {
-    return baseToolName(toolName) === "imagegen" ? 7 : 4;
+function codexCallPreviewLines(): number {
+    return DEFAULT_TOOL_CALL_PREVIEW_LINES;
 }
 
 export function createCodexRenderer(
@@ -109,7 +110,7 @@ export function createCodexRenderer(
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, codexCallLabels(toolName)),
                 body: codexCallBody(toolName, args, theme, context),
-                maxRenderedLines: codexCallPreviewLines(toolName),
+                maxRenderedLines: codexCallPreviewLines(),
                 expanded: context.expanded,
             });
         },

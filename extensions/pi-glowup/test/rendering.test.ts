@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
     collapseHome,
     configureRenderingAppearance,
+    configureToolCallIndicator,
     formatGrepAction,
     formatReadAction,
     highlightShell,
@@ -95,6 +96,7 @@ describe("Codex rendering helpers", () => {
             addedRowBackground: "#123456",
             deletedRowBackground: "#654321",
             instructionPathColor: "#AABBCC",
+            dimUnchangedDiffText: false,
         });
         try {
             const read = formatReadAction(plainTheme, { path: "src/AGENTS.md" });
@@ -115,6 +117,7 @@ describe("Codex rendering helpers", () => {
                 addedRowBackground: null,
                 deletedRowBackground: null,
                 instructionPathColor: null,
+                dimUnchangedDiffText: false,
             });
         }
     });
@@ -196,7 +199,7 @@ describe("Codex rendering helpers", () => {
         expect(component.render(12)).toEqual(["• Run "]);
     });
 
-    it("renders completed tool markers in bold", () => {
+    it("renders tool indicators in bold consistently by default", () => {
         const styledTheme: CodexRenderTheme = {
             ...tokenTheme,
             bold(text: string): string {
@@ -216,6 +219,40 @@ describe("Codex rendering helpers", () => {
                 statusText: "Bash",
             }).render(80)[0],
         ).toContain("<toolDiffRemoved><bold>•</bold></toolDiffRemoved>");
+        expect(
+            renderCodexCall(styledTheme, {
+                state: "running",
+                statusText: "Bash",
+            }).render(80)[0],
+        ).toContain("<muted><bold>•</bold></muted>");
+        expect(
+            renderCodexCall(styledTheme, {
+                state: "muted",
+                statusText: "Explore",
+            }).render(80)[0],
+        ).toContain("<dim><bold>•</bold></dim>");
+    });
+
+    it("uses the configured tool indicator symbol and weight", () => {
+        const styledTheme: CodexRenderTheme = {
+            ...tokenTheme,
+            bold(text: string): string {
+                return `<bold>${text}</bold>`;
+            },
+        };
+
+        configureToolCallIndicator({ symbol: "*", bold: false });
+        try {
+            const rendered = renderCodexCall(styledTheme, {
+                state: "success",
+                statusText: "Bash",
+            }).render(80)[0];
+
+            expect(rendered).toContain("<success>*</success>");
+            expect(rendered).not.toContain("<success><bold>*</bold></success>");
+        } finally {
+            configureToolCallIndicator({ symbol: "•", bold: true });
+        }
     });
 
     it("pads mutation labels only when a label column width is provided", () => {
@@ -306,9 +343,10 @@ describe("Codex rendering helpers", () => {
         expect(component.render(80)).toEqual([
             "  └ one",
             "    two",
+            "    three",
             "    nine",
             "    ten",
-            "    … +6 lines (hint)",
+            "    … +5 lines (hint)",
         ]);
     });
 
@@ -368,9 +406,10 @@ describe("Codex rendering helpers", () => {
         expect(component.render(80)).toEqual([
             "  └ start",
             "    line 1",
+            "    line 2",
             "    line 20",
             "    Command exited with code 2",
-            "    … +18 lines (hint)",
+            "    … +17 lines (hint)",
         ]);
     });
 
@@ -453,7 +492,7 @@ describe("Codex rendering helpers", () => {
 
         expect(rendered).toContain("start");
         expect(rendered).toContain("middle 1");
-        expect(rendered).toContain("… +1998 lines (hint)");
+        expect(rendered).toContain("… +1997 lines (hint)");
         expect(rendered).toContain("middle 2000");
         expect(rendered).toContain("end");
         expect(rendered).not.toContain("middle 1000");
@@ -469,7 +508,7 @@ describe("Codex rendering helpers", () => {
         const rendered = component.render(100).join("\n");
 
         expect(rendered).toContain("start");
-        expect(rendered).toContain("… +1997 lines (hint)");
+        expect(rendered).toContain("… +1996 lines (hint)");
         expect(rendered).toContain("end");
     });
 
@@ -499,7 +538,7 @@ describe("Codex rendering helpers", () => {
         const lines = component.render(80);
         const rendered = lines.join("\n");
 
-        expect(lines.length).toBeLessThanOrEqual(5);
+        expect(lines.length).toBeLessThanOrEqual(6);
         expectLinesWithinWidth(lines, 80);
         expect(rendered).toContain("rollout.jsonl:648");
         expect(rendered).toContain("… preview truncated (hint)");
@@ -527,7 +566,7 @@ describe("Codex rendering helpers", () => {
 
         const rendered = component.render(80).join("\n");
 
-        expect(rendered.match(/… \+95 lines \(hint\)/gu)).toHaveLength(1);
+        expect(rendered.match(/… \+94 lines \(hint\)/gu)).toHaveLength(1);
         expect(rendered).toContain("first wrapped");
         expect(rendered).toContain("last");
         expect(rendered).not.toContain("rows (hint)");
@@ -945,8 +984,8 @@ describe("Codex rendering helpers", () => {
         const rendered = component.render(100).join("\n");
 
         expect(rendered).toContain("print(1)");
-        expect(rendered).toContain("print(4)");
-        expect(rendered).toContain("… +1996 lines (truncated)");
+        expect(rendered).toContain("print(5)");
+        expect(rendered).toContain("… +1995 lines (truncated)");
         expect(rendered).not.toContain("print(1000)");
     });
 
@@ -965,7 +1004,7 @@ describe("Codex rendering helpers", () => {
 
         const rendered = component.render(100).join("\n");
 
-        expect(rendered).toContain("… +8 lines (truncated)");
+        expect(rendered).toContain("… +7 lines (truncated)");
         expect(rendered).not.toContain("to expand");
     });
 
@@ -1066,6 +1105,30 @@ describe("Codex rendering helpers", () => {
         expect(rendered).toContain("const limit = args.limit ??");
     });
 
+    it("omits a replacement side with no changed content", () => {
+        const lines = renderCodexDiff(
+            plainTheme,
+            [
+                {
+                    path: "apps/coordinator/src/scheduler.ts",
+                    lines: [
+                        '-377         const tag = Reflect.get(failure, "_tag");',
+                        '+377         const tag: unknown = Reflect.get(failure, "_tag");',
+                    ],
+                    added: 1,
+                    removed: 1,
+                },
+            ],
+            true,
+        )
+            .render(100)
+            .map((line) => line.trimEnd());
+
+        expect(lines).toEqual([
+            '    377 +        const tag: unknown = Reflect.get(failure, "_tag");',
+        ]);
+    });
+
     it("keeps full-row diff backgrounds as an option", () => {
         configureRenderingAppearance({
             diffBackgroundStyle: "full-row",
@@ -1074,6 +1137,7 @@ describe("Codex rendering helpers", () => {
             addedRowBackground: null,
             deletedRowBackground: null,
             instructionPathColor: null,
+            dimUnchangedDiffText: false,
         });
         try {
             const backgroundTheme: CodexRenderTheme = {
@@ -1094,7 +1158,7 @@ describe("Codex rendering helpers", () => {
             expect(
                 renderedLines
                     .filter((line) => line.includes("\u001b[4"))
-                    .every((line) => visibleWidth(line) === 80),
+                    .every((line) => visibleWidth(line) === 79),
             ).toBe(true);
         } finally {
             configureRenderingAppearance({
@@ -1104,6 +1168,7 @@ describe("Codex rendering helpers", () => {
                 addedRowBackground: null,
                 deletedRowBackground: null,
                 instructionPathColor: null,
+                dimUnchangedDiffText: false,
             });
         }
     });
@@ -1155,6 +1220,29 @@ describe("Codex rendering helpers", () => {
 
         expect(lines.length).toBeGreaterThan(1);
         expectLinesWithinWidth(lines, width);
+    });
+
+    it("keeps compact diff previews clear of the terminal's final cell", () => {
+        const width = 78;
+        const lines = renderCodexDiff(
+            plainTheme,
+            [
+                {
+                    path: "narrow-render-probe.go",
+                    lines: [
+                        '+13         IndentedRuntimeContext: RuntimeContext{CWD: "/tmp/long-runtime-context-for-tmux-narrow-rendering", ParentArgs: []string{"--reportqueue", "--verbose"}, Env: map[string]string{"service": "reportqueue"}},',
+                    ],
+                    added: 1,
+                    removed: 0,
+                },
+            ],
+            false,
+            { maxWrappedRows: 1 },
+        ).render(width);
+
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("…");
+        expect(visibleWidth(lines[0] ?? "")).toBeLessThan(width);
     });
 
     it("preserves every character when diff content wraps", () => {

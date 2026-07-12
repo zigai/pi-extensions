@@ -83,6 +83,9 @@
               "type": "null"
             }
           ]
+        },
+        "dimUnchangedDiffText": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -92,7 +95,8 @@
         "sideBySideLayout": "content-aware",
         "addedRowBackground": null,
         "deletedRowBackground": null,
-        "instructionPathColor": null
+        "instructionPathColor": null,
+        "dimUnchangedDiffText": false
       }
     },
     "debugLog": {
@@ -148,6 +152,25 @@
       "additionalProperties": false,
       "default": {
         "mode": "static"
+      }
+    },
+    "toolCallIndicator": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "pattern": "\\S"
+        },
+        "bold": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "symbol": "•",
+        "bold": true
       }
     },
     "writePreview": {

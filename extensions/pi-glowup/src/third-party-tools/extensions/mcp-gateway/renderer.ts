@@ -3,6 +3,7 @@ import { browserLifecycleLabels } from "../../browser-labels.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../../types.ts";
 import {
     callState,
+    DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
     thirdPartyStatusLabel,
@@ -89,7 +90,7 @@ export function createMcpGatewayRenderer(
                     mcpLifecycleLabels(summary.label),
                 ),
                 body: summary.body,
-                maxRenderedLines: 4,
+                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
             });
         },
@@ -111,7 +112,7 @@ export function createChromeDevtoolsMcpRenderer(
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, mcpLifecycleLabels(label)),
                 body: previewArgsForContext(args, context),
-                maxRenderedLines: 4,
+                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
             });
         },

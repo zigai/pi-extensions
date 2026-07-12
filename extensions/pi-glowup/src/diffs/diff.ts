@@ -291,7 +291,10 @@ export function buildUnifiedDiffRows(
                             palette.deletionSpanBg,
                             cleanDiffLine(metadata.deletionLines[deletionLineIndex + offset]),
                             metadata.lang,
-                            { dimUnchanged: palette.deletionRowBg.length === 0 },
+                            {
+                                boldEmphasized: palette.deletionRowBg.length === 0,
+                                dimUnchanged: palette.dimUnchangedText,
+                            },
                         ),
                         palette,
                     }),
@@ -308,7 +311,10 @@ export function buildUnifiedDiffRows(
                             palette.additionSpanBg,
                             cleanDiffLine(metadata.additionLines[additionLineIndex + offset]),
                             metadata.lang,
-                            { dimUnchanged: palette.additionRowBg.length === 0 },
+                            {
+                                boldEmphasized: palette.additionRowBg.length === 0,
+                                dimUnchanged: palette.dimUnchangedText,
+                            },
                         ),
                         palette,
                     }),
@@ -440,7 +446,10 @@ export function buildSplitDiffRows(
                                               metadata.deletionLines[deletionLineIndex + offset],
                                           ),
                                           metadata.lang,
-                                          { dimUnchanged: palette.deletionRowBg.length === 0 },
+                                          {
+                                              boldEmphasized: palette.deletionRowBg.length === 0,
+                                              dimUnchanged: palette.dimUnchangedText,
+                                          },
                                       ),
                                       palette,
                                   })
@@ -458,7 +467,10 @@ export function buildSplitDiffRows(
                                               metadata.additionLines[additionLineIndex + offset],
                                           ),
                                           metadata.lang,
-                                          { dimUnchanged: palette.additionRowBg.length === 0 },
+                                          {
+                                              boldEmphasized: palette.additionRowBg.length === 0,
+                                              dimUnchanged: palette.dimUnchangedText,
+                                          },
                                       ),
                                       palette,
                                   })

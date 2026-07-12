@@ -24,6 +24,7 @@ import {
 } from "./rendering/exploration-groups.ts";
 import {
     configureRenderingAppearance,
+    configureToolCallIndicator,
     emptyComponent,
     formatFindAction,
     formatGrepAction,
@@ -1118,6 +1119,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     const applyConfig = (nextConfig: CodexLookConfig): void => {
         config = nextConfig;
         configureRenderingAppearance(config.appearance);
+        configureToolCallIndicator(config.toolCallIndicator);
         debugLogger.configure(config.debugLog);
         formatter = scriptBlockFormatter(config, reportWarning);
         headerLayout = scriptPreviewHeaderLayout(config);

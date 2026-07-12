@@ -39,6 +39,12 @@ export type RenderingAppearance = {
     readonly addedRowBackground: string | null;
     readonly deletedRowBackground: string | null;
     readonly instructionPathColor: string | null;
+    readonly dimUnchangedDiffText: boolean;
+};
+
+export type ToolCallIndicator = {
+    readonly symbol: string;
+    readonly bold: boolean;
 };
 
 let renderingAppearance: RenderingAppearance = {
@@ -48,11 +54,22 @@ let renderingAppearance: RenderingAppearance = {
     addedRowBackground: null,
     deletedRowBackground: null,
     instructionPathColor: null,
+    dimUnchangedDiffText: false,
+};
+
+let toolCallIndicator: ToolCallIndicator = {
+    symbol: "•",
+    bold: true,
 };
 
 /** Applies user-configured semantic colors used by all renderer families. */
 export function configureRenderingAppearance(appearance: RenderingAppearance): void {
     renderingAppearance = { ...appearance };
+}
+
+/** Applies user-configured tool-call indicator text used by all renderer families. */
+export function configureToolCallIndicator(indicator: ToolCallIndicator): void {
+    toolCallIndicator = { ...indicator };
 }
 
 function trueColorOpen(hex: string, background: boolean): string {
@@ -84,6 +101,11 @@ export function configuredNarrowDiffLayout(): NarrowDiffLayout {
 /** Returns how side-by-side eligibility responds to terminal width and content. */
 export function configuredSideBySideLayout(): SideBySideLayout {
     return renderingAppearance.sideBySideLayout;
+}
+
+/** Returns whether unchanged text in changed diff rows should be dimmed. */
+export function configuredDimUnchangedDiffText(): boolean {
+    return renderingAppearance.dimUnchangedDiffText;
 }
 
 export type DiffSection = {
@@ -143,6 +165,8 @@ type ScriptPreview = {
 const diffLinePattern = /^([+\- ])(\s*\d*)\s(.*)$/;
 const ellipsisLinePattern = /^\s+\.\.\.$/;
 const omissionLinePattern = /^\s+…(?:\s+.*)?$/u;
+// Avoid a terminal's pending-wrap state when a compact diff row ends in the final cell.
+const DIFF_TERMINAL_GUARD_COLUMNS = 1;
 const addCountPattern = /^\+\s*\d+\s/;
 const removeCountPattern = /^-\s*\d+\s/;
 const heredocOpenPattern =
@@ -504,20 +528,15 @@ function collapsedPreviewLines(
     if (lines.length <= lineBudget) {
         return [...lines];
     }
-    if (lineBudget === 1) {
-        return [`… +${lines.length} lines (${omittedHint})`];
-    }
     if (mode === "head") {
-        const visibleCount = lineBudget - 1;
         return [
-            ...lines.slice(0, visibleCount),
-            `… +${lines.length - visibleCount} lines (${omittedHint})`,
+            ...lines.slice(0, lineBudget),
+            `… +${lines.length - lineBudget} lines (${omittedHint})`,
         ];
     }
 
-    const visibleCount = lineBudget - 1;
-    const headCount = Math.ceil(visibleCount / 2);
-    const tailCount = Math.floor(visibleCount / 2);
+    const headCount = Math.ceil(lineBudget / 2);
+    const tailCount = Math.floor(lineBudget / 2);
     const tailLines = tailCount === 0 ? [] : lines.slice(lines.length - tailCount);
     const omitted = lines.length - headCount - tailLines.length;
     return [...lines.slice(0, headCount), ...tailLines, `… +${omitted} lines (${omittedHint})`];
@@ -565,9 +584,8 @@ function collapsedPreviewLinesFromText(
             Math.floor(MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES / lineBudget),
         ),
     );
-    const visibleCount = Math.max(0, lineBudget - 1);
-    const headCount = mode === "headTail" ? Math.ceil(visibleCount / 2) : visibleCount;
-    const tailCount = mode === "headTail" ? Math.floor(visibleCount / 2) : 0;
+    const headCount = mode === "headTail" ? Math.ceil(lineBudget / 2) : lineBudget;
+    const tailCount = mode === "headTail" ? Math.floor(lineBudget / 2) : 0;
     const headLines: string[] = [];
     const tailLines: string[] = [];
     let allLines: string[] | undefined = [];
@@ -630,9 +648,6 @@ function collapsedPreviewLinesFromText(
     }
     if (allLines !== undefined) {
         return { isEmpty: false, lines: allLines };
-    }
-    if (lineBudget === 1) {
-        return { isEmpty: false, lines: [`… +${lineCount} lines (${omittedHint})`] };
     }
     if (mode === "head") {
         return {
@@ -800,16 +815,19 @@ function visitPhysicalLines(text: string, visit: (line: string) => void): void {
 }
 
 function renderBullet(theme: CodexRenderTheme, state: CodexCallState): string {
+    const indicator = toolCallIndicator.bold
+        ? theme.bold(toolCallIndicator.symbol)
+        : toolCallIndicator.symbol;
     if (state === "success") {
-        return success(theme, theme.bold("•"));
+        return success(theme, indicator);
     }
     if (state === "error") {
-        return red(theme, theme.bold("•"));
+        return red(theme, indicator);
     }
     if (state === "muted") {
-        return dim(theme, "•");
+        return dim(theme, indicator);
     }
-    return muted(theme, "•");
+    return muted(theme, indicator);
 }
 
 export function renderCodexCall(
@@ -932,11 +950,11 @@ function renderCollapsedWrappedPreview(
     },
 ): string[] {
     const rendered = flattenWrappedRows(lines);
-    if (rendered.length <= options.rowBudget) {
+    const metaIndex = lines.findIndex((line) => line.isMeta);
+    if (metaIndex === -1 && rendered.length <= options.rowBudget) {
         return rendered;
     }
 
-    const metaIndex = lines.findIndex((line) => line.isMeta);
     const markerText =
         metaIndex === -1
             ? `… preview truncated (${options.omittedHint})`
@@ -952,12 +970,7 @@ function renderCollapsedWrappedPreview(
     const marker = (prefix: string): string =>
         truncateToWidth(`${prefix}${muted(options.theme, markerText)}`, options.width, "…");
 
-    if (options.rowBudget === 1) {
-        return [marker(options.prefixFirst)];
-    }
-
-    const visibleBudget = options.rowBudget - 1;
-    if (allContent.length <= visibleBudget) {
+    if (allContent.length <= options.rowBudget) {
         return [
             ...before,
             ...after,
@@ -966,12 +979,12 @@ function renderCollapsedWrappedPreview(
     }
 
     if (options.mode === "head") {
-        const head = allContent.slice(0, visibleBudget);
+        const head = allContent.slice(0, options.rowBudget);
         return [...head, marker(head.length === 0 ? options.prefixFirst : options.prefixRest)];
     }
 
-    const headCount = Math.ceil(visibleBudget / 2);
-    const tailCount = Math.floor(visibleBudget / 2);
+    const headCount = Math.ceil(options.rowBudget / 2);
+    const tailCount = Math.floor(options.rowBudget / 2);
     const head = allContent.slice(0, headCount);
     const tail = tailCount === 0 ? [] : allContent.slice(allContent.length - tailCount);
     return [...head, ...tail, marker(options.prefixRest)];
@@ -2452,6 +2465,14 @@ function changedRangesForDiffLines(
     return ranges;
 }
 
+function isUnchangedReplacementSide(
+    line: string,
+    changedRanges: readonly TextRange[] | undefined,
+): boolean {
+    const parsed = parseDiffLine(line);
+    return (parsed?.kind === "insert" || parsed?.kind === "delete") && changedRanges?.length === 0;
+}
+
 function wrapDiffText(text: string, width: number, maxWrappedRows: number | undefined): string[] {
     if (maxWrappedRows === undefined) {
         return wrapStyledText(text, width);
@@ -2475,7 +2496,7 @@ function renderDiffRow(
     },
 ): string[] {
     const parsed = parseDiffLine(line);
-    const rowWidth = Math.max(1, width);
+    const rowWidth = Math.max(1, width - DIFF_TERMINAL_GUARD_COLUMNS);
     const prefixWidth = visibleWidth(leftPrefix);
     const contentWidth = Math.max(1, rowWidth - prefixWidth);
 
@@ -2846,6 +2867,9 @@ export function renderCodexDiff(
             ): void => {
                 const maxWrappedRows = options.maxWrappedRows ?? (expanded ? undefined : 4);
                 for (const { line, index } of lines) {
+                    if (isUnchangedReplacementSide(line, changedRanges[index])) {
+                        continue;
+                    }
                     rendered.push(
                         ...renderDiffRow(line, width, "    ", theme, {
                             ...(section.path === undefined ? {} : { path: section.path }),

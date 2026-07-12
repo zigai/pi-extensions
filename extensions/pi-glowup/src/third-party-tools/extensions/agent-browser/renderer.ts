@@ -3,6 +3,7 @@ import { browserLifecycleLabels } from "../../browser-labels.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../../types.ts";
 import {
     callState,
+    DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
     thirdPartyStatusLabel,
@@ -95,7 +96,7 @@ export function createAgentBrowserRenderer(
                     browserLifecycleLabels(summary.label),
                 ),
                 body: summary.body,
-                maxRenderedLines: 4,
+                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
             });
         },

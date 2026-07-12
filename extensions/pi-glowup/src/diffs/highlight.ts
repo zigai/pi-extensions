@@ -32,6 +32,7 @@ type SpanStyle = {
     readonly fg: string | undefined;
     readonly bg: string | undefined;
     readonly emphasized: boolean;
+    readonly boldEmphasized: boolean;
     readonly dimUnchanged: boolean;
 };
 
@@ -75,7 +76,7 @@ export function flattenHighlightedLine(
     emphasisBg: string,
     fallbackText: string,
     language?: string,
-    options: { readonly dimUnchanged?: boolean } = {},
+    options: { readonly boldEmphasized?: boolean; readonly dimUnchanged?: boolean } = {},
 ): ReadonlyArray<DiffSpan> {
     const spans: DiffSpan[] = [];
     const colorVariable = appearance === "light" ? "--diffs-token-light" : "--diffs-token-dark";
@@ -104,6 +105,7 @@ export function flattenHighlightedLine(
             fg: styles.get(colorVariable) ?? styles.get("color") ?? inherited.fg,
             bg: emphasized ? emphasisBg : inherited.bg,
             emphasized,
+            boldEmphasized: inherited.boldEmphasized,
             dimUnchanged: inherited.dimUnchanged,
         };
         const children = Array.isArray(current.children) ? current.children : [];
@@ -116,6 +118,7 @@ export function flattenHighlightedLine(
         fg: undefined,
         bg: undefined,
         emphasized: false,
+        boldEmphasized: options.boldEmphasized === true,
         dimUnchanged: options.dimUnchanged === true,
     });
 
@@ -129,6 +132,7 @@ export function flattenHighlightedLine(
                       fg: undefined,
                       bg: undefined,
                       emphasized: false,
+                      boldEmphasized: options.boldEmphasized === true,
                       dimUnchanged: options.dimUnchanged === true,
                   }),
               ],
@@ -203,7 +207,7 @@ function makeDiffSpan(text: string, style: SpanStyle): DiffSpan {
         text,
         ...(style.fg === undefined ? {} : { fg: style.fg }),
         ...(style.bg === undefined ? {} : { bg: style.bg }),
-        ...(style.emphasized && style.dimUnchanged ? { bold: true } : {}),
+        ...(style.emphasized && style.boldEmphasized ? { bold: true } : {}),
         ...(style.dimUnchanged && !style.emphasized ? { dim: true } : {}),
     };
 }

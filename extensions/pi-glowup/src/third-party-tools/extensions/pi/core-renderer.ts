@@ -3,6 +3,7 @@ import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/stat
 import type { ThirdPartyToolRenderer } from "../../types.ts";
 import {
     callState,
+    DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
     thirdPartyStatusLabel,
@@ -44,7 +45,7 @@ function createFinalizePlanRenderer(
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, piCoreCallLabels(toolName)),
                 body: undefined,
-                maxRenderedLines: 1,
+                maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
                 expandable: false,
             });

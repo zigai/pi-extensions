@@ -24,6 +24,7 @@ describe("codex look config", () => {
             addedRowBackground: null,
             deletedRowBackground: null,
             instructionPathColor: null,
+            dimUnchangedDiffText: false,
         });
         expect(config.debugLog).toEqual({
             enabled: false,
@@ -34,6 +35,7 @@ describe("codex look config", () => {
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
+        expect(config.toolCallIndicator).toEqual({ symbol: "•", bold: true });
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview).toEqual({ movingViewport: true });
         expect(config.syntax).toEqual({
@@ -58,6 +60,7 @@ describe("codex look config", () => {
                 addedRowBackground: "#123456",
                 deletedRowBackground: "#654321",
                 instructionPathColor: "#AABBCC",
+                dimUnchangedDiffText: true,
             },
         });
 
@@ -68,6 +71,7 @@ describe("codex look config", () => {
             addedRowBackground: "#123456",
             deletedRowBackground: "#654321",
             instructionPathColor: "#AABBCC",
+            dimUnchangedDiffText: true,
         });
     });
 
@@ -77,6 +81,14 @@ describe("codex look config", () => {
         });
 
         expect(config.appearance.addedRowBackground).toBeNull();
+    });
+
+    it("parses user-configured tool call indicators", () => {
+        const config = parseCodexLookConfig({
+            toolCallIndicator: { symbol: "▸", bold: false },
+        });
+
+        expect(config.toolCallIndicator).toEqual({ symbol: "▸", bold: false });
     });
 
     it("ignores invalid config shapes with a safe warning", () => {
@@ -98,6 +110,7 @@ describe("codex look config", () => {
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
+        expect(config.toolCallIndicator).toEqual({ symbol: "•", bold: true });
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.preloadLanguages).toEqual([
@@ -127,6 +140,7 @@ describe("codex look config", () => {
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
+        expect(config.toolCallIndicator).toEqual({ symbol: "•", bold: true });
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
@@ -154,6 +168,7 @@ describe("codex look config", () => {
 
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog.enabled).toBe(false);
+        expect(config.toolCallIndicator).toEqual({ symbol: "•", bold: true });
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.preloadLanguages).toEqual([
@@ -188,6 +203,7 @@ describe("codex look config", () => {
 
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog.memorySampleIntervalMs).toBe(10_000);
+        expect(config.toolCallIndicator).toEqual({ symbol: "•", bold: true });
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
@@ -219,6 +235,7 @@ describe("codex look config", () => {
                 $schema: "./config.schema.json",
                 preserveTools: ["mcp"],
                 debugLog: { enabled: false, memorySampleIntervalMs: 0 },
+                toolCallIndicator: { symbol: "·", bold: false },
                 toolLabels: { mode: "lifecycle" },
                 writePreview: { movingViewport: false },
                 syntax: {
@@ -233,6 +250,7 @@ describe("codex look config", () => {
             projectConfigPath,
             JSON.stringify({
                 toolLabels: { mode: "static" },
+                toolCallIndicator: { symbol: "▸", bold: true },
                 writePreview: { movingViewport: true },
                 debugLog: { enabled: true, path: "project-debug.log" },
                 syntax: {
@@ -256,6 +274,7 @@ describe("codex look config", () => {
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptMaxCodePreviewLines).toBe(12);
         expect(config.scriptFormatters.get("python")).toBeUndefined();
+        expect(config.toolCallIndicator).toEqual({ symbol: "·", bold: false });
         expect(config.toolLabels.mode).toBe("lifecycle");
         expect(config.writePreview.movingViewport).toBe(false);
         expect(config.syntax.preloadLanguages).toEqual(["go"]);
@@ -279,6 +298,7 @@ describe("codex look config", () => {
                 $schema: "./config.schema.json",
                 preserveTools: ["mcp"],
                 debugLog: { enabled: false, memorySampleIntervalMs: 0 },
+                toolCallIndicator: { symbol: "·", bold: false },
                 toolLabels: { mode: "lifecycle" },
                 writePreview: { movingViewport: false },
                 syntax: {
@@ -293,6 +313,7 @@ describe("codex look config", () => {
             projectConfigPath,
             JSON.stringify({
                 toolLabels: { mode: "static" },
+                toolCallIndicator: { bold: true },
                 writePreview: { movingViewport: true },
                 debugLog: { enabled: true, path: "project-debug.log" },
                 syntax: {
@@ -316,6 +337,7 @@ describe("codex look config", () => {
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptMaxCodePreviewLines).toBe(4);
         expect(config.scriptFormatters.get("python")).toEqual(["black", "-"]);
+        expect(config.toolCallIndicator).toEqual({ symbol: "·", bold: true });
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.preloadLanguages).toEqual(["typescript"]);

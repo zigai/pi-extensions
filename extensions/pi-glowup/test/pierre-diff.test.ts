@@ -588,7 +588,7 @@ describe("Pierre diff rendering", () => {
         expect(plainLines[plainLines.indexOf("+2") + 1]).toContain("+3 def greet():");
     });
 
-    it("paints only Pierre intra-line replacement spans", async () => {
+    it("paints only Pierre intra-line replacement spans without dimming unchanged text by default", async () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
             oldContent: "const limit = args.limit ?? 2000;\n",
@@ -615,10 +615,58 @@ describe("Pierre diff rendering", () => {
         expect(addition).toContain("48;2;0;34;0");
         expect(deletion.match(/48;2;34;0;0/gu)).toHaveLength(1);
         expect(addition.match(/48;2;0;34;0/gu)).toHaveLength(1);
-        expect(deletion).toContain("\u001b[2m");
         expect(deletion).toContain("\u001b[1m");
-        expect(addition).toContain("\u001b[2m");
         expect(addition).toContain("\u001b[1m");
+        expect(deletion).not.toContain("\u001b[2m");
+        expect(addition).not.toContain("\u001b[2m");
+    });
+
+    it("dims unchanged Pierre replacement text when configured", async () => {
+        configureRenderingAppearance({
+            diffBackgroundStyle: "changed-spans",
+            narrowDiffLayout: "paired",
+            sideBySideLayout: "content-aware",
+            addedRowBackground: null,
+            deletedRowBackground: null,
+            instructionPathColor: null,
+            dimUnchangedDiffText: true,
+        });
+        try {
+            const payload = buildPierreDiffPayload({
+                path: "src/example.ts",
+                oldContent: "const limit = args.limit ?? 2000;\n",
+                newContent: "const limit = args.limit ?? 4000;\n",
+                oldSizeBytes: 34,
+                newSizeBytes: 34,
+                canBuildPierreDiff: true,
+            });
+            if (payload?.kind !== "renderable") {
+                throw new Error("expected renderable Pierre payload");
+            }
+
+            await loadHighlightedDiff(payload.metadata);
+            const lines = renderPierreDiff(
+                payload,
+                testTheme,
+                { expanded: false },
+                { lastComponent: undefined, invalidate() {} },
+            ).render(100);
+            const deletion = lines.find((line) => stripAnsi(line).includes("2000")) ?? "";
+            const addition = lines.find((line) => stripAnsi(line).includes("4000")) ?? "";
+
+            expect(deletion).toContain("\u001b[2m");
+            expect(addition).toContain("\u001b[2m");
+        } finally {
+            configureRenderingAppearance({
+                diffBackgroundStyle: "changed-spans",
+                narrowDiffLayout: "paired",
+                sideBySideLayout: "content-aware",
+                addedRowBackground: null,
+                deletedRowBackground: null,
+                instructionPathColor: null,
+                dimUnchangedDiffText: false,
+            });
+        }
     });
 
     it("keeps an added blank row compact in changed-span mode", () => {
@@ -656,6 +704,7 @@ describe("Pierre diff rendering", () => {
             addedRowBackground: null,
             deletedRowBackground: null,
             instructionPathColor: null,
+            dimUnchangedDiffText: false,
         });
         try {
             const payload = buildPierreDiffPayload({
@@ -687,6 +736,7 @@ describe("Pierre diff rendering", () => {
                 addedRowBackground: null,
                 deletedRowBackground: null,
                 instructionPathColor: null,
+                dimUnchangedDiffText: false,
             });
         }
     });

@@ -24,6 +24,8 @@ type GoalRecord = {
     readonly timeUsedSeconds: number | undefined;
 };
 
+const GOAL_CALL_PREVIEW_LINES = 4;
+
 function normalizeGoalToolName(toolName: string): string {
     return baseToolName(toolName);
 }
@@ -139,7 +141,7 @@ export function createGoalRenderer(
                     goalCallLabels(toolName, args),
                 ),
                 body,
-                maxRenderedLines: 3,
+                maxRenderedLines: GOAL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
             });
         },

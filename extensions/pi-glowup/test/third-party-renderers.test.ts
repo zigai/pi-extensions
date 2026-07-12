@@ -331,8 +331,8 @@ describe("third-party tool renderers", () => {
             )
             .render(100);
 
-        expect(lines).toHaveLength(4);
-        expect(lines.join("\n")).toContain("… +27 lines");
+        expect(lines).toHaveLength(5);
+        expect(lines.join("\n")).toContain("… +26 lines");
     });
 
     it("summarizes agent launch calls without dumping JSON", () => {
