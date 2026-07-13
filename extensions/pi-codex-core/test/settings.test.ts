@@ -90,6 +90,30 @@ test("settings screen saves standalone web search mode", async () => {
     assert.equal(savedMode, "cached");
 });
 
+test("settings screen keeps the changed setting selected after save", async () => {
+    initTheme(undefined, false);
+    let rendered = "";
+    const ctx = makeSettingsContext({
+        run(factory) {
+            const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+            component.handleInput?.("\x1b[B");
+            component.handleInput?.(" ");
+            rendered = component.render(120).join("\n");
+        },
+    });
+
+    await openCodexSettingsScreen(ctx, {
+        initialConfig: DEFAULT_CODEX_CORE_CONFIG,
+        initialTab: "tools",
+        onChange: (nextConfig) => ({ ok: true, effectiveConfig: nextConfig }),
+    });
+
+    assert.ok(
+        rendered.includes("Use cached, indexed, or live results for standalone web_run searches."),
+    );
+    assert.equal(rendered.includes("Codex web.run / web_run search tool."), false);
+});
+
 test("settings screen shows personality only for supported bundled prompts", async () => {
     const renderForModel = async (modelId: string): Promise<string> => {
         let rendered = "";

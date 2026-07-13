@@ -182,7 +182,16 @@ export async function openCodexSettingsScreen(
                         if (nextDraft === draft) return;
                         const saveResult = options.onChange(nextDraft);
                         if (saveResult.ok) draft = saveResult.effectiveConfig;
-                        settingsList = createSettingsList();
+                        for (const item of buildItems(
+                            activeTab,
+                            draft,
+                            usageState,
+                            usageLoading,
+                            resetLoading,
+                            personalitySupported,
+                        )) {
+                            settingsList.updateValue(item.id, item.currentValue);
+                        }
                         tui.requestRender();
                     },
                     () => done(undefined),
