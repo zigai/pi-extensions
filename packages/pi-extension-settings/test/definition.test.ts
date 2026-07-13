@@ -233,6 +233,8 @@ describe("generated schema documents", () => {
         expect(schema.$id).toBe("https://example.test/pi-example/config.schema.json");
         expect(schema.required).toBeUndefined();
         expect(schema.additionalProperties).toBe(false);
+        expect(JSON.stringify(schema)).not.toContain('"~kind"');
+        expect(JSON.stringify(schema)).not.toContain('"~optional"');
         expect(schema.properties).toMatchObject({
             $schema: { default: "./schemas/pi-example.schema.json" },
             enabled: { default: true },

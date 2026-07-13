@@ -296,7 +296,7 @@ export async function loadExtensionSettings(definition, options) {
         }
     }
     return {
-        settings: Value.Decode(definition.schema, resolved),
+        settings: Value.Decode(Value.Clone(definition.schema), resolved),
         globalSettingsLayer: globalApplied.diagnostic === undefined ? globalLayer.settings : undefined,
         projectSettingsLayer,
         diagnostics,
@@ -395,7 +395,7 @@ export function loadExtensionSettingsSync(definition, options) {
         }
     }
     return {
-        settings: Value.Decode(definition.schema, resolved),
+        settings: Value.Decode(Value.Clone(definition.schema), resolved),
         globalSettingsLayer: globalApplied.diagnostic === undefined ? globalLayer.settings : undefined,
         projectSettingsLayer,
         diagnostics,

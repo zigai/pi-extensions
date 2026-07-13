@@ -435,7 +435,7 @@ export async function loadExtensionSettings<const Schema extends TObject>(
     }
 
     return {
-        settings: Value.Decode(definition.schema, resolved),
+        settings: Value.Decode(Value.Clone(definition.schema), resolved),
         globalSettingsLayer:
             globalApplied.diagnostic === undefined ? globalLayer.settings : undefined,
         projectSettingsLayer,
@@ -565,7 +565,7 @@ export function loadExtensionSettingsSync<const Schema extends TObject>(
     }
 
     return {
-        settings: Value.Decode(definition.schema, resolved),
+        settings: Value.Decode(Value.Clone(definition.schema), resolved),
         globalSettingsLayer:
             globalApplied.diagnostic === undefined ? globalLayer.settings : undefined,
         projectSettingsLayer,

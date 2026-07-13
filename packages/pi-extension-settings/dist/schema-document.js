@@ -40,6 +40,19 @@ function makeSettingsObjectPartial(schema) {
     }
     return transformed;
 }
+function stripTypeBoxMetadata(value) {
+    if (Array.isArray(value))
+        return value.map(stripTypeBoxMetadata);
+    if (!isJsonObject(value))
+        return value;
+    const sanitized = {};
+    for (const [key, child] of Object.entries(value)) {
+        if (key.startsWith("~"))
+            continue;
+        sanitized[key] = stripTypeBoxMetadata(child);
+    }
+    return sanitized;
+}
 function schemaRecord(schema) {
     const serialized = JSON.stringify(schema);
     if (serialized === undefined) {
@@ -49,7 +62,7 @@ function schemaRecord(schema) {
     if (!isJsonObject(parsed)) {
         throw new TypeError("The TypeBox settings schema must serialize to a JSON object.");
     }
-    return parsed;
+    return stripTypeBoxMetadata(parsed);
 }
 function visitChildSchemas(schema, path, visit) {
     for (const [key, value] of Object.entries(schema)) {

@@ -2,8 +2,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { defineExtensionSettings } from "../src/definition.ts";
 import { formatJson } from "../src/json-value.ts";
 import { resolveGlobalSettingsPaths, resolveProjectSettingsPaths } from "../src/paths.ts";
 import { loadExtensionSettingsSync } from "../src/runtime.ts";
@@ -104,6 +106,32 @@ describe("loadExtensionSettingsSync", () => {
         expect(configFailure.diagnostics).toContainEqual(
             expect.objectContaining({ code: "config-read-failed" }),
         );
+    });
+
+    it("decodes mixed unions without mutating the frozen definition schema", () => {
+        const definition = defineExtensionSettings({
+            id: "pi-union",
+            title: "Union",
+            description: "Mixed union settings.",
+            schema: Type.Object(
+                {
+                    color: Type.Union([Type.Integer(), Type.String()], {
+                        default: "blue",
+                        description: "Color name or ANSI index.",
+                    }),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const loaded = loadExtensionSettingsSync(definition, {
+            agentDir: temporaryDirectory(),
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+        });
+
+        expect(loaded.settings.color).toBe("blue");
     });
 
     it("reports stale and unreadable bundled schemas", () => {
