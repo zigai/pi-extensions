@@ -3,6 +3,7 @@ import {
     getAgentDir,
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
 import type { TObject } from "typebox";
 
 import type { ExtensionSettingsDefinition } from "./definition.ts";
@@ -19,7 +20,22 @@ export type LoadPiExtensionSettingsOptions = {
     readonly bundledSchema: BundledSchemaSource;
     /** Test or embedded-host override. Normal Pi extensions should omit this. */
     readonly agentDir?: string;
+    /** Additional historical extension IDs whose per-extension config may be migrated. */
+    readonly legacySettingsIds?: readonly string[];
 };
+
+function legacyConfigPaths<Schema extends TObject>(
+    definition: ExtensionSettingsDefinition<Schema>,
+    agentDir: string,
+    context: PiSettingsContext,
+    additionalIds: readonly string[],
+): { readonly global: readonly string[]; readonly project: readonly string[] } {
+    const ids = [...new Set([definition.id, ...additionalIds])];
+    return {
+        global: ids.map((id) => join(agentDir, id, "config.json")),
+        project: ids.map((id) => join(context.cwd, CONFIG_DIR_NAME, id, "config.json")),
+    };
+}
 
 /** Load settings using Pi's configured global and project-directory locations. */
 export function loadPiExtensionSettings<const Schema extends TObject>(
@@ -27,14 +43,21 @@ export function loadPiExtensionSettings<const Schema extends TObject>(
     context: PiSettingsContext,
     options: LoadPiExtensionSettingsOptions,
 ): Promise<LoadedExtensionSettings<Schema>> {
+    const agentDir = options.agentDir ?? getAgentDir();
     return loadExtensionSettings(definition, {
-        agentDir: options.agentDir ?? getAgentDir(),
+        agentDir,
         bundledSchema: options.bundledSchema,
         project: {
             cwd: context.cwd,
             configDirName: CONFIG_DIR_NAME,
             trusted: context.isProjectTrusted(),
         },
+        legacyConfigPaths: legacyConfigPaths(
+            definition,
+            agentDir,
+            context,
+            options.legacySettingsIds ?? [],
+        ),
     });
 }
 
@@ -44,13 +67,20 @@ export function loadPiExtensionSettingsSync<const Schema extends TObject>(
     context: PiSettingsContext,
     options: LoadPiExtensionSettingsOptions,
 ): LoadedExtensionSettings<Schema> {
+    const agentDir = options.agentDir ?? getAgentDir();
     return loadExtensionSettingsSync(definition, {
-        agentDir: options.agentDir ?? getAgentDir(),
+        agentDir,
         bundledSchema: options.bundledSchema,
         project: {
             cwd: context.cwd,
             configDirName: CONFIG_DIR_NAME,
             trusted: context.isProjectTrusted(),
         },
+        legacyConfigPaths: legacyConfigPaths(
+            definition,
+            agentDir,
+            context,
+            options.legacySettingsIds ?? [],
+        ),
     });
 }

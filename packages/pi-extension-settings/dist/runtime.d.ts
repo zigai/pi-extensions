@@ -17,8 +17,13 @@ export type LoadExtensionSettingsOptions = {
     readonly agentDir: string;
     readonly bundledSchema: BundledSchemaSource;
     readonly project?: ProjectSettingsLocation;
+    /** Older config locations copied once when the centralized target is absent. */
+    readonly legacyConfigPaths?: {
+        readonly global?: readonly string[];
+        readonly project?: readonly string[];
+    };
 };
-export type SettingsDiagnosticCode = "bundled-schema-read-failed" | "bundled-schema-stale" | "config-decode-failed" | "config-invalid" | "config-malformed" | "config-read-failed" | "config-scaffold-failed" | "schema-install-failed";
+export type SettingsDiagnosticCode = "bundled-schema-read-failed" | "bundled-schema-stale" | "config-decode-failed" | "config-invalid" | "config-malformed" | "config-migration-failed" | "config-read-failed" | "config-scaffold-failed" | "schema-install-failed";
 export type SettingsDiagnostic = {
     readonly code: SettingsDiagnosticCode;
     readonly severity: "error" | "warning";

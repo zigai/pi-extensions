@@ -35,6 +35,11 @@ export type LoadExtensionSettingsOptions = {
     readonly agentDir: string;
     readonly bundledSchema: BundledSchemaSource;
     readonly project?: ProjectSettingsLocation;
+    /** Older config locations copied once when the centralized target is absent. */
+    readonly legacyConfigPaths?: {
+        readonly global?: readonly string[];
+        readonly project?: readonly string[];
+    };
 };
 
 export type SettingsDiagnosticCode =
@@ -43,6 +48,7 @@ export type SettingsDiagnosticCode =
     | "config-decode-failed"
     | "config-invalid"
     | "config-malformed"
+    | "config-migration-failed"
     | "config-read-failed"
     | "config-scaffold-failed"
     | "schema-install-failed";
@@ -231,6 +237,60 @@ function readLayerSync(
     return parseLayer(path, scope, content.value, layerSchema);
 }
 
+function migrationDiagnostic(scope: "global" | "project", path: string): SettingsDiagnostic {
+    return {
+        code: "config-migration-failed",
+        severity: "error",
+        scope,
+        path,
+        message: `Legacy ${scope} settings could not be migrated`,
+    };
+}
+
+async function migrateLegacyConfig(
+    targetPath: string,
+    candidatePaths: readonly string[],
+    scope: "global" | "project",
+): Promise<SettingsDiagnostic | undefined> {
+    const target = await readTextIfPresent(targetPath);
+    if (Result.isError(target)) return migrationDiagnostic(scope, targetPath);
+    if (target.value !== undefined) return undefined;
+
+    for (const candidatePath of candidatePaths) {
+        const candidate = await readTextIfPresent(candidatePath);
+        if (Result.isError(candidate)) return migrationDiagnostic(scope, candidatePath);
+        if (candidate.value === undefined) continue;
+
+        const copied = await writeTextIfMissing(targetPath, candidate.value);
+        /* v8 ignore next -- requires the target to become unwritable after its successful read */
+        if (Result.isError(copied)) return migrationDiagnostic(scope, targetPath);
+        return undefined;
+    }
+    return undefined;
+}
+
+function migrateLegacyConfigSync(
+    targetPath: string,
+    candidatePaths: readonly string[],
+    scope: "global" | "project",
+): SettingsDiagnostic | undefined {
+    const target = readTextIfPresentSync(targetPath);
+    if (Result.isError(target)) return migrationDiagnostic(scope, targetPath);
+    if (target.value !== undefined) return undefined;
+
+    for (const candidatePath of candidatePaths) {
+        const candidate = readTextIfPresentSync(candidatePath);
+        if (Result.isError(candidate)) return migrationDiagnostic(scope, candidatePath);
+        if (candidate.value === undefined) continue;
+
+        const copied = writeTextIfMissingSync(targetPath, candidate.value);
+        /* v8 ignore next -- requires the target to become unwritable after its successful read */
+        if (Result.isError(copied)) return migrationDiagnostic(scope, targetPath);
+        return undefined;
+    }
+    return undefined;
+}
+
 function applyLayer<Schema extends TObject>(
     schema: Schema,
     current: JsonObject,
@@ -275,6 +335,21 @@ export async function loadExtensionSettings<const Schema extends TObject>(
                   options.project.configDirName,
                   definition.id,
               );
+    const globalMigration = await migrateLegacyConfig(
+        globalPaths.configPath,
+        options.legacyConfigPaths?.global ?? [],
+        "global",
+    );
+    if (globalMigration !== undefined) diagnostics.push(globalMigration);
+    if (projectPaths !== undefined && options.project?.trusted === true) {
+        const projectMigration = await migrateLegacyConfig(
+            projectPaths.configPath,
+            options.legacyConfigPaths?.project ?? [],
+            "project",
+        );
+        if (projectMigration !== undefined) diagnostics.push(projectMigration);
+    }
+
     const expectedSchema = formatJson(createSettingsFileSchema(definition));
     const sourceSchema = await bundledSchemaContent(options.bundledSchema);
 
@@ -390,6 +465,21 @@ export function loadExtensionSettingsSync<const Schema extends TObject>(
                   options.project.configDirName,
                   definition.id,
               );
+    const globalMigration = migrateLegacyConfigSync(
+        globalPaths.configPath,
+        options.legacyConfigPaths?.global ?? [],
+        "global",
+    );
+    if (globalMigration !== undefined) diagnostics.push(globalMigration);
+    if (projectPaths !== undefined && options.project?.trusted === true) {
+        const projectMigration = migrateLegacyConfigSync(
+            projectPaths.configPath,
+            options.legacyConfigPaths?.project ?? [],
+            "project",
+        );
+        if (projectMigration !== undefined) diagnostics.push(projectMigration);
+    }
+
     const expectedSchema = formatJson(createSettingsFileSchema(definition));
     const sourceSchema = bundledSchemaContentSync(options.bundledSchema);
 

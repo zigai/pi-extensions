@@ -137,7 +137,7 @@ export default function (pi: ExtensionAPI) {
 }
 ```
 
-The lower-level `loadExtensionSettings` API accepts explicit directories and trust state for other hosts and filesystem-level tests. Synchronous call paths can use `loadPiExtensionSettingsSync` or `loadExtensionSettingsSync` with the same options and result shape.
+The lower-level `loadExtensionSettings` API accepts explicit directories and trust state for other hosts and filesystem-level tests. Synchronous call paths can use `loadPiExtensionSettingsSync` or `loadExtensionSettingsSync` with the same options and result shape. The result also exposes validated `globalSettingsLayer` and `projectSettingsLayer` values for extensions that apply additional domain-specific merge semantics.
 
 ## Storage layout
 
@@ -170,6 +170,8 @@ Project overrides use Pi's configured project directory name:
 
 Project files are read only when `ctx.isProjectTrusted()` is true. They are never created automatically. A committed project override can use the definition's stable HTTPS `schemaId` in its `$schema` field without requiring the extension to write generated files into the project.
 
+The Pi adapter non-destructively migrates the former per-extension layout (`<getAgentDir()>/<id>/config.json` and `<cwd>/<CONFIG_DIR_NAME>/<id>/config.json`) when the corresponding centralized file is absent. Pass `legacySettingsIds` for earlier extension names. Migration copies bytes exactly once; it never overwrites a centralized file, including a malformed one.
+
 ## Runtime guarantees
 
 Settings resolve in this order:
@@ -187,6 +189,7 @@ The loader also guarantees:
 - malformed or invalid layers are reported and ignored;
 - diagnostics contain paths and schema issues, not raw setting values;
 - existing and malformed user config is never replaced or repaired;
+- legacy per-extension config is copied only when the centralized target is absent;
 - global config uses exclusive creation and is scaffolded only when missing;
 - the bundled checked-in schema must exactly match the TypeBox-derived schema;
 - the global schema is created or refreshed with an atomic replacement;

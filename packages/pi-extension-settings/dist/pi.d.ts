@@ -7,6 +7,8 @@ export type LoadPiExtensionSettingsOptions = {
     readonly bundledSchema: BundledSchemaSource;
     /** Test or embedded-host override. Normal Pi extensions should omit this. */
     readonly agentDir?: string;
+    /** Additional historical extension IDs whose per-extension config may be migrated. */
+    readonly legacySettingsIds?: readonly string[];
 };
 /** Load settings using Pi's configured global and project-directory locations. */
 export declare function loadPiExtensionSettings<const Schema extends TObject>(definition: ExtensionSettingsDefinition<Schema>, context: PiSettingsContext, options: LoadPiExtensionSettingsOptions): Promise<LoadedExtensionSettings<Schema>>;

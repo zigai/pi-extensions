@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,7 +6,7 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { formatJson } from "../src/json-value.ts";
-import { resolveProjectSettingsPaths } from "../src/paths.ts";
+import { resolveGlobalSettingsPaths, resolveProjectSettingsPaths } from "../src/paths.ts";
 import { loadPiExtensionSettings, loadPiExtensionSettingsSync } from "../src/pi.ts";
 import { createSettingsFileSchema } from "../src/schema-document.ts";
 import { testDefinition } from "./fixture.ts";
@@ -60,6 +60,134 @@ describe("loadPiExtensionSettings", () => {
         );
         expect(synchronous.settings.enabled).toBe(false);
         expect(synchronous.usedProjectConfig).toBe(true);
+    });
+
+    it("migrates historical per-extension config without overwriting central settings", async () => {
+        const root = await temporaryDirectory();
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        const legacyGlobalPath = join(agentDir, "pi-example", "config.json");
+        const legacyProjectPath = join(cwd, CONFIG_DIR_NAME, "pi-old-example", "config.json");
+        await mkdir(join(agentDir, "pi-example"), { recursive: true });
+        await mkdir(join(cwd, CONFIG_DIR_NAME, "pi-old-example"), { recursive: true });
+        await writeFile(legacyGlobalPath, JSON.stringify({ enabled: false }));
+        await writeFile(legacyProjectPath, JSON.stringify({ mode: "expanded" }));
+        const definition = testDefinition();
+
+        const loaded = await loadPiExtensionSettings(
+            definition,
+            { cwd, isProjectTrusted: () => true },
+            {
+                agentDir,
+                legacySettingsIds: ["pi-old-example"],
+                bundledSchema: {
+                    kind: "content",
+                    content: formatJson(createSettingsFileSchema(definition)),
+                },
+            },
+        );
+
+        expect(loaded.settings).toMatchObject({ enabled: false, mode: "expanded" });
+        await expect(readFile(loaded.globalConfigPath, "utf8")).resolves.toBe(
+            JSON.stringify({ enabled: false }),
+        );
+        await expect(readFile(loaded.projectConfigPath!, "utf8")).resolves.toBe(
+            JSON.stringify({ mode: "expanded" }),
+        );
+
+        await writeFile(loaded.globalConfigPath, JSON.stringify({ enabled: true }));
+        const reloaded = loadPiExtensionSettingsSync(
+            definition,
+            { cwd, isProjectTrusted: () => false },
+            {
+                agentDir,
+                bundledSchema: {
+                    kind: "content",
+                    content: formatJson(createSettingsFileSchema(definition)),
+                },
+            },
+        );
+        expect(reloaded.settings.enabled).toBe(true);
+    });
+
+    it("migrates legacy config through the synchronous adapter", async () => {
+        const root = await temporaryDirectory();
+        const agentDir = join(root, "agent");
+        const legacyPath = join(agentDir, "pi-example", "config.json");
+        await mkdir(join(agentDir, "pi-example"), { recursive: true });
+        await writeFile(legacyPath, JSON.stringify({ enabled: false }));
+        const definition = testDefinition();
+
+        const loaded = loadPiExtensionSettingsSync(
+            definition,
+            { cwd: root, isProjectTrusted: () => false },
+            {
+                agentDir,
+                bundledSchema: {
+                    kind: "content",
+                    content: formatJson(createSettingsFileSchema(definition)),
+                },
+            },
+        );
+
+        expect(loaded.settings.enabled).toBe(false);
+        await expect(readFile(loaded.globalConfigPath, "utf8")).resolves.toBe(
+            JSON.stringify({ enabled: false }),
+        );
+    });
+
+    it("reports unreadable legacy config in async and synchronous adapters", async () => {
+        const definition = testDefinition();
+        const schema = formatJson(createSettingsFileSchema(definition));
+        const asyncRoot = await temporaryDirectory();
+        const asyncAgentDir = join(asyncRoot, "agent");
+        await mkdir(join(asyncAgentDir, "pi-example", "config.json"), { recursive: true });
+
+        const asynchronous = await loadPiExtensionSettings(
+            definition,
+            { cwd: asyncRoot, isProjectTrusted: () => false },
+            {
+                agentDir: asyncAgentDir,
+                bundledSchema: { kind: "content", content: schema },
+            },
+        );
+        expect(asynchronous.diagnostics).toEqual(
+            expect.arrayContaining([expect.objectContaining({ code: "config-migration-failed" })]),
+        );
+
+        const syncRoot = await temporaryDirectory();
+        const syncAgentDir = join(syncRoot, "agent");
+        await mkdir(join(syncAgentDir, "pi-example", "config.json"), { recursive: true });
+        const synchronous = loadPiExtensionSettingsSync(
+            definition,
+            { cwd: syncRoot, isProjectTrusted: () => false },
+            {
+                agentDir: syncAgentDir,
+                bundledSchema: { kind: "content", content: schema },
+            },
+        );
+        expect(synchronous.diagnostics).toEqual(
+            expect.arrayContaining([expect.objectContaining({ code: "config-migration-failed" })]),
+        );
+
+        const occupiedRoot = await temporaryDirectory();
+        const occupiedAgentDir = join(occupiedRoot, "agent");
+        const occupiedConfigPath = resolveGlobalSettingsPaths(
+            occupiedAgentDir,
+            "pi-example",
+        ).configPath;
+        await mkdir(occupiedConfigPath, { recursive: true });
+        const occupied = await loadPiExtensionSettings(
+            definition,
+            { cwd: occupiedRoot, isProjectTrusted: () => false },
+            {
+                agentDir: occupiedAgentDir,
+                bundledSchema: { kind: "content", content: schema },
+            },
+        );
+        expect(occupied.diagnostics).toEqual(
+            expect.arrayContaining([expect.objectContaining({ code: "config-migration-failed" })]),
+        );
     });
 
     it("uses Pi's configured agent directory when no override is supplied", async () => {
