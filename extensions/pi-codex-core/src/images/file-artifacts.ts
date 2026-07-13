@@ -30,7 +30,10 @@ export type LoadedImage = {
 export async function loadImageContent(
     path: string,
     cwd: string,
-    options: { readonly signal?: AbortSignal | undefined } = {},
+    options: {
+        readonly signal?: AbortSignal | undefined;
+        readonly allowOutsideWorkspace?: boolean | undefined;
+    } = {},
 ): Promise<LoadedImage> {
     options.signal?.throwIfAborted();
     const requestedPath = resolve(cwd, path);
@@ -174,10 +177,17 @@ function isNodeError(cause: unknown): cause is NodeJS.ErrnoException {
 async function authorizeImagePath(
     path: string,
     cwd: string,
-    options: { readonly signal?: AbortSignal | undefined },
+    options: {
+        readonly signal?: AbortSignal | undefined;
+        readonly allowOutsideWorkspace?: boolean | undefined;
+    },
 ): Promise<string> {
     options.signal?.throwIfAborted();
-    const [realPath, realCwd] = await Promise.all([realpath(path), realpath(cwd)]);
+    const realPath = await realpath(path);
+    options.signal?.throwIfAborted();
+    if (options.allowOutsideWorkspace) return realPath;
+
+    const realCwd = await realpath(cwd);
     options.signal?.throwIfAborted();
     if (isWithinRoot(realPath, realCwd)) return realPath;
     try {

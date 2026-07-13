@@ -279,6 +279,31 @@ test("rejects image paths outside the workspace and through symlinks", async () 
     }
 });
 
+test("view_image loads an image outside the workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-view-image-external-"));
+    const cwd = join(root, "workspace");
+    const imagePath = join(root, "outside.png");
+    try {
+        await mkdir(cwd, { recursive: true });
+        await writeFile(imagePath, solidPngBytes(1, 1, [1, 2, 3, 255]));
+
+        const tool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+        const result = await tool.execute(
+            "view-external",
+            { path: imagePath },
+            undefined,
+            undefined,
+            makeImageContext(cwd),
+        );
+
+        assert.equal(result.details.path, imagePath);
+        assert.equal(result.details.absolutePath, imagePath);
+        assert.ok(result.content.some((item) => isRecord(item) && item.type === "image"));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("view_image returns durable image content with Codex patch budget", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-view-image-"));
     try {
@@ -779,6 +804,56 @@ test("imagegen returns model-visible images and saved paths", async () => {
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("imagegen accepts referenced images outside the workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-imagegen-external-"));
+    const cwd = join(root, "workspace");
+    const imagePath = join(root, "outside.png");
+    const sourceImage = solidPngBytes(1, 1, [10, 20, 30, 255]);
+    const generatedImage = solidPngBytes(1, 1, [40, 50, 60, 255]).toString("base64");
+    let requestBody: unknown;
+    try {
+        await mkdir(cwd, { recursive: true });
+        await writeFile(imagePath, sourceImage);
+
+        const tool = createImagegenTool({
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            runtime: makeTestRuntime(async (_input, init) => {
+                requestBody = JSON.parse(String(init?.body));
+                return new Response(JSON.stringify({ data: [{ b64_json: generatedImage }] }), {
+                    status: 200,
+                });
+            }),
+            async saveImage(args) {
+                return {
+                    path: `/tmp/${args.index}.png`,
+                    absolutePath: `/tmp/${args.index}.png`,
+                    latestPath: "/tmp/latest.png",
+                    latestAbsolutePath: "/tmp/latest.png",
+                };
+            },
+        });
+
+        await tool.execute(
+            "call-external",
+            { prompt: "Edit this image", referenced_image_paths: [imagePath] },
+            undefined,
+            undefined,
+            makeWebRunContext(cwd),
+        );
+
+        assert.ok(isRecord(requestBody));
+        assert.ok(isUnknownArray(requestBody.images));
+        const [editImage] = requestBody.images;
+        assert.ok(isRecord(editImage));
+        assert.equal(
+            editImage.image_url,
+            `data:image/png;base64,${sourceImage.toString("base64")}`,
+        );
+    } finally {
         await rm(root, { recursive: true, force: true });
     }
 });

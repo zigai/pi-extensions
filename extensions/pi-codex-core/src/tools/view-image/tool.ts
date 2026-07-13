@@ -199,7 +199,10 @@ export function createViewImageTool(
             return container;
         },
         async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-            const image = await loadImageContent(params.path, ctx.cwd, { signal });
+            const image = await loadImageContent(params.path, ctx.cwd, {
+                signal,
+                allowOutsideWorkspace: true,
+            });
             const detail = params.detail ?? "high";
             if (modelSupportsImages(ctx.model)) {
                 if (

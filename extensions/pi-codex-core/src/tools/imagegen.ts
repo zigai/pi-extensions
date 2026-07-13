@@ -257,7 +257,10 @@ async function resolveEditImages(
         const editImages: ImageContent[] = [];
         for (const path of paths) {
             options.signal?.throwIfAborted();
-            const image = await loadImageContent(path, ctx.cwd, options);
+            const image = await loadImageContent(path, ctx.cwd, {
+                ...options,
+                allowOutsideWorkspace: true,
+            });
             editImages.push(await prepareCodexPromptImageContent(image, "original", options));
         }
         return editImages;
