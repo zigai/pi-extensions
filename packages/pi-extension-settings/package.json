@@ -1,0 +1,56 @@
+{
+  "name": "@zigai/pi-extension-settings",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeBox-first configuration runtime and artifact tooling for Pi extensions.",
+  "keywords": [
+    "node",
+    "pi-extension-settings",
+    "typescript"
+  ],
+  "homepage": "https://github.com/zigai/pi-extension-settings#readme",
+  "bugs": {
+    "url": "https://github.com/zigai/pi-extension-settings/issues"
+  },
+  "license": "MIT",
+  "author": "zigai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/pi-extension-settings.git"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "oxlint -c ./.oxlintrc.json .",
+    "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "verify": "npm run check"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.1.9",
+    "oxfmt": "^0.44.0",
+    "oxlint": "^1.59.0",
+    "oxlint-tsgolint": "^0.23.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=22.19.0 <27"
+  },
+  "packageManager": "npm@11.0.0"
+}
