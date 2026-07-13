@@ -137,7 +137,7 @@ export default function (pi: ExtensionAPI) {
 }
 ```
 
-The lower-level `loadExtensionSettings` API accepts explicit directories and trust state for other hosts and filesystem-level tests.
+The lower-level `loadExtensionSettings` API accepts explicit directories and trust state for other hosts and filesystem-level tests. Synchronous call paths can use `loadPiExtensionSettingsSync` or `loadExtensionSettingsSync` with the same options and result shape.
 
 ## Storage layout
 

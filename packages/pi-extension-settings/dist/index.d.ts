@@ -4,6 +4,6 @@ export { DefinitionModuleInvalid, FileOperationFailed, ProjectManifestInvalid, R
 export { defaultGlobalSettingsDisplayPath, EXTENSION_SETTINGS_DIRECTORY, EXTENSION_SETTINGS_SCHEMA_DIRECTORY, resolveGlobalSettingsPaths, resolveProjectSettingsPaths, type ExtensionSettingsPaths, } from "./paths.ts";
 export { discoverSettingsProjects, PACKAGE_MANIFEST_KEY, type SettingsArtifactProject, } from "./projects.ts";
 export { README_GENERATED_END, README_GENERATED_START, renderReadmeSettingsSection, replaceGeneratedReadmeSection, type RenderReadmeOptions, } from "./readme.ts";
-export { loadExtensionSettings, type BundledSchemaSource, type LoadedExtensionSettings, type LoadExtensionSettingsOptions, type ProjectSettingsLocation, type SettingsDiagnostic, type SettingsDiagnosticCode, } from "./runtime.ts";
+export { loadExtensionSettings, loadExtensionSettingsSync, type BundledSchemaSource, type LoadedExtensionSettings, type LoadExtensionSettingsOptions, type ProjectSettingsLocation, type SettingsDiagnostic, type SettingsDiagnosticCode, } from "./runtime.ts";
 export { createDefaultSettingsDocument, createSettingsFileSchema, JSON_SCHEMA_DIALECT, } from "./schema-document.ts";
 //# sourceMappingURL=index.d.ts.map

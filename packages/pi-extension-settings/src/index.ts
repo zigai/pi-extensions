@@ -45,6 +45,7 @@ export {
 } from "./readme.ts";
 export {
     loadExtensionSettings,
+    loadExtensionSettingsSync,
     type BundledSchemaSource,
     type LoadedExtensionSettings,
     type LoadExtensionSettingsOptions,

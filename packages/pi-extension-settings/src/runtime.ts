@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 import { Result } from "better-result";
@@ -5,6 +6,11 @@ import type { StaticDecode, TObject, TSchema } from "typebox";
 import { Value } from "typebox/value";
 
 import type { ExtensionSettingsDefinition } from "./definition.ts";
+import {
+    readTextIfPresentSync,
+    writeTextAtomicallySync,
+    writeTextIfMissingSync,
+} from "./file-system-sync.ts";
 import { readTextIfPresent, writeTextAtomically, writeTextIfMissing } from "./file-system.ts";
 import { formatJson, isJsonObject, parseJson, type JsonObject } from "./json-value.ts";
 import { resolveGlobalSettingsPaths, resolveProjectSettingsPaths } from "./paths.ts";
@@ -74,6 +80,16 @@ async function bundledSchemaContent(source: BundledSchemaSource): Promise<string
 
     try {
         return await readFile(source.url, "utf8");
+    } catch {
+        return undefined;
+    }
+}
+
+function bundledSchemaContentSync(source: BundledSchemaSource): string | undefined {
+    if (source.kind === "content") return source.content;
+
+    try {
+        return readFileSync(source.url, "utf8");
     } catch {
         return undefined;
     }
@@ -169,6 +185,30 @@ async function readLayer(
     layerSchema: TSchema,
 ): Promise<ParsedLayer> {
     const content = await readTextIfPresent(path);
+    if (Result.isError(content)) {
+        return {
+            settings: undefined,
+            diagnostics: [
+                {
+                    code: "config-read-failed",
+                    severity: "error",
+                    scope,
+                    path,
+                    message: `${scope} settings could not be read and were ignored`,
+                },
+            ],
+        };
+    }
+    if (content.value === undefined) return { settings: undefined, diagnostics: [] };
+    return parseLayer(path, scope, content.value, layerSchema);
+}
+
+function readLayerSync(
+    path: string,
+    scope: "global" | "project",
+    layerSchema: TSchema,
+): ParsedLayer {
+    const content = readTextIfPresentSync(path);
     if (Result.isError(content)) {
         return {
             settings: undefined,
@@ -298,6 +338,116 @@ export async function loadExtensionSettings<const Schema extends TObject>(
     let usedProjectConfig = false;
     if (projectPaths !== undefined && options.project?.trusted === true) {
         const projectLayer = await readLayer(projectPaths.configPath, "project", layerSchema);
+        diagnostics.push(...projectLayer.diagnostics);
+        const projectApplied = applyLayer(
+            definition.schema,
+            resolved,
+            projectLayer,
+            projectPaths.configPath,
+            "project",
+        );
+        if (projectApplied.diagnostic !== undefined) diagnostics.push(projectApplied.diagnostic);
+        if (projectLayer.settings !== undefined && projectApplied.diagnostic === undefined) {
+            resolved = projectApplied.settings;
+            usedProjectConfig = true;
+        }
+    }
+
+    return {
+        settings: Value.Decode(definition.schema, resolved),
+        diagnostics,
+        globalConfigPath: globalPaths.configPath,
+        projectConfigPath: projectPaths?.configPath,
+        usedGlobalConfig:
+            globalLayer.settings !== undefined && globalApplied.diagnostic === undefined,
+        usedProjectConfig,
+        scaffoldedGlobalConfig,
+        schemaStatus,
+    };
+}
+
+/** Synchronous counterpart to `loadExtensionSettings` for render and patch paths. */
+export function loadExtensionSettingsSync<const Schema extends TObject>(
+    definition: ExtensionSettingsDefinition<Schema>,
+    options: LoadExtensionSettingsOptions,
+): LoadedExtensionSettings<Schema> {
+    const diagnostics: SettingsDiagnostic[] = [];
+    const globalPaths = resolveGlobalSettingsPaths(options.agentDir, definition.id);
+    const projectPaths =
+        options.project === undefined
+            ? undefined
+            : resolveProjectSettingsPaths(
+                  options.project.cwd,
+                  options.project.configDirName,
+                  definition.id,
+              );
+    const expectedSchema = formatJson(createSettingsFileSchema(definition));
+    const sourceSchema = bundledSchemaContentSync(options.bundledSchema);
+
+    let schemaStatus: LoadedExtensionSettings<Schema>["schemaStatus"] = "unavailable";
+    let scaffoldedGlobalConfig = false;
+    if (sourceSchema === undefined) {
+        diagnostics.push({
+            code: "bundled-schema-read-failed",
+            severity: "error",
+            scope: "schema",
+            path: globalPaths.schemaPath,
+            message: "The bundled settings schema could not be read",
+        });
+    } else if (sourceSchema !== expectedSchema) {
+        diagnostics.push({
+            code: "bundled-schema-stale",
+            severity: "error",
+            scope: "schema",
+            path: globalPaths.schemaPath,
+            message: "The bundled settings schema is stale; run the artifact generator",
+        });
+    } else {
+        const schemaWrite = writeTextAtomicallySync(globalPaths.schemaPath, sourceSchema);
+        if (Result.isError(schemaWrite)) {
+            diagnostics.push({
+                code: "schema-install-failed",
+                severity: "error",
+                scope: "schema",
+                path: globalPaths.schemaPath,
+                message: "The local editor schema could not be installed",
+            });
+        } else {
+            schemaStatus = schemaWrite.value;
+            const configWrite = writeTextIfMissingSync(
+                globalPaths.configPath,
+                formatJson(createDefaultSettingsDocument(definition)),
+            );
+            if (Result.isError(configWrite)) {
+                diagnostics.push({
+                    code: "config-scaffold-failed",
+                    severity: "error",
+                    scope: "global",
+                    path: globalPaths.configPath,
+                    message: "The default global settings file could not be scaffolded",
+                });
+            } else {
+                scaffoldedGlobalConfig = configWrite.value === "created";
+            }
+        }
+    }
+
+    const layerSchema = createSettingsLayerSchema(definition);
+    const globalLayer = readLayerSync(globalPaths.configPath, "global", layerSchema);
+    diagnostics.push(...globalLayer.diagnostics);
+    const globalApplied = applyLayer(
+        definition.schema,
+        definition.defaultSettings,
+        globalLayer,
+        globalPaths.configPath,
+        "global",
+    );
+    if (globalApplied.diagnostic !== undefined) diagnostics.push(globalApplied.diagnostic);
+
+    let resolved = globalApplied.settings;
+    let usedProjectConfig = false;
+    if (projectPaths !== undefined && options.project?.trusted === true) {
+        const projectLayer = readLayerSync(projectPaths.configPath, "project", layerSchema);
         diagnostics.push(...projectLayer.diagnostics);
         const projectApplied = applyLayer(
             definition.schema,

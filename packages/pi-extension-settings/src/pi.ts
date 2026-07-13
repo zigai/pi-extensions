@@ -8,6 +8,7 @@ import type { TObject } from "typebox";
 import type { ExtensionSettingsDefinition } from "./definition.ts";
 import {
     loadExtensionSettings,
+    loadExtensionSettingsSync,
     type BundledSchemaSource,
     type LoadedExtensionSettings,
 } from "./runtime.ts";
@@ -27,6 +28,23 @@ export function loadPiExtensionSettings<const Schema extends TObject>(
     options: LoadPiExtensionSettingsOptions,
 ): Promise<LoadedExtensionSettings<Schema>> {
     return loadExtensionSettings(definition, {
+        agentDir: options.agentDir ?? getAgentDir(),
+        bundledSchema: options.bundledSchema,
+        project: {
+            cwd: context.cwd,
+            configDirName: CONFIG_DIR_NAME,
+            trusted: context.isProjectTrusted(),
+        },
+    });
+}
+
+/** Synchronously load settings for Pi APIs that cannot await configuration. */
+export function loadPiExtensionSettingsSync<const Schema extends TObject>(
+    definition: ExtensionSettingsDefinition<Schema>,
+    context: PiSettingsContext,
+    options: LoadPiExtensionSettingsOptions,
+): LoadedExtensionSettings<Schema> {
+    return loadExtensionSettingsSync(definition, {
         agentDir: options.agentDir ?? getAgentDir(),
         bundledSchema: options.bundledSchema,
         project: {

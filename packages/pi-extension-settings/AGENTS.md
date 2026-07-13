@@ -4,7 +4,8 @@
 
 - This package provides reusable runtime and artifact tooling for Pi extension settings; it is not itself a Pi extension.
 - Keep the public API small and cohesive. Extension-specific semantic validation, UI policy, and migrations belong in consuming extensions.
-- `src/definition.ts` owns definition invariants, `src/runtime.ts` owns layer resolution, `src/artifacts.ts` owns repository artifact workflows, and `src/projects.ts` owns package/workspace discovery.
+- `src/definition.ts` owns definition invariants, `src/runtime.ts` owns async/synchronous layer resolution, `src/artifacts.ts` owns repository artifact workflows, and `src/projects.ts` owns package/workspace discovery.
+- Async and synchronous loaders must preserve identical paths, diagnostics, merge order, and file-ownership behavior.
 - Keep Pi-specific imports isolated in `src/pi.ts`; core runtime and generation modules must remain testable with explicit paths and trust state.
 - Publish compiled JavaScript and declarations from the checked-in `dist`; do not expose TypeScript source as an executable package boundary. Keep `dist` synchronized with `npm run build:check` so private Git installs do not depend on lifecycle scripts.
 

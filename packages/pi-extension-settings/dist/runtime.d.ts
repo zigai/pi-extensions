@@ -45,4 +45,6 @@ export type LoadedExtensionSettings<Schema extends TObject> = {
  * resolved TypeBox schema established by `defineExtensionSettings`.
  */
 export declare function loadExtensionSettings<const Schema extends TObject>(definition: ExtensionSettingsDefinition<Schema>, options: LoadExtensionSettingsOptions): Promise<LoadedExtensionSettings<Schema>>;
+/** Synchronous counterpart to `loadExtensionSettings` for render and patch paths. */
+export declare function loadExtensionSettingsSync<const Schema extends TObject>(definition: ExtensionSettingsDefinition<Schema>, options: LoadExtensionSettingsOptions): LoadedExtensionSettings<Schema>;
 //# sourceMappingURL=runtime.d.ts.map

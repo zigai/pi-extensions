@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { formatJson } from "../src/json-value.ts";
 import { resolveProjectSettingsPaths } from "../src/paths.ts";
-import { loadPiExtensionSettings } from "../src/pi.ts";
+import { loadPiExtensionSettings, loadPiExtensionSettingsSync } from "../src/pi.ts";
 import { createSettingsFileSchema } from "../src/schema-document.ts";
 import { testDefinition } from "./fixture.ts";
 
@@ -46,5 +46,19 @@ describe("loadPiExtensionSettings", () => {
 
         expect(loaded.settings.enabled).toBe(false);
         expect(loaded.usedProjectConfig).toBe(true);
+
+        const synchronous = loadPiExtensionSettingsSync(
+            definition,
+            { cwd, isProjectTrusted: () => true },
+            {
+                agentDir: join(root, "sync-agent"),
+                bundledSchema: {
+                    kind: "content",
+                    content: formatJson(createSettingsFileSchema(definition)),
+                },
+            },
+        );
+        expect(synchronous.settings.enabled).toBe(false);
+        expect(synchronous.usedProjectConfig).toBe(true);
     });
 });

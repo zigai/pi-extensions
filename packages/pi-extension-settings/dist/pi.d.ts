@@ -10,4 +10,6 @@ export type LoadPiExtensionSettingsOptions = {
 };
 /** Load settings using Pi's configured global and project-directory locations. */
 export declare function loadPiExtensionSettings<const Schema extends TObject>(definition: ExtensionSettingsDefinition<Schema>, context: PiSettingsContext, options: LoadPiExtensionSettingsOptions): Promise<LoadedExtensionSettings<Schema>>;
+/** Synchronously load settings for Pi APIs that cannot await configuration. */
+export declare function loadPiExtensionSettingsSync<const Schema extends TObject>(definition: ExtensionSettingsDefinition<Schema>, context: PiSettingsContext, options: LoadPiExtensionSettingsOptions): LoadedExtensionSettings<Schema>;
 //# sourceMappingURL=pi.d.ts.map
