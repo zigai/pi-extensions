@@ -1,7 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+    initTheme,
+    ToolExecutionComponent,
+    type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
+import type { TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getCodexLookGlobalConfigPath } from "../src/config/config.ts";
 import codexLookExtension from "../src/index.ts";
@@ -235,6 +240,50 @@ describe("extension lifecycle", () => {
 
         await pi.shutdownSession();
     });
+
+    it("renders generic Bash calls before a long-running command completes", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        const pi = new FakeExtensionApi();
+        await codexLookExtension(pi as unknown as ExtensionAPI);
+        initTheme("dark");
+
+        // SAFETY: ToolExecutionComponent only calls requestRender() on this boundary in the
+        // exercised lifecycle. The concrete TUI contract is otherwise irrelevant to rendering.
+        const tui = { requestRender(): void {} } as unknown as TUI;
+        const command = "cd /tmp && sleep 300";
+        const completedArgs = new ToolExecutionComponent(
+            "bash",
+            "call-complete-args",
+            { command },
+            undefined,
+            undefined,
+            tui,
+            root,
+        );
+        const startedExecution = new ToolExecutionComponent(
+            "bash",
+            "call-started-execution",
+            { command },
+            undefined,
+            undefined,
+            tui,
+            root,
+        );
+
+        expect(completedArgs.render(100)).toEqual([]);
+        completedArgs.setArgsComplete();
+        expect(stripAnsi(completedArgs.render(100).join("\n"))).toContain(
+            "Bash cd /tmp && sleep 300",
+        );
+
+        startedExecution.markExecutionStarted();
+        expect(stripAnsi(startedExecution.render(100).join("\n"))).toContain(
+            "Bash cd /tmp && sleep 300",
+        );
+
+        await pi.shutdownSession();
+    });
 });
 
 function readLogEvents(filePath: string): string[] {
@@ -252,4 +301,8 @@ function readLogEvents(filePath: string): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stripAnsi(text: string): string {
+    return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu"), "");
 }

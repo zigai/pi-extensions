@@ -38,6 +38,28 @@ describe("tool status labels", () => {
     it("defers simple calls until arguments are complete", () => {
         expect(shouldDeferSimpleToolCall({ isPartial: true, argsComplete: false })).toBe(true);
         expect(shouldDeferSimpleToolCall({ isPartial: false, argsComplete: false })).toBe(true);
+        expect(shouldDeferSimpleToolCall({ isPartial: true, argsComplete: true })).toBe(false);
         expect(shouldDeferSimpleToolCall({ isPartial: false, argsComplete: true })).toBe(false);
+    });
+
+    it("renders a running call once execution proves its arguments are stable", () => {
+        expect(
+            shouldDeferSimpleToolCall({
+                isPartial: true,
+                argsComplete: false,
+                executionStarted: true,
+            }),
+        ).toBe(false);
+    });
+
+    it("renders persisted calls despite stale lifecycle flags", () => {
+        expect(
+            shouldDeferSimpleToolCall({
+                isPartial: true,
+                argsComplete: false,
+                executionStarted: false,
+                result: { details: {} },
+            }),
+        ).toBe(false);
     });
 });

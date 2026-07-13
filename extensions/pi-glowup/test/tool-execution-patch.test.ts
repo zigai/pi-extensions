@@ -327,6 +327,7 @@ describe("tool execution patches", () => {
         const active = prototype.getCallRenderer
             .call(instance)?.({}, plainTheme, {
                 ...renderContext,
+                executionStarted: false,
                 argsComplete: false,
                 isPartial: true,
             })

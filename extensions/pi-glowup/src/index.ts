@@ -796,7 +796,10 @@ function renderBashCall(
     registerExplorationBoundary(context.toolCallId);
     const state = context.isError ? "error" : context.isPartial ? "running" : "success";
     const command = commandField(args) ?? "";
-    if (context.isPartial && scriptPreviews.get(context.toolCallId) === undefined) {
+    if (
+        shouldDeferSimpleToolCall(context) &&
+        scriptPreviews.get(context.toolCallId) === undefined
+    ) {
         const partialScript = streamingScriptIdentities.resolve(
             context.toolCallId,
             partialBashCommandPreview(command),

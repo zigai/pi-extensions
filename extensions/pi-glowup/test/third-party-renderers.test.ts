@@ -162,6 +162,7 @@ describe("third-party tool renderers", () => {
         const active = renderer
             .renderCall({}, plainTheme, {
                 ...renderContext,
+                executionStarted: false,
                 argsComplete: false,
                 isPartial: true,
             })
@@ -189,6 +190,7 @@ describe("third-party tool renderers", () => {
         const active = renderer
             .renderCall({}, plainTheme, {
                 ...renderContext,
+                executionStarted: false,
                 argsComplete: false,
                 isPartial: true,
             })
@@ -206,6 +208,7 @@ describe("third-party tool renderers", () => {
         const active = renderer
             .renderCall({}, plainTheme, {
                 ...renderContext,
+                executionStarted: false,
                 argsComplete: false,
                 isPartial: true,
             })
@@ -215,6 +218,21 @@ describe("third-party tool renderers", () => {
 
         expect(active).toBe("");
         expect(completed).toContain("• Called custom_tool");
+    });
+
+    it("renders generic tools while their execution is running", () => {
+        const renderer = createLifecycleRenderer("custom_tool");
+        const running = renderer
+            .renderCall({ action: "run" }, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(80)
+            .join("\n");
+
+        expect(running).toContain("• Calling custom_tool");
+        expect(running).toContain("action: run");
     });
 
     it("bounds huge generic third-party tool call argument previews", () => {
@@ -244,6 +262,7 @@ describe("third-party tool renderers", () => {
         const rendered = renderer
             .renderCall(args, plainTheme, {
                 ...renderContext,
+                executionStarted: false,
                 argsComplete: false,
                 isPartial: true,
                 expanded: true,

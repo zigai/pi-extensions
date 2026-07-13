@@ -9,6 +9,7 @@ export type ToolLifecycleLabels = {
 export type ToolLifecycleContext = {
     readonly isPartial: boolean;
     readonly argsComplete?: boolean;
+    readonly executionStarted?: boolean;
     readonly result?: unknown;
 };
 
@@ -20,7 +21,10 @@ export function isActiveToolCall(context: ToolLifecycleContext): boolean {
 
 /** Defers compact one-shot calls until their argument object is complete. */
 export function shouldDeferSimpleToolCall(context: ToolLifecycleContext): boolean {
-    return isActiveToolCall(context);
+    if (context.result !== undefined || context.executionStarted === true) {
+        return false;
+    }
+    return context.argsComplete === false;
 }
 
 /** Selects a stable label or the active/completed lifecycle form. */
