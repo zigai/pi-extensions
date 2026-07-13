@@ -13,6 +13,10 @@ fmt:
 lint:
     npm run lint
 
+# Build distributable JavaScript and declarations
+build:
+    npm run build
+
 # Run tests
 test:
     npm test
