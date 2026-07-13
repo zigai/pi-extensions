@@ -12,6 +12,8 @@ export type FormatScriptPreviewOptions = {
     readonly command: string;
     readonly formatter: ScriptBlockFormatter | undefined;
     readonly signal?: AbortSignal;
+    readonly isCurrent?: () => boolean;
+    readonly invalidate?: () => void;
 };
 
 /** Stores the cheap raw script preview for the command currently associated with a tool call. */
@@ -41,8 +43,9 @@ export async function formatAndStoreScriptPreview(
         options.formatter,
         options.signal === undefined ? {} : { signal: options.signal },
     );
-    if (formattedScript.code !== script.code) {
+    if (formattedScript.code !== script.code && (options.isCurrent?.() ?? true)) {
         options.sink.set(options.toolCallId, boundedScriptPreview(formattedScript));
+        options.invalidate?.();
     }
 }
 

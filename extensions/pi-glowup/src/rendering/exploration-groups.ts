@@ -30,6 +30,7 @@ export class ExplorationGroupStore {
     private readonly groupsByToolCallId = new Map<string, ExplorationGroup>();
     private readonly groupsInInsertionOrder: ExplorationGroup[] = [];
     private readonly boundaryToolCallIds = new Set<string>();
+    private readonly groupStartToolCallIds = new Set<string>();
     private readonly maxRetainedToolCalls: number;
 
     constructor(maxRetainedToolCalls = DEFAULT_MAX_RETAINED_TOOL_CALLS) {
@@ -48,6 +49,10 @@ export class ExplorationGroupStore {
             }
             this.trimRetainedGroups();
             return this.decisionFor(context.toolCallId, existingGroup);
+        }
+
+        if (this.groupStartToolCallIds.has(context.toolCallId)) {
+            this.closeActiveGroup();
         }
 
         const group = this.activeGroup ?? this.createGroup(context);
@@ -84,11 +89,22 @@ export class ExplorationGroupStore {
         this.closeActiveGroup();
     }
 
+    /** Marks the first exploration call in a historical assistant tool-call run. */
+    registerGroupStart(toolCallId: string): void {
+        this.groupStartToolCallIds.add(toolCallId);
+        while (this.groupStartToolCallIds.size > this.maxRetainedToolCalls) {
+            const oldest = this.groupStartToolCallIds.values().next().value;
+            if (typeof oldest !== "string") break;
+            this.groupStartToolCallIds.delete(oldest);
+        }
+    }
+
     clear(): void {
         this.activeGroup = undefined;
         this.groupsByToolCallId.clear();
         this.groupsInInsertionOrder.length = 0;
         this.boundaryToolCallIds.clear();
+        this.groupStartToolCallIds.clear();
     }
 
     stats(): { readonly groups: number; readonly toolCalls: number } {

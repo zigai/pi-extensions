@@ -18,11 +18,14 @@ describe("codex look config", () => {
 
         expect(config.preserveTools).toEqual([]);
         expect(config.appearance).toEqual({
-            diffBackgroundStyle: "changed-spans",
+            diffBackgroundStyle: "two-tone",
+            diffLineNumberStyle: "dual",
             narrowDiffLayout: "paired",
             sideBySideLayout: "content-aware",
             addedRowBackground: null,
             deletedRowBackground: null,
+            addedContentBackground: null,
+            deletedContentBackground: null,
             instructionPathColor: null,
             dimUnchangedDiffText: false,
         });
@@ -40,6 +43,7 @@ describe("codex look config", () => {
         expect(config.writePreview).toEqual({ movingViewport: true });
         expect(config.syntax).toEqual({
             preloadLanguages: ["markdown", "bash", "python", "typescript", "javascript", "json"],
+            bracketPairColoring: true,
             projectLanguageDetection: { enabled: true },
         });
         expect(config.patches).toEqual({
@@ -55,10 +59,13 @@ describe("codex look config", () => {
         const config = parseCodexLookConfig({
             appearance: {
                 diffBackgroundStyle: "full-row",
+                diffLineNumberStyle: "single",
                 narrowDiffLayout: "traditional",
                 sideBySideLayout: "fixed",
                 addedRowBackground: "#123456",
                 deletedRowBackground: "#654321",
+                addedContentBackground: "#234567",
+                deletedContentBackground: "#765432",
                 instructionPathColor: "#AABBCC",
                 dimUnchangedDiffText: true,
             },
@@ -66,13 +73,28 @@ describe("codex look config", () => {
 
         expect(config.appearance).toEqual({
             diffBackgroundStyle: "full-row",
+            diffLineNumberStyle: "single",
             narrowDiffLayout: "traditional",
             sideBySideLayout: "fixed",
             addedRowBackground: "#123456",
             deletedRowBackground: "#654321",
+            addedContentBackground: "#234567",
+            deletedContentBackground: "#765432",
             instructionPathColor: "#AABBCC",
             dimUnchangedDiffText: true,
         });
+    });
+
+    it("keeps the previous compact diff appearance selectable", () => {
+        const config = parseCodexLookConfig({
+            appearance: {
+                diffBackgroundStyle: "changed-spans",
+                diffLineNumberStyle: "single",
+            },
+        });
+
+        expect(config.appearance.diffBackgroundStyle).toBe("changed-spans");
+        expect(config.appearance.diffLineNumberStyle).toBe("single");
     });
 
     it("allows the added-row background to inherit Pi explicitly", () => {
@@ -89,6 +111,14 @@ describe("codex look config", () => {
         });
 
         expect(config.toolCallIndicator).toEqual({ symbol: "▸", bold: false });
+    });
+
+    it("allows bracket pair coloring to be disabled", () => {
+        const config = parseCodexLookConfig({
+            syntax: { bracketPairColoring: false },
+        });
+
+        expect(config.syntax.bracketPairColoring).toBe(false);
     });
 
     it("ignores invalid config shapes with a safe warning", () => {
@@ -216,6 +246,24 @@ describe("codex look config", () => {
     });
 
     it("keeps checked-in config schema aligned with TypeBox source", () => {
+        expect(JSON.parse(readFileSync("config.schema.json", "utf8"))).toEqual(
+            codexLookConfigJsonSchema(),
+        );
+    });
+
+    it.each(["README.md", "docs/configuration.md"])(
+        "keeps the full default config synchronized in %s",
+        (filePath) => {
+            const markdown = readFileSync(filePath, "utf8");
+            const match = /```json\n(?<json>\{[\s\S]*?\})\n```/u.exec(markdown);
+            const json = match?.groups?.json;
+
+            expect(json).toBeDefined();
+            expect(JSON.parse(json ?? "{}")).toEqual(DEFAULT_CODEX_LOOK_CONFIG_JSON);
+        },
+    );
+
+    it("keeps the checked-in config schema synchronized", () => {
         expect(JSON.parse(readFileSync("config.schema.json", "utf8"))).toEqual(
             codexLookConfigJsonSchema(),
         );

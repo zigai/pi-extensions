@@ -1,9 +1,11 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { PierreAppearance } from "./types.ts";
 import { SYNTAX_THEME_APPEARANCE } from "../syntax/theme-assets.ts";
+import { strongerDiffBackgroundAnsi } from "./ansi-colors.ts";
 import {
     configuredDiffBackgroundAnsi,
     configuredDiffBackgroundStyle,
+    configuredDiffContentBackgroundAnsi,
     configuredDimUnchangedDiffText,
 } from "../rendering/core.ts";
 
@@ -39,17 +41,30 @@ export function getPierrePalette(theme: Theme): PierreTerminalPalette {
         configuredDiffBackgroundAnsi("insert") ?? theme.getBgAnsi("toolSuccessBg");
     const deletionBackground =
         configuredDiffBackgroundAnsi("delete") ?? theme.getBgAnsi("toolErrorBg");
-    const fullRowBackground = configuredDiffBackgroundStyle() === "full-row";
+    const backgroundStyle = configuredDiffBackgroundStyle();
+    const paintChangedRows = backgroundStyle === "full-row" || backgroundStyle === "two-tone";
+    const additionSpanBackground =
+        backgroundStyle === "two-tone"
+            ? (configuredDiffContentBackgroundAnsi("insert") ??
+              strongerDiffBackgroundAnsi(additionBackground, theme.getFgAnsi("toolDiffAdded")) ??
+              additionBackground)
+            : additionBackground;
+    const deletionSpanBackground =
+        backgroundStyle === "two-tone"
+            ? (configuredDiffContentBackgroundAnsi("delete") ??
+              strongerDiffBackgroundAnsi(deletionBackground, theme.getFgAnsi("toolDiffRemoved")) ??
+              deletionBackground)
+            : deletionBackground;
     return {
         appearance: getPierreAppearance(theme),
         contextFg: theme.getFgAnsi("toolDiffContext"),
         contextRowBg: "",
         additionFg: theme.getFgAnsi("toolDiffAdded"),
-        additionRowBg: fullRowBackground ? additionBackground : "",
-        additionSpanBg: additionBackground,
+        additionRowBg: paintChangedRows ? additionBackground : "",
+        additionSpanBg: additionSpanBackground,
         deletionFg: theme.getFgAnsi("toolDiffRemoved"),
-        deletionRowBg: fullRowBackground ? deletionBackground : "",
-        deletionSpanBg: deletionBackground,
+        deletionRowBg: paintChangedRows ? deletionBackground : "",
+        deletionSpanBg: deletionSpanBackground,
         emptyFg: theme.getFgAnsi("dim"),
         emptyRowBg: "",
         lineNumberFg: theme.getFgAnsi("dim"),
@@ -57,6 +72,6 @@ export function getPierrePalette(theme: Theme): PierreTerminalPalette {
         metadataBg: "",
         dividerFg: theme.getFgAnsi("dim"),
         dividerBg: "",
-        dimUnchangedText: configuredDimUnchangedDiffText() && !fullRowBackground,
+        dimUnchangedText: configuredDimUnchangedDiffText() && !paintChangedRows,
     };
 }

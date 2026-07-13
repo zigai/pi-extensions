@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import type TypeboxSchema from "typebox/schema";
-import type { NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
+import type { DiffLineNumberStyle, NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
 import type {
     DiffBackgroundStyle,
     ScriptPreviewHeaderLayout,
@@ -26,10 +26,13 @@ export type CodexLookConfig = {
     readonly preserveTools: readonly string[];
     readonly appearance: {
         readonly diffBackgroundStyle: DiffBackgroundStyle;
+        readonly diffLineNumberStyle: DiffLineNumberStyle;
         readonly narrowDiffLayout: NarrowDiffLayout;
         readonly sideBySideLayout: SideBySideLayout;
         readonly addedRowBackground: string | null;
         readonly deletedRowBackground: string | null;
+        readonly addedContentBackground: string | null;
+        readonly deletedContentBackground: string | null;
         readonly instructionPathColor: string | null;
         readonly dimUnchangedDiffText: boolean;
     };
@@ -51,6 +54,7 @@ export type CodexLookConfig = {
     };
     readonly syntax: {
         readonly preloadLanguages: readonly string[];
+        readonly bracketPairColoring: boolean;
         readonly projectLanguageDetection: {
             readonly enabled: boolean;
         };
@@ -83,11 +87,14 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
     appearance: {
-        diffBackgroundStyle: "changed-spans",
+        diffBackgroundStyle: "two-tone",
+        diffLineNumberStyle: "dual",
         narrowDiffLayout: "paired",
         sideBySideLayout: "content-aware",
         addedRowBackground: null,
         deletedRowBackground: null,
+        addedContentBackground: null,
+        deletedContentBackground: null,
         instructionPathColor: null,
         dimUnchangedDiffText: false,
     },
@@ -109,6 +116,7 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
     },
     syntax: {
         preloadLanguages: ["markdown", "bash", "python", "typescript", "javascript", "json"],
+        bracketPairColoring: true,
         projectLanguageDetection: {
             enabled: true,
         },
@@ -132,17 +140,42 @@ const ScriptPreviewHeaderLayoutSchema = Type.Union([
     Type.Literal("inline"),
     Type.Literal("block"),
 ]);
-const DiffBackgroundStyleSchema = Type.Union([
-    Type.Literal("changed-spans"),
-    Type.Literal("full-row"),
-]);
-const NarrowDiffLayoutSchema = Type.Union([Type.Literal("paired"), Type.Literal("traditional")]);
-const SideBySideLayoutSchema = Type.Union([Type.Literal("content-aware"), Type.Literal("fixed")]);
+const DiffBackgroundStyleSchema = Type.Union(
+    [Type.Literal("changed-spans"), Type.Literal("two-tone"), Type.Literal("full-row")],
+    {
+        description: "Background treatment for changed diff rows and intraline spans.",
+    },
+);
+const DiffLineNumberStyleSchema = Type.Union([Type.Literal("single"), Type.Literal("dual")], {
+    description: "Show one relevant line number or aligned old and new line-number columns.",
+});
+const NarrowDiffLayoutSchema = Type.Union([Type.Literal("paired"), Type.Literal("traditional")], {
+    description: "Order similar deletion/addition rows together or in traditional blocks.",
+});
+const SideBySideLayoutSchema = Type.Union([Type.Literal("content-aware"), Type.Literal("fixed")], {
+    description: "Choose split diffs from content fit or a fixed terminal-width threshold.",
+});
 const SchemaReferenceSchema = Type.String();
-const OptionalHexColorSchema = Type.Union([
-    Type.String({ pattern: "^#[0-9A-Fa-f]{6}$" }),
-    Type.Null(),
-]);
+function optionalHexColorSchema(description: string) {
+    return Type.Union([Type.String({ pattern: "^#[0-9A-Fa-f]{6}$" }), Type.Null()], {
+        description,
+    });
+}
+const AddedRowBackgroundSchema = optionalHexColorSchema(
+    "Subtle addition-row background; null derives it from the active Pi theme.",
+);
+const DeletedRowBackgroundSchema = optionalHexColorSchema(
+    "Subtle deletion-row background; null derives it from the active Pi theme.",
+);
+const AddedContentBackgroundSchema = optionalHexColorSchema(
+    "Stronger added intraline-span background; null derives a contrasting shade.",
+);
+const DeletedContentBackgroundSchema = optionalHexColorSchema(
+    "Stronger deleted intraline-span background; null derives a contrasting shade.",
+);
+const InstructionPathColorSchema = optionalHexColorSchema(
+    "Instruction-file path foreground; null inherits the active Pi theme.",
+);
 const StringArraySchema = Type.Array(Type.String());
 const FormatterCommandSchema = Type.Array(Type.String({ minLength: 1 }), { minItems: 1 });
 const FormatterCommandsSchema = Type.Record(Type.String(), FormatterCommandSchema);
@@ -188,6 +221,12 @@ const SyntaxProjectLanguageDetectionConfigSchema = Type.Object(
 const SyntaxConfigSchema = Type.Object(
     {
         preloadLanguages: Type.Optional(StringArraySchema),
+        bracketPairColoring: Type.Optional(
+            Type.Boolean({
+                description:
+                    "Color matching bracket pairs; false preserves the syntax theme foreground.",
+            }),
+        ),
         projectLanguageDetection: Type.Optional(SyntaxProjectLanguageDetectionConfigSchema),
     },
     { additionalProperties: false },
@@ -213,12 +252,17 @@ const ScriptPreviewConfigSchema = Type.Object(
 const AppearanceConfigSchema = Type.Object(
     {
         diffBackgroundStyle: Type.Optional(DiffBackgroundStyleSchema),
+        diffLineNumberStyle: Type.Optional(DiffLineNumberStyleSchema),
         narrowDiffLayout: Type.Optional(NarrowDiffLayoutSchema),
         sideBySideLayout: Type.Optional(SideBySideLayoutSchema),
-        addedRowBackground: Type.Optional(OptionalHexColorSchema),
-        deletedRowBackground: Type.Optional(OptionalHexColorSchema),
-        instructionPathColor: Type.Optional(OptionalHexColorSchema),
-        dimUnchangedDiffText: Type.Optional(Type.Boolean()),
+        addedRowBackground: Type.Optional(AddedRowBackgroundSchema),
+        deletedRowBackground: Type.Optional(DeletedRowBackgroundSchema),
+        addedContentBackground: Type.Optional(AddedContentBackgroundSchema),
+        deletedContentBackground: Type.Optional(DeletedContentBackgroundSchema),
+        instructionPathColor: Type.Optional(InstructionPathColorSchema),
+        dimUnchangedDiffText: Type.Optional(
+            Type.Boolean({ description: "Dim unchanged text around changed intraline spans." }),
+        ),
     },
     { additionalProperties: false },
 );
@@ -245,12 +289,19 @@ const CodexLookConfigJsonSchema = Type.Object(
             Type.Object(
                 {
                     diffBackgroundStyle: Type.Optional(DiffBackgroundStyleSchema),
+                    diffLineNumberStyle: Type.Optional(DiffLineNumberStyleSchema),
                     narrowDiffLayout: Type.Optional(NarrowDiffLayoutSchema),
                     sideBySideLayout: Type.Optional(SideBySideLayoutSchema),
-                    addedRowBackground: Type.Optional(OptionalHexColorSchema),
-                    deletedRowBackground: Type.Optional(OptionalHexColorSchema),
-                    instructionPathColor: Type.Optional(OptionalHexColorSchema),
-                    dimUnchangedDiffText: Type.Optional(Type.Boolean()),
+                    addedRowBackground: Type.Optional(AddedRowBackgroundSchema),
+                    deletedRowBackground: Type.Optional(DeletedRowBackgroundSchema),
+                    addedContentBackground: Type.Optional(AddedContentBackgroundSchema),
+                    deletedContentBackground: Type.Optional(DeletedContentBackgroundSchema),
+                    instructionPathColor: Type.Optional(InstructionPathColorSchema),
+                    dimUnchangedDiffText: Type.Optional(
+                        Type.Boolean({
+                            description: "Dim unchanged text around changed intraline spans.",
+                        }),
+                    ),
                 },
                 {
                     additionalProperties: false,
@@ -306,6 +357,12 @@ const CodexLookConfigJsonSchema = Type.Object(
             Type.Object(
                 {
                     preloadLanguages: Type.Optional(StringArraySchema),
+                    bracketPairColoring: Type.Optional(
+                        Type.Boolean({
+                            description:
+                                "Color matching bracket pairs; false preserves the syntax theme foreground.",
+                        }),
+                    ),
                     projectLanguageDetection: Type.Optional(
                         Type.Object(
                             {
@@ -458,6 +515,9 @@ export function parseCodexLookConfig(
             diffBackgroundStyle:
                 appearance.diffBackgroundStyle ??
                 DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.diffBackgroundStyle,
+            diffLineNumberStyle:
+                appearance.diffLineNumberStyle ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.diffLineNumberStyle,
             narrowDiffLayout:
                 appearance.narrowDiffLayout ??
                 DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.narrowDiffLayout,
@@ -471,6 +531,12 @@ export function parseCodexLookConfig(
             deletedRowBackground:
                 appearance.deletedRowBackground ??
                 DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedRowBackground,
+            addedContentBackground:
+                appearance.addedContentBackground ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.addedContentBackground,
+            deletedContentBackground:
+                appearance.deletedContentBackground ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedContentBackground,
             instructionPathColor:
                 appearance.instructionPathColor ??
                 DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.instructionPathColor,
@@ -512,6 +578,9 @@ export function parseCodexLookConfig(
         syntax: {
             preloadLanguages:
                 syntax.preloadLanguages ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.preloadLanguages,
+            bracketPairColoring:
+                syntax.bracketPairColoring ??
+                DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.bracketPairColoring,
             projectLanguageDetection: {
                 enabled:
                     projectLanguageDetection.enabled ??

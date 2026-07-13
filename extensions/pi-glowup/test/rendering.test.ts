@@ -1,5 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
     collapseHome,
     configureRenderingAppearance,
@@ -44,6 +44,19 @@ const tokenTheme: CodexRenderTheme = {
     },
 };
 
+const classicAppearance = {
+    diffBackgroundStyle: "changed-spans",
+    diffLineNumberStyle: "single",
+    narrowDiffLayout: "paired",
+    sideBySideLayout: "content-aware",
+    addedRowBackground: null,
+    deletedRowBackground: null,
+    addedContentBackground: null,
+    deletedContentBackground: null,
+    instructionPathColor: null,
+    dimUnchangedDiffText: false,
+} as const;
+
 function expectLinesWithinWidth(lines: ReadonlyArray<string>, width: number): void {
     for (const line of lines) {
         expect(visibleWidth(line)).toBeLessThanOrEqual(width);
@@ -51,6 +64,8 @@ function expectLinesWithinWidth(lines: ReadonlyArray<string>, width: number): vo
 }
 
 describe("Codex rendering helpers", () => {
+    beforeEach(() => configureRenderingAppearance(classicAppearance));
+
     it("formats compact read and grep calls", () => {
         expect(formatReadAction(plainTheme, { path: "/tmp/example.ts", offset: 4, limit: 3 })).toBe(
             "Read /tmp/example.ts:4-6",
@@ -91,10 +106,13 @@ describe("Codex rendering helpers", () => {
     it("applies configured instruction and diff colors", () => {
         configureRenderingAppearance({
             diffBackgroundStyle: "full-row",
+            diffLineNumberStyle: "single",
             narrowDiffLayout: "paired",
             sideBySideLayout: "content-aware",
             addedRowBackground: "#123456",
             deletedRowBackground: "#654321",
+            addedContentBackground: null,
+            deletedContentBackground: null,
             instructionPathColor: "#AABBCC",
             dimUnchangedDiffText: false,
         });
@@ -112,10 +130,13 @@ describe("Codex rendering helpers", () => {
         } finally {
             configureRenderingAppearance({
                 diffBackgroundStyle: "changed-spans",
+                diffLineNumberStyle: "single",
                 narrowDiffLayout: "paired",
                 sideBySideLayout: "content-aware",
                 addedRowBackground: null,
                 deletedRowBackground: null,
+                addedContentBackground: null,
+                deletedContentBackground: null,
                 instructionPathColor: null,
                 dimUnchangedDiffText: false,
             });
@@ -156,6 +177,7 @@ describe("Codex rendering helpers", () => {
             {
                 path: "src/file.ts",
                 lines: [" 1 before", "-2 old", "+2 new"],
+                lineCoordinates: [{ oldLine: 1, newLine: 1 }, { oldLine: 2 }, { newLine: 2 }],
                 added: 1,
                 removed: 1,
             },
@@ -1085,6 +1107,86 @@ describe("Codex rendering helpers", () => {
         );
     });
 
+    it("renders dual gutters with distinct row and intraline backgrounds", () => {
+        configureRenderingAppearance({
+            ...classicAppearance,
+            diffBackgroundStyle: "two-tone",
+            diffLineNumberStyle: "dual",
+            addedRowBackground: "#002200",
+            deletedRowBackground: "#220000",
+            addedContentBackground: "#004400",
+            deletedContentBackground: "#440000",
+        });
+        const lines = renderCodexDiff(
+            plainTheme,
+            parseDiffSections("-10 const value = 100;\n+20 const value = 200;", "value.ts"),
+            true,
+        ).render(80);
+        const deletion = lines.find((line) => line.includes("100")) ?? "";
+        const addition = lines.find((line) => line.includes("200")) ?? "";
+        const deletedRow = "\u001b[48;2;34;0;0m";
+        const deletedContent = "\u001b[48;2;68;0;0m";
+        const addedRow = "\u001b[48;2;0;34;0m";
+        const addedContent = "\u001b[48;2;0;68;0m";
+
+        expect(deletion).toContain("10    -");
+        expect(addition).toContain("   20 +");
+        expect(deletion).toContain(deletedRow);
+        expect(deletion).toContain(deletedContent);
+        expect(deletion.indexOf(deletedRow, deletion.indexOf(deletedContent))).toBeGreaterThan(
+            deletion.indexOf(deletedContent),
+        );
+        expect(addition).toContain(addedRow);
+        expect(addition).toContain(addedContent);
+        expect(addition.indexOf(addedRow, addition.indexOf(addedContent))).toBeGreaterThan(
+            addition.indexOf(addedContent),
+        );
+        expectLinesWithinWidth(lines, 80);
+    });
+
+    it("uses the intraline shade for blank additions and deletions in two-tone mode", () => {
+        configureRenderingAppearance({
+            ...classicAppearance,
+            diffBackgroundStyle: "two-tone",
+            addedRowBackground: "#002200",
+            deletedRowBackground: "#220000",
+            addedContentBackground: "#004400",
+            deletedContentBackground: "#440000",
+        });
+        const width = 80;
+        const lines = renderCodexDiff(
+            plainTheme,
+            parseDiffSections(" 1 alpha\n+2 \n 2 omega\n 3 beta\n-4 \n 4 gamma", "blank-lines.txt"),
+            true,
+        ).render(width);
+        const addition = lines.find((line) => line.includes("2 +")) ?? "";
+        const deletion = lines.find((line) => line.includes("4 -")) ?? "";
+
+        expect(addition).toContain("\u001b[48;2;0;68;0m");
+        expect(deletion).toContain("\u001b[48;2;68;0;0m");
+        expect(visibleWidth(addition)).toBe(width);
+        expect(visibleWidth(deletion)).toBe(width);
+    });
+
+    it("derives shifted dual context coordinates in fallback diffs", () => {
+        configureRenderingAppearance({ ...classicAppearance, diffLineNumberStyle: "dual" });
+        const lines = renderCodexDiff(
+            plainTheme,
+            parseDiffSections(
+                "+2 inserted before context\n 2 shifted context\n-3 removed again\n 3 restored context",
+                "value.ts",
+            ),
+            true,
+        )
+            .render(100)
+            .map((line) => line.trimEnd());
+
+        expect(lines).toContain("      2 +inserted before context");
+        expect(lines).toContain("    2 3  shifted context");
+        expect(lines).toContain("    3   -removed again");
+        expect(lines).toContain("    3 3  restored context");
+    });
+
     it("paints only changed spans while preserving unchanged syntax", () => {
         const backgroundTheme: CodexRenderTheme = {
             ...plainTheme,
@@ -1132,10 +1234,13 @@ describe("Codex rendering helpers", () => {
     it("keeps full-row diff backgrounds as an option", () => {
         configureRenderingAppearance({
             diffBackgroundStyle: "full-row",
+            diffLineNumberStyle: "single",
             narrowDiffLayout: "paired",
             sideBySideLayout: "content-aware",
             addedRowBackground: null,
             deletedRowBackground: null,
+            addedContentBackground: null,
+            deletedContentBackground: null,
             instructionPathColor: null,
             dimUnchangedDiffText: false,
         });
@@ -1158,15 +1263,18 @@ describe("Codex rendering helpers", () => {
             expect(
                 renderedLines
                     .filter((line) => line.includes("\u001b[4"))
-                    .every((line) => visibleWidth(line) === 79),
+                    .every((line) => visibleWidth(line) === 80),
             ).toBe(true);
         } finally {
             configureRenderingAppearance({
                 diffBackgroundStyle: "changed-spans",
+                diffLineNumberStyle: "single",
                 narrowDiffLayout: "paired",
                 sideBySideLayout: "content-aware",
                 addedRowBackground: null,
                 deletedRowBackground: null,
+                addedContentBackground: null,
+                deletedContentBackground: null,
                 instructionPathColor: null,
                 dimUnchangedDiffText: false,
             });
@@ -1222,7 +1330,7 @@ describe("Codex rendering helpers", () => {
         expectLinesWithinWidth(lines, width);
     });
 
-    it("keeps compact diff previews clear of the terminal's final cell", () => {
+    it("fills the terminal's final cell in compact diff previews", () => {
         const width = 78;
         const lines = renderCodexDiff(
             plainTheme,
@@ -1242,7 +1350,7 @@ describe("Codex rendering helpers", () => {
 
         expect(lines).toHaveLength(1);
         expect(lines[0]).toContain("…");
-        expect(visibleWidth(lines[0] ?? "")).toBeLessThan(width);
+        expect(visibleWidth(lines[0] ?? "")).toBe(width);
     });
 
     it("preserves every character when diff content wraps", () => {

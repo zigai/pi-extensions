@@ -23,9 +23,27 @@
             },
             {
               "type": "string",
+              "const": "two-tone"
+            },
+            {
+              "type": "string",
               "const": "full-row"
             }
-          ]
+          ],
+          "description": "Background treatment for changed diff rows and intraline spans."
+        },
+        "diffLineNumberStyle": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "single"
+            },
+            {
+              "type": "string",
+              "const": "dual"
+            }
+          ],
+          "description": "Show one relevant line number or aligned old and new line-number columns."
         },
         "narrowDiffLayout": {
           "anyOf": [
@@ -37,7 +55,8 @@
               "type": "string",
               "const": "traditional"
             }
-          ]
+          ],
+          "description": "Order similar deletion/addition rows together or in traditional blocks."
         },
         "sideBySideLayout": {
           "anyOf": [
@@ -49,7 +68,8 @@
               "type": "string",
               "const": "fixed"
             }
-          ]
+          ],
+          "description": "Choose split diffs from content fit or a fixed terminal-width threshold."
         },
         "addedRowBackground": {
           "anyOf": [
@@ -60,7 +80,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Subtle addition-row background; null derives it from the active Pi theme."
         },
         "deletedRowBackground": {
           "anyOf": [
@@ -71,7 +92,32 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Subtle deletion-row background; null derives it from the active Pi theme."
+        },
+        "addedContentBackground": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stronger added intraline-span background; null derives a contrasting shade."
+        },
+        "deletedContentBackground": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stronger deleted intraline-span background; null derives a contrasting shade."
         },
         "instructionPathColor": {
           "anyOf": [
@@ -82,19 +128,24 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Instruction-file path foreground; null inherits the active Pi theme."
         },
         "dimUnchangedDiffText": {
+          "description": "Dim unchanged text around changed intraline spans.",
           "type": "boolean"
         }
       },
       "additionalProperties": false,
       "default": {
-        "diffBackgroundStyle": "changed-spans",
+        "diffBackgroundStyle": "two-tone",
+        "diffLineNumberStyle": "dual",
         "narrowDiffLayout": "paired",
         "sideBySideLayout": "content-aware",
         "addedRowBackground": null,
         "deletedRowBackground": null,
+        "addedContentBackground": null,
+        "deletedContentBackground": null,
         "instructionPathColor": null,
         "dimUnchangedDiffText": false
       }
@@ -194,6 +245,10 @@
             "type": "string"
           }
         },
+        "bracketPairColoring": {
+          "description": "Color matching bracket pairs; false preserves the syntax theme foreground.",
+          "type": "boolean"
+        },
         "projectLanguageDetection": {
           "type": "object",
           "properties": {
@@ -210,6 +265,7 @@
       "additionalProperties": false,
       "default": {
         "preloadLanguages": ["markdown", "bash", "python", "typescript", "javascript", "json"],
+        "bracketPairColoring": true,
         "projectLanguageDetection": {
           "enabled": true
         }

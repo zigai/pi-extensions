@@ -9,10 +9,12 @@ export type ToolLifecycleLabels = {
 export type ToolLifecycleContext = {
     readonly isPartial: boolean;
     readonly argsComplete?: boolean;
+    readonly result?: unknown;
 };
 
 /** Returns whether a tool call is still receiving arguments or executing. */
 export function isActiveToolCall(context: ToolLifecycleContext): boolean {
+    if (context.result !== undefined) return false;
     return context.isPartial || context.argsComplete === false;
 }
 

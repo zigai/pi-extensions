@@ -40,6 +40,11 @@ type EditLineNumberState = {
 
 const editLineNumbers = new Map<string, EditLineNumberState>();
 
+/** Drops session-scoped edit lookup state so old async work cannot repaint a replacement session. */
+export function clearStreamingEditRenderingState(): void {
+    editLineNumbers.clear();
+}
+
 export type EditCallRenderContext = {
     readonly isError: boolean;
     readonly isPartial: boolean;
@@ -154,8 +159,10 @@ export function resolveStreamingEditLineNumber(
             targetState.startLine = startLine;
         })
         .finally(() => {
-            if (targetState.pending === request) targetState.pending = undefined;
-            invalidate();
+            if (editLineNumbers.get(toolCallId) === targetState && targetState.key === targetKey) {
+                if (targetState.pending === request) targetState.pending = undefined;
+                invalidate();
+            }
         });
     targetState.pending = request;
     return undefined;

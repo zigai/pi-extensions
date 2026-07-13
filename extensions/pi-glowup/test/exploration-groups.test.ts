@@ -92,6 +92,20 @@ describe("exploration groups", () => {
         expect(second).toEqual({ kind: "owner", actions: ["Read b.ts"], active: false });
     });
 
+    it("preserves historical assistant-message group boundaries during replay", () => {
+        const store = new ExplorationGroupStore();
+        store.registerGroupStart("first");
+        store.registerGroupStart("third");
+
+        const first = store.register({ toolCallId: "first", invalidate: noop }, "Read a.ts");
+        const second = store.register({ toolCallId: "second", invalidate: noop }, "Search a");
+        const third = store.register({ toolCallId: "third", invalidate: noop }, "Read b.ts");
+
+        expect(first).toMatchObject({ kind: "owner", actions: ["Read a.ts"] });
+        expect(second).toEqual({ kind: "child" });
+        expect(third).toEqual({ kind: "owner", actions: ["Read b.ts"], active: false });
+    });
+
     it("does not let a repainted older boundary close a newer exploration group", () => {
         const store = new ExplorationGroupStore();
 

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { Component } from "@earendil-works/pi-tui";
-import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import { configureRenderingAppearance, type CodexRenderTheme } from "../src/rendering/core.ts";
 import {
     renderSuccessfulWriteResultFallback,
     renderWriteCallPreview,
@@ -30,7 +30,22 @@ const dimMarkerTheme: CodexRenderTheme = {
     },
 };
 
+const defaultAppearance = {
+    diffBackgroundStyle: "two-tone",
+    diffLineNumberStyle: "dual",
+    narrowDiffLayout: "paired",
+    sideBySideLayout: "content-aware",
+    addedRowBackground: null,
+    deletedRowBackground: null,
+    addedContentBackground: null,
+    deletedContentBackground: null,
+    instructionPathColor: null,
+    dimUnchangedDiffText: false,
+} as const;
+
 describe("write rendering", () => {
+    beforeEach(() => configureRenderingAppearance(defaultAppearance));
+
     it("renders successful write content from call arguments", () => {
         const component = renderWriteCallPreview(
             { path: "src/example.ts", content: "export const value = 1;\n" },
@@ -96,8 +111,8 @@ describe("write rendering", () => {
             { isError: false, isPartial: true, expanded: false },
         );
 
-        expect(completed.render(140).join("\n")).toContain("<dim>1 </dim>+");
-        expect(streaming.render(140).join("\n")).toContain("<dim>1 </dim>+");
+        expect(completed.render(140).join("\n")).toContain("<dim>  1 </dim>+");
+        expect(streaming.render(140).join("\n")).toContain("<dim>  1 </dim>+");
     });
 
     it("renders streaming write content with a moving tail viewport", () => {

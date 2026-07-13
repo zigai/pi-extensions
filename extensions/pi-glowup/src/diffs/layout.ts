@@ -4,6 +4,7 @@ import { cleanDiffLine } from "./highlight.ts";
 
 export type NarrowDiffLayout = "paired" | "traditional";
 export type SideBySideLayout = "content-aware" | "fixed";
+export type DiffLineNumberStyle = "single" | "dual";
 
 export type ReplacementLinePair = {
     readonly deletionIndex: number;
@@ -25,6 +26,7 @@ export function shouldRenderSideBySide(
     width: number,
     metadata: FileDiffMetadata,
     layout: SideBySideLayout,
+    lineNumberStyle: DiffLineNumberStyle = "single",
 ): boolean {
     if (layout === "fixed") {
         return width >= FIXED_SIDE_BY_SIDE_MIN_WIDTH;
@@ -42,7 +44,9 @@ export function shouldRenderSideBySide(
         return false;
     }
 
-    const unifiedContentWidth = Math.max(8, width - lineNumberWidth - 2);
+    const unifiedGutterWidth =
+        lineNumberStyle === "dual" ? lineNumberWidth * 2 + 4 : lineNumberWidth + 2;
+    const unifiedContentWidth = Math.max(8, width - unifiedGutterWidth);
     let splitRows = 0;
     let unifiedRows = 0;
     let comparableRuns = 0;

@@ -17,7 +17,8 @@ import {
     changedTextRanges,
     type TextRange,
 } from "../diffs/intraline.ts";
-import type { NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
+import { strongerDiffBackgroundAnsi } from "../diffs/ansi-colors.ts";
+import type { DiffLineNumberStyle, NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
@@ -28,16 +29,21 @@ export type CodexRenderTheme = {
     readonly fg: (token: ThemeColor, text: string) => string;
     readonly bg?: (token: CodexRenderBg, text: string) => string;
     readonly bold: (text: string) => string;
+    readonly getFgAnsi?: (token: ThemeColor) => string;
+    readonly getBgAnsi?: (token: CodexRenderBg) => string;
 };
 
-export type DiffBackgroundStyle = "changed-spans" | "full-row";
+export type DiffBackgroundStyle = "changed-spans" | "two-tone" | "full-row";
 
 export type RenderingAppearance = {
     readonly diffBackgroundStyle: DiffBackgroundStyle;
+    readonly diffLineNumberStyle: DiffLineNumberStyle;
     readonly narrowDiffLayout: NarrowDiffLayout;
     readonly sideBySideLayout: SideBySideLayout;
     readonly addedRowBackground: string | null;
     readonly deletedRowBackground: string | null;
+    readonly addedContentBackground: string | null;
+    readonly deletedContentBackground: string | null;
     readonly instructionPathColor: string | null;
     readonly dimUnchangedDiffText: boolean;
 };
@@ -48,14 +54,18 @@ export type ToolCallIndicator = {
 };
 
 let renderingAppearance: RenderingAppearance = {
-    diffBackgroundStyle: "changed-spans",
+    diffBackgroundStyle: "two-tone",
+    diffLineNumberStyle: "dual",
     narrowDiffLayout: "paired",
     sideBySideLayout: "content-aware",
     addedRowBackground: null,
     deletedRowBackground: null,
+    addedContentBackground: null,
+    deletedContentBackground: null,
     instructionPathColor: null,
     dimUnchangedDiffText: false,
 };
+let renderingAppearanceVersion = 0;
 
 let toolCallIndicator: ToolCallIndicator = {
     symbol: "•",
@@ -65,6 +75,12 @@ let toolCallIndicator: ToolCallIndicator = {
 /** Applies user-configured semantic colors used by all renderer families. */
 export function configureRenderingAppearance(appearance: RenderingAppearance): void {
     renderingAppearance = { ...appearance };
+    renderingAppearanceVersion += 1;
+}
+
+/** Returns a monotonic version for invalidating components that depend on appearance globals. */
+export function configuredRenderingAppearanceVersion(): number {
+    return renderingAppearanceVersion;
 }
 
 /** Applies user-configured tool-call indicator text used by all renderer families. */
@@ -88,9 +104,23 @@ export function configuredDiffBackgroundAnsi(kind: "insert" | "delete"): string 
     return color === null ? undefined : trueColorOpen(color, true);
 }
 
+/** Returns a configured semantic intraline background ANSI opener when overridden. */
+export function configuredDiffContentBackgroundAnsi(kind: "insert" | "delete"): string | undefined {
+    const color =
+        kind === "insert"
+            ? renderingAppearance.addedContentBackground
+            : renderingAppearance.deletedContentBackground;
+    return color === null ? undefined : trueColorOpen(color, true);
+}
+
 /** Returns the configured placement strategy for semantic diff backgrounds. */
 export function configuredDiffBackgroundStyle(): DiffBackgroundStyle {
     return renderingAppearance.diffBackgroundStyle;
+}
+
+/** Returns the configured compact unified line-number gutter style. */
+export function configuredDiffLineNumberStyle(): DiffLineNumberStyle {
+    return renderingAppearance.diffLineNumberStyle;
 }
 
 /** Returns how replacement rows are ordered when a diff uses one column. */
@@ -111,8 +141,14 @@ export function configuredDimUnchangedDiffText(): boolean {
 export type DiffSection = {
     readonly path?: string;
     readonly lines: ReadonlyArray<string>;
+    readonly lineCoordinates?: ReadonlyArray<DiffLineCoordinates | undefined>;
     readonly added: number;
     readonly removed: number;
+};
+
+export type DiffLineCoordinates = {
+    readonly oldLine?: number;
+    readonly newLine?: number;
 };
 
 export const MUTATION_DIFF_PREVIEW_ROWS = 6;
@@ -165,8 +201,6 @@ type ScriptPreview = {
 const diffLinePattern = /^([+\- ])(\s*\d*)\s(.*)$/;
 const ellipsisLinePattern = /^\s+\.\.\.$/;
 const omissionLinePattern = /^\s+…(?:\s+.*)?$/u;
-// Avoid a terminal's pending-wrap state when a compact diff row ends in the final cell.
-const DIFF_TERMINAL_GUARD_COLUMNS = 1;
 const addCountPattern = /^\+\s*\d+\s/;
 const removeCountPattern = /^-\s*\d+\s/;
 const heredocOpenPattern =
@@ -2331,6 +2365,7 @@ function makeDiffSection(path: string | undefined, lines: ReadonlyArray<string>)
     const visibleLines = trimEdgeEllipsisLines(lines);
     const section = {
         lines: visibleLines,
+        lineCoordinates: deriveDiffLineCoordinates(visibleLines),
         added: visibleLines.filter((line) => addCountPattern.test(line)).length,
         removed: visibleLines.filter((line) => removeCountPattern.test(line)).length,
     };
@@ -2339,6 +2374,31 @@ function makeDiffSection(path: string | undefined, lines: ReadonlyArray<string>)
         return section;
     }
     return { ...section, path };
+}
+
+function deriveDiffLineCoordinates(
+    lines: ReadonlyArray<string>,
+): ReadonlyArray<DiffLineCoordinates | undefined> {
+    let lineDelta = 0;
+    return lines.map((line) => {
+        const parsed = parseDiffLine(line);
+        if (parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission") {
+            return undefined;
+        }
+        const lineNumber = Number(normalizedDiffLineNumber(parsed.lineNumber));
+        if (!Number.isSafeInteger(lineNumber) || lineNumber < 1) {
+            return undefined;
+        }
+        if (parsed.kind === "delete") {
+            lineDelta -= 1;
+            return { oldLine: lineNumber };
+        }
+        if (parsed.kind === "insert") {
+            lineDelta += 1;
+            return { newLine: lineNumber };
+        }
+        return { oldLine: lineNumber, newLine: lineNumber + lineDelta };
+    });
 }
 
 function trimEdgeEllipsisLines(lines: ReadonlyArray<string>): string[] {
@@ -2393,24 +2453,48 @@ function normalizedDiffLineNumber(lineNumber: string): string {
     return lineNumber.trim();
 }
 
-function formatDiffLineNumber(lineNumber: string, width: number): string {
-    const normalized = normalizedDiffLineNumber(lineNumber);
+function formatDiffLineNumber(lineNumber: string | number, width: number): string {
+    const normalized = normalizedDiffLineNumber(String(lineNumber));
     if (normalized.length === 0) {
         return " ".repeat(Math.max(0, width));
     }
     return normalized.padStart(Math.max(normalized.length, width), " ");
 }
 
-function diffLineNumberWidth(lines: ReadonlyArray<string>): number {
+function diffLineNumberWidth(
+    lines: ReadonlyArray<string>,
+    coordinates: ReadonlyArray<DiffLineCoordinates | undefined> | undefined,
+): number {
     let width = 0;
-    for (const line of lines) {
+    for (const [index, line] of lines.entries()) {
         const parsed = parseDiffLine(line);
         if (parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission") {
             continue;
         }
         width = Math.max(width, normalizedDiffLineNumber(parsed.lineNumber).length);
+        const rowCoordinates = coordinates?.[index];
+        width = Math.max(
+            width,
+            rowCoordinates?.oldLine === undefined ? 0 : String(rowCoordinates.oldLine).length,
+            rowCoordinates?.newLine === undefined ? 0 : String(rowCoordinates.newLine).length,
+        );
     }
     return width;
+}
+
+function diffLineNumberText(
+    kind: "insert" | "delete" | "context",
+    lineNumber: string,
+    width: number,
+    coordinates: DiffLineCoordinates | undefined,
+): string {
+    if (configuredDiffLineNumberStyle() === "single") {
+        return `${formatDiffLineNumber(lineNumber, width)} `;
+    }
+
+    const oldLine = coordinates?.oldLine ?? (kind === "insert" ? "" : lineNumber);
+    const newLine = coordinates?.newLine ?? (kind === "delete" ? "" : lineNumber);
+    return `${formatDiffLineNumber(oldLine, width)} ${formatDiffLineNumber(newLine, width)} `;
 }
 
 function changedRangesForDiffLines(
@@ -2493,10 +2577,11 @@ function renderDiffRow(
         readonly maxWrappedRows?: number;
         readonly highlightedContent?: string;
         readonly changedRanges?: readonly TextRange[];
+        readonly lineCoordinates?: DiffLineCoordinates;
     },
 ): string[] {
     const parsed = parseDiffLine(line);
-    const rowWidth = Math.max(1, width - DIFF_TERMINAL_GUARD_COLUMNS);
+    const rowWidth = Math.max(1, width);
     const prefixWidth = visibleWidth(leftPrefix);
     const contentWidth = Math.max(1, rowWidth - prefixWidth);
 
@@ -2525,10 +2610,12 @@ function renderDiffRow(
         sign = "-";
     }
 
-    const lineNumber = `${formatDiffLineNumber(
+    const lineNumber = diffLineNumberText(
+        parsed.kind,
         parsed.lineNumber,
         options?.lineNumberWidth ?? normalizedDiffLineNumber(parsed.lineNumber).length,
-    )} `;
+        options?.lineCoordinates,
+    );
     const lineNumberWidth = visibleWidth(lineNumber);
     const rowPrefix = `${lineNumber}${sign}`;
     const wrapPrefix = `${" ".repeat(lineNumberWidth)} `;
@@ -2546,7 +2633,7 @@ function renderDiffRow(
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);
         const row = truncateToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
-        return [paintDiffRowBackground(parsed.kind, row, rowWidth, theme)];
+        return [paintEmptyDiffRowBackground(parsed.kind, row, rowWidth, theme)];
     }
 
     const wrappedContent = wrapDiffText(styledContent, availableWidth, options?.maxWrappedRows);
@@ -2562,31 +2649,58 @@ function renderDiffRow(
     });
 }
 
+function paintEmptyDiffRowBackground(
+    kind: "insert" | "delete" | "context",
+    row: string,
+    rowWidth: number,
+    theme: CodexRenderTheme,
+): string {
+    if (kind === "context" || configuredDiffBackgroundStyle() !== "two-tone") {
+        return paintDiffRowBackground(kind, row, rowWidth, theme);
+    }
+
+    const padding = " ".repeat(Math.max(0, rowWidth - visibleWidth(row)));
+    const spanBackground = diffSpanBackground(kind, theme);
+    const contentRow =
+        spanBackground === undefined || padding.length === 0
+            ? row
+            : `${row}${spanBackground.open}${padding}${spanBackground.close}`;
+    return paintDiffRowBackground(kind, contentRow, rowWidth, theme);
+}
+
 function diffSpanBackground(
     kind: "insert" | "delete" | "context",
     theme: CodexRenderTheme,
 ): { readonly open: string; readonly close: string } | undefined {
-    if (kind === "context" || configuredDiffBackgroundStyle() !== "changed-spans") {
+    const style = configuredDiffBackgroundStyle();
+    if (kind === "context" || style === "full-row") {
         return undefined;
     }
-    const configuredBackground = configuredDiffBackgroundAnsi(kind);
+    const rowBackground = diffRowBackgroundAnsi(kind, theme);
+    const configuredBackground =
+        style === "two-tone" ? configuredDiffContentBackgroundAnsi(kind) : rowBackground;
     if (configuredBackground !== undefined) {
-        return { open: configuredBackground, close: ansiStyles.bgColor.close };
+        return {
+            open: configuredBackground,
+            close:
+                style === "two-tone" && rowBackground !== undefined
+                    ? rowBackground
+                    : ansiStyles.bgColor.close,
+        };
     }
-    if (theme.bg === undefined) {
-        return undefined;
+    if (style === "two-tone" && rowBackground !== undefined) {
+        const semanticForeground = diffSemanticForegroundAnsi(kind, theme);
+        const stronger =
+            semanticForeground === undefined
+                ? undefined
+                : strongerDiffBackgroundAnsi(rowBackground, semanticForeground);
+        if (stronger !== undefined) {
+            return { open: stronger, close: rowBackground };
+        }
     }
-
-    const sentinel = "__PI_CODEX_LOOK_DIFF_SPAN__";
-    const wrapped = theme.bg(kind === "insert" ? "toolSuccessBg" : "toolErrorBg", sentinel);
-    const sentinelIndex = wrapped.indexOf(sentinel);
-    if (sentinelIndex < 0) {
-        return undefined;
-    }
-    return {
-        open: wrapped.slice(0, sentinelIndex),
-        close: wrapped.slice(sentinelIndex + sentinel.length),
-    };
+    return rowBackground === undefined
+        ? undefined
+        : { open: rowBackground, close: ansiStyles.bgColor.close };
 }
 
 function paintDiffRowBackground(
@@ -2595,18 +2709,52 @@ function paintDiffRowBackground(
     rowWidth: number,
     theme: CodexRenderTheme,
 ): string {
-    if (kind === "context" || configuredDiffBackgroundStyle() !== "full-row") {
+    const style = configuredDiffBackgroundStyle();
+    if (kind === "context" || (style !== "full-row" && style !== "two-tone")) {
         return row;
     }
     const padding = " ".repeat(Math.max(0, rowWidth - visibleWidth(row)));
-    const configuredBackground = configuredDiffBackgroundAnsi(kind);
-    if (configuredBackground !== undefined) {
-        return `${configuredBackground}${row}${padding}${ansiStyles.bgColor.close}`;
-    }
-    if (theme.bg === undefined) {
+    const background = diffRowBackgroundAnsi(kind, theme);
+    if (background === undefined) {
         return row;
     }
-    return theme.bg(kind === "insert" ? "toolSuccessBg" : "toolErrorBg", `${row}${padding}`);
+    return `${background}${row}${padding}${ansiStyles.bgColor.close}`;
+}
+
+function diffRowBackgroundAnsi(
+    kind: "insert" | "delete",
+    theme: CodexRenderTheme,
+): string | undefined {
+    const configured = configuredDiffBackgroundAnsi(kind);
+    if (configured !== undefined) {
+        return configured;
+    }
+    const token = kind === "insert" ? "toolSuccessBg" : "toolErrorBg";
+    return theme.getBgAnsi?.(token) ?? extractStyledAnsi(theme.bg, token);
+}
+
+function diffSemanticForegroundAnsi(
+    kind: "insert" | "delete",
+    theme: CodexRenderTheme,
+): string | undefined {
+    const token = kind === "insert" ? "toolDiffAdded" : "toolDiffRemoved";
+    return theme.getFgAnsi?.(token) ?? extractStyledAnsi(theme.fg, token);
+}
+
+function extractStyledAnsi<TToken extends string>(
+    style: ((token: TToken, text: string) => string) | undefined,
+    token: TToken,
+): string | undefined {
+    if (style === undefined) {
+        return undefined;
+    }
+    const sentinel = "__PI_CODEX_LOOK_STYLE__";
+    const wrapped = style(token, sentinel);
+    const sentinelIndex = wrapped.indexOf(sentinel);
+    if (sentinelIndex <= 0) {
+        return undefined;
+    }
+    return wrapped.slice(0, sentinelIndex);
 }
 
 function styleDiffContent(
@@ -2859,7 +3007,10 @@ export function renderCodexDiff(
             }
             renderedSection = true;
 
-            const sectionLineNumberWidth = diffLineNumberWidth(section.lines);
+            const sectionLineNumberWidth = diffLineNumberWidth(
+                section.lines,
+                section.lineCoordinates,
+            );
             const highlightedContents = highlightDiffContents(section.lines, section.path);
             const changedRanges = changedRangesForDiffLines(section.lines);
             const renderLines = (
@@ -2874,6 +3025,9 @@ export function renderCodexDiff(
                         ...renderDiffRow(line, width, "    ", theme, {
                             ...(section.path === undefined ? {} : { path: section.path }),
                             lineNumberWidth: sectionLineNumberWidth,
+                            ...(section.lineCoordinates?.[index] === undefined
+                                ? {}
+                                : { lineCoordinates: section.lineCoordinates[index] }),
                             ...(highlightedContents[index] === undefined
                                 ? {}
                                 : { highlightedContent: highlightedContents[index] }),

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import type { CodexRenderTheme } from "../src/rendering/core.ts";
 import type { CodexLookRenderingAdapter } from "../src/tool-rendering/protocol.ts";
 import {
@@ -45,6 +46,49 @@ function compactRenderedText(text: string): string {
 }
 
 describe("third-party tool renderers", () => {
+    it("keeps every renderer family within tiny terminal widths", () => {
+        const cases: ReadonlyArray<{ readonly toolName: string; readonly args: unknown }> = [
+            { toolName: "agent_browser", args: { args: ["open", "https://example.com"] } },
+            { toolName: "mcp", args: { connect: "chrome-devtools" } },
+            { toolName: "finalize_plan", args: { markdown: "# Plan\n\nLong plan body" } },
+            {
+                toolName: "ask_user_question",
+                args: {
+                    questions: [
+                        {
+                            header: "Mode",
+                            question: "Which mode should be selected?",
+                            options: [{ label: "Safe", description: "Use safe mode" }],
+                        },
+                    ],
+                },
+            },
+            { toolName: "get_goal", args: {} },
+            { toolName: "Agent", args: { description: "Inspect renderer behavior" } },
+            { toolName: "web_run", args: { search_query: [{ q: "latest Pi documentation" }] } },
+            { toolName: "imagegen", args: { prompt: "long visual prompt ".repeat(30) } },
+            { toolName: "view_image", args: { path: "/tmp/世界/very-long-preview-name.png" } },
+            { toolName: "unknown_tool", args: { nested: { value: "hello 世界" } } },
+        ];
+
+        for (const testCase of cases) {
+            const renderer = createThirdPartyToolRenderer(testCase.toolName, {
+                labelMode: "lifecycle",
+            });
+            for (const width of [1, 8, 23, 50]) {
+                const lines = renderer
+                    .renderCall(testCase.args, plainTheme, renderContext)
+                    .render(width);
+                for (const line of lines) {
+                    expect(
+                        visibleWidth(stripAccentStyle(line)),
+                        `${testCase.toolName} exceeded width ${width}`,
+                    ).toBeLessThanOrEqual(width);
+                }
+            }
+        }
+    });
+
     it("uses passive codexLookRendering adapters when present", () => {
         type DbQueryArgs = {
             readonly sql: string;
@@ -717,6 +761,32 @@ describe("third-party tool renderers", () => {
         expect(lines.some((line) => line.includes("Second lighting line."))).toBe(true);
         expect(lines.some((line) => line.includes("Third material line."))).toBe(true);
         expect(rendered).not.toContain('"First composition line.');
+    });
+
+    it("summarizes imagegen results without exposing internal artifact paths", () => {
+        const renderer = createThirdPartyToolRenderer("imagegen");
+        const rendered = renderer
+            .renderResult(
+                {
+                    details: {
+                        images: [
+                            {
+                                latestPath:
+                                    "/home/user/.pi/agent/pi-codex-core/imagegen/private/latest.png",
+                            },
+                        ],
+                    },
+                },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("Generated 1 image");
+        expect(rendered).not.toContain("latest.png");
+        expect(rendered).not.toContain("/.pi/");
     });
 
     it("hides successful view_image attachment text results", () => {

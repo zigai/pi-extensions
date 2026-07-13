@@ -47,6 +47,7 @@ type FakeToolExecutionInstance = {
     readonly toolName: string;
     readonly builtInToolDefinition?: unknown;
     readonly toolDefinition?: unknown;
+    readonly result?: unknown;
 };
 
 type FakeToolExecutionPrototype = {
@@ -139,6 +140,30 @@ describe("tool execution patches", () => {
                 .render(80),
         ).toEqual(["result read"]);
         expect(prototype.getRenderShell.call(customInstance)).toBe("default");
+    });
+
+    it("passes persisted results to restored built-in call renderers", () => {
+        const prototype = createPrototype();
+        let receivedResult: unknown;
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: (_toolName, _args, _theme, context) => {
+                    receivedResult = context.result;
+                    return { render: () => ["restored"], invalidate: noop };
+                },
+                renderResult: () => undefined,
+            },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "write",
+            builtInToolDefinition: {},
+            result: { content: [], details: { diff: "+1 restored" } },
+        };
+
+        prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80);
+
+        expect(receivedResult).toEqual({ content: [], details: { diff: "+1 restored" } });
     });
 
     it("renders compatibility tool names through canonical built-in renderers", () => {
@@ -325,7 +350,7 @@ describe("tool execution patches", () => {
 
         const instance: FakeToolExecutionInstance = {
             toolName: "custom_tool",
-            toolDefinition: {},
+            toolDefinition: { renderCall: () => ({ render: () => [], invalidate: noop }) },
         };
 
         expect(prototype.getRenderShell.call(instance)).toBe("default");
@@ -344,7 +369,7 @@ describe("tool execution patches", () => {
 
         const instance: FakeToolExecutionInstance = {
             toolName: "apply_patch",
-            toolDefinition: {},
+            toolDefinition: { renderCall: () => ({ render: () => [], invalidate: noop }) },
         };
         const patch = `*** Begin Patch
 *** Update File: README.md
@@ -363,6 +388,40 @@ describe("tool execution patches", () => {
         ).toContain("Patch README.md (+1 -1)");
     });
 
+    it("passes persisted tool results to restored call renderers", () => {
+        const prototype = createPrototype();
+        installThirdPartyToolRendererPatch(undefined, prototype);
+        const patch = "*** Begin Patch\n*** Delete File: removed.ts\n*** End Patch";
+        const instance: FakeToolExecutionInstance = {
+            toolName: "apply_patch",
+            toolDefinition: {},
+            result: {
+                content: [{ type: "text", text: "Done" }],
+                details: {
+                    diff: "removed.ts\n-1 one\n-2 two\n",
+                    lineSummary: {
+                        files: [
+                            {
+                                action: "D",
+                                path: "removed.ts",
+                                addedLines: 0,
+                                removedLines: 2,
+                            },
+                        ],
+                    },
+                },
+            },
+        };
+
+        const rendered = prototype.getCallRenderer
+            .call(instance)?.({ patch }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("Patch removed.ts (-2)");
+        expect(rendered).toContain("2   -two");
+    });
+
     it("uses explicit Codex-look plugins over native built-in renderers", () => {
         const prototype = createPrototype();
         prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
@@ -373,7 +432,7 @@ describe("tool execution patches", () => {
         const instance: FakeToolExecutionInstance = {
             toolName: "apply_patch",
             builtInToolDefinition: {},
-            toolDefinition: {},
+            toolDefinition: { renderCall: () => ({ render: () => [], invalidate: noop }) },
         };
         const patch = `*** Begin Patch
 *** Add File: src/new.ts
@@ -400,6 +459,7 @@ describe("tool execution patches", () => {
         const instance: FakeToolExecutionInstance = {
             toolName: "db_query",
             toolDefinition: {
+                renderCall: () => ({ render: () => [], invalidate: noop }),
                 codexLookRendering: {
                     version: 1,
                     renderCall: () => ({
@@ -419,6 +479,33 @@ describe("tool execution patches", () => {
                 .render(80)
                 .join("\n"),
         ).toContain("DB Query select 1");
+    });
+
+    it("rebuilds cached renderers when a tool definition is replaced", () => {
+        const prototype = createPrototype();
+        installThirdPartyToolRendererPatch(undefined, prototype);
+        const makeInstance = (label: string): FakeToolExecutionInstance => ({
+            toolName: "dynamic_tool",
+            toolDefinition: {
+                codexLookRendering: {
+                    version: 1,
+                    renderCall: () => ({ kind: "call", label }),
+                },
+            },
+        });
+
+        const first = prototype.getCallRenderer
+            .call(makeInstance("First Definition"))?.({}, plainTheme, renderContext)
+            .render(80)
+            .join("\n");
+        const second = prototype.getCallRenderer
+            .call(makeInstance("Replacement Definition"))?.({}, plainTheme, renderContext)
+            .render(80)
+            .join("\n");
+
+        expect(first).toContain("First Definition");
+        expect(second).toContain("Replacement Definition");
+        expect(second).not.toContain("First Definition");
     });
 
     it("leaves third-party tools on their original render path when disabled", () => {

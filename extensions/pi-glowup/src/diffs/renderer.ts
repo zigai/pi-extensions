@@ -25,12 +25,15 @@ import type {
 import { shouldRenderSideBySide, type SideBySideLayout } from "./layout.ts";
 import { getPierrePalette, type PierreTerminalPalette } from "./theme.ts";
 import {
+    configuredDiffLineNumberStyle,
     configuredNarrowDiffLayout,
+    configuredRenderingAppearanceVersion,
     configuredSideBySideLayout,
     MUTATION_DIFF_PREVIEW_ROWS,
     selectSemanticDiffIndices,
     type SemanticDiffRowKind,
 } from "../rendering/core.ts";
+import { syntaxHighlightingVersion } from "../syntax/highlighter.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const DIFF_STYLE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.color.close}${ansiStyles.bgColor.close}`;
@@ -93,7 +96,7 @@ export function shouldRenderSideBySideDiff(
     metadata: PierreRenderableDiffPayload["metadata"],
     layout: SideBySideLayout,
 ): boolean {
-    return shouldRenderSideBySide(width, metadata, layout);
+    return shouldRenderSideBySide(width, metadata, layout, configuredDiffLineNumberStyle());
 }
 
 /** Renders a replayable Pierre diff payload with lazy syntax highlighting. */
@@ -154,6 +157,8 @@ class PierreDiffComponent implements Component {
     private highlighted: HighlightedDiffSet;
     private maxVisibleLines: number;
     private expanded: boolean;
+    private appearanceVersion: number;
+    private syntaxVersion: number;
     private refreshPromise: Promise<void> | undefined;
     private refreshTimer: ReturnType<typeof setTimeout> | undefined;
     private refreshKey: string | undefined;
@@ -175,6 +180,8 @@ class PierreDiffComponent implements Component {
         this.highlighted = emptyHighlightedDiffSet();
         this.maxVisibleLines = maxVisibleLines;
         this.expanded = expanded;
+        this.appearanceVersion = configuredRenderingAppearanceVersion();
+        this.syntaxVersion = syntaxHighlightingVersion();
         this.toolCallId = toolCallId;
         this.requestRender = requestRender;
         if (this.expanded || this.usesChangedSpanBackgrounds()) {
@@ -197,16 +204,23 @@ class PierreDiffComponent implements Component {
         const previousKey = refreshKeyFor(previousPayload);
         const nextKey = refreshKeyFor(payload);
         const nextPalette = getPierrePalette(theme);
+        const nextAppearanceVersion = configuredRenderingAppearanceVersion();
+        const nextSyntaxVersion = syntaxHighlightingVersion();
+        const syntaxChanged = this.syntaxVersion !== nextSyntaxVersion;
         const canReuseRenderedCache =
             previousPayload === payload &&
             this.maxVisibleLines === maxVisibleLines &&
             this.expanded === expanded &&
+            this.appearanceVersion === nextAppearanceVersion &&
+            !syntaxChanged &&
             pierrePalettesEqual(this.palette, nextPalette);
 
         this.payload = payload;
         this.palette = nextPalette;
         this.maxVisibleLines = maxVisibleLines;
         this.expanded = expanded;
+        this.appearanceVersion = nextAppearanceVersion;
+        this.syntaxVersion = nextSyntaxVersion;
         this.requestRender = requestRender;
         if (!this.expanded && !this.usesChangedSpanBackgrounds()) {
             this.highlighted = emptyHighlightedDiffSet();
@@ -216,7 +230,7 @@ class PierreDiffComponent implements Component {
         if (!canReuseRenderedCache) {
             this.invalidate();
         }
-        if (previousKey !== nextKey) {
+        if (previousKey !== nextKey || syntaxChanged) {
             this.highlighted = emptyHighlightedDiffSet();
             this.refreshPromise = undefined;
             this.clearRefreshTimer();
@@ -228,7 +242,19 @@ class PierreDiffComponent implements Component {
     }
 
     render(width: number): string[] {
-        const safeWidth = Math.max(24, Math.floor(width));
+        const safeWidth = Math.max(1, Math.floor(width));
+        const nextSyntaxVersion = syntaxHighlightingVersion();
+        if (this.syntaxVersion !== nextSyntaxVersion) {
+            this.syntaxVersion = nextSyntaxVersion;
+            this.highlighted = emptyHighlightedDiffSet();
+            this.refreshPromise = undefined;
+            this.clearRefreshTimer();
+            this.refreshKey = undefined;
+            this.invalidate();
+            if (this.expanded || this.usesChangedSpanBackgrounds()) {
+                this.maybeRefreshHighlightedDiff();
+            }
+        }
         this.highlightVisibleRenderIfPossible();
         if (this.cachedWidth === safeWidth && this.cachedLines !== undefined) {
             return this.cachedLines;
@@ -404,7 +430,12 @@ class PierreDiffComponent implements Component {
     }
 
     private usesChangedSpanBackgrounds(): boolean {
-        return this.palette.additionRowBg.length === 0 && this.palette.additionSpanBg.length > 0;
+        return (
+            (this.palette.additionSpanBg.length > 0 &&
+                this.palette.additionSpanBg !== this.palette.additionRowBg) ||
+            (this.palette.deletionSpanBg.length > 0 &&
+                this.palette.deletionSpanBg !== this.palette.deletionRowBg)
+        );
     }
 
     private clearRefreshTimer(): void {
@@ -420,7 +451,7 @@ class PierreDiffComponent implements Component {
 function renderPierreDiffSummary(payload: PierreSummaryDiffPayload, theme: Theme): Component {
     return {
         render(width: number): string[] {
-            const safeWidth = Math.max(24, Math.floor(width));
+            const safeWidth = Math.max(1, Math.floor(width));
             const changeStats = `${payload.stats.added.toLocaleString("en-US")} + / ${payload.stats.removed.toLocaleString("en-US")} -`;
             const headline = `${theme.fg("toolDiffContext", payload.path)} ${theme.fg("muted", changeStats)}`;
             const hint = "Use git diff or read the file directly to inspect the full change.";
@@ -655,8 +686,11 @@ function renderUnifiedRow(
 ): string[] {
     if (row.kind !== "line") {
         const lineNumberWidth = lineNumberWidthFor(metadata);
-        const text =
-            row.kind === "collapsed" ? ` ${" ".repeat(lineNumberWidth)} ${row.text}` : row.text;
+        const gutterWidth =
+            configuredDiffLineNumberStyle() === "dual"
+                ? lineNumberWidth * 2 + 3
+                : lineNumberWidth + 1;
+        const text = row.kind === "collapsed" ? `${" ".repeat(gutterWidth)} ${row.text}` : row.text;
         return [
             renderFullWidthLine(
                 [{ text, fg: row.fg, bg: row.bg }],
@@ -668,16 +702,23 @@ function renderUnifiedRow(
 
     const lineNumberWidth = lineNumberWidthFor(metadata);
     const marker = markerForLineType(row.lineType);
-    const firstPrefix = `${marker}${formatLineNumber(row.lineNumber, lineNumberWidth)} `;
+    const firstPrefix = unifiedDiffPrefix(row, marker, lineNumberWidth);
     const restPrefix = " ".repeat(visibleWidth(firstPrefix));
     const contentWidth = Math.max(8, width - visibleWidth(firstPrefix));
     const content = renderContent(row.spans, baseStyle({ fg: row.rowFg, bg: row.rowBg }));
     if (visibleWidth(content) === 0) {
-        const prefix = renderDiffPrefix(firstPrefix, row.rowFg, row.lineNumberFg, row.rowBg);
+        const prefix = renderUnifiedDiffPrefix(
+            firstPrefix,
+            lineNumberWidth,
+            row.rowFg,
+            row.lineNumberFg,
+            row.rowBg,
+        );
         if (row.lineType === "context") {
             return [`${prefix}${DIFF_STYLE_RESET}`];
         }
-        return [padRenderedLine(prefix, width, baseStyle({ fg: row.rowFg, bg: row.rowBg }))];
+        const rowStyle = baseStyle({ fg: row.rowFg, bg: row.rowBg });
+        return [padRenderedLine(prefix, width, rowStyle, blankContentStyle(row, rowStyle))];
     }
 
     const wrapped = wrapTextWithAnsi(content, contentWidth);
@@ -685,13 +726,37 @@ function renderUnifiedRow(
 
     return segments.map((segment, index) => {
         const prefix = index === 0 ? firstPrefix : restPrefix;
-        const currentPrefixAnsi = renderDiffPrefix(prefix, row.rowFg, row.lineNumberFg, row.rowBg);
+        const currentPrefixAnsi =
+            index === 0
+                ? renderUnifiedDiffPrefix(
+                      prefix,
+                      lineNumberWidth,
+                      row.rowFg,
+                      row.lineNumberFg,
+                      row.rowBg,
+                  )
+                : renderSegments(
+                      [{ text: prefix, fg: row.lineNumberFg, bg: row.rowBg }],
+                      baseStyle({ fg: row.lineNumberFg, bg: row.rowBg }),
+                  );
         return padRenderedLine(
             `${currentPrefixAnsi}${segment}`,
             width,
             baseStyle({ fg: row.rowFg, bg: row.rowBg }),
         );
     });
+}
+
+function unifiedDiffPrefix(
+    row: Extract<UnifiedDiffRow, { readonly kind: "line" }>,
+    marker: string,
+    lineNumberWidth: number,
+): string {
+    if (configuredDiffLineNumberStyle() === "single") {
+        const lineNumber = row.lineType === "deletion" ? row.oldLineNumber : row.newLineNumber;
+        return `${marker}${formatLineNumber(lineNumber, lineNumberWidth)} `;
+    }
+    return `${formatLineNumber(row.oldLineNumber, lineNumberWidth)} ${formatLineNumber(row.newLineNumber, lineNumberWidth)} ${marker} `;
 }
 
 function renderSplitRow(
@@ -737,16 +802,23 @@ function renderSplitRow(
 
 function renderSplitCell(cell: SplitDiffCell, width: number, lineNumberWidth: number): string[] {
     const marker = markerForLineType(cell.lineType);
-    const firstPrefix = `${marker}${formatLineNumber(cell.lineNumber, lineNumberWidth)} `;
+    const firstPrefix =
+        configuredDiffLineNumberStyle() === "dual"
+            ? `${formatLineNumber(cell.lineNumber, lineNumberWidth)} ${marker} `
+            : `${marker}${formatLineNumber(cell.lineNumber, lineNumberWidth)} `;
     const restPrefix = " ".repeat(visibleWidth(firstPrefix));
     const contentWidth = Math.max(8, width - visibleWidth(firstPrefix));
     const content = renderContent(cell.spans, baseStyle({ fg: cell.rowFg, bg: cell.rowBg }));
     if (visibleWidth(content) === 0) {
-        const prefix = renderDiffPrefix(firstPrefix, cell.rowFg, cell.lineNumberFg, cell.rowBg);
-        if (cell.lineType === "context" || cell.lineType === "empty") {
-            return [`${prefix}${DIFF_STYLE_RESET}`];
-        }
-        return [padRenderedLine(prefix, width, baseStyle({ fg: cell.rowFg, bg: cell.rowBg }))];
+        const prefix = renderSplitDiffPrefix(
+            firstPrefix,
+            lineNumberWidth,
+            cell.rowFg,
+            cell.lineNumberFg,
+            cell.rowBg,
+        );
+        const rowStyle = baseStyle({ fg: cell.rowFg, bg: cell.rowBg });
+        return [padRenderedLine(prefix, width, rowStyle, blankContentStyle(cell, rowStyle))];
     }
 
     const wrapped = wrapTextWithAnsi(content, contentWidth);
@@ -754,8 +826,9 @@ function renderSplitCell(cell: SplitDiffCell, width: number, lineNumberWidth: nu
 
     return segments.map((segment, index) => {
         const prefix = index === 0 ? firstPrefix : restPrefix;
-        const currentPrefixAnsi = renderDiffPrefix(
+        const currentPrefixAnsi = renderSplitDiffPrefix(
             prefix,
+            lineNumberWidth,
             cell.rowFg,
             cell.lineNumberFg,
             cell.rowBg,
@@ -766,6 +839,19 @@ function renderSplitCell(cell: SplitDiffCell, width: number, lineNumberWidth: nu
             baseStyle({ fg: cell.rowFg, bg: cell.rowBg }),
         );
     });
+}
+
+function renderSplitDiffPrefix(
+    prefix: string,
+    lineNumberWidth: number,
+    markerFg: string,
+    lineNumberFg: string,
+    rowBg: string,
+): string {
+    if (configuredDiffLineNumberStyle() === "single") {
+        return renderDiffPrefix(prefix, markerFg, lineNumberFg, rowBg);
+    }
+    return renderDiffPrefixAtMarker(prefix, lineNumberWidth + 1, markerFg, lineNumberFg, rowBg);
 }
 
 function renderDiffPrefix(
@@ -780,6 +866,36 @@ function renderDiffPrefix(
             { text: prefix.slice(1), fg: lineNumberFg, bg: rowBg },
         ],
         baseStyle({ fg: markerFg, bg: rowBg }),
+    );
+}
+
+function renderUnifiedDiffPrefix(
+    prefix: string,
+    lineNumberWidth: number,
+    markerFg: string,
+    lineNumberFg: string,
+    rowBg: string,
+): string {
+    if (configuredDiffLineNumberStyle() === "single") {
+        return renderDiffPrefix(prefix, markerFg, lineNumberFg, rowBg);
+    }
+    return renderDiffPrefixAtMarker(prefix, lineNumberWidth * 2 + 2, markerFg, lineNumberFg, rowBg);
+}
+
+function renderDiffPrefixAtMarker(
+    prefix: string,
+    markerIndex: number,
+    markerFg: string,
+    lineNumberFg: string,
+    rowBg: string,
+): string {
+    return renderSegments(
+        [
+            { text: prefix.slice(0, markerIndex), fg: lineNumberFg, bg: rowBg },
+            { text: prefix.slice(markerIndex, markerIndex + 1), fg: markerFg, bg: rowBg },
+            { text: prefix.slice(markerIndex + 1), fg: lineNumberFg, bg: rowBg },
+        ],
+        baseStyle({ fg: lineNumberFg, bg: rowBg }),
     );
 }
 
@@ -803,11 +919,25 @@ function renderFullWidthLine(
     return padRenderedLine(truncateToWidth(rendered, width, ""), width, base);
 }
 
-function padRenderedLine(line: string, width: number, base: AnsiStyle): string {
+function blankContentStyle(
+    line: Pick<SplitDiffCell, "contentBg" | "rowBg">,
+    rowStyle: AnsiStyle,
+): AnsiStyle {
+    return line.rowBg.length > 0 && line.contentBg !== line.rowBg
+        ? baseStyle({ ...rowStyle, bg: line.contentBg })
+        : rowStyle;
+}
+
+function padRenderedLine(
+    line: string,
+    width: number,
+    base: AnsiStyle,
+    paddingBase: AnsiStyle = base,
+): string {
     const targetWidth = Math.max(1, width);
     const truncated = truncateToWidth(line, targetWidth, "");
     const padding = Math.max(0, targetWidth - visibleWidth(truncated));
-    return `${truncated}${openAnsi(base)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;
+    return `${truncated}${openAnsi(paddingBase)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;
 }
 
 function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle): string {

@@ -8,6 +8,7 @@ import { buildPierreDiffPayload, createWriteSnapshot } from "../src/diffs/diff.t
 import { renderPierreDiff } from "../src/diffs/renderer.ts";
 import { loadHighlightedDiff } from "../src/diffs/highlight.ts";
 import {
+    configureRenderingAppearance,
     highlightShell,
     parseDiffSections,
     renderCodexDiff,
@@ -19,6 +20,7 @@ import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import {
     disposeSyntaxHighlighting,
+    configureSyntaxBracketPairColoring,
     highlightSyntaxCode,
     initializeSyntaxHighlighting,
 } from "../src/syntax/highlighter.ts";
@@ -37,6 +39,7 @@ const VARIABLE_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.pythonVariableIdentif
 const FUNCTION_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.pythonFunctionIdentifier);
 const BRACKET_PAIR_1_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.bracketPair[0]);
 const BRACKET_PAIR_2_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.bracketPair[1]);
+const NEUTRAL_PUNCTUATION_RGB_CODE = ansiRgbCode(SYNTAX_ACCENT_COLORS.neutralForegrounds[1]);
 
 function ansiRgbCode(hex: string): string {
     return `38;2;${Number.parseInt(hex.slice(1, 3), 16)};${Number.parseInt(hex.slice(3, 5), 16)};${Number.parseInt(hex.slice(5, 7), 16)}`;
@@ -205,6 +208,22 @@ describe("central syntax highlighting", () => {
         expect(rendered).toContain(BRACKET_PAIR_1_RGB_CODE);
         expect(rendered).toContain(BRACKET_PAIR_2_RGB_CODE);
         expect(rendered).toContain(`${STRING_RGB_CODE}m"(text)"`);
+    });
+
+    it("preserves syntax-theme bracket colors when pair coloring is disabled", () => {
+        configureSyntaxBracketPairColoring(false);
+        try {
+            const rendered = highlightSyntaxCode(
+                'const value = make([]Item, "(text)");',
+                "typescript",
+            ).join("\n");
+
+            expect(rendered).not.toContain(BRACKET_PAIR_1_RGB_CODE);
+            expect(rendered).not.toContain(BRACKET_PAIR_2_RGB_CODE);
+            expect(rendered).toContain(`${NEUTRAL_PUNCTUATION_RGB_CODE}m([]`);
+        } finally {
+            configureSyntaxBracketPairColoring(true);
+        }
     });
 
     it("falls back to plain lines for unknown languages", () => {
@@ -429,6 +448,18 @@ describe("central syntax highlighting", () => {
     });
 
     it("highlights fallback diff previews when a path is known", () => {
+        configureRenderingAppearance({
+            diffBackgroundStyle: "two-tone",
+            diffLineNumberStyle: "dual",
+            narrowDiffLayout: "paired",
+            sideBySideLayout: "content-aware",
+            addedRowBackground: null,
+            deletedRowBackground: null,
+            addedContentBackground: null,
+            deletedContentBackground: null,
+            instructionPathColor: null,
+            dimUnchangedDiffText: false,
+        });
         const rendered = renderCodexDiff(
             plainTheme,
             parseDiffSections(

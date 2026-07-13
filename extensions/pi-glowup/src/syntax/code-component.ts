@@ -3,6 +3,7 @@ import {
     getLoadedSyntaxHighlighterForLanguage,
     highlightSyntaxCode,
     loadSyntaxLanguageIfReady,
+    onSyntaxHighlightingStateChange,
 } from "./highlighter.ts";
 
 export type CodeOutputSyntax = {
@@ -13,6 +14,20 @@ export type CodeOutputSyntax = {
 
 const MAX_STRUCTURED_OUTPUT_DETECTION_CHARS = 64 * 1024;
 const pendingCodeOutputSyntaxLoads = new Map<string, Set<() => void>>();
+const activeCodeOutputSyntaxLoads = new Set<string>();
+
+onSyntaxHighlightingStateChange((status) => {
+    if (status === "ready") {
+        for (const language of pendingCodeOutputSyntaxLoads.keys()) {
+            requestPendingCodeOutputSyntaxLoad(language);
+        }
+        return;
+    }
+    if (status === "disabled" || status === "failed") {
+        pendingCodeOutputSyntaxLoads.clear();
+        activeCodeOutputSyntaxLoads.clear();
+    }
+});
 
 /** Highlights code-like output when a language or path is known; otherwise returns normalized plain lines. */
 export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | undefined): string[] {
@@ -39,22 +54,47 @@ export function scheduleCodeOutputSyntaxLoad(
     const pendingInvalidations = pendingCodeOutputSyntaxLoads.get(normalizedLanguage);
     if (pendingInvalidations !== undefined) {
         pendingInvalidations.add(invalidate);
+        requestPendingCodeOutputSyntaxLoad(normalizedLanguage);
         return;
     }
 
     const invalidations = new Set([invalidate]);
     pendingCodeOutputSyntaxLoads.set(normalizedLanguage, invalidations);
-    void loadSyntaxLanguageIfReady(normalizedLanguage)
+    requestPendingCodeOutputSyntaxLoad(normalizedLanguage);
+}
+
+function requestPendingCodeOutputSyntaxLoad(language: string): void {
+    if (activeCodeOutputSyntaxLoads.has(language)) {
+        return;
+    }
+    const invalidations = pendingCodeOutputSyntaxLoads.get(language);
+    if (invalidations === undefined) {
+        return;
+    }
+    const loaded = getLoadedSyntaxHighlighterForLanguage(language);
+    if (loaded !== undefined) {
+        pendingCodeOutputSyntaxLoads.delete(language);
+        for (const invalidate of invalidations) {
+            invalidate();
+        }
+        return;
+    }
+
+    activeCodeOutputSyntaxLoads.add(language);
+    void loadSyntaxLanguageIfReady(language)
         .then((loaded) => {
             if (loaded) {
+                pendingCodeOutputSyntaxLoads.delete(language);
                 for (const invalidatePendingPreview of invalidations) {
                     invalidatePendingPreview();
                 }
             }
         })
-        .catch(() => {})
+        .catch(() => {
+            pendingCodeOutputSyntaxLoads.delete(language);
+        })
         .finally(() => {
-            pendingCodeOutputSyntaxLoads.delete(normalizedLanguage);
+            activeCodeOutputSyntaxLoads.delete(language);
         });
 }
 

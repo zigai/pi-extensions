@@ -14,6 +14,14 @@ type SessionStartEvent = {
 
 type SessionStartContext = {
     readonly cwd: string;
+    readonly mode: "print" | "tui";
+    readonly ui: {
+        getToolsExpanded(): boolean;
+        setToolsExpanded(expanded: boolean): void;
+    };
+    readonly sessionManager: {
+        getBranch(): readonly unknown[];
+    };
     isProjectTrusted(): boolean;
 };
 
@@ -36,13 +44,19 @@ type ToolCallContext = {
 
 type ToolCallHandler = (event: ToolCallEvent, context: ToolCallContext) => Promise<void> | void;
 
-type SessionShutdownHandler = () => Promise<void> | void;
+type SessionShutdownEvent = {
+    readonly type: "session_shutdown";
+    readonly reason: "quit" | "reload";
+};
+
+type SessionShutdownHandler = (event: SessionShutdownEvent) => Promise<void> | void;
 
 class FakeExtensionApi {
     private readonly sessionStartHandlers: SessionStartHandler[] = [];
     private readonly sessionShutdownHandlers: SessionShutdownHandler[] = [];
     private readonly toolCallHandlers: ToolCallHandler[] = [];
     registeredToolCount = 0;
+    toolExpansionRefreshes = 0;
 
     registerTool(): void {
         this.registeredToolCount += 1;
@@ -65,12 +79,30 @@ class FakeExtensionApi {
         }
     }
 
-    async startSession(cwd: string, trusted: boolean): Promise<void> {
+    async startSession(
+        cwd: string,
+        trusted: boolean,
+        mode: "print" | "tui" = "print",
+    ): Promise<void> {
         for (const handler of this.sessionStartHandlers) {
             await handler(
                 { type: "session_start", reason: "startup" },
                 {
                     cwd,
+                    mode,
+                    ui: {
+                        getToolsExpanded() {
+                            return false;
+                        },
+                        setToolsExpanded: () => {
+                            this.toolExpansionRefreshes += 1;
+                        },
+                    },
+                    sessionManager: {
+                        getBranch() {
+                            return [];
+                        },
+                    },
                     isProjectTrusted() {
                         return trusted;
                     },
@@ -92,9 +124,9 @@ class FakeExtensionApi {
         );
     }
 
-    async shutdownSession(): Promise<void> {
+    async shutdownSession(reason: SessionShutdownEvent["reason"] = "quit"): Promise<void> {
         for (const handler of this.sessionShutdownHandlers) {
-            await handler();
+            await handler({ type: "session_shutdown", reason });
         }
     }
 }
@@ -132,6 +164,7 @@ describe("extension lifecycle", () => {
 
         expect(pi.registeredToolCount).toBe(0);
         expect(vi.getTimerCount()).toBe(0);
+        expect(isSyntaxHighlightingReady()).toBe(true);
 
         await pi.startSession(join(root, "project"), false);
 
@@ -163,6 +196,29 @@ describe("extension lifecycle", () => {
         );
 
         await pi.shutdownSession();
+    });
+
+    it("keeps syntax ready across reload teardown", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        const pi = new FakeExtensionApi();
+
+        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await pi.startSession(join(root, "project"), false);
+        await pi.shutdownSession("reload");
+
+        expect(isSyntaxHighlightingReady()).toBe(true);
+    });
+
+    it("refreshes retained tool components after TUI syntax startup", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        const pi = new FakeExtensionApi();
+
+        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await pi.startSession(join(root, "project"), false, "tui");
+
+        expect(pi.toolExpansionRefreshes).toBe(1);
     });
 
     it("does not block bash tool-call preflight on configured script formatters", async () => {

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createHighlighter, type BundledLanguage, type Highlighter } from "shiki";
 import { tokensToAnsiLines } from "./ansi.ts";
+import { configureBracketPairColoring } from "./brackets.ts";
 import {
     isBundledSyntaxLanguage,
     normalizeSyntaxLanguage,
@@ -52,6 +54,7 @@ export type SyntaxHighlighterDiagnostics = {
 };
 
 type SyntaxStateStatus = "disabled" | "failed" | "ready" | "uninitialized";
+type SyntaxStateListener = (status: SyntaxStateStatus) => void;
 
 type SyntaxWarningReporter = (message: string) => void;
 
@@ -107,6 +110,9 @@ const highlightedCodeCache = new Map<
     { readonly lines: string[]; readonly bytes: number }
 >();
 let highlightedCodeCacheBytes = 0;
+const syntaxStateListeners = new Set<SyntaxStateListener>();
+let syntaxRenderingVersion = 0;
+let activeConfigurationKey: string | undefined;
 
 export type SyntaxHighlighterFactory = typeof createHighlighter;
 
@@ -128,24 +134,87 @@ export async function initializeSyntaxHighlighting(
 
     const generation = syntaxGeneration;
     const createSyntaxHighlighter = options.createHighlighter ?? createHighlighter;
-    initializationPromise = initializeSyntaxHighlightingOnce(
-        env,
-        createSyntaxHighlighter,
-        options,
-    ).then((state) => {
+    initializationPromise = Promise.all([
+        syntaxConfigurationKey(env, options),
+        initializeSyntaxHighlightingOnce(env, createSyntaxHighlighter, options),
+    ]).then(([configurationKey, state]) => {
         if (generation !== syntaxGeneration) {
             disposeReadySyntaxState(state);
             return disposedSyntaxState(state.config);
         }
         syntaxState = state;
+        activeConfigurationKey = configurationKey;
+        syntaxRenderingVersion += 1;
+        notifySyntaxStateListeners(state.status);
         return state;
     });
     return initializationPromise;
 }
 
+/** Builds and atomically swaps the central highlighter while the current one remains usable. */
+export async function reinitializeSyntaxHighlighting(
+    env: NodeJS.ProcessEnv = process.env,
+    options: SyntaxInitializationOptions = {},
+): Promise<SyntaxState> {
+    const generation = syntaxGeneration + 1;
+    syntaxGeneration = generation;
+    const previousState = syntaxState;
+    const createSyntaxHighlighter = options.createHighlighter ?? createHighlighter;
+    const replacement = Promise.all([
+        syntaxConfigurationKey(env, options),
+        initializeSyntaxHighlightingOnce(env, createSyntaxHighlighter, options),
+    ]).then(([configurationKey, state]) => {
+        if (generation !== syntaxGeneration) {
+            disposeReadySyntaxState(state);
+            return disposedSyntaxState(state.config);
+        }
+        clearSyntaxHighlightCache();
+        syntaxState = state;
+        activeConfigurationKey = configurationKey;
+        disposeReadySyntaxState(previousState);
+        syntaxRenderingVersion += 1;
+        notifySyntaxStateListeners(state.status);
+        return state;
+    });
+    initializationPromise = replacement;
+    return replacement;
+}
+
+/** Rebuilds syntax state only when environment, theme contents, or preload inputs changed. */
+export async function refreshSyntaxHighlighting(
+    env: NodeJS.ProcessEnv = process.env,
+    options: SyntaxInitializationOptions = {},
+): Promise<SyntaxState> {
+    const configurationKey = await syntaxConfigurationKey(env, options);
+    if (syntaxState !== undefined && activeConfigurationKey === configurationKey) {
+        return syntaxState;
+    }
+    return reinitializeSyntaxHighlighting(env, options);
+}
+
 /** Returns true when syntax highlighting is available for synchronous render calls. */
 export function isSyntaxHighlightingReady(): boolean {
     return syntaxState?.status === "ready";
+}
+
+/** Returns a monotonic version for render caches that embed syntax colors. */
+export function syntaxHighlightingVersion(): number {
+    return syntaxRenderingVersion;
+}
+
+/** Updates bracket-pair coloring and invalidates syntax-bearing render caches when it changes. */
+export function configureSyntaxBracketPairColoring(enabled: boolean): void {
+    if (!configureBracketPairColoring(enabled)) {
+        return;
+    }
+    clearSyntaxHighlightCache();
+    syntaxRenderingVersion += 1;
+}
+
+/** Subscribes to central highlighter state changes for render-cache invalidation. */
+export function onSyntaxHighlightingStateChange(listener: SyntaxStateListener): () => void {
+    syntaxStateListeners.add(listener);
+    return () => syntaxStateListeners.delete(listener);
 }
 
 /** Highlights code synchronously for render-time callers, falling back to plain lines when unavailable. */
@@ -251,6 +320,7 @@ export async function getSyntaxHighlighterForLanguage(
         }
         state.loadedLanguages.add(normalizedLanguage);
         state.dynamicLanguages.add(normalizedLanguage);
+        notifySyntaxStateListeners(state.status);
     }
 
     return {
@@ -285,6 +355,7 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
     }
     state.loadedLanguages.add(normalizedLanguage);
     state.dynamicLanguages.add(normalizedLanguage);
+    notifySyntaxStateListeners(state.status);
     return true;
 }
 
@@ -357,8 +428,43 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     syntaxState = undefined;
     initializationPromise = undefined;
     syntaxPreloadDiagnostics = undefined;
+    activeConfigurationKey = undefined;
 
     disposeReadySyntaxState(state);
+    syntaxRenderingVersion += 1;
+    notifySyntaxStateListeners("uninitialized");
+}
+
+async function syntaxConfigurationKey(
+    env: NodeJS.ProcessEnv,
+    options: SyntaxInitializationOptions,
+): Promise<string> {
+    const config = loadSyntaxConfig(env);
+    let themeContents = "";
+    if (config.enabled) {
+        try {
+            themeContents = await readFile(config.themePath, "utf8");
+        } catch (cause: unknown) {
+            themeContents =
+                cause instanceof Error ? `${cause.name}:${cause.message}` : String(cause);
+        }
+    }
+    return createHash("sha256")
+        .update(
+            JSON.stringify({
+                config,
+                themeContents,
+                preloadLanguages: options.preloadLanguages ?? null,
+                projectLanguageDetection: options.projectLanguageDetection ?? null,
+            }),
+        )
+        .digest("hex");
+}
+
+function notifySyntaxStateListeners(status: SyntaxStateStatus): void {
+    for (const listener of syntaxStateListeners) {
+        listener(status);
+    }
 }
 
 function disposeReadySyntaxState(state: SyntaxState | undefined): void {

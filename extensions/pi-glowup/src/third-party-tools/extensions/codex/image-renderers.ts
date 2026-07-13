@@ -167,9 +167,5 @@ export function imagegenResultSummary(result: ThirdPartyToolResult): string | un
     if (images === undefined || images.length === 0) {
         return undefined;
     }
-    const first = images[0];
-    const path = isRecord(first)
-        ? (getString(first, "latestPath") ?? getString(first, "path"))
-        : undefined;
-    return `Generated ${images.length} image${images.length === 1 ? "" : "s"}${isNonEmptyString(path) ? ` → ${path}` : ""}`;
+    return `Generated ${images.length} image${images.length === 1 ? "" : "s"}`;
 }

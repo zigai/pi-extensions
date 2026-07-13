@@ -30,6 +30,7 @@ describe("script preview events", () => {
 
     it("schedules formatter work without waiting for it", async () => {
         const sink = new RecordingPreviewSink();
+        let invalidations = 0;
         let resolveFormatter: ((value: string | undefined) => void) | undefined;
         const formatter: ScriptBlockFormatter = async () =>
             new Promise((resolve) => {
@@ -41,6 +42,9 @@ describe("script preview events", () => {
             toolCallId: "call-1",
             command: "python - <<'PY'\nprint(1)\nPY",
             formatter,
+            invalidate: () => {
+                invalidations += 1;
+            },
         });
 
         expect(sink.previews.size).toBe(0);
@@ -48,5 +52,29 @@ describe("script preview events", () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
 
         expect(sink.previews.get("call-1")?.code).toBe("print(2)");
+        expect(invalidations).toBe(1);
+    });
+
+    it("does not commit formatter output after its session is replaced", async () => {
+        const sink = new RecordingPreviewSink();
+        let current = true;
+        let resolveFormatter: ((value: string | undefined) => void) | undefined;
+        const formatter: ScriptBlockFormatter = async () =>
+            new Promise((resolve) => {
+                resolveFormatter = resolve;
+            });
+
+        scheduleFormattedScriptPreview({
+            sink,
+            toolCallId: "stale-call",
+            command: "python - <<'PY'\nprint(1)\nPY",
+            formatter,
+            isCurrent: () => current,
+        });
+        current = false;
+        resolveFormatter?.("print(2)");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(sink.previews.has("stale-call")).toBe(false);
     });
 });

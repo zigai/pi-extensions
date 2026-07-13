@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     buildLargeDiffSummaryPayload,
     buildPierreDiffPayload,
@@ -21,6 +21,7 @@ import { pairReplacementLines } from "../src/diffs/layout.ts";
 import { getPierreAppearance, getPierrePalette } from "../src/diffs/theme.ts";
 import type { UnifiedDiffRow } from "../src/diffs/types.ts";
 import { configureRenderingAppearance } from "../src/rendering/core.ts";
+import { reinitializeSyntaxHighlighting } from "../src/syntax/highlighter.ts";
 
 type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
 
@@ -36,6 +37,18 @@ const bgColors = {
     toolSuccessBg: "#002200",
 } as ThemeBackgroundColors;
 const testTheme = new Theme(fgColors, bgColors, "truecolor", { name: "pierre-dark" });
+const defaultAppearance = {
+    diffBackgroundStyle: "two-tone",
+    diffLineNumberStyle: "dual",
+    narrowDiffLayout: "paired",
+    sideBySideLayout: "content-aware",
+    addedRowBackground: null,
+    deletedRowBackground: null,
+    addedContentBackground: null,
+    deletedContentBackground: null,
+    instructionPathColor: null,
+    dimUnchangedDiffText: false,
+} as const;
 
 function expectLinesWithinWidth(lines: ReadonlyArray<string>, width: number): void {
     for (const line of lines) {
@@ -48,6 +61,8 @@ function stripAnsi(text: string): string {
 }
 
 describe("Pierre diff rendering", () => {
+    beforeEach(() => configureRenderingAppearance(defaultAppearance));
+
     it("uses the bundled syntax theme appearance instead of the Pi theme name", () => {
         const misleadingTheme = new Theme(fgColors, bgColors, "truecolor", {
             name: "custom-light",
@@ -151,6 +166,46 @@ describe("Pierre diff rendering", () => {
         expect(rendered).toContain("large.txt");
         expect(rendered).toContain("Large diff omitted");
         expect(rendered).toContain("5,001 lines");
+    });
+
+    it("honors the exact width contract below 24 columns", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "const value = 1;\n",
+            newContent: "const value = 2;\n",
+            oldSizeBytes: 17,
+            newSizeBytes: 17,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+
+        const component = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, invalidate() {} },
+        );
+
+        for (const width of [1, 8, 23]) {
+            expectLinesWithinWidth(component.render(width), width);
+        }
+
+        const summary = buildLargeDiffSummaryPayload({
+            path: "large.ts",
+            diffText: `${"+1 value\n".repeat(5_001)}`,
+        });
+        if (summary === undefined) throw new Error("expected summary payload");
+        for (const width of [1, 8, 23]) {
+            expectLinesWithinWidth(
+                renderPierreDiff(
+                    summary,
+                    testTheme,
+                    { expanded: false },
+                    { lastComponent: undefined, invalidate() {} },
+                ).render(width),
+                width,
+            );
+        }
     });
 
     it("keeps unreadable existing files out of create-style write diffs", async () => {
@@ -409,6 +464,46 @@ describe("Pierre diff rendering", () => {
         }
     });
 
+    it("schedules deletion-only intraline highlighting when addition shades match", () => {
+        vi.useFakeTimers();
+        configureRenderingAppearance({
+            ...defaultAppearance,
+            addedRowBackground: "#002200",
+            addedContentBackground: "#002200",
+            deletedRowBackground: "#220000",
+            deletedContentBackground: "#440000",
+        });
+        try {
+            const palette = getPierrePalette(testTheme);
+            expect(palette.additionSpanBg).toBe(palette.additionRowBg);
+            expect(palette.deletionSpanBg).not.toBe(palette.deletionRowBg);
+
+            const payload = buildPierreDiffPayload({
+                path: "src/example.rs",
+                oldContent: "let removed = 1;\n",
+                newContent: "",
+                oldSizeBytes: 17,
+                newSizeBytes: 0,
+                canBuildPierreDiff: true,
+            });
+            if (payload?.kind !== "renderable") {
+                throw new Error("expected renderable Pierre payload");
+            }
+
+            renderPierreDiff(
+                payload,
+                testTheme,
+                { expanded: false },
+                { lastComponent: undefined, invalidate() {} },
+            );
+
+            expect(vi.getTimerCount()).toBeGreaterThan(0);
+        } finally {
+            vi.useRealTimers();
+            clearQueuedDiffHighlights();
+        }
+    });
+
     it("renders side-by-side whenever width has room", () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
@@ -444,6 +539,63 @@ describe("Pierre diff rendering", () => {
         expectLinesWithinWidth(narrow, 80);
         expectLinesWithinWidth(collapsedWide, 180);
         expectLinesWithinWidth(expandedWide, 180);
+    });
+
+    it("keeps unpaired additions in the right pane at full split width", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "alpha\nold\nomega\n",
+            newContent: "alpha\nnew\nextra\nomega\n",
+            oldSizeBytes: 16,
+            newSizeBytes: 22,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") {
+            throw new Error("expected renderable Pierre payload");
+        }
+
+        const lines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, invalidate() {} },
+        ).render(180);
+        const addition = lines.map(stripAnsi).find((line) => line.includes("extra"));
+        if (addition === undefined) throw new Error("expected unpaired addition row");
+
+        const dividerIndex = addition.indexOf(" │ ");
+        expect(dividerIndex).toBe(88);
+        expect(addition.slice(0, dividerIndex).trim()).toBe("");
+        expect(addition.indexOf("extra")).toBeGreaterThan(dividerIndex + 3);
+        expect(visibleWidth(addition)).toBe(180);
+        expect(addition).toContain("3 + extra");
+    });
+
+    it("preserves marker-first split gutters in single-number mode", () => {
+        configureRenderingAppearance({ ...defaultAppearance, diffLineNumberStyle: "single" });
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "old\n",
+            newContent: "new\n",
+            oldSizeBytes: 4,
+            newSizeBytes: 4,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") {
+            throw new Error("expected renderable Pierre payload");
+        }
+
+        const lines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, invalidate() {} },
+        )
+            .render(180)
+            .map(stripAnsi);
+
+        expect(lines.some((line) => line.includes("-1 old"))).toBe(true);
+        expect(lines.some((line) => line.includes("+1 new"))).toBe(true);
     });
 
     it("keeps collapsed semantic rows to one physical terminal row", () => {
@@ -583,12 +735,99 @@ describe("Pierre diff rendering", () => {
         );
         const plainLines = component.render(100).map((line) => stripAnsi(line).trimEnd());
 
-        expect(plainLines).toContain("+2");
+        expect(plainLines).toContain("  2 +");
         expect(plainLines).not.toContain("");
-        expect(plainLines[plainLines.indexOf("+2") + 1]).toContain("+3 def greet():");
+        expect(plainLines[plainLines.indexOf("  2 +") + 1]).toContain("  3 + def greet():");
     });
 
-    it("paints only Pierre intra-line replacement spans without dimming unchanged text by default", async () => {
+    it("shows true old and new coordinates in the compact unified gutter", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "one\ntwo\n",
+            newContent: "zero\none\ntwo\n",
+            oldSizeBytes: 8,
+            newSizeBytes: 13,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+
+        const lines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, invalidate() {} },
+        )
+            .render(100)
+            .map(stripAnsi);
+
+        expect(lines.some((line) => line.includes("  1 + zero"))).toBe(true);
+        expect(lines.some((line) => line.includes("1 2   one"))).toBe(true);
+        expect(lines.some((line) => line.includes("2 3   two"))).toBe(true);
+    });
+
+    it("invalidates a reused component when the gutter style changes", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "one\n",
+            newContent: "zero\none\n",
+            oldSizeBytes: 4,
+            newSizeBytes: 9,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+        const context = {
+            lastComponent: undefined,
+            toolCallId: "appearance-cache",
+            invalidate() {},
+        };
+        const component = renderPierreDiff(payload, testTheme, { expanded: true }, context);
+        const dual = component.render(100).map(stripAnsi);
+
+        configureRenderingAppearance({ ...defaultAppearance, diffLineNumberStyle: "single" });
+        const reused = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            {
+                ...context,
+                lastComponent: component,
+            },
+        );
+        const single = reused.render(100).map(stripAnsi);
+
+        expect(dual.some((line) => line.includes("  1 + zero"))).toBe(true);
+        expect(single.some((line) => line.includes("+1 zero"))).toBe(true);
+        expect(reused).toBe(component);
+    });
+
+    it("invalidates rendered lines when the syntax highlighter is replaced", async () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "const value = 1;\n",
+            newContent: "const value = 2;\n",
+            oldSizeBytes: 17,
+            newSizeBytes: 17,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+        const component = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, invalidate() {} },
+        );
+        const before = component.render(100);
+
+        await reinitializeSyntaxHighlighting(process.env, {
+            preloadLanguages: ["typescript"],
+        });
+        const after = component.render(100);
+
+        expect(after).not.toBe(before);
+        expectLinesWithinWidth(after, 100);
+    });
+
+    it("uses distinct row and intraline shades without dimming unchanged text by default", async () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
             oldContent: "const limit = args.limit ?? 2000;\n",
@@ -610,24 +849,117 @@ describe("Pierre diff rendering", () => {
         ).render(100);
         const deletion = lines.find((line) => stripAnsi(line).includes("2000")) ?? "";
         const addition = lines.find((line) => stripAnsi(line).includes("4000")) ?? "";
+        const palette = getPierrePalette(testTheme);
 
-        expect(deletion).toContain("48;2;34;0;0");
-        expect(addition).toContain("48;2;0;34;0");
-        expect(deletion.match(/48;2;34;0;0/gu)).toHaveLength(1);
-        expect(addition.match(/48;2;0;34;0/gu)).toHaveLength(1);
-        expect(deletion).toContain("\u001b[1m");
-        expect(addition).toContain("\u001b[1m");
+        expect(palette.deletionRowBg).not.toBe(palette.deletionSpanBg);
+        expect(palette.additionRowBg).not.toBe(palette.additionSpanBg);
+        expect(deletion).toContain(palette.deletionRowBg);
+        expect(deletion).toContain(palette.deletionSpanBg);
+        expect(addition).toContain(palette.additionRowBg);
+        expect(addition).toContain(palette.additionSpanBg);
+        expect(deletion.split(palette.deletionRowBg).length).toBeGreaterThan(
+            deletion.split(palette.deletionSpanBg).length,
+        );
+        expect(addition.split(palette.additionRowBg).length).toBeGreaterThan(
+            addition.split(palette.additionSpanBg).length,
+        );
         expect(deletion).not.toContain("\u001b[2m");
         expect(addition).not.toContain("\u001b[2m");
+    });
+
+    it("honors independently configured two-tone shades", () => {
+        configureRenderingAppearance({
+            ...defaultAppearance,
+            addedRowBackground: "#010203",
+            deletedRowBackground: "#040506",
+            addedContentBackground: "#070809",
+            deletedContentBackground: "#0A0B0C",
+        });
+
+        const palette = getPierrePalette(testTheme);
+
+        expect(palette.additionRowBg).toContain("48;2;1;2;3");
+        expect(palette.deletionRowBg).toContain("48;2;4;5;6");
+        expect(palette.additionSpanBg).toContain("48;2;7;8;9");
+        expect(palette.deletionSpanBg).toContain("48;2;10;11;12");
+    });
+
+    it("derives a distinct intraline shade from 256-color Pi themes", () => {
+        const indexedTheme = new Theme(
+            {
+                ...fgColors,
+                toolDiffAdded: 10,
+                toolDiffRemoved: 9,
+            } as Record<ThemeColor, string | number>,
+            { toolErrorBg: 52, toolSuccessBg: 22 } as ThemeBackgroundColors,
+            "256color",
+        );
+
+        const palette = getPierrePalette(indexedTheme);
+
+        expect(palette.additionRowBg).toContain("48;5;22");
+        expect(palette.deletionRowBg).toContain("48;5;52");
+        expect(palette.additionSpanBg).toContain("48;5;");
+        expect(palette.deletionSpanBg).toContain("48;5;");
+        expect(palette.additionSpanBg).not.toBe(palette.additionRowBg);
+        expect(palette.deletionSpanBg).not.toBe(palette.deletionRowBg);
+    });
+
+    it("keeps two-tone shades distinct when semantic and row colors are close", () => {
+        const closeTheme = new Theme(
+            {
+                ...fgColors,
+                toolDiffAdded: "#002200",
+                toolDiffRemoved: "#220000",
+            },
+            bgColors,
+            "truecolor",
+        );
+
+        const palette = getPierrePalette(closeTheme);
+
+        expect(palette.additionSpanBg).not.toBe(palette.additionRowBg);
+        expect(palette.deletionSpanBg).not.toBe(palette.deletionRowBg);
+    });
+
+    it("keeps changed-span-only backgrounds as an option", async () => {
+        configureRenderingAppearance({
+            ...defaultAppearance,
+            diffBackgroundStyle: "changed-spans",
+        });
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "const limit = 2000;\n",
+            newContent: "const limit = 4000;\n",
+            oldSizeBytes: 20,
+            newSizeBytes: 20,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+
+        await loadHighlightedDiff(payload.metadata);
+        const lines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined, invalidate() {} },
+        ).render(100);
+        const deletion = lines.find((line) => stripAnsi(line).includes("2000")) ?? "";
+
+        expect(getPierrePalette(testTheme).deletionRowBg).toBe("");
+        expect(deletion.match(/48;2;34;0;0/gu)).toHaveLength(1);
     });
 
     it("dims unchanged Pierre replacement text when configured", async () => {
         configureRenderingAppearance({
             diffBackgroundStyle: "changed-spans",
+            diffLineNumberStyle: "single",
             narrowDiffLayout: "paired",
             sideBySideLayout: "content-aware",
             addedRowBackground: null,
             deletedRowBackground: null,
+            addedContentBackground: null,
+            deletedContentBackground: null,
             instructionPathColor: null,
             dimUnchangedDiffText: true,
         });
@@ -657,19 +989,16 @@ describe("Pierre diff rendering", () => {
             expect(deletion).toContain("\u001b[2m");
             expect(addition).toContain("\u001b[2m");
         } finally {
-            configureRenderingAppearance({
-                diffBackgroundStyle: "changed-spans",
-                narrowDiffLayout: "paired",
-                sideBySideLayout: "content-aware",
-                addedRowBackground: null,
-                deletedRowBackground: null,
-                instructionPathColor: null,
-                dimUnchangedDiffText: false,
-            });
+            configureRenderingAppearance(defaultAppearance);
         }
     });
 
     it("keeps an added blank row compact in changed-span mode", () => {
+        configureRenderingAppearance({
+            ...defaultAppearance,
+            diffBackgroundStyle: "changed-spans",
+            diffLineNumberStyle: "single",
+        });
         const payload = buildPierreDiffPayload({
             path: "src/example.py",
             oldContent: "alpha\nomega\n",
@@ -696,13 +1025,54 @@ describe("Pierre diff rendering", () => {
         expect(visibleWidth(blankAddition ?? "")).toBe(width);
     });
 
+    it("uses the intraline shade for blank additions and deletions in two-tone mode", () => {
+        const cases = [
+            { oldContent: "alpha\nomega\n", newContent: "alpha\n\nomega\n", marker: "+2" },
+            { oldContent: "alpha\n\nomega\n", newContent: "alpha\nomega\n", marker: "-2" },
+        ] as const;
+        const palette = getPierrePalette(testTheme);
+
+        for (const testCase of cases) {
+            const payload = buildPierreDiffPayload({
+                path: "src/example.py",
+                oldContent: testCase.oldContent,
+                newContent: testCase.newContent,
+                oldSizeBytes: testCase.oldContent.length,
+                newSizeBytes: testCase.newContent.length,
+                canBuildPierreDiff: true,
+            });
+            if (!payload) {
+                throw new Error("expected Pierre payload");
+            }
+
+            const isAddition = testCase.marker.startsWith("+");
+            const blankChangeMarker = isAddition ? "+" : "-";
+            const blankChange = renderPierreDiff(
+                payload,
+                testTheme,
+                { expanded: true },
+                { lastComponent: undefined, invalidate() {} },
+            )
+                .render(80)
+                .find((line) => stripAnsi(line).trimEnd().endsWith(blankChangeMarker));
+            const contentBackground = isAddition ? palette.additionSpanBg : palette.deletionSpanBg;
+
+            expect(blankChange).toBeDefined();
+            expect(blankChange).toContain(contentBackground);
+            expect(visibleWidth(blankChange ?? "")).toBe(80);
+        }
+    });
+
     it("keeps full-row Pierre backgrounds as an option", () => {
         configureRenderingAppearance({
             diffBackgroundStyle: "full-row",
+            diffLineNumberStyle: "single",
             narrowDiffLayout: "paired",
             sideBySideLayout: "content-aware",
             addedRowBackground: null,
             deletedRowBackground: null,
+            addedContentBackground: null,
+            deletedContentBackground: null,
             instructionPathColor: null,
             dimUnchangedDiffText: false,
         });
@@ -729,15 +1099,7 @@ describe("Pierre diff rendering", () => {
 
             expect(blankAddition).toContain("48;2;0;34;0");
         } finally {
-            configureRenderingAppearance({
-                diffBackgroundStyle: "changed-spans",
-                narrowDiffLayout: "paired",
-                sideBySideLayout: "content-aware",
-                addedRowBackground: null,
-                deletedRowBackground: null,
-                instructionPathColor: null,
-                dimUnchangedDiffText: false,
-            });
+            configureRenderingAppearance(defaultAppearance);
         }
     });
 
@@ -763,7 +1125,7 @@ describe("Pierre diff rendering", () => {
         ).render(width);
 
         expect(lines.length).toBeGreaterThan(1);
-        expect(lines.some((line) => stripAnsi(line).trimEnd() === " 2")).toBe(true);
+        expect(lines.some((line) => stripAnsi(line).trimEnd() === "2 2")).toBe(true);
         expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     });
 });

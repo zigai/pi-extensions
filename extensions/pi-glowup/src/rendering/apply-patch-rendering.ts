@@ -3,6 +3,7 @@ import {
     emptyComponent,
     formatPathTarget,
     makeComponent,
+    parseDiffSections,
     renderCodexBody,
     renderCodexCall,
     renderCodexDiff,
@@ -10,6 +11,7 @@ import {
     renderMutationCall,
     MUTATION_DIFF_PREVIEW_ROWS,
     type CodexRenderTheme,
+    type DiffLineCoordinates,
     type DiffSection,
 } from "./core.ts";
 import type {
@@ -29,6 +31,7 @@ import {
     type DeletedTextPreview,
     type TextFilePreimage,
 } from "./delete-preview.ts";
+import { scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
 
 type ApplyPatchKind = "add" | "delete" | "update";
 
@@ -55,6 +58,7 @@ type MutableApplyPatchSection = {
     path: string;
     movePath: string | undefined;
     lines: string[];
+    lineCoordinates: Array<DiffLineCoordinates | undefined>;
     added: number;
     removed: number;
     oldLine: number;
@@ -66,6 +70,28 @@ const deletePreimages = new Map<string, Map<string, DeletedTextPreview>>();
 const updatePreimages = new Map<string, Map<string, TextFilePreimage>>();
 const unavailableUpdatePreimages = new Map<string, Map<string, true>>();
 const pendingUpdatePreimages = new Map<string, Map<string, Promise<void>>>();
+const persistedSummaries = new Map<string, ApplyPatchSummary>();
+const persistedSummaryDiffs = new Map<string, string>();
+
+/** Drops session-scoped mutation snapshots and pending preimage references. */
+export function clearApplyPatchRenderingState(): void {
+    deletePreimages.clear();
+    updatePreimages.clear();
+    unavailableUpdatePreimages.clear();
+    pendingUpdatePreimages.clear();
+    persistedSummaries.clear();
+    persistedSummaryDiffs.clear();
+}
+
+function rememberBounded<T>(store: Map<string, T>, key: string, value: T): void {
+    store.delete(key);
+    store.set(key, value);
+    while (store.size > MAX_DELETE_PREIMAGE_CALLS) {
+        const oldest = store.keys().next().value;
+        if (typeof oldest !== "string") break;
+        store.delete(oldest);
+    }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -177,42 +203,17 @@ export async function captureApplyPatchPreimages(
     await Promise.all(workers);
 }
 
-function schedulePartialUpdatePreimages(
-    toolCallId: string,
-    cwd: string | undefined,
-    patch: string,
-    invalidate: (() => void) | undefined,
-): void {
-    if (cwd === undefined || invalidate === undefined) return;
-    const previews = boundedPreimageMap(updatePreimages, toolCallId);
-    const unavailable = boundedPreimageMap(unavailableUpdatePreimages, toolCallId);
-    const pending = boundedPreimageMap(pendingUpdatePreimages, toolCallId);
-    const normalized = patch.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
-    const completeLines = normalized.split("\n");
-    if (!normalized.endsWith("\n")) completeLines.pop();
-    for (const line of completeLines) {
-        if (!line.startsWith("*** Update File: ")) continue;
-        const filePath = line.slice("*** Update File: ".length);
-        if (filePath.length === 0 || previews.has(filePath) || unavailable.has(filePath)) {
-            continue;
+function scheduleApplyPatchSyntaxLoads(patch: string, invalidate: (() => void) | undefined): void {
+    if (invalidate === undefined) return;
+    const paths = new Set<string>();
+    for (const line of patch.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n")) {
+        const section = partialPatchSectionHeader(line);
+        if (section !== undefined && section.path.length > 0) {
+            paths.add(section.path);
         }
-        const pendingRequest = pending.get(filePath);
-        if (pendingRequest !== undefined) {
-            void pendingRequest.finally(invalidate);
-            continue;
-        }
-        const request = captureTextFilePreimage(cwd, filePath, MAX_UPDATE_PREIMAGE_BYTES, {
-            allowOutsideCwd: true,
-        })
-            .then((preimage) => {
-                if (preimage === undefined) unavailable.set(filePath, true);
-                else previews.set(filePath, preimage);
-                invalidate();
-            })
-            .finally(() => {
-                pending.delete(filePath);
-            });
-        pending.set(filePath, request);
+    }
+    for (const path of paths) {
+        scheduleCodeOutputSyntaxLoad({ path }, invalidate);
     }
 }
 
@@ -237,6 +238,63 @@ function hydrateDeletePreimages(summary: ApplyPatchSummary, toolCallId: string):
                   };
         }),
     };
+}
+
+function persistedApplyPatchSummary(
+    result: ThirdPartyToolResult | undefined,
+): ApplyPatchSummary | undefined {
+    if (!isRecord(result?.details)) return undefined;
+    const diff = stringField(result.details, "diff");
+    if (diff === undefined || diff.trim().length === 0) return undefined;
+    const sections = diff
+        .trimEnd()
+        .split(/\n{2,}/u)
+        .flatMap((block) => {
+            const normalizedBlock = block.trimStart();
+            const separator = normalizedBlock.indexOf("\n");
+            if (separator < 0) return [];
+            const path = normalizedBlock.slice(0, separator).trim();
+            const body = normalizedBlock.slice(separator + 1);
+            return path.length === 0 ? [] : parseDiffSections(body, path);
+        });
+    if (sections.length === 0) return undefined;
+    const lineSummary = isRecord(result.details.lineSummary)
+        ? result.details.lineSummary
+        : undefined;
+    const files = Array.isArray(lineSummary?.files) ? lineSummary.files : [];
+    return {
+        sections: sections.map((section, index): ApplyPatchSection => {
+            const file = isRecord(files[index]) ? files[index] : undefined;
+            const action = file === undefined ? undefined : stringField(file, "action");
+            const kind: ApplyPatchKind =
+                action === "A" ? "add" : action === "D" ? "delete" : "update";
+            return { ...section, kind, countsKnown: true };
+        }),
+    };
+}
+
+/** Rehydrates immutable apply_patch history from persisted session tool results. */
+export function restoreApplyPatchResultSummaries(entries: readonly unknown[]): void {
+    for (const entry of entries) {
+        if (!isRecord(entry) || entry.type !== "message" || !isRecord(entry.message)) continue;
+        const message = entry.message;
+        if (message.role !== "toolResult") continue;
+        const toolName = stringField(message, "toolName");
+        const toolCallId = stringField(message, "toolCallId");
+        if (
+            toolCallId === undefined ||
+            toolName === undefined ||
+            (toolName !== "apply_patch" && !toolName.endsWith("__apply_patch"))
+        ) {
+            continue;
+        }
+        const result = { details: message.details };
+        const summary = persistedApplyPatchSummary(result);
+        const diff = isRecord(message.details) ? stringField(message.details, "diff") : undefined;
+        if (summary === undefined || diff === undefined) continue;
+        rememberBounded(persistedSummaries, toolCallId, summary);
+        rememberBounded(persistedSummaryDiffs, toolCallId, diff);
+    }
 }
 
 function displayPath(section: MutableApplyPatchSection): string {
@@ -284,6 +342,7 @@ function makeSection(kind: ApplyPatchKind, path: string): MutableApplyPatchSecti
         path,
         movePath: undefined,
         lines: [],
+        lineCoordinates: [],
         added: 0,
         removed: 0,
         oldLine: 1,
@@ -299,6 +358,26 @@ function numberedDiffLine(
     known: boolean,
 ): string {
     return known ? `${sign}${lineNumber} ${content}` : `${sign} ${content}`;
+}
+
+function appendNumberedDiffLine(
+    section: MutableApplyPatchSection,
+    sign: "+" | "-" | " ",
+    content: string,
+    known: boolean,
+    oldLine: number | undefined,
+    newLine: number | undefined,
+): void {
+    const lineNumber = sign === "-" ? oldLine : newLine;
+    section.lines.push(numberedDiffLine(sign, lineNumber ?? 0, content, known));
+    section.lineCoordinates.push(
+        known
+            ? {
+                  ...(oldLine === undefined ? {} : { oldLine }),
+                  ...(newLine === undefined ? {} : { newLine }),
+              }
+            : undefined,
+    );
 }
 
 function applyHunkCoordinates(section: MutableApplyPatchSection, line: string): void {
@@ -318,6 +397,7 @@ function finalizedSection(section: MutableApplyPatchSection): ApplyPatchSection 
         kind: section.kind,
         path: displayPath(section),
         lines: [...section.lines],
+        lineCoordinates: [...section.lineCoordinates],
         added: section.added,
         removed: section.removed,
         countsKnown: section.kind !== "delete",
@@ -390,7 +470,7 @@ function parseApplyPatchSummary(patchText: string): ApplyPatchSummary | undefine
         if (current.kind === "add") {
             if (line.startsWith("+")) {
                 current.added += 1;
-                current.lines.push(numberedDiffLine("+", current.added, line.slice(1), true));
+                appendNumberedDiffLine(current, "+", line.slice(1), true, undefined, current.added);
             }
             continue;
         }
@@ -406,8 +486,13 @@ function parseApplyPatchSummary(patchText: string): ApplyPatchSummary | undefine
 
         if (line.startsWith("+")) {
             current.added += 1;
-            current.lines.push(
-                numberedDiffLine("+", current.newLine, line.slice(1), current.lineNumbersKnown),
+            appendNumberedDiffLine(
+                current,
+                "+",
+                line.slice(1),
+                current.lineNumbersKnown,
+                undefined,
+                current.newLine,
             );
             current.newLine += 1;
             continue;
@@ -415,16 +500,26 @@ function parseApplyPatchSummary(patchText: string): ApplyPatchSummary | undefine
 
         if (line.startsWith("-")) {
             current.removed += 1;
-            current.lines.push(
-                numberedDiffLine("-", current.oldLine, line.slice(1), current.lineNumbersKnown),
+            appendNumberedDiffLine(
+                current,
+                "-",
+                line.slice(1),
+                current.lineNumbersKnown,
+                current.oldLine,
+                undefined,
             );
             current.oldLine += 1;
             continue;
         }
 
         if (line.startsWith(" ")) {
-            current.lines.push(
-                numberedDiffLine(" ", current.newLine, line.slice(1), current.lineNumbersKnown),
+            appendNumberedDiffLine(
+                current,
+                " ",
+                line.slice(1),
+                current.lineNumbersKnown,
+                current.oldLine,
+                current.newLine,
             );
             current.oldLine += 1;
             current.newLine += 1;
@@ -432,8 +527,13 @@ function parseApplyPatchSummary(patchText: string): ApplyPatchSummary | undefine
         }
 
         if (line.length === 0) {
-            current.lines.push(
-                numberedDiffLine(" ", current.newLine, "", current.lineNumbersKnown),
+            appendNumberedDiffLine(
+                current,
+                " ",
+                "",
+                current.lineNumbersKnown,
+                current.oldLine,
+                current.newLine,
             );
             current.oldLine += 1;
             current.newLine += 1;
@@ -541,23 +641,32 @@ function matchingLineSequence(
     fromIndex: number,
 ): number | undefined {
     if (needle.length === 0) {
-        return Math.min(fromIndex, source.length);
+        return undefined;
     }
-    for (const searchStart of [fromIndex, 0]) {
-        for (let index = searchStart; index + needle.length <= source.length; index += 1) {
-            if (needle.every((line, offset) => source[index + offset] === line)) {
-                return index;
-            }
+    let matchedIndex: number | undefined;
+    for (let index = fromIndex; index + needle.length <= source.length; index += 1) {
+        if (!needle.every((line, offset) => source[index + offset] === line)) {
+            continue;
         }
+        if (matchedIndex !== undefined) {
+            return undefined;
+        }
+        matchedIndex = index;
     }
-    return undefined;
+    return matchedIndex;
 }
 
 function numberedUpdateHunks(
     hunks: readonly UpdateHunk[],
     preimage: TextFilePreimage | undefined,
-): readonly string[] | undefined {
+):
+    | {
+          readonly lines: readonly string[];
+          readonly lineCoordinates: ReadonlyArray<DiffLineCoordinates>;
+      }
+    | undefined {
     const lines: string[] = [];
+    const lineCoordinates: DiffLineCoordinates[] = [];
     let oldCursor = 0;
     let lineDelta = 0;
 
@@ -579,13 +688,17 @@ function numberedUpdateHunks(
             lines.push(
                 numberedDiffLine(row.sign, row.sign === "-" ? oldLine : newLine, row.content, true),
             );
+            lineCoordinates.push({
+                ...(row.sign === "+" ? {} : { oldLine }),
+                ...(row.sign === "-" ? {} : { newLine }),
+            });
             if (row.sign !== "+") oldLine += 1;
             if (row.sign !== "-") newLine += 1;
         }
         oldCursor = oldLine - 1;
         lineDelta = newLine - oldLine;
     }
-    return lines;
+    return { lines, lineCoordinates };
 }
 
 function hydrateUpdateLineNumbers(
@@ -606,8 +719,8 @@ function hydrateUpdateLineNumbers(
             if (update === undefined) {
                 return section;
             }
-            const lines = numberedUpdateHunks(update.hunks, preimages?.get(update.path));
-            return lines === undefined ? section : { ...section, lines };
+            const numbered = numberedUpdateHunks(update.hunks, preimages?.get(update.path));
+            return numbered === undefined ? section : { ...section, ...numbered };
         }),
     };
 }
@@ -627,6 +740,7 @@ function copyPartialSection(section: PartialApplyPatchSection): PartialApplyPatc
     return {
         ...section,
         lines: [...section.lines],
+        lineCoordinates: [...section.lineCoordinates],
     };
 }
 
@@ -645,11 +759,18 @@ function partialPatchSectionHeader(
     return undefined;
 }
 
-function appendPartialPatchDiffLine(section: PartialApplyPatchSection, line: string): void {
+function appendPartialPatchDiffLine(
+    section: PartialApplyPatchSection,
+    sign: "+" | "-" | " ",
+    content: string,
+    oldLine: number | undefined,
+    newLine: number | undefined,
+): void {
     section.diffLineCount += 1;
-    section.lines.push(line);
+    appendNumberedDiffLine(section, sign, content, section.lineNumbersKnown, oldLine, newLine);
     if (section.lines.length > MAX_PARTIAL_PATCH_PREVIEW_LINES) {
         section.lines.shift();
+        section.lineCoordinates.shift();
     }
 }
 
@@ -661,10 +782,7 @@ function applyPartialPatchBodyLine(section: PartialApplyPatchSection, line: stri
     if (section.kind === "add") {
         if (line.startsWith("+")) {
             section.added += 1;
-            appendPartialPatchDiffLine(
-                section,
-                numberedDiffLine("+", section.added, line.slice(1), true),
-            );
+            appendPartialPatchDiffLine(section, "+", line.slice(1), undefined, section.added);
         }
         return;
     }
@@ -679,30 +797,21 @@ function applyPartialPatchBodyLine(section: PartialApplyPatchSection, line: stri
 
     if (line.startsWith("+")) {
         section.added += 1;
-        appendPartialPatchDiffLine(
-            section,
-            numberedDiffLine("+", section.newLine, line.slice(1), section.lineNumbersKnown),
-        );
+        appendPartialPatchDiffLine(section, "+", line.slice(1), undefined, section.newLine);
         section.newLine += 1;
         return;
     }
 
     if (line.startsWith("-")) {
         section.removed += 1;
-        appendPartialPatchDiffLine(
-            section,
-            numberedDiffLine("-", section.oldLine, line.slice(1), section.lineNumbersKnown),
-        );
+        appendPartialPatchDiffLine(section, "-", line.slice(1), section.oldLine, undefined);
         section.oldLine += 1;
         return;
     }
 
     if (line.startsWith(" ") || line.length === 0) {
         const content = line.startsWith(" ") ? line.slice(1) : "";
-        appendPartialPatchDiffLine(
-            section,
-            numberedDiffLine(" ", section.newLine, content, section.lineNumbersKnown),
-        );
+        appendPartialPatchDiffLine(section, " ", content, section.oldLine, section.newLine);
         section.oldLine += 1;
         section.newLine += 1;
     }
@@ -713,6 +822,7 @@ function finalizedPartialSection(section: PartialApplyPatchSection): ApplyPatchS
         kind: section.kind,
         path: displayPath(section),
         lines: section.lines.slice(-MAX_PARTIAL_PATCH_PREVIEW_LINES),
+        lineCoordinates: section.lineCoordinates.slice(-MAX_PARTIAL_PATCH_PREVIEW_LINES),
         added: section.added,
         removed: section.removed,
         countsKnown: section.kind !== "delete",
@@ -897,6 +1007,10 @@ class PartialApplyPatchCallPreviewComponent implements Component {
         this.toolCallId = update.toolCallId;
         this.theme = update.theme;
         this.update(update);
+    }
+
+    belongsTo(toolCallId: string): boolean {
+        return this.toolCallId === toolCallId;
     }
 
     update(update: PartialApplyPatchPreviewUpdate): void {
@@ -1205,6 +1319,13 @@ function renderPartialApplyPatchCall(
         labelMode,
         toolCallId: context.toolCallId,
     };
+    if (
+        context.lastComponent instanceof PartialApplyPatchCallPreviewComponent &&
+        context.lastComponent.belongsTo(context.toolCallId)
+    ) {
+        context.lastComponent.update(update);
+        return context.lastComponent;
+    }
     return new PartialApplyPatchCallPreviewComponent(update);
 }
 
@@ -1249,14 +1370,16 @@ export function createApplyPatchRenderer(
         renderCall(args, theme, context) {
             const patch = patchTextFromArgs(args);
             if (patch !== undefined) {
-                schedulePartialUpdatePreimages(
-                    context.toolCallId,
-                    context.cwd,
-                    patch,
-                    context.invalidate,
-                );
+                scheduleApplyPatchSyntaxLoads(patch, context.invalidate);
             }
-            if (patch !== undefined && isActiveToolCall(context)) {
+            const persistedSummary =
+                persistedApplyPatchSummary(context.result) ??
+                persistedSummaries.get(context.toolCallId);
+            if (
+                patch !== undefined &&
+                persistedSummary === undefined &&
+                isActiveToolCall(context)
+            ) {
                 return renderPartialApplyPatchCall(patch, theme, context, labelMode);
             }
             const parsedSummary =
@@ -1264,18 +1387,42 @@ export function createApplyPatchRenderer(
                     ? undefined
                     : parseApplyPatchSummary(patch);
             const summary =
-                parsedSummary === undefined
+                persistedSummary ??
+                (parsedSummary === undefined
                     ? undefined
                     : hydrateUpdateLineNumbers(
                           hydrateDeletePreimages(parsedSummary, context.toolCallId),
                           patch ?? "",
                           context.toolCallId,
-                      );
+                      ));
+            const summaryContext =
+                persistedSummary === undefined
+                    ? context
+                    : { ...context, argsComplete: true, isPartial: false };
             return summary === undefined
                 ? renderApplyPatchFallbackCall(args, theme, context, labelMode)
-                : renderApplyPatchSummary(summary, theme, context.expanded, context, labelMode);
+                : renderApplyPatchSummary(
+                      summary,
+                      theme,
+                      context.expanded,
+                      summaryContext,
+                      labelMode,
+                  );
         },
         renderResult(result, options, theme, context) {
+            const persistedSummary = persistedApplyPatchSummary(result);
+            const persistedDiff = isRecord(result.details)
+                ? stringField(result.details, "diff")
+                : undefined;
+            if (
+                persistedSummary !== undefined &&
+                persistedDiff !== undefined &&
+                persistedSummaryDiffs.get(context.toolCallId) !== persistedDiff
+            ) {
+                rememberBounded(persistedSummaries, context.toolCallId, persistedSummary);
+                rememberBounded(persistedSummaryDiffs, context.toolCallId, persistedDiff);
+                queueMicrotask(() => context.invalidate?.());
+            }
             if (context.isError) {
                 return renderApplyPatchFailure(result, options, theme, labelMode);
             }

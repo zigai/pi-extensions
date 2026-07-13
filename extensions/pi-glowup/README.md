@@ -5,6 +5,7 @@ Compact Codex-style rendering for Pi tool calls and results.
 ## Contents
 
 - [Codex-look tool rendering](docs/tool-rendering.md)
+- [Configuration guide](docs/configuration.md)
 - [Script previews](docs/script-previews.md)
 
 ## Configuration
@@ -14,11 +15,14 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | Option                                    | Default                                                         | Purpose                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.                 |
-| `appearance.diffBackgroundStyle`          | `"changed-spans"`                                               | Highlight `changed-spans` only or paint each `full-row`.                    |
+| `appearance.diffBackgroundStyle`          | `"two-tone"`                                                    | Use `two-tone`, `changed-spans`, or `full-row` diff backgrounds.            |
+| `appearance.diffLineNumberStyle`          | `"dual"`                                                        | Show aligned `dual` old/new gutters or the previous `single` gutter.        |
 | `appearance.narrowDiffLayout`             | `"paired"`                                                      | Pair similar old/new rows or use `traditional` block ordering.              |
 | `appearance.sideBySideLayout`             | `"content-aware"`                                               | Use content-aware split selection or the `fixed` 140-column cutoff.         |
-| `appearance.addedRowBackground`           | `null`                                                          | Override addition backgrounds with a `#RRGGBB` color; `null` uses Pi.       |
-| `appearance.deletedRowBackground`         | `null`                                                          | Override deletion backgrounds with a `#RRGGBB` color; `null` uses Pi.       |
+| `appearance.addedRowBackground`           | `null`                                                          | Override the subtle addition-row shade; `null` derives it from Pi.          |
+| `appearance.deletedRowBackground`         | `null`                                                          | Override the subtle deletion-row shade; `null` derives it from Pi.          |
+| `appearance.addedContentBackground`       | `null`                                                          | Override the stronger added intraline shade; `null` derives it.             |
+| `appearance.deletedContentBackground`     | `null`                                                          | Override the stronger deleted intraline shade; `null` derives it.           |
 | `appearance.instructionPathColor`         | `null`                                                          | Override Skill/AGENTS path text with a `#RRGGBB` color; `null` uses Pi.     |
 | `appearance.dimUnchangedDiffText`         | `false`                                                         | Dim unchanged text inside changed diff rows.                                |
 | `debugLog.enabled`                        | `false`                                                         | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
@@ -30,6 +34,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | `toolLabels.mode`                         | `"static"`                                                      | Use `static` labels or `lifecycle` active/completed verb pairs.             |
 | `writePreview.movingViewport`             | `true`                                                          | Follow the latest lines while a large write streams; disable for head-only. |
 | `syntax.preloadLanguages`                 | `["markdown","bash","python","typescript","javascript","json"]` | Language ids or aliases to preload for synchronous syntax highlighting.     |
+| `syntax.bracketPairColoring`              | `true`                                                          | Color matching brackets; disable to use the syntax theme's normal color.    |
 | `syntax.projectLanguageDetection.enabled` | `true`                                                          | Add languages inferred from project filenames to the preload set.           |
 | `patches.assistantSeparator`              | `true`                                                          | Add separators and spacing around assistant messages.                       |
 | `patches.workingWidgetSpacing`            | `false`                                                         | Remove one blank line near the working indicator with a global TUI patch.   |
@@ -45,11 +50,14 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
   "$schema": "./config.schema.json",
   "preserveTools": [],
   "appearance": {
-    "diffBackgroundStyle": "changed-spans",
+    "diffBackgroundStyle": "two-tone",
+    "diffLineNumberStyle": "dual",
     "narrowDiffLayout": "paired",
     "sideBySideLayout": "content-aware",
     "addedRowBackground": null,
     "deletedRowBackground": null,
+    "addedContentBackground": null,
+    "deletedContentBackground": null,
     "instructionPathColor": null,
     "dimUnchangedDiffText": false
   },
@@ -71,6 +79,7 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
   },
   "syntax": {
     "preloadLanguages": ["markdown", "bash", "python", "typescript", "javascript", "json"],
+    "bracketPairColoring": true,
     "projectLanguageDetection": {
       "enabled": true
     }

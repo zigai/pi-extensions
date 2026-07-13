@@ -6,14 +6,18 @@ import type { Highlighter } from "shiki";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderScriptCall, type CodexRenderTheme } from "../src/rendering/core.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
+import { scheduleCodeOutputSyntaxLoad } from "../src/syntax/code-component.ts";
 import {
     disposeSyntaxHighlighting,
     clearSyntaxHighlightCache,
+    getLoadedSyntaxHighlighterForLanguage,
     getSyntaxHighlighterForLanguage,
     highlightSyntaxCode,
     initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
     loadSyntaxLanguageIfReady,
+    refreshSyntaxHighlighting,
+    reinitializeSyntaxHighlighting,
     syntaxHighlightCacheStats,
     syntaxHighlighterDiagnostics,
     type SyntaxHighlighterFactory,
@@ -113,6 +117,99 @@ describe("syntax highlighter lifecycle", () => {
         }
         expect(disposedCount).toBe(1);
         expect(isSyntaxHighlightingReady()).toBe(false);
+    });
+
+    it("keeps the current highlighter ready until its replacement is available", async () => {
+        let releaseReplacement: (() => void) | undefined;
+        let resolveReplacementStarted: (() => void) | undefined;
+        let oldDisposedCount = 0;
+        const replacementStarted = new Promise<void>((resolve) => {
+            resolveReplacementStarted = resolve;
+        });
+        const oldHighlighter = fakeHighlighter({
+            loadedLanguages: ["typescript"],
+            dispose() {
+                oldDisposedCount += 1;
+            },
+        });
+        const newHighlighter = fakeHighlighter({ loadedLanguages: ["typescript", "python"] });
+
+        await initializeSyntaxHighlighting(
+            {},
+            { createHighlighter: async () => oldHighlighter, preloadLanguages: ["typescript"] },
+        );
+        const replacement = reinitializeSyntaxHighlighting(
+            {},
+            {
+                createHighlighter: async () => {
+                    resolveReplacementStarted?.();
+                    await new Promise<void>((resolve) => {
+                        releaseReplacement = resolve;
+                    });
+                    return newHighlighter;
+                },
+                preloadLanguages: ["typescript", "python"],
+            },
+        );
+        await replacementStarted;
+
+        expect(isSyntaxHighlightingReady()).toBe(true);
+        expect(getLoadedSyntaxHighlighterForLanguage("typescript")?.highlighter).toBe(
+            oldHighlighter,
+        );
+        expect(oldDisposedCount).toBe(0);
+
+        releaseReplacement?.();
+        await replacement;
+
+        expect(getLoadedSyntaxHighlighterForLanguage("typescript")?.highlighter).toBe(
+            newHighlighter,
+        );
+        expect(oldDisposedCount).toBe(1);
+    });
+
+    it("reuses the highlighter until syntax inputs change", async () => {
+        let factoryCalls = 0;
+        const factory: SyntaxHighlighterFactory = async () => {
+            factoryCalls += 1;
+            return fakeHighlighter({ loadedLanguages: ["typescript", "python"] });
+        };
+
+        await initializeSyntaxHighlighting(
+            {},
+            { createHighlighter: factory, preloadLanguages: ["typescript"] },
+        );
+        await refreshSyntaxHighlighting(
+            {},
+            { createHighlighter: factory, preloadLanguages: ["typescript"] },
+        );
+        expect(factoryCalls).toBe(1);
+
+        await refreshSyntaxHighlighting(
+            {},
+            { createHighlighter: factory, preloadLanguages: ["typescript", "python"] },
+        );
+        expect(factoryCalls).toBe(2);
+    });
+
+    it("invalidates previews queued before syntax initialization completes", async () => {
+        let invalidations = 0;
+
+        scheduleCodeOutputSyntaxLoad({ path: "src/example.ts" }, () => {
+            invalidations += 1;
+        });
+        expect(invalidations).toBe(0);
+
+        await initializeSyntaxHighlighting(
+            {},
+            {
+                createHighlighter: async () => fakeHighlighter({ loadedLanguages: ["typescript"] }),
+                preloadLanguages: ["typescript"],
+            },
+        );
+        await waitForCondition(() => invalidations === 1);
+
+        expect(invalidations).toBe(1);
     });
 
     it("does not return a highlighter after disposal during language loading", async () => {

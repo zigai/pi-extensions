@@ -2,9 +2,13 @@ import { visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering/core.ts";
-import { captureApplyPatchPreimages } from "../src/rendering/apply-patch-rendering.ts";
+import { beforeEach, describe, expect, it } from "vitest";
+import { configureRenderingAppearance, type CodexRenderTheme } from "../src/rendering/core.ts";
+import {
+    captureApplyPatchPreimages,
+    clearApplyPatchRenderingState,
+    restoreApplyPatchResultSummaries,
+} from "../src/rendering/apply-patch-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 
 const plainTheme: CodexRenderTheme = {
@@ -30,6 +34,19 @@ const renderContext = {
     isError: false,
 };
 
+const defaultAppearance = {
+    diffBackgroundStyle: "two-tone",
+    diffLineNumberStyle: "dual",
+    narrowDiffLayout: "paired",
+    sideBySideLayout: "content-aware",
+    addedRowBackground: null,
+    deletedRowBackground: null,
+    addedContentBackground: null,
+    deletedContentBackground: null,
+    instructionPathColor: null,
+    dimUnchangedDiffText: false,
+} as const;
+
 const samplePatch = `*** Begin Patch
 *** Update File: README.md
 @@
@@ -47,6 +64,11 @@ function expectLinesWithinWidth(lines: ReadonlyArray<string>, width: number): vo
 }
 
 describe("apply_patch renderer", () => {
+    beforeEach(() => {
+        configureRenderingAppearance(defaultAppearance);
+        clearApplyPatchRenderingState();
+    });
+
     it("shows every file and its bounded diff before expansion", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",
@@ -120,8 +142,8 @@ describe("apply_patch renderer", () => {
             .render(100)
             .join("\n");
 
-        expect(rendered).toContain("20 -const value = 1;");
-        expect(rendered).toContain("30 +const value = 2;");
+        expect(rendered).toContain("20    -const value = 1;");
+        expect(rendered).toContain("   30 +const value = 2;");
     });
 
     it("derives real line numbers for coordinate-less edit hunks from the preimage", async () => {
@@ -150,10 +172,10 @@ describe("apply_patch renderer", () => {
                 .render(100)
                 .join("\n");
 
-            expect(rendered).toContain("3  line three");
-            expect(rendered).toContain("4 -line four");
-            expect(rendered).toContain("4 +changed four");
-            expect(rendered).toContain("5  line five");
+            expect(rendered).toContain("3 3  line three");
+            expect(rendered).toContain("4   -line four");
+            expect(rendered).toContain("  4 +changed four");
+            expect(rendered).toContain("5 5  line five");
         } finally {
             rmSync(cwd, { recursive: true, force: true });
         }
@@ -190,17 +212,77 @@ describe("apply_patch renderer", () => {
                 .render(120)
                 .join("\n");
 
-            expect(rendered).toContain('3 -  "currentMode": "5.5",');
-            expect(rendered).toContain('3 +  "currentMode": "luna",');
-            expect(rendered).toContain('4 -  "5.5": {');
-            expect(rendered).toContain('4 +  "luna": {');
+            expect(rendered).toContain('3   -  "currentMode": "5.5",');
+            expect(rendered).toContain('  3 +  "currentMode": "luna",');
+            expect(rendered).toContain('4   -  "5.5": {');
+            expect(rendered).toContain('  4 +  "luna": {');
             expect(rendered).not.toContain("not shown");
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
     });
 
-    it("refreshes completed coordinate-less previews after a pending preimage capture", async () => {
+    it("leaves ambiguous coordinate-less update hunks unnumbered", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-ambiguous-update-"));
+        try {
+            writeFileSync(path.join(cwd, "example.txt"), "same\nmiddle\nsame\n");
+            const patch = `*** Begin Patch
+*** Update File: example.txt
+@@
+-same
++changed
+*** End Patch`;
+            const renderer = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            });
+            const context = { ...renderContext, cwd, toolCallId: "ambiguous-update" };
+
+            await captureApplyPatchPreimages(context.toolCallId, cwd, { patch });
+            const rendered = renderer
+                .renderCall({ patch }, plainTheme, context)
+                .render(100)
+                .join("\n");
+            const deletion = rendered.split("\n").find((line) => line.includes("-same")) ?? "";
+            const addition = rendered.split("\n").find((line) => line.includes("+changed")) ?? "";
+
+            expect(deletion).not.toBe("");
+            expect(addition).not.toBe("");
+            expect(deletion).not.toMatch(/\d/u);
+            expect(addition).not.toMatch(/\d/u);
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
+    it("leaves insertion-only coordinate-less update hunks unnumbered", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-insertion-update-"));
+        try {
+            writeFileSync(path.join(cwd, "example.txt"), "existing\n");
+            const patch = `*** Begin Patch
+*** Update File: example.txt
+@@
++inserted
+*** End Patch`;
+            const renderer = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            });
+            const context = { ...renderContext, cwd, toolCallId: "insertion-only-update" };
+
+            await captureApplyPatchPreimages(context.toolCallId, cwd, { patch });
+            const rendered = renderer
+                .renderCall({ patch }, plainTheme, context)
+                .render(100)
+                .join("\n");
+            const addition = rendered.split("\n").find((line) => line.includes("+inserted")) ?? "";
+
+            expect(addition).not.toBe("");
+            expect(addition).not.toMatch(/\d/u);
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
+    it("does not consult the current filesystem while rendering completed history", () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
         try {
             writeFileSync(path.join(cwd, "example.ts"), "line one\nline two\nline three\n");
@@ -215,20 +297,15 @@ describe("apply_patch renderer", () => {
             const renderer = createThirdPartyToolRenderer("apply_patch", {
                 labelMode: "lifecycle",
             });
-            let notify: (() => void) | undefined;
-            const invalidated = new Promise<void>((resolve) => {
-                notify = resolve;
-            });
             const context = {
                 ...renderContext,
                 toolCallId: "completed-numbered-patch",
                 argsComplete: true,
                 isPartial: false,
                 cwd,
-                invalidate: () => notify?.(),
+                invalidate: () => {},
             };
 
-            const capture = captureApplyPatchPreimages(context.toolCallId, cwd, { patch });
             const initial = renderer
                 .renderCall({ patch }, plainTheme, context)
                 .render(100)
@@ -237,17 +314,13 @@ describe("apply_patch renderer", () => {
             expect(initial).toContain("-line two");
             expect(initial).not.toContain("2 -line two");
 
-            await invalidated;
-            await capture;
+            writeFileSync(path.join(cwd, "example.ts"), "unrelated replacement\n");
             const refreshed = renderer
-                .renderCall({ patch }, plainTheme, { ...context, invalidate: () => {} })
+                .renderCall({ patch }, plainTheme, context)
                 .render(100)
                 .join("\n");
 
-            expect(refreshed).toContain("1  line one");
-            expect(refreshed).toContain("2 -line two");
-            expect(refreshed).toContain("2 +changed two");
-            expect(refreshed).toContain("3  line three");
+            expect(refreshed).toBe(initial);
         } finally {
             rmSync(cwd, { recursive: true, force: true });
         }
@@ -284,12 +357,12 @@ describe("apply_patch renderer", () => {
                 .render(100)
                 .join("\n");
 
-            expect(rendered).toContain("3 -line 3");
-            expect(rendered).toContain("3 +line 3a");
-            expect(rendered).toContain("4 +line 3b");
-            expect(rendered).toContain("8  line 7");
-            expect(rendered).toContain("8 -line 8");
-            expect(rendered).toContain("9 +changed 8");
+            expect(rendered).toContain("3   -line 3");
+            expect(rendered).toContain("  3 +line 3a");
+            expect(rendered).toContain("  4 +line 3b");
+            expect(rendered).toContain("7 8  line 7");
+            expect(rendered).toContain("8   -line 8");
+            expect(rendered).toContain("  9 +changed 8");
         } finally {
             rmSync(cwd, { recursive: true, force: true });
         }
@@ -370,7 +443,7 @@ describe("apply_patch renderer", () => {
         expectLinesWithinWidth(lines, 100);
     });
 
-    it("resolves real line numbers for coordinate-less streaming updates", async () => {
+    it("uses preimages captured by tool-call preflight for streaming updates", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-streaming-patch-"));
         try {
             writeFileSync(
@@ -387,17 +460,13 @@ describe("apply_patch renderer", () => {
             const renderer = createThirdPartyToolRenderer("apply_patch", {
                 labelMode: "lifecycle",
             });
-            let notify: (() => void) | undefined;
-            const invalidated = new Promise<void>((resolve) => {
-                notify = resolve;
-            });
             const context = {
                 ...renderContext,
                 toolCallId: "streaming-numbered-patch",
                 argsComplete: false,
                 isPartial: true,
                 cwd,
-                invalidate: () => notify?.(),
+                invalidate: () => {},
             };
             const component = renderer.renderCall({ patch }, plainTheme, context);
             const initial = component.render(100).join("\n");
@@ -405,7 +474,7 @@ describe("apply_patch renderer", () => {
             expect(initial).not.toContain("-line 10");
             expect(initial).not.toContain("+line ten");
 
-            await invalidated;
+            await captureApplyPatchPreimages(context.toolCallId, cwd, { patch });
             const rendered = renderer
                 .renderCall({ patch }, plainTheme, {
                     ...context,
@@ -415,23 +484,19 @@ describe("apply_patch renderer", () => {
                 .render(100)
                 .join("\n");
 
-            expect(rendered).toContain("9  line 9");
-            expect(rendered).toContain("10 -line 10");
-            expect(rendered).toContain("10 +line ten");
-            expect(rendered).toContain("11  line 11");
+            expect(rendered).toContain("9  9  line 9");
+            expect(rendered).toContain("10    -line 10");
+            expect(rendered).toContain("   10 +line ten");
+            expect(rendered).toContain("11 11  line 11");
         } finally {
             rmSync(cwd, { recursive: true, force: true });
         }
     });
 
-    it("does not retry unavailable streaming update preimages", async () => {
+    it("does not read unavailable update preimages from render calls", async () => {
         const renderer = createThirdPartyToolRenderer("apply_patch");
         const patch = "*** Begin Patch\n*** Update File: missing.ts\n@@\n-old\n+new";
         let invalidations = 0;
-        let notify: (() => void) | undefined;
-        const invalidated = new Promise<void>((resolve) => {
-            notify = resolve;
-        });
         const context = {
             ...renderContext,
             toolCallId: "missing-streaming-preimage",
@@ -440,15 +505,13 @@ describe("apply_patch renderer", () => {
             cwd: process.cwd(),
             invalidate: (): void => {
                 invalidations += 1;
-                notify?.();
             },
         };
         const component = renderer.renderCall({ patch }, plainTheme, context);
 
-        await invalidated;
         renderer.renderCall({ patch }, plainTheme, { ...context, lastComponent: component });
         await new Promise<void>((resolve) => setImmediate(resolve));
-        expect(invalidations).toBe(1);
+        expect(invalidations).toBe(0);
     });
 
     it("does not read partially streamed update paths", async () => {
@@ -658,7 +721,133 @@ describe("apply_patch renderer", () => {
         }
     });
 
-    it("replays bounded newly streamed patch lines without reusing components", () => {
+    it("reconstructs restored delete previews from persisted result details", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
+        const patch = "*** Begin Patch\n*** Delete File: removed.ts\n*** End Patch";
+        const rendered = renderer
+            .renderCall({ patch }, plainTheme, {
+                ...renderContext,
+                toolCallId: "restored-delete",
+                argsComplete: false,
+                isPartial: true,
+                result: {
+                    details: {
+                        diff: "removed.ts\n-1 one\n-2 two\n-3 世界\n",
+                        lineSummary: {
+                            files: [
+                                {
+                                    action: "D",
+                                    path: "removed.ts",
+                                    addedLines: 0,
+                                    removedLines: 3,
+                                },
+                            ],
+                        },
+                    },
+                },
+            })
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("• Patched removed.ts (-3)");
+        expect(rendered).toContain("1   -one");
+        expect(rendered).toContain("3   -世界");
+    });
+
+    it("rehydrates a restored call after its persisted result renderer runs", async () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
+        const patch = "*** Begin Patch\n*** Delete File: restored.ts\n*** End Patch";
+        let invalidations = 0;
+        const result = {
+            content: [],
+            details: {
+                diff: "restored.ts\n-1 retained\n-2 history\n",
+                lineSummary: {
+                    files: [
+                        {
+                            action: "D",
+                            path: "restored.ts",
+                            addedLines: 0,
+                            removedLines: 2,
+                        },
+                    ],
+                },
+            },
+        };
+
+        renderer.renderResult(result, { expanded: false, isPartial: false }, plainTheme, {
+            ...renderContext,
+            toolCallId: "restored-side-channel",
+            invalidate: () => {
+                invalidations += 1;
+            },
+        });
+        await Promise.resolve();
+        const rendered = renderer
+            .renderCall({ patch }, plainTheme, {
+                ...renderContext,
+                toolCallId: "restored-side-channel",
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100)
+            .join("\n");
+
+        expect(invalidations).toBe(1);
+        expect(rendered).toContain("• Patched restored.ts (-2)");
+        expect(rendered).toContain("2   -history");
+    });
+
+    it("restores immutable patch summaries from session branch entries", () => {
+        restoreApplyPatchResultSummaries([
+            {
+                type: "message",
+                message: {
+                    role: "toolResult",
+                    toolCallId: "branch-patch",
+                    toolName: "functions__apply_patch",
+                    details: {
+                        diff: "gone.ts\n-1 original\n-2 transcript\n",
+                        lineSummary: {
+                            files: [
+                                {
+                                    action: "D",
+                                    path: "gone.ts",
+                                    addedLines: 0,
+                                    removedLines: 2,
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        ]);
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
+        const rendered = renderer
+            .renderCall(
+                { patch: "*** Begin Patch\n*** Delete File: gone.ts\n*** End Patch" },
+                plainTheme,
+                {
+                    ...renderContext,
+                    toolCallId: "branch-patch",
+                    argsComplete: false,
+                    isPartial: true,
+                },
+            )
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("• Patched gone.ts (-2)");
+        expect(rendered).toContain("2   -transcript");
+    });
+
+    it("retains section state after a streamed patch exceeds the replay window", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",
         });
@@ -666,8 +855,11 @@ describe("apply_patch renderer", () => {
         let lastComponent: Component | undefined;
         let firstComponent: Component | undefined;
 
-        for (let index = 1; index <= 200; index += 1) {
-            patch += `+export const value${index} = ${index};\n`;
+        for (let batch = 0; batch < 30; batch += 1) {
+            for (let offset = 1; offset <= 100; offset += 1) {
+                const index = batch * 100 + offset;
+                patch += `+export const value${index} = ${index};\n`;
+            }
             lastComponent = renderer.renderCall({ patch }, plainTheme, {
                 ...renderContext,
                 argsComplete: false,
@@ -679,12 +871,12 @@ describe("apply_patch renderer", () => {
         }
 
         const rendered = lastComponent?.render(120).join("\n") ?? "";
-        expect(lastComponent).not.toBe(firstComponent);
+        expect(lastComponent).toBe(firstComponent);
         expect(lastComponent?.render(120)).toHaveLength(7);
         expect(rendered).toContain("• Patching src/generated.ts");
-        expect(rendered).not.toContain("(+200)");
-        expect(rendered).toContain("export const value195 = 195;");
-        expect(rendered).toContain("export const value200 = 200;");
+        expect(rendered).not.toContain("(+3000)");
+        expect(rendered).toContain("export const value2995 = 2995;");
+        expect(rendered).toContain("export const value3000 = 3000;");
         expect(rendered).not.toContain("export const value1 = 1;");
         expectLinesWithinWidth(lastComponent?.render(120) ?? [], 120);
     });
@@ -763,9 +955,9 @@ describe("apply_patch renderer", () => {
         );
         const secondLineFrame = secondLineComponent.render(120);
 
-        expect(partialHeaderComponent).not.toBe(firstComponent);
-        expect(secondHeaderComponent).not.toBe(firstComponent);
-        expect(secondLineComponent).not.toBe(firstComponent);
+        expect(partialHeaderComponent).toBe(firstComponent);
+        expect(secondHeaderComponent).toBe(firstComponent);
+        expect(secondLineComponent).toBe(firstComponent);
         expect(firstFrame.length).toBeLessThanOrEqual(7);
         expect(partialHeaderFrame.length).toBeLessThanOrEqual(7);
         expect(secondHeaderFrame.length).toBeLessThanOrEqual(7);
@@ -801,7 +993,7 @@ describe("apply_patch renderer", () => {
         });
         const rendered = secondComponent.render(100).join("\n");
 
-        expect(secondComponent).not.toBe(firstComponent);
+        expect(secondComponent).toBe(firstComponent);
         expect(rendered).toContain("Patching src/second.ts");
         expect(rendered).not.toContain("(+1)");
         expect(rendered).toContain("export const second = true;");

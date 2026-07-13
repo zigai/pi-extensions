@@ -9,6 +9,7 @@ const PYTHON_VARIABLE_IDENTIFIER_COLOR = SYNTAX_ACCENT_COLORS.pythonVariableIden
 const PYTHON_FUNCTION_IDENTIFIER_COLOR = SYNTAX_ACCENT_COLORS.pythonFunctionIdentifier;
 const OPEN_BRACKETS = new Set(["(", "[", "{"]);
 const CLOSE_BRACKETS = new Set([")", "]", "}"]);
+let bracketPairColoringEnabled = true;
 
 type BracketState = {
     depth: number;
@@ -18,6 +19,15 @@ type TextSegment = {
     readonly text: string;
     readonly fg?: string;
 };
+
+/** Enables or disables bracket-pair foreground overrides without changing syntax token colors. */
+export function configureBracketPairColoring(enabled: boolean): boolean {
+    if (bracketPairColoringEnabled === enabled) {
+        return false;
+    }
+    bracketPairColoringEnabled = enabled;
+    return true;
+}
 
 /** Applies VS Code-like bracket pair colors to otherwise-neutral punctuation tokens. */
 export function colorBracketPairsInTokenRows(
@@ -139,7 +149,11 @@ function splitBracketText(
     if (text.length === 0) {
         return [];
     }
-    if (!isBracketColorableForeground(foreground) || !hasBracket(text)) {
+    if (
+        !bracketPairColoringEnabled ||
+        !isBracketColorableForeground(foreground) ||
+        !hasBracket(text)
+    ) {
         return [{ text }];
     }
 

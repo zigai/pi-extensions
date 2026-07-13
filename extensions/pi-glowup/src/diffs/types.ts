@@ -73,10 +73,12 @@ export type UnifiedDiffRow =
     | {
           readonly kind: "line";
           readonly lineType: "context" | "addition" | "deletion";
-          readonly lineNumber?: number;
+          readonly oldLineNumber?: number;
+          readonly newLineNumber?: number;
           readonly spans: ReadonlyArray<DiffSpan>;
           readonly rowFg: string;
           readonly rowBg: string;
+          readonly contentBg: string;
           readonly lineNumberFg: string;
       };
 
@@ -87,6 +89,7 @@ export type SplitDiffCell = {
     readonly spans: ReadonlyArray<DiffSpan>;
     readonly rowFg: string;
     readonly rowBg: string;
+    readonly contentBg: string;
     readonly lineNumberFg: string;
 };
 

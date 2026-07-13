@@ -20,6 +20,7 @@ export type ThirdPartyToolRenderContext = CodexLookRenderContext & {
     readonly lastComponent?: Component | undefined;
     readonly cwd?: string;
     readonly invalidate?: () => void;
+    readonly result?: ThirdPartyToolResult | undefined;
 };
 
 /** Minimal result shape consumed by Codex-look third-party renderers. */

@@ -29,6 +29,12 @@ describe("tool status labels", () => {
         ).toBe("Exploring");
     });
 
+    it("treats persisted results as completed despite stale partial flags", () => {
+        expect(
+            isActiveToolCall({ isPartial: true, argsComplete: false, result: { details: {} } }),
+        ).toBe(false);
+    });
+
     it("defers simple calls until arguments are complete", () => {
         expect(shouldDeferSimpleToolCall({ isPartial: true, argsComplete: false })).toBe(true);
         expect(shouldDeferSimpleToolCall({ isPartial: false, argsComplete: false })).toBe(true);
