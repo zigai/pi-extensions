@@ -23,6 +23,7 @@ export {
     type ArtifactFailure,
     type ProjectFailure,
 } from "./failures.ts";
+export type { JsonArray, JsonObject, JsonPrimitive, JsonValue } from "./json-value.ts";
 export {
     defaultGlobalSettingsDisplayPath,
     EXTENSION_SETTINGS_DIRECTORY,

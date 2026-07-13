@@ -47,6 +47,8 @@ describe("loadExtensionSettingsSync", () => {
 
         expect(loaded.settings.appearance).toEqual({ color: "red", opacity: 0.8 });
         expect(loaded.usedProjectConfig).toBe(true);
+        expect(loaded.projectSettingsLayer).toEqual({ appearance: { color: "red" } });
+        expect(loaded.globalSettingsLayer).toEqual(testDefinition().defaultSettings);
         expect(loaded.scaffoldedGlobalConfig).toBe(true);
         expect(readFileSync(globalPaths.schemaPath, "utf8")).toBe(bundledSchema().content);
     });

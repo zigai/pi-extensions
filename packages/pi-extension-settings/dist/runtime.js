@@ -224,6 +224,7 @@ export async function loadExtensionSettings(definition, options) {
     if (globalApplied.diagnostic !== undefined)
         diagnostics.push(globalApplied.diagnostic);
     let resolved = globalApplied.settings;
+    let projectSettingsLayer;
     let usedProjectConfig = false;
     if (projectPaths !== undefined && options.project?.trusted === true) {
         const projectLayer = await readLayer(projectPaths.configPath, "project", layerSchema);
@@ -233,11 +234,14 @@ export async function loadExtensionSettings(definition, options) {
             diagnostics.push(projectApplied.diagnostic);
         if (projectLayer.settings !== undefined && projectApplied.diagnostic === undefined) {
             resolved = projectApplied.settings;
+            projectSettingsLayer = projectLayer.settings;
             usedProjectConfig = true;
         }
     }
     return {
         settings: Value.Decode(definition.schema, resolved),
+        globalSettingsLayer: globalApplied.diagnostic === undefined ? globalLayer.settings : undefined,
+        projectSettingsLayer,
         diagnostics,
         globalConfigPath: globalPaths.configPath,
         projectConfigPath: projectPaths?.configPath,
@@ -311,6 +315,7 @@ export function loadExtensionSettingsSync(definition, options) {
     if (globalApplied.diagnostic !== undefined)
         diagnostics.push(globalApplied.diagnostic);
     let resolved = globalApplied.settings;
+    let projectSettingsLayer;
     let usedProjectConfig = false;
     if (projectPaths !== undefined && options.project?.trusted === true) {
         const projectLayer = readLayerSync(projectPaths.configPath, "project", layerSchema);
@@ -320,11 +325,14 @@ export function loadExtensionSettingsSync(definition, options) {
             diagnostics.push(projectApplied.diagnostic);
         if (projectLayer.settings !== undefined && projectApplied.diagnostic === undefined) {
             resolved = projectApplied.settings;
+            projectSettingsLayer = projectLayer.settings;
             usedProjectConfig = true;
         }
     }
     return {
         settings: Value.Decode(definition.schema, resolved),
+        globalSettingsLayer: globalApplied.diagnostic === undefined ? globalLayer.settings : undefined,
+        projectSettingsLayer,
         diagnostics,
         globalConfigPath: globalPaths.configPath,
         projectConfigPath: projectPaths?.configPath,

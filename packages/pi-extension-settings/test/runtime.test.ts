@@ -103,6 +103,10 @@ describe("loadExtensionSettings", () => {
             tools: ["bash"],
         });
         expect(loaded.usedProjectConfig).toBe(true);
+        expect(loaded.projectSettingsLayer).toEqual({
+            appearance: { opacity: 0.25 },
+            tools: ["bash"],
+        });
         await expect(readFile(projectPaths.schemaPath, "utf8")).rejects.toMatchObject({
             code: "ENOENT",
         });
@@ -156,6 +160,8 @@ describe("loadExtensionSettings", () => {
         const diagnostic = loaded.diagnostics.find((item) => item.code === "config-invalid");
 
         expect(diagnostic?.issues).toBeDefined();
+        expect(loaded.globalSettingsLayer).toBeUndefined();
+        expect(loaded.projectSettingsLayer).toBeUndefined();
         expect(JSON.stringify(diagnostic)).not.toContain("do-not-report");
         expect(await readFile(paths.configPath, "utf8")).toContain("do-not-report");
     });

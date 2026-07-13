@@ -1,5 +1,6 @@
 import type { StaticDecode, TObject } from "typebox";
 import type { ExtensionSettingsDefinition } from "./definition.ts";
+import { type JsonObject } from "./json-value.ts";
 export type BundledSchemaSource = {
     readonly kind: "content";
     readonly content: string;
@@ -31,6 +32,10 @@ export type SettingsDiagnostic = {
 };
 export type LoadedExtensionSettings<Schema extends TObject> = {
     readonly settings: StaticDecode<Schema>;
+    /** Validated user global layer before defaults or project overrides. */
+    readonly globalSettingsLayer: JsonObject | undefined;
+    /** Validated trusted-project layer before merging. */
+    readonly projectSettingsLayer: JsonObject | undefined;
     readonly diagnostics: readonly SettingsDiagnostic[];
     readonly globalConfigPath: string;
     readonly projectConfigPath: string | undefined;

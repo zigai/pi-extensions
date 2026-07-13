@@ -61,4 +61,31 @@ describe("loadPiExtensionSettings", () => {
         expect(synchronous.settings.enabled).toBe(false);
         expect(synchronous.usedProjectConfig).toBe(true);
     });
+
+    it("uses Pi's configured agent directory when no override is supplied", async () => {
+        const root = await temporaryDirectory();
+        const agentDir = join(root, "configured-agent");
+        const previous = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        try {
+            const definition = testDefinition();
+            const loaded = loadPiExtensionSettingsSync(
+                definition,
+                { cwd: root, isProjectTrusted: () => false },
+                {
+                    bundledSchema: {
+                        kind: "content",
+                        content: formatJson(createSettingsFileSchema(definition)),
+                    },
+                },
+            );
+            expect(loaded.globalConfigPath).toContain("configured-agent");
+        } finally {
+            if (previous === undefined) {
+                delete process.env.PI_CODING_AGENT_DIR;
+            } else {
+                process.env.PI_CODING_AGENT_DIR = previous;
+            }
+        }
+    });
 });
