@@ -126,12 +126,28 @@ describe("CLI failure behavior", () => {
         await writeDefinition(join(root, "settings.mjs"));
         await writeFile(join(root, "README.md"), "# No markers\n");
 
-        const generateOutput = recordingIo();
-        expect(await runCli(["generate", "--root", root], generateOutput.io)).toBe(1);
-        expect(generateOutput.err.join("")).toContain("markers");
-
         const checkOutput = recordingIo();
         expect(await runCli(["check", "--root", root], checkOutput.io)).toBe(1);
-        expect(checkOutput.err.join("")).toContain("markers");
+        expect(checkOutput.err.join("")).toContain("stale");
+
+        const generateOutput = recordingIo();
+        expect(await runCli(["generate", "--root", root], generateOutput.io)).toBe(0);
+        expect(generateOutput.err).toEqual([]);
+
+        const currentOutput = recordingIo();
+        expect(await runCli(["check", "--root", root], currentOutput.io)).toBe(0);
+        expect(currentOutput.out.join("")).toContain("current");
+
+        await writeFile(
+            join(root, "README.md"),
+            "# Invalid\n\n<!-- pi-extension-settings:start -->\n",
+        );
+        const invalidGenerate = recordingIo();
+        expect(await runCli(["generate", "--root", root], invalidGenerate.io)).toBe(1);
+        expect(invalidGenerate.err.join("")).toContain("markers");
+
+        const invalidCheck = recordingIo();
+        expect(await runCli(["check", "--root", root], invalidCheck.io)).toBe(1);
+        expect(invalidCheck.err.join("")).toContain("markers");
     });
 });

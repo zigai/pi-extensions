@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { Result } from "better-result";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ReadmeMarkersMissing } from "../src/failures.ts";
+
 import {
     checkSettingsArtifacts,
     generateSettingsArtifacts,
     renderSettingsArtifacts,
 } from "../src/artifacts.ts";
-import { ReadmeMarkersMissing } from "../src/failures.ts";
 import { README_GENERATED_END, README_GENERATED_START } from "../src/settings-documentation.ts";
 import { testDefinition } from "./fixture.ts";
 
@@ -85,8 +86,8 @@ describe("settings artifacts", () => {
         expect(await readFile(targets.schemaPath, "utf8")).toBe("stale\n");
     });
 
-    it("returns a typed failure for missing README markers", async () => {
-        const targets = await artifactFiles("# Package\n");
+    it("rejects an incomplete generated README region", async () => {
+        const targets = await artifactFiles(`# Package\n\n${README_GENERATED_START}\n`);
 
         const generated = generateSettingsArtifacts(testDefinition(), targets);
 
@@ -96,5 +97,18 @@ describe("settings artifacts", () => {
         await expect(readFile(targets.schemaPath, "utf8")).rejects.toMatchObject({
             code: "ENOENT",
         });
+    });
+
+    it("appends the generated README section when markers are absent", async () => {
+        const targets = await artifactFiles("# Package\n");
+
+        const generated = generateSettingsArtifacts(testDefinition(), targets);
+
+        expect(generated).toEqual(
+            Result.ok({ changedPaths: [targets.schemaPath, targets.readmePath] }),
+        );
+        await expect(readFile(targets.readmePath, "utf8")).resolves.toContain(
+            `${README_GENERATED_START}\n## Configuration`,
+        );
     });
 });

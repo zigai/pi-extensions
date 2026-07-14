@@ -119,13 +119,16 @@ export function renderReadmeSettingsSection(
     ].join("\n");
 }
 
-/** Replace exactly one generated README region, or return undefined for invalid markers. */
+/** Replace the generated region, appending it when neither marker is present. */
 export function replaceGeneratedReadmeSection(
     readme: string,
     generatedSection: string,
 ): string | undefined {
     const start = readme.indexOf(README_GENERATED_START);
     const end = readme.indexOf(README_GENERATED_END);
+    if (start < 0 && end < 0) {
+        return `${readme.trimEnd()}\n\n${README_GENERATED_START}\n${generatedSection.trim()}\n${README_GENERATED_END}\n`;
+    }
     if (start < 0 || end < start) return undefined;
     if (readme.indexOf(README_GENERATED_START, start + 1) >= 0) return undefined;
     if (readme.indexOf(README_GENERATED_END, end + 1) >= 0) return undefined;

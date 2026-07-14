@@ -18,15 +18,12 @@ The rest of this README is for adding settings to an existing extension.
 ## Install
 
 ```sh
-npm install @zigai/pi-extension-settings typebox
-npm install --save-dev @earendil-works/pi-coding-agent
+npm install @zigai/pi-extension-settings
 ```
 
 Add `@zigai/pi-extension-settings` to `bundleDependencies` if your extension package must remain independently installable.
 
 ## Define and load
-
-Keep the definition and its package-facing loader in `src/settings.ts`:
 
 ```ts
 import { defineExtensionSettings } from "@zigai/pi-extension-settings";
@@ -53,17 +50,6 @@ export function loadExampleSettings(ctx: PiSettingsContext) {
 }
 ```
 
-Use the loader from your extension entrypoint and surface any diagnostics:
-
-```ts
-const loaded = loadExampleSettings(ctx);
-for (const diagnostic of loaded.diagnostics) {
-  ctx.ui.notify(diagnostic.message, diagnostic.severity);
-}
-
-if (!loaded.settings.enabled) return;
-```
-
 ## Generate documentation and schema
 
 Add this to `package.json`:
@@ -82,13 +68,6 @@ Add this to `package.json`:
 }
 ```
 
-Add these markers once to your README:
-
-```md
-<!-- pi-extension-settings:start -->
-<!-- pi-extension-settings:end -->
-```
-
 Generate and check the artifacts:
 
 ```sh
@@ -96,7 +75,7 @@ npm run config:generate
 npm run config:check
 ```
 
-`generate` updates `config.schema.json` and the marked README section. `check` makes no changes, so use it in pre-commit and CI.
+`generate` updates `config.schema.json` and adds its generated README section when needed. `check` makes no changes, so use it in pre-commit and CI.
 
 ## Behavior
 

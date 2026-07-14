@@ -64,8 +64,13 @@ describe("README generation", () => {
         );
     });
 
+    it("appends a generated region when markers are absent", () => {
+        expect(replaceGeneratedReadmeSection("# README", "generated")).toBe(
+            `# README\n\n${README_GENERATED_START}\ngenerated\n${README_GENERATED_END}\n`,
+        );
+    });
+
     it.each([
-        ["missing markers", "# README"],
         ["reversed markers", `${README_GENERATED_END}\n${README_GENERATED_START}`],
         [
             "duplicate start",
@@ -75,7 +80,7 @@ describe("README generation", () => {
             "duplicate end",
             `${README_GENERATED_START}\n${README_GENERATED_END}\n${README_GENERATED_END}`,
         ],
-    ])("rejects %s", (_label, readme) => {
+    ])("rejects invalid %s", (_label, readme) => {
         expect(replaceGeneratedReadmeSection(readme, "generated")).toBeUndefined();
     });
 });
