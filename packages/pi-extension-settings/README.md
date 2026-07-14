@@ -78,26 +78,10 @@ npm run config:generate
 npm run config:check
 ```
 
-`generate` writes `config.schema.json` and adds or updates the generated configuration section in the README. `check` verifies that both artifacts are current without changing files, making it suitable for pre-commit and CI.
+`generate` writes `config.schema.json` and add/updates the generated configuration section in the README.
 
-## Settings behavior
+`check` verifies that both artifacts are up to date without changing files, making it suitable for pre-commit and CI.
 
-```text
-TypeBox defaults → global settings → trusted project settings
-```
+## License
 
-Objects merge recursively; arrays and scalar values replace. Invalid settings are ignored with a diagnostic, existing settings are never overwritten, and project settings are ignored for untrusted projects.
-
-```text
-<getAgentDir()>/extension-settings/<id>.json
-<cwd>/<CONFIG_DIR_NAME>/extension-settings/<id>.json
-```
-
-Keep secrets in environment variables or secure storage rather than settings JSON.
-
-## Development
-
-```sh
-just setup
-just coverage
-```
+[MIT](https://github.com/zigai/pi-extension-settings/blob/master/LICENSE)
