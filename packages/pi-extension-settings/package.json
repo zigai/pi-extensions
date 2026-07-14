@@ -1,7 +1,6 @@
 {
   "name": "@zigai/pi-extension-settings",
-  "version": "0.2.9",
-  "private": true,
+  "version": "0.2.10",
   "description": "TypeBox-first configuration runtime and artifact tooling for Pi extensions.",
   "keywords": [
     "configuration",
@@ -42,10 +41,12 @@
       "import": "./dist/pi.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.build.json",
-    "build:check": "npm run build && node scripts/check-dist.ts",
     "lint": "oxlint -c ./.oxlintrc.json .",
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
     "format": "oxfmt .",
@@ -53,9 +54,9 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build:check && npm run coverage",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm run coverage",
     "verify": "npm run check",
-    "prepack": "npm run build"
+    "prepare": "npm run build"
   },
   "dependencies": {
     "better-result": "^2.9.2"

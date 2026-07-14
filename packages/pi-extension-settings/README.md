@@ -4,15 +4,13 @@ TypeBox-first runtime and artifact tooling for persistent Pi extension settings.
 
 ## Install
 
-This package is private. Standalone extensions should vendor it so CI and downstream installs do not require a sibling clone:
+Install the package directly from its public Git repository until it is available from npm:
 
 ```sh
-mkdir -p vendor
-tarball=$(npm pack ../pi-extension-settings --pack-destination vendor)
-npm install "./vendor/$tarball"
+npm install github:zigai/pi-extension-settings
 ```
 
-Check in the tarball and `file:vendor/...tgz` dependency, and add `@zigai/pi-extension-settings` to `bundleDependencies`. The Pi extension template handles this automatically when its settings scaffold is selected.
+The lockfile pins the resolved commit. Add `@zigai/pi-extension-settings` to `bundleDependencies` when the extension package must remain independently installable. Git installs build the ignored `dist/` output through the `prepare` lifecycle; source control contains only the TypeScript source.
 
 Keep `typebox` and `@earendil-works/pi-coding-agent` in peer dependencies and local development dependencies.
 

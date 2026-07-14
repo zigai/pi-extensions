@@ -7,7 +7,7 @@
 - `src/definition.ts` owns definition invariants, `src/runtime.ts` owns async/synchronous layer resolution, `src/artifacts.ts` owns repository artifact workflows, and `src/projects.ts` owns package/workspace discovery.
 - Async and synchronous loaders must preserve identical paths, diagnostics, merge order, and file-ownership behavior.
 - Keep Pi-specific imports isolated in `src/pi.ts`; core runtime and generation modules must remain testable with explicit paths and trust state.
-- Publish compiled JavaScript and declarations from the checked-in `dist`; do not expose TypeScript source as an executable package boundary. Keep `dist` synchronized with `npm run build:check` so private Git installs do not depend on lifecycle scripts.
+- Publish compiled JavaScript and declarations from `dist`, but do not commit that generated directory. Git installs and package publishing build it through `prepare`; executable package exports must continue to target compiled JavaScript rather than TypeScript source.
 
 ## Configuration Invariants
 
