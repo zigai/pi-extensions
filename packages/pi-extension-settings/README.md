@@ -13,13 +13,15 @@ The package keeps one settings definition authoritative and derives all other re
 
 ## Install
 
-This package is private. Clone it beside the consuming extension repository and install the local package:
+This package is private. Standalone extension repositories should vendor a versioned tarball so clean CI checkouts and downstream installs do not depend on a sibling clone:
 
 ```sh
-npm install ../pi-extension-settings
+mkdir -p vendor
+tarball=$(npm pack ../pi-extension-settings --pack-destination vendor)
+npm install "./vendor/$tarball"
 ```
 
-This keeps consumption compatible with npm installations that disable Git dependency fetching. A private registry can replace the local path later without changing the library API.
+Keep the resulting `file:vendor/...tgz` runtime dependency and tarball checked in, and add `@zigai/pi-extension-settings` to `bundleDependencies` so the published extension remains independently installable. The Pi extension template performs these steps automatically when its settings scaffold is selected. A private registry can replace the vendor tarball later without changing the library API.
 
 List `typebox` and `@earendil-works/pi-coding-agent` as Pi-provided peer dependencies and as development dependencies for local checks.
 

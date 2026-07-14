@@ -3,7 +3,7 @@
 ## Project Contract
 
 - This package provides reusable runtime and artifact tooling for Pi extension settings; it is not itself a Pi extension.
-- Keep the public API small and cohesive. Extension-specific semantic validation, UI policy, and migrations belong in consuming extensions.
+- Keep the public API small and cohesive. Generic path/layout migration belongs here; extension-specific semantic transformation and UI policy belong in consuming extensions.
 - `src/definition.ts` owns definition invariants, `src/runtime.ts` owns async/synchronous layer resolution, `src/artifacts.ts` owns repository artifact workflows, and `src/projects.ts` owns package/workspace discovery.
 - Async and synchronous loaders must preserve identical paths, diagnostics, merge order, and file-ownership behavior.
 - Keep Pi-specific imports isolated in `src/pi.ts`; core runtime and generation modules must remain testable with explicit paths and trust state.
@@ -16,7 +16,7 @@
 - Apply defaults once, then layer global settings and trusted project settings. Deep-merge objects and replace arrays/scalars.
 - Store global config under `getAgentDir()/extension-settings/<id>.json` and global schemas under `getAgentDir()/extension-settings/schemas/<id>.schema.json`.
 - Resolve project overrides with `CONFIG_DIR_NAME` and honor them only for trusted projects.
-- Never overwrite, repair, or migrate an existing user config. Scaffold global config exclusively when missing; never scaffold project config.
+- Never overwrite or repair an existing centralized user settings file. Scaffold global settings exclusively when missing; never scaffold project settings. Legacy settings may be copied only into a missing centralized target, with the original left untouched.
 - Treat schemas as generated extension-owned artifacts. Verify bundled schema content and refresh the global copy atomically when stale.
 - Diagnostics must not include raw setting values or secrets.
 
