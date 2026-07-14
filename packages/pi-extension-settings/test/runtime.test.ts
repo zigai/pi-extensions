@@ -50,6 +50,32 @@ describe("loadExtensionSettings", () => {
         expect(await readFile(paths.schemaPath, "utf8")).toBe(bundledSchema().content);
     });
 
+    it("concurrently scaffolds one complete global settings file", async () => {
+        const agentDir = await temporaryDirectory();
+        const definition = testDefinition();
+
+        const loads = await Promise.all(
+            Array.from({ length: 16 }, () =>
+                loadExtensionSettings(definition, {
+                    agentDir,
+                    bundledSchema: bundledSchema(),
+                }),
+            ),
+        );
+
+        for (const loaded of loads) {
+            expect(loaded.settings).toEqual(definition.defaultSettings);
+            expect(loaded.diagnostics).toEqual([]);
+        }
+        expect(loads.filter((loaded) => loaded.scaffoldedGlobalConfig)).toHaveLength(1);
+
+        const paths = resolveGlobalSettingsPaths(agentDir, definition.id);
+        expect(JSON.parse(await readFile(paths.configPath, "utf8"))).toEqual({
+            $schema: "./schemas/pi-example.schema.json",
+            ...definition.defaultSettings,
+        });
+    });
+
     it("applies partial global settings and refreshes only the stale schema", async () => {
         const agentDir = await temporaryDirectory();
         const definition = testDefinition();
