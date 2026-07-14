@@ -16,12 +16,19 @@ import {
 
 export type PiSettingsContext = Pick<ExtensionContext, "cwd" | "isProjectTrusted">;
 
+export type LegacyPiConfigPaths = {
+    readonly global?: readonly string[];
+    readonly project?: readonly string[];
+};
+
 export type LoadPiExtensionSettingsOptions = {
     readonly bundledSchema: BundledSchemaSource;
     /** Test or embedded-host override. Normal Pi extensions should omit this. */
     readonly agentDir?: string;
     /** Additional historical extension IDs whose per-extension config may be migrated. */
     readonly legacySettingsIds?: readonly string[];
+    /** Historical config paths that do not follow the conventional `<id>/config.json` layout. */
+    readonly legacyConfigPaths?: LegacyPiConfigPaths;
 };
 
 function legacyConfigPaths<Schema extends TObject>(
@@ -29,11 +36,22 @@ function legacyConfigPaths<Schema extends TObject>(
     agentDir: string,
     context: PiSettingsContext,
     additionalIds: readonly string[],
+    additionalPaths: LegacyPiConfigPaths,
 ): { readonly global: readonly string[]; readonly project: readonly string[] } {
     const ids = [...new Set([definition.id, ...additionalIds])];
     return {
-        global: ids.map((id) => join(agentDir, id, "config.json")),
-        project: ids.map((id) => join(context.cwd, CONFIG_DIR_NAME, id, "config.json")),
+        global: [
+            ...new Set([
+                ...ids.map((id) => join(agentDir, id, "config.json")),
+                ...(additionalPaths.global ?? []),
+            ]),
+        ],
+        project: [
+            ...new Set([
+                ...ids.map((id) => join(context.cwd, CONFIG_DIR_NAME, id, "config.json")),
+                ...(additionalPaths.project ?? []),
+            ]),
+        ],
     };
 }
 
@@ -57,6 +75,7 @@ export function loadPiExtensionSettings<const Schema extends TObject>(
             agentDir,
             context,
             options.legacySettingsIds ?? [],
+            options.legacyConfigPaths ?? {},
         ),
     });
 }
@@ -81,6 +100,7 @@ export function loadPiExtensionSettingsSync<const Schema extends TObject>(
             agentDir,
             context,
             options.legacySettingsIds ?? [],
+            options.legacyConfigPaths ?? {},
         ),
     });
 }

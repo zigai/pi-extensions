@@ -145,6 +145,37 @@ describe("loadPiExtensionSettings", () => {
         );
     });
 
+    it("migrates explicit legacy filenames through the Pi adapter", async () => {
+        const root = await temporaryDirectory();
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        const legacyProjectPath = join(cwd, CONFIG_DIR_NAME, "pi-example", "settings.json");
+        await mkdir(join(cwd, CONFIG_DIR_NAME, "pi-example"), { recursive: true });
+        await writeFile(legacyProjectPath, JSON.stringify({ enabled: false }));
+        const definition = testDefinition();
+
+        const loaded = loadPiExtensionSettingsSync(
+            definition,
+            { cwd, isProjectTrusted: () => true },
+            {
+                agentDir,
+                legacyConfigPaths: { project: [legacyProjectPath, legacyProjectPath] },
+                bundledSchema: {
+                    kind: "content",
+                    content: formatJson(createSettingsFileSchema(definition)),
+                },
+            },
+        );
+
+        expect(loaded.settings.enabled).toBe(false);
+        await expect(readFile(loaded.projectConfigPath!, "utf8")).resolves.toBe(
+            formatJson({
+                $schema: definition.schemaId,
+                enabled: false,
+            }),
+        );
+    });
+
     it("preserves malformed legacy bytes while migrating to the central path", async () => {
         const root = await temporaryDirectory();
         const agentDir = join(root, "agent");

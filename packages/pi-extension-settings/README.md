@@ -25,7 +25,7 @@ List `typebox` and `@earendil-works/pi-coding-agent` as Pi-provided peer depende
 
 ## Define settings
 
-Keep the definition in a pure module such as `src/config/definition.ts`. Importing it must not perform filesystem or Pi lifecycle work.
+Keep each extension's definition and runtime settings boundary together in `src/settings.ts`. The module may export loading helpers, but importing it must not perform filesystem or Pi lifecycle work.
 
 ```ts
 import { defineExtensionSettings } from "@zigai/pi-extension-settings";
@@ -75,7 +75,7 @@ Add a package-level manifest:
 ```json
 {
   "piExtensionSettings": {
-    "definition": "./src/config/definition.ts",
+    "definition": "./src/settings.ts",
     "schema": "./config.schema.json",
     "readme": "./README.md"
   },
@@ -117,7 +117,7 @@ Use the Pi adapter from the `./pi` export:
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadPiExtensionSettings } from "@zigai/pi-extension-settings/pi";
 
-import definition from "./config/definition.ts";
+import definition from "./settings.ts";
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
@@ -170,7 +170,7 @@ Project overrides use Pi's configured project directory name:
 
 Project files are read only when `ctx.isProjectTrusted()` is true. They are never created automatically. A committed project override can use the definition's stable HTTPS `schemaId` in its `$schema` field without requiring the extension to write generated files into the project.
 
-The Pi adapter non-destructively migrates the former per-extension layout (`<getAgentDir()>/<id>/config.json` and `<cwd>/<CONFIG_DIR_NAME>/<id>/config.json`) when the corresponding centralized file is absent. Pass `legacySettingsIds` for earlier extension names. Migration creates the centralized file exactly once and updates a valid JSON object's `$schema` metadata for its new location. Malformed or non-object legacy content is copied unchanged, and an existing centralized file is never overwritten.
+The Pi adapter non-destructively migrates the former per-extension layout (`<getAgentDir()>/<id>/config.json` and `<cwd>/<CONFIG_DIR_NAME>/<id>/config.json`) when the corresponding centralized file is absent. Pass `legacySettingsIds` for earlier extension names and `legacyConfigPaths` for historical filenames or nonstandard locations. Migration creates the centralized file exactly once and updates a valid JSON object's `$schema` metadata for its new location. Malformed or non-object legacy content is copied unchanged, and an existing centralized file is never overwritten.
 
 ## Runtime guarantees
 
