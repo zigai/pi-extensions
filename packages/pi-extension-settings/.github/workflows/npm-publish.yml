@@ -30,9 +30,6 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Setup npm
-        run: npm install --global npm@latest
-
       - name: Install dependencies
         run: npm ci
 
@@ -45,4 +42,6 @@ jobs:
         run: node -e 'const p = require("./package.json"); if (`v${p.version}` !== process.env.RELEASE_TAG) throw new Error(`release ${process.env.RELEASE_TAG} does not match package ${p.version}`)'
 
       - name: Publish
-        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
