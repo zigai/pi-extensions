@@ -1,7 +1,4 @@
-import { Result, type Result as ResultType } from "better-result";
-
 import type { ExtensionSettingsDefinition } from "./definition.ts";
-import { ReadmeMarkersMissing, type ArtifactFailure } from "./failures.ts";
 import { readTextIfPresent, writeTextAtomically } from "./file-system.ts";
 import { formatJson } from "./json-value.ts";
 import {
@@ -45,53 +42,49 @@ export function renderSettingsArtifacts(
     };
 }
 
-function expectedReadme(readmePath: string, section: string): ResultType<string, ArtifactFailure> {
+function expectedReadme(readmePath: string, section: string): string {
     const current = readTextIfPresent(readmePath);
-    if (Result.isError(current)) return current;
-    if (current.value === undefined) return Result.err(new ReadmeMarkersMissing(readmePath));
+    if (current === undefined) {
+        throw new Error(`README does not exist: ${readmePath}`);
+    }
 
-    const expected = replaceGeneratedReadmeSection(current.value, section);
-    return expected === undefined
-        ? Result.err(new ReadmeMarkersMissing(readmePath))
-        : Result.ok(expected);
+    const expected = replaceGeneratedReadmeSection(current, section);
+    if (expected === undefined) {
+        throw new Error(`README generation markers are invalid in ${readmePath}`);
+    }
+    return expected;
 }
 
 export function generateSettingsArtifacts(
     definition: ExtensionSettingsDefinition,
     targets: SettingsArtifactTargets,
-): ResultType<GeneratedSettingsArtifacts, ArtifactFailure> {
+): GeneratedSettingsArtifacts {
     const rendered = renderSettingsArtifacts(definition, targets);
     const readme = expectedReadme(targets.readmePath, rendered.readmeSection);
-    if (Result.isError(readme)) return readme;
 
     const changedPaths: string[] = [];
-    const schemaWrite = writeTextAtomically(targets.schemaPath, rendered.schema);
-    if (Result.isError(schemaWrite)) return schemaWrite;
-    if (schemaWrite.value !== "unchanged") changedPaths.push(targets.schemaPath);
+    if (writeTextAtomically(targets.schemaPath, rendered.schema) !== "unchanged") {
+        changedPaths.push(targets.schemaPath);
+    }
+    if (writeTextAtomically(targets.readmePath, readme) !== "unchanged") {
+        changedPaths.push(targets.readmePath);
+    }
 
-    const readmeWrite = writeTextAtomically(targets.readmePath, readme.value);
-    if (Result.isError(readmeWrite)) return readmeWrite;
-    if (readmeWrite.value !== "unchanged") changedPaths.push(targets.readmePath);
-
-    return Result.ok({ changedPaths });
+    return { changedPaths };
 }
 
 export function checkSettingsArtifacts(
     definition: ExtensionSettingsDefinition,
     targets: SettingsArtifactTargets,
-): ResultType<CheckedSettingsArtifacts, ArtifactFailure> {
+): CheckedSettingsArtifacts {
     const rendered = renderSettingsArtifacts(definition, targets);
     const readme = expectedReadme(targets.readmePath, rendered.readmeSection);
-    if (Result.isError(readme)) return readme;
-
     const schemaCurrent = readTextIfPresent(targets.schemaPath);
     const readmeCurrent = readTextIfPresent(targets.readmePath);
-    if (Result.isError(schemaCurrent)) return schemaCurrent;
-    if (Result.isError(readmeCurrent)) return readmeCurrent;
 
     const stalePaths: string[] = [];
-    if (schemaCurrent.value !== rendered.schema) stalePaths.push(targets.schemaPath);
-    if (readmeCurrent.value !== readme.value) stalePaths.push(targets.readmePath);
+    if (schemaCurrent !== rendered.schema) stalePaths.push(targets.schemaPath);
+    if (readmeCurrent !== readme) stalePaths.push(targets.readmePath);
 
-    return Result.ok({ current: stalePaths.length === 0, stalePaths });
+    return { current: stalePaths.length === 0, stalePaths };
 }

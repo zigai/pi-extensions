@@ -2,11 +2,9 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { Result } from "better-result";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli, type CliIo } from "../src/cli.ts";
-import { DefinitionModuleInvalid, ProjectManifestInvalid } from "../src/failures.ts";
 import { discoverSettingsProjects } from "../src/projects.ts";
 import { README_GENERATED_END, README_GENERATED_START } from "../src/settings-documentation.ts";
 
@@ -58,11 +56,9 @@ describe("project discovery", () => {
 
         const discovered = await discoverSettingsProjects(root);
 
-        expect(Result.isOk(discovered)).toBe(true);
-        if (Result.isError(discovered)) return;
-        expect(discovered.value).toHaveLength(1);
-        expect(discovered.value[0]?.definition.id).toBe("pi-fixture");
-        expect(discovered.value[0]?.targets.schemaPath).toBe(join(root, "config.schema.json"));
+        expect(discovered).toHaveLength(1);
+        expect(discovered[0]?.definition.id).toBe("pi-fixture");
+        expect(discovered[0]?.targets.schemaPath).toBe(join(root, "config.schema.json"));
     });
 
     it("discovers configured npm workspace packages", async () => {
@@ -76,9 +72,7 @@ describe("project discovery", () => {
 
         const discovered = await discoverSettingsProjects(root);
 
-        expect(Result.isOk(discovered)).toBe(true);
-        if (Result.isError(discovered)) return;
-        expect(discovered.value.map((project) => project.definition.id)).toEqual([
+        expect(discovered.map((project) => project.definition.id)).toEqual([
             "pi-first",
             "pi-second",
         ]);
@@ -93,11 +87,7 @@ describe("project discovery", () => {
             }),
         );
 
-        const discovered = await discoverSettingsProjects(root);
-
-        expect(Result.isError(discovered)).toBe(true);
-        if (Result.isOk(discovered)) return;
-        expect(ProjectManifestInvalid.is(discovered.error)).toBe(true);
+        await expect(discoverSettingsProjects(root)).rejects.toThrow("unknown keys");
     });
 
     it("rejects artifact paths outside the package", async () => {
@@ -107,11 +97,7 @@ describe("project discovery", () => {
             JSON.stringify({ piExtensionSettings: { definition: "../settings.mjs" } }),
         );
 
-        const discovered = await discoverSettingsProjects(root);
-
-        expect(Result.isError(discovered)).toBe(true);
-        if (Result.isOk(discovered)) return;
-        expect(discovered.error.message).toContain("must stay inside");
+        await expect(discoverSettingsProjects(root)).rejects.toThrow("must stay inside");
     });
 
     it("rejects modules that do not export a definition", async () => {
@@ -122,11 +108,9 @@ describe("project discovery", () => {
         );
         await writeFile(join(root, "settings.mjs"), "export default {};\n");
 
-        const discovered = await discoverSettingsProjects(root);
-
-        expect(Result.isError(discovered)).toBe(true);
-        if (Result.isOk(discovered)) return;
-        expect(DefinitionModuleInvalid.is(discovered.error)).toBe(true);
+        await expect(discoverSettingsProjects(root)).rejects.toThrow(
+            "default export must be created by defineExtensionSettings",
+        );
     });
 });
 

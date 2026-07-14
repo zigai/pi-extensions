@@ -2,15 +2,8 @@ import { glob } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { Result, type Result as ResultType } from "better-result";
-
 import type { SettingsArtifactTargets } from "./artifacts.ts";
 import { isExtensionSettingsDefinition, type ExtensionSettingsDefinition } from "./definition.ts";
-import {
-    DefinitionModuleInvalid,
-    ProjectManifestInvalid,
-    type ProjectFailure,
-} from "./failures.ts";
 import { readTextIfPresent } from "./file-system.ts";
 import { isJsonObject, parseJson, type JsonObject } from "./json-value.ts";
 
@@ -29,6 +22,10 @@ export type SettingsArtifactProject = {
     readonly targets: SettingsArtifactTargets;
 };
 
+function manifestError(path: string, reason: string): Error {
+    return new Error(`Invalid Pi extension settings manifest in ${path}: ${reason}`);
+}
+
 function stringProperty(object: JsonObject, key: string): string | undefined {
     const value = object[key];
     return typeof value === "string" && value.trim() !== "" ? value : undefined;
@@ -37,47 +34,30 @@ function stringProperty(object: JsonObject, key: string): string | undefined {
 function parseSettingsManifest(
     packagePath: string,
     packageJson: JsonObject,
-): ResultType<SettingsProjectManifest | undefined, ProjectManifestInvalid> {
+): SettingsProjectManifest | undefined {
     const raw = packageJson[PACKAGE_MANIFEST_KEY];
-    if (raw === undefined) return Result.ok(undefined);
+    if (raw === undefined) return undefined;
     if (!isJsonObject(raw)) {
-        return Result.err(
-            new ProjectManifestInvalid({
-                path: packagePath,
-                reason: `${PACKAGE_MANIFEST_KEY} must be an object`,
-            }),
-        );
+        throw manifestError(packagePath, `${PACKAGE_MANIFEST_KEY} must be an object`);
     }
 
     const supported = new Set(["definition", "schema", "readme", "globalPath"]);
     const unknownKeys = Object.keys(raw).filter((key) => !supported.has(key));
     if (unknownKeys.length > 0) {
-        return Result.err(
-            new ProjectManifestInvalid({
-                path: packagePath,
-                reason: `unknown keys: ${unknownKeys.join(", ")}`,
-            }),
-        );
+        throw manifestError(packagePath, `unknown keys: ${unknownKeys.join(", ")}`);
     }
 
     const definition = stringProperty(raw, "definition");
     if (definition === undefined) {
-        return Result.err(
-            new ProjectManifestInvalid({
-                path: packagePath,
-                reason: "definition must be a non-empty relative path",
-            }),
-        );
+        throw manifestError(packagePath, "definition must be a non-empty relative path");
     }
 
     const schema = stringProperty(raw, "schema") ?? "config.schema.json";
     const readme = stringProperty(raw, "readme") ?? "README.md";
     const globalPath = stringProperty(raw, "globalPath");
-    return Result.ok(
-        globalPath === undefined
-            ? { definition, schema, readme }
-            : { definition, schema, readme, globalPath },
-    );
+    return globalPath === undefined
+        ? { definition, schema, readme }
+        : { definition, schema, readme, globalPath };
 }
 
 function resolveInside(packageRoot: string, configuredPath: string): string | undefined {
@@ -99,28 +79,21 @@ function workspacePatterns(packageJson: JsonObject): readonly string[] {
     return workspaces.packages.filter((value): value is string => typeof value === "string");
 }
 
-async function readPackageJson(path: string): Promise<ResultType<JsonObject, ProjectFailure>> {
+function readPackageJson(path: string): JsonObject {
     const content = readTextIfPresent(path);
-    if (Result.isError(content)) return content;
-    if (content.value === undefined) {
-        return Result.err(new ProjectManifestInvalid({ path, reason: "file does not exist" }));
-    }
-    const parsed = parseJson(content.value);
-    if (!isJsonObject(parsed)) {
-        return Result.err(new ProjectManifestInvalid({ path, reason: "file is not valid JSON" }));
-    }
-    return Result.ok(parsed);
+    if (content === undefined) throw manifestError(path, "file does not exist");
+
+    const parsed = parseJson(content);
+    if (!isJsonObject(parsed)) throw manifestError(path, "file is not valid JSON");
+    return parsed;
 }
 
-async function packageJsonPaths(
-    root: string,
-): Promise<ResultType<readonly string[], ProjectFailure>> {
+async function packageJsonPaths(root: string): Promise<readonly string[]> {
     const rootPackagePath = resolve(root, "package.json");
-    const rootPackage = await readPackageJson(rootPackagePath);
-    if (Result.isError(rootPackage)) return rootPackage;
+    const rootPackage = readPackageJson(rootPackagePath);
 
     const paths = new Set<string>([rootPackagePath]);
-    for (const pattern of workspacePatterns(rootPackage.value)) {
+    for (const pattern of workspacePatterns(rootPackage)) {
         const packagePattern = pattern.endsWith("package.json")
             ? pattern
             : `${pattern.replace(/\/$/, "")}/package.json`;
@@ -131,83 +104,66 @@ async function packageJsonPaths(
             paths.add(resolve(root, match));
         }
     }
-    return Result.ok([...paths].sort());
+    return [...paths].sort();
 }
 
 function isObjectWithDefault(value: unknown): value is { readonly default: unknown } {
     return value !== null && typeof value === "object" && "default" in value;
 }
 
-async function importDefinition(
-    path: string,
-): Promise<ResultType<ExtensionSettingsDefinition, DefinitionModuleInvalid>> {
+async function importDefinition(path: string): Promise<ExtensionSettingsDefinition> {
     let imported: unknown;
     try {
         imported = await import(pathToFileURL(path).href);
     } catch (cause: unknown) {
-        return Result.err(
-            new DefinitionModuleInvalid({
-                path,
-                reason: "module could not be imported",
+        throw new Error(
+            `Invalid settings definition module ${path}: module could not be imported`,
+            {
                 cause,
-            }),
+            },
         );
     }
 
     if (!isObjectWithDefault(imported) || !isExtensionSettingsDefinition(imported.default)) {
-        return Result.err(
-            new DefinitionModuleInvalid({
-                path,
-                reason: "default export must be created by defineExtensionSettings",
-            }),
+        throw new Error(
+            `Invalid settings definition module ${path}: default export must be created by defineExtensionSettings`,
         );
     }
-    return Result.ok(imported.default);
+    return imported.default;
 }
 
-async function loadProject(
-    packagePath: string,
-): Promise<ResultType<SettingsArtifactProject | undefined, ProjectFailure>> {
-    const packageJson = await readPackageJson(packagePath);
-    if (Result.isError(packageJson)) return packageJson;
-
-    const manifest = parseSettingsManifest(packagePath, packageJson.value);
-    if (Result.isError(manifest)) return manifest;
-    if (manifest.value === undefined) return Result.ok(undefined);
+async function loadProject(packagePath: string): Promise<SettingsArtifactProject | undefined> {
+    const packageJson = readPackageJson(packagePath);
+    const manifest = parseSettingsManifest(packagePath, packageJson);
+    if (manifest === undefined) return undefined;
 
     const packageRoot = dirname(packagePath);
-    const definitionPath = resolveInside(packageRoot, manifest.value.definition);
-    const schemaPath = resolveInside(packageRoot, manifest.value.schema);
-    const readmePath = resolveInside(packageRoot, manifest.value.readme);
+    const definitionPath = resolveInside(packageRoot, manifest.definition);
+    const schemaPath = resolveInside(packageRoot, manifest.schema);
+    const readmePath = resolveInside(packageRoot, manifest.readme);
     if (definitionPath === undefined || schemaPath === undefined || readmePath === undefined) {
-        return Result.err(
-            new ProjectManifestInvalid({
-                path: packagePath,
-                reason: "definition, schema, and readme paths must stay inside the package",
-            }),
+        throw manifestError(
+            packagePath,
+            "definition, schema, and readme paths must stay inside the package",
         );
     }
 
     const definition = await importDefinition(definitionPath);
-    if (Result.isError(definition)) return definition;
     const targets: SettingsArtifactTargets =
-        manifest.value.globalPath === undefined
+        manifest.globalPath === undefined
             ? { schemaPath, readmePath }
-            : { schemaPath, readmePath, globalPath: manifest.value.globalPath };
-    return Result.ok({ packageRoot, definition: definition.value, targets });
+            : { schemaPath, readmePath, globalPath: manifest.globalPath };
+    return { packageRoot, definition, targets };
 }
 
 export async function discoverSettingsProjects(
     root: string,
-): Promise<ResultType<readonly SettingsArtifactProject[], ProjectFailure>> {
+): Promise<readonly SettingsArtifactProject[]> {
     const paths = await packageJsonPaths(root);
-    if (Result.isError(paths)) return paths;
-
     const projects: SettingsArtifactProject[] = [];
-    for (const path of paths.value) {
+    for (const path of paths) {
         const project = await loadProject(path);
-        if (Result.isError(project)) return project;
-        if (project.value !== undefined) projects.push(project.value);
+        if (project !== undefined) projects.push(project);
     }
-    return Result.ok(projects);
+    return projects;
 }

@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-extension-settings",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "TypeBox-first configuration runtime and artifact tooling for Pi extensions.",
   "keywords": [
     "configuration",
@@ -58,9 +58,6 @@
     "verify": "npm run check",
     "prepare": "npm run build"
   },
-  "dependencies": {
-    "better-result": "^2.9.2"
-  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.6",
     "@types/node": "^24.10.1",
@@ -81,9 +78,6 @@
       "optional": true
     }
   },
-  "bundledDependencies": [
-    "better-result"
-  ],
   "engines": {
     "node": ">=22.19.0 <27"
   },

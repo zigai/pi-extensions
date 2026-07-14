@@ -2,11 +2,9 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Result } from "better-result";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { checkSettingsArtifacts, generateSettingsArtifacts } from "../src/artifacts.ts";
-import { FileOperationFailed } from "../src/failures.ts";
 import {
     README_GENERATED_END,
     README_GENERATED_START,
@@ -27,36 +25,32 @@ afterEach(async () => {
 });
 
 describe("artifact filesystem failures", () => {
-    it("returns a typed failure when README cannot be read", async () => {
+    it("throws when README cannot be read", async () => {
         const root = await temporaryDirectory();
         const readmePath = join(root, "README.md");
         await mkdir(readmePath);
 
-        const result = generateSettingsArtifacts(testDefinition(), {
-            schemaPath: join(root, "config.schema.json"),
-            readmePath,
-        });
-
-        expect(Result.isError(result)).toBe(true);
-        if (Result.isOk(result)) return;
-        expect(FileOperationFailed.is(result.error)).toBe(true);
+        expect(() =>
+            generateSettingsArtifacts(testDefinition(), {
+                schemaPath: join(root, "config.schema.json"),
+                readmePath,
+            }),
+        ).toThrow();
     });
 
-    it("returns a typed failure when schema output cannot be written", async () => {
+    it("throws when schema output cannot be written", async () => {
         const root = await temporaryDirectory();
         const parentFile = join(root, "blocked");
         const readmePath = join(root, "README.md");
         await writeFile(parentFile, "file");
         await writeFile(readmePath, `${README_GENERATED_START}\nold\n${README_GENERATED_END}\n`);
 
-        const result = generateSettingsArtifacts(testDefinition(), {
-            schemaPath: join(parentFile, "config.schema.json"),
-            readmePath,
-        });
-
-        expect(Result.isError(result)).toBe(true);
-        if (Result.isOk(result)) return;
-        expect(FileOperationFailed.is(result.error)).toBe(true);
+        expect(() =>
+            generateSettingsArtifacts(testDefinition(), {
+                schemaPath: join(parentFile, "config.schema.json"),
+                readmePath,
+            }),
+        ).toThrow();
     });
 
     it("reports only a missing schema when README content is current", async () => {
@@ -73,8 +67,9 @@ describe("artifact filesystem failures", () => {
             readmePath,
         });
 
-        expect(result).toEqual(
-            Result.ok({ current: false, stalePaths: [join(root, "config.schema.json")] }),
-        );
+        expect(result).toEqual({
+            current: false,
+            stalePaths: [join(root, "config.schema.json")],
+        });
     });
 });

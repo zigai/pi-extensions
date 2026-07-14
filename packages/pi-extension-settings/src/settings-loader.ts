@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 
-import { Result } from "better-result";
 import type { StaticDecode, TObject, TSchema } from "typebox";
 import { Value } from "typebox/value";
 
@@ -104,8 +103,12 @@ function bundledSchemaContent(source: BundledSchemaSource): string | undefined {
 }
 
 function readLayer(path: string, scope: SettingsScope, layerSchema: TSchema): ParsedSettingsLayer {
-    const content = readTextIfPresent(path);
-    if (Result.isError(content)) {
+    try {
+        const content = readTextIfPresent(path);
+        return content === undefined
+            ? { settings: undefined, diagnostics: [] }
+            : parseSettingsLayer(path, scope, content, layerSchema);
+    } catch {
         return {
             settings: undefined,
             diagnostics: [
@@ -119,8 +122,6 @@ function readLayer(path: string, scope: SettingsScope, layerSchema: TSchema): Pa
             ],
         };
     }
-    if (content.value === undefined) return { settings: undefined, diagnostics: [] };
-    return parseSettingsLayer(path, scope, content.value, layerSchema);
 }
 
 export function loadSettings<const Schema extends TObject>(
@@ -160,8 +161,9 @@ export function loadSettings<const Schema extends TObject>(
             message: "The bundled settings schema is stale; run the artifact generator",
         });
     } else {
-        const schemaWrite = writeTextAtomically(globalPaths.schemaPath, sourceSchema);
-        if (Result.isError(schemaWrite)) {
+        try {
+            schemaStatus = writeTextAtomically(globalPaths.schemaPath, sourceSchema);
+        } catch {
             diagnostics.push({
                 code: "schema-install-failed",
                 severity: "error",
@@ -169,13 +171,16 @@ export function loadSettings<const Schema extends TObject>(
                 path: globalPaths.schemaPath,
                 message: "The local editor schema could not be installed",
             });
-        } else {
-            schemaStatus = schemaWrite.value;
-            const configWrite = writeTextIfMissing(
-                globalPaths.configPath,
-                formatJson(createDefaultSettingsDocument(definition)),
-            );
-            if (Result.isError(configWrite)) {
+        }
+
+        if (schemaStatus !== "unavailable") {
+            try {
+                scaffoldedGlobalConfig =
+                    writeTextIfMissing(
+                        globalPaths.configPath,
+                        formatJson(createDefaultSettingsDocument(definition)),
+                    ) === "created";
+            } catch {
                 diagnostics.push({
                     code: "config-scaffold-failed",
                     severity: "error",
@@ -183,8 +188,6 @@ export function loadSettings<const Schema extends TObject>(
                     path: globalPaths.configPath,
                     message: "The default global settings file could not be scaffolded",
                 });
-            } else {
-                scaffoldedGlobalConfig = configWrite.value === "created";
             }
         }
     }

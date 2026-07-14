@@ -1,7 +1,5 @@
 import { resolve } from "node:path";
 
-import { Result } from "better-result";
-
 import { checkSettingsArtifacts, generateSettingsArtifacts } from "./artifacts.ts";
 import { discoverSettingsProjects } from "./projects.ts";
 
@@ -53,6 +51,42 @@ function line(message: string): string {
     return message.endsWith("\n") ? message : `${message}\n`;
 }
 
+async function runCommand(parsed: ParsedArguments, io: CliIo): Promise<number> {
+    const projects = await discoverSettingsProjects(parsed.root);
+    if (projects.length === 0) {
+        io.stderr(
+            line(
+                `No package.json with a piExtensionSettings manifest was found under ${parsed.root}`,
+            ),
+        );
+        return 1;
+    }
+
+    if (parsed.command === "generate") {
+        for (const project of projects) {
+            const generated = generateSettingsArtifacts(project.definition, project.targets);
+            for (const path of generated.changedPaths) io.stdout(line(`updated ${path}`));
+        }
+        return 0;
+    }
+
+    let stale = false;
+    for (const project of projects) {
+        const checked = checkSettingsArtifacts(project.definition, project.targets);
+        for (const path of checked.stalePaths) {
+            stale = true;
+            io.stderr(line(`stale ${path}`));
+        }
+    }
+    if (stale) {
+        io.stderr(line("Run pi-extension-settings generate and commit the resulting changes."));
+        return 1;
+    }
+
+    io.stdout(line(`settings artifacts are current (${projects.length} package(s))`));
+    return 0;
+}
+
 export async function runCli(args: readonly string[], io: CliIo = processIo): Promise<number> {
     if (args.length === 0 || args.includes("--help")) {
         io.stdout(HELP);
@@ -65,49 +99,10 @@ export async function runCli(args: readonly string[], io: CliIo = processIo): Pr
         return 2;
     }
 
-    const discovered = await discoverSettingsProjects(parsed.root);
-    if (Result.isError(discovered)) {
-        io.stderr(line(discovered.error.message));
+    try {
+        return await runCommand(parsed, io);
+    } catch (cause: unknown) {
+        io.stderr(line(cause instanceof Error ? cause.message : String(cause)));
         return 1;
     }
-    if (discovered.value.length === 0) {
-        io.stderr(
-            line(
-                `No package.json with a piExtensionSettings manifest was found under ${parsed.root}`,
-            ),
-        );
-        return 1;
-    }
-
-    if (parsed.command === "generate") {
-        for (const project of discovered.value) {
-            const generated = generateSettingsArtifacts(project.definition, project.targets);
-            if (Result.isError(generated)) {
-                io.stderr(line(generated.error.message));
-                return 1;
-            }
-            for (const path of generated.value.changedPaths) io.stdout(line(`updated ${path}`));
-        }
-        return 0;
-    }
-
-    let stale = false;
-    for (const project of discovered.value) {
-        const checked = checkSettingsArtifacts(project.definition, project.targets);
-        if (Result.isError(checked)) {
-            io.stderr(line(checked.error.message));
-            return 1;
-        }
-        for (const path of checked.value.stalePaths) {
-            stale = true;
-            io.stderr(line(`stale ${path}`));
-        }
-    }
-    if (stale) {
-        io.stderr(line("Run pi-extension-settings generate and commit the resulting changes."));
-        return 1;
-    }
-
-    io.stdout(line(`settings artifacts are current (${discovered.value.length} package(s))`));
-    return 0;
 }

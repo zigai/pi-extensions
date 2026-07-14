@@ -2,10 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Result } from "better-result";
 import { afterEach, describe, expect, it } from "vitest";
-
-import { ReadmeMarkersMissing } from "../src/failures.ts";
 
 import {
     checkSettingsArtifacts,
@@ -53,22 +50,19 @@ describe("settings artifacts", () => {
     it("generates, checks, and then remains idempotent", async () => {
         const targets = await artifactFiles();
         const generated = generateSettingsArtifacts(testDefinition(), targets);
-        expect(Result.isOk(generated)).toBe(true);
-        if (Result.isError(generated)) return;
-        expect(generated.value.changedPaths).toEqual([targets.schemaPath, targets.readmePath]);
+        expect(generated.changedPaths).toEqual([targets.schemaPath, targets.readmePath]);
 
         const checked = checkSettingsArtifacts(testDefinition(), targets);
-        expect(checked).toEqual(Result.ok({ current: true, stalePaths: [] }));
+        expect(checked).toEqual({ current: true, stalePaths: [] });
 
         const repeated = generateSettingsArtifacts(testDefinition(), targets);
-        expect(repeated).toEqual(Result.ok({ changedPaths: [] }));
+        expect(repeated).toEqual({ changedPaths: [] });
         expect(await readFile(targets.readmePath, "utf8")).toContain("Intro.");
     });
 
     it("reports each stale artifact without modifying it", async () => {
         const targets = await artifactFiles();
-        const generated = generateSettingsArtifacts(testDefinition(), targets);
-        if (Result.isError(generated)) throw generated.error;
+        generateSettingsArtifacts(testDefinition(), targets);
         await writeFile(targets.schemaPath, "stale\n");
         await writeFile(
             targets.readmePath,
@@ -77,23 +71,17 @@ describe("settings artifacts", () => {
 
         const checked = checkSettingsArtifacts(testDefinition(), targets);
 
-        expect(checked).toEqual(
-            Result.ok({
-                current: false,
-                stalePaths: [targets.schemaPath, targets.readmePath],
-            }),
-        );
+        expect(checked).toEqual({
+            current: false,
+            stalePaths: [targets.schemaPath, targets.readmePath],
+        });
         expect(await readFile(targets.schemaPath, "utf8")).toBe("stale\n");
     });
 
     it("rejects an incomplete generated README region", async () => {
         const targets = await artifactFiles(`# Package\n\n${README_GENERATED_START}\n`);
 
-        const generated = generateSettingsArtifacts(testDefinition(), targets);
-
-        expect(Result.isError(generated)).toBe(true);
-        if (Result.isOk(generated)) return;
-        expect(ReadmeMarkersMissing.is(generated.error)).toBe(true);
+        expect(() => generateSettingsArtifacts(testDefinition(), targets)).toThrow("markers");
         await expect(readFile(targets.schemaPath, "utf8")).rejects.toMatchObject({
             code: "ENOENT",
         });
@@ -104,9 +92,7 @@ describe("settings artifacts", () => {
 
         const generated = generateSettingsArtifacts(testDefinition(), targets);
 
-        expect(generated).toEqual(
-            Result.ok({ changedPaths: [targets.schemaPath, targets.readmePath] }),
-        );
+        expect(generated).toEqual({ changedPaths: [targets.schemaPath, targets.readmePath] });
         await expect(readFile(targets.readmePath, "utf8")).resolves.toContain(
             `${README_GENERATED_START}\n## Configuration`,
         );

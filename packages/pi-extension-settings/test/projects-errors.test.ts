@@ -2,7 +2,6 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { Result } from "better-result";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli, type CliIo } from "../src/cli.ts";
@@ -41,11 +40,11 @@ afterEach(async () => {
 describe("project discovery failures and options", () => {
     it("reports missing and malformed root package files", async () => {
         const missingRoot = await temporaryProject();
-        expect(Result.isError(await discoverSettingsProjects(missingRoot))).toBe(true);
+        await expect(discoverSettingsProjects(missingRoot)).rejects.toThrow("file does not exist");
 
         const malformedRoot = await temporaryProject();
         await writeFile(join(malformedRoot, "package.json"), "not json");
-        expect(Result.isError(await discoverSettingsProjects(malformedRoot))).toBe(true);
+        await expect(discoverSettingsProjects(malformedRoot)).rejects.toThrow("not valid JSON");
     });
 
     it.each([
@@ -55,7 +54,7 @@ describe("project discovery failures and options", () => {
     ])("rejects %s", async (_label, packageJson) => {
         const root = await temporaryProject();
         await writeFile(join(root, "package.json"), JSON.stringify(packageJson));
-        expect(Result.isError(await discoverSettingsProjects(root))).toBe(true);
+        await expect(discoverSettingsProjects(root)).rejects.toThrow();
     });
 
     it("supports object-form workspaces and custom global display paths", async () => {
@@ -79,9 +78,7 @@ describe("project discovery failures and options", () => {
 
         const discovered = await discoverSettingsProjects(root);
 
-        expect(Result.isOk(discovered)).toBe(true);
-        if (Result.isError(discovered)) return;
-        expect(discovered.value[0]?.targets.globalPath).toBe(
+        expect(discovered[0]?.targets.globalPath).toBe(
             "$PI_AGENT_DIR/extension-settings/pi-errors.json",
         );
     });
@@ -94,11 +91,8 @@ describe("project discovery failures and options", () => {
         );
         await writeFile(join(root, "settings.mjs"), 'throw new Error("module failed");\n');
 
-        const discovered = await discoverSettingsProjects(root);
-        expect(Result.isError(discovered)).toBe(true);
-        if (Result.isOk(discovered)) return;
-        expect(discovered.error.message).toContain("could not be imported");
-        expect(discovered.error.message).not.toContain("module failed");
+        await expect(discoverSettingsProjects(root)).rejects.toThrow("could not be imported");
+        await expect(discoverSettingsProjects(root)).rejects.not.toThrow("module failed");
     });
 });
 
