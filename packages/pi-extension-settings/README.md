@@ -1,6 +1,8 @@
 # Pi Extension Settings
 
-Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions. Define one TypeBox schema and this package uses it for defaults, runtime validation, `config.schema.json`, and generated configuration documentation.
+Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions.
+
+Define one TypeBox schema and this package uses it for defaults, runtime validation, `config.schema.json`, and generated documentation.
 
 The runtime API consists of:
 
