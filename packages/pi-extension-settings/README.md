@@ -31,7 +31,7 @@ Keep each extension's definition and runtime settings boundary together in `src/
 import { defineExtensionSettings } from "@zigai/pi-extension-settings";
 import { Type } from "typebox";
 
-export default defineExtensionSettings({
+export const exampleSettingsDefinition = defineExtensionSettings({
   id: "pi-example",
   title: "Pi Example",
   description: "Settings for the Pi example extension.",
@@ -55,6 +55,8 @@ export default defineExtensionSettings({
     { additionalProperties: false },
   ),
 });
+
+export default exampleSettingsDefinition;
 ```
 
 Definition requirements are checked immediately:
@@ -111,27 +113,35 @@ Include `config.schema.json` in each published extension package's `files` allow
 
 ## Load settings at runtime
 
-Use the Pi adapter from the `./pi` export:
+Use the Pi adapter from the `./pi` export. Expose one package-facing `load<ExtensionName>Settings` function from `src/settings.ts`; it owns the shared adapter call so ordinary extension code does not depend on definition and storage mechanics:
+
+```ts
+import type { PiSettingsContext } from "@zigai/pi-extension-settings/pi";
+import { loadPiExtensionSettings } from "@zigai/pi-extension-settings/pi";
+
+export function loadExampleSettings(ctx: PiSettingsContext) {
+  return loadPiExtensionSettings(exampleSettingsDefinition, ctx, {
+    bundledSchema: {
+      kind: "url",
+      url: new URL("../config.schema.json", import.meta.url),
+    },
+  });
+}
+```
+
+The extension entrypoint calls that package-level loader:
 
 ```ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadPiExtensionSettings } from "@zigai/pi-extension-settings/pi";
 
-import definition from "./settings.ts";
+import { loadExampleSettings } from "./settings.ts";
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
-    const loaded = await loadPiExtensionSettings(definition, ctx, {
-      bundledSchema: {
-        kind: "url",
-        url: new URL("../config.schema.json", import.meta.url),
-      },
-    });
-
+    const loaded = await loadExampleSettings(ctx);
     for (const diagnostic of loaded.diagnostics) {
       ctx.ui.notify(diagnostic.message, diagnostic.severity);
     }
-
     useSettings(loaded.settings);
   });
 }
