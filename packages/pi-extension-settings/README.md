@@ -10,7 +10,7 @@ The runtime API consists of:
 
 ## Recommended: use the template
 
-I recommend using [pi-extension-template](https://github.com/zigai/pi-extension-template), which has extension settings built in.
+For the easiest setup, use [pi-extension-template](https://github.com/zigai/pi-extension-template), which has extension settings built in.
 
 If you do not want to use the template, or you want to add settings to an existing extension, follow the manual setup below.
 
