@@ -112,13 +112,11 @@ function visitChildSchemas(
     }
 }
 
-/** Return whether the user schema collides with editor metadata owned by this package. */
 export function hasReservedSchemaProperty(schema: TSchema): boolean {
     const root = schemaRecord(schema);
     return isJsonObject(root.properties) && "$schema" in root.properties;
 }
 
-/** Return user-editable leaf settings that do not have descriptions. */
 export function findUndocumentedSettings(schema: TSchema): readonly string[] {
     const root = schemaRecord(schema);
     if (!isJsonObject(root.properties)) return ["<root>"];
@@ -145,7 +143,6 @@ export function findUndocumentedSettings(schema: TSchema): readonly string[] {
     return issues;
 }
 
-/** Return paths of object schemas that permit unrecognized properties. */
 export function findNonStrictObjectSchemas(schema: TSchema): readonly string[] {
     const issues: string[] = [];
 
@@ -160,7 +157,6 @@ export function findNonStrictObjectSchemas(schema: TSchema): readonly string[] {
     return issues;
 }
 
-/** Convert a resolved settings schema into a deeply partial persisted-file schema. */
 export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject {
     const partial = makeSettingsObjectPartial(schemaRecord(input.schema));
     if (!isJsonObject(partial.properties)) {
@@ -198,7 +194,6 @@ export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject
     return document;
 }
 
-/** Create the exact global settings document scaffolded for users. */
 export function createDefaultSettingsDocument(
     input: SchemaDocumentInput & { readonly defaultSettings: JsonObject },
 ): JsonObject {
@@ -211,12 +206,10 @@ export function createDefaultSettingsDocument(
     return document;
 }
 
-/** Return a TypeBox-compatible schema for decoding persisted partial settings layers. */
 export function createSettingsLayerSchema(input: SchemaDocumentInput): TSchema {
     return createSettingsFileSchema(input);
 }
 
-/** Return whether the schema's defaults are ordinary JSON data. */
 export function isJsonSettingsDefault(value: unknown): value is JsonObject {
     return isJsonObject(value) && isJsonValue(value);
 }

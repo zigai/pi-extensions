@@ -19,7 +19,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     );
 }
 
-/** Return whether a value can be represented losslessly in JSON. */
 export function isJsonValue(value: unknown): value is JsonValue {
     if (value === null) return true;
 
@@ -41,22 +40,18 @@ export function isJsonValue(value: unknown): value is JsonValue {
     return false;
 }
 
-/** Return whether a value is a JSON array. */
 export function isJsonArray(value: unknown): value is JsonArray {
     return Array.isArray(value) && value.every((item: unknown) => isJsonValue(item));
 }
 
-/** Return whether a value is a JSON object rather than an array or null. */
 export function isJsonObject(value: unknown): value is Record<string, JsonValue> {
     return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
-/** Clone a JSON value so callers never receive mutable internal state. */
 export function cloneJson<Value extends JsonValue>(value: Value): Value {
     return structuredClone(value);
 }
 
-/** Parse JSON text without assigning a trusted shape to the result. */
 export function parseJson(text: string): unknown {
     try {
         const value: unknown = JSON.parse(text);
@@ -66,7 +61,6 @@ export function parseJson(text: string): unknown {
     }
 }
 
-/** Serialize JSON deterministically with a trailing newline. */
 export function formatJson(value: JsonValue): string {
     return `${JSON.stringify(value, undefined, 2)}\n`;
 }

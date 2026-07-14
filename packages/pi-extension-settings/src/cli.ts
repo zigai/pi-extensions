@@ -53,7 +53,6 @@ function line(message: string): string {
     return message.endsWith("\n") ? message : `${message}\n`;
 }
 
-/** Run the CLI and return a process exit code without terminating the host process. */
 export async function runCli(args: readonly string[], io: CliIo = processIo): Promise<number> {
     if (args.length === 0 || args.includes("--help")) {
         io.stdout(HELP);

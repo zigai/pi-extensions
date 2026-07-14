@@ -85,7 +85,6 @@ export type RenderReadmeOptions = {
     readonly globalPath?: string;
 };
 
-/** Render the generated README configuration section from the TypeBox definition. */
 export function renderReadmeSettingsSection(
     definition: ExtensionSettingsDefinition,
     options: RenderReadmeOptions = {},
@@ -119,7 +118,6 @@ export function renderReadmeSettingsSection(
     ].join("\n");
 }
 
-/** Replace the generated region, appending it when neither marker is present. */
 export function replaceGeneratedReadmeSection(
     readme: string,
     generatedSection: string,

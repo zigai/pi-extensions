@@ -197,7 +197,6 @@ async function loadProject(
     return Result.ok({ packageRoot, definition: definition.value, targets });
 }
 
-/** Discover configured standalone packages and npm workspace packages. */
 export async function discoverSettingsProjects(
     root: string,
 ): Promise<ResultType<readonly SettingsArtifactProject[], ProjectFailure>> {

@@ -83,7 +83,6 @@ function readLayer(path: string, scope: SettingsScope, layerSchema: TSchema): Pa
     return parseSettingsLayer(path, scope, content.value, layerSchema);
 }
 
-/** Load and validate one Pi extension's global and trusted-project settings. */
 export function loadSettings<const Schema extends TObject>(
     definition: ExtensionSettingsDefinition<Schema>,
     options: LoadSettingsOptions,

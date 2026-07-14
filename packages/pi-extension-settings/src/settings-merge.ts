@@ -11,7 +11,6 @@ function mergeValue(current: JsonValue | undefined, next: JsonValue): JsonValue 
     return merged;
 }
 
-/** Remove editor-only metadata from a decoded settings file. */
 export function settingsLayerFromFile(file: JsonObject): JsonObject {
     const settings: Record<string, JsonValue> = {};
     for (const [key, value] of Object.entries(file)) {

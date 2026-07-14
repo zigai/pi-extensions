@@ -71,7 +71,6 @@ export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
     readonly schema: Schema;
 };
 
-/** Define an extension's settings contract and verify its defaults immediately. */
 export function defineExtensionSettings<const Schema extends TObject>(
     input: ExtensionSettingsDefinitionInput<Schema>,
 ): ExtensionSettingsDefinition<Schema> {
@@ -150,7 +149,6 @@ export function defineExtensionSettings<const Schema extends TObject>(
     return definition;
 }
 
-/** Return whether a dynamically imported value was created by `defineExtensionSettings`. */
 export function isExtensionSettingsDefinition(
     value: unknown,
 ): value is ExtensionSettingsDefinition {

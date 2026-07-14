@@ -24,17 +24,14 @@ export type LoadPiExtensionSettingsOptions = {
 export type LoadedPiExtensionSettings<Schema extends TObject> = LoadedSettings<Schema>;
 export type { BundledSchemaSource, SettingsDiagnostic, SettingsDiagnosticCode };
 
-/** Return the global settings file used by a Pi extension. */
 export function getPiGlobalSettingsPath(extensionId: string): string {
     return resolveGlobalSettingsPaths(getAgentDir(), extensionId).configPath;
 }
 
-/** Return the trusted-project settings file used by a Pi extension. */
 export function getPiProjectSettingsPath(extensionId: string, cwd: string): string {
     return resolveProjectSettingsPaths(cwd, CONFIG_DIR_NAME, extensionId).configPath;
 }
 
-/** Load settings using Pi's global directory, project directory, and trust state. */
 export function loadPiExtensionSettings<const Schema extends TObject>(
     definition: ExtensionSettingsDefinition<Schema>,
     context: PiSettingsContext,

@@ -9,7 +9,6 @@ export type ExtensionSettingsPaths = {
     readonly schemaReference: string;
 };
 
-/** Resolve the centralized user-level settings and schema paths. */
 export function resolveGlobalSettingsPaths(
     agentDir: string,
     settingsId: string,
@@ -26,7 +25,6 @@ export function resolveGlobalSettingsPaths(
     };
 }
 
-/** Resolve a project override using Pi's configured project-directory name. */
 export function resolveProjectSettingsPaths(
     cwd: string,
     configDirName: string,
@@ -44,7 +42,6 @@ export function resolveProjectSettingsPaths(
     };
 }
 
-/** Default path shown in user-facing README configuration sections. */
 export function defaultGlobalSettingsDisplayPath(settingsId: string): string {
     return `~/.pi/agent/${EXTENSION_SETTINGS_DIRECTORY}/${settingsId}.json`;
 }
