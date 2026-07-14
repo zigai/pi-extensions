@@ -10,8 +10,9 @@ type ReadTextResult = ResultType<string | undefined, FileOperationFailed>;
 type WriteResult = ResultType<"created" | "unchanged" | "updated", FileOperationFailed>;
 
 function errorCode(cause: unknown): string | undefined {
-    if (cause === null || typeof cause !== "object" || !("code" in cause)) return undefined;
-    return typeof cause.code === "string" ? cause.code : undefined;
+    if (!(cause instanceof Error)) return undefined;
+    const error: NodeJS.ErrnoException = cause;
+    return error.code;
 }
 
 function fileFailure(
