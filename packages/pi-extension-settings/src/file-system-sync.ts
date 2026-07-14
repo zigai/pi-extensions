@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 import { Result, type Result as ResultType } from "better-result";
@@ -31,19 +31,33 @@ export function readTextIfPresentSync(path: string): ReadTextResult {
     }
 }
 
+/** Atomically publish complete content only when the destination does not already exist. */
 export function writeTextIfMissingSync(path: string, content: string, mode = 0o600): WriteResult {
-    try {
-        mkdirSync(dirname(path), { recursive: true });
-    } catch (cause: unknown) {
-        return Result.err(fileFailure("write", path, cause));
-    }
+    const directory = dirname(path);
+    const temporaryPath = join(directory, `.${basename(path)}.${randomUUID()}.tmp`);
 
     try {
-        writeFileSync(path, content, { encoding: "utf8", flag: "wx", mode });
-        return Result.ok("created");
-    } catch (cause: unknown) {
-        if (errorCode(cause) === "EEXIST") return Result.ok("unchanged");
-        return Result.err(fileFailure("write", path, cause));
+        try {
+            mkdirSync(directory, { recursive: true });
+            writeFileSync(temporaryPath, content, { encoding: "utf8", flag: "wx", mode });
+        } catch (cause: unknown) {
+            return Result.err(fileFailure("write", path, cause));
+        }
+
+        try {
+            linkSync(temporaryPath, path);
+            return Result.ok("created");
+        } catch (cause: unknown) {
+            if (errorCode(cause) === "EEXIST") return Result.ok("unchanged");
+            /* v8 ignore next -- requires a hard-link failure after a same-directory write */
+            return Result.err(fileFailure("write", path, cause));
+        }
+    } finally {
+        try {
+            rmSync(temporaryPath, { force: true });
+        } catch {
+            // Cleanup must not mask the write result.
+        }
     }
 }
 
@@ -62,6 +76,10 @@ export function writeTextAtomicallySync(path: string, content: string, mode = 0o
     } catch (cause: unknown) {
         return Result.err(fileFailure("write", path, cause));
     } finally {
-        rmSync(temporaryPath, { force: true });
+        try {
+            rmSync(temporaryPath, { force: true });
+        } catch {
+            // Cleanup must not mask the write result.
+        }
     }
 }

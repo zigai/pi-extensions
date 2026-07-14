@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    readdirSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,12 +32,14 @@ afterEach(() => {
 });
 
 describe("synchronous file operations", () => {
-    it("reads missing files and exclusively creates config", () => {
-        const path = join(temporaryDirectory(), "nested", "config.json");
+    it("reads missing files and atomically creates config", () => {
+        const root = temporaryDirectory();
+        const path = join(root, "nested", "config.json");
         expect(readTextIfPresentSync(path)).toEqual(Result.ok(undefined));
         expect(writeTextIfMissingSync(path, "first\n")).toEqual(Result.ok("created"));
         expect(writeTextIfMissingSync(path, "second\n")).toEqual(Result.ok("unchanged"));
         expect(readTextIfPresentSync(path)).toEqual(Result.ok("first\n"));
+        expect(readdirSync(join(root, "nested"))).toEqual(["config.json"]);
     });
 
     it("atomically creates, preserves, and updates schema", () => {

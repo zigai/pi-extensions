@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import { Result, type Result as ResultType } from "better-result";
@@ -31,23 +31,33 @@ export async function readTextIfPresent(path: string): Promise<ReadTextResult> {
     }
 }
 
+/** Atomically publish complete content only when the destination does not already exist. */
 export async function writeTextIfMissing(
     path: string,
     content: string,
     mode = 0o600,
 ): Promise<WriteResult> {
-    try {
-        await mkdir(dirname(path), { recursive: true });
-    } catch (cause: unknown) {
-        return Result.err(fileFailure("write", path, cause));
-    }
+    const directory = dirname(path);
+    const temporaryPath = join(directory, `.${basename(path)}.${randomUUID()}.tmp`);
 
     try {
-        await writeFile(path, content, { encoding: "utf8", flag: "wx", mode });
-        return Result.ok("created");
-    } catch (cause: unknown) {
-        if (errorCode(cause) === "EEXIST") return Result.ok("unchanged");
-        return Result.err(fileFailure("write", path, cause));
+        try {
+            await mkdir(directory, { recursive: true });
+            await writeFile(temporaryPath, content, { encoding: "utf8", flag: "wx", mode });
+        } catch (cause: unknown) {
+            return Result.err(fileFailure("write", path, cause));
+        }
+
+        try {
+            await link(temporaryPath, path);
+            return Result.ok("created");
+        } catch (cause: unknown) {
+            if (errorCode(cause) === "EEXIST") return Result.ok("unchanged");
+            /* v8 ignore next -- requires a hard-link failure after a same-directory write */
+            return Result.err(fileFailure("write", path, cause));
+        }
+    } finally {
+        await rm(temporaryPath, { force: true }).catch(() => undefined);
     }
 }
 

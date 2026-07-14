@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -68,6 +68,27 @@ describe("safe file operations", () => {
         expect(await writeTextIfMissing(path, "first\n")).toEqual(Result.ok("created"));
         expect(await writeTextIfMissing(path, "second\n")).toEqual(Result.ok("unchanged"));
         expect(await readTextIfPresent(path)).toEqual(Result.ok("first\n"));
+    });
+
+    it("atomically chooses one complete config during concurrent creation", async () => {
+        const root = await temporaryDirectory();
+        const directory = join(root, "settings");
+        const path = join(directory, "config.json");
+        const candidates = Array.from(
+            { length: 16 },
+            (_, index) => `${JSON.stringify({ source: index, value: "x".repeat(64_000) })}\n`,
+        );
+
+        const writes = await Promise.all(
+            candidates.map((content) => writeTextIfMissing(path, content)),
+        );
+
+        expect(writes.every((result) => !Result.isError(result))).toBe(true);
+        expect(
+            writes.filter((result) => !Result.isError(result) && result.value === "created"),
+        ).toHaveLength(1);
+        expect(candidates).toContain(await readFile(path, "utf8"));
+        expect((await readdir(directory)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     });
 
     it("atomically creates, preserves, and updates extension-owned files", async () => {
