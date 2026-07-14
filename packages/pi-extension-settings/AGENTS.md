@@ -29,7 +29,7 @@
 
 ## Quality Gates
 
-- Run `just check` before handing off changes.
+- Run `just setup` after cloning to install dependencies and Git hooks and verify the package. Run `just check` before handing off later changes.
 - Keep strict TypeScript and type-aware Oxlint enabled; do not add unsafe casts or broad lint suppressions.
 - Exercise filesystem behavior through real temporary directories rather than module mocks or method spies.
 - Preserve the enforced coverage thresholds. New failure paths and boundary behavior require observable tests.

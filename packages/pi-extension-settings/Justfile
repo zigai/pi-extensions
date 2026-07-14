@@ -5,6 +5,12 @@ _:
 help:
     @just --list
 
+# Install dependencies and Git hooks, then verify the project
+setup:
+    npm install
+    pre-commit install
+    npm run check
+
 # Format code
 fmt:
     npm run format

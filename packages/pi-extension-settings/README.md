@@ -129,7 +129,6 @@ Keep secrets in environment variables or purpose-built secure storage rather tha
 ## Development
 
 ```sh
-npm install
-just check
+just setup
 just coverage
 ```
