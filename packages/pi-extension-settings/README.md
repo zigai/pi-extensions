@@ -2,18 +2,17 @@
 
 Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions. Define one TypeBox schema and this package uses it for defaults, runtime validation, `config.schema.json`, and generated configuration documentation.
 
-The public API consists of:
+The runtime API consists of:
 
 - `defineExtensionSettings()` for defining settings.
 - `loadPiExtensionSettings()` for loading defaults, global settings, and trusted project overrides.
 - `getPiGlobalSettingsPath()` and `getPiProjectSettingsPath()` for locating settings files.
-- `pi-extension-settings generate` and `pi-extension-settings check` for generated artifacts.
 
 ## Recommended: use the template
 
-I recommend using [pi-extension-template](https://github.com/zigai/pi-extension-template), which has extension settings built in. Select the extension-settings option and the template configures the package, definition, loader, generated schema and documentation, Git hooks, and checks for you.
+I recommend using [pi-extension-template](https://github.com/zigai/pi-extension-template), which has extension settings built in.
 
-If you do not want to use the template, the complete manual setup is below.
+If you do not want to use the template, or you want to add settings to an existing extension, follow the manual setup below.
 
 ## Manual setup
 
@@ -54,7 +53,7 @@ export default settingsDefinition;
 
 ### Generate the schema and documentation
 
-Add the definition and scripts to `package.json`:
+Add the settings definition and commands to `package.json`:
 
 ```json
 {
