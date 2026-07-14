@@ -20,6 +20,10 @@ describe("README schema rendering", () => {
                         default: [1, 2],
                         description: "Numeric limits.",
                     }),
+                    mixed: Type.Array(Type.Union([Type.Literal("one"), Type.Integer()]), {
+                        default: ["one"],
+                        description: "Mixed values.",
+                    }),
                     choice: Type.Enum(["one", "two"], {
                         default: "one",
                         description: "An enumerated choice.",
@@ -40,6 +44,9 @@ describe("README schema rendering", () => {
             "| `optional` | string | — | Optional \\| setting. Second line. |",
         );
         expect(rendered).toContain("| `limits` | number[] | `[1,2]` | Numeric limits. |");
+        expect(rendered).toContain(
+            '| `mixed` | (`one` \\| integer)[] | `["one"]` | Mixed values. |',
+        );
         expect(rendered).toContain('| `choice` | `one` \\| `two` | `"one"`');
         expect(rendered).toContain("| `mystery` | unknown | `null`");
         expect(rendered).not.toContain('"optional"');

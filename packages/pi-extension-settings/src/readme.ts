@@ -39,7 +39,10 @@ function schemaType(schema: JsonObject): string {
     }
 
     if (schema.type === "array") {
-        return isJsonObject(schema.items) ? `${schemaType(schema.items)}[]` : "array";
+        if (!isJsonObject(schema.items)) return "array";
+        const itemType = schemaType(schema.items);
+        if (itemType.includes(" | ")) return `(${itemType})[]`;
+        return `${itemType}[]`;
     }
     if (typeof schema.type === "string") return schema.type;
     if (typeof schema.$ref === "string") return "reference";
@@ -88,6 +91,7 @@ export function renderReadmeSettingsSection(
     options: RenderReadmeOptions = {},
 ): string {
     const fileSchema = createSettingsFileSchema(definition);
+    /* v8 ignore next -- createSettingsFileSchema always returns an object properties map */
     if (!isJsonObject(fileSchema.properties)) {
         throw new TypeError("Generated settings schema does not contain properties.");
     }
