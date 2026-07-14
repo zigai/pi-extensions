@@ -170,7 +170,7 @@ Project overrides use Pi's configured project directory name:
 
 Project files are read only when `ctx.isProjectTrusted()` is true. They are never created automatically. A committed project override can use the definition's stable HTTPS `schemaId` in its `$schema` field without requiring the extension to write generated files into the project.
 
-The Pi adapter non-destructively migrates the former per-extension layout (`<getAgentDir()>/<id>/config.json` and `<cwd>/<CONFIG_DIR_NAME>/<id>/config.json`) when the corresponding centralized file is absent. Pass `legacySettingsIds` for earlier extension names. Migration copies bytes exactly once; it never overwrites a centralized file, including a malformed one.
+The Pi adapter non-destructively migrates the former per-extension layout (`<getAgentDir()>/<id>/config.json` and `<cwd>/<CONFIG_DIR_NAME>/<id>/config.json`) when the corresponding centralized file is absent. Pass `legacySettingsIds` for earlier extension names. Migration creates the centralized file exactly once and updates a valid JSON object's `$schema` metadata for its new location. Malformed or non-object legacy content is copied unchanged, and an existing centralized file is never overwritten.
 
 ## Runtime guarantees
 

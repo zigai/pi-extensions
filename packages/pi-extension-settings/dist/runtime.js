@@ -138,6 +138,15 @@ function readLayerSync(path, scope, layerSchema) {
         return { settings: undefined, diagnostics: [] };
     return parseLayer(path, scope, content.value, layerSchema);
 }
+function migratedConfigContent(content, schemaReference) {
+    const parsed = parseJson(content);
+    if (!isJsonObject(parsed))
+        return content;
+    return formatJson({
+        $schema: schemaReference,
+        ...settingsLayerFromFile(parsed),
+    });
+}
 function migrationDiagnostic(scope, path) {
     return {
         code: "config-migration-failed",
@@ -147,7 +156,7 @@ function migrationDiagnostic(scope, path) {
         message: `Legacy ${scope} settings could not be migrated`,
     };
 }
-async function migrateLegacyConfig(targetPath, candidatePaths, scope) {
+async function migrateLegacyConfig(targetPath, candidatePaths, scope, schemaReference) {
     const target = await readTextIfPresent(targetPath);
     if (Result.isError(target))
         return migrationDiagnostic(scope, targetPath);
@@ -159,7 +168,7 @@ async function migrateLegacyConfig(targetPath, candidatePaths, scope) {
             return migrationDiagnostic(scope, candidatePath);
         if (candidate.value === undefined)
             continue;
-        const copied = await writeTextIfMissing(targetPath, candidate.value);
+        const copied = await writeTextIfMissing(targetPath, migratedConfigContent(candidate.value, schemaReference));
         /* v8 ignore next -- requires the target to become unwritable after its successful read */
         if (Result.isError(copied))
             return migrationDiagnostic(scope, targetPath);
@@ -167,7 +176,7 @@ async function migrateLegacyConfig(targetPath, candidatePaths, scope) {
     }
     return undefined;
 }
-function migrateLegacyConfigSync(targetPath, candidatePaths, scope) {
+function migrateLegacyConfigSync(targetPath, candidatePaths, scope, schemaReference) {
     const target = readTextIfPresentSync(targetPath);
     if (Result.isError(target))
         return migrationDiagnostic(scope, targetPath);
@@ -179,7 +188,7 @@ function migrateLegacyConfigSync(targetPath, candidatePaths, scope) {
             return migrationDiagnostic(scope, candidatePath);
         if (candidate.value === undefined)
             continue;
-        const copied = writeTextIfMissingSync(targetPath, candidate.value);
+        const copied = writeTextIfMissingSync(targetPath, migratedConfigContent(candidate.value, schemaReference));
         /* v8 ignore next -- requires the target to become unwritable after its successful read */
         if (Result.isError(copied))
             return migrationDiagnostic(scope, targetPath);
@@ -216,11 +225,11 @@ export async function loadExtensionSettings(definition, options) {
     const projectPaths = options.project === undefined
         ? undefined
         : resolveProjectSettingsPaths(options.project.cwd, options.project.configDirName, definition.id);
-    const globalMigration = await migrateLegacyConfig(globalPaths.configPath, options.legacyConfigPaths?.global ?? [], "global");
+    const globalMigration = await migrateLegacyConfig(globalPaths.configPath, options.legacyConfigPaths?.global ?? [], "global", globalPaths.schemaReference);
     if (globalMigration !== undefined)
         diagnostics.push(globalMigration);
     if (projectPaths !== undefined && options.project?.trusted === true) {
-        const projectMigration = await migrateLegacyConfig(projectPaths.configPath, options.legacyConfigPaths?.project ?? [], "project");
+        const projectMigration = await migrateLegacyConfig(projectPaths.configPath, options.legacyConfigPaths?.project ?? [], "project", definition.schemaId);
         if (projectMigration !== undefined)
             diagnostics.push(projectMigration);
     }
@@ -315,11 +324,11 @@ export function loadExtensionSettingsSync(definition, options) {
     const projectPaths = options.project === undefined
         ? undefined
         : resolveProjectSettingsPaths(options.project.cwd, options.project.configDirName, definition.id);
-    const globalMigration = migrateLegacyConfigSync(globalPaths.configPath, options.legacyConfigPaths?.global ?? [], "global");
+    const globalMigration = migrateLegacyConfigSync(globalPaths.configPath, options.legacyConfigPaths?.global ?? [], "global", globalPaths.schemaReference);
     if (globalMigration !== undefined)
         diagnostics.push(globalMigration);
     if (projectPaths !== undefined && options.project?.trusted === true) {
-        const projectMigration = migrateLegacyConfigSync(projectPaths.configPath, options.legacyConfigPaths?.project ?? [], "project");
+        const projectMigration = migrateLegacyConfigSync(projectPaths.configPath, options.legacyConfigPaths?.project ?? [], "project", definition.schemaId);
         if (projectMigration !== undefined)
             diagnostics.push(projectMigration);
     }

@@ -89,10 +89,16 @@ describe("loadPiExtensionSettings", () => {
 
         expect(loaded.settings).toMatchObject({ enabled: false, mode: "expanded" });
         await expect(readFile(loaded.globalConfigPath, "utf8")).resolves.toBe(
-            JSON.stringify({ enabled: false }),
+            formatJson({
+                $schema: "./schemas/pi-example.schema.json",
+                enabled: false,
+            }),
         );
         await expect(readFile(loaded.projectConfigPath!, "utf8")).resolves.toBe(
-            JSON.stringify({ mode: "expanded" }),
+            formatJson({
+                $schema: definition.schemaId,
+                mode: "expanded",
+            }),
         );
 
         await writeFile(loaded.globalConfigPath, JSON.stringify({ enabled: true }));
@@ -132,7 +138,36 @@ describe("loadPiExtensionSettings", () => {
 
         expect(loaded.settings.enabled).toBe(false);
         await expect(readFile(loaded.globalConfigPath, "utf8")).resolves.toBe(
-            JSON.stringify({ enabled: false }),
+            formatJson({
+                $schema: "./schemas/pi-example.schema.json",
+                enabled: false,
+            }),
+        );
+    });
+
+    it("preserves malformed legacy bytes while migrating to the central path", async () => {
+        const root = await temporaryDirectory();
+        const agentDir = join(root, "agent");
+        const legacyPath = join(agentDir, "pi-example", "config.json");
+        await mkdir(join(agentDir, "pi-example"), { recursive: true });
+        await writeFile(legacyPath, "{ malformed");
+        const definition = testDefinition();
+
+        const loaded = loadPiExtensionSettingsSync(
+            definition,
+            { cwd: root, isProjectTrusted: () => false },
+            {
+                agentDir,
+                bundledSchema: {
+                    kind: "content",
+                    content: formatJson(createSettingsFileSchema(definition)),
+                },
+            },
+        );
+
+        await expect(readFile(loaded.globalConfigPath, "utf8")).resolves.toBe("{ malformed");
+        expect(loaded.diagnostics).toEqual(
+            expect.arrayContaining([expect.objectContaining({ code: "config-malformed" })]),
         );
     });
 

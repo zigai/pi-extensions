@@ -237,6 +237,15 @@ function readLayerSync(
     return parseLayer(path, scope, content.value, layerSchema);
 }
 
+function migratedConfigContent(content: string, schemaReference: string): string {
+    const parsed = parseJson(content);
+    if (!isJsonObject(parsed)) return content;
+    return formatJson({
+        $schema: schemaReference,
+        ...settingsLayerFromFile(parsed),
+    });
+}
+
 function migrationDiagnostic(scope: "global" | "project", path: string): SettingsDiagnostic {
     return {
         code: "config-migration-failed",
@@ -251,6 +260,7 @@ async function migrateLegacyConfig(
     targetPath: string,
     candidatePaths: readonly string[],
     scope: "global" | "project",
+    schemaReference: string,
 ): Promise<SettingsDiagnostic | undefined> {
     const target = await readTextIfPresent(targetPath);
     if (Result.isError(target)) return migrationDiagnostic(scope, targetPath);
@@ -261,7 +271,10 @@ async function migrateLegacyConfig(
         if (Result.isError(candidate)) return migrationDiagnostic(scope, candidatePath);
         if (candidate.value === undefined) continue;
 
-        const copied = await writeTextIfMissing(targetPath, candidate.value);
+        const copied = await writeTextIfMissing(
+            targetPath,
+            migratedConfigContent(candidate.value, schemaReference),
+        );
         /* v8 ignore next -- requires the target to become unwritable after its successful read */
         if (Result.isError(copied)) return migrationDiagnostic(scope, targetPath);
         return undefined;
@@ -273,6 +286,7 @@ function migrateLegacyConfigSync(
     targetPath: string,
     candidatePaths: readonly string[],
     scope: "global" | "project",
+    schemaReference: string,
 ): SettingsDiagnostic | undefined {
     const target = readTextIfPresentSync(targetPath);
     if (Result.isError(target)) return migrationDiagnostic(scope, targetPath);
@@ -283,7 +297,10 @@ function migrateLegacyConfigSync(
         if (Result.isError(candidate)) return migrationDiagnostic(scope, candidatePath);
         if (candidate.value === undefined) continue;
 
-        const copied = writeTextIfMissingSync(targetPath, candidate.value);
+        const copied = writeTextIfMissingSync(
+            targetPath,
+            migratedConfigContent(candidate.value, schemaReference),
+        );
         /* v8 ignore next -- requires the target to become unwritable after its successful read */
         if (Result.isError(copied)) return migrationDiagnostic(scope, targetPath);
         return undefined;
@@ -339,6 +356,7 @@ export async function loadExtensionSettings<const Schema extends TObject>(
         globalPaths.configPath,
         options.legacyConfigPaths?.global ?? [],
         "global",
+        globalPaths.schemaReference,
     );
     if (globalMigration !== undefined) diagnostics.push(globalMigration);
     if (projectPaths !== undefined && options.project?.trusted === true) {
@@ -346,6 +364,7 @@ export async function loadExtensionSettings<const Schema extends TObject>(
             projectPaths.configPath,
             options.legacyConfigPaths?.project ?? [],
             "project",
+            definition.schemaId,
         );
         if (projectMigration !== undefined) diagnostics.push(projectMigration);
     }
@@ -469,6 +488,7 @@ export function loadExtensionSettingsSync<const Schema extends TObject>(
         globalPaths.configPath,
         options.legacyConfigPaths?.global ?? [],
         "global",
+        globalPaths.schemaReference,
     );
     if (globalMigration !== undefined) diagnostics.push(globalMigration);
     if (projectPaths !== undefined && options.project?.trusted === true) {
@@ -476,6 +496,7 @@ export function loadExtensionSettingsSync<const Schema extends TObject>(
             projectPaths.configPath,
             options.legacyConfigPaths?.project ?? [],
             "project",
+            definition.schemaId,
         );
         if (projectMigration !== undefined) diagnostics.push(projectMigration);
     }
