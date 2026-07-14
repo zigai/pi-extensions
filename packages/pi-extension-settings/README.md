@@ -1,61 +1,72 @@
 # Pi Extension Settings
 
-TypeBox-first runtime and artifact tooling for persistent Pi extension settings. One definition drives typed settings, defaults, JSON Schema, README documentation, and runtime loading.
+Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions. Define one TypeBox schema and this package derives defaults, runtime validation, `config.schema.json`, and the generated configuration section of your README.
+
+Its public API is intentionally small:
+
+- `defineExtensionSettings()` defines settings and validates the definition.
+- `loadPiExtensionSettings()` loads defaults, global settings, and trusted project overrides.
+- `getPiGlobalSettingsPath()` and `getPiProjectSettingsPath()` expose the corresponding file paths.
+- `pi-extension-settings generate` and `pi-extension-settings check` maintain generated artifacts.
+
+## Start with the template
+
+Use [pi-extension-template](https://github.com/zigai/pi-extension-template) for a new extension. Select its extension-settings option: it creates the definition, loader, artifact configuration, checks, Git hooks, and package setup for you.
+
+The rest of this README is for adding settings to an existing extension.
 
 ## Install
 
-Install the package directly from its public Git repository until it is available from npm:
-
 ```sh
-npm install github:zigai/pi-extension-settings
+npm install @zigai/pi-extension-settings typebox
+npm install --save-dev @earendil-works/pi-coding-agent
 ```
 
-The lockfile pins the resolved commit. Add `@zigai/pi-extension-settings` to `bundleDependencies` when the extension package must remain independently installable. Git installs build the ignored `dist/` output through the `prepare` lifecycle; source control contains only the TypeScript source.
+Add `@zigai/pi-extension-settings` to `bundleDependencies` if your extension package must remain independently installable.
 
-Keep `typebox` and `@earendil-works/pi-coding-agent` in peer dependencies and local development dependencies.
+## Define and load
 
-## Define and load settings
-
-Keep the definition and package-facing loader together in `src/settings.ts`. Importing this module must not perform filesystem or Pi lifecycle work.
+Keep the definition and its package-facing loader in `src/settings.ts`:
 
 ```ts
 import { defineExtensionSettings } from "@zigai/pi-extension-settings";
 import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-extension-settings/pi";
 import { Type } from "typebox";
 
-export const exampleSettingsDefinition = defineExtensionSettings({
+export const settingsDefinition = defineExtensionSettings({
   id: "pi-example",
   title: "Pi Example",
   description: "Settings for Pi Example.",
-  schemaId: "https://raw.githubusercontent.com/zigai/pi-example/master/config.schema.json",
+  schemaId: "https://raw.githubusercontent.com/zigai/pi-example/main/config.schema.json",
   schema: Type.Object(
     {
-      enabled: Type.Boolean({
-        default: true,
-        description: "Enable the extension.",
-      }),
+      enabled: Type.Boolean({ default: true, description: "Enable the extension." }),
     },
     { additionalProperties: false },
   ),
 });
 
 export function loadExampleSettings(ctx: PiSettingsContext) {
-  return loadPiExtensionSettings(exampleSettingsDefinition, ctx, {
-    bundledSchema: {
-      kind: "url",
-      url: new URL("../config.schema.json", import.meta.url),
-    },
+  return loadPiExtensionSettings(settingsDefinition, ctx, {
+    bundledSchema: { kind: "url", url: new URL("../config.schema.json", import.meta.url) },
   });
 }
-
-export default exampleSettingsDefinition;
 ```
 
-Definitions require filename-safe IDs, closed object schemas, descriptions for user-facing leaves, and valid defaults.
+Use the loader from your extension entrypoint and surface any diagnostics:
 
-## Generate artifacts
+```ts
+const loaded = loadExampleSettings(ctx);
+for (const diagnostic of loaded.diagnostics) {
+  ctx.ui.notify(diagnostic.message, diagnostic.severity);
+}
 
-Register the definition in `package.json`:
+if (!loaded.settings.enabled) return;
+```
+
+## Generate documentation and schema
+
+Add this to `package.json`:
 
 ```json
 {
@@ -71,50 +82,38 @@ Register the definition in `package.json`:
 }
 ```
 
-Add one generated README region:
+Add these markers once to your README:
 
 ```md
 <!-- pi-extension-settings:start -->
-<!-- generated configuration documentation -->
 <!-- pi-extension-settings:end -->
 ```
 
-Then run:
+Generate and check the artifacts:
 
 ```sh
 npm run config:generate
 npm run config:check
 ```
 
-`generate` updates `config.schema.json` and the marked README region. `check` is non-mutating and suitable for pre-commit and CI. Workspace commands discover configured root and workspace packages automatically.
+`generate` updates `config.schema.json` and the marked README section. `check` makes no changes, so use it in pre-commit and CI.
 
-## Runtime behavior
+## Behavior
 
-Settings resolve as:
+Settings resolve in this order:
 
 ```text
 TypeBox defaults → global settings → trusted project settings
 ```
 
-Objects merge recursively; arrays and scalar values replace. Persisted JSON remains `unknown` until TypeBox validation and decoding.
-
-Storage paths:
+Objects merge recursively; arrays and scalar values replace. Invalid or incomplete JSON is ignored with a diagnostic, so typed runtime settings always satisfy the TypeBox schema. Existing settings are never overwritten. Project settings are never created and are ignored for untrusted projects.
 
 ```text
 <getAgentDir()>/extension-settings/<id>.json
-<getAgentDir()>/extension-settings/schemas/<id>.schema.json
 <cwd>/<CONFIG_DIR_NAME>/extension-settings/<id>.json
 ```
 
-The loader:
-
-- scaffolds global settings only when missing;
-- never creates project settings or reads them for untrusted projects;
-- never overwrites malformed or existing user settings;
-- refreshes missing or stale installed schemas atomically;
-- reports safe diagnostics without raw setting values;
-
-Keep secrets in environment variables or purpose-built secure storage rather than ordinary settings JSON.
+Keep secrets in environment variables or secure storage, not settings JSON.
 
 ## Development
 
