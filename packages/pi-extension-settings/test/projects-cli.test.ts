@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runCli, type CliIo } from "../src/cli.ts";
 import { DefinitionModuleInvalid, ProjectManifestInvalid } from "../src/failures.ts";
 import { discoverSettingsProjects } from "../src/projects.ts";
-import { README_GENERATED_END, README_GENERATED_START } from "../src/readme.ts";
+import { README_GENERATED_END, README_GENERATED_START } from "../src/settings-documentation.ts";
 
 const temporaryDirectories: string[] = [];
 const definitionImport = pathToFileURL(resolve("src/definition.ts")).href;

@@ -11,7 +11,7 @@ import {
     renderSettingsArtifacts,
 } from "../src/artifacts.ts";
 import { ReadmeMarkersMissing } from "../src/failures.ts";
-import { README_GENERATED_END, README_GENERATED_START } from "../src/readme.ts";
+import { README_GENERATED_END, README_GENERATED_START } from "../src/settings-documentation.ts";
 import { testDefinition } from "./fixture.ts";
 
 const temporaryDirectories: string[] = [];

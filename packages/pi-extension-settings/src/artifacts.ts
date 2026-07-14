@@ -8,7 +8,7 @@ import {
     renderReadmeSettingsSection,
     replaceGeneratedReadmeSection,
     type RenderReadmeOptions,
-} from "./readme.ts";
+} from "./settings-documentation.ts";
 import { createSettingsFileSchema } from "./schema-document.ts";
 
 export type SettingsArtifactTargets = {

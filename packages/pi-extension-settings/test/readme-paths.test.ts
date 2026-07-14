@@ -10,7 +10,7 @@ import {
     README_GENERATED_START,
     renderReadmeSettingsSection,
     replaceGeneratedReadmeSection,
-} from "../src/readme.ts";
+} from "../src/settings-documentation.ts";
 import { testDefinition } from "./fixture.ts";
 
 describe("settings paths", () => {

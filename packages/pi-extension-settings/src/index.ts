@@ -43,7 +43,7 @@ export {
     renderReadmeSettingsSection,
     replaceGeneratedReadmeSection,
     type RenderReadmeOptions,
-} from "./readme.ts";
+} from "./settings-documentation.ts";
 export {
     loadExtensionSettings,
     loadExtensionSettingsSync,

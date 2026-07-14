@@ -11,7 +11,7 @@ import {
     README_GENERATED_END,
     README_GENERATED_START,
     renderReadmeSettingsSection,
-} from "../src/readme.ts";
+} from "../src/settings-documentation.ts";
 import { testDefinition } from "./fixture.ts";
 
 const temporaryDirectories: string[] = [];

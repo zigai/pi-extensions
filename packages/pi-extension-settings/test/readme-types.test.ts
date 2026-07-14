@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Type } from "typebox";
 
 import { defineExtensionSettings } from "../src/definition.ts";
-import { renderReadmeSettingsSection } from "../src/readme.ts";
+import { renderReadmeSettingsSection } from "../src/settings-documentation.ts";
 
 describe("README schema rendering", () => {
     it("documents optional values, arrays, and escaped descriptions", () => {
