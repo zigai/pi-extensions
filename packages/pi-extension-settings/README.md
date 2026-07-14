@@ -1,29 +1,29 @@
 # Pi Extension Settings
 
-Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions. Define one TypeBox schema and this package derives defaults, runtime validation, `config.schema.json`, and the generated configuration section of your README.
+Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions. Define one TypeBox schema and this package uses it for defaults, runtime validation, `config.schema.json`, and generated configuration documentation.
 
-Its public API is intentionally small:
+The public API consists of:
 
-- `defineExtensionSettings()` defines settings and validates the definition.
-- `loadPiExtensionSettings()` loads defaults, global settings, and trusted project overrides.
-- `getPiGlobalSettingsPath()` and `getPiProjectSettingsPath()` expose the corresponding file paths.
-- `pi-extension-settings generate` and `pi-extension-settings check` maintain generated artifacts.
+- `defineExtensionSettings()` for defining settings.
+- `loadPiExtensionSettings()` for loading defaults, global settings, and trusted project overrides.
+- `getPiGlobalSettingsPath()` and `getPiProjectSettingsPath()` for locating settings files.
+- `pi-extension-settings generate` and `pi-extension-settings check` for generated artifacts.
 
-## Start with the template
+## Recommended: use the template
 
-Use [pi-extension-template](https://github.com/zigai/pi-extension-template) for a new extension. Select its extension-settings option: it creates the definition, loader, artifact configuration, checks, Git hooks, and package setup for you.
+I recommend using [pi-extension-template](https://github.com/zigai/pi-extension-template), which has extension settings built in. Select the extension-settings option and the template configures the package, definition, loader, generated schema and documentation, Git hooks, and checks for you.
 
-The rest of this README is for adding settings to an existing extension.
+If you do not want to use the template, the complete manual setup is below.
 
-## Install
+## Manual setup
+
+### Install
 
 ```sh
 npm install @zigai/pi-extension-settings
 ```
 
-Add `@zigai/pi-extension-settings` to `bundleDependencies` if your extension package must remain independently installable.
-
-## Define and load
+### Define and load settings
 
 ```ts
 import { defineExtensionSettings } from "@zigai/pi-extension-settings";
@@ -48,11 +48,13 @@ export function loadExampleSettings(ctx: PiSettingsContext) {
     bundledSchema: { kind: "url", url: new URL("../config.schema.json", import.meta.url) },
   });
 }
+
+export default settingsDefinition;
 ```
 
-## Generate documentation and schema
+### Generate the schema and documentation
 
-Add this to `package.json`:
+Add the definition and scripts to `package.json`:
 
 ```json
 {
@@ -68,31 +70,29 @@ Add this to `package.json`:
 }
 ```
 
-Generate and check the artifacts:
+Then run:
 
 ```sh
 npm run config:generate
 npm run config:check
 ```
 
-`generate` updates `config.schema.json` and adds its generated README section when needed. `check` makes no changes, so use it in pre-commit and CI.
+`generate` writes `config.schema.json` and adds or updates the generated configuration section in the README. `check` verifies that both artifacts are current without changing files, making it suitable for pre-commit and CI.
 
-## Behavior
-
-Settings resolve in this order:
+## Settings behavior
 
 ```text
 TypeBox defaults → global settings → trusted project settings
 ```
 
-Objects merge recursively; arrays and scalar values replace. Invalid or incomplete JSON is ignored with a diagnostic, so typed runtime settings always satisfy the TypeBox schema. Existing settings are never overwritten. Project settings are never created and are ignored for untrusted projects.
+Objects merge recursively; arrays and scalar values replace. Invalid settings are ignored with a diagnostic, existing settings are never overwritten, and project settings are ignored for untrusted projects.
 
 ```text
 <getAgentDir()>/extension-settings/<id>.json
 <cwd>/<CONFIG_DIR_NAME>/extension-settings/<id>.json
 ```
 
-Keep secrets in environment variables or secure storage, not settings JSON.
+Keep secrets in environment variables or secure storage rather than settings JSON.
 
 ## Development
 
