@@ -6,6 +6,20 @@ import { mergeSettings, settingsLayerFromFile } from "./settings-merge.ts";
 
 export type SettingsScope = "global" | "project";
 
+/**
+ * Stable machine-readable category for a non-fatal settings problem.
+ *
+ * Callers should branch on this value rather than diagnostic text:
+ *
+ * - `bundled-schema-read-failed`: the generated schema could not be read.
+ * - `bundled-schema-stale`: the bundled schema does not match the definition.
+ * - `config-decode-failed`: a validated layer could not be decoded by TypeBox.
+ * - `config-invalid`: a layer failed validation or conflicted with an earlier layer.
+ * - `config-malformed`: a settings file contains malformed JSON.
+ * - `config-read-failed`: a settings file could not be read.
+ * - `config-scaffold-failed`: the initial global settings file could not be created.
+ * - `schema-install-failed`: the editor schema could not be installed.
+ */
 export type SettingsDiagnosticCode =
     | "bundled-schema-read-failed"
     | "bundled-schema-stale"
@@ -16,14 +30,28 @@ export type SettingsDiagnosticCode =
     | "config-scaffold-failed"
     | "schema-install-failed";
 
+/**
+ * A non-fatal problem encountered while loading settings.
+ *
+ * The affected schema or settings layer is ignored. Messages and validation issues contain no
+ * settings values, making them suitable for display through Pi's UI.
+ */
 export type SettingsDiagnostic = {
+    /** Stable category intended for programmatic handling. */
     readonly code: SettingsDiagnosticCode;
+    /** All current diagnostics are errors; the field allows direct use with `ctx.ui.notify`. */
     readonly severity: "error";
+    /** The settings layer or editor-schema operation that failed. */
     readonly scope: SettingsScope | "schema";
+    /** Absolute path of the affected settings or schema file. */
     readonly path: string;
+    /** User-facing summary that does not include settings values. */
     readonly message: string;
+    /** JSON Pointer paths and validator messages when schema validation failed. */
     readonly issues?: readonly {
+        /** JSON Pointer to the invalid setting, or `/` for the document root. */
         readonly path: string;
+        /** TypeBox validation message for this issue. */
         readonly message: string;
     }[];
 };

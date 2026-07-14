@@ -22,9 +22,26 @@ import {
     type SettingsScope,
 } from "./settings-layer.ts";
 
+/**
+ * Source for the generated `config.schema.json` shipped with an extension.
+ *
+ * The content must exactly match the schema derived from the settings definition. A mismatch is
+ * reported as `bundled-schema-stale`, and neither the editor schema nor the initial global settings
+ * file is installed.
+ */
 export type BundledSchemaSource =
-    | { readonly kind: "content"; readonly content: string }
-    | { readonly kind: "url"; readonly url: URL };
+    | {
+          /** Use schema text already loaded by the extension. */
+          readonly kind: "content";
+          /** Complete generated JSON Schema, including its trailing newline. */
+          readonly content: string;
+      }
+    | {
+          /** Read the schema synchronously from a bundled file URL. */
+          readonly kind: "url";
+          /** A `file:` URL, usually `new URL("../config.schema.json", import.meta.url)`. */
+          readonly url: URL;
+      };
 
 export type ProjectSettingsLocation = {
     readonly cwd: string;
@@ -38,16 +55,39 @@ export type LoadSettingsOptions = {
     readonly project?: ProjectSettingsLocation;
 };
 
+/**
+ * Result of resolving defaults, global settings, and an optional trusted-project override.
+ *
+ * File and validation failures are represented in {@link SettingsDiagnostic}; a failed layer is
+ * ignored and resolution continues from the last valid value.
+ *
+ * @template Schema The definition's TypeBox schema.
+ */
 export type LoadedSettings<Schema extends TObject> = {
+    /** Fully resolved and TypeBox-decoded settings safe for extension code to consume. */
     readonly settings: StaticDecode<Schema>;
+    /** Accepted global file contents after decoding and removal of editor-only metadata. */
     readonly globalSettingsLayer: JsonObject | undefined;
+    /** Accepted trusted-project file contents after decoding and removal of editor metadata. */
     readonly projectSettingsLayer: JsonObject | undefined;
+    /** Non-fatal problems encountered while installing, reading, validating, or decoding settings. */
     readonly diagnostics: readonly SettingsDiagnostic[];
+    /** Absolute path of the extension's global settings file. */
     readonly globalConfigPath: string;
+    /** Absolute project settings path, even when the project is untrusted; absent without a project. */
     readonly projectConfigPath: string | undefined;
+    /** Whether a valid global layer contributed to {@link LoadedSettings.settings}. */
     readonly usedGlobalConfig: boolean;
+    /** Whether a valid trusted-project layer contributed to {@link LoadedSettings.settings}. */
     readonly usedProjectConfig: boolean;
+    /** Whether this load created the global settings file from schema defaults. */
     readonly scaffoldedGlobalConfig: boolean;
+    /**
+     * Result of installing the bundled editor schema in Pi's global settings directory.
+     *
+     * `created` and `updated` indicate a write, `unchanged` means the installed file already
+     * matched, and `unavailable` means the bundled schema could not be verified or installed.
+     */
     readonly schemaStatus: "created" | "unavailable" | "unchanged" | "updated";
 };
 

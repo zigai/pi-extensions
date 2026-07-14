@@ -50,27 +50,99 @@ export class InvalidSettingsDefinition extends Error {
     }
 }
 
+/**
+ * An immutable settings contract created by {@link defineExtensionSettings}.
+ *
+ * The schema and derived defaults are cloned and recursively frozen. Resolved runtime values retain
+ * the schema's decoded TypeBox type, while `defaultSettings` remains JSON data suitable for writing
+ * to disk.
+ *
+ * @template Schema The TypeBox object schema that defines persisted and resolved settings.
+ */
 export type ExtensionSettingsDefinition<Schema extends TObject = TObject> = {
     readonly [definitionMarker]: true;
+    /** The stable identifier used in settings and schema filenames. */
     readonly id: string;
+    /** The display name used in generated schema and README content. */
     readonly title: string;
+    /** The summary used in generated schema and README content. */
     readonly description: string;
+    /** The absolute URI written to the generated JSON Schema `$id` field. */
     readonly schemaId: string;
+    /** A validated, recursively frozen clone of the supplied TypeBox schema. */
     readonly schema: Schema;
+    /** The schema defaults as recursively frozen JSON data, before TypeBox decoding. */
     readonly defaultSettings: JsonObject;
 };
 
+/**
+ * Input accepted by {@link defineExtensionSettings}.
+ *
+ * @template Schema The TypeBox object schema that determines the returned settings type.
+ */
 export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
-    /** Stable, filename-safe identity. Changing it changes where settings are stored. */
+    /**
+     * Stable identity used in settings filenames.
+     *
+     * Must contain 1–128 lowercase letters, digits, dots, underscores, or hyphens; the first and
+     * last characters must be alphanumeric. Changing this value moves the extension to different
+     * settings files.
+     */
     readonly id: string;
+    /** Non-blank display name for generated documentation and JSON Schema metadata. */
     readonly title: string;
+    /** Non-blank summary for generated documentation and JSON Schema metadata. */
     readonly description: string;
-    /** Stable canonical URI for project-local schema references. */
+    /**
+     * Absolute URI for the generated JSON Schema `$id`.
+     *
+     * Defaults to `urn:pi-extension-settings:<id>`.
+     */
     readonly schemaId?: string;
-    /** Resolved settings schema. Required properties must declare defaults. */
+    /**
+     * TypeBox object schema for resolved settings.
+     *
+     * Every object must set `additionalProperties: false`, every user-facing leaf must have a
+     * non-blank description, and every required property must resolve to a valid JSON default.
+     * `$schema` is reserved for editor metadata and cannot be declared as a setting.
+     */
     readonly schema: Schema;
 };
 
+/**
+ * Defines and validates an extension's settings contract.
+ *
+ * Validation is eager so invalid schemas fail while the extension is loading, before any settings
+ * files are read or written. The input schema is cloned; this function does not mutate caller-owned
+ * data.
+ *
+ * @template Schema The TypeBox object schema used to infer resolved settings.
+ * @param input Identity, documentation metadata, and the TypeBox settings schema.
+ * @returns An immutable definition with validated JSON defaults.
+ * @throws {InvalidSettingsDefinition} If metadata, schema structure, descriptions, or defaults do
+ * not satisfy the settings contract.
+ *
+ * @example
+ * ```ts
+ * import { defineExtensionSettings } from "@zigai/pi-extension-settings";
+ * import { Type } from "typebox";
+ *
+ * export default defineExtensionSettings({
+ *   id: "pi-example",
+ *   title: "Pi Example",
+ *   description: "Settings for Pi Example.",
+ *   schema: Type.Object(
+ *     {
+ *       enabled: Type.Boolean({
+ *         default: true,
+ *         description: "Enable the extension.",
+ *       }),
+ *     },
+ *     { additionalProperties: false },
+ *   ),
+ * });
+ * ```
+ */
 export function defineExtensionSettings<const Schema extends TObject>(
     input: ExtensionSettingsDefinitionInput<Schema>,
 ): ExtensionSettingsDefinition<Schema> {
@@ -164,6 +236,22 @@ export function isExtensionSettingsDefinition(
     return "defaultSettings" in value && isJsonObject(value.defaultSettings);
 }
 
+/**
+ * The decoded runtime settings type produced by an extension definition.
+ *
+ * This preserves TypeBox transforms: it represents values after decoding, not the JSON shape stored
+ * in settings files.
+ *
+ * @template Definition A definition returned by {@link defineExtensionSettings}.
+ *
+ * @example
+ * ```ts
+ * import type { ResolvedSettings } from "@zigai/pi-extension-settings";
+ * import settingsDefinition from "./settings.ts";
+ *
+ * export type Settings = ResolvedSettings<typeof settingsDefinition>;
+ * ```
+ */
 export type ResolvedSettings<Definition extends ExtensionSettingsDefinition> = StaticDecode<
     Definition["schema"]
 >;
