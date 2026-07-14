@@ -35,7 +35,6 @@ function readmeRenderOptions(targets: SettingsArtifactTargets): RenderReadmeOpti
     return targets.globalPath === undefined ? {} : { globalPath: targets.globalPath };
 }
 
-/** Render deterministic repository artifacts without touching the filesystem. */
 export function renderSettingsArtifacts(
     definition: ExtensionSettingsDefinition,
     targets: SettingsArtifactTargets,
@@ -46,11 +45,8 @@ export function renderSettingsArtifacts(
     };
 }
 
-async function expectedReadme(
-    readmePath: string,
-    section: string,
-): Promise<ResultType<string, ArtifactFailure>> {
-    const current = await readTextIfPresent(readmePath);
+function expectedReadme(readmePath: string, section: string): ResultType<string, ArtifactFailure> {
+    const current = readTextIfPresent(readmePath);
     if (Result.isError(current)) return current;
     if (current.value === undefined) return Result.err(new ReadmeMarkersMissing(readmePath));
 
@@ -60,40 +56,36 @@ async function expectedReadme(
         : Result.ok(expected);
 }
 
-/** Generate the checked-in schema and marked README section. */
-export async function generateSettingsArtifacts(
+export function generateSettingsArtifacts(
     definition: ExtensionSettingsDefinition,
     targets: SettingsArtifactTargets,
-): Promise<ResultType<GeneratedSettingsArtifacts, ArtifactFailure>> {
+): ResultType<GeneratedSettingsArtifacts, ArtifactFailure> {
     const rendered = renderSettingsArtifacts(definition, targets);
-    const readme = await expectedReadme(targets.readmePath, rendered.readmeSection);
+    const readme = expectedReadme(targets.readmePath, rendered.readmeSection);
     if (Result.isError(readme)) return readme;
 
     const changedPaths: string[] = [];
-    const schemaWrite = await writeTextAtomically(targets.schemaPath, rendered.schema);
+    const schemaWrite = writeTextAtomically(targets.schemaPath, rendered.schema);
     if (Result.isError(schemaWrite)) return schemaWrite;
     if (schemaWrite.value !== "unchanged") changedPaths.push(targets.schemaPath);
 
-    const readmeWrite = await writeTextAtomically(targets.readmePath, readme.value);
+    const readmeWrite = writeTextAtomically(targets.readmePath, readme.value);
     if (Result.isError(readmeWrite)) return readmeWrite;
     if (readmeWrite.value !== "unchanged") changedPaths.push(targets.readmePath);
 
     return Result.ok({ changedPaths });
 }
 
-/** Check generated artifacts without modifying the working tree. */
-export async function checkSettingsArtifacts(
+export function checkSettingsArtifacts(
     definition: ExtensionSettingsDefinition,
     targets: SettingsArtifactTargets,
-): Promise<ResultType<CheckedSettingsArtifacts, ArtifactFailure>> {
+): ResultType<CheckedSettingsArtifacts, ArtifactFailure> {
     const rendered = renderSettingsArtifacts(definition, targets);
-    const readme = await expectedReadme(targets.readmePath, rendered.readmeSection);
+    const readme = expectedReadme(targets.readmePath, rendered.readmeSection);
     if (Result.isError(readme)) return readme;
 
-    const [schemaCurrent, readmeCurrent] = await Promise.all([
-        readTextIfPresent(targets.schemaPath),
-        readTextIfPresent(targets.readmePath),
-    ]);
+    const schemaCurrent = readTextIfPresent(targets.schemaPath);
+    const readmeCurrent = readTextIfPresent(targets.readmePath);
     if (Result.isError(schemaCurrent)) return schemaCurrent;
     if (Result.isError(readmeCurrent)) return readmeCurrent;
 

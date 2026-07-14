@@ -13,11 +13,7 @@ import { join } from "node:path";
 import { Result } from "better-result";
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-    readTextIfPresentSync,
-    writeTextAtomicallySync,
-    writeTextIfMissingSync,
-} from "../src/file-system-sync.ts";
+import { readTextIfPresent, writeTextAtomically, writeTextIfMissing } from "../src/file-system.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -31,22 +27,22 @@ afterEach(() => {
     for (const path of temporaryDirectories.splice(0)) rmSync(path, { recursive: true });
 });
 
-describe("synchronous file operations", () => {
+describe("file operations", () => {
     it("reads missing files and atomically creates config", () => {
         const root = temporaryDirectory();
         const path = join(root, "nested", "config.json");
-        expect(readTextIfPresentSync(path)).toEqual(Result.ok(undefined));
-        expect(writeTextIfMissingSync(path, "first\n")).toEqual(Result.ok("created"));
-        expect(writeTextIfMissingSync(path, "second\n")).toEqual(Result.ok("unchanged"));
-        expect(readTextIfPresentSync(path)).toEqual(Result.ok("first\n"));
+        expect(readTextIfPresent(path)).toEqual(Result.ok(undefined));
+        expect(writeTextIfMissing(path, "first\n")).toEqual(Result.ok("created"));
+        expect(writeTextIfMissing(path, "second\n")).toEqual(Result.ok("unchanged"));
+        expect(readTextIfPresent(path)).toEqual(Result.ok("first\n"));
         expect(readdirSync(join(root, "nested"))).toEqual(["config.json"]);
     });
 
     it("atomically creates, preserves, and updates schema", () => {
         const path = join(temporaryDirectory(), "schemas", "config.schema.json");
-        expect(writeTextAtomicallySync(path, "first\n")).toEqual(Result.ok("created"));
-        expect(writeTextAtomicallySync(path, "first\n")).toEqual(Result.ok("unchanged"));
-        expect(writeTextAtomicallySync(path, "second\n")).toEqual(Result.ok("updated"));
+        expect(writeTextAtomically(path, "first\n")).toEqual(Result.ok("created"));
+        expect(writeTextAtomically(path, "first\n")).toEqual(Result.ok("unchanged"));
+        expect(writeTextAtomically(path, "second\n")).toEqual(Result.ok("updated"));
         expect(readFileSync(path, "utf8")).toBe("second\n");
     });
 
@@ -55,9 +51,9 @@ describe("synchronous file operations", () => {
         const parentFile = join(root, "parent");
         writeFileSync(parentFile, "file");
 
-        expect(Result.isError(readTextIfPresentSync(parentFile))).toBe(false);
-        expect(Result.isError(writeTextIfMissingSync(join(parentFile, "child"), "x"))).toBe(true);
-        expect(Result.isError(writeTextAtomicallySync(join(parentFile, "child"), "x"))).toBe(true);
+        expect(Result.isError(readTextIfPresent(parentFile))).toBe(false);
+        expect(Result.isError(writeTextIfMissing(join(parentFile, "child"), "x"))).toBe(true);
+        expect(Result.isError(writeTextAtomically(join(parentFile, "child"), "x"))).toBe(true);
     });
 
     it("returns typed write failures for a read-only directory", () => {
@@ -66,10 +62,8 @@ describe("synchronous file operations", () => {
         mkdirSync(locked);
         chmodSync(locked, 0o500);
         try {
-            expect(Result.isError(writeTextIfMissingSync(join(locked, "config.json"), "x"))).toBe(
-                true,
-            );
-            expect(Result.isError(writeTextAtomicallySync(join(locked, "schema.json"), "x"))).toBe(
+            expect(Result.isError(writeTextIfMissing(join(locked, "config.json"), "x"))).toBe(true);
+            expect(Result.isError(writeTextAtomically(join(locked, "schema.json"), "x"))).toBe(
                 true,
             );
         } finally {
@@ -79,6 +73,6 @@ describe("synchronous file operations", () => {
 
     it("returns a typed read failure for directories", () => {
         const directory = temporaryDirectory();
-        expect(Result.isError(readTextIfPresentSync(directory))).toBe(true);
+        expect(Result.isError(readTextIfPresent(directory))).toBe(true);
     });
 });

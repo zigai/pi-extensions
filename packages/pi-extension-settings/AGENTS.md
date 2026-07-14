@@ -2,11 +2,10 @@
 
 ## Project Contract
 
-- This package provides reusable runtime and artifact tooling for Pi extension settings; it is not itself a Pi extension.
-- Keep the public API small and cohesive. Generic path/layout migration belongs here; extension-specific semantic transformation and UI policy belong in consuming extensions.
-- `src/definition.ts` owns definition invariants, `src/runtime.ts` owns async/synchronous layer resolution, `src/artifacts.ts` owns repository artifact workflows, and `src/projects.ts` owns package/workspace discovery.
-- Async and synchronous loaders must preserve identical paths, diagnostics, merge order, and file-ownership behavior.
-- Keep Pi-specific imports isolated in `src/pi.ts`; core runtime and generation modules must remain testable with explicit paths and trust state.
+- This package provides settings runtime and artifact tooling specifically for Pi extensions; it is not itself a Pi extension.
+- Keep the public API limited to defining settings, loading them through Pi, and the `generate`/`check` CLI. Filesystem, schema-document, artifact, and workspace-discovery modules are implementation details.
+- `src/definition.ts` owns definition invariants, `src/settings-layer.ts` owns parsing and merge validation, `src/settings-loader.ts` owns synchronous filesystem orchestration, and `src/artifacts.ts` owns repository artifact generation.
+- Keep Pi-specific path and trust resolution in `src/pi.ts`; internal loading remains testable with explicit paths.
 - Publish compiled JavaScript and declarations from `dist`, but do not commit that generated directory. Git installs and package publishing build it through `prepare`; executable package exports must continue to target compiled JavaScript rather than TypeScript source.
 
 ## Configuration Invariants

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { formatJson } from "../src/json-value.ts";
 import { resolveProjectSettingsPaths } from "../src/paths.ts";
-import { loadExtensionSettings } from "../src/runtime.ts";
+import { loadSettings } from "../src/settings-loader.ts";
 import { createSettingsFileSchema } from "../src/schema-document.ts";
 import { testDefinition } from "./fixture.ts";
 
@@ -26,13 +26,13 @@ afterEach(async () => {
     await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
 
-describe("runtime failure isolation", () => {
+describe("settings loader failure isolation", () => {
     it("reports schema installation failures and still returns defaults", async () => {
         const agentDir = await temporaryDirectory();
         await mkdir(join(agentDir, "extension-settings"), { recursive: true });
         await writeFile(join(agentDir, "extension-settings", "schemas"), "blocks directory");
 
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir,
             bundledSchema: { kind: "content", content: schemaContent() },
         });
@@ -50,9 +50,9 @@ describe("runtime failure isolation", () => {
             agentDir,
             bundledSchema: { kind: "content" as const, content: schemaContent() },
         };
-        await loadExtensionSettings(testDefinition(), options);
+        loadSettings(testDefinition(), options);
 
-        const loaded = await loadExtensionSettings(testDefinition(), options);
+        const loaded = loadSettings(testDefinition(), options);
 
         expect(loaded.schemaStatus).toBe("unchanged");
         expect(loaded.scaffoldedGlobalConfig).toBe(false);
@@ -63,7 +63,7 @@ describe("runtime failure isolation", () => {
         const sourcePath = join(root, "bundled.schema.json");
         await writeFile(sourcePath, schemaContent());
 
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir: join(root, "agent"),
             bundledSchema: { kind: "url", url: new URL(`file://${sourcePath}`) },
         });
@@ -79,7 +79,7 @@ describe("runtime failure isolation", () => {
         await mkdir(join(cwd, ".pi", "extension-settings"), { recursive: true });
         await writeFile(paths.configPath, JSON.stringify({ appearance: { opacity: 2 } }));
 
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir: join(root, "agent"),
             bundledSchema: { kind: "content", content: schemaContent() },
             project: { cwd, configDirName: ".pi", trusted: true },

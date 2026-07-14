@@ -2,11 +2,13 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { defineExtensionSettings } from "../src/definition.ts";
 import { formatJson } from "../src/json-value.ts";
 import { resolveGlobalSettingsPaths, resolveProjectSettingsPaths } from "../src/paths.ts";
-import { loadExtensionSettings } from "../src/runtime.ts";
+import { loadSettings } from "../src/settings-loader.ts";
 import { createSettingsFileSchema } from "../src/schema-document.ts";
 import { testDefinition } from "./fixture.ts";
 
@@ -29,11 +31,11 @@ afterEach(async () => {
     await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
 
-describe("loadExtensionSettings", () => {
+describe("loadSettings", () => {
     it("scaffolds defaults and the editor schema on first load", async () => {
         const agentDir = await temporaryDirectory();
         const definition = testDefinition();
-        const loaded = await loadExtensionSettings(definition, {
+        const loaded = loadSettings(definition, {
             agentDir,
             bundledSchema: bundledSchema(),
         });
@@ -50,32 +52,6 @@ describe("loadExtensionSettings", () => {
         expect(await readFile(paths.schemaPath, "utf8")).toBe(bundledSchema().content);
     });
 
-    it("concurrently scaffolds one complete global settings file", async () => {
-        const agentDir = await temporaryDirectory();
-        const definition = testDefinition();
-
-        const loads = await Promise.all(
-            Array.from({ length: 16 }, () =>
-                loadExtensionSettings(definition, {
-                    agentDir,
-                    bundledSchema: bundledSchema(),
-                }),
-            ),
-        );
-
-        for (const loaded of loads) {
-            expect(loaded.settings).toEqual(definition.defaultSettings);
-            expect(loaded.diagnostics).toEqual([]);
-        }
-        expect(loads.filter((loaded) => loaded.scaffoldedGlobalConfig)).toHaveLength(1);
-
-        const paths = resolveGlobalSettingsPaths(agentDir, definition.id);
-        expect(JSON.parse(await readFile(paths.configPath, "utf8"))).toEqual({
-            $schema: "./schemas/pi-example.schema.json",
-            ...definition.defaultSettings,
-        });
-    });
-
     it("applies partial global settings and refreshes only the stale schema", async () => {
         const agentDir = await temporaryDirectory();
         const definition = testDefinition();
@@ -89,7 +65,7 @@ describe("loadExtensionSettings", () => {
         await writeFile(paths.configPath, custom);
         await writeFile(paths.schemaPath, "stale schema\n");
 
-        const loaded = await loadExtensionSettings(definition, {
+        const loaded = loadSettings(definition, {
             agentDir,
             bundledSchema: bundledSchema(),
         });
@@ -118,7 +94,7 @@ describe("loadExtensionSettings", () => {
             JSON.stringify({ appearance: { opacity: 0.25 }, tools: ["bash"] }),
         );
 
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir,
             bundledSchema: bundledSchema(),
             project: { cwd, configDirName: ".pi", trusted: true },
@@ -145,7 +121,7 @@ describe("loadExtensionSettings", () => {
         await mkdir(join(cwd, ".pi", "extension-settings"), { recursive: true });
         await writeFile(projectPaths.configPath, JSON.stringify({ enabled: false }));
 
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir: join(root, "agent"),
             bundledSchema: bundledSchema(),
             project: { cwd, configDirName: ".pi", trusted: false },
@@ -161,7 +137,7 @@ describe("loadExtensionSettings", () => {
         await mkdir(join(agentDir, "extension-settings"), { recursive: true });
         await writeFile(paths.configPath, "{ malformed");
 
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir,
             bundledSchema: bundledSchema(),
         });
@@ -179,7 +155,7 @@ describe("loadExtensionSettings", () => {
         await mkdir(join(agentDir, "extension-settings"), { recursive: true });
         await writeFile(paths.configPath, JSON.stringify({ secretTypo: "do-not-report" }));
 
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir,
             bundledSchema: bundledSchema(),
         });
@@ -194,7 +170,7 @@ describe("loadExtensionSettings", () => {
 
     it("does not scaffold from a stale bundled schema", async () => {
         const agentDir = await temporaryDirectory();
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir,
             bundledSchema: { kind: "content", content: "{}\n" },
         });
@@ -209,7 +185,7 @@ describe("loadExtensionSettings", () => {
 
     it("reports an unreadable bundled schema URL", async () => {
         const agentDir = await temporaryDirectory();
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir,
             bundledSchema: { kind: "url", url: new URL("file:///does/not/exist/schema.json") },
         });
@@ -219,12 +195,39 @@ describe("loadExtensionSettings", () => {
         );
     });
 
+    it("decodes mixed unions without mutating the definition", async () => {
+        const definition = defineExtensionSettings({
+            id: "pi-union",
+            title: "Union",
+            description: "Mixed union settings.",
+            schema: Type.Object(
+                {
+                    color: Type.Union([Type.Integer(), Type.String()], {
+                        default: "blue",
+                        description: "Color name or ANSI index.",
+                    }),
+                },
+                { additionalProperties: false },
+            ),
+        });
+
+        const loaded = loadSettings(definition, {
+            agentDir: await temporaryDirectory(),
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+        });
+
+        expect(loaded.settings.color).toBe("blue");
+    });
+
     it("falls back safely when the config path cannot be read", async () => {
         const agentDir = await temporaryDirectory();
         const paths = resolveGlobalSettingsPaths(agentDir, "pi-example");
         await mkdir(paths.configPath, { recursive: true });
 
-        const loaded = await loadExtensionSettings(testDefinition(), {
+        const loaded = loadSettings(testDefinition(), {
             agentDir,
             bundledSchema: bundledSchema(),
         });

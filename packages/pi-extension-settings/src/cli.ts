@@ -82,7 +82,7 @@ export async function runCli(args: readonly string[], io: CliIo = processIo): Pr
 
     if (parsed.command === "generate") {
         for (const project of discovered.value) {
-            const generated = await generateSettingsArtifacts(project.definition, project.targets);
+            const generated = generateSettingsArtifacts(project.definition, project.targets);
             if (Result.isError(generated)) {
                 io.stderr(line(generated.error.message));
                 return 1;
@@ -94,7 +94,7 @@ export async function runCli(args: readonly string[], io: CliIo = processIo): Pr
 
     let stale = false;
     for (const project of discovered.value) {
-        const checked = await checkSettingsArtifacts(project.definition, project.targets);
+        const checked = checkSettingsArtifacts(project.definition, project.targets);
         if (Result.isError(checked)) {
             io.stderr(line(checked.error.message));
             return 1;

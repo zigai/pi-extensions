@@ -20,10 +20,7 @@ Keep the definition and package-facing loader together in `src/settings.ts`. Imp
 
 ```ts
 import { defineExtensionSettings } from "@zigai/pi-extension-settings";
-import {
-  loadPiExtensionSettingsSync,
-  type PiSettingsContext,
-} from "@zigai/pi-extension-settings/pi";
+import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-extension-settings/pi";
 import { Type } from "typebox";
 
 export const exampleSettingsDefinition = defineExtensionSettings({
@@ -43,7 +40,7 @@ export const exampleSettingsDefinition = defineExtensionSettings({
 });
 
 export function loadExampleSettings(ctx: PiSettingsContext) {
-  return loadPiExtensionSettingsSync(exampleSettingsDefinition, ctx, {
+  return loadPiExtensionSettings(exampleSettingsDefinition, ctx, {
     bundledSchema: {
       kind: "url",
       url: new URL("../config.schema.json", import.meta.url),
@@ -116,11 +113,6 @@ The loader:
 - never overwrites malformed or existing user settings;
 - refreshes missing or stale installed schemas atomically;
 - reports safe diagnostics without raw setting values;
-- migrates legacy per-extension paths only when the centralized target is absent.
-
-Use `legacySettingsIds` for former extension IDs and `legacyConfigPaths` for nonstandard historical locations. The original legacy file remains untouched.
-
-Async callers can use `loadPiExtensionSettings`; non-Pi hosts and filesystem tests can use `loadExtensionSettings` or `loadExtensionSettingsSync` with explicit paths and trust state.
 
 Keep secrets in environment variables or purpose-built secure storage rather than ordinary settings JSON.
 

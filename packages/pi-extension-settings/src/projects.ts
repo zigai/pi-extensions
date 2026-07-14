@@ -100,7 +100,7 @@ function workspacePatterns(packageJson: JsonObject): readonly string[] {
 }
 
 async function readPackageJson(path: string): Promise<ResultType<JsonObject, ProjectFailure>> {
-    const content = await readTextIfPresent(path);
+    const content = readTextIfPresent(path);
     if (Result.isError(content)) return content;
     if (content.value === undefined) {
         return Result.err(new ProjectManifestInvalid({ path, reason: "file does not exist" }));

@@ -56,16 +56,14 @@ export function cloneJson<Value extends JsonValue>(value: Value): Value {
     return structuredClone(value);
 }
 
-/** Parse text as a JSON value without trusting the result of `JSON.parse`. */
-export function parseJson(text: string): JsonValue | undefined {
-    let parsed: unknown;
+/** Parse JSON text without assigning a trusted shape to the result. */
+export function parseJson(text: string): unknown {
     try {
-        parsed = JSON.parse(text);
+        const value: unknown = JSON.parse(text);
+        return value;
     } catch {
         return undefined;
     }
-
-    return isJsonValue(parsed) ? parsed : undefined;
 }
 
 /** Serialize JSON deterministically with a trailing newline. */

@@ -51,22 +51,22 @@ describe("settings artifacts", () => {
 
     it("generates, checks, and then remains idempotent", async () => {
         const targets = await artifactFiles();
-        const generated = await generateSettingsArtifacts(testDefinition(), targets);
+        const generated = generateSettingsArtifacts(testDefinition(), targets);
         expect(Result.isOk(generated)).toBe(true);
         if (Result.isError(generated)) return;
         expect(generated.value.changedPaths).toEqual([targets.schemaPath, targets.readmePath]);
 
-        const checked = await checkSettingsArtifacts(testDefinition(), targets);
+        const checked = checkSettingsArtifacts(testDefinition(), targets);
         expect(checked).toEqual(Result.ok({ current: true, stalePaths: [] }));
 
-        const repeated = await generateSettingsArtifacts(testDefinition(), targets);
+        const repeated = generateSettingsArtifacts(testDefinition(), targets);
         expect(repeated).toEqual(Result.ok({ changedPaths: [] }));
         expect(await readFile(targets.readmePath, "utf8")).toContain("Intro.");
     });
 
     it("reports each stale artifact without modifying it", async () => {
         const targets = await artifactFiles();
-        const generated = await generateSettingsArtifacts(testDefinition(), targets);
+        const generated = generateSettingsArtifacts(testDefinition(), targets);
         if (Result.isError(generated)) throw generated.error;
         await writeFile(targets.schemaPath, "stale\n");
         await writeFile(
@@ -74,7 +74,7 @@ describe("settings artifacts", () => {
             `# Changed\n${README_GENERATED_START}\nstale\n${README_GENERATED_END}\n`,
         );
 
-        const checked = await checkSettingsArtifacts(testDefinition(), targets);
+        const checked = checkSettingsArtifacts(testDefinition(), targets);
 
         expect(checked).toEqual(
             Result.ok({
@@ -88,7 +88,7 @@ describe("settings artifacts", () => {
     it("returns a typed failure for missing README markers", async () => {
         const targets = await artifactFiles("# Package\n");
 
-        const generated = await generateSettingsArtifacts(testDefinition(), targets);
+        const generated = generateSettingsArtifacts(testDefinition(), targets);
 
         expect(Result.isError(generated)).toBe(true);
         if (Result.isOk(generated)) return;

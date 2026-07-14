@@ -32,7 +32,7 @@ describe("artifact filesystem failures", () => {
         const readmePath = join(root, "README.md");
         await mkdir(readmePath);
 
-        const result = await generateSettingsArtifacts(testDefinition(), {
+        const result = generateSettingsArtifacts(testDefinition(), {
             schemaPath: join(root, "config.schema.json"),
             readmePath,
         });
@@ -49,7 +49,7 @@ describe("artifact filesystem failures", () => {
         await writeFile(parentFile, "file");
         await writeFile(readmePath, `${README_GENERATED_START}\nold\n${README_GENERATED_END}\n`);
 
-        const result = await generateSettingsArtifacts(testDefinition(), {
+        const result = generateSettingsArtifacts(testDefinition(), {
             schemaPath: join(parentFile, "config.schema.json"),
             readmePath,
         });
@@ -68,7 +68,7 @@ describe("artifact filesystem failures", () => {
             `${README_GENERATED_START}\n${section}\n${README_GENERATED_END}\n`,
         );
 
-        const result = await checkSettingsArtifacts(testDefinition(), {
+        const result = checkSettingsArtifacts(testDefinition(), {
             schemaPath: join(root, "config.schema.json"),
             readmePath,
         });
