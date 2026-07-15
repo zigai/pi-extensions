@@ -33,6 +33,7 @@ function handlerValues<TDefinitions extends ArgumentDefinitions>(
     const expanded = maybeExpandGroupedValues(values, definitions);
     // SAFETY: handler adapters receive the parser's successfully validated flat value state and
     // only reshape keys according to the same definition tree.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: parser validation and the same definition tree establish every expanded handler leaf.
     return expanded as InferArguments<TDefinitions>;
 }
 
@@ -43,6 +44,7 @@ function refinementValues<TDefinitions extends ArgumentDefinitions>(
     const expanded = maybeExpandGroupedValues(values, definitions);
     // SAFETY: refinement adapters receive parser-produced leaves and only reshape paths according
     // to the same definition tree; missing draft leaves remain missing.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: parser-produced leaves are only regrouped under their source definition paths.
     return expanded as ParsedArgumentDraft<TDefinitions>;
 }
 

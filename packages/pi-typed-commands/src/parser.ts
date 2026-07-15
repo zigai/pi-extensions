@@ -144,14 +144,16 @@ export function lexTypedArgumentString(input: string): LexResult {
         if (!tokenStarted) {
             return;
         }
-        const token: Token = {
+        let token: Token = {
             value: current,
             raw: input.slice(tokenStart, end),
             start: tokenStart,
             end,
             escaped,
-            ...(tokenQuote === undefined ? {} : { quote: tokenQuote }),
         };
+        if (tokenQuote !== undefined) {
+            token = { ...token, quote: tokenQuote };
+        }
         tokens.push(token);
         tokenStarted = false;
         current = "";
@@ -314,6 +316,19 @@ function serializableRecord<TDefinitions extends ArgumentDefinitions>(
     values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
     return values;
+}
+
+function serializedArgumentText(value: unknown): string | undefined {
+    if (typeof value === "string") {
+        return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    if (isStringArrayValue(value)) {
+        return value.join(",");
+    }
+    return undefined;
 }
 
 export function getTypedCommandRefinementIssues(
@@ -684,7 +699,11 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
                         throw new TypeError(issue.message);
                     }
                 }
-                parts.push(quoteSerializedValue(String(value), String(value).startsWith("-")));
+                const text = serializedArgumentText(value);
+                if (text === undefined) {
+                    throw new TypeError(`${argument.key} has an unsupported serialized value`);
+                }
+                parts.push(quoteSerializedValue(text, text.startsWith("-")));
             }
         } else {
             parts.push(...argument.serialize(value));
@@ -753,11 +772,13 @@ function typedDraft<TDefinitions extends ArgumentDefinitions>(
     grammar: CompiledCommand<TDefinitions>,
     values: Readonly<Record<string, ArgumentValue>>,
 ): ParsedArgumentDraft<TDefinitions> {
-    const grouped = hasArgumentGroups(grammar.definitions)
-        ? expandGroupedArgumentValues(values, grammar.definitions)
-        : { ...values };
+    let grouped: Readonly<Record<string, unknown>> = { ...values };
+    if (hasArgumentGroups(grammar.definitions)) {
+        grouped = expandGroupedArgumentValues(values, grammar.definitions);
+    }
     // SAFETY: validatedParsedValues retained only leaves accepted by their compiled definitions;
     // expandGroupedArgumentValues changes paths into the matching source-definition tree only.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: values were validated by the same generic grammar before path expansion.
     return grouped as ParsedArgumentDraft<TDefinitions>;
 }
 
@@ -820,6 +841,7 @@ export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
         status: "success",
         // SAFETY: every compiled argument validated successfully, which establishes all required
         // leaves and defaults represented by InferArguments.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: zero validation issues proves every required/defaulted leaf is present.
         value: partial as InferArguments<TDefinitions>,
         provided,
         sources: typedSources(grammar, parsed.sources),

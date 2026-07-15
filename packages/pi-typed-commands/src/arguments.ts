@@ -3,7 +3,6 @@ import {
     type ArgumentDefinition,
     type ArgumentDefinitions,
     type ArgumentGroupDefinition,
-    type ArgumentValue,
     type BooleanArgumentDefinition,
     type EnumArgumentDefinition,
     type FlatArgumentDefinitions,

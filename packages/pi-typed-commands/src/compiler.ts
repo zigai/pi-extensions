@@ -10,21 +10,47 @@ import {
     positionalArgumentEntries,
     validateArgumentDefinitions,
 } from "./schema.js";
-import type {
-    ArgumentDefinition,
-    ArgumentDefinitions,
-    ArgumentGroupDefinition,
-    ArgumentUi,
-    CompileResult,
-    CompiledCommand,
-    TypedCommandDefinition,
+import {
+    ARGUMENT_GROUP,
+    type ArgumentDefinition,
+    type ArgumentDefinitions,
+    type ArgumentGroupDefinition,
+    type ArgumentUi,
+    type CompileResult,
+    type CompiledCommand,
+    type CustomArgumentWidget,
+    type TypedCommandDefinition,
 } from "./types.js";
-import { ARGUMENT_GROUP } from "./types.js";
 
 function cloneArgumentUi(ui: ArgumentUi): ArgumentUi {
-    const cloned = { ...ui };
+    const cloned: ArgumentUi = {};
+    if (ui.widget !== undefined) {
+        cloned.widget = ui.widget;
+    }
+    if (ui.rows !== undefined) {
+        cloned.rows = ui.rows;
+    }
+    if (ui.title !== undefined) {
+        cloned.title = ui.title;
+    }
+    if (ui.readOnly !== undefined) {
+        cloned.readOnly = ui.readOnly;
+    }
+    if (ui.hidden !== undefined) {
+        cloned.hidden = ui.hidden;
+    }
+    if (ui.compute !== undefined) {
+        cloned.compute = ui.compute;
+    }
     if (ui.custom !== undefined) {
-        cloned.custom = { ...ui.custom };
+        const custom: CustomArgumentWidget = {};
+        if (ui.custom.renderValue !== undefined) {
+            custom.renderValue = ui.custom.renderValue;
+        }
+        if (ui.custom.handleInput !== undefined) {
+            custom.handleInput = ui.custom.handleInput;
+        }
+        cloned.custom = custom;
     }
     return cloned;
 }
@@ -36,6 +62,9 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     }
     if (definition.ui !== undefined) {
         cloned.ui = cloneArgumentUi(definition.ui);
+    }
+    if (definition.complete !== undefined) {
+        cloned.complete = definition.complete;
     }
     if (
         cloned.type === "string" &&
@@ -65,13 +94,17 @@ function cloneDefinitionGraph(definitions: ArgumentDefinitions): ArgumentDefinit
     for (const [name, definition] of Object.entries(definitions)) {
         if (isArgumentGroupDefinition(definition)) {
             const args = cloneDefinitionGraph(definition.args);
+            const metadata: { description?: string; title?: string } = {};
+            if (definition.title !== undefined) {
+                metadata.title = definition.title;
+            }
+            if (definition.description !== undefined) {
+                metadata.description = definition.description;
+            }
             cloned[name] = {
+                ...metadata,
                 args,
                 [ARGUMENT_GROUP]: args,
-                ...(definition.title === undefined ? {} : { title: definition.title }),
-                ...(definition.description === undefined
-                    ? {}
-                    : { description: definition.description }),
             };
             continue;
         }
@@ -122,6 +155,7 @@ export function cloneAndFreezeDefinitions<TDefinitions extends ArgumentDefinitio
     freezeDefinitionGraph(cloned);
     // SAFETY: cloneDefinitionGraph reconstructs every member of the closed ArgumentDefinitions
     // graph without changing keys, discriminants, literals, or behavior-hook references.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the closed graph is reconstructed from the same generic definition tree.
     return cloned as TDefinitions;
 }
 

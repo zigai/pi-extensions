@@ -195,7 +195,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
     if (!isRecord(value)) {
         return false;
     }
-    const prototype = Object.getPrototypeOf(value);
+    const prototype: unknown = Object.getPrototypeOf(value);
     return prototype === Object.prototype || prototype === null;
 }
 

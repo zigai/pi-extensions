@@ -162,7 +162,7 @@ function flagItem(name: string, definition: ArgumentDefinition): AutocompleteIte
 }
 
 function isPromiseLike<T>(value: MaybePromise<T> | undefined): value is Promise<T> {
-    return value !== undefined && typeof (value as { then?: unknown }).then === "function";
+    return value instanceof Promise;
 }
 
 function normalizedCompletionTimeoutMs(definition: ArgumentDefinition): number | undefined {

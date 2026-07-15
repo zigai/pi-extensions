@@ -225,8 +225,17 @@ function serializeValue(
             ];
         }
         case "string":
-        case "number":
         case "enum":
+            if (typeof value !== "string") {
+                return [];
+            }
+            return [
+                `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value)}`,
+            ];
+        case "number":
+            if (typeof value !== "number") {
+                return [];
+            }
             return [
                 `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(String(value))}`,
             ];

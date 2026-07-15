@@ -9,6 +9,7 @@ const loadedTypeBoxSchemaModule: unknown = requireFromTypeBoxSchemaFacade("typeb
 // SAFETY: typebox declares the "./schema" package export, and Node's createRequire
 // resolves that export correctly in pi's extension loader even when jiti mis-resolves
 // a static `typebox/schema` import as `typebox/build/index.mjs/schema`.
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Node resolved the declared package export, whose runtime namespace matches its published declaration.
 const typeBoxSchemaModule = loadedTypeBoxSchemaModule as TypeBoxSchemaModule;
 
 /** TypeBox Schema runtime loaded through Node's package export resolver for pi extension compatibility. */
