@@ -11,7 +11,7 @@ import {
 import { formatTypedSkillDiagnostics } from "../skills/diagnostics.js";
 import { readTypedSkillMetadataResult } from "../skills/metadata.js";
 import { renderTypedSkillInvocation } from "../skills/prompt.js";
-import type { SkillArgumentDiagnostic, TypedSkillDiagnostics } from "../skills/types.js";
+import type { TypedSkillDiagnostics } from "../skills/types.js";
 import type { FormMode, ParsedCommandArguments, RegisteredTypedCommand } from "../types.js";
 import { commandInvocationForEditorText, slashCommandMatch } from "./editor-invocation.js";
 import { notifyDetailedHelp } from "./help.js";
@@ -35,30 +35,12 @@ export function refreshTypedSkills(pi: ExtensionAPI): void {
             continue;
         }
         const fallbackName = command.name.replace(/^skill:/, "");
-        try {
-            const result = readTypedSkillMetadataResult(skillPath, { fallbackName });
-            if (result.status === "ok") {
-                commands.push(typedSkillCommandFromMetadata(result.metadata));
-            }
-            if (result.status === "invalid") {
-                diagnostics.push(result.diagnostics);
-            }
-        } catch (error) {
-            let message = String(error);
-            if (error instanceof Error) {
-                message = error.message;
-            }
-            const diagnostic: SkillArgumentDiagnostic = {
-                code: "skill.arguments.read_failed",
-                message: `failed to read typed arguments: ${message}`,
-                path: [],
-                severity: "error",
-            };
-            diagnostics.push({
-                name: fallbackName,
-                filePath: skillPath,
-                diagnostics: [diagnostic],
-            });
+        const result = readTypedSkillMetadataResult(skillPath, { fallbackName });
+        if (result.status === "ok") {
+            commands.push(typedSkillCommandFromMetadata(result.metadata));
+        }
+        if (result.status === "invalid") {
+            diagnostics.push(result.diagnostics);
         }
     }
     replaceTypedSkillMetadata(commands, diagnostics);

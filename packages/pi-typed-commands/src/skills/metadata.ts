@@ -41,13 +41,12 @@ function validateSkillPlaceholders(
 }
 
 function fileReadErrorCode(cause: unknown): string | undefined {
-    if (typeof cause !== "object" || cause === null) {
+    if (typeof cause !== "object" || cause === null || !("code" in cause)) {
         return undefined;
     }
 
-    const code = Reflect.get(cause, "code");
-    if (typeof code === "string") {
-        return code;
+    if (typeof cause.code === "string") {
+        return cause.code;
     }
     return undefined;
 }
@@ -144,13 +143,4 @@ export function readTypedSkillMetadataResult(
         metadata.formTitle = formTitle;
     }
     return { status: "ok", metadata };
-}
-
-/** Read typed skill metadata, returning `undefined` when absent or invalid. */
-export function readTypedSkillMetadata(filePath: string): TypedSkillMetadata | undefined {
-    const result = readTypedSkillMetadataResult(filePath);
-    if (result.status === "ok") {
-        return result.metadata;
-    }
-    return undefined;
 }

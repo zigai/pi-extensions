@@ -7,7 +7,11 @@ import {
 } from "pi-typed-args/command";
 import { compileTypedCommandDefinition, enumArgument, group } from "pi-typed-args/core";
 import { createTypedCommandUxExtension, defineTypedCommand } from "pi-typed-args/pi";
-import { normalizeSkillArguments, skillArgumentsJsonSchema } from "pi-typed-args/skills";
+import {
+    normalizeSkillArguments,
+    readTypedSkillMetadataResult,
+    skillArgumentsJsonSchema,
+} from "pi-typed-args/skills";
 import { createHeadlessFormModel, type FormMode } from "pi-typed-args/pi-tui";
 import { piTypedCommandsConfigJsonSchema } from "../src/pi/config-schema.js";
 
@@ -43,6 +47,7 @@ describe("package subpath exports", () => {
         assert.equal(typeof createTypedCommandUxExtension, "function");
         assert.equal(typeof defineLeanTypedCommand, "function");
         assert.equal(typeof registerTypedCommand, "function");
+        assert.equal(typeof readTypedSkillMetadataResult, "function");
         assert.equal(grouped.args.host?.type, "enum");
         assert.equal(compiled.ok, true);
         assert.deepEqual(normalized.diagnostics, []);

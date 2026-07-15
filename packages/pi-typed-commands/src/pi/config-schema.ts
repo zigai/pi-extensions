@@ -1,4 +1,4 @@
-import Type from "typebox";
+import Type, { type Static } from "typebox";
 import { DEFAULT_HELPER_PLACEMENT } from "./helper.js";
 import {
     DEFAULT_PI_TYPED_COMMANDS_APPEARANCE,
@@ -65,7 +65,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const PiTypedCommandsConfigSchema = Type.Object(
+export const PiTypedCommandsConfigSchema = Type.Object(
     {
         helperPlacement: Type.Optional(WidgetPlacementSchema),
         appearance: Type.Optional(
@@ -212,6 +212,9 @@ const PiTypedCommandsConfigSchema = Type.Object(
     },
     { additionalProperties: true },
 );
+
+/** Parsed extension configuration after TypeBox has checked the JSON boundary value. */
+export type PiTypedCommandsConfig = Static<typeof PiTypedCommandsConfigSchema>;
 
 export function piTypedCommandsConfigJsonSchema(): unknown {
     const schema = structuredClone(PiTypedCommandsConfigSchema);

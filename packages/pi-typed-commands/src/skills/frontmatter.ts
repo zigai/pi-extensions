@@ -44,7 +44,16 @@ function parseFrontmatterFields(
     | { status: "ok"; frontmatter: SkillFrontmatter }
     | { status: "invalid"; diagnostics: SkillArgumentDiagnostic[] } {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        return { status: "ok", frontmatter: {} };
+        return {
+            status: "invalid",
+            diagnostics: [
+                skillArgumentDiagnostic({
+                    code: "skill.frontmatter.invalid",
+                    message: "frontmatter must be an object",
+                    path: ["frontmatter"],
+                }),
+            ],
+        };
     }
 
     if (!Schema.Check(SkillFrontmatterYamlSchema, parsed)) {
@@ -80,19 +89,15 @@ export function parseSkillMarkdown(content: string): ParseSkillMarkdownResult {
     const body = (match[2] ?? "").trim();
     let parsed: unknown;
     try {
-        parsed = YAML.parse(yamlText) as unknown;
-    } catch (error) {
-        let message = "frontmatter: invalid YAML";
-        if (error instanceof Error) {
-            message = `frontmatter: invalid YAML: ${error.message}`;
-        }
+        parsed = YAML.parse(yamlText);
+    } catch {
         return {
             status: "invalid",
             body,
             diagnostics: [
                 skillArgumentDiagnostic({
                     code: "skill.frontmatter.yaml.invalid",
-                    message,
+                    message: "frontmatter contains invalid YAML",
                     path: ["frontmatter"],
                 }),
             ],

@@ -126,6 +126,9 @@ export class TypedCommandUxSession {
         if (!ctx.hasUI) {
             return;
         }
+        for (const diagnostic of this.options.diagnostics) {
+            ctx.ui.notify(diagnostic.message, "warning");
+        }
         const refresh = (): void => {
             this.refresh(ctx);
         };

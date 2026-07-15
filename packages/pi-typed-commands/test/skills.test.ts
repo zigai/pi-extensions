@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
@@ -107,10 +107,34 @@ Body
 
         assert.equal(parsed.status, "invalid");
         if (parsed.status === "invalid") {
-            assert.match(
-                parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
-                /frontmatter: invalid YAML/,
-            );
+            assert.equal(diagnosticMessages(parsed), "frontmatter contains invalid YAML");
+        }
+    });
+
+    it("redacts YAML parser source details from diagnostics", () => {
+        const parsed = parseSkillMarkdown(`---
+name: [private-source-value
+---
+
+Body
+`);
+
+        assert.equal(parsed.status, "invalid");
+        if (parsed.status === "invalid") {
+            assert.equal(diagnosticMessages(parsed), "frontmatter contains invalid YAML");
+            assert.doesNotMatch(JSON.stringify(parsed.diagnostics), /private-source-value/);
+        }
+    });
+
+    it("rejects scalar and array YAML document roots", () => {
+        for (const yamlRoot of ["private scalar", "- private\n- values"]) {
+            const parsed = parseSkillMarkdown(`---\n${yamlRoot}\n---\n\nBody\n`);
+
+            assert.equal(parsed.status, "invalid");
+            if (parsed.status === "invalid") {
+                assert.equal(diagnosticMessages(parsed), "frontmatter must be an object");
+                assert.doesNotMatch(JSON.stringify(parsed.diagnostics), /private/);
+            }
         }
     });
 
@@ -246,6 +270,44 @@ Use {args.path}.
                 diagnosticMessages(result.diagnostics),
                 /frontmatter\.name must be a string/,
             );
+        }
+    });
+
+    it("keeps absent and invalid public outcomes distinct", () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-result-"));
+        const absentPath = join(dir, "absent.md");
+        const invalidPath = join(dir, "invalid.md");
+        writeFileSync(absentPath, "---\nname: demo\ndescription: Demo\n---\n\nBody\n");
+        writeFileSync(invalidPath, "---\nprivate scalar\n---\n\nBody\n");
+
+        assert.deepEqual(readTypedSkillMetadataResult(absentPath), { status: "absent" });
+        const invalid = readTypedSkillMetadataResult(invalidPath, { fallbackName: "demo" });
+        assert.equal(invalid.status, "invalid");
+    });
+
+    it("reports permission failures without exposing paths or dependency messages", () => {
+        const dir = mkdtempSync(join(tmpdir(), "pi-typed-skill-permission-"));
+        const skillPath = join(dir, "SKILL.md");
+        writeFileSync(skillPath, "private skill source");
+        chmodSync(skillPath, 0o000);
+
+        try {
+            const result = readTypedSkillMetadataResult(skillPath, { fallbackName: "demo" });
+
+            assert.equal(result.status, "invalid");
+            if (result.status === "invalid") {
+                assert.equal(
+                    diagnosticMessages(result.diagnostics),
+                    "failed to read typed arguments (EACCES)",
+                );
+                assert.doesNotMatch(JSON.stringify(result.diagnostics.diagnostics), /private/);
+                assert.doesNotMatch(
+                    JSON.stringify(result.diagnostics.diagnostics),
+                    new RegExp(dir),
+                );
+            }
+        } finally {
+            chmodSync(skillPath, 0o600);
         }
     });
 

@@ -65,6 +65,8 @@ When a skill body does not reference all provided values, the renderer appends a
 Skill normalization returns structured diagnostics:
 
 ```ts
+import { readTypedSkillMetadataResult } from "pi-typed-args/skills";
+
 const result = readTypedSkillMetadataResult("/path/to/SKILL.md");
 
 if (result.status === "invalid") {
@@ -74,9 +76,13 @@ if (result.status === "invalid") {
 if (result.status === "ok") {
   result.metadata;
 }
+
+if (result.status === "absent") {
+  // The skill does not declare typed arguments.
+}
 ```
 
-Diagnostics include a code, message, path, and severity. Invalid YAML frontmatter, unknown `{args.*}` placeholders, invalid argument schemas, and unsupported typed argument fields are reported as diagnostics instead of throwing during metadata loading.
+Diagnostics include a code, message, path, and severity. Invalid YAML frontmatter, unreadable files, unknown `{args.*}` placeholders, invalid argument schemas, and unsupported typed argument fields return `invalid`; skills without typed arguments return `absent`. YAML source text and dependency error messages are not included in diagnostics.
 
 ## JSON Schema
 

@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
@@ -19,6 +26,7 @@ import { parsePiTypedCommandsAppearance } from "../src/pi/presentation-config.js
 import {
     getPiTypedCommandsGlobalConfigPath,
     getPiTypedCommandsGlobalConfigSchemaPath,
+    resolvePiTypedCommandsConfigSnapshot,
     resolveTypedCommandAppearance,
 } from "../src/pi/settings.js";
 import { typedSkillCommandFromMetadata } from "../src/skills.js";
@@ -147,11 +155,198 @@ describe("global presentation config", () => {
         writeFileSync(configPath, "{not json");
 
         withAgentDir(agentDir, () => {
-            const appearance = resolveTypedCommandAppearance({ cwd: process.cwd() } as never);
+            const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                cwd: process.cwd(),
+            } as never);
 
-            assert.equal(appearance.inlineHelp.order, "active-required-available");
+            assert.equal(
+                snapshot.settings.appearance.inlineHelp.order,
+                "active-required-available",
+            );
+            assert.equal(snapshot.global.status, "malformed");
+            assert.deepEqual(
+                snapshot.diagnostics.map((diagnostic) => diagnostic.code),
+                ["config.json.malformed"],
+            );
+            assert.ok(
+                snapshot.diagnostics.every(
+                    (diagnostic) => !diagnostic.message.includes("not json"),
+                ),
+            );
             assert.equal(readFileSync(configPath, "utf8"), "{not json");
         });
+    });
+
+    it("classifies schema-invalid global config instead of treating it as absent", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        writeGlobalConfig(agentDir, { helperPlacement: "besideEditor" });
+
+        withAgentDir(agentDir, () => {
+            const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                cwd: process.cwd(),
+            } as never);
+
+            assert.equal(snapshot.global.status, "schema-invalid");
+            assert.equal(snapshot.settings.helperPlacement, "aboveEditor");
+            assert.deepEqual(snapshot.diagnostics, [
+                {
+                    code: "config.schema.invalid",
+                    operation: "validate",
+                    fileRole: "global-config",
+                    message: "pi-typed-args configuration validate failed for global-config",
+                },
+            ]);
+        });
+    });
+
+    it("classifies permission failures with only safe file-role and error-code context", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-project-"));
+        const projectConfigPath = join(projectDir, CONFIG_DIR_NAME, "pi-typed-args", "config.json");
+        writeProjectConfig(projectDir, { appearance: { secretValue: "do-not-report" } });
+        chmodSync(projectConfigPath, 0o000);
+
+        try {
+            withAgentDir(agentDir, () => {
+                const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                    cwd: projectDir,
+                    isProjectTrusted: () => true,
+                } as never);
+
+                assert.equal(snapshot.project.status, "read-failed");
+                assert.deepEqual(snapshot.diagnostics, [
+                    {
+                        code: "config.read.failed",
+                        operation: "read",
+                        fileRole: "project-config",
+                        errorCode: "EACCES",
+                        message:
+                            "pi-typed-args configuration read failed for project-config (EACCES)",
+                    },
+                ]);
+                assert.doesNotMatch(JSON.stringify(snapshot.diagnostics), /do-not-report/);
+                assert.doesNotMatch(JSON.stringify(snapshot.diagnostics), new RegExp(projectDir));
+            });
+        } finally {
+            chmodSync(projectConfigPath, 0o600);
+        }
+    });
+
+    it("preserves scaffold write failures as structured outcomes", () => {
+        const parent = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        const blockedAgentDir = join(parent, "not-a-directory");
+        writeFileSync(blockedAgentDir, "blocker");
+
+        withAgentDir(blockedAgentDir, () => {
+            const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                cwd: process.cwd(),
+            } as never);
+
+            assert.ok(snapshot.fileOutcomes.every((outcome) => outcome.status === "write-failed"));
+            assert.ok(
+                snapshot.diagnostics.some(
+                    (diagnostic) =>
+                        diagnostic.code === "config.write.failed" &&
+                        diagnostic.fileRole === "global-config" &&
+                        diagnostic.errorCode === "ENOTDIR",
+                ),
+            );
+            assert.ok(
+                snapshot.diagnostics.every(
+                    (diagnostic) => !diagnostic.message.includes(blockedAgentDir),
+                ),
+            );
+        });
+    });
+
+    it("does not read config from an untrusted project", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-project-"));
+        writeGlobalConfig(agentDir, {
+            appearance: { form: { symbols: { focusedField: "G" } } },
+        });
+        writeProjectConfig(projectDir, {
+            appearance: { form: { symbols: { focusedField: "P" } } },
+        });
+
+        withAgentDir(agentDir, () => {
+            const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                cwd: projectDir,
+                isProjectTrusted: () => false,
+            } as never);
+
+            assert.equal(snapshot.project.status, "skipped-untrusted");
+            assert.equal(snapshot.settings.appearance.form.symbols.focusedField, "G");
+            assert.deepEqual(snapshot.diagnostics, []);
+        });
+    });
+
+    it("does not create config for an absent trusted project source", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-project-"));
+        const projectConfigDir = join(projectDir, CONFIG_DIR_NAME, "pi-typed-args");
+
+        withAgentDir(agentDir, () => {
+            const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                cwd: projectDir,
+                isProjectTrusted: () => true,
+            } as never);
+
+            assert.equal(snapshot.project.status, "absent");
+            assert.equal(existsSync(projectConfigDir), false);
+        });
+    });
+
+    it("surfaces invalid config diagnostics when the Pi UX session starts", async () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
+        const configPath = getPiTypedCommandsGlobalConfigPath(agentDir);
+        mkdirSync(join(configPath, ".."), { recursive: true });
+        writeFileSync(configPath, "{private malformed config");
+        const handlers = new Map<string, ExtensionEventHandler[]>();
+        const notifications: Array<{ message: string; level: string | undefined }> = [];
+        const pi = {
+            on(name: string, handler: ExtensionEventHandler) {
+                const current = handlers.get(name) ?? [];
+                handlers.set(name, [...current, handler]);
+            },
+            getCommands() {
+                return [];
+            },
+        } as unknown as ExtensionAPI;
+        const ctx = {
+            cwd: process.cwd(),
+            hasUI: true,
+            ui: {
+                getEditorText() {
+                    return "";
+                },
+                setWidget() {},
+                onTerminalInput() {
+                    return () => {};
+                },
+                addAutocompleteProvider() {},
+                notify(message: string, level?: string) {
+                    notifications.push({ message, level });
+                },
+            },
+        };
+
+        try {
+            await withAgentDirAsync(agentDir, async () => {
+                installTypedCommandUx(pi);
+                await firstHandler(handlers, "session_start")({}, ctx);
+            });
+
+            assert.deepEqual(notifications, [
+                {
+                    message: "pi-typed-args configuration parse failed for global-config",
+                    level: "warning",
+                },
+            ]);
+            assert.doesNotMatch(JSON.stringify(notifications), /private malformed config/);
+        } finally {
+            await firstHandler(handlers, "session_shutdown")({}, ctx);
+        }
     });
 
     it("refreshes stale global schema without rewriting user config", () => {

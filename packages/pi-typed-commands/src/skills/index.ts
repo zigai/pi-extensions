@@ -7,7 +7,7 @@ export {
 } from "./command.js";
 export { formatTypedSkillDiagnostics } from "./diagnostics.js";
 export { parseSkillMarkdown } from "./frontmatter.js";
-export { readTypedSkillMetadata, readTypedSkillMetadataResult } from "./metadata.js";
+export { readTypedSkillMetadataResult } from "./metadata.js";
 export { expandArgumentObject, renderTypedSkillInvocation } from "./prompt.js";
 export type {
     RawSkillArgumentDefinition,

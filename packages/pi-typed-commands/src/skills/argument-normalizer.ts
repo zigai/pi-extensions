@@ -33,7 +33,6 @@ import type {
     StringArgumentDefinition,
 } from "./types.js";
 
-type MutableArgumentDefinitions = Record<string, ArgumentDefinition>;
 type SupportedSkillArgumentType = ArgumentDefinition["type"];
 type SkillArgumentSchema =
     | typeof StringSkillArgumentYamlSchema
@@ -535,23 +534,28 @@ function flattenRawArguments(
  */
 export function normalizeSkillArguments(rawArguments: unknown): SkillArgumentNormalizationResult {
     const warnings = createSkillDiagnosticSink();
-    const args = createSafeRecord() as MutableArgumentDefinitions;
     if (!Schema.Check(UnknownRecordYamlSchema, rawArguments)) {
         const messages = ["arguments must be an object"];
         return {
-            args,
+            args: createSafeRecord<ArgumentDefinition>(),
             diagnostics: messages.map((message) =>
                 skillArgumentDiagnostic({ code: "skill.argument.invalid", message }),
             ),
         };
     }
 
+    const normalizedEntries: Array<readonly [string, ArgumentDefinition]> = [];
     for (const [name, raw] of flattenRawArguments(rawArguments, warnings)) {
         const parsed = parseSkillArgumentYaml(name, raw, warnings);
         if (parsed === undefined) {
             continue;
         }
-        args[name] = normalizeParsedArgument(name, parsed, warnings);
+        normalizedEntries.push([name, normalizeParsedArgument(name, parsed, warnings)]);
+    }
+
+    const args = createSafeRecord<ArgumentDefinition>();
+    for (const [name, definition] of normalizedEntries) {
+        args[name] = definition;
     }
 
     warnings.push(...validateArgumentDefinitions(args));

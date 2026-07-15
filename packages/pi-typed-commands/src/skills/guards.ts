@@ -48,6 +48,8 @@ export function optionalStringArray(value: unknown): string[] | undefined {
 }
 
 /** Create a null-prototype record for user-controlled dotted skill argument paths. */
-export function createSafeRecord(): Record<string, unknown> {
-    return Object.create(null) as Record<string, unknown>;
+export function createSafeRecord<TValue = unknown>(): Record<string, TValue> {
+    // SAFETY: Object.create(null) returns a mutable object with no inherited keys. The generic
+    // value type is enforced at every assignment; TypeScript cannot type Object.create precisely.
+    return Object.create(null) as Record<string, TValue>;
 }
