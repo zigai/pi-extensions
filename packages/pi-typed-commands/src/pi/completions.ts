@@ -61,7 +61,7 @@ class PiCompletionTaskOwner implements CompletionTaskOwner {
 
     own(task: Promise<unknown>): void {
         this.pending.add(task);
-        task.then(
+        void task.then(
             () => {
                 this.pending.delete(task);
             },
@@ -71,8 +71,6 @@ class PiCompletionTaskOwner implements CompletionTaskOwner {
         );
     }
 }
-
-const piCompletionTaskOwner = new PiCompletionTaskOwner();
 
 async function completePathItems(query: string, cwd: string): Promise<TypedCompletionItem[]> {
     let raw = query;
@@ -128,7 +126,7 @@ export function createPiCompletionCapabilities(
             complete: completePathItems,
         },
         scheduler: new PiCompletionScheduler(signal),
-        completionTasks: piCompletionTaskOwner,
+        completionTasks: new PiCompletionTaskOwner(),
     };
 }
 
