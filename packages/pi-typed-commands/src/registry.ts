@@ -53,22 +53,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         command: RegisteredTypedCommand<TDefinitions>,
         options: RegisterTypedCommandMetadataOptions = {},
     ): string {
-        this.removeExisting(command);
-
-        const id = options.id ?? Symbol(command.name);
-        const ownerId = options.ownerId ?? DEFAULT_OWNER_ID;
-        const invocationName = options.invocationName ?? this.nextInvocationName(command.name);
-        const record: RegistrationRecord = {
-            id,
-            ownerId,
-            source: command.source ?? "extension",
-            localName: command.name,
-            invocationName,
-            command,
-        };
-
-        this.#records.set(id, record);
-        this.#commands.set(invocationName, record);
+        const invocationName = this.registerWithoutNotification(command, options);
         this.notifyListeners();
         return invocationName;
     }
@@ -95,7 +80,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         }
         this.#skillDiagnostics.clear();
         for (const command of commands) {
-            this.register(command, { invocationName: command.name });
+            this.registerWithoutNotification(command, { invocationName: command.name });
         }
         for (const diagnostic of diagnostics) {
             this.#skillDiagnostics.set(`skill:${diagnostic.name}`, diagnostic);
@@ -136,6 +121,29 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         for (const listener of this.#listeners) {
             listener();
         }
+    }
+
+    private registerWithoutNotification<TDefinitions extends ArgumentDefinitions>(
+        command: RegisteredTypedCommand<TDefinitions>,
+        options: RegisterTypedCommandMetadataOptions,
+    ): string {
+        this.removeExisting(command);
+
+        const id = options.id ?? Symbol(command.name);
+        const ownerId = options.ownerId ?? DEFAULT_OWNER_ID;
+        const invocationName = options.invocationName ?? this.nextInvocationName(command.name);
+        const record: RegistrationRecord = {
+            id,
+            ownerId,
+            source: command.source ?? "extension",
+            localName: command.name,
+            invocationName,
+            command,
+        };
+
+        this.#records.set(id, record);
+        this.#commands.set(invocationName, record);
+        return invocationName;
     }
 
     private nextInvocationName(localName: string): string {

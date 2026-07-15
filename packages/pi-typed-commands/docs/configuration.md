@@ -135,6 +135,10 @@ Use global config at `~/.pi/agent/pi-typed-args/config.json`.
 }
 ```
 
+Unrecognized keys are left untouched but ignored by the installed version. This preserves newer
+configuration when an older package version reads the file; misspelled setting names have no
+effect.
+
 ## Package Notes
 
 Current package characteristics:

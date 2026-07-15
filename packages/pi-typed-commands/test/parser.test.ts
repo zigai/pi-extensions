@@ -628,6 +628,40 @@ describe("parseTypedCommandArgs", () => {
         assert.equal(parsed.values.dryRun, false);
         assert.deepEqual(parsed.values.tags, ["api", "web"]);
     });
+
+    it("serializes grouped values through the directly exported core helper", () => {
+        const compiled = compileTypedCommandDefinition({
+            name: "grouped-serialization-proof",
+            description: "Grouped serialization proof",
+            args: {
+                database: group({
+                    host: { type: "string", required: true },
+                    port: { type: "number", integer: true },
+                }),
+            },
+        });
+        if (!compiled.ok) {
+            assert.fail("expected grouped serialization grammar to compile");
+        }
+        const groupedCommand = {
+            args: compiled.command.args,
+            compiled: compiled.command,
+        };
+
+        const raw = serializeTypedCommandArgs(groupedCommand, {
+            database: { host: "localhost", port: 5432 },
+        });
+        const parsed = parseTypedCommandArgs(groupedCommand, raw);
+        const typed = toTypedParseResult(compiled.command, parsed);
+
+        assert.equal(raw, "--database-host=localhost --database-port=5432");
+        assert.equal(typed.status, "success");
+        if (typed.status === "success") {
+            assert.deepEqual(typed.value, {
+                database: { host: "localhost", port: 5432 },
+            });
+        }
+    });
 });
 
 describe("formatCommandUsage", () => {
@@ -656,6 +690,32 @@ describe("getTypedAutocompleteSuggestions", () => {
         assert.equal(left.get(command.name)?.name, command.name);
         assert.equal(right.get(command.name), undefined);
         assert.deepEqual(right.list(), []);
+    });
+
+    it("publishes one atomic registry change when replacing skills", () => {
+        const registry = createTypedCommandRegistry();
+        const snapshots: string[][] = [];
+        const unsubscribe = registry.onChanged(() => {
+            snapshots.push(registry.list().map((item) => item.name));
+        });
+        const first: RegisteredTypedCommand = {
+            ...command,
+            name: "first-skill",
+            source: "skill",
+        };
+        const second: RegisteredTypedCommand = {
+            ...command,
+            name: "second-skill",
+            source: "skill",
+        };
+
+        try {
+            registry.replaceSkills([first, second]);
+        } finally {
+            unsubscribe();
+        }
+
+        assert.deepEqual(snapshots, [["first-skill", "second-skill"]]);
     });
 
     it("does not start async providers from synchronous editor completion", async () => {

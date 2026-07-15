@@ -1,5 +1,9 @@
 import { quoteSerializedValue } from "./behavior.js";
-import { expandGroupedArgumentValues, hasArgumentGroups } from "./arguments.js";
+import {
+    expandGroupedArgumentValues,
+    flattenGroupedArgumentValues,
+    hasArgumentGroups,
+} from "./arguments.js";
 import { compileTypedCommandGrammar } from "./compiler.js";
 import { normalizeFlagName } from "./names.js";
 import {
@@ -307,12 +311,6 @@ function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
         return [...value];
     }
     return value;
-}
-
-function serializableRecord<TDefinitions extends ArgumentDefinitions>(
-    values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, unknown>>,
-): Readonly<Record<string, unknown>> {
-    return values;
 }
 
 function serializedArgumentText(value: unknown): string | undefined {
@@ -681,10 +679,13 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
 /** Serialize typed argument values into a raw string that `parseTypedCommandArgs` can read. */
 export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     command: Pick<ParsableTypedCommand<TDefinitions>, "args" | "compiled">,
-    values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, unknown>>,
+    values: SerializableArgumentValues<TDefinitions>,
 ): string {
     const grammar = commandGrammar(command);
-    const flatValues = serializableRecord(values);
+    let flatValues: Readonly<Record<string, unknown>> = values;
+    if (hasArgumentGroups(grammar.definitions)) {
+        flatValues = flattenGroupedArgumentValues(values, grammar.definitions);
+    }
     const parts: string[] = [];
     const restArgument = grammar.arguments.find((argument) => argument.definition.rest === true);
     let serializationOrder = grammar.arguments;

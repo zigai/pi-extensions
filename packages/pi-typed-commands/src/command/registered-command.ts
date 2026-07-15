@@ -22,17 +22,14 @@ export function definitionError(name: string, diagnostics: readonly DefinitionDi
     );
 }
 
-/** Compile a definition into normalized registered-command metadata used by pure helpers. */
-export function registeredCommandForDefinition<TDefinitions extends ArgumentDefinitions>(
+/** Build registered metadata from the exact grammar already compiled for this definition. */
+export function registeredCommandFromCompiledDefinition<TDefinitions extends ArgumentDefinitions>(
     definition: Pick<
         TypedCommandDefinition<TDefinitions>,
         "name" | "description" | "args" | "refine"
     >,
+    compiled: CompiledCommand<TDefinitions>,
 ): RegisteredTypedCommand<TDefinitions> & { readonly compiled: CompiledCommand<TDefinitions> } {
-    const compiled = compileTypedCommandDefinition(definition);
-    if (!compiled.ok) {
-        throw definitionError(definition.name, compiled.diagnostics);
-    }
     const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
     const refinementFields: {
         refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
@@ -45,12 +42,26 @@ export function registeredCommandForDefinition<TDefinitions extends ArgumentDefi
     } = {
         name: definition.name,
         description: definition.description,
-        args: compiled.command.args,
-        compiled: compiled.command,
+        args: compiled.args,
+        compiled,
         formSymbols: DEFAULT_FORM_SYMBOLS,
         ...refinementFields,
     };
     return command;
+}
+
+/** Compile a definition into normalized registered-command metadata used by pure helpers. */
+export function registeredCommandForDefinition<TDefinitions extends ArgumentDefinitions>(
+    definition: Pick<
+        TypedCommandDefinition<TDefinitions>,
+        "name" | "description" | "args" | "refine"
+    >,
+): RegisteredTypedCommand<TDefinitions> & { readonly compiled: CompiledCommand<TDefinitions> } {
+    const compiled = compileTypedCommandDefinition(definition);
+    if (!compiled.ok) {
+        throw definitionError(definition.name, compiled.diagnostics);
+    }
+    return registeredCommandFromCompiledDefinition(definition, compiled.command);
 }
 
 /** Normalize a user command definition into metadata consumed by Pi registration and UX adapters. */
