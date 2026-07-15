@@ -17,7 +17,6 @@ export type {
     CompiledCommand,
     CoreCommandDefinition,
     DecodeResult,
-    DefinedTypedCommand,
     DefinitionDiagnostic,
     FieldEditor,
     FlatArgumentDefinitions,
@@ -32,9 +31,6 @@ export type {
     PrimitiveArgumentValue,
     SerializableArgumentValues,
     StringArgumentDefinition,
-    TypedCommandDefinition,
-    TypedCommandHandler,
-    TypedCommandHandle,
     TypedCompletionContext,
     TypedCompletionItem,
     TypedAsyncCompletionProvider,
@@ -43,12 +39,19 @@ export type {
     TypedCommandRefinement,
     TypedCommandRefinementContext,
     TypedCommandRefinementIssue,
+    TypedCommandFormTrigger,
     TypedCommandFormSymbols,
-    TypedCommandFormTitle,
     TypedCommandUxOptions,
     TypedParseResult,
     FormMode,
 } from "./types.js";
+export type {
+    DefinedTypedCommand,
+    TypedCommandDefinition,
+    TypedCommandFormTitle,
+    TypedCommandHandler,
+    TypedCommandHandle,
+} from "./pi/command-types.js";
 
 export {
     booleanArgument,

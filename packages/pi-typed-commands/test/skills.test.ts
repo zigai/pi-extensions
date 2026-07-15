@@ -13,7 +13,7 @@ import {
     typedSkillCommandFromMetadata,
     type TypedSkillMetadata,
 } from "../src/skills.js";
-import type { RegisteredTypedCommand } from "../src/types.js";
+import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 
 const formSymbols = {
     selectedCheckbox: "■",

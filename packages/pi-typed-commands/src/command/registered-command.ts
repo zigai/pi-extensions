@@ -4,10 +4,14 @@ import type {
     ArgumentDefinitions,
     CompiledCommand,
     DefinitionDiagnostic,
+    FlatArgumentDefinitions,
+    TypedCommandRefinement,
+} from "../types.js";
+import type {
     DefinedTypedCommand,
     RegisteredTypedCommand,
     TypedCommandDefinition,
-} from "../types.js";
+} from "../pi/command-types.js";
 import { maybeWrapGroupedHandler, maybeWrapGroupedRefinement } from "./grouped-values.js";
 import { DEFAULT_FORM_SYMBOLS } from "./symbols.js";
 
@@ -29,6 +33,13 @@ export function registeredCommandForDefinition<TDefinitions extends ArgumentDefi
     if (!compiled.ok) {
         throw definitionError(definition.name, compiled.diagnostics);
     }
+    const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
+    const refinementFields: {
+        refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
+    } = {};
+    if (refine !== undefined) {
+        refinementFields.refine = refine;
+    }
     const command: RegisteredTypedCommand<TDefinitions> & {
         readonly compiled: CompiledCommand<TDefinitions>;
     } = {
@@ -36,13 +47,9 @@ export function registeredCommandForDefinition<TDefinitions extends ArgumentDefi
         description: definition.description,
         args: compiled.command.args,
         compiled: compiled.command,
-        target: { kind: "extension", run: () => {} },
         formSymbols: DEFAULT_FORM_SYMBOLS,
+        ...refinementFields,
     };
-    const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
-    if (refine !== undefined) {
-        command.refine = refine;
-    }
     return command;
 }
 
@@ -59,6 +66,18 @@ export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefiniti
         throw definitionError(definition.name, compiled.diagnostics);
     }
 
+    const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
+    const formTitle = definition.formTitle;
+    const optionalFields: {
+        refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
+        formTitle?: NonNullable<TypedCommandDefinition<TDefinitions>["formTitle"]>;
+    } = {};
+    if (refine !== undefined) {
+        optionalFields.refine = refine;
+    }
+    if (formTitle !== undefined) {
+        optionalFields.formTitle = formTitle;
+    }
     const command: RegisteredTypedCommand<TDefinitions> & {
         readonly compiled: CompiledCommand<TDefinitions>;
     } = {
@@ -72,14 +91,7 @@ export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefiniti
         },
         formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...definition.formSymbols },
         source: "extension",
+        ...optionalFields,
     };
-
-    const refine = maybeWrapGroupedRefinement(definition.args, definition.refine);
-    if (refine !== undefined) {
-        command.refine = refine;
-    }
-    if (definition.formTitle !== undefined) {
-        command.formTitle = definition.formTitle;
-    }
     return command;
 }

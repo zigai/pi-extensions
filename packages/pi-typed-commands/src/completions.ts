@@ -7,7 +7,6 @@ import {
     quoteSerializedValue,
     type Token,
 } from "./parser.js";
-import type { TypedCommandLookup } from "./registry.js";
 import {
     completionValuesForArgument,
     createArgumentLookup,
@@ -19,7 +18,8 @@ import {
 import type {
     ArgumentDefinition,
     ArgumentDefinitions,
-    RegisteredTypedCommand,
+    CoreRegisteredTypedCommand,
+    TypedCommandLookup,
     TypedCompletionContext,
     TypedCompletionItem,
 } from "./types.js";
@@ -43,7 +43,7 @@ export type CompletionCapabilities = {
 };
 
 type CommandLineContext = {
-    command: RegisteredTypedCommand;
+    command: CoreRegisteredTypedCommand;
     argsBeforeCursor: string;
     currentPrefix: string;
     replacementPrefix: string;
@@ -58,12 +58,20 @@ type ValueCompletionItem = TypedCompletionItem & {
 const DEFAULT_COMPLETION_TIMEOUT_MS = 1000;
 
 const UnknownCompletionItemsSchema = Type.Array(Type.Unknown());
+const CompletionReplacementRangeSchema = Type.Object(
+    {
+        start: Type.Integer({ minimum: 0 }),
+        end: Type.Integer({ minimum: 0 }),
+    },
+    { additionalProperties: false },
+);
 const ProviderCompletionItemSchema = Type.Object(
     {
         value: Type.String(),
         label: Type.Optional(Type.Unknown()),
         description: Type.Optional(Type.Unknown()),
         replacement: Type.Optional(Type.Unknown()),
+        replaceRange: Type.Optional(Type.Unknown()),
     },
     { additionalProperties: true },
 );
@@ -74,6 +82,7 @@ type ProviderCompletionItem = {
     label?: string;
     description?: string;
     replacement?: string;
+    replaceRange?: { readonly start: number; readonly end: number };
 };
 
 function tokenizeLoose(input: string): readonly Token[] {
@@ -81,7 +90,7 @@ function tokenizeLoose(input: string): readonly Token[] {
 }
 
 function providedArgumentNames<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
+    command: CoreRegisteredTypedCommand<TDefinitions>,
     tokens: readonly Token[],
 ): Set<string> {
     const lookup = createArgumentLookup(command.args);
@@ -206,6 +215,15 @@ function normalizeProviderCompletionItems(value: unknown): ProviderCompletionIte
         if (typeof boundaryItem.replacement === "string") {
             normalized.replacement = boundaryItem.replacement;
         }
+        if (
+            Schema.Check(CompletionReplacementRangeSchema, boundaryItem.replaceRange) &&
+            boundaryItem.replaceRange.start <= boundaryItem.replaceRange.end
+        ) {
+            normalized.replaceRange = Schema.Parse(
+                CompletionReplacementRangeSchema,
+                boundaryItem.replaceRange,
+            );
+        }
         items.push(normalized);
     }
     return items;
@@ -220,6 +238,9 @@ function mapProviderCompletionItems(value: unknown): ValueCompletionItem[] {
         };
         if (item.description !== undefined) {
             mapped.description = item.description;
+        }
+        if (item.replaceRange !== undefined) {
+            mapped.replaceRange = item.replaceRange;
         }
         return mapped;
     });
@@ -464,7 +485,7 @@ function hasEndOfOptions(tokens: readonly Token[]): boolean {
 }
 
 function flagDefinitionForToken(
-    command: RegisteredTypedCommand,
+    command: CoreRegisteredTypedCommand,
     token: Token | undefined,
 ): ArgumentDefinition | undefined {
     if (token === undefined || token.quote !== undefined || !token.value.startsWith("-")) {
@@ -654,7 +675,7 @@ function resolveCompletionDecisionSync(
  * Returns `null` when typed completions have no suggestion so Pi can continue its normal behavior.
  */
 export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
+    command: CoreRegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
     capabilities: CompletionCapabilities,
 ): Promise<readonly TypedCompletionItem[] | null> {

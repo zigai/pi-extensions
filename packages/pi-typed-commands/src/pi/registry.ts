@@ -1,5 +1,5 @@
 import { createTypedCommandRegistry, type TypedCommandRegistry } from "../registry.js";
-import type { RegisteredTypedCommand } from "../types.js";
+import type { RegisteredTypedCommand } from "./command-types.js";
 
 const PI_REGISTRY_KEY = Symbol.for("pi-typed-args.registry.v2");
 

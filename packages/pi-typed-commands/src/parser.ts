@@ -441,7 +441,8 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             if (!this.optionsEnded && isFlagToken(token)) {
                 const positional = this.currentPositionalArgument();
                 if (
-                    positional?.definition.rest === true ||
+                    (positional?.definition.rest === true &&
+                        this.result.provided.has(positional.name)) ||
                     (positional?.definition.type === "number" && isNumericToken(token))
                 ) {
                     this.consumePositionalValue(token);
@@ -688,7 +689,17 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
     const grammar = commandGrammar(command);
     const flatValues = serializableRecord(values);
     const parts: string[] = [];
-    for (const argument of grammar.arguments) {
+    const restArgument = grammar.arguments.find(
+        (argument) => argument.definition.rest === true,
+    );
+    const serializationOrder =
+        restArgument === undefined
+            ? grammar.arguments
+            : [
+                  ...grammar.arguments.filter((argument) => argument !== restArgument),
+                  restArgument,
+              ];
+    for (const argument of serializationOrder) {
         const value = flatValues[argument.key];
         if (isPositionalArgument(argument.definition)) {
             if (value !== undefined) {

@@ -14,8 +14,8 @@ import type {
     ArgumentDefinition,
     ArgumentValue,
     ParseIssue,
-    RegisteredTypedCommand,
 } from "../types.js";
+import type { RegisteredTypedCommand } from "./command-types.js";
 import {
     commandDisplayName,
     editorTextForInvocation,

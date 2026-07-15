@@ -48,6 +48,14 @@ const InlineHelpOrderSchema = Type.Enum([
 const FormDescriptionsSchema = Type.Enum(["inline", "focused", "hidden"] as const);
 const FormInstructionsSchema = Type.Enum(["full", "short", "hidden"] as const);
 const DetailedHelpOrderSchema = Type.Enum(["definition", "required-first"] as const);
+const DisplayStringSchema = Type.String({ minLength: 1, pattern: "^[^\\r\\n]*$" });
+const OptionalEmptyDisplayStringSchema = Type.String({ pattern: "^[^\\r\\n]*$" });
+const LeftPaddingSchema = Type.Integer({ minimum: 0, maximum: 12 });
+const FieldGapSchema = Type.Integer({ minimum: 0, maximum: 12 });
+const MinNameWidthSchema = Type.Integer({ minimum: 1, maximum: 80 });
+const MaxNameWidthSchema = Type.Integer({ minimum: 1, maximum: 120 });
+const MinValueWidthSchema = Type.Integer({ minimum: 1, maximum: 80 });
+const MaxValueWidthSchema = Type.Integer({ minimum: 1, maximum: 120 });
 
 const HelpMetadataSchema = Type.Object(
     {
@@ -98,11 +106,11 @@ export const PiTypedCommandsConfigSchema = Type.Object(
                                 symbols: Type.Optional(
                                     Type.Object(
                                         {
-                                            focusedField: Type.Optional(Type.String()),
-                                            selectedCheckbox: Type.Optional(Type.String()),
-                                            unselectedCheckbox: Type.Optional(Type.String()),
-                                            selectedRadio: Type.Optional(Type.String()),
-                                            unselectedRadio: Type.Optional(Type.String()),
+                                            focusedField: Type.Optional(DisplayStringSchema),
+                                            selectedCheckbox: Type.Optional(DisplayStringSchema),
+                                            unselectedCheckbox: Type.Optional(DisplayStringSchema),
+                                            selectedRadio: Type.Optional(DisplayStringSchema),
+                                            unselectedRadio: Type.Optional(DisplayStringSchema),
                                         },
                                         {
                                             additionalProperties: true,
@@ -115,12 +123,12 @@ export const PiTypedCommandsConfigSchema = Type.Object(
                                 layout: Type.Optional(
                                     Type.Object(
                                         {
-                                            leftPadding: Type.Optional(Type.Number()),
-                                            fieldGap: Type.Optional(Type.Number()),
-                                            minNameWidth: Type.Optional(Type.Number()),
-                                            maxNameWidth: Type.Optional(Type.Number()),
-                                            minValueWidth: Type.Optional(Type.Number()),
-                                            maxValueWidth: Type.Optional(Type.Number()),
+                                            leftPadding: Type.Optional(LeftPaddingSchema),
+                                            fieldGap: Type.Optional(FieldGapSchema),
+                                            minNameWidth: Type.Optional(MinNameWidthSchema),
+                                            maxNameWidth: Type.Optional(MaxNameWidthSchema),
+                                            minValueWidth: Type.Optional(MinValueWidthSchema),
+                                            maxValueWidth: Type.Optional(MaxValueWidthSchema),
                                             descriptions: Type.Optional(FormDescriptionsSchema),
                                             instructions: Type.Optional(FormInstructionsSchema),
                                         },
@@ -166,12 +174,24 @@ export const PiTypedCommandsConfigSchema = Type.Object(
                                 format: Type.Optional(
                                     Type.Object(
                                         {
-                                            tokenPrefix: Type.Optional(Type.String()),
-                                            tokenSuffix: Type.Optional(Type.String()),
-                                            groupSeparator: Type.Optional(Type.String()),
-                                            itemSeparator: Type.Optional(Type.String()),
-                                            typeSeparator: Type.Optional(Type.String()),
-                                            valueSeparator: Type.Optional(Type.String()),
+                                            tokenPrefix: Type.Optional(
+                                                OptionalEmptyDisplayStringSchema,
+                                            ),
+                                            tokenSuffix: Type.Optional(
+                                                OptionalEmptyDisplayStringSchema,
+                                            ),
+                                            groupSeparator: Type.Optional(
+                                                OptionalEmptyDisplayStringSchema,
+                                            ),
+                                            itemSeparator: Type.Optional(
+                                                OptionalEmptyDisplayStringSchema,
+                                            ),
+                                            typeSeparator: Type.Optional(
+                                                OptionalEmptyDisplayStringSchema,
+                                            ),
+                                            valueSeparator: Type.Optional(
+                                                OptionalEmptyDisplayStringSchema,
+                                            ),
                                         },
                                         {
                                             additionalProperties: true,
@@ -215,6 +235,9 @@ export const PiTypedCommandsConfigSchema = Type.Object(
 
 /** Parsed extension configuration after TypeBox has checked the JSON boundary value. */
 export type PiTypedCommandsConfig = Static<typeof PiTypedCommandsConfigSchema>;
+export type PiTypedCommandsAppearanceConfig = NonNullable<
+    PiTypedCommandsConfig["appearance"]
+>;
 
 export function piTypedCommandsConfigJsonSchema(): unknown {
     const schema = structuredClone(PiTypedCommandsConfigSchema);

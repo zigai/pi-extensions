@@ -1,7 +1,9 @@
 import { formatArgumentFlagName, isPositionalArgument } from "../schema.js";
-import type { RegisteredTypedCommand } from "../types.js";
+import type {
+    PiTypedCommandLookup,
+    RegisteredTypedCommand,
+} from "./command-types.js";
 import { commandInvocationForEditorText } from "./editor-invocation.js";
-import type { TypedCommandLookup } from "../registry.js";
 import { commandArgumentEntries } from "./helper.js";
 
 /** Result of attempting to handle Tab as typed-command flag completion. */
@@ -91,7 +93,7 @@ function flagCompletionForTab(
 /** Complete a partial named flag in editor text when Tab is pressed. */
 export function completePartialFlagOnTab(
     editorText: string,
-    commands: TypedCommandLookup,
+    commands: PiTypedCommandLookup,
 ): TabCompletionResult {
     const invocation = commandInvocationForEditorText(editorText, commands);
     if (invocation === undefined) {

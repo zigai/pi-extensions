@@ -8,7 +8,11 @@ import {
     isPositionalArgument,
     orderedCommandArgumentEntries,
 } from "./schema.js";
-import type { ArgumentDefinition, ArgumentDefinitions, RegisteredTypedCommand } from "./types.js";
+import type {
+    ArgumentDefinition,
+    ArgumentDefinitions,
+    CoreRegisteredTypedCommand,
+} from "./types.js";
 
 /** Style category for one segment of a typed command usage line. */
 export type CommandUsagePartKind = "label" | "command" | "positional" | "flag" | "detail" | "muted";
@@ -132,7 +136,7 @@ function formatArgumentUsage(
 
 /** Format a compact usage string such as `/deploy env [--ref=main]`. */
 export function formatCommandUsage<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
+    command: CoreRegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
 ): string {
     const parts = orderedCommandArgumentEntries(command).map(([name, definition]) =>
@@ -147,7 +151,7 @@ export function formatCommandUsage<TDefinitions extends ArgumentDefinitions>(
 
 /** Format the one-line editor helper text shown below the Pi editor. */
 export function formatHelperLine<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
+    command: CoreRegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
 ): string {
     return `usage: ${formatCommandUsage(command, options)}`;
@@ -155,7 +159,7 @@ export function formatHelperLine<TDefinitions extends ArgumentDefinitions>(
 
 /** Format the editor helper as styled text segments for TUI rendering. */
 export function formatHelperLineParts<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
+    command: CoreRegisteredTypedCommand<TDefinitions>,
     options: UsageFormatOptions = {},
 ): CommandUsagePart[] {
     const parts: CommandUsagePart[] = [
@@ -205,7 +209,7 @@ function detailedArgumentValueHint(
 
 /** Format detailed multi-line help for a registered typed command. */
 export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
+    command: CoreRegisteredTypedCommand<TDefinitions>,
     options?: DetailedHelpFormatOptions,
 ): string {
     const metadata: ResolvedDetailedHelpMetadataOptions = {

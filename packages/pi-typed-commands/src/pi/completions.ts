@@ -11,9 +11,9 @@ import {
 import type { TypedCommandLookup } from "../registry.js";
 import type {
     ArgumentDefinitions,
-    RegisteredTypedCommand,
     TypedCompletionItem,
 } from "../types.js";
+import type { RegisteredTypedCommand } from "./command-types.js";
 
 class PiCompletionScheduler implements CompletionScheduler {
     constructor(private readonly parentSignal?: AbortSignal) {}

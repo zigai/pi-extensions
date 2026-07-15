@@ -22,7 +22,7 @@ import {
     piTypedCommandsConfigJsonSchema,
 } from "../src/pi/config-schema.js";
 import { renderInlineHelper } from "../src/pi/helper.js";
-import { parsePiTypedCommandsAppearance } from "../src/pi/presentation-config.js";
+import { resolvePiTypedCommandsAppearance } from "../src/pi/presentation-config.js";
 import {
     getPiTypedCommandsGlobalConfigPath,
     getPiTypedCommandsGlobalConfigSchemaPath,
@@ -35,8 +35,8 @@ import { installTypedCommandUx, registerTypedCommand } from "../src/index.js";
 import type {
     FlatArgumentDefinitions,
     ParsedCommandArguments,
-    RegisteredTypedCommand,
 } from "../src/types.js";
+import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 
 const formSymbols = {
     selectedCheckbox: "■",
@@ -395,44 +395,32 @@ describe("global presentation config", () => {
         });
     });
 
-    it("parses global appearance settings and safely falls back for invalid values", () => {
-        const appearance = parsePiTypedCommandsAppearance({
-            form: {
-                colors: {
-                    title: "success",
-                    focusedLabel: "\u001b[31m",
+    it("classifies invalid bounded appearance values instead of normalizing them", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-invalid-layout-agent-"));
+        writeGlobalConfig(agentDir, {
+            appearance: {
+                form: {
+                    layout: { leftPadding: 1.5, minValueWidth: 80, maxValueWidth: 20 },
                 },
-                symbols: {
-                    focusedField: "»",
-                    selectedCheckbox: "",
-                },
-                layout: {
-                    leftPadding: 3,
-                    minValueWidth: 80,
-                    maxNameWidth: -1,
-                    descriptions: "hidden",
-                },
-            },
-            inlineHelp: {
-                order: "available-required-active",
-                metadata: { types: true },
-                colors: { active: "toolTitle", issue: "not-a-role" },
             },
         });
 
-        assert.equal(appearance.form.colors.title, "success");
-        assert.equal(appearance.form.colors.focusedLabel, "accent");
-        assert.equal(appearance.form.symbols.focusedField, "»");
-        assert.equal(appearance.form.symbols.selectedCheckbox, "■");
-        assert.equal(appearance.form.symbolOverrides.selectedCheckbox, undefined);
-        assert.equal(appearance.form.layout.leftPadding, 3);
-        assert.equal(appearance.form.layout.maxValueWidth, 80);
-        assert.equal(appearance.form.layout.maxNameWidth, 24);
-        assert.equal(appearance.form.layout.descriptions, "hidden");
-        assert.equal(appearance.inlineHelp.order, "available-required-active");
-        assert.equal(appearance.inlineHelp.metadata.types, true);
-        assert.equal(appearance.inlineHelp.colors.active, "toolTitle");
-        assert.equal(appearance.inlineHelp.colors.issue, "error");
+        withAgentDir(agentDir, () => {
+            const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                cwd: process.cwd(),
+                projectTrusted: false,
+            });
+
+            assert.equal(snapshot.global.status, "schema-invalid");
+            assert.deepEqual(
+                snapshot.diagnostics.map((diagnostic) => diagnostic.code),
+                ["config.schema.invalid"],
+            );
+            assert.deepEqual(
+                snapshot.settings.appearance.form.layout,
+                DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON.appearance.form.layout,
+            );
+        });
     });
 
     it("uses project config as an appearance override", () => {
@@ -469,7 +457,7 @@ describe("global presentation config", () => {
 
     it("renders type-rich inline helper tokens and custom ordering", () => {
         const command = helperCommand();
-        const appearance = parsePiTypedCommandsAppearance({
+        const appearance = resolvePiTypedCommandsAppearance({
             inlineHelp: {
                 order: "available-required-active",
                 metadata: { types: true },
@@ -495,7 +483,7 @@ describe("global presentation config", () => {
 
     it("honors configured inline helper value separator in compact tokens", () => {
         const command = helperCommand();
-        const appearance = parsePiTypedCommandsAppearance({
+        const appearance = resolvePiTypedCommandsAppearance({
             inlineHelp: {
                 format: { valueSeparator: " -> " },
             },
@@ -518,7 +506,7 @@ describe("global presentation config", () => {
 
     it("applies configured inline helper colour roles", () => {
         const command = helperCommand();
-        const appearance = parsePiTypedCommandsAppearance({
+        const appearance = resolvePiTypedCommandsAppearance({
             inlineHelp: {
                 colors: {
                     active: "success",

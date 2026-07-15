@@ -14,7 +14,7 @@ import {
 } from "../src/index.js";
 import { createTypedCommandRegistry } from "../src/registry.js";
 import { createPiCompletionCapabilities } from "../src/pi/completions.js";
-import type { RegisteredTypedCommand } from "../src/types.js";
+import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 
 const completionRegistry = createTypedCommandRegistry();
 function completionCapabilities() {
@@ -235,6 +235,73 @@ describe("parseTypedCommandArgs", () => {
         assert.deepEqual(parsed.issues, []);
         assert.equal(parsed.values.title, "note");
         assert.equal(parsed.values.body, "this is the body --literal");
+    });
+
+    it("parses leading flags before a rest positional and preserves later dash-prefixed text", () => {
+        const restCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                task: { type: "string", position: 0, rest: true },
+                raw: { type: "boolean", aliases: ["r"] },
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(restCommand, "-r Build --literal output");
+
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.raw, true);
+        assert.equal(parsed.values.task, "Build --literal output");
+    });
+
+    it("serializes named flags before a rest positional for a parseable round trip", () => {
+        const restCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                task: { type: "string", position: 0, rest: true },
+                raw: { type: "boolean", aliases: ["r"] },
+            },
+        };
+
+        const serialized = serializeTypedCommandArgs(restCommand, {
+            task: "Build and verify",
+            raw: true,
+        });
+        const parsed = parseTypedCommandArgs(restCommand, serialized);
+
+        assert.equal(serialized, '--raw "Build and verify"');
+        assert.deepEqual(parsed.issues, []);
+        assert.equal(parsed.values.raw, true);
+        assert.equal(parsed.values.task, "Build and verify");
+    });
+
+    it("keeps form-only arguments out of CLI parsing, serialization, and usage", () => {
+        const formOnlyCommand: RegisteredTypedCommand = {
+            ...command,
+            name: "goal",
+            args: {
+                task: { type: "string", position: 0, rest: true },
+                maximumTimeMinutes: {
+                    type: "number",
+                    integer: true,
+                    min: 1,
+                    formOnly: true,
+                },
+            },
+        };
+
+        const parsed = parseTypedCommandArgs(
+            formOnlyCommand,
+            "--maximum-time-minutes 15 Build and verify",
+        );
+        const serialized = serializeTypedCommandArgs(formOnlyCommand, {
+            task: "Build and verify",
+            maximumTimeMinutes: 15,
+        });
+        const usage = formatCommandUsage(formOnlyCommand);
+
+        assert.equal(parsed.issues[0]?.kind, "unknown-argument");
+        assert.equal(serialized, '"Build and verify"');
+        assert.doesNotMatch(usage, /maximum-time-minutes/);
     });
 
     it("recognizes --help and -h", () => {

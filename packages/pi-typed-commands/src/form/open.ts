@@ -1,4 +1,3 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getTypedCommandRefinementIssues } from "../parser.js";
 import { formatFormIssueMessage } from "../pi-tui/form-model.js";
 import type {
@@ -6,16 +5,19 @@ import type {
     ArgumentValue,
     FormMode,
     ParsedCommandArguments,
-    RegisteredTypedCommand,
 } from "../types.js";
+import type { RegisteredTypedCommand } from "../pi/command-types.js";
 import { formatIssues } from "../usage.js";
 import { openDenseArgumentForm } from "./dense.js";
 import { SequentialArgumentForm } from "./sequential.js";
 import type { ResolvedPiTypedCommandsAppearance } from "../pi/presentation-config.js";
+import type { ArgumentFormContext } from "./context.js";
 
 export type OpenArgumentFormOptions = {
     readonly appearance: ResolvedPiTypedCommandsAppearance;
     readonly signal?: AbortSignal;
+    /** Title already adapted from any Pi-specific form-title callback. */
+    readonly title?: string;
 };
 
 /**
@@ -27,7 +29,7 @@ export async function openArgumentForm<TDefinitions extends ArgumentDefinitions>
     command: RegisteredTypedCommand<TDefinitions>,
     parsed: ParsedCommandArguments,
     mode: FormMode,
-    ctx: ExtensionContext,
+    ctx: ArgumentFormContext,
     options: OpenArgumentFormOptions,
 ): Promise<Record<string, ArgumentValue> | undefined> {
     let result: Record<string, ArgumentValue> | undefined;

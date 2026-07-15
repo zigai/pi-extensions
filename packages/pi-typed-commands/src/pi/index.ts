@@ -3,9 +3,7 @@ export { createTypedCommandUxExtension, installTypedCommandUx } from "./extensio
 export { registerTypedCommand } from "./register.js";
 export { getTypedCommand, getTypedCommands } from "./registry.js";
 export type {
-    DefinedTypedCommand,
-    TypedCommandDefinition,
-    TypedCommandHandle,
+    TypedCommandFormTrigger,
     TypedCommandUxOptions,
     TypedCompletionContext,
     TypedCompletionItem,
@@ -15,3 +13,8 @@ export type {
     ParsedArgumentDraft,
     SerializableArgumentValues,
 } from "../types.js";
+export type {
+    DefinedTypedCommand,
+    TypedCommandDefinition,
+    TypedCommandHandle,
+} from "./command-types.js";

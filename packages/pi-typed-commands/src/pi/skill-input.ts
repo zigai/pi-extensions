@@ -12,10 +12,12 @@ import { formatTypedSkillDiagnostics } from "../skills/diagnostics.js";
 import { readTypedSkillMetadataResult } from "../skills/metadata.js";
 import { renderTypedSkillInvocation } from "../skills/prompt.js";
 import type { TypedSkillDiagnostics } from "../skills/types.js";
-import type { FormMode, ParsedCommandArguments, RegisteredTypedCommand } from "../types.js";
+import type { FormMode, ParsedCommandArguments } from "../types.js";
+import type { RegisteredTypedCommand } from "./command-types.js";
 import { commandInvocationForEditorText, slashCommandMatch } from "./editor-invocation.js";
 import { notifyDetailedHelp } from "./help.js";
 import type { ResolvedPiTypedCommandsAppearance } from "./presentation-config.js";
+import { resolveTypedCommandFormTitle } from "./form-title.js";
 import { notifyIssues, shouldNotifyInsteadOfOpeningForm } from "./register.js";
 
 type SkillParseResult = {
@@ -119,9 +121,16 @@ export async function renderTypedSkillInput(
             notifyIssues(ctx, issueMessages);
             return undefined;
         }
-        let formOptions: OpenArgumentFormOptions = { appearance };
+        let formOptions: OpenArgumentFormOptions = {
+            appearance,
+            title: resolveTypedCommandFormTitle(command, ctx),
+        };
         if (signal !== undefined) {
-            formOptions = { appearance, signal };
+            formOptions = {
+                appearance,
+                signal,
+                title: resolveTypedCommandFormTitle(command, ctx),
+            };
         }
         const collected = await openArgumentForm(command, parsed, formMode, ctx, formOptions);
         if (collected === undefined) {

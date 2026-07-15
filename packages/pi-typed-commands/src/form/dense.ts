@@ -1,14 +1,14 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createHeadlessFormModel } from "../pi-tui/form-model.js";
 import type {
     ArgumentDefinitions,
     ArgumentValue,
     FormMode,
     ParsedCommandArguments,
-    RegisteredTypedCommand,
 } from "../types.js";
+import type { RegisteredTypedCommand } from "../pi/command-types.js";
 import { ArgumentFormComponent, type FormResult } from "./dense-component.js";
 import type { OpenArgumentFormOptions } from "./open.js";
+import type { ArgumentFormContext } from "./context.js";
 
 function signalAborted(signal?: AbortSignal): boolean {
     return signal?.aborted === true;
@@ -16,14 +16,16 @@ function signalAborted(signal?: AbortSignal): boolean {
 
 function resolveFormTitle<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
-    ctx: ExtensionContext,
+    options: OpenArgumentFormOptions,
 ): string {
-    const title = command.formTitle;
-    if (typeof title === "function") {
-        return title(ctx);
+    if (options.title !== undefined) {
+        return options.title;
     }
+    const title = command.formTitle;
     if (title !== undefined) {
-        return title;
+        if (typeof title === "string") {
+            return title;
+        }
     }
     return command.name;
 }
@@ -33,7 +35,7 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
     command: RegisteredTypedCommand<TDefinitions>,
     parsed: ParsedCommandArguments,
     mode: FormMode,
-    ctx: ExtensionContext,
+    ctx: ArgumentFormContext,
     options: OpenArgumentFormOptions,
 ): Promise<Record<string, ArgumentValue> | undefined> {
     const { state, fields, initialSelection } = createHeadlessFormModel(command.args, parsed, mode);
@@ -59,7 +61,7 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
             };
             return new ArgumentFormComponent(
                 tui,
-                resolveFormTitle(command, ctx),
+                resolveFormTitle(command, options),
                 fields,
                 state,
                 theme,

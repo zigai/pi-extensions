@@ -1,4 +1,3 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { casesHandled } from "../exhaustive.js";
 import { formatFlagName, toKebabCase } from "../names.js";
 import { applyArgumentDefault, coerceArgumentValue, validateArgumentValue } from "../schema.js";
@@ -13,11 +12,12 @@ import type {
     MultiEnumArgumentDefinition,
     NumberArgumentDefinition,
     ParsedCommandArguments,
-    RegisteredTypedCommand,
     StringArgumentDefinition,
 } from "../types.js";
+import type { RegisteredTypedCommand } from "../pi/command-types.js";
 import { formatIssues } from "../usage.js";
 import { FORM_MESSAGE_OPTIONS, UNSET_OPTION } from "./constants.js";
+import type { ArgumentFormContext } from "./context.js";
 
 function currentValueText(value: ArgumentValue): string {
     if (value === undefined) {
@@ -31,7 +31,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
     private readonly command: RegisteredTypedCommand<TDefinitions>;
     private readonly parsed: ParsedCommandArguments;
     private readonly mode: FormMode;
-    private readonly ctx: ExtensionContext;
+    private readonly ctx: ArgumentFormContext;
     private readonly signal: AbortSignal | undefined;
     private readonly state: Record<string, ArgumentValue>;
 
@@ -39,7 +39,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         command: RegisteredTypedCommand<TDefinitions>,
         parsed: ParsedCommandArguments,
         mode: FormMode,
-        ctx: ExtensionContext,
+        ctx: ArgumentFormContext,
         signal?: AbortSignal,
     ) {
         this.command = command;

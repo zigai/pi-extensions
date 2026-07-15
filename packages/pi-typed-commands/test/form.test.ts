@@ -7,8 +7,8 @@ import { DEFAULT_PI_TYPED_COMMANDS_APPEARANCE } from "../src/pi/presentation-con
 import type {
     FlatArgumentDefinitions,
     ParsedCommandArguments,
-    RegisteredTypedCommand,
 } from "../src/types.js";
+import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 
 const symbols = {
     selectedCheckbox: "■",

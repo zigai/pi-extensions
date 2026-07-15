@@ -1,5 +1,11 @@
 import type { TypedSkillDiagnostics } from "./skills/types.js";
-import type { ArgumentDefinitions, RegisteredTypedCommand } from "./types.js";
+import type {
+    ArgumentDefinitions,
+    TypedCommandLookup,
+} from "./types.js";
+import type { RegisteredTypedCommand } from "./pi/command-types.js";
+
+export type { TypedCommandLookup } from "./types.js";
 
 export type TypedCommandRegistryListener = () => void;
 
@@ -10,12 +16,6 @@ type RegistrationRecord = {
     readonly localName: string;
     readonly invocationName: string;
     readonly command: RegisteredTypedCommand;
-};
-
-/** Narrow command metadata lookup consumed by parsers, completions, and Pi UI adapters. */
-export type TypedCommandLookup = {
-    get(name: string): RegisteredTypedCommand | undefined;
-    list(): readonly RegisteredTypedCommand[];
 };
 
 /** Narrow registry subscription consumed by live Pi UI sessions. */

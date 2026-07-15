@@ -4,6 +4,7 @@ import {
     completionValuesForArgument,
     createParseIssue,
     formatArgumentFlagName,
+    isFormOnlyArgument,
     isPositionalArgument,
     validateArgumentValue,
 } from "./schema.js";
@@ -260,7 +261,8 @@ export function compileArgumentBehavior(
     const positional = isPositionalArgument(definition);
     let flag: string | undefined;
     let aliases: string[] = [];
-    if (!positional) {
+    const formOnly = isFormOnlyArgument(definition);
+    if (!positional && !formOnly) {
         flag = formatArgumentFlagName(key, definition).slice(2);
         aliases = [...(definition.aliases ?? [])];
     }
@@ -292,6 +294,15 @@ export function compileArgumentBehavior(
             ];
         },
         serialize(value) {
+            if (formOnly) {
+                if (value !== undefined) {
+                    const validation = validateArgumentValue(key, definition, value);
+                    if (!validation.ok) {
+                        throw new TypeError(validation.message);
+                    }
+                }
+                return [];
+            }
             return serializeValue(definition, key, value);
         },
         describe(): ArgumentDescription {

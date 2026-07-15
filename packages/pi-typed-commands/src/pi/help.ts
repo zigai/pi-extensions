@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { RegisteredTypedCommand } from "../types.js";
+import type { RegisteredTypedCommand } from "./command-types.js";
 import { formatDetailedHelp } from "../usage.js";
 import {
     type ResolvedDetailedHelpAppearance,

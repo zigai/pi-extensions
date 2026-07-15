@@ -6,7 +6,7 @@ import {
     getAgentDir,
     type WidgetPlacement,
 } from "@earendil-works/pi-coding-agent";
-import type { TypedCommandUxOptions } from "../types.js";
+import type { TypedCommandFormTrigger, TypedCommandUxOptions } from "../types.js";
 import {
     DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON,
     PiTypedCommandsConfigSchema,
@@ -16,7 +16,7 @@ import {
 import { DEFAULT_HELPER_PLACEMENT } from "./helper.js";
 import {
     DEFAULT_PI_TYPED_COMMANDS_APPEARANCE,
-    parsePiTypedCommandsAppearance,
+    resolvePiTypedCommandsAppearance,
     type ResolvedPiTypedCommandsAppearance,
 } from "./presentation-config.js";
 import Schema from "../typebox-schema.js";
@@ -311,6 +311,40 @@ function loadedConfig(outcome: PiTypedCommandsConfigSourceOutcome): PiTypedComma
     return {};
 }
 
+function hasValidLayoutRanges(config: PiTypedCommandsConfig): boolean {
+    const layout = config.appearance?.form?.layout;
+    const defaults = DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON.appearance.form.layout;
+    const minNameWidth = layout?.minNameWidth ?? defaults.minNameWidth;
+    const maxNameWidth = layout?.maxNameWidth ?? defaults.maxNameWidth;
+    const minValueWidth = layout?.minValueWidth ?? defaults.minValueWidth;
+    const maxValueWidth = layout?.maxValueWidth ?? defaults.maxValueWidth;
+    return maxNameWidth >= minNameWidth && maxValueWidth >= minValueWidth;
+}
+
+function schemaInvalidOutcome(
+    fileRole: "global-config" | "project-config",
+): PiTypedCommandsConfigSourceOutcome {
+    return {
+        status: "schema-invalid",
+        fileRole,
+        diagnostic: configDiagnostic({
+            code: "config.schema.invalid",
+            operation: "validate",
+            fileRole,
+        }),
+    };
+}
+
+function parseMergedConfig(
+    global: PiTypedCommandsConfigSourceOutcome,
+    project: PiTypedCommandsConfigSourceOutcome,
+): PiTypedCommandsConfig {
+    return Schema.Parse(
+        PiTypedCommandsConfigSchema,
+        mergeConfig(loadedConfig(global), loadedConfig(project)),
+    );
+}
+
 function diagnosticFromSource(
     outcome: PiTypedCommandsConfigSourceOutcome,
 ): PiTypedCommandsConfigDiagnostic | undefined {
@@ -338,10 +372,23 @@ export function resolvePiTypedCommandsConfigSnapshot(
     context: PiTypedCommandsSettingsContext,
 ): ResolvedPiTypedCommandsConfigSnapshot {
     const fileOutcomes = ensurePiTypedCommandsGlobalConfigFiles();
-    const global = readConfigFile(getPiTypedCommandsGlobalConfigPath(), "global-config");
-    const project = projectConfigOutcome(context);
-    const merged = mergeConfig(loadedConfig(global), loadedConfig(project));
-    const config = Schema.Parse(PiTypedCommandsConfigSchema, merged);
+    let global = readConfigFile(getPiTypedCommandsGlobalConfigPath(), "global-config");
+    let project = projectConfigOutcome(context);
+    const absentProject: PiTypedCommandsConfigSourceOutcome = {
+        status: "absent",
+        fileRole: "project-config",
+    };
+    if (
+        global.status === "loaded" &&
+        !hasValidLayoutRanges(parseMergedConfig(global, absentProject))
+    ) {
+        global = schemaInvalidOutcome("global-config");
+    }
+    let config = parseMergedConfig(global, project);
+    if (!hasValidLayoutRanges(config) && project.status === "loaded") {
+        project = schemaInvalidOutcome("project-config");
+        config = parseMergedConfig(global, project);
+    }
     const diagnostics: PiTypedCommandsConfigDiagnostic[] = [];
     for (const outcome of fileOutcomes) {
         const diagnostic = diagnosticFromWrite(outcome);
@@ -359,7 +406,7 @@ export function resolvePiTypedCommandsConfigSnapshot(
     return {
         settings: {
             helperPlacement: config.helperPlacement ?? DEFAULT_HELPER_PLACEMENT,
-            appearance: parsePiTypedCommandsAppearance(config.appearance),
+            appearance: resolvePiTypedCommandsAppearance(config.appearance),
         },
         global,
         project,
@@ -371,6 +418,7 @@ export function resolvePiTypedCommandsConfigSnapshot(
 /** Resolved UX settings for typed-command Pi integrations. */
 export type ResolvedTypedCommandUxOptions = {
     helperPlacement: WidgetPlacement;
+    formTrigger: TypedCommandFormTrigger;
     appearance: ResolvedPiTypedCommandsAppearance;
     diagnostics: readonly PiTypedCommandsConfigDiagnostic[];
 };
@@ -391,6 +439,7 @@ export function resolveTypedCommandUxOptions(
     return {
         helperPlacement:
             options.helperPlacement ?? settingsHelperPlacement ?? DEFAULT_HELPER_PLACEMENT,
+        formTrigger: options.formTrigger ?? "tab",
         appearance,
         diagnostics,
     };

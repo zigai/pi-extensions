@@ -22,7 +22,6 @@ import type { DefinitionDiagnostic } from "../types.js";
 import type {
     ArgumentDefinition,
     ArgumentUi,
-    ArgumentWidget,
     BooleanArgumentDefinition,
     EnumArgumentDefinition,
     MultiEnumArgumentDefinition,
@@ -281,7 +280,7 @@ function normalizeUi(raw: SkillArgumentUiYaml | undefined): ArgumentUi | undefin
 
     const ui: ArgumentUi = {};
     if (raw.widget !== undefined) {
-        ui.widget = raw.widget as ArgumentWidget;
+        ui.widget = raw.widget;
     }
     if (raw.rows !== undefined) {
         ui.rows = raw.rows;

@@ -6,6 +6,7 @@ import { matchesKey } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../form/open.js";
 import { parseTypedCommandArgs, serializeTypedCommandArgs } from "../parser.js";
 import type { TypedCommandRegistry } from "../registry.js";
+import { isFormOnlyArgument } from "../schema.js";
 import { isTypedSkillCommand } from "../skills/command.js";
 import type { TypedCommandUxOptions } from "../types.js";
 import {
@@ -19,9 +20,13 @@ import {
     type EditorTypedCommandInvocation,
 } from "./editor-invocation.js";
 import { notifyDetailedHelp } from "./help.js";
+import { resolveTypedCommandFormTitle } from "./form-title.js";
 import { setHelperWidget, WIDGET_KEY } from "./helper.js";
 import { renderTypedSkillInput } from "./skill-input.js";
-import { registerSubmittedInvalidCommandHandler } from "./session-state.js";
+import {
+    registerSubmittedInvalidCommandHandler,
+    stageExpandedFormArguments,
+} from "./session-state.js";
 import {
     resolvePiTypedCommandsConfigSnapshot,
     resolveTypedCommandUxOptions,
@@ -74,6 +79,7 @@ async function openEditorCommandForm(
     const args = await openArgumentForm(command, parsed, "all", ctx, {
         appearance: options.appearance,
         signal,
+        title: resolveTypedCommandFormTitle(command, ctx),
     });
     if (args === undefined || !isCurrent()) {
         return;
@@ -92,6 +98,14 @@ async function openEditorCommandForm(
     let editorText = `/${invocationName}`;
     if (serialized.length > 0) {
         editorText += ` ${serialized}`;
+    }
+    const hasFormOnlyArguments = Object.values(command.args).some(isFormOnlyArgument);
+    if (
+        hasFormOnlyArguments &&
+        !stageExpandedFormArguments(ctx, invocationName, editorText, args)
+    ) {
+        ctx.ui.notify("Typed command form values could not be staged.", "error");
+        return;
     }
     ctx.ui.setEditorText(editorText);
 }
@@ -131,6 +145,7 @@ export class TypedCommandUxSession {
         | { readonly controller: AbortController; readonly completion: Promise<void> }
         | undefined;
     private submittedInvalidEditorText: string | undefined;
+    private armedDoubleTabEditorText: string | undefined;
     private helperWidgetSignature: string | undefined;
     private options: ResolvedTypedCommandUxOptions;
 
@@ -187,6 +202,7 @@ export class TypedCommandUxSession {
         this.active = false;
         this.formRunId += 1;
         this.submittedInvalidEditorText = undefined;
+        this.armedDoubleTabEditorText = undefined;
         const task = this.formTask;
         this.formTask = undefined;
         if (task !== undefined) {
@@ -353,6 +369,7 @@ export class TypedCommandUxSession {
         }
         if (!matchesKey(data, "tab")) {
             this.submittedInvalidEditorText = undefined;
+            this.armedDoubleTabEditorText = undefined;
             this.scheduleRefresh(ctx);
             return undefined;
         }
@@ -360,6 +377,7 @@ export class TypedCommandUxSession {
         const editorText = ctx.ui.getEditorText();
         const completion = completePartialFlagOnTab(editorText, this.registry);
         if (completion.handled === true) {
+            this.armedDoubleTabEditorText = undefined;
             if ("editorText" in completion && completion.editorText !== undefined) {
                 ctx.ui.setEditorText(completion.editorText);
             }
@@ -368,8 +386,18 @@ export class TypedCommandUxSession {
         }
 
         if (commandInvocationForEditorText(editorText, this.registry) === undefined) {
+            this.armedDoubleTabEditorText = undefined;
             this.scheduleRefresh(ctx);
             return undefined;
+        }
+
+        if (this.options.formTrigger === "double-tab") {
+            if (this.armedDoubleTabEditorText !== editorText) {
+                this.armedDoubleTabEditorText = editorText;
+                this.scheduleRefresh(ctx);
+                return { consume: true };
+            }
+            this.armedDoubleTabEditorText = undefined;
         }
 
         this.launchOpenEditorCommandForm(ctx);

@@ -23,7 +23,8 @@ import {
 } from "../src/invocation.js";
 import { getPiTypedCommandRegistry } from "../src/pi/registry.js";
 import { notifySkillDiagnosticsForText, refreshTypedSkills } from "../src/pi/skill-input.js";
-import type { ParseIssue, RegisteredTypedCommand } from "../src/types.js";
+import type { ParseIssue } from "../src/types.js";
+import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 
 const registry = getPiTypedCommandRegistry();
 const getTypedCommand = registry.get.bind(registry);

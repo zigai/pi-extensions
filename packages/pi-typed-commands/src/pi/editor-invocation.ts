@@ -1,6 +1,8 @@
 import { parseSlashCommandText } from "../invocation.js";
-import type { TypedCommandLookup } from "../registry.js";
-import type { RegisteredTypedCommand } from "../types.js";
+import type {
+    PiTypedCommandLookup,
+    RegisteredTypedCommand,
+} from "./command-types.js";
 
 /** A typed command invocation parsed from the Pi editor's first line and trailing body. */
 export type EditorTypedCommandInvocation = {
@@ -22,7 +24,7 @@ export function slashCommandMatch(editorText: string): ReturnType<typeof parseSl
 /** Return the typed command invocation represented by editor text, when it targets one. */
 export function commandInvocationForEditorText(
     editorText: string,
-    commands: TypedCommandLookup,
+    commands: PiTypedCommandLookup,
 ): EditorTypedCommandInvocation | undefined {
     const match = slashCommandMatch(editorText);
     if (match === undefined) {
@@ -44,7 +46,7 @@ export function commandInvocationForEditorText(
 /** Return the typed command invocation eligible for the live helper widget. */
 export function helperInvocationForEditorText(
     editorText: string,
-    commands: TypedCommandLookup,
+    commands: PiTypedCommandLookup,
 ): EditorTypedCommandInvocation | undefined {
     const invocation = commandInvocationForEditorText(editorText, commands);
     if (invocation === undefined) {

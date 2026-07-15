@@ -11,18 +11,22 @@ import { parseTypedCommandArgs } from "../parser.js";
 import type { OpenArgumentFormOptions } from "../form/open.js";
 import { createPiCompletionCapabilities, getTypedArgumentCompletions } from "./completions.js";
 import { getPiTypedCommandRegistry } from "./registry.js";
+import { resolveTypedCommandFormTitle } from "./form-title.js";
+import { takeExpandedFormArguments } from "./session-state.js";
 import type { TypedCommandRegistry } from "../registry.js";
 import type {
     ArgumentDefinitions,
-    DefinedTypedCommand,
     FlatArgumentDefinitions,
     FormMode,
     InferArguments,
     ParseIssue,
+} from "../types.js";
+import type {
+    DefinedTypedCommand,
     RegisteredTypedCommand,
     TypedCommandDefinition,
     TypedCommandHandle,
-} from "../types.js";
+} from "./command-types.js";
 
 /** Notify Pi users about one or more typed-command issues. */
 export function notifyIssues(ctx: ExtensionContext, messages: string[]): void {
@@ -44,19 +48,22 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     ctx: ExtensionCommandContext,
     registry: TypedCommandRegistry,
 ): Promise<InferArguments<FlatArgumentDefinitions> | undefined> {
-    const parsed = parseTypedCommandArgs(command, rawArgs);
-    const [
-        { getTypedCommandSessionOptions },
-        { resolvePiTypedCommandsConfigSnapshot, resolveTypedCommandUxOptions },
-    ] = await Promise.all([import("./session-state.js"), import("./settings.js")]);
-    let options = getTypedCommandSessionOptions(ctx);
-    if (options === undefined) {
-        const snapshot = resolvePiTypedCommandsConfigSnapshot({
-            cwd: ctx.cwd,
-            projectTrusted: ctx.isProjectTrusted(),
-        });
-        options = resolveTypedCommandUxOptions({}, snapshot);
+    let editorText = `/${invocationName}`;
+    if (rawArgs.length > 0) {
+        editorText += ` ${rawArgs}`;
     }
+    const expandedFormArguments = takeExpandedFormArguments(
+        ctx,
+        invocationName,
+        editorText,
+    );
+    if (expandedFormArguments !== undefined) {
+        return expandedFormArguments;
+    }
+
+    const parsed = parseTypedCommandArgs(command, rawArgs);
+    const { resolveTypedCommandSessionOptions } = await import("./session-state.js");
+    const options = resolveTypedCommandSessionOptions(ctx);
     if (parsed.mode === "help") {
         const { notifyDetailedHelp } = await import("./help.js");
         notifyDetailedHelp(ctx, command, options.appearance);
@@ -76,9 +83,16 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
             return undefined;
         }
         const { openArgumentForm } = await import("../form/open.js");
-        let formOptions: OpenArgumentFormOptions = { appearance: options.appearance };
+        let formOptions: OpenArgumentFormOptions = {
+            appearance: options.appearance,
+            title: resolveTypedCommandFormTitle(command, ctx),
+        };
         if (ctx.signal !== undefined) {
-            formOptions = { appearance: options.appearance, signal: ctx.signal };
+            formOptions = {
+                appearance: options.appearance,
+                signal: ctx.signal,
+                title: resolveTypedCommandFormTitle(command, ctx),
+            };
         }
         const collected = await openArgumentForm(command, parsed, formMode, ctx, formOptions);
         if (collected === undefined) {
@@ -89,10 +103,6 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
 
     if (issueAction === "notify") {
         if (ctx.hasUI) {
-            let editorText = `/${invocationName}`;
-            if (rawArgs.length > 0) {
-                editorText += ` ${rawArgs}`;
-            }
             ctx.ui.setEditorText(editorText);
             const [
                 { helperInvocationForEditorText },

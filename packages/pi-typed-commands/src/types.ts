@@ -1,9 +1,3 @@
-import type {
-    ExtensionCommandContext,
-    ExtensionContext,
-    WidgetPlacement,
-} from "@earendil-works/pi-coding-agent";
-
 /**
  * Built-in dense-form widget names for typed command arguments.
  *
@@ -200,6 +194,14 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> =
         position?: number;
         /** Consume all remaining positional tokens into this positional argument. */
         rest?: boolean;
+        /**
+         * Collect this optional value only through Pi's expanded argument form.
+         *
+         * Form-only arguments have no CLI flag or positional spelling and are omitted from
+         * generated usage, help, completions, and serialization. They must not define CLI
+         * metadata, a default, or requiredness.
+         */
+        formOnly?: boolean;
         ui?: ArgumentUi;
     };
 
@@ -330,25 +332,6 @@ export type SerializableArgumentValues<TDefinitions extends ArgumentDefinitions>
     readonly [TKey in keyof TDefinitions]?: InferArgumentValue<TDefinitions[TKey]>;
 };
 
-/** Handler called after typed arguments have been parsed, defaulted, and validated. */
-export type TypedCommandHandler<TDefinitions extends ArgumentDefinitions> = (
-    args: InferArguments<TDefinitions>,
-    ctx: ExtensionCommandContext,
-) => Promise<void> | void;
-
-export type InvocationTarget<TDefinitions extends ArgumentDefinitions> =
-    | {
-          kind: "extension";
-          run: TypedCommandHandler<TDefinitions>;
-      }
-    | {
-          kind: "skill";
-          render(args: InferArguments<TDefinitions>, additionalInput?: string): string;
-      };
-
-/** Dense-form title, or a callback that derives one from the active extension session. */
-export type TypedCommandFormTitle = string | ((ctx: ExtensionContext) => string);
-
 /** Glyphs used for checkbox and radio widgets in the dense form. */
 export type TypedCommandFormSymbols = {
     /** Marker used for selected checkbox and multiselect values. */
@@ -362,9 +345,14 @@ export type TypedCommandFormSymbols = {
 };
 
 /** Options for the Pi live typed-command UX bridge. */
+export type TypedCommandFormTrigger = "tab" | "double-tab";
+export type TypedCommandWidgetPlacement = "aboveEditor" | "belowEditor";
+
 export type TypedCommandUxOptions = {
     /** Where the compact live helper is rendered. Defaults to `"aboveEditor"`. */
-    helperPlacement?: WidgetPlacement;
+    helperPlacement?: TypedCommandWidgetPlacement;
+    /** Keystroke sequence that opens the expanded argument form. Defaults to `"tab"`. */
+    formTrigger?: TypedCommandFormTrigger;
 };
 
 /** Command-level refinement issue shown as a parse/form diagnostic. */
@@ -389,60 +377,22 @@ export type TypedCommandRefinement<TDefinitions extends ArgumentDefinitions> = (
     context: TypedCommandRefinementContext<TDefinitions>,
 ) => readonly TypedCommandRefinementIssue[];
 
-export type TypedCommandConfig<TDefinitions extends ArgumentDefinitions> = {
-    /** One-line command description used by Pi command listings and detailed help. */
-    description: string;
-    /** Argument definitions used for parsing, validation, completions, usage, and forms. */
-    args: TDefinitions;
-    /** Cross-field validation invoked after individual arguments are parsed and validated. */
-    refine?: TypedCommandRefinement<TDefinitions>;
-    /** Title shown at the top of the dense argument form. */
-    formTitle?: TypedCommandFormTitle;
-    /** Override checkbox and radio glyphs in the dense form. */
-    formSymbols?: TypedCommandFormSymbols;
+/** Framework-independent command metadata consumed by parser, usage, and completion policy. */
+export type CoreRegisteredTypedCommand<
+    TDefinitions extends ArgumentDefinitions = ArgumentDefinitions,
+> = {
+    readonly name: string;
+    readonly description: string;
+    readonly args: FlatArgumentDefinitions;
+    readonly refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
+    readonly compiled?: CompiledCommand<TDefinitions>;
+    readonly invocationName?: string;
 };
 
-/** Normalized command metadata stored in the typed command registry. */
-export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
-    Omit<TypedCommandConfig<TDefinitions>, "args" | "refine"> & {
-        /** Local slash command name without the leading `/`. */
-        name: string;
-        /** Flattened parser-facing argument definitions. */
-        args: FlatArgumentDefinitions;
-        /** Runtime cross-field validation over flattened parser-facing values. */
-        refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
-        /** Discriminated runtime target for extension commands and typed skills. */
-        target?: InvocationTarget<FlatArgumentDefinitions>;
-        /** Immutable compiled command schema. */
-        compiled?: CompiledCommand<TDefinitions>;
-        /** Concrete invocation name assigned by Pi or the registry, including duplicate suffixes. */
-        invocationName?: string;
-        /** Unique wrapper registration identity. */
-        registrationId?: symbol;
-        /** Runtime owner identity used for extension reload cleanup. */
-        ownerId?: symbol;
-        formSymbols: Required<TypedCommandFormSymbols>;
-        /** Source adapter that owns this metadata. */
-        source?: "extension" | "skill";
-    };
-
-/** Declaration-only object created by `defineTypedCommand`. */
-export type TypedCommandDefinition<TDefinitions extends ArgumentDefinitions> =
-    TypedCommandConfig<TDefinitions> & {
-        /** Slash command name without the leading `/`. */
-        name: string;
-        /** Handler invoked with typed values when parsing and validation succeed. */
-        run: TypedCommandHandler<TDefinitions>;
-    };
-
-/** A command definition with convenience pure-core methods attached. */
-export type DefinedTypedCommand<TDefinitions extends ArgumentDefinitions> = Readonly<
-    TypedCommandDefinition<TDefinitions>
-> & {
-    parse(rawArgs: string): TypedParseResult<TDefinitions>;
-    serialize(values: SerializableArgumentValues<TDefinitions>): string;
-    formatUsage(): string;
-    formatHelp(): string;
+/** Framework-independent command lookup consumed by completion policy. */
+export type TypedCommandLookup = {
+    get(name: string): CoreRegisteredTypedCommand | undefined;
+    list(): readonly CoreRegisteredTypedCommand[];
 };
 
 /** Stable diagnostic produced while compiling a command definition. */
@@ -527,17 +477,6 @@ export type CompiledCommand<TDefinitions extends ArgumentDefinitions = ArgumentD
     readonly positionalOrder: readonly string[];
     readonly flagToName: ReadonlyMap<string, string>;
     readonly diagnostics: readonly DefinitionDiagnostic[];
-};
-
-export type TypedCommandHandle<TDefinitions extends ArgumentDefinitions> = {
-    readonly definition: DefinedTypedCommand<TDefinitions>;
-    readonly invocationName: string;
-    parse(rawArgs: string): TypedParseResult<TDefinitions>;
-    serialize(values: SerializableArgumentValues<TDefinitions>): string;
-    formatUsage(): string;
-    formatHelp(): string;
-    /** Remove wrapper-owned metadata and listeners. Safe to call more than once. */
-    dispose(): void;
 };
 
 /** Machine-readable kind for a parser or validation issue. */

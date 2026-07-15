@@ -60,6 +60,37 @@ describe("typed command schema", () => {
         assert.equal(findArgumentName(lookup, "--action"), undefined);
     });
 
+    it("excludes valid form-only arguments from CLI lookup", () => {
+        const formDefinitions = {
+            task: { type: "string", position: 0 },
+            maximumTimeMinutes: { type: "number", formOnly: true },
+        } satisfies FlatArgumentDefinitions;
+        const diagnostics = validateArgumentDefinitions(formDefinitions);
+        const lookup = createArgumentLookup(formDefinitions);
+
+        assert.deepEqual(diagnostics, []);
+        assert.equal(findArgumentName(lookup, "--maximum-time-minutes"), undefined);
+    });
+
+    it("rejects form-only requiredness, defaults, and CLI metadata", () => {
+        const diagnostics = validateArgumentDefinitions({
+            requiredValue: { type: "number", formOnly: true, required: true },
+            defaultValue: { type: "number", formOnly: true, default: 1 },
+            flaggedValue: { type: "number", formOnly: true, flag: "minutes" },
+            aliasedValue: { type: "number", formOnly: true, aliases: ["m"] },
+            positionalValue: { type: "number", formOnly: true, position: 0 },
+            restValue: { type: "string", formOnly: true, rest: true },
+        });
+        const codes = diagnostics.map((diagnostic) => diagnostic.code);
+
+        assert.ok(codes.includes("argument.form-only.required"));
+        assert.ok(codes.includes("argument.form-only.default"));
+        assert.equal(
+            codes.filter((code) => code === "argument.form-only.cli-metadata").length,
+            4,
+        );
+    });
+
     it("coerces and validates values consistently", () => {
         const count = definitions.count;
         assert.equal(count?.type, "number");

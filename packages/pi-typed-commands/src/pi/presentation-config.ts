@@ -1,5 +1,6 @@
 import Type, { type Static } from "typebox";
 import Schema from "../typebox-schema.js";
+import type { PiTypedCommandsAppearanceConfig } from "./config-schema.js";
 import type { TypedCommandFormSymbols } from "../types.js";
 
 /** Pi TUI theme colour roles accepted by pi-typed-args appearance settings. */
@@ -321,8 +322,6 @@ export const DEFAULT_PI_TYPED_COMMANDS_APPEARANCE: ResolvedPiTypedCommandsAppear
     },
 };
 
-const WidgetPlacementSettingSchema = Type.Enum(["aboveEditor", "belowEditor"] as const);
-
 const FormColorSettingsSchema = Type.Object(
     {
         title: Type.Optional(Type.Unknown()),
@@ -436,40 +435,6 @@ export const PiTypedCommandsAppearanceSettingsSchema = Type.Object(
     { additionalProperties: true },
 );
 
-export const PiTypedCommandsSettingsSchema = Type.Object(
-    {
-        helperPlacement: Type.Optional(WidgetPlacementSettingSchema),
-        appearance: Type.Optional(Type.Unknown()),
-    },
-    { additionalProperties: true },
-);
-
-const PiSettingsSchema = Type.Object(
-    {
-        piTypedCommands: Type.Optional(Type.Unknown()),
-    },
-    { additionalProperties: true },
-);
-
-type PiSettingsInput = Static<typeof PiSettingsSchema>;
-type PiTypedCommandsSettingsInput = Static<typeof PiTypedCommandsSettingsSchema>;
-
-function parsePiSettingsInput(input: unknown): PiSettingsInput | undefined {
-    if (!Schema.Check(PiSettingsSchema, input)) {
-        return undefined;
-    }
-    return Schema.Parse(PiSettingsSchema, input);
-}
-
-function parsePiTypedCommandsSettingsInput(
-    input: unknown,
-): PiTypedCommandsSettingsInput | undefined {
-    if (!Schema.Check(PiTypedCommandsSettingsSchema, input)) {
-        return undefined;
-    }
-    return Schema.Parse(PiTypedCommandsSettingsSchema, input);
-}
-
 function parseFormColorSettings(
     input: unknown,
 ): Static<typeof FormColorSettingsSchema> | undefined {
@@ -558,16 +523,6 @@ function parseAppearanceSettings(
         return undefined;
     }
     return Schema.Parse(PiTypedCommandsAppearanceSettingsSchema, input);
-}
-
-export function parsePiSettings(input: unknown): PiSettingsInput | undefined {
-    return parsePiSettingsInput(input);
-}
-
-export function parsePiTypedCommandsSettings(
-    input: unknown,
-): PiTypedCommandsSettingsInput | undefined {
-    return parsePiTypedCommandsSettingsInput(input);
 }
 
 function cloneDefaultAppearance(): ResolvedPiTypedCommandsAppearance {
@@ -848,8 +803,10 @@ function parseDetailedHelpAppearance(input: unknown): ResolvedDetailedHelpAppear
     };
 }
 
-/** Parse and normalize appearance from unknown config input. */
-export function parsePiTypedCommandsAppearance(input: unknown): ResolvedPiTypedCommandsAppearance {
+/** Resolve appearance from a configuration value already parsed at the persisted-config seam. */
+export function resolvePiTypedCommandsAppearance(
+    input: PiTypedCommandsAppearanceConfig | undefined,
+): ResolvedPiTypedCommandsAppearance {
     const settings = parseAppearanceSettings(input);
     if (settings === undefined) {
         return cloneDefaultAppearance();
@@ -860,19 +817,4 @@ export function parsePiTypedCommandsAppearance(input: unknown): ResolvedPiTypedC
         inlineHelp: parseInlineHelpAppearance(settings.inlineHelp),
         detailedHelp: parseDetailedHelpAppearance(settings.detailedHelp),
     };
-}
-
-/** Extract and parse legacy nested appearance from a settings-shaped object. */
-export function parsePiTypedCommandsAppearanceFromSettings(
-    settings: unknown,
-): ResolvedPiTypedCommandsAppearance {
-    const rootSettings = parsePiSettings(settings);
-    if (rootSettings === undefined) {
-        return cloneDefaultAppearance();
-    }
-    const typedCommands = parsePiTypedCommandsSettings(rootSettings.piTypedCommands);
-    if (typedCommands === undefined) {
-        return cloneDefaultAppearance();
-    }
-    return parsePiTypedCommandsAppearance(typedCommands.appearance);
 }

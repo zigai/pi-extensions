@@ -10,42 +10,35 @@ import type {
     FlatArgumentDefinitions,
     InferArguments,
     ParsedArgumentDraft,
-    TypedCommandHandler,
+    SerializableArgumentValues,
     TypedCommandRefinement,
     TypedCommandRefinementContext,
 } from "../types.js";
+import type { TypedCommandHandler } from "../pi/command-types.js";
 
-/** Expand flat dotted parser values into nested handler values when a definition contains groups. */
-export function maybeExpandGroupedValues<TDefinitions extends ArgumentDefinitions>(
-    values: Readonly<Record<string, unknown>>,
+function expandValidatedGroupedValues<TDefinitions extends ArgumentDefinitions>(
+    values: InferArguments<FlatArgumentDefinitions>,
     definitions: TDefinitions,
-): Record<string, unknown> {
-    if (!hasArgumentGroups(definitions)) {
-        return { ...values };
+): InferArguments<TDefinitions>;
+function expandValidatedGroupedValues<TDefinitions extends ArgumentDefinitions>(
+    values: ParsedArgumentDraft<FlatArgumentDefinitions>,
+    definitions: TDefinitions,
+): ParsedArgumentDraft<TDefinitions>;
+function expandValidatedGroupedValues<TDefinitions extends ArgumentDefinitions>(
+    values:
+        | InferArguments<FlatArgumentDefinitions>
+        | ParsedArgumentDraft<FlatArgumentDefinitions>,
+    definitions: TDefinitions,
+): InferArguments<TDefinitions> | ParsedArgumentDraft<TDefinitions> {
+    let expanded: Record<string, unknown> = { ...values };
+    if (hasArgumentGroups(definitions)) {
+        expanded = expandGroupedArgumentValues(values, definitions);
     }
-    return expandGroupedArgumentValues(values, definitions);
-}
-
-function handlerValues<TDefinitions extends ArgumentDefinitions>(
-    values: Readonly<Record<string, unknown>>,
-    definitions: TDefinitions,
-): InferArguments<TDefinitions> {
-    const expanded = maybeExpandGroupedValues(values, definitions);
-    // SAFETY: handler adapters receive the parser's successfully validated flat value state and
-    // only reshape keys according to the same definition tree.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: parser validation and the same definition tree establish every expanded handler leaf.
-    return expanded as InferArguments<TDefinitions>;
-}
-
-function refinementValues<TDefinitions extends ArgumentDefinitions>(
-    values: Readonly<Record<string, unknown>>,
-    definitions: TDefinitions,
-): ParsedArgumentDraft<TDefinitions> {
-    const expanded = maybeExpandGroupedValues(values, definitions);
-    // SAFETY: refinement adapters receive parser-produced leaves and only reshape paths according
-    // to the same definition tree; missing draft leaves remain missing.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: parser-produced leaves are only regrouped under their source definition paths.
-    return expanded as ParsedArgumentDraft<TDefinitions>;
+    // SAFETY: overload inputs are parser/refinement values already validated against the compiled
+    // flat definitions. Expansion changes only keys according to the same source definition tree;
+    // total handler input remains total, while draft input remains optional.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: validated leaves are regrouped through their matching definition tree.
+    return expanded as InferArguments<TDefinitions> | ParsedArgumentDraft<TDefinitions>;
 }
 
 function isGroupedArgumentPath<TDefinitions extends ArgumentDefinitions>(
@@ -70,7 +63,7 @@ function refinementContext<TDefinitions extends ArgumentDefinitions>(
 
 /** Flatten nested handler values into dotted parser values when a definition contains groups. */
 export function maybeFlattenGroupedValues<TDefinitions extends ArgumentDefinitions>(
-    values: Readonly<Record<string, unknown>>,
+    values: SerializableArgumentValues<TDefinitions>,
     definitions: TDefinitions,
 ): Record<string, unknown> {
     if (!hasArgumentGroups(definitions)) {
@@ -88,7 +81,10 @@ export function maybeWrapGroupedRefinement<TDefinitions extends ArgumentDefiniti
         return undefined;
     }
     return (args, context) =>
-        refine(refinementValues(args, definitions), refinementContext(definitions, context));
+        refine(
+            expandValidatedGroupedValues(args, definitions),
+            refinementContext(definitions, context),
+        );
 }
 
 /** Adapt grouped command handlers to the parser's flat dotted-value representation. */
@@ -96,5 +92,5 @@ export function maybeWrapGroupedHandler<TDefinitions extends ArgumentDefinitions
     definitions: TDefinitions,
     handler: TypedCommandHandler<TDefinitions>,
 ): TypedCommandHandler<FlatArgumentDefinitions> {
-    return (args, ctx) => handler(handlerValues(args, definitions), ctx);
+    return (args, ctx) => handler(expandValidatedGroupedValues(args, definitions), ctx);
 }

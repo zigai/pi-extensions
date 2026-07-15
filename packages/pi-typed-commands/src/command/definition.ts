@@ -7,10 +7,12 @@ import {
 import { formatCommandUsage, formatDetailedHelp } from "../usage.js";
 import type {
     ArgumentDefinitions,
-    DefinedTypedCommand,
     SerializableArgumentValues,
-    TypedCommandDefinition,
 } from "../types.js";
+import type {
+    DefinedTypedCommand,
+    TypedCommandDefinition,
+} from "../pi/command-types.js";
 import { maybeFlattenGroupedValues } from "./grouped-values.js";
 import { definitionError, registeredCommandForDefinition } from "./registered-command.js";
 

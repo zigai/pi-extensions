@@ -1,10 +1,12 @@
 import type {
     ArgumentDefinitions,
+    SerializableArgumentValues,
+} from "../types.js";
+import type {
     DefinedTypedCommand,
     RegisteredTypedCommand,
-    SerializableArgumentValues,
     TypedCommandHandle,
-} from "../types.js";
+} from "../pi/command-types.js";
 
 /** Create the disposable handle returned from typed command registration. */
 export function createCommandHandle<TDefinitions extends ArgumentDefinitions>(

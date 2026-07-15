@@ -1,6 +1,6 @@
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_FORM_SYMBOLS } from "../command/symbols.js";
-import type { RegisteredTypedCommand } from "../types.js";
+import type { RegisteredTypedCommand } from "../pi/command-types.js";
 import { renderTypedSkillInvocation } from "./prompt.js";
 import type { RenderTypedSkillInvocationOptions, TypedSkillMetadata } from "./types.js";
 
@@ -19,6 +19,10 @@ export function skillPathFromCommand(command: SlashCommandInfo): string | undefi
 export function typedSkillCommandFromMetadata(
     skill: TypedSkillMetadata,
 ): RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
+    const formFields: { formTitle?: string } = {};
+    if (skill.formTitle !== undefined) {
+        formFields.formTitle = skill.formTitle;
+    }
     const command: RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } = {
         name: `skill:${skill.name}`,
         description: skill.description,
@@ -39,10 +43,8 @@ export function typedSkillCommandFromMetadata(
         formSymbols: { ...DEFAULT_FORM_SYMBOLS },
         source: "skill",
         skill,
+        ...formFields,
     };
-    if (skill.formTitle !== undefined) {
-        command.formTitle = skill.formTitle;
-    }
     return command;
 }
 

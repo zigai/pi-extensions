@@ -4,7 +4,8 @@ Pi Typed Args derives completions and forms from the same argument definitions u
 
 ## Completion providers
 
-Add `complete` to an argument to provide value suggestions.
+Add `complete` for synchronous suggestions, or `completeAsync` when producing suggestions requires
+asynchronous work.
 
 ```ts
 const command = defineTypedCommand({
@@ -14,7 +15,7 @@ const command = defineTypedCommand({
     ref: {
       type: "string",
       required: true,
-      complete: async (query, context) => {
+      completeAsync: async (query, context) => {
         const refs = await listGitRefs(context.cwd);
         return refs.filter((ref) => ref.startsWith(query)).map((value) => ({ value }));
       },
@@ -29,10 +30,14 @@ The completion context contains:
 - `values` - parsed values available before the cursor;
 - `provided` - names supplied by the user;
 - `cwd` - active working directory when available;
-- `ctx` - Pi extension context when completions run through the Pi adapter;
 - `signal` - cancellation signal that is aborted when the completion request times out.
 
-Completion providers can return values synchronously or asynchronously. Provider failures are contained: thrown errors, rejected promises, and invalid items produce no suggestions instead of breaking completion. Async providers time out after 1000 ms by default; set `completionTimeoutMs` on the argument to override that, or `0` to disable the timeout.
+`complete` must return its items synchronously and is available to both editor and command-level
+completion. `completeAsync` returns a promise and is invoked only by Pi's asynchronous command-level
+completion hook, so synchronous editor completion never starts work that it cannot own. Provider
+failures are contained: thrown errors, rejected promises, and invalid items produce no suggestions
+instead of breaking completion. Async providers time out after 1000 ms by default; set
+`completionTimeoutMs` on the argument to override that, or `0` to disable the timeout.
 
 ## Replacement text
 
@@ -48,6 +53,9 @@ complete: () => [
 ```
 
 If no replacement is supplied, the adapter quotes inserted values when needed.
+
+Set `replaceRange` when a provider has computed the exact source span to replace. The range is
+relative to the raw argument string and must accompany a `replacement` value.
 
 ## Built-in completion sources
 
@@ -103,11 +111,43 @@ Users can open the form by typing a completed command and pressing Tab:
 /deploy<Tab>
 ```
 
+Composed extensions can require two consecutive Tabs on unchanged editor text:
+
+```ts
+installTypedCommandUx(pi, { formTrigger: "double-tab" });
+```
+
+With this option, the first Tab arms the form shortcut and the second opens it. Typing any other
+key or changing the command text resets the sequence.
+
 Forms can also open automatically for missing required arguments or invalid values, depending on command options.
 
 The selected field is marked with `›` and accented so users can tell which value arrow keys, space, or typing will edit.
 
 Dense form presentation can be customized with `appearance.form`. The setting applies to extension commands and typed skills. Command metadata cannot override configured colors or layout.
+
+## Form-only arguments
+
+Set `formOnly: true` when an optional value must be available exclusively through the expanded
+form:
+
+```ts
+args: {
+  maximumTimeMinutes: {
+    type: "number",
+    integer: true,
+    min: 1,
+    formOnly: true,
+    title: "Maximum active time (minutes)",
+  },
+}
+```
+
+Form-only arguments have no flag or positional spelling and are omitted from usage, help,
+completion, helper, and serialization output. They cannot be required or define a default,
+`flag`, `aliases`, `position`, or `rest`. After the user submits the expanded form, the validated
+values are staged for the exact command text written back to the editor and consumed once when
+that command runs.
 
 ## Form configuration
 

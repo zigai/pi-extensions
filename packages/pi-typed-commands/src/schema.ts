@@ -12,7 +12,7 @@ import type {
     DefinitionDiagnostic,
     FlatArgumentDefinitions,
     ParseIssue,
-    RegisteredTypedCommand,
+    CoreRegisteredTypedCommand,
 } from "./types.js";
 
 const ARGUMENT_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
@@ -82,6 +82,11 @@ export function isPositionalArgument(definition: ArgumentDefinition): boolean {
     return definition.position !== undefined;
 }
 
+/** Return whether an argument is intentionally available only in Pi's expanded form. */
+export function isFormOnlyArgument(definition: ArgumentDefinition): boolean {
+    return definition.formOnly === true;
+}
+
 /** Return the canonical no-leading-dash flag name for an argument definition. */
 export function argumentFlagName(name: string, definition: ArgumentDefinition): string {
     return normalizeFlagName(definition.flag ?? name);
@@ -147,9 +152,11 @@ export function orderedArgumentEntries(
 
 /** Return a registered command's arguments in parser/help order. */
 export function orderedCommandArgumentEntries<TDefinitions extends ArgumentDefinitions>(
-    command: RegisteredTypedCommand<TDefinitions>,
+    command: CoreRegisteredTypedCommand<TDefinitions>,
 ): Array<[string, ArgumentDefinition]> {
-    return orderedArgumentEntries(command.args);
+    return orderedArgumentEntries(command.args).filter(
+        ([, definition]) => !isFormOnlyArgument(definition),
+    );
 }
 
 /** Return only positional arguments after applying the same flattening and ordering rules. */
@@ -494,7 +501,7 @@ function validateArgumentDefinitionShape(
     for (const field of ["description", "flag", "title", "placeholder"] as const) {
         valid = validateOptionalStringField(name, definition, field, diagnostics) && valid;
     }
-    for (const field of ["required", "rest"] as const) {
+    for (const field of ["required", "rest", "formOnly"] as const) {
         valid = validateOptionalBooleanField(name, definition, field, diagnostics) && valid;
     }
     valid = validateAliasesShape(name, definition, diagnostics) && valid;
@@ -890,6 +897,40 @@ function validateTypeSpecificRules(
         );
     }
 
+    if (isFormOnlyArgument(definition)) {
+        if (definition.required === true) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "required",
+                "argument.form-only.required",
+                `${name}: form-only arguments must be optional`,
+            );
+        }
+        if (definition.default !== undefined) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "default",
+                "argument.form-only.default",
+                `${name}: form-only arguments may not define a default`,
+            );
+        }
+        for (const field of ["flag", "aliases", "position", "rest"] as const) {
+            const value = definition[field];
+            if (value === undefined || value === false) {
+                continue;
+            }
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                field,
+                "argument.form-only.cli-metadata",
+                `${name}: form-only arguments may not define ${field}`,
+            );
+        }
+    }
+
     if (definition.position !== undefined && !isNonNegativeInteger(definition.position)) {
         addArgumentDiagnostic(
             diagnostics,
@@ -1213,7 +1254,7 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
         validDefinitions[name] = definition;
 
         validateTypeSpecificRules(name, definition, diagnostics);
-        if (isPositionalArgument(definition)) {
+        if (isPositionalArgument(definition) || isFormOnlyArgument(definition)) {
             continue;
         }
 
@@ -1240,7 +1281,7 @@ export function createArgumentLookup(definitions: ArgumentDefinitions): Argument
     const byFlag = new Map<string, string>();
 
     for (const [name, definition] of Object.entries(flatDefinitions)) {
-        if (isPositionalArgument(definition)) {
+        if (isPositionalArgument(definition) || isFormOnlyArgument(definition)) {
             continue;
         }
         for (const flag of argumentFlagNames(name, definition)) {
