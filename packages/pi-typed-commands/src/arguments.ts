@@ -128,39 +128,88 @@ function groupedKey(prefix: string, name: string): string {
     return `${prefix}.${name}`;
 }
 
+export type UnknownGroupedArgumentDefinitionEntry = {
+    readonly key: string;
+    readonly definition: unknown;
+    readonly sourcePath: readonly string[];
+};
+
+/** Collect parser-facing paths without erasing duplicate canonical keys. */
+export function collectUnknownGroupedArgumentDefinitions(
+    definitions: Readonly<Record<string, unknown>>,
+    prefix = "",
+    sourcePrefix: readonly string[] = [],
+): readonly UnknownGroupedArgumentDefinitionEntry[] {
+    const entries: UnknownGroupedArgumentDefinitionEntry[] = [];
+    for (const [name, definition] of Object.entries(definitions)) {
+        const key = groupedKey(prefix, name);
+        const sourcePath = [...sourcePrefix, name];
+        if (isRecord(definition) && ARGUMENT_GROUP in definition && isRecord(definition.args)) {
+            entries.push(
+                ...collectUnknownGroupedArgumentDefinitions(definition.args, key, sourcePath),
+            );
+            continue;
+        }
+        entries.push({ key, definition, sourcePath });
+    }
+    return entries;
+}
+
+function assignUniqueDefinition(
+    flattened: Record<string, ArgumentDefinition>,
+    key: string,
+    definition: ArgumentDefinition,
+): void {
+    if (Object.hasOwn(flattened, key)) {
+        throw new TypeError(`Duplicate canonical argument path ${key}`);
+    }
+    flattened[key] = definition;
+}
+
+function flattenGroupedArgumentDefinitionsInto(
+    flattened: Record<string, ArgumentDefinition>,
+    definitions: ArgumentDefinitions,
+    prefix: string,
+): void {
+    for (const [name, definition] of Object.entries(definitions)) {
+        const key = groupedKey(prefix, name);
+        if (isArgumentGroupDefinition(definition)) {
+            flattenGroupedArgumentDefinitionsInto(flattened, definition.args, key);
+            continue;
+        }
+        assignUniqueDefinition(flattened, key, definition);
+    }
+}
+
 /** Flatten grouped definitions into parser-facing dotted argument names such as `database.host`. */
 export function flattenGroupedArgumentDefinitions(
     definitions: ArgumentDefinitions,
     prefix = "",
 ): FlatArgumentDefinitions {
     const flattened: Record<string, ArgumentDefinition> = {};
-    for (const [name, definition] of Object.entries(definitions)) {
-        const key = groupedKey(prefix, name);
-        if (isArgumentGroupDefinition(definition)) {
-            Object.assign(flattened, flattenGroupedArgumentDefinitions(definition.args, key));
-            continue;
-        }
-        flattened[key] = definition;
-    }
+    flattenGroupedArgumentDefinitionsInto(flattened, definitions, prefix);
     return flattened;
 }
 
-/** Flatten grouped definitions while preserving unparsed leaves as unknown boundary input. */
-export function flattenUnknownGroupedArgumentDefinitions(
-    definitions: Readonly<Record<string, unknown>>,
-    prefix = "",
+function flattenGroupedArgumentValuesUnchecked(
+    values: Readonly<Record<string, unknown>>,
+    definitions: ArgumentDefinitions,
+    prefix: string,
 ): Record<string, unknown> {
     const flattened: Record<string, unknown> = {};
     for (const [name, definition] of Object.entries(definitions)) {
         const key = groupedKey(prefix, name);
-        if (isRecord(definition) && ARGUMENT_GROUP in definition && isRecord(definition.args)) {
-            Object.assign(
-                flattened,
-                flattenUnknownGroupedArgumentDefinitions(definition.args, key),
-            );
+        if (isArgumentGroupDefinition(definition)) {
+            const nested = values[name];
+            if (isRecord(nested)) {
+                Object.assign(
+                    flattened,
+                    flattenGroupedArgumentValuesUnchecked(nested, definition.args, key),
+                );
+            }
             continue;
         }
-        flattened[key] = definition;
+        flattened[key] = values[name];
     }
     return flattened;
 }
@@ -171,22 +220,25 @@ export function flattenGroupedArgumentValues(
     definitions: ArgumentDefinitions,
     prefix = "",
 ): Record<string, unknown> {
-    const flattened: Record<string, unknown> = {};
+    flattenGroupedArgumentDefinitions(definitions, prefix);
+    return flattenGroupedArgumentValuesUnchecked(values, definitions, prefix);
+}
+
+function expandGroupedArgumentValuesUnchecked(
+    values: Readonly<Record<string, unknown>>,
+    definitions: ArgumentDefinitions,
+    prefix: string,
+): Record<string, unknown> {
+    const expanded: Record<string, unknown> = {};
     for (const [name, definition] of Object.entries(definitions)) {
         const key = groupedKey(prefix, name);
         if (isArgumentGroupDefinition(definition)) {
-            const nested = values[name];
-            if (isRecord(nested)) {
-                Object.assign(
-                    flattened,
-                    flattenGroupedArgumentValues(nested, definition.args, key),
-                );
-            }
+            expanded[name] = expandGroupedArgumentValuesUnchecked(values, definition.args, key);
             continue;
         }
-        flattened[key] = values[name];
+        expanded[name] = values[key];
     }
-    return flattened;
+    return expanded;
 }
 
 /** Expand dotted parser values back into nested handler values using the definition tree. */
@@ -195,14 +247,6 @@ export function expandGroupedArgumentValues(
     definitions: ArgumentDefinitions,
     prefix = "",
 ): Record<string, unknown> {
-    const expanded: Record<string, unknown> = {};
-    for (const [name, definition] of Object.entries(definitions)) {
-        const key = groupedKey(prefix, name);
-        if (isArgumentGroupDefinition(definition)) {
-            expanded[name] = expandGroupedArgumentValues(values, definition.args, key);
-            continue;
-        }
-        expanded[name] = values[key];
-    }
-    return expanded;
+    flattenGroupedArgumentDefinitions(definitions, prefix);
+    return expandGroupedArgumentValuesUnchecked(values, definitions, prefix);
 }

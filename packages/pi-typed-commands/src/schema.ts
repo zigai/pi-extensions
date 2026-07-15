@@ -1,6 +1,6 @@
 import {
     flattenGroupedArgumentDefinitions,
-    flattenUnknownGroupedArgumentDefinitions,
+    collectUnknownGroupedArgumentDefinitions,
 } from "./arguments.js";
 import { createDefinitionDiagnostic } from "./diagnostics.js";
 import { casesHandled } from "./exhaustive.js";
@@ -1210,7 +1210,23 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
         return diagnostics;
     }
 
-    const flatDefinitions = flattenUnknownGroupedArgumentDefinitions(definitions);
+    const entries = collectUnknownGroupedArgumentDefinitions(definitions);
+    const flatDefinitions: Record<string, unknown> = {};
+    const sourcePaths = new Map<string, readonly string[]>();
+    for (const entry of entries) {
+        const firstPath = sourcePaths.get(entry.key);
+        if (firstPath !== undefined) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.name.duplicate-path",
+                `${entry.key}: canonical argument path is defined by both ${firstPath.join(" > ")} and ${entry.sourcePath.join(" > ")}`,
+                entry.sourcePath,
+            );
+            continue;
+        }
+        sourcePaths.set(entry.key, entry.sourcePath);
+        flatDefinitions[entry.key] = entry.definition;
+    }
     const validDefinitions: Record<string, ArgumentDefinition> = {};
     const names = Object.keys(flatDefinitions);
     const flags = new Map<string, string>();

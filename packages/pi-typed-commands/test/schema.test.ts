@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import { flattenGroupedArgumentDefinitions, group } from "../src/arguments.js";
 import { compileTypedCommandDefinition } from "../src/compiler.js";
 import {
     applyArgumentDefaults,
@@ -198,6 +199,44 @@ describe("typed command schema", () => {
                     diagnostic.path.join(".") === "range.min",
             ),
         );
+    });
+
+    it("rejects colliding grouped and literal canonical paths in either insertion order", () => {
+        const nestedRequired = group({
+            port: { type: "number", required: true },
+        });
+        const nestedDefaulted = group({
+            port: { type: "number", default: 5432 },
+        });
+        const literalRequired = { type: "string", required: true } as const;
+        const literalOptional = { type: "string" } as const;
+        const cases = [
+            { database: nestedRequired, "database.port": literalRequired },
+            { "database.port": literalRequired, database: nestedRequired },
+            { database: nestedDefaulted, "database.port": literalOptional },
+            { "database.port": literalOptional, database: nestedDefaulted },
+        ];
+
+        for (const args of cases) {
+            const diagnostics = validateArgumentDefinitions(args);
+            const compiled = compileTypedCommandDefinition({
+                name: "canonical-path-collision",
+                description: "Canonical path collision",
+                args,
+            });
+
+            const collisions = diagnostics.filter(
+                (diagnostic) => diagnostic.code === "argument.name.duplicate-path",
+            );
+            assert.equal(collisions.length, 1);
+            assert.match(collisions[0]?.message ?? "", /database > port/);
+            assert.match(collisions[0]?.message ?? "", /database\.port/);
+            assert.equal(compiled.ok, false);
+            assert.throws(
+                () => flattenGroupedArgumentDefinitions(args),
+                /Duplicate canonical argument path database\.port/,
+            );
+        }
     });
 
     it("returns diagnostics for malformed runtime definitions instead of throwing", () => {
