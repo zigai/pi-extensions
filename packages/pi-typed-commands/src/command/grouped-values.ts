@@ -25,9 +25,7 @@ function expandValidatedGroupedValues<TDefinitions extends ArgumentDefinitions>(
     definitions: TDefinitions,
 ): ParsedArgumentDraft<TDefinitions>;
 function expandValidatedGroupedValues<TDefinitions extends ArgumentDefinitions>(
-    values:
-        | InferArguments<FlatArgumentDefinitions>
-        | ParsedArgumentDraft<FlatArgumentDefinitions>,
+    values: InferArguments<FlatArgumentDefinitions> | ParsedArgumentDraft<FlatArgumentDefinitions>,
     definitions: TDefinitions,
 ): InferArguments<TDefinitions> | ParsedArgumentDraft<TDefinitions> {
     let expanded: Record<string, unknown> = { ...values };

@@ -195,11 +195,7 @@ export function quoteSerializedValue(value: string, force = false): string {
     return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
-function serializeValue(
-    definition: ArgumentDefinition,
-    name: string,
-    value: unknown,
-): string[] {
+function serializeValue(definition: ArgumentDefinition, name: string, value: unknown): string[] {
     if (value === undefined) {
         return [];
     }
@@ -230,9 +226,7 @@ function serializeValue(
             if (typeof value !== "string") {
                 return [];
             }
-            return [
-                `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value)}`,
-            ];
+            return [`${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value)}`];
         case "number":
             if (typeof value !== "number") {
                 return [];

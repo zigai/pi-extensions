@@ -8,8 +8,11 @@ import {
     type MultiArgumentValue,
     multiEnumArgument,
     numberArgument,
+    parseTypedCommandArgs,
     stringArgument,
+    toTypedParseResult,
 } from "../src/index.js";
+import { compileTypedCommandDefinition } from "../src/compiler.js";
 
 function expectType<T>(_value: T): void {}
 
@@ -170,6 +173,22 @@ describe("compile-time API inference", () => {
             };
             // @ts-expect-error public definition maps are readonly.
             definitions.ref = stringArgument();
+
+            const actualArgs = { count: numberArgument({ required: true }) };
+            const unrelatedArgs = { branch: stringArgument({ required: true }) };
+            const compiled = compileTypedCommandDefinition({
+                name: "actual-grammar",
+                description: "Actual grammar",
+                args: actualArgs,
+            });
+            if (compiled.ok) {
+                const parsed = parseTypedCommandArgs(
+                    { args: compiled.command.args, compiled: compiled.command },
+                    "--count 2",
+                );
+                // @ts-expect-error conversion cannot select definitions unrelated to its grammar.
+                toTypedParseResult<typeof unrelatedArgs>(compiled.command, parsed);
+            }
         };
         void assertPublicContracts;
 

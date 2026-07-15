@@ -164,7 +164,7 @@ export function requireTestWidgetFactory(value: unknown): TestWidgetFactory {
     return value;
 }
 
-export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

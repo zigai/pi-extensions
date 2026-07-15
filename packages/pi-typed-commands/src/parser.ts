@@ -1,8 +1,5 @@
 import { quoteSerializedValue } from "./behavior.js";
-import {
-    expandGroupedArgumentValues,
-    hasArgumentGroups,
-} from "./arguments.js";
+import { expandGroupedArgumentValues, hasArgumentGroups } from "./arguments.js";
 import { compileTypedCommandGrammar } from "./compiler.js";
 import { normalizeFlagName } from "./names.js";
 import {
@@ -689,16 +686,14 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
     const grammar = commandGrammar(command);
     const flatValues = serializableRecord(values);
     const parts: string[] = [];
-    const restArgument = grammar.arguments.find(
-        (argument) => argument.definition.rest === true,
-    );
-    const serializationOrder =
-        restArgument === undefined
-            ? grammar.arguments
-            : [
-                  ...grammar.arguments.filter((argument) => argument !== restArgument),
-                  restArgument,
-              ];
+    const restArgument = grammar.arguments.find((argument) => argument.definition.rest === true);
+    let serializationOrder = grammar.arguments;
+    if (restArgument !== undefined) {
+        serializationOrder = [
+            ...grammar.arguments.filter((argument) => argument !== restArgument),
+            restArgument,
+        ];
+    }
     for (const argument of serializationOrder) {
         const value = flatValues[argument.key];
         if (isPositionalArgument(argument.definition)) {

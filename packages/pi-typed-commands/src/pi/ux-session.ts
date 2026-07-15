@@ -1,7 +1,4 @@
-import type {
-    ExtensionAPI,
-    ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../form/open.js";
 import { parseTypedCommandArgs, serializeTypedCommandArgs } from "../parser.js";
@@ -9,10 +6,7 @@ import type { TypedCommandRegistry } from "../registry.js";
 import { isFormOnlyArgument } from "../schema.js";
 import { isTypedSkillCommand } from "../skills/command.js";
 import type { TypedCommandUxOptions } from "../types.js";
-import {
-    createPiCompletionCapabilities,
-    getTypedAutocompleteSuggestions,
-} from "./completions.js";
+import { createPiCompletionCapabilities, getTypedAutocompleteSuggestions } from "./completions.js";
 import {
     commandDisplayName,
     commandInvocationForEditorText,
@@ -86,10 +80,11 @@ async function openEditorCommandForm(
     }
 
     if (command.target?.kind !== "extension") {
-        if (isCurrent()) ctx.ui.notify(
-            `Typed command /${command.name} does not have an extension handler.`,
-            "error",
-        );
+        if (isCurrent())
+            ctx.ui.notify(
+                `Typed command /${command.name} does not have an extension handler.`,
+                "error",
+            );
         return;
     }
 

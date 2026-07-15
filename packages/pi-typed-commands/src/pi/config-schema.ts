@@ -235,9 +235,7 @@ export const PiTypedCommandsConfigSchema = Type.Object(
 
 /** Parsed extension configuration after TypeBox has checked the JSON boundary value. */
 export type PiTypedCommandsConfig = Static<typeof PiTypedCommandsConfigSchema>;
-export type PiTypedCommandsAppearanceConfig = NonNullable<
-    PiTypedCommandsConfig["appearance"]
->;
+export type PiTypedCommandsAppearanceConfig = NonNullable<PiTypedCommandsConfig["appearance"]>;
 
 export function piTypedCommandsConfigJsonSchema(): unknown {
     const schema = structuredClone(PiTypedCommandsConfigSchema);

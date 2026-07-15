@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import type {
-    ExtensionAPI,
-    ExtensionCommandContext,
-    ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { defineTypedCommand } from "../src/command/definition.js";
 import { registerTypedCommand } from "../src/pi/register.js";
 import {
@@ -15,13 +11,18 @@ import { resolveTypedCommandUxOptions } from "../src/pi/settings.js";
 import { TypedCommandUxSession } from "../src/pi/ux-session.js";
 import { createTypedCommandRegistry } from "../src/registry.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
+import {
+    createTestExtensionApi,
+    createTestExtensionCommandContext,
+    createTestExtensionContext,
+} from "./pi-test-adapter.js";
 
 describe("Pi form-only arguments", () => {
     it("delivers staged expanded-form values exactly once to the registered handler", async () => {
         let commandHandler:
             | ((rawArgs: string, ctx: ExtensionCommandContext) => Promise<void>)
             | undefined;
-        const pi = {
+        const pi = createTestExtensionApi({
             registerCommand(
                 _name: string,
                 options: {
@@ -30,7 +31,7 @@ describe("Pi form-only arguments", () => {
             ) {
                 commandHandler = options.handler;
             },
-        } as unknown as ExtensionAPI;
+        });
         const received: Array<Record<string, unknown>> = [];
         const command = defineTypedCommand({
             name: "form-only-staging-test",
@@ -49,13 +50,13 @@ describe("Pi form-only arguments", () => {
             },
         });
         const handle = registerTypedCommand(pi, command);
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             cwd: process.cwd(),
             hasUI: false,
             isProjectTrusted: () => false,
             mode: "print",
             ui: { notify() {}, setEditorText() {} },
-        } as unknown as ExtensionCommandContext;
+        });
         const cleanup = registerSubmittedInvalidCommandHandler(
             ctx,
             resolveTypedCommandUxOptions(),
@@ -105,13 +106,11 @@ describe("Pi form-only arguments", () => {
         };
         registry.register(command);
 
-        let terminalInput:
-            | ((data: string) => { consume?: boolean } | undefined)
-            | undefined;
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
         let customCalls = 0;
         let editorText = "/double-tab-form-test Build";
-        const pi = {} as ExtensionAPI;
-        const ctx = {
+        const pi = createTestExtensionApi();
+        const ctx = createTestExtensionContext({
             cwd: process.cwd(),
             hasUI: true,
             isProjectTrusted: () => false,
@@ -124,9 +123,7 @@ describe("Pi form-only arguments", () => {
                 },
                 getEditorText: () => editorText,
                 notify() {},
-                onTerminalInput(
-                    handler: (data: string) => { consume?: boolean } | undefined,
-                ) {
+                onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
                     terminalInput = handler;
                     return () => {
                         terminalInput = undefined;
@@ -137,12 +134,8 @@ describe("Pi form-only arguments", () => {
                 },
                 setWidget() {},
             },
-        } as unknown as ExtensionContext;
-        const session = new TypedCommandUxSession(
-            pi,
-            { formTrigger: "double-tab" },
-            registry,
-        );
+        });
+        const session = new TypedCommandUxSession(pi, { formTrigger: "double-tab" }, registry);
 
         try {
             await session.start(ctx);

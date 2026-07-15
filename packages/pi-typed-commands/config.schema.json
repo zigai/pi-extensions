@@ -474,19 +474,29 @@
               "type": "object",
               "properties": {
                 "focusedField": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "selectedCheckbox": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "unselectedCheckbox": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "selectedRadio": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "unselectedRadio": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^\\r\\n]*$"
                 }
               },
               "additionalProperties": true,
@@ -502,22 +512,34 @@
               "type": "object",
               "properties": {
                 "leftPadding": {
-                  "type": "number"
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 12
                 },
                 "fieldGap": {
-                  "type": "number"
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 12
                 },
                 "minNameWidth": {
-                  "type": "number"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 80
                 },
                 "maxNameWidth": {
-                  "type": "number"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 120
                 },
                 "minValueWidth": {
-                  "type": "number"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 80
                 },
                 "maxValueWidth": {
-                  "type": "number"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 120
                 },
                 "descriptions": {
                   "enum": ["inline", "focused", "hidden"]
@@ -925,22 +947,28 @@
               "type": "object",
               "properties": {
                 "tokenPrefix": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "tokenSuffix": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "groupSeparator": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "itemSeparator": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "typeSeparator": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
                 },
                 "valueSeparator": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[^\\r\\n]*$"
                 }
               },
               "additionalProperties": true,

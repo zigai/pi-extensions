@@ -1,18 +1,8 @@
 import { cloneAndFreezeDefinitions, compileTypedCommandDefinition } from "../compiler.js";
-import {
-    parseTypedCommandArgs,
-    serializeTypedCommandArgs,
-    toTypedParseResult,
-} from "../parser.js";
+import { parseTypedCommandArgs, serializeTypedCommandArgs, toTypedParseResult } from "../parser.js";
 import { formatCommandUsage, formatDetailedHelp } from "../usage.js";
-import type {
-    ArgumentDefinitions,
-    SerializableArgumentValues,
-} from "../types.js";
-import type {
-    DefinedTypedCommand,
-    TypedCommandDefinition,
-} from "../pi/command-types.js";
+import type { ArgumentDefinitions, SerializableArgumentValues } from "../types.js";
+import type { DefinedTypedCommand, TypedCommandDefinition } from "../pi/command-types.js";
 import { maybeFlattenGroupedValues } from "./grouped-values.js";
 import { definitionError, registeredCommandForDefinition } from "./registered-command.js";
 

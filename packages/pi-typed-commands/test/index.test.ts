@@ -436,6 +436,37 @@ Body
             replaceTypedSkillMetadata([]);
         }
     });
+
+    it("lets unexpected skill refresh defects reach the framework error boundary", () => {
+        const sourceInfo: {
+            readonly path: string;
+            readonly source: string;
+            readonly scope: "temporary";
+            readonly origin: "top-level";
+        } = {
+            get path(): string {
+                throw new Error("unexpected source metadata defect");
+            },
+            source: "test",
+            scope: "temporary",
+            origin: "top-level",
+        };
+        const pi = createTestExtensionApi({
+            getCommands() {
+                return [
+                    {
+                        name: "skill:defect-proof",
+                        description: "Defect proof",
+                        source: "skill",
+                        sourceInfo,
+                    },
+                ];
+            },
+        });
+
+        assert.throws(() => refreshTypedSkills(pi, registry), /unexpected source metadata defect/);
+        assert.equal(getTypedSkillDiagnostics("skill:defect-proof"), undefined);
+    });
 });
 
 describe("typed command live helper", () => {

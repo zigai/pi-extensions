@@ -3,10 +3,7 @@ import { describe, it } from "vitest";
 import { CURSOR_MARKER } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
 import { DEFAULT_PI_TYPED_COMMANDS_APPEARANCE } from "../src/pi/presentation-config.js";
-import type {
-    FlatArgumentDefinitions,
-    ParsedCommandArguments,
-} from "../src/types.js";
+import type { FlatArgumentDefinitions, ParsedCommandArguments } from "../src/types.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 import {
     createTestExtensionCommandContext,

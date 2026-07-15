@@ -24,13 +24,11 @@ import {
     resolvePiTypedCommandsConfigSnapshot,
 } from "../src/pi/settings.js";
 import { getPiTypedCommandRegistry } from "../src/pi/registry.js";
+import { resolveTypedCommandSessionOptions } from "../src/pi/session-state.js";
 import { typedSkillCommandFromMetadata } from "../src/skills.js";
 import { formatDetailedHelp } from "../src/usage.js";
 import { installTypedCommandUx, registerTypedCommand } from "../src/index.js";
-import type {
-    FlatArgumentDefinitions,
-    ParsedCommandArguments,
-} from "../src/types.js";
+import type { FlatArgumentDefinitions, ParsedCommandArguments } from "../src/types.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 import {
     createTestExtensionApi,
@@ -366,30 +364,46 @@ describe("global presentation config", () => {
     });
 
     it("classifies invalid bounded appearance values instead of normalizing them", () => {
-        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-invalid-layout-agent-"));
-        writeGlobalConfig(agentDir, {
-            appearance: {
-                form: {
-                    layout: { leftPadding: 1.5, minValueWidth: 80, maxValueWidth: 20 },
+        const invalidLayouts = [{ leftPadding: 1.5 }, { minValueWidth: 80, maxValueWidth: 20 }];
+        for (const layout of invalidLayouts) {
+            const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-invalid-layout-agent-"));
+            writeGlobalConfig(agentDir, {
+                appearance: {
+                    form: { layout },
                 },
-            },
-        });
-
-        withAgentDir(agentDir, () => {
-            const snapshot = resolvePiTypedCommandsConfigSnapshot({
-                cwd: process.cwd(),
-                projectTrusted: false,
             });
 
-            assert.equal(snapshot.global.status, "schema-invalid");
-            assert.deepEqual(
-                snapshot.diagnostics.map((diagnostic) => diagnostic.code),
-                ["config.schema.invalid"],
-            );
-            assert.deepEqual(
-                snapshot.settings.appearance.form.layout,
-                DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON.appearance.form.layout,
-            );
+            withAgentDir(agentDir, () => {
+                const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                    cwd: process.cwd(),
+                    projectTrusted: false,
+                });
+
+                assert.equal(snapshot.global.status, "schema-invalid");
+                assert.deepEqual(
+                    snapshot.diagnostics.map((diagnostic) => diagnostic.code),
+                    ["config.schema.invalid"],
+                );
+                assert.deepEqual(
+                    snapshot.settings.appearance.form.layout,
+                    DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON.appearance.form.layout,
+                );
+            });
+        }
+    });
+
+    it("reuses one resolved configuration snapshot for a command context", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-session-snapshot-agent-"));
+        writeGlobalConfig(agentDir, { helperPlacement: "belowEditor" });
+
+        withAgentDir(agentDir, () => {
+            const ctx = createTestExtensionContext({ isProjectTrusted: () => false });
+            const first = resolveTypedCommandSessionOptions(ctx);
+            writeGlobalConfig(agentDir, { helperPlacement: "aboveEditor" });
+            const second = resolveTypedCommandSessionOptions(ctx);
+
+            assert.equal(first, second);
+            assert.equal(second.helperPlacement, "belowEditor");
         });
     });
 

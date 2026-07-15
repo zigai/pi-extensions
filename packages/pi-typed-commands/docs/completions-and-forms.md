@@ -55,7 +55,8 @@ complete: () => [
 If no replacement is supplied, the adapter quotes inserted values when needed.
 
 Set `replaceRange` when a provider has computed the exact source span to replace. The range is
-relative to the raw argument string and must accompany a `replacement` value.
+relative to the raw argument string and is preserved in library-owned completion results for
+adapters that support per-item ranges.
 
 ## Built-in completion sources
 

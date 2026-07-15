@@ -446,10 +446,7 @@ export type CompiledArgument<TValue extends ArgumentValue = ArgumentValue> = {
     validate(value: unknown): readonly ParseIssue[];
     serialize(value: unknown): readonly string[];
     describe(): ArgumentDescription;
-    complete?(
-        query: string,
-        context: TypedCompletionContext,
-    ): readonly TypedCompletionItem[];
+    complete?(query: string, context: TypedCompletionContext): readonly TypedCompletionItem[];
     completeAsync?(
         query: string,
         context: TypedCompletionContext,

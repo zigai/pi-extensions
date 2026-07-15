@@ -20,11 +20,15 @@ type ArgumentOptions<TDefinition extends ArgumentDefinition> = DistributiveOmit<
     "type"
 >;
 
-type EnumArgumentOptions<TValues extends readonly string[]> =
-    DistributiveOmit<EnumArgumentDefinition<TValues>, "type" | "values">;
+type EnumArgumentOptions<TValues extends readonly string[]> = DistributiveOmit<
+    EnumArgumentDefinition<TValues>,
+    "type" | "values"
+>;
 
-type MultiEnumArgumentOptions<TValues extends readonly string[]> =
-    DistributiveOmit<MultiEnumArgumentDefinition<TValues>, "type" | "values">;
+type MultiEnumArgumentOptions<TValues extends readonly string[]> = DistributiveOmit<
+    MultiEnumArgumentDefinition<TValues>,
+    "type" | "values"
+>;
 
 /** Create a string argument definition while preserving literal option types for inference. */
 export function stringArgument<const TOptions extends ArgumentOptions<StringArgumentDefinition>>(
@@ -149,11 +153,7 @@ export function flattenUnknownGroupedArgumentDefinitions(
     const flattened: Record<string, unknown> = {};
     for (const [name, definition] of Object.entries(definitions)) {
         const key = groupedKey(prefix, name);
-        if (
-            isRecord(definition) &&
-            ARGUMENT_GROUP in definition &&
-            isRecord(definition.args)
-        ) {
+        if (isRecord(definition) && ARGUMENT_GROUP in definition && isRecord(definition.args)) {
             Object.assign(
                 flattened,
                 flattenUnknownGroupedArgumentDefinitions(definition.args, key),

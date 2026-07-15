@@ -10,9 +10,12 @@ import {
 } from "../src/completions.js";
 import {
     formatCommandUsage,
+    group,
     parseTypedCommandArgs,
     serializeTypedCommandArgs,
+    toTypedParseResult,
 } from "../src/index.js";
+import { compileTypedCommandDefinition } from "../src/compiler.js";
 import { createTypedCommandRegistry } from "../src/registry.js";
 import { createPiCompletionCapabilities } from "../src/pi/completions.js";
 import type { ArgumentDefinition } from "../src/types.js";
@@ -151,6 +154,61 @@ const branchCommand: RegisteredTypedCommand = {
 };
 
 describe("parseTypedCommandArgs", () => {
+    it("rejects raw parse details paired with a different compiled grammar", () => {
+        const first = compileTypedCommandDefinition({
+            name: "first-proof",
+            description: "First proof",
+            args: { count: { type: "number", required: true } },
+        });
+        const second = compileTypedCommandDefinition({
+            name: "second-proof",
+            description: "Second proof",
+            args: { branch: { type: "string", required: true } },
+        });
+        if (!first.ok || !second.ok) {
+            assert.fail("expected both proof grammars to compile");
+        }
+        const parsed = parseTypedCommandArgs(
+            { args: first.command.args, compiled: first.command },
+            "--count 2",
+        );
+
+        assert.throws(
+            () => toTypedParseResult(second.command, parsed),
+            /different compiled grammar/,
+        );
+    });
+
+    it("revalidates grouped leaves before returning mapped typed values", () => {
+        const compiled = compileTypedCommandDefinition({
+            name: "grouped-proof",
+            description: "Grouped proof",
+            args: {
+                database: group({ port: { type: "number", required: true } }),
+            },
+        });
+        if (!compiled.ok) {
+            assert.fail("expected grouped proof grammar to compile");
+        }
+        const parsed = parseTypedCommandArgs(
+            { args: compiled.command.args, compiled: compiled.command },
+            "--database-port 5432",
+        );
+        const tampered = {
+            ...parsed,
+            grammar: compiled.command,
+            values: { "database.port": "not-a-number" },
+        };
+
+        const result = toTypedParseResult(compiled.command, tampered);
+
+        assert.equal(result.status, "error");
+        if (result.status === "error") {
+            assert.equal(result.issues[0]?.kind, "invalid-value");
+            assert.deepEqual(result.partial, { database: { port: undefined } });
+        }
+    });
+
     it("parses named enum, string, boolean, and number args", () => {
         const parsed = parseTypedCommandArgs(
             command,
@@ -589,6 +647,44 @@ describe("formatCommandUsage", () => {
 });
 
 describe("getTypedAutocompleteSuggestions", () => {
+    it("keeps independently composed command registries isolated", () => {
+        const left = createTypedCommandRegistry();
+        const right = createTypedCommandRegistry();
+
+        left.register(command);
+
+        assert.equal(left.get(command.name)?.name, command.name);
+        assert.equal(right.get(command.name), undefined);
+        assert.deepEqual(right.list(), []);
+    });
+
+    it("does not start async providers from synchronous editor completion", async () => {
+        let calls = 0;
+        const asyncCommand: RegisteredTypedCommand = {
+            ...command,
+            name: "async-editor-proof",
+            args: {
+                ref: {
+                    type: "string",
+                    async completeAsync() {
+                        calls += 1;
+                        return [{ value: "feature" }];
+                    },
+                },
+            },
+        };
+
+        await withRegisteredCommandAsync(asyncCommand, async () => {
+            const line = "/async-editor-proof --ref f";
+            const editor = getTypedAutocompleteSuggestions([line], 0, line.length);
+
+            assert.equal(editor, undefined);
+            assert.equal(calls, 0);
+            await getTypedArgumentCompletions(asyncCommand, "--ref f");
+            assert.equal(calls, 1);
+        });
+    });
+
     it("suggests flags for typed commands", () => {
         withRegisteredCommand(command, () => {
             const suggestions = getTypedAutocompleteSuggestions(["/deploy --e"], 0, 11);
@@ -673,6 +769,7 @@ describe("getTypedAutocompleteSuggestions", () => {
             {
                 value: '"provider-selected value"',
                 label: "feature branch",
+                replaceRange: { start: 6, end: 13 },
                 replacementReady: true,
             },
         ]);
@@ -683,8 +780,16 @@ describe("getTypedAutocompleteSuggestions", () => {
 
             assert.equal(editorSuggestions?.prefix, "feature");
             assert.deepEqual(
-                editorSuggestions?.items.map((item) => item.value),
-                ['"provider-selected value"'],
+                editorSuggestions?.items.map((item) => ({
+                    value: item.value,
+                    replaceRange: item.replaceRange,
+                })),
+                [
+                    {
+                        value: '"provider-selected value"',
+                        replaceRange: { start: 6, end: 13 },
+                    },
+                ],
             );
         });
     });

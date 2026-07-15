@@ -85,10 +85,7 @@ describe("typed command schema", () => {
 
         assert.ok(codes.includes("argument.form-only.required"));
         assert.ok(codes.includes("argument.form-only.default"));
-        assert.equal(
-            codes.filter((code) => code === "argument.form-only.cli-metadata").length,
-            4,
-        );
+        assert.equal(codes.filter((code) => code === "argument.form-only.cli-metadata").length, 4);
     });
 
     it("coerces and validates values consistently", () => {

@@ -1,8 +1,5 @@
 import { formatArgumentFlagName, isPositionalArgument } from "../schema.js";
-import type {
-    PiTypedCommandLookup,
-    RegisteredTypedCommand,
-} from "./command-types.js";
+import type { PiTypedCommandLookup, RegisteredTypedCommand } from "./command-types.js";
 import { commandInvocationForEditorText } from "./editor-invocation.js";
 import { commandArgumentEntries } from "./helper.js";
 

@@ -10,11 +10,7 @@ import {
     isPositionalArgument,
     orderedCommandArgumentEntries,
 } from "../schema.js";
-import type {
-    ArgumentDefinition,
-    ArgumentValue,
-    ParseIssue,
-} from "../types.js";
+import type { ArgumentDefinition, ArgumentValue, ParseIssue } from "../types.js";
 import type { RegisteredTypedCommand } from "./command-types.js";
 import {
     commandDisplayName,

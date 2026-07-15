@@ -9,10 +9,7 @@ import {
     type CompletionScheduler,
 } from "../completions.js";
 import type { TypedCommandLookup } from "../registry.js";
-import type {
-    ArgumentDefinitions,
-    TypedCompletionItem,
-} from "../types.js";
+import type { ArgumentDefinitions, TypedCompletionItem } from "../types.js";
 import type { RegisteredTypedCommand } from "./command-types.js";
 
 class PiCompletionScheduler implements CompletionScheduler {
@@ -126,9 +123,7 @@ function toAutocompleteItem(item: TypedCompletionItem): AutocompleteItem {
     return result;
 }
 
-function toAutocompleteSuggestions(
-    decision: CompletionDecision,
-): AutocompleteSuggestions {
+function toAutocompleteSuggestions(decision: CompletionDecision): AutocompleteSuggestions {
     return {
         items: decision.items.map(toAutocompleteItem),
         prefix: decision.prefix,

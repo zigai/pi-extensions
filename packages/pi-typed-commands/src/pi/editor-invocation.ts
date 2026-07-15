@@ -1,8 +1,5 @@
 import { parseSlashCommandText } from "../invocation.js";
-import type {
-    PiTypedCommandLookup,
-    RegisteredTypedCommand,
-} from "./command-types.js";
+import type { PiTypedCommandLookup, RegisteredTypedCommand } from "./command-types.js";
 
 /** A typed command invocation parsed from the Pi editor's first line and trailing body. */
 export type EditorTypedCommandInvocation = {

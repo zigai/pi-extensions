@@ -1,8 +1,5 @@
 import type { TypedSkillDiagnostics } from "./skills/types.js";
-import type {
-    ArgumentDefinitions,
-    TypedCommandLookup,
-} from "./types.js";
+import type { ArgumentDefinitions, TypedCommandLookup } from "./types.js";
 import type { RegisteredTypedCommand } from "./pi/command-types.js";
 
 export type { TypedCommandLookup } from "./types.js";

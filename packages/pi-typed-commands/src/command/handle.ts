@@ -1,7 +1,4 @@
-import type {
-    ArgumentDefinitions,
-    SerializableArgumentValues,
-} from "../types.js";
+import type { ArgumentDefinitions, SerializableArgumentValues } from "../types.js";
 import type {
     DefinedTypedCommand,
     RegisteredTypedCommand,

@@ -1,7 +1,4 @@
-import type {
-    ExtensionCommandContext,
-    ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type {
     ArgumentDefinitions,
     CoreRegisteredTypedCommand,
@@ -56,16 +53,15 @@ export type InvocationTarget<TDefinitions extends ArgumentDefinitions> =
       };
 
 /** Pi-owned command metadata layered over the framework-independent command snapshot. */
-export type RegisteredTypedCommand<
-    TDefinitions extends ArgumentDefinitions = ArgumentDefinitions,
-> = CoreRegisteredTypedCommand<TDefinitions> & {
-    readonly formTitle?: TypedCommandFormTitle;
-    readonly target?: InvocationTarget<FlatArgumentDefinitions>;
-    readonly registrationId?: symbol;
-    readonly ownerId?: symbol;
-    readonly formSymbols: Required<TypedCommandFormSymbols>;
-    readonly source?: "extension" | "skill";
-};
+export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
+    CoreRegisteredTypedCommand<TDefinitions> & {
+        readonly formTitle?: TypedCommandFormTitle;
+        readonly target?: InvocationTarget<FlatArgumentDefinitions>;
+        readonly registrationId?: symbol;
+        readonly ownerId?: symbol;
+        readonly formSymbols: Required<TypedCommandFormSymbols>;
+        readonly source?: "extension" | "skill";
+    };
 
 export type PiTypedCommandLookup = {
     get(name: string): RegisteredTypedCommand | undefined;

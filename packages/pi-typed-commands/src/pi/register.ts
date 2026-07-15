@@ -52,11 +52,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     if (rawArgs.length > 0) {
         editorText += ` ${rawArgs}`;
     }
-    const expandedFormArguments = takeExpandedFormArguments(
-        ctx,
-        invocationName,
-        editorText,
-    );
+    const expandedFormArguments = takeExpandedFormArguments(ctx, invocationName, editorText);
     if (expandedFormArguments !== undefined) {
         return expandedFormArguments;
     }

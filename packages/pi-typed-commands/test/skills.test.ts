@@ -12,7 +12,10 @@ import {
     typedSkillCommandFromMetadata,
     type TypedSkillMetadata,
 } from "../src/skills.js";
-import { isRecord } from "./pi-test-adapter.js";
+
+function isPrototypeSection(value: unknown): value is Readonly<Record<string, unknown>> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function diagnosticMessages(result: { diagnostics: readonly { message: string }[] }): string {
     return result.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
@@ -452,7 +455,7 @@ describe("renderTypedSkillInvocation", () => {
 
         assert.equal(pollutedOnPlainObject, undefined);
         assert.equal(Object.hasOwn(expanded, "__proto__"), true);
-        if (!isRecord(protoSection)) {
+        if (!isPrototypeSection(protoSection)) {
             assert.fail("expected the __proto__ section to remain a data record");
         }
         assert.equal(protoSection.polluted, "yes");

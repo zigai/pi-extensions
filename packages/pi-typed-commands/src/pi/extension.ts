@@ -1,7 +1,4 @@
-import type {
-    ExtensionAPI,
-    ExtensionFactory,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { TypedCommandUxOptions } from "../types.js";
 import {
     notifySkillDiagnosticsForText,

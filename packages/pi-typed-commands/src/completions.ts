@@ -468,12 +468,7 @@ function valueCompletionForPreviousFlag(
         }
         return mapValueItemsForInsertion(items);
     };
-    const items = argumentValueItemsForMode(
-        definition,
-        context.currentPrefix,
-        context,
-        mode,
-    );
+    const items = argumentValueItemsForMode(definition, context.currentPrefix, context, mode);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }

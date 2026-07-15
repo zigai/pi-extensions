@@ -1,8 +1,5 @@
 import { compileArgumentBehavior } from "./behavior.js";
-import {
-    flattenGroupedArgumentDefinitions,
-    isArgumentGroupDefinition,
-} from "./arguments.js";
+import { flattenGroupedArgumentDefinitions, isArgumentGroupDefinition } from "./arguments.js";
 import { diagnosticMessages } from "./diagnostics.js";
 import {
     createArgumentLookup,
