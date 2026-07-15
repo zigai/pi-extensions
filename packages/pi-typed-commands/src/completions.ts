@@ -35,11 +35,17 @@ export type CompletionScheduler = {
     ): Promise<T | undefined>;
 };
 
+export type CompletionTaskOwner = {
+    /** Retain the task until settlement and install rejection observation before returning. */
+    own(task: Promise<unknown>): void;
+};
+
 export type CompletionCapabilities = {
     readonly cwd: string;
     readonly paths: CompletionPathLookup;
     readonly commands: TypedCommandLookup;
     readonly scheduler: CompletionScheduler;
+    readonly completionTasks: CompletionTaskOwner;
 };
 
 type CommandLineContext = {
@@ -183,6 +189,13 @@ function flagItem(name: string, definition: ArgumentDefinition): TypedCompletion
     };
 }
 
+function hasCallableThen(value: unknown): boolean {
+    if ((typeof value !== "object" || value === null) && typeof value !== "function") {
+        return false;
+    }
+    return "then" in value && typeof value.then === "function";
+}
+
 function isPromiseLike<T>(value: T | Promise<T> | undefined): value is Promise<T> {
     return value instanceof Promise;
 }
@@ -277,7 +290,8 @@ function syncProviderArgumentValueItems(
 
     try {
         const completed: unknown = definition.complete(query, completionContext(context));
-        if (isPromiseLike(completed)) {
+        if (hasCallableThen(completed)) {
+            context.capabilities.completionTasks.own(Promise.resolve(completed));
             return [];
         }
         return mapProviderCompletionItems(completed);

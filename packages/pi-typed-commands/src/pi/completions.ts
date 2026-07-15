@@ -7,6 +7,7 @@ import {
     type CompletionCapabilities,
     type CompletionDecision,
     type CompletionScheduler,
+    type CompletionTaskOwner,
 } from "../completions.js";
 import type { TypedCommandLookup } from "../registry.js";
 import type { ArgumentDefinitions, TypedCompletionItem } from "../types.js";
@@ -54,6 +55,24 @@ class PiCompletionScheduler implements CompletionScheduler {
         }
     }
 }
+
+class PiCompletionTaskOwner implements CompletionTaskOwner {
+    private readonly pending = new Set<Promise<unknown>>();
+
+    own(task: Promise<unknown>): void {
+        this.pending.add(task);
+        task.then(
+            () => {
+                this.pending.delete(task);
+            },
+            () => {
+                this.pending.delete(task);
+            },
+        );
+    }
+}
+
+const piCompletionTaskOwner = new PiCompletionTaskOwner();
 
 async function completePathItems(query: string, cwd: string): Promise<TypedCompletionItem[]> {
     let raw = query;
@@ -109,6 +128,7 @@ export function createPiCompletionCapabilities(
             complete: completePathItems,
         },
         scheduler: new PiCompletionScheduler(signal),
+        completionTasks: piCompletionTaskOwner,
     };
 }
 

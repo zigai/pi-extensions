@@ -76,13 +76,13 @@ function malformedJavaScriptCompletionProvider(): StringCompletionProvider {
     return provider as StringCompletionProvider;
 }
 
-function getTypedAutocompleteSuggestions(lines: string[], cursorLine: number, cursorCol: number) {
-    return resolveTypedAutocompleteSuggestions(
-        lines,
-        cursorLine,
-        cursorCol,
-        completionCapabilities(),
-    );
+function getTypedAutocompleteSuggestions(
+    lines: string[],
+    cursorLine: number,
+    cursorCol: number,
+    capabilities: CompletionCapabilities = completionCapabilities(),
+) {
+    return resolveTypedAutocompleteSuggestions(lines, cursorLine, cursorCol, capabilities);
 }
 
 const command: RegisteredTypedCommand = {
@@ -743,6 +743,108 @@ describe("getTypedAutocompleteSuggestions", () => {
             await getTypedArgumentCompletions(asyncCommand, "--ref f");
             assert.equal(calls, 1);
         });
+    });
+
+    it("has Pi observe a rejected promise returned by a malformed sync provider", async () => {
+        const rejection = new Error("malformed sync provider rejected");
+        const ref = { type: "string" as const };
+        assert.equal(
+            Reflect.defineProperty(ref, "complete", {
+                value: () => Promise.reject(rejection),
+            }),
+            true,
+        );
+        const malformedCommand: RegisteredTypedCommand = {
+            ...command,
+            name: "rejected-sync-completion",
+            args: { ref },
+        };
+        const unhandledRejections: unknown[] = [];
+        const recordUnhandledRejection = (cause: unknown): void => {
+            unhandledRejections.push(cause);
+        };
+
+        process.on("unhandledRejection", recordUnhandledRejection);
+        try {
+            withRegisteredCommand(malformedCommand, () => {
+                const line = "/rejected-sync-completion --ref f";
+                assert.equal(getTypedAutocompleteSuggestions([line], 0, line.length), undefined);
+            });
+            await new Promise<void>((resolve) => {
+                setImmediate(resolve);
+            });
+            assert.deepEqual(unhandledRejections, []);
+        } finally {
+            process.removeListener("unhandledRejection", recordUnhandledRejection);
+        }
+    });
+
+    it("transfers a rejected thenable without starting completeAsync from sync completion", async () => {
+        const rejection = new Error("malformed thenable rejected");
+        const observedRejections: unknown[] = [];
+        const observedTasks: Promise<void>[] = [];
+        let asyncCalls = 0;
+        const ref = {
+            type: "string" as const,
+            async completeAsync() {
+                asyncCalls += 1;
+                return [{ value: "feature" }];
+            },
+        };
+        assert.equal(
+            Reflect.defineProperty(ref, "complete", {
+                value: () => ({
+                    // oxlint-disable-next-line unicorn/no-thenable -- This fixture deliberately simulates a malformed JavaScript provider returning a thenable.
+                    then(_resolve: (value: unknown) => void, reject: (cause: unknown) => void) {
+                        reject(rejection);
+                    },
+                }),
+            }),
+            true,
+        );
+        const malformedCommand: RegisteredTypedCommand = {
+            ...command,
+            name: "thenable-sync-completion",
+            args: { ref },
+        };
+        const capabilities: CompletionCapabilities = {
+            ...completionCapabilities(),
+            completionTasks: {
+                own(task) {
+                    observedTasks.push(
+                        task.then(
+                            () => undefined,
+                            (cause: unknown) => {
+                                observedRejections.push(cause);
+                            },
+                        ),
+                    );
+                },
+            },
+        };
+
+        withRegisteredCommand(malformedCommand, () => {
+            const line = "/thenable-sync-completion --ref f";
+            assert.equal(
+                getTypedAutocompleteSuggestions([line], 0, line.length, capabilities),
+                undefined,
+            );
+        });
+        assert.equal(asyncCalls, 0);
+        assert.equal(observedTasks.length, 1);
+        await Promise.all(observedTasks);
+        assert.deepEqual(observedRejections, [rejection]);
+
+        const suggestions = await getTypedArgumentCompletions(
+            malformedCommand,
+            "--ref f",
+            capabilities,
+        );
+        assert.equal(asyncCalls, 1);
+        assert.deepEqual(
+            suggestions?.map((item) => item.value),
+            ["feature"],
+        );
     });
 
     it("suggests flags for typed commands", () => {
