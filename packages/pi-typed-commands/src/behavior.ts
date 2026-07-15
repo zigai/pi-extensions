@@ -1,4 +1,3 @@
-import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { casesHandled } from "./exhaustive.js";
 import {
     coerceArgumentValue,
@@ -17,6 +16,7 @@ import type {
     ArgumentDescription,
     ParseIssue,
     TypedCompletionContext,
+    TypedCompletionItem,
 } from "./types.js";
 
 function occurrencePolicy(definition: ArgumentDefinition): "error" | "first" | "last" | "append" {
@@ -244,7 +244,10 @@ function serializeValue(
     }
 }
 
-function staticCompletionItems(definition: ArgumentDefinition, query: string): AutocompleteItem[] {
+function staticCompletionItems(
+    definition: ArgumentDefinition,
+    query: string,
+): TypedCompletionItem[] {
     return completionValuesForArgument(definition)
         .filter((value) => value.startsWith(query))
         .map((value) => ({ value, label: value }));
@@ -330,6 +333,10 @@ export function compileArgumentBehavior(
             definition.complete?.(query, context) ?? [];
     } else if (completionValuesForArgument(definition).length > 0) {
         compiled.complete = (query: string) => staticCompletionItems(definition, query);
+    }
+    if (definition.completeAsync !== undefined) {
+        compiled.completeAsync = (query: string, context: TypedCompletionContext) =>
+            definition.completeAsync?.(query, context) ?? Promise.resolve([]);
     }
     return Object.freeze(compiled);
 }

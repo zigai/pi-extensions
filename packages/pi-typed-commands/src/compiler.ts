@@ -18,8 +18,8 @@ import {
     type ArgumentUi,
     type CompileResult,
     type CompiledCommand,
+    type CoreCommandDefinition,
     type CustomArgumentWidget,
-    type TypedCommandDefinition,
 } from "./types.js";
 
 function cloneArgumentUi(ui: ArgumentUi): ArgumentUi {
@@ -65,6 +65,9 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     }
     if (definition.complete !== undefined) {
         cloned.complete = definition.complete;
+    }
+    if (definition.completeAsync !== undefined) {
+        cloned.completeAsync = definition.completeAsync;
     }
     if (
         cloned.type === "string" &&
@@ -202,7 +205,7 @@ class ImmutableReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
 
 /** Build immutable parser/completion metadata for an already accepted argument definition map. */
 export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDefinitions>(
-    definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
+    definition: CoreCommandDefinition<TDefinitions>,
 ): CompiledCommand<TDefinitions> {
     const definitions = cloneAndFreezeDefinitions(definition.args);
     const args = Object.freeze(flattenGroupedArgumentDefinitions(definitions));
@@ -231,7 +234,7 @@ export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDe
 
 /** Compile and validate a command definition into immutable parser/completion metadata. */
 export function compileTypedCommandDefinition<const TDefinitions extends ArgumentDefinitions>(
-    definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
+    definition: CoreCommandDefinition<TDefinitions>,
 ): CompileResult<TDefinitions> {
     const diagnostics = validateArgumentDefinitions(definition.args);
     if (diagnostics.length > 0) {
@@ -243,7 +246,7 @@ export function compileTypedCommandDefinition<const TDefinitions extends Argumen
 
 /** Compile a command definition or throw a startup-style error containing all diagnostics. */
 export function assertCompiles<const TDefinitions extends ArgumentDefinitions>(
-    definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
+    definition: CoreCommandDefinition<TDefinitions>,
 ): CompiledCommand<TDefinitions> {
     const result = compileTypedCommandDefinition(definition);
     if (result.ok) {

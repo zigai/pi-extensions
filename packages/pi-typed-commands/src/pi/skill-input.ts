@@ -1,8 +1,8 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { openArgumentForm } from "../form/open.js";
 import { combineSkillAdditionalInput, decideArgumentIssueAction } from "../invocation.js";
 import { parseTypedCommandArgs } from "../parser.js";
-import { getTypedSkillDiagnostics, replaceTypedSkillMetadata } from "../registry.js";
+import type { TypedCommandRegistry } from "../registry.js";
 import {
     isTypedSkillCommand,
     skillPathFromCommand,
@@ -26,7 +26,7 @@ type SkillParseResult = {
 type TypedSkillInputResult = { action: "handled" } | { action: "transform"; text: string };
 
 /** Refresh process-local typed skill metadata from Pi's current skill command list. */
-export function refreshTypedSkills(pi: ExtensionAPI): void {
+export function refreshTypedSkills(pi: ExtensionAPI, registry: TypedCommandRegistry): void {
     const commands: RegisteredTypedCommand[] = [];
     const diagnostics: TypedSkillDiagnostics[] = [];
     for (const command of pi.getCommands()) {
@@ -43,16 +43,20 @@ export function refreshTypedSkills(pi: ExtensionAPI): void {
             diagnostics.push(result.diagnostics);
         }
     }
-    replaceTypedSkillMetadata(commands, diagnostics);
+    registry.replaceSkills(commands, diagnostics);
 }
 
 /** Notify when editor text targets a skill whose typed arguments could not be registered. */
-export function notifySkillDiagnosticsForText(text: string, ctx: ExtensionCommandContext): boolean {
+export function notifySkillDiagnosticsForText(
+    text: string,
+    ctx: ExtensionContext,
+    registry: TypedCommandRegistry,
+): boolean {
     const match = slashCommandMatch(text);
     if (match === undefined) {
         return false;
     }
-    const diagnostics = getTypedSkillDiagnostics(match.commandName);
+    const diagnostics = registry.getSkillDiagnostics(match.commandName);
     if (diagnostics === undefined) {
         return false;
     }
@@ -88,9 +92,10 @@ export async function renderTypedSkillInput(
     command: RegisteredTypedCommand,
     rawArgs: string,
     trailingBody: string,
-    ctx: ExtensionCommandContext,
+    ctx: ExtensionContext,
     formMode: FormMode,
-    appearance?: ResolvedPiTypedCommandsAppearance,
+    appearance: ResolvedPiTypedCommandsAppearance,
+    signal?: AbortSignal,
 ): Promise<string | undefined> {
     if (!isTypedSkillCommand(command)) {
         return undefined;
@@ -114,7 +119,10 @@ export async function renderTypedSkillInput(
             notifyIssues(ctx, issueMessages);
             return undefined;
         }
-        const collected = await openArgumentForm(command, parsed, formMode, ctx);
+        const collected = await openArgumentForm(command, parsed, formMode, ctx, {
+            appearance,
+            ...(signal === undefined ? {} : { signal }),
+        });
         if (collected === undefined) {
             return undefined;
         }
@@ -134,10 +142,13 @@ export async function renderTypedSkillInput(
 /** Transform a typed skill slash-command input into the model-facing skill prompt. */
 export async function transformTypedSkillInput(
     text: string,
-    ctx: ExtensionCommandContext,
+    ctx: ExtensionContext,
+    registry: TypedCommandRegistry,
+    appearance: ResolvedPiTypedCommandsAppearance,
     formMode: FormMode = "missing",
+    signal?: AbortSignal,
 ): Promise<TypedSkillInputResult | undefined> {
-    const invocation = commandInvocationForEditorText(text);
+    const invocation = commandInvocationForEditorText(text, registry);
     if (invocation === undefined || !isTypedSkillCommand(invocation.command)) {
         return undefined;
     }
@@ -148,6 +159,8 @@ export async function transformTypedSkillInput(
         invocation.trailingBody,
         ctx,
         formMode,
+        appearance,
+        signal,
     );
     if (transformed === undefined) {
         return { action: "handled" };

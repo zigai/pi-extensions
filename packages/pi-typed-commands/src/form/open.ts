@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getTypedCommandRefinementIssues } from "../parser.js";
 import { formatFormIssueMessage } from "../pi-tui/form-model.js";
 import type {
@@ -11,6 +11,12 @@ import type {
 import { formatIssues } from "../usage.js";
 import { openDenseArgumentForm } from "./dense.js";
 import { SequentialArgumentForm } from "./sequential.js";
+import type { ResolvedPiTypedCommandsAppearance } from "../pi/presentation-config.js";
+
+export type OpenArgumentFormOptions = {
+    readonly appearance: ResolvedPiTypedCommandsAppearance;
+    readonly signal?: AbortSignal;
+};
 
 /**
  * Prompt for typed command arguments using the dense TUI form when available, otherwise sequential prompts.
@@ -21,20 +27,21 @@ export async function openArgumentForm<TDefinitions extends ArgumentDefinitions>
     command: RegisteredTypedCommand<TDefinitions>,
     parsed: ParsedCommandArguments,
     mode: FormMode,
-    ctx: ExtensionCommandContext,
+    ctx: ExtensionContext,
+    options: OpenArgumentFormOptions,
 ): Promise<Record<string, ArgumentValue> | undefined> {
     let result: Record<string, ArgumentValue> | undefined;
     if (ctx.mode === "tui") {
-        result = await openDenseArgumentForm(command, parsed, mode, ctx);
+        result = await openDenseArgumentForm(command, parsed, mode, ctx, options);
     } else {
-        result = await new SequentialArgumentForm(command, parsed, mode, ctx).run();
+        result = await new SequentialArgumentForm(command, parsed, mode, ctx, options.signal).run();
     }
     if (result === undefined) {
         return undefined;
     }
 
     const refinementIssues = getTypedCommandRefinementIssues(command, result, parsed.provided);
-    if (refinementIssues.length > 0) {
+    if (refinementIssues.length > 0 && options.signal?.aborted !== true) {
         ctx.ui.notify(formatIssues(refinementIssues.map(formatFormIssueMessage)), "error");
         return undefined;
     }

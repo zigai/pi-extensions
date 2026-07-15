@@ -21,15 +21,16 @@ import {
     decideArgumentIssueAction,
     parseSlashCommandText,
 } from "../src/invocation.js";
-import {
-    getTypedCommand,
-    getTypedSkillDiagnostics,
-    registerTypedCommandMetadata,
-    replaceTypedSkillMetadata,
-    unregisterTypedCommandMetadata,
-} from "../src/registry.js";
+import { getPiTypedCommandRegistry } from "../src/pi/registry.js";
 import { notifySkillDiagnosticsForText, refreshTypedSkills } from "../src/pi/skill-input.js";
 import type { ParseIssue, RegisteredTypedCommand } from "../src/types.js";
+
+const registry = getPiTypedCommandRegistry();
+const getTypedCommand = registry.get.bind(registry);
+const getTypedSkillDiagnostics = registry.getSkillDiagnostics.bind(registry);
+const registerTypedCommandMetadata = registry.register.bind(registry);
+const replaceTypedSkillMetadata = registry.replaceSkills.bind(registry);
+const unregisterTypedCommandMetadata = registry.unregister.bind(registry);
 
 describe("argument issue policy", () => {
     it("opens forms for named validation issues but not structural parse issues", () => {
@@ -397,7 +398,7 @@ Body
         };
 
         try {
-            refreshTypedSkills(pi);
+            refreshTypedSkills(pi, registry);
 
             assert.equal(getTypedSkillDiagnostics("skill:unknown"), undefined);
             assert.notEqual(getTypedSkillDiagnostics("skill:demo"), undefined);
@@ -405,6 +406,7 @@ Body
                 notifySkillDiagnosticsForText(
                     "/skill:demo",
                     ctx as unknown as ExtensionCommandContext,
+                    registry,
                 ),
                 true,
             );

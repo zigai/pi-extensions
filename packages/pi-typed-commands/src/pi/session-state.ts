@@ -1,31 +1,41 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ResolvedTypedCommandUxOptions } from "./settings.js";
 
-type SubmittedInvalidCommandHandler = (editorText: string) => void;
+type TypedCommandSessionState = {
+    readonly options: ResolvedTypedCommandUxOptions;
+    readonly submittedInvalidCommand: (editorText: string) => void;
+};
 
-const submittedInvalidCommandHandlers = new WeakMap<
-    ExtensionContext,
-    SubmittedInvalidCommandHandler
->();
+const typedCommandSessions = new WeakMap<ExtensionContext, TypedCommandSessionState>();
 
 /** Register the active session callback for submitted invalid command editor text. */
 export function registerSubmittedInvalidCommandHandler(
     ctx: ExtensionContext,
-    handler: SubmittedInvalidCommandHandler,
+    options: ResolvedTypedCommandUxOptions,
+    handler: (editorText: string) => void,
 ): () => void {
-    submittedInvalidCommandHandlers.set(ctx, handler);
+    const state: TypedCommandSessionState = { options, submittedInvalidCommand: handler };
+    typedCommandSessions.set(ctx, state);
     return () => {
-        if (submittedInvalidCommandHandlers.get(ctx) === handler) {
-            submittedInvalidCommandHandlers.delete(ctx);
+        if (typedCommandSessions.get(ctx) === state) {
+            typedCommandSessions.delete(ctx);
         }
     };
 }
 
 /** Mark submitted invalid command text in the active UX session, when one owns the context. */
 export function markSubmittedInvalidCommand(ctx: ExtensionContext, editorText: string): boolean {
-    const handler = submittedInvalidCommandHandlers.get(ctx);
-    if (handler === undefined) {
+    const state = typedCommandSessions.get(ctx);
+    if (state === undefined) {
         return false;
     }
-    handler(editorText);
+    state.submittedInvalidCommand(editorText);
     return true;
+}
+
+/** Return the settings snapshot passed into the active session for this context. */
+export function getTypedCommandSessionOptions(
+    ctx: ExtensionContext,
+): ResolvedTypedCommandUxOptions | undefined {
+    return typedCommandSessions.get(ctx)?.options;
 }

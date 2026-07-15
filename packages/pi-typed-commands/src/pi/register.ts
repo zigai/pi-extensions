@@ -1,10 +1,16 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type {
+    ExtensionAPI,
+    ExtensionCommandContext,
+    ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { defineTypedCommand } from "../command/definition.js";
 import { createCommandHandle } from "../command/handle.js";
 import { normalizeRegisteredCommand } from "../command/registered-command.js";
 import { decideArgumentIssueAction } from "../invocation.js";
 import { parseTypedCommandArgs } from "../parser.js";
-import { registerTypedCommandMetadata } from "../registry.js";
+import { createPiCompletionCapabilities, getTypedArgumentCompletions } from "./completions.js";
+import { getPiTypedCommandRegistry } from "./registry.js";
+import type { TypedCommandRegistry } from "../registry.js";
 import type {
     ArgumentDefinitions,
     DefinedTypedCommand,
@@ -18,7 +24,7 @@ import type {
 } from "../types.js";
 
 /** Notify Pi users about one or more typed-command issues. */
-export function notifyIssues(ctx: ExtensionCommandContext, messages: string[]): void {
+export function notifyIssues(ctx: ExtensionContext, messages: string[]): void {
     if (messages.length === 0) {
         return;
     }
@@ -35,11 +41,15 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     invocationName: string,
     rawArgs: string,
     ctx: ExtensionCommandContext,
+    registry: TypedCommandRegistry,
 ): Promise<InferArguments<FlatArgumentDefinitions> | undefined> {
     const parsed = parseTypedCommandArgs(command, rawArgs);
+    const [{ getTypedCommandSessionOptions }, { resolveTypedCommandUxOptions }] =
+        await Promise.all([import("./session-state.js"), import("./settings.js")]);
+    const options = getTypedCommandSessionOptions(ctx) ?? resolveTypedCommandUxOptions();
     if (parsed.mode === "help") {
         const { notifyDetailedHelp } = await import("./help.js");
-        notifyDetailedHelp(ctx, command);
+        notifyDetailedHelp(ctx, command, options.appearance);
         return undefined;
     }
 
@@ -56,7 +66,10 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
             return undefined;
         }
         const { openArgumentForm } = await import("../form/open.js");
-        const collected = await openArgumentForm(command, parsed, formMode, ctx);
+        const collected = await openArgumentForm(command, parsed, formMode, ctx, {
+            appearance: options.appearance,
+            ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
+        });
         if (collected === undefined) {
             return undefined;
         }
@@ -74,18 +87,15 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
                 { helperInvocationForEditorText },
                 { setHelperWidget },
                 { markSubmittedInvalidCommand },
-                { resolveTypedCommandUxOptions },
             ] = await Promise.all([
                 import("./editor-invocation.js"),
                 import("./helper.js"),
                 import("./session-state.js"),
-                import("./settings.js"),
             ]);
             if (!markSubmittedInvalidCommand(ctx, editorText)) {
-                const options = resolveTypedCommandUxOptions({}, ctx);
                 setHelperWidget(
                     ctx,
-                    helperInvocationForEditorText(editorText),
+                    helperInvocationForEditorText(editorText, registry),
                     options.helperPlacement,
                     { submittedInvalidEditorText: editorText },
                     options.appearance.inlineHelp,
@@ -115,17 +125,27 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
     definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
 ): TypedCommandHandle<TDefinitions> {
     const name = definition.name;
+    const registry = getPiTypedCommandRegistry();
 
     const command = normalizeRegisteredCommand(definition);
     let invocationName = name;
     const maybeInvocationName: unknown = pi.registerCommand(name, {
         description: command.description,
         async getArgumentCompletions(argumentPrefix) {
-            const { getTypedArgumentCompletions } = await import("../completions.js");
-            return getTypedArgumentCompletions(command, argumentPrefix);
+            return getTypedArgumentCompletions(
+                command,
+                argumentPrefix,
+                createPiCompletionCapabilities(process.cwd(), registry),
+            );
         },
         handler: async (rawArgs, ctx) => {
-            const args = await resolveCommandArguments(command, invocationName, rawArgs, ctx);
+            const args = await resolveCommandArguments(
+                command,
+                invocationName,
+                rawArgs,
+                ctx,
+                registry,
+            );
             if (args === undefined) {
                 return;
             }
@@ -145,12 +165,14 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
         piInvocationName = maybeInvocationName;
     }
     if (piInvocationName === undefined) {
-        invocationName = registerTypedCommandMetadata(command);
+        invocationName = registry.register(command);
     } else {
-        invocationName = registerTypedCommandMetadata(command, {
+        invocationName = registry.register(command, {
             invocationName: piInvocationName,
         });
     }
     const definedCommand = defineTypedCommand(definition);
-    return createCommandHandle(definedCommand, command, invocationName);
+    return createCommandHandle(definedCommand, command, invocationName, (registered) => {
+        registry.unregister(registered);
+    });
 }

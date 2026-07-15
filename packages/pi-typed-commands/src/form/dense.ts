@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createHeadlessFormModel } from "../pi-tui/form-model.js";
 import type {
     ArgumentDefinitions,
@@ -8,11 +8,15 @@ import type {
     RegisteredTypedCommand,
 } from "../types.js";
 import { ArgumentFormComponent, type FormResult } from "./dense-component.js";
-import { resolveTypedCommandAppearance } from "../pi/settings.js";
+import type { OpenArgumentFormOptions } from "./open.js";
+
+function signalAborted(signal?: AbortSignal): boolean {
+    return signal?.aborted === true;
+}
 
 function resolveFormTitle<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
-    ctx: ExtensionCommandContext,
+    ctx: ExtensionContext,
 ): string {
     const title = command.formTitle;
     if (typeof title === "function") {
@@ -29,18 +33,31 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
     command: RegisteredTypedCommand<TDefinitions>,
     parsed: ParsedCommandArguments,
     mode: FormMode,
-    ctx: ExtensionCommandContext,
+    ctx: ExtensionContext,
+    options: OpenArgumentFormOptions,
 ): Promise<Record<string, ArgumentValue> | undefined> {
     const { state, fields, initialSelection } = createHeadlessFormModel(command.args, parsed, mode);
-    const appearance = resolveTypedCommandAppearance(ctx).form;
+    const appearance = options.appearance.form;
 
-    if (fields.length === 0) {
+    if (fields.length === 0 && !signalAborted(options.signal)) {
         return state;
     }
+    if (signalAborted(options.signal)) {
+        return undefined;
+    }
 
-    const result = await ctx.ui.custom<FormResult | undefined>(
-        (tui, theme, _keybindings, done) =>
-            new ArgumentFormComponent(
+    let removeAbortListener = (): void => {};
+    let result: FormResult | undefined;
+    try {
+        result = await ctx.ui.custom<FormResult | undefined>((tui, theme, _keybindings, done) => {
+            const abort = (): void => {
+                done(undefined);
+            };
+            options.signal?.addEventListener("abort", abort, { once: true });
+            removeAbortListener = () => {
+                options.signal?.removeEventListener("abort", abort);
+            };
+            return new ArgumentFormComponent(
                 tui,
                 resolveFormTitle(command, ctx),
                 fields,
@@ -50,10 +67,13 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
                 appearance,
                 done,
                 initialSelection,
-            ),
-    );
+            );
+        });
+    } finally {
+        removeAbortListener();
+    }
 
-    if (result === undefined || !result.confirmed) {
+    if (signalAborted(options.signal) || result === undefined || !result.confirmed) {
         return undefined;
     }
 

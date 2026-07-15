@@ -829,6 +829,15 @@ function validateTypeSpecificRules(
     definition: ArgumentDefinition,
     diagnostics: DefinitionDiagnostic[],
 ): void {
+    if (definition.complete?.constructor.name === "AsyncFunction") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "complete",
+            "argument.completion.async-provider-in-sync-slot",
+            `${name}.complete must be synchronous; use completeAsync for async completion providers`,
+        );
+    }
     if (definition.title !== undefined && typeof definition.title !== "string") {
         addArgumentDiagnostic(
             diagnostics,

@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { casesHandled } from "../exhaustive.js";
 import { formatFlagName, toKebabCase } from "../names.js";
 import { applyArgumentDefault, coerceArgumentValue, validateArgumentValue } from "../schema.js";
@@ -31,24 +31,27 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
     private readonly command: RegisteredTypedCommand<TDefinitions>;
     private readonly parsed: ParsedCommandArguments;
     private readonly mode: FormMode;
-    private readonly ctx: ExtensionCommandContext;
+    private readonly ctx: ExtensionContext;
+    private readonly signal: AbortSignal | undefined;
     private readonly state: Record<string, ArgumentValue>;
 
     constructor(
         command: RegisteredTypedCommand<TDefinitions>,
         parsed: ParsedCommandArguments,
         mode: FormMode,
-        ctx: ExtensionCommandContext,
+        ctx: ExtensionContext,
+        signal?: AbortSignal,
     ) {
         this.command = command;
         this.parsed = parsed;
         this.mode = mode;
         this.ctx = ctx;
+        this.signal = signal;
         this.state = { ...parsed.values };
     }
 
     async run(): Promise<Record<string, ArgumentValue> | undefined> {
-        if (this.parsed.issues.length > 0) {
+        if (this.parsed.issues.length > 0 && this.active()) {
             this.ctx.ui.notify(
                 formatIssues(this.parsed.issues.map(formatFormIssueMessage)),
                 "warning",
@@ -67,12 +70,20 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         }
 
         const messages = this.finalIssues();
-        if (messages.length > 0) {
+        if (messages.length > 0 && this.active()) {
             this.ctx.ui.notify(formatIssues(messages), "error");
             return undefined;
         }
 
-        return this.state;
+        return this.active() ? this.state : undefined;
+    }
+
+    private active(): boolean {
+        return this.signal?.aborted !== true;
+    }
+
+    private dialogOptions(): { signal?: AbortSignal } {
+        return this.signal === undefined ? {} : { signal: this.signal };
     }
 
     private async promptArgument(name: string, definition: ArgumentDefinition): Promise<boolean> {
@@ -97,8 +108,12 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             options.unshift(UNSET_OPTION);
         }
 
-        const selected = await this.ctx.ui.select(`Set ${formatFlagName(name)}`, options);
-        if (selected === undefined) {
+        const selected = await this.ctx.ui.select(
+            `Set ${formatFlagName(name)}`,
+            options,
+            this.dialogOptions(),
+        );
+        if (!this.active() || selected === undefined) {
             return false;
         }
 
@@ -120,8 +135,12 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             options.push(UNSET_OPTION);
         }
 
-        const selected = await this.ctx.ui.select(`Set ${formatFlagName(name)}`, options);
-        if (selected === undefined) {
+        const selected = await this.ctx.ui.select(
+            `Set ${formatFlagName(name)}`,
+            options,
+            this.dialogOptions(),
+        );
+        if (!this.active() || selected === undefined) {
             return false;
         }
 
@@ -145,8 +164,8 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         }
 
         const title = `Set ${formatFlagName(name)} (current: ${currentValueText(current)})`;
-        const input = await this.ctx.ui.input(title, placeholder);
-        if (input === undefined) {
+        const input = await this.ctx.ui.input(title, placeholder, this.dialogOptions());
+        if (!this.active() || input === undefined) {
             return false;
         }
 
@@ -156,7 +175,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
 
         const coerced = coerceArgumentValue(definition, input, name, FORM_MESSAGE_OPTIONS);
         if (!coerced.ok) {
-            this.ctx.ui.notify(coerced.issue.message, "error");
+            if (this.active()) this.ctx.ui.notify(coerced.issue.message, "error");
             return this.promptMultiEnum(name, definition);
         }
 
@@ -167,7 +186,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             FORM_MESSAGE_OPTIONS,
         );
         if (!validation.ok) {
-            this.ctx.ui.notify(validation.message, "error");
+            if (this.active()) this.ctx.ui.notify(validation.message, "error");
             return this.promptMultiEnum(name, definition);
         }
 
@@ -183,8 +202,8 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         const placeholder = definition.placeholder ?? currentValueText(current);
 
         const title = `Set ${formatFlagName(name)} (current: ${currentValueText(current)})`;
-        const input = await this.ctx.ui.input(title, placeholder);
-        if (input === undefined) {
+        const input = await this.ctx.ui.input(title, placeholder, this.dialogOptions());
+        if (!this.active() || input === undefined) {
             return false;
         }
 
@@ -201,7 +220,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
                     FORM_MESSAGE_OPTIONS,
                 );
                 if (!validation.ok) {
-                    this.ctx.ui.notify(validation.message, "error");
+                    if (this.active()) this.ctx.ui.notify(validation.message, "error");
                     return this.promptStringLike(name, definition);
                 }
                 this.state[name] = input;
@@ -215,7 +234,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
                     FORM_MESSAGE_OPTIONS,
                 );
                 if (!numberValue.ok) {
-                    this.ctx.ui.notify(numberValue.issue.message, "error");
+                    if (this.active()) this.ctx.ui.notify(numberValue.issue.message, "error");
                     return this.promptStringLike(name, definition);
                 }
 
@@ -241,7 +260,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             return true;
         }
         if (definition.required === true) {
-            this.ctx.ui.notify(`${toKebabCase(name)} is required`, "error");
+            if (this.active()) this.ctx.ui.notify(`${toKebabCase(name)} is required`, "error");
             return this.promptMultiEnum(name, definition);
         }
         this.state[name] = undefined;
@@ -262,7 +281,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             return true;
         }
         if (definition.required === true) {
-            this.ctx.ui.notify(`${toKebabCase(name)} is required`, "error");
+            if (this.active()) this.ctx.ui.notify(`${toKebabCase(name)} is required`, "error");
             return this.promptStringLike(name, definition);
         }
         this.state[name] = undefined;

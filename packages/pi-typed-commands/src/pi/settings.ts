@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import {
     CONFIG_DIR_NAME,
     getAgentDir,
-    type ExtensionContext,
     type WidgetPlacement,
 } from "@earendil-works/pi-coding-agent";
 import type { TypedCommandUxOptions } from "../types.js";
@@ -83,12 +82,11 @@ export type ResolvedPiTypedCommandsConfigSnapshot = {
     readonly diagnostics: readonly PiTypedCommandsConfigDiagnostic[];
 };
 
-function projectTrusted(ctx: ExtensionContext): boolean {
-    if (typeof ctx.isProjectTrusted === "function") {
-        return ctx.isProjectTrusted();
-    }
-    return true;
-}
+/** Narrow session boundary values needed to resolve project configuration. */
+export type PiTypedCommandsSettingsContext = {
+    readonly cwd: string;
+    readonly projectTrusted: boolean;
+};
 
 export function getPiTypedCommandsGlobalConfigPath(agentDir: string = getAgentDir()): string {
     return join(agentDir, EXTENSION_ID, CONFIG_BASENAME);
@@ -286,15 +284,13 @@ export function ensurePiTypedCommandsGlobalConfigFiles(
     ];
 }
 
-function projectConfigOutcome(ctx: ExtensionContext): PiTypedCommandsConfigSourceOutcome {
-    const trusted = projectTrusted(ctx);
-    if (!trusted) {
+function projectConfigOutcome(
+    context: PiTypedCommandsSettingsContext,
+): PiTypedCommandsConfigSourceOutcome {
+    if (!context.projectTrusted) {
         return { status: "skipped-untrusted", fileRole: "project-config" };
     }
-    if (typeof ctx.cwd === "string") {
-        return readConfigFile(getProjectConfigPath(ctx.cwd), "project-config");
-    }
-    return { status: "absent", fileRole: "project-config" };
+    return readConfigFile(getProjectConfigPath(context.cwd), "project-config");
 }
 
 function mergeConfig(base: unknown, override: unknown): unknown {
@@ -339,11 +335,11 @@ function diagnosticFromWrite(
 
 /** Load, classify, merge, and resolve global/project configuration once. */
 export function resolvePiTypedCommandsConfigSnapshot(
-    ctx: ExtensionContext,
+    context: PiTypedCommandsSettingsContext,
 ): ResolvedPiTypedCommandsConfigSnapshot {
     const fileOutcomes = ensurePiTypedCommandsGlobalConfigFiles();
     const global = readConfigFile(getPiTypedCommandsGlobalConfigPath(), "global-config");
-    const project = projectConfigOutcome(ctx);
+    const project = projectConfigOutcome(context);
     const merged = mergeConfig(loadedConfig(global), loadedConfig(project));
     const config = Schema.Parse(PiTypedCommandsConfigSchema, merged);
     const diagnostics: PiTypedCommandsConfigDiagnostic[] = [];
@@ -379,27 +375,15 @@ export type ResolvedTypedCommandUxOptions = {
     diagnostics: readonly PiTypedCommandsConfigDiagnostic[];
 };
 
-/** Resolve typed-command appearance from extension-owned config. */
-export function resolveTypedCommandAppearance(
-    ctx?: ExtensionContext,
-): ResolvedPiTypedCommandsAppearance {
-    if (ctx === undefined) {
-        return DEFAULT_PI_TYPED_COMMANDS_APPEARANCE;
-    }
-
-    return resolvePiTypedCommandsConfigSnapshot(ctx).settings.appearance;
-}
-
-/** Resolve typed-command UX options from explicit options and extension-owned config. */
+/** Resolve typed-command UX options from explicit options and one session config snapshot. */
 export function resolveTypedCommandUxOptions(
     options: TypedCommandUxOptions = {},
-    ctx?: ExtensionContext,
+    snapshot?: ResolvedPiTypedCommandsConfigSnapshot,
 ): ResolvedTypedCommandUxOptions {
     let settingsHelperPlacement: WidgetPlacement | undefined;
     let appearance = DEFAULT_PI_TYPED_COMMANDS_APPEARANCE;
     let diagnostics: readonly PiTypedCommandsConfigDiagnostic[] = [];
-    if (ctx !== undefined) {
-        const snapshot = resolvePiTypedCommandsConfigSnapshot(ctx);
+    if (snapshot !== undefined) {
         settingsHelperPlacement = snapshot.settings.helperPlacement;
         appearance = snapshot.settings.appearance;
         diagnostics = snapshot.diagnostics;

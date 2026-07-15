@@ -1,4 +1,3 @@
-import { unregisterTypedCommandMetadata } from "../registry.js";
 import type {
     ArgumentDefinitions,
     DefinedTypedCommand,
@@ -12,6 +11,7 @@ export function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
     definition: DefinedTypedCommand<TDefinitions>,
     command: RegisteredTypedCommand<TDefinitions>,
     invocationName: string,
+    unregister: (command: RegisteredTypedCommand<TDefinitions>) => void,
 ): TypedCommandHandle<TDefinitions> {
     let disposed = false;
     return Object.freeze({
@@ -34,7 +34,7 @@ export function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
                 return;
             }
             disposed = true;
-            unregisterTypedCommandMetadata(command);
+            unregister(command);
         },
     });
 }

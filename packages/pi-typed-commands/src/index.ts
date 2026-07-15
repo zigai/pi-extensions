@@ -15,6 +15,7 @@ export type {
     CompileResult,
     CompiledArgument,
     CompiledCommand,
+    CoreCommandDefinition,
     DecodeResult,
     DefinedTypedCommand,
     DefinitionDiagnostic,
@@ -37,6 +38,7 @@ export type {
     TypedCommandHandle,
     TypedCompletionContext,
     TypedCompletionItem,
+    TypedAsyncCompletionProvider,
     TypedCompletionProvider,
     TypedCompletionReplacementRange,
     TypedCommandRefinement,
@@ -65,7 +67,9 @@ export {
 export { defineTypedCommand } from "./command/definition.js";
 export { compileTypedCommandDefinition } from "./compiler.js";
 export { formatCommandUsage, formatDetailedHelp, formatHelperLine } from "./usage.js";
-export { getTypedCommand, getTypedCommands } from "./registry.js";
+export { createTypedCommandRegistry, TypedCommandRegistry } from "./registry.js";
+export type { TypedCommandLookup, TypedCommandSubscription } from "./registry.js";
+export { getTypedCommand, getTypedCommands } from "./pi/registry.js";
 export {
     lexTypedArgumentString,
     parseTypedCommandArgs,

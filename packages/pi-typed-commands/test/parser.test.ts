@@ -4,16 +4,46 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
 import {
-    getTypedArgumentCompletions,
-    getTypedAutocompleteSuggestions,
+    getTypedArgumentCompletions as resolveTypedArgumentCompletions,
+    getTypedAutocompleteSuggestions as resolveTypedAutocompleteSuggestions,
 } from "../src/completions.js";
 import {
     formatCommandUsage,
     parseTypedCommandArgs,
     serializeTypedCommandArgs,
 } from "../src/index.js";
-import { registerTypedCommandMetadata } from "../src/registry.js";
+import { createTypedCommandRegistry } from "../src/registry.js";
+import { createPiCompletionCapabilities } from "../src/pi/completions.js";
 import type { RegisteredTypedCommand } from "../src/types.js";
+
+const completionRegistry = createTypedCommandRegistry();
+function completionCapabilities() {
+    return createPiCompletionCapabilities(process.cwd(), completionRegistry);
+}
+
+function registerTypedCommandMetadata(command: RegisteredTypedCommand): string {
+    return completionRegistry.register(command);
+}
+
+function getTypedArgumentCompletions(
+    command: RegisteredTypedCommand,
+    argumentPrefix: string,
+) {
+    return resolveTypedArgumentCompletions(command, argumentPrefix, completionCapabilities());
+}
+
+function getTypedAutocompleteSuggestions(
+    lines: string[],
+    cursorLine: number,
+    cursorCol: number,
+) {
+    return resolveTypedAutocompleteSuggestions(
+        lines,
+        cursorLine,
+        cursorCol,
+        completionCapabilities(),
+    );
+}
 
 const command: RegisteredTypedCommand = {
     name: "deploy",
@@ -569,7 +599,7 @@ describe("getTypedAutocompleteSuggestions", () => {
             args: {
                 ref: {
                     type: "string",
-                    complete: async (query) =>
+                    completeAsync: async (query) =>
                         ["main", "feature/login"]
                             .filter((value) => value.startsWith(query))
                             .map((value) => ({ value })),
@@ -634,7 +664,7 @@ describe("getTypedAutocompleteSuggestions", () => {
                 ref: {
                     type: "string",
                     completionTimeoutMs: 1,
-                    complete(_query, context) {
+                    completeAsync(_query, context) {
                         sawSignal = context.signal !== undefined;
                         context.signal?.addEventListener("abort", () => {
                             aborted = true;

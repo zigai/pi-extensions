@@ -1,7 +1,4 @@
-import { readdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
 import Type, { type Static } from "typebox";
 import Schema from "./typebox-schema.js";
 import { casesHandled } from "./exhaustive.js";
@@ -11,7 +8,7 @@ import {
     quoteSerializedValue,
     type Token,
 } from "./parser.js";
-import { getTypedCommand, getTypedCommands } from "./registry.js";
+import type { TypedCommandLookup } from "./registry.js";
 import {
     completionValuesForArgument,
     createArgumentLookup,
@@ -23,22 +20,44 @@ import {
 import type {
     ArgumentDefinition,
     ArgumentDefinitions,
-    MaybePromise,
     RegisteredTypedCommand,
     TypedCompletionContext,
+    TypedCompletionItem,
 } from "./types.js";
+
+export type CompletionPathEntry = {
+    readonly name: string;
+    readonly directory: boolean;
+};
+
+export type CompletionPathLookup = {
+    list(directory: string): Promise<readonly CompletionPathEntry[]>;
+};
+
+export type CompletionScheduler = {
+    run<T>(
+        work: (signal: AbortSignal) => Promise<T>,
+        timeoutMs: number | undefined,
+    ): Promise<T | undefined>;
+};
+
+export type CompletionCapabilities = {
+    readonly cwd: string;
+    readonly paths: CompletionPathLookup;
+    readonly commands: TypedCommandLookup;
+    readonly scheduler: CompletionScheduler;
+};
 
 type CommandLineContext = {
     command: RegisteredTypedCommand;
     argsBeforeCursor: string;
     currentPrefix: string;
     replacementPrefix: string;
-    cwd?: string;
-    ctx?: ExtensionContext;
+    capabilities: CompletionCapabilities;
     previousToken?: Token;
 };
 
-type ValueCompletionItem = AutocompleteItem & {
+type ValueCompletionItem = TypedCompletionItem & {
     replacementReady?: boolean;
 };
 
@@ -134,7 +153,7 @@ function supportsRepeatedCompletion(definition: ArgumentDefinition): boolean {
     }
 }
 
-function mapValueItemsForInsertion(items: ValueCompletionItem[]): AutocompleteItem[] {
+function mapValueItemsForInsertion(items: ValueCompletionItem[]): TypedCompletionItem[] {
     return items.map((item) => {
         if (item.replacementReady === true) {
             return item;
@@ -146,7 +165,7 @@ function mapValueItemsForInsertion(items: ValueCompletionItem[]): AutocompleteIt
     });
 }
 
-function flagItem(name: string, definition: ArgumentDefinition): AutocompleteItem {
+function flagItem(name: string, definition: ArgumentDefinition): TypedCompletionItem {
     let value = `${formatArgumentFlagName(name, definition)} `;
     if (!flagConsumesValue(definition)) {
         value = formatArgumentFlagName(name, definition);
@@ -161,7 +180,7 @@ function flagItem(name: string, definition: ArgumentDefinition): AutocompleteIte
     };
 }
 
-function isPromiseLike<T>(value: MaybePromise<T> | undefined): value is Promise<T> {
+function isPromiseLike<T>(value: T | Promise<T> | undefined): value is Promise<T> {
     return value instanceof Promise;
 }
 
@@ -212,84 +231,58 @@ function mapProviderCompletionItems(value: unknown): ValueCompletionItem[] {
     });
 }
 
-function withCompletionTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number | undefined,
-    controller: AbortController,
-): Promise<T | undefined> {
-    if (timeoutMs === undefined) {
-        return promise.then(
-            (value) => value,
-            () => undefined,
-        );
-    }
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-            controller.abort();
-            resolve(undefined);
-        }, timeoutMs);
-        promise.then(
-            (value) => {
-                clearTimeout(timer);
-                resolve(value);
-            },
-            () => {
-                clearTimeout(timer);
-                resolve(undefined);
-            },
-        );
-    });
-}
-
 function completionContext(
     context: CommandLineContext,
     signal?: AbortSignal,
 ): TypedCompletionContext {
     const parsed = parseTypedCommandArgs(context.command, context.argsBeforeCursor);
-    const result: TypedCompletionContext = {
+    if (signal === undefined) {
+        return {
+            values: parsed.values,
+            provided: parsed.provided,
+            cwd: context.capabilities.cwd,
+        };
+    }
+    return {
         values: parsed.values,
         provided: parsed.provided,
+        cwd: context.capabilities.cwd,
+        signal,
     };
-    if (context.cwd !== undefined) {
-        result.cwd = context.cwd;
-    }
-    if (context.ctx !== undefined) {
-        result.ctx = context.ctx;
-    }
-    if (signal !== undefined) {
-        result.signal = signal;
-    }
-    return result;
 }
 
-function providerArgumentValueItems(
+function syncProviderArgumentValueItems(
     definition: ArgumentDefinition,
     query: string,
     context: CommandLineContext,
-): MaybePromise<ValueCompletionItem[]> {
+): ValueCompletionItem[] {
     if (definition.complete === undefined) {
         return [];
     }
 
-    const controller = new AbortController();
-    let completed: MaybePromise<readonly unknown[]>;
     try {
-        completed = definition.complete(
-            query,
-            completionContext(context, controller.signal),
-        ) as MaybePromise<readonly unknown[]>;
+        const completed: unknown = definition.complete(query, completionContext(context));
+        if (isPromiseLike(completed)) {
+            return [];
+        }
+        return mapProviderCompletionItems(completed);
     } catch {
-        controller.abort();
         return [];
     }
+}
 
-    if (isPromiseLike(completed)) {
-        return withCompletionTimeout(
-            completed,
-            normalizedCompletionTimeoutMs(definition),
-            controller,
-        ).then((items) => mapProviderCompletionItems(items));
+async function asyncProviderArgumentValueItems(
+    definition: ArgumentDefinition,
+    query: string,
+    context: CommandLineContext,
+): Promise<ValueCompletionItem[]> {
+    if (definition.completeAsync === undefined) {
+        return syncProviderArgumentValueItems(definition, query, context);
     }
+    const completed = await context.capabilities.scheduler.run(
+        (signal) => definition.completeAsync?.(query, completionContext(context, signal)) ?? Promise.resolve([]),
+        normalizedCompletionTimeoutMs(definition),
+    );
     return mapProviderCompletionItems(completed);
 }
 
@@ -300,7 +293,7 @@ function staticArgumentValueItems(
     return completionValuesForArgument(definition)
         .filter((value) => value.startsWith(query))
         .map((value) => {
-            const item: AutocompleteItem = { value, label: value };
+            const item: TypedCompletionItem = { value, label: value };
             if (definition.description !== undefined) {
                 item.description = definition.description;
             }
@@ -308,15 +301,22 @@ function staticArgumentValueItems(
         });
 }
 
-function commandCompletionItems(query: string): AutocompleteItem[] {
-    return getTypedCommands()
+function commandCompletionItems(
+    query: string,
+    commands: TypedCommandLookup,
+): TypedCompletionItem[] {
+    return commands
+        .list()
         .map((command) => `/${command.invocationName ?? command.name}`)
         .filter((value) => value.startsWith(query))
         .map((value) => ({ value, label: value, description: "typed command" }));
 }
 
-async function pathCompletionItems(query: string, cwd?: string): Promise<AutocompleteItem[]> {
-    const root = cwd ?? process.cwd();
+async function pathCompletionItems(
+    query: string,
+    capabilities: CompletionCapabilities,
+): Promise<TypedCompletionItem[]> {
+    const root = capabilities.cwd;
     let raw = query;
     if (raw.length === 0) {
         raw = ".";
@@ -339,18 +339,18 @@ async function pathCompletionItems(query: string, cwd?: string): Promise<Autocom
     }
 
     try {
-        const entries = await readdir(lookupDirectory, { withFileTypes: true });
+        const entries = await capabilities.paths.list(lookupDirectory);
         return entries
             .filter((entry) => entry.name.startsWith(filePrefix))
             .sort((left, right) => left.name.localeCompare(right.name))
             .map((entry) => {
                 let value = `${valuePrefix}${entry.name}`;
-                if (entry.isDirectory()) {
+                if (entry.directory) {
                     value += "/";
                 }
                 let label = entry.name;
                 let description = "file";
-                if (entry.isDirectory()) {
+                if (entry.directory) {
                     label = `${entry.name}/`;
                     description = "directory";
                 }
@@ -365,33 +365,38 @@ async function pathCompletionItems(query: string, cwd?: string): Promise<Autocom
     }
 }
 
-function argumentValueItems(
+function syncArgumentValueItems(
     definition: ArgumentDefinition,
     query: string,
     context: CommandLineContext,
-): MaybePromise<ValueCompletionItem[]> {
+): ValueCompletionItem[] {
     if (definition.complete !== undefined) {
-        return providerArgumentValueItems(definition, query, context);
-    }
-    if (definition.ui?.widget === "path") {
-        return pathCompletionItems(query, context.cwd);
+        return syncProviderArgumentValueItems(definition, query, context);
     }
     if (definition.ui?.widget === "command") {
-        return commandCompletionItems(query);
+        return commandCompletionItems(query, context.capabilities.commands);
     }
     return staticArgumentValueItems(definition, query);
 }
 
-function syncItems<T>(items: MaybePromise<T> | undefined): T | undefined {
-    if (items === undefined || isPromiseLike(items)) {
-        return undefined;
+async function asyncArgumentValueItems(
+    definition: ArgumentDefinition,
+    query: string,
+    context: CommandLineContext,
+): Promise<ValueCompletionItem[]> {
+    if (definition.completeAsync !== undefined) {
+        return asyncProviderArgumentValueItems(definition, query, context);
     }
-    return items;
+    if (definition.ui?.widget === "path") {
+        return pathCompletionItems(query, context.capabilities);
+    }
+    return syncArgumentValueItems(definition, query, context);
 }
 
 function inlineFlagValueCompletion(
     context: CommandLineContext,
-): MaybePromise<AutocompleteItem[] | undefined> {
+    mode: "async" | "sync",
+): TypedCompletionItem[] | Promise<TypedCompletionItem[] | undefined> | undefined {
     if (!context.currentPrefix.startsWith("-")) {
         return undefined;
     }
@@ -425,7 +430,7 @@ function inlineFlagValueCompletion(
         return undefined;
     }
 
-    const mapItems = (items: AutocompleteItem[]): AutocompleteItem[] | undefined => {
+    const mapItems = (items: TypedCompletionItem[]): TypedCompletionItem[] | undefined => {
         const mapped = items.map((item) => ({
             ...item,
             value: `${flagToken}=${valuePrefix}${completionInsertionValue(item.value)}`,
@@ -435,7 +440,10 @@ function inlineFlagValueCompletion(
         }
         return mapped;
     };
-    const items = argumentValueItems(definition, query, context);
+    const items =
+        mode === "async"
+            ? asyncArgumentValueItems(definition, query, context)
+            : syncArgumentValueItems(definition, query, context);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }
@@ -444,7 +452,8 @@ function inlineFlagValueCompletion(
 
 function valueCompletionForPreviousFlag(
     context: CommandLineContext,
-): MaybePromise<AutocompleteItem[] | undefined> {
+    mode: "async" | "sync",
+): TypedCompletionItem[] | Promise<TypedCompletionItem[] | undefined> | undefined {
     if (context.previousToken === undefined) {
         return undefined;
     }
@@ -470,13 +479,16 @@ function valueCompletionForPreviousFlag(
         return undefined;
     }
 
-    const mapItems = (items: AutocompleteItem[]): AutocompleteItem[] | undefined => {
+    const mapItems = (items: TypedCompletionItem[]): TypedCompletionItem[] | undefined => {
         if (items.length === 0) {
             return undefined;
         }
         return mapValueItemsForInsertion(items);
     };
-    const items = argumentValueItems(definition, context.currentPrefix, context);
+    const items =
+        mode === "async"
+            ? asyncArgumentValueItems(definition, context.currentPrefix, context)
+            : syncArgumentValueItems(definition, context.currentPrefix, context);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }
@@ -518,7 +530,8 @@ function currentTokenIsFlagValue(context: CommandLineContext): boolean {
 function nextPositionalValueCompletion(
     context: CommandLineContext,
     tokens: readonly Token[],
-): MaybePromise<AutocompleteItem[] | undefined> {
+    mode: "async" | "sync",
+): TypedCompletionItem[] | Promise<TypedCompletionItem[] | undefined> | undefined {
     if (currentTokenIsFlagValue(context)) {
         return undefined;
     }
@@ -580,13 +593,16 @@ function nextPositionalValueCompletion(
     if (context.argsBeforeCursor.endsWith(" ")) {
         query = "";
     }
-    const mapItems = (items: AutocompleteItem[]): AutocompleteItem[] | undefined => {
+    const mapItems = (items: TypedCompletionItem[]): TypedCompletionItem[] | undefined => {
         if (items.length === 0) {
             return undefined;
         }
         return mapValueItemsForInsertion(items);
     };
-    const items = argumentValueItems(definition, query, context);
+    const items =
+        mode === "async"
+            ? asyncArgumentValueItems(definition, query, context)
+            : syncArgumentValueItems(definition, query, context);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }
@@ -604,20 +620,21 @@ function shouldSuggestFlag(
     return !provided.has(name) || supportsRepeatedCompletion(definition);
 }
 
-type CompletionDecision = {
-    items: AutocompleteItem[];
-    prefix: string;
+export type CompletionDecision = {
+    readonly items: readonly TypedCompletionItem[];
+    readonly prefix: string;
 };
 
 type CompletionBranch = (
     context: CommandLineContext,
     tokens: readonly Token[],
-) => MaybePromise<AutocompleteItem[] | undefined>;
+    mode: "async" | "sync",
+) => TypedCompletionItem[] | Promise<TypedCompletionItem[] | undefined> | undefined;
 
 const VALUE_COMPLETION_BRANCHES: readonly CompletionBranch[] = [
-    (context) => inlineFlagValueCompletion(context),
-    (context) => valueCompletionForPreviousFlag(context),
-    (context, tokens) => nextPositionalValueCompletion(context, tokens),
+    (context, _tokens, mode) => inlineFlagValueCompletion(context, mode),
+    (context, _tokens, mode) => valueCompletionForPreviousFlag(context, mode),
+    (context, tokens, mode) => nextPositionalValueCompletion(context, tokens, mode),
 ];
 
 function flagCompletionDecision(
@@ -635,7 +652,7 @@ function flagCompletionDecision(
         .filter(
             (item) =>
                 item.value.startsWith(context.currentPrefix) ||
-                item.label.startsWith(context.currentPrefix),
+                (item.label ?? item.value).startsWith(context.currentPrefix),
         );
 
     if (items.length === 0) {
@@ -649,7 +666,7 @@ async function resolveCompletionDecisionAsync(
     tokens: readonly Token[],
 ): Promise<CompletionDecision | undefined> {
     for (const branch of VALUE_COMPLETION_BRANCHES) {
-        const items = await branch(context, tokens);
+        const items = await branch(context, tokens, "async");
         if (items !== undefined) {
             return { items, prefix: context.replacementPrefix };
         }
@@ -662,8 +679,8 @@ function resolveCompletionDecisionSync(
     tokens: readonly Token[],
 ): CompletionDecision | undefined {
     for (const branch of VALUE_COMPLETION_BRANCHES) {
-        const items = syncItems(branch(context, tokens));
-        if (items !== undefined) {
+        const items = branch(context, tokens, "sync");
+        if (items !== undefined && !isPromiseLike(items)) {
             return { items, prefix: context.replacementPrefix };
         }
     }
@@ -678,7 +695,8 @@ function resolveCompletionDecisionSync(
 export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
     argumentPrefix: string,
-): MaybePromise<AutocompleteItem[] | null> {
+    capabilities: CompletionCapabilities,
+): Promise<readonly TypedCompletionItem[] | null> {
     const tokens = tokenizeLoose(argumentPrefix);
     const lastToken = tokens[tokens.length - 1];
     let query = "";
@@ -702,7 +720,7 @@ export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinit
         argsBeforeCursor: argumentPrefix,
         currentPrefix: query,
         replacementPrefix,
-        cwd: process.cwd(),
+        capabilities,
     };
     if (previousToken !== undefined) {
         context.previousToken = previousToken;
@@ -717,8 +735,7 @@ function commandLineContext(
     lines: string[],
     cursorLine: number,
     cursorCol: number,
-    cwd?: string,
-    ctx?: ExtensionContext,
+    capabilities: CompletionCapabilities,
 ): CommandLineContext | undefined {
     const line = lines[cursorLine];
     if (line === undefined) {
@@ -736,7 +753,7 @@ function commandLineContext(
         return undefined;
     }
 
-    const command = getTypedCommand(commandName);
+    const command = capabilities.commands.get(commandName);
     if (command === undefined) {
         return undefined;
     }
@@ -769,13 +786,8 @@ function commandLineContext(
         argsBeforeCursor,
         currentPrefix,
         replacementPrefix,
+        capabilities,
     };
-    if (cwd !== undefined) {
-        context.cwd = cwd;
-    }
-    if (ctx !== undefined) {
-        context.ctx = ctx;
-    }
     if (previousToken !== undefined) {
         context.previousToken = previousToken;
     }
@@ -791,10 +803,9 @@ export function getTypedAutocompleteSuggestions(
     lines: string[],
     cursorLine: number,
     cursorCol: number,
-    cwd?: string,
-    ctx?: ExtensionContext,
-): AutocompleteSuggestions | undefined {
-    const context = commandLineContext(lines, cursorLine, cursorCol, cwd, ctx);
+    capabilities: CompletionCapabilities,
+): CompletionDecision | undefined {
+    const context = commandLineContext(lines, cursorLine, cursorCol, capabilities);
     if (context === undefined) {
         return undefined;
     }
@@ -805,4 +816,18 @@ export function getTypedAutocompleteSuggestions(
         return undefined;
     }
     return decision;
+}
+
+/** Resolve editor completion decisions, including async providers and path lookup. */
+export async function getTypedAutocompleteSuggestionsAsync(
+    lines: string[],
+    cursorLine: number,
+    cursorCol: number,
+    capabilities: CompletionCapabilities,
+): Promise<CompletionDecision | undefined> {
+    const context = commandLineContext(lines, cursorLine, cursorCol, capabilities);
+    if (context === undefined) {
+        return undefined;
+    }
+    return resolveCompletionDecisionAsync(context, tokenizeLoose(context.argsBeforeCursor));
 }

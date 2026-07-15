@@ -136,12 +136,10 @@ export type TypedCompletionItem = {
 
 export type TypedCompletionContext<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> =
     {
-        values: ParsedArgumentDraft<TDefinitions>;
-        provided: ReadonlySet<keyof TDefinitions & string>;
-        cwd?: string;
-        /** Pi extension context when completions run from the Pi adapter. */
-        ctx?: ExtensionContext;
-        signal?: AbortSignal;
+        readonly values: ParsedArgumentDraft<TDefinitions>;
+        readonly provided: ReadonlySet<keyof TDefinitions & string>;
+        readonly cwd?: string;
+        readonly signal?: AbortSignal;
     };
 
 export type MaybePromise<T> = T | Promise<T>;
@@ -151,7 +149,14 @@ export type TypedCompletionProvider<
 > = (
     query: string,
     context: TypedCompletionContext<TDefinitions>,
-) => MaybePromise<readonly TypedCompletionItem[]>;
+) => readonly TypedCompletionItem[];
+
+export type TypedAsyncCompletionProvider<
+    TDefinitions extends ArgumentDefinitions = ArgumentDefinitions,
+> = (
+    query: string,
+    context: TypedCompletionContext<TDefinitions>,
+) => Promise<readonly TypedCompletionItem[]>;
 
 type ArgumentPresence<TValue extends ConcreteArgumentValue> =
     | {
@@ -187,8 +192,10 @@ export type BaseArgumentDefinition<TValue extends ConcreteArgumentValue> =
         placeholder?: string;
         /** How repeated occurrences of this argument are handled. Defaults to error for scalars and append for multi-enum. */
         occurrence?: ArgumentOccurrencePolicy;
-        /** Optional completion provider for this argument's values. */
+        /** Optional synchronous completion provider for editor and command completion paths. */
         complete?: TypedCompletionProvider;
+        /** Optional asynchronous provider used only by Pi's async command-completion hook. */
+        completeAsync?: TypedAsyncCompletionProvider;
         /** Maximum milliseconds to wait for async completions. Defaults to 1000; set to 0 to disable. */
         completionTimeoutMs?: number;
         /** Explicit positional index. */
@@ -341,8 +348,8 @@ export type InvocationTarget<TDefinitions extends ArgumentDefinitions> =
           render(args: InferArguments<TDefinitions>, additionalInput?: string): string;
       };
 
-/** Dense-form title, or a callback that derives one from the command context. */
-export type TypedCommandFormTitle = string | ((ctx: ExtensionCommandContext) => string);
+/** Dense-form title, or a callback that derives one from the active extension session. */
+export type TypedCommandFormTitle = string | ((ctx: ExtensionContext) => string);
 
 /** Glyphs used for checkbox and radio widgets in the dense form. */
 export type TypedCommandFormSymbols = {
@@ -494,8 +501,19 @@ export type CompiledArgument<TValue extends ArgumentValue = ArgumentValue> = {
     complete?(
         query: string,
         context: TypedCompletionContext,
-    ): MaybePromise<readonly TypedCompletionItem[]>;
+    ): readonly TypedCompletionItem[];
+    completeAsync?(
+        query: string,
+        context: TypedCompletionContext,
+    ): Promise<readonly TypedCompletionItem[]>;
     editor?: FieldEditor<TValue>;
+};
+
+/** Library-owned command metadata accepted by the core compiler. */
+export type CoreCommandDefinition<TDefinitions extends ArgumentDefinitions> = {
+    readonly name: string;
+    readonly description: string;
+    readonly args: TDefinitions;
 };
 
 /** Immutable internal representation consumed by parsing, formatting, completion, forms, and Pi. */
