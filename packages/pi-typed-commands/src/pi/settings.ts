@@ -166,7 +166,7 @@ function readConfigFile(
 
     let parsed: unknown;
     try {
-        parsed = JSON.parse(content) as unknown;
+        parsed = JSON.parse(content);
     } catch {
         return {
             status: "malformed",

@@ -208,14 +208,14 @@ Body
     });
 
     it("rejects prototype-reserved skill argument path segments", () => {
-        const raw = JSON.parse(`{
+        const raw: unknown = JSON.parse(`{
             "__proto__": { "type": "string" },
             "config": {
                 "prototype": { "type": "string" },
                 "nested": { "__proto__": { "type": "string" } }
             },
             "constructor": { "type": "string" }
-        }`) as Record<string, unknown>;
+        }`);
 
         const result = normalizeSkillArguments(raw);
         const messages = diagnosticMessages(result);
