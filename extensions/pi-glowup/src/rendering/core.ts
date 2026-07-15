@@ -2361,6 +2361,33 @@ export function parseDiffSections(diffText: string, fallbackPath?: string): Diff
     return sections;
 }
 
+/** Removes unchanged context rows while preserving changed-row coordinates and metadata. */
+export function changedOnlyDiffSections(sections: ReadonlyArray<DiffSection>): DiffSection[] {
+    return sections.flatMap((section) => {
+        const retainedIndices = section.lines.flatMap((line, index) => {
+            const parsed = parseDiffLine(line);
+            return parsed?.kind === "context" || parsed?.kind === "ellipsis" ? [] : [index];
+        });
+        if (retainedIndices.length === 0) {
+            return [];
+        }
+
+        const lines = retainedIndices.map((index) => section.lines[index] ?? "");
+        const lineCoordinates = section.lineCoordinates;
+        return [
+            {
+                ...section,
+                lines,
+                ...(lineCoordinates === undefined
+                    ? {}
+                    : {
+                          lineCoordinates: retainedIndices.map((index) => lineCoordinates[index]),
+                      }),
+            },
+        ];
+    });
+}
+
 function makeDiffSection(path: string | undefined, lines: ReadonlyArray<string>): DiffSection {
     const visibleLines = trimEdgeEllipsisLines(lines);
     const section = {

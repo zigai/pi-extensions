@@ -47,6 +47,7 @@ type FakeToolExecutionInstance = {
     readonly toolName: string;
     readonly builtInToolDefinition?: unknown;
     readonly toolDefinition?: unknown;
+    readonly executionStarted?: boolean;
     readonly result?: unknown;
 };
 
@@ -168,6 +169,31 @@ describe("tool execution patches", () => {
         prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80);
 
         expect(receivedResult).toEqual({ content: [], details: { diff: "+1 restored" } });
+    });
+
+    it("does not inject results into actively executed built-in call renderers", () => {
+        const prototype = createPrototype();
+        let receivedResult: unknown = "unset";
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: (_toolName, _args, _theme, context) => {
+                    receivedResult = context.result;
+                    return { render: () => ["live"], invalidate: noop };
+                },
+                renderResult: () => undefined,
+            },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "write",
+            builtInToolDefinition: {},
+            executionStarted: true,
+            result: { content: [], details: { diff: "+1 live" } },
+        };
+
+        prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80);
+
+        expect(receivedResult).toBeUndefined();
     });
 
     it("renders compatibility tool names through canonical built-in renderers", () => {
@@ -425,6 +451,28 @@ describe("tool execution patches", () => {
 
         expect(rendered).toContain("Patch removed.ts (-2)");
         expect(stripAnsi(rendered ?? "")).toContain("2   -two");
+    });
+
+    it("does not inject results into actively executed third-party call renderers", () => {
+        const prototype = createPrototype();
+        installThirdPartyToolRendererPatch(undefined, prototype);
+        const instance: FakeToolExecutionInstance = {
+            toolName: "apply_patch",
+            toolDefinition: {},
+            executionStarted: true,
+            result: {
+                content: [{ type: "text", text: "Done" }],
+                details: { diff: "removed.ts\n-1 one\n" },
+            },
+        };
+        const patch = "*** Begin Patch\n*** Delete File: removed.ts\n*** End Patch";
+
+        const rendered = prototype.getCallRenderer
+            .call(instance)?.({ patch }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        expect(rendered).not.toContain("removed.ts (-1)");
     });
 
     it("uses explicit Codex-look plugins over native built-in renderers", () => {

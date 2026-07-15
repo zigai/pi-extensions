@@ -202,6 +202,9 @@ function toolDefinition(instance: ToolExecutionInstance): unknown {
 }
 
 function currentToolResult(instance: ToolExecutionInstance): ThirdPartyToolResult | undefined {
+    // Live results have their own renderer pass. Forwarding them into the call renderer in the
+    // same frame couples transcript growth to footer/input updates; restored calls never start.
+    if (Reflect.get(instance, "executionStarted") === true) return undefined;
     const result = Reflect.get(instance, "result");
     if (typeof result !== "object" || result === null) return undefined;
     return {

@@ -756,6 +756,60 @@ describe("apply_patch renderer", () => {
         expect(rendered).toContain("3   -世界");
     });
 
+    it("shows only changed persisted rows until the patch is expanded", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
+        const patch = `*** Begin Patch
+*** Update File: example.ts
+@@
+ alpha
+-old
++new
+ omega
+*** End Patch`;
+        const result = {
+            details: {
+                diff: "example.ts\n  1 alpha\n- 2 old\n+ 2 new\n  3 omega\n",
+                lineSummary: {
+                    files: [
+                        {
+                            action: "M",
+                            path: "example.ts",
+                            addedLines: 1,
+                            removedLines: 1,
+                        },
+                    ],
+                },
+            },
+        };
+
+        const collapsed = renderer
+            .renderCall({ patch }, plainTheme, {
+                ...renderContext,
+                toolCallId: "persisted-update",
+                result,
+            })
+            .render(100)
+            .join("\n");
+        expect(collapsed).toContain("old");
+        expect(collapsed).toContain("new");
+        expect(collapsed).not.toContain("alpha");
+        expect(collapsed).not.toContain("omega");
+
+        const expanded = renderer
+            .renderCall({ patch }, plainTheme, {
+                ...renderContext,
+                toolCallId: "persisted-update",
+                expanded: true,
+                result,
+            })
+            .render(100)
+            .join("\n");
+        expect(expanded).toContain("alpha");
+        expect(expanded).toContain("omega");
+    });
+
     it("rehydrates a restored call after its persisted result renderer runs", async () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",

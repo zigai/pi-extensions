@@ -660,11 +660,7 @@ function renderBuiltInToolResult(settings: {
 }
 
 function callState(context: BuiltInRenderContext) {
-    return context.isError
-        ? "error"
-        : context.isPartial || !context.argsComplete
-          ? "running"
-          : "success";
+    return context.isError ? "error" : isActiveToolCall(context) ? "running" : "success";
 }
 
 const nativeDeletePreviews = new Map<string, DeletedTextPreview>();
@@ -688,17 +684,21 @@ async function captureNativeEditSnapshot(
     trimOldestMapEntries(nativeEditSnapshots, 300);
 }
 
-async function finishNativeEditSnapshot(toolCallId: string, isError: boolean): Promise<void> {
+async function finishNativeEditSnapshot(
+    toolCallId: string,
+    isError: boolean,
+): Promise<PierreDiffPayload | undefined> {
     const snapshot = nativeEditSnapshots.get(toolCallId);
     nativeEditSnapshots.delete(toolCallId);
     if (snapshot === undefined || isError) {
-        return;
+        return undefined;
     }
     const payload = buildPierreDiffPayload(await snapshot.finish());
     if (payload !== undefined) {
         nativeEditPierrePayloads.set(toolCallId, payload);
         trimOldestMapEntries(nativeEditPierrePayloads, 300);
     }
+    return payload;
 }
 
 function trimOldestMapEntries<T>(entries: Map<string, T>, limit: number): void {
@@ -713,6 +713,23 @@ function trimOldestMapEntries<T>(entries: Map<string, T>, limit: number): void {
 
 function nativeDeletePreview(toolCallId: string): DeletedTextPreview | undefined {
     return nativeDeletePreviews.get(toolCallId);
+}
+
+function persistedDeletePreview(
+    result: TextResult | undefined,
+    filePath: string | undefined,
+): DeletedTextPreview | undefined {
+    if (filePath === undefined || !isRecord(result?.details)) return undefined;
+    const diff = result.details.diff;
+    if (typeof diff !== "string" || !hasNonWhitespaceText(diff)) return undefined;
+    const normalized = diff.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
+    const pathHeader = `${filePath}\n`;
+    const body = normalized.startsWith(pathHeader)
+        ? normalized.slice(pathHeader.length)
+        : normalized;
+    const section = parseDiffSections(body, filePath)[0];
+    if (section === undefined || section.removed === 0) return undefined;
+    return { section, removed: section.removed };
 }
 
 async function captureNativeDeletePreview(
@@ -744,7 +761,8 @@ function renderDeleteCall(
 ) {
     registerExplorationBoundary(context.toolCallId);
     const filePath = pathField(args);
-    const preview = nativeDeletePreview(context.toolCallId);
+    const preview =
+        nativeDeletePreview(context.toolCallId) ?? persistedDeletePreview(context.result, filePath);
     const header = renderCodexCall(theme, {
         state: callState(context),
         statusText: toolStatusLabel(labelMode, context, {
@@ -919,8 +937,18 @@ function renderEditCall(
 ) {
     registerExplorationBoundary(context.toolCallId);
     const labelColumnWidth = mutationLabelColumnWidth(context, labelMode);
-    const preview = editPreviews.get(context.toolCallId);
-    if (!context.isPartial && preview) {
+    const resultDetails = context.result?.details;
+    const persistedPreview =
+        isRecord(resultDetails) &&
+        typeof resultDetails.diff === "string" &&
+        hasNonWhitespaceText(resultDetails.diff)
+            ? buildEditPreview({
+                  path: pathField(args) ?? "",
+                  diff: resultDetails.diff,
+              })
+            : undefined;
+    const preview = editPreviews.get(context.toolCallId) ?? persistedPreview;
+    if (!isActiveToolCall(context) && preview) {
         return renderMutationCall(
             theme,
             makeMutationSummary({
@@ -1271,6 +1299,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     pi.on("tool_result", async (event, ctx) => {
         let scheduledFormattedPreview = false;
         let storedEditPreview = false;
+        let persistedEditPierrePayload: PierreDiffPayload | undefined;
         if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
             const command = commandField(event.input);
             if (command !== undefined) {
@@ -1292,7 +1321,10 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
         const rendersAsEdit =
             isEditToolResult(event) || compatBuiltInToolName(event.toolName) === "edit";
         if (rendersAsEdit) {
-            await finishNativeEditSnapshot(event.toolCallId, event.isError === true);
+            persistedEditPierrePayload = await finishNativeEditSnapshot(
+                event.toolCallId,
+                event.isError === true,
+            );
         }
         if (
             rendersAsEdit &&
@@ -1322,6 +1354,15 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
             ...detailsDiagnostics(event.details),
             ...diagnosticSnapshot(),
         });
+        if (persistedEditPierrePayload !== undefined) {
+            return {
+                details: {
+                    ...(isRecord(event.details) ? event.details : {}),
+                    pierreDiff: persistedEditPierrePayload,
+                },
+            };
+        }
+        return undefined;
     });
 
     pi.on("session_start", async (_event, ctx) => {

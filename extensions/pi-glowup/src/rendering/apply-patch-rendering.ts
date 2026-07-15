@@ -1,5 +1,6 @@
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import {
+    changedOnlyDiffSections,
     emptyComponent,
     formatPathTarget,
     makeComponent,
@@ -270,6 +271,17 @@ function persistedApplyPatchSummary(
                 action === "A" ? "add" : action === "D" ? "delete" : "update";
             return { ...section, kind, countsKnown: true };
         }),
+    };
+}
+
+function changedOnlyApplyPatchSummary(summary: ApplyPatchSummary): ApplyPatchSummary {
+    return {
+        sections: summary.sections.flatMap((section) =>
+            changedOnlyDiffSections([section]).map((changedSection) => ({
+                ...section,
+                ...changedSection,
+            })),
+        ),
     };
 }
 
@@ -1399,10 +1411,14 @@ export function createApplyPatchRenderer(
                 persistedSummary === undefined
                     ? context
                     : { ...context, argsComplete: true, isPartial: false };
-            return summary === undefined
+            const renderedSummary =
+                summary === undefined || context.expanded || persistedSummary === undefined
+                    ? summary
+                    : changedOnlyApplyPatchSummary(summary);
+            return renderedSummary === undefined
                 ? renderApplyPatchFallbackCall(args, theme, context, labelMode)
                 : renderApplyPatchSummary(
-                      summary,
+                      renderedSummary,
                       theme,
                       context.expanded,
                       summaryContext,
