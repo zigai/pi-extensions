@@ -27,12 +27,11 @@ import {
     getPiTypedCommandsGlobalConfigPath,
     getPiTypedCommandsGlobalConfigSchemaPath,
     resolvePiTypedCommandsConfigSnapshot,
-    resolveTypedCommandAppearance,
 } from "../src/pi/settings.js";
+import { getPiTypedCommandRegistry } from "../src/pi/registry.js";
 import { typedSkillCommandFromMetadata } from "../src/skills.js";
 import { formatDetailedHelp } from "../src/usage.js";
 import { installTypedCommandUx, registerTypedCommand } from "../src/index.js";
-import { registerTypedCommandMetadata, unregisterTypedCommandMetadata } from "../src/registry.js";
 import type {
     FlatArgumentDefinitions,
     ParsedCommandArguments,
@@ -55,6 +54,10 @@ const tui = {
     terminal: { rows: 24, columns: 80 },
     requestRender() {},
 } as unknown as TUI;
+
+function resolveAppearance(cwd: string = process.cwd(), projectTrusted = true) {
+    return resolvePiTypedCommandsConfigSnapshot({ cwd, projectTrusted }).settings.appearance;
+}
 
 type TestFormComponent = Component & {
     focused: boolean;
@@ -132,7 +135,7 @@ describe("global presentation config", () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
 
         withAgentDir(agentDir, () => {
-            const appearance = resolveTypedCommandAppearance({ cwd: process.cwd() } as never);
+            const appearance = resolveAppearance();
 
             assert.equal(appearance.inlineHelp.order, "active-required-available");
             assert.deepEqual(
@@ -157,7 +160,8 @@ describe("global presentation config", () => {
         withAgentDir(agentDir, () => {
             const snapshot = resolvePiTypedCommandsConfigSnapshot({
                 cwd: process.cwd(),
-            } as never);
+                projectTrusted: true,
+            });
 
             assert.equal(
                 snapshot.settings.appearance.inlineHelp.order,
@@ -184,7 +188,8 @@ describe("global presentation config", () => {
         withAgentDir(agentDir, () => {
             const snapshot = resolvePiTypedCommandsConfigSnapshot({
                 cwd: process.cwd(),
-            } as never);
+                projectTrusted: true,
+            });
 
             assert.equal(snapshot.global.status, "schema-invalid");
             assert.equal(snapshot.settings.helperPlacement, "aboveEditor");
@@ -210,8 +215,8 @@ describe("global presentation config", () => {
             withAgentDir(agentDir, () => {
                 const snapshot = resolvePiTypedCommandsConfigSnapshot({
                     cwd: projectDir,
-                    isProjectTrusted: () => true,
-                } as never);
+                    projectTrusted: true,
+                });
 
                 assert.equal(snapshot.project.status, "read-failed");
                 assert.deepEqual(snapshot.diagnostics, [
@@ -240,7 +245,8 @@ describe("global presentation config", () => {
         withAgentDir(blockedAgentDir, () => {
             const snapshot = resolvePiTypedCommandsConfigSnapshot({
                 cwd: process.cwd(),
-            } as never);
+                projectTrusted: true,
+            });
 
             assert.ok(snapshot.fileOutcomes.every((outcome) => outcome.status === "write-failed"));
             assert.ok(
@@ -272,8 +278,8 @@ describe("global presentation config", () => {
         withAgentDir(agentDir, () => {
             const snapshot = resolvePiTypedCommandsConfigSnapshot({
                 cwd: projectDir,
-                isProjectTrusted: () => false,
-            } as never);
+                projectTrusted: false,
+            });
 
             assert.equal(snapshot.project.status, "skipped-untrusted");
             assert.equal(snapshot.settings.appearance.form.symbols.focusedField, "G");
@@ -289,8 +295,8 @@ describe("global presentation config", () => {
         withAgentDir(agentDir, () => {
             const snapshot = resolvePiTypedCommandsConfigSnapshot({
                 cwd: projectDir,
-                isProjectTrusted: () => true,
-            } as never);
+                projectTrusted: true,
+            });
 
             assert.equal(snapshot.project.status, "absent");
             assert.equal(existsSync(projectConfigDir), false);
@@ -358,7 +364,7 @@ describe("global presentation config", () => {
         writeFileSync(schemaPath, "{}\n");
 
         withAgentDir(agentDir, () => {
-            const appearance = resolveTypedCommandAppearance({ cwd: process.cwd() } as never);
+            const appearance = resolveAppearance();
 
             assert.equal(appearance.inlineHelp.order, "active-required-available");
             assert.equal(readFileSync(configPath, "utf8"), "{not json");
@@ -378,7 +384,7 @@ describe("global presentation config", () => {
         writeFileSync(schemaPath, "{}\n");
 
         withAgentDir(agentDir, () => {
-            const appearance = resolveTypedCommandAppearance({ cwd: process.cwd() } as never);
+            const appearance = resolveAppearance();
 
             assert.equal(appearance.inlineHelp.order, "active-required-available");
             assert.equal(readFileSync(configPath, "utf8"), "{not json");
@@ -440,10 +446,7 @@ describe("global presentation config", () => {
         });
 
         withAgentDir(agentDir, () => {
-            const appearance = resolveTypedCommandAppearance({
-                cwd: projectDir,
-                isProjectTrusted: () => true,
-            } as never);
+            const appearance = resolveAppearance(projectDir);
 
             assert.equal(appearance.form.symbols.focusedField, "P");
         });
@@ -622,7 +625,11 @@ describe("global presentation config", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        await withAgentDirAsync(agentDir, () => openArgumentForm(command, parsed, "all", ctx));
+        await withAgentDirAsync(agentDir, () =>
+            openArgumentForm(command, parsed, "all", ctx, {
+                appearance: resolveAppearance(projectDir),
+            }),
+        );
 
         assert.ok(
             renderedLines.some((line) => line.startsWith("   » Enabled")),
@@ -701,7 +708,7 @@ describe("global presentation config", () => {
             await withAgentDirAsync(agentDir, async () => {
                 installTypedCommandUx(pi);
                 await firstHandler(handlers, "session_start")({}, ctx);
-                registerTypedCommandMetadata(command);
+                getPiTypedCommandRegistry().register(command);
             });
 
             if (widgetFactory === undefined) {
@@ -712,7 +719,7 @@ describe("global presentation config", () => {
             assert.match(line ?? "", /<--path <path>>/);
         } finally {
             await firstHandler(handlers, "session_shutdown")({}, ctx);
-            unregisterTypedCommandMetadata(command);
+            getPiTypedCommandRegistry().unregister(command);
         }
     });
 

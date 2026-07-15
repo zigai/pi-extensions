@@ -9,10 +9,7 @@ type GlobalWithPiRegistry = typeof globalThis & {
 
 /** Pi composition adapter for cross-extension command metadata discovery. */
 export function getPiTypedCommandRegistry(): TypedCommandRegistry {
-    // SAFETY: this adapter is the sole owner of the Symbol.for slot and validates an absent value
-    // by initializing it with this package's concrete registry instance.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: access is localized to the owned symbol slot.
-    const globalObject = globalThis as GlobalWithPiRegistry;
+    const globalObject: GlobalWithPiRegistry = globalThis;
     let registry = globalObject[PI_REGISTRY_KEY];
     if (registry === undefined) {
         registry = createTypedCommandRegistry();

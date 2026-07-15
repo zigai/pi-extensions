@@ -91,7 +91,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         commands: readonly RegisteredTypedCommand[],
         diagnostics: readonly TypedSkillDiagnostics[] = [],
     ): void {
-        for (const record of [...this.#records.values()]) {
+        for (const record of this.#records.values()) {
             if (record.source === "skill") {
                 this.deleteRecord(record);
             }
@@ -108,7 +108,10 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
 
     get(name: string): RegisteredTypedCommand | undefined {
         const record = this.#commands.get(name);
-        return record === undefined ? undefined : commandWithRegistration(record);
+        if (record === undefined) {
+            return undefined;
+        }
+        return commandWithRegistration(record);
     }
 
     list(): readonly RegisteredTypedCommand[] {

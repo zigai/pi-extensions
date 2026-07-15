@@ -3,6 +3,7 @@ import { describe, it } from "vitest";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { CURSOR_MARKER, type Component, type TUI } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
+import { DEFAULT_PI_TYPED_COMMANDS_APPEARANCE } from "../src/pi/presentation-config.js";
 import type {
     FlatArgumentDefinitions,
     ParsedCommandArguments,
@@ -20,6 +21,8 @@ const theme = {
     bold: (text: string) => text,
     fg: (_color: string, text: string) => text,
 };
+
+const formOptions = { appearance: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE };
 
 const tui = {
     terminal: { rows: 24, columns: 80 },
@@ -79,7 +82,7 @@ describe("dense argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        await openArgumentForm(command, parsed, "missing", ctx);
+        await openArgumentForm(command, parsed, "missing", ctx, formOptions);
 
         assert.ok(
             renderedLines.some((line) => line.includes("count must be at most 3")),
@@ -137,7 +140,7 @@ describe("dense argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        const result = await openArgumentForm(command, parsed, "all", ctx);
+        const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
         assert.ok(
             countLine.includes("123"),
@@ -200,7 +203,7 @@ describe("dense argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        await openArgumentForm(command, parsed, "all", ctx);
+        await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
         assert.ok(renderedLines.some((line) => line.includes("Output path")));
         assert.ok(renderedLines.some((line) => line.includes("source=api")));
@@ -249,7 +252,7 @@ describe("dense argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        await openArgumentForm(command, parsed, "all", ctx);
+        await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
         assert.ok(
             renderedLines.some((line) => line.includes("Current tab panes")),
@@ -303,7 +306,7 @@ describe("dense argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        await openArgumentForm(command, parsed, "all", ctx);
+        await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
         assert.ok(
             initialLines.some((line) => line.includes("› Count")),
@@ -361,7 +364,7 @@ describe("dense argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        const result = await openArgumentForm(command, parsed, "all", ctx);
+        const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
         assert.equal(result?.output, "api.txt");
     });
@@ -413,7 +416,7 @@ describe("dense argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        const result = await openArgumentForm(command, parsed, "all", ctx);
+        const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
         assert.ok(
             countLine.includes(`1${CURSOR_MARKER}`),
@@ -472,7 +475,7 @@ describe("sequential argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        const result = await openArgumentForm(command, parsed, "missing", ctx);
+        const result = await openArgumentForm(command, parsed, "missing", ctx, formOptions);
 
         assert.equal(result, undefined);
         assert.deepEqual(notifications, ["• end is required", "• start must not exceed end"]);
@@ -522,7 +525,7 @@ describe("sequential argument form", () => {
             },
         } as unknown as ExtensionCommandContext;
 
-        const result = await openArgumentForm(command, parsed, "missing", ctx);
+        const result = await openArgumentForm(command, parsed, "missing", ctx, formOptions);
 
         assert.deepEqual(result?.tags, ["api", "worker"]);
         assert.deepEqual(prompts, ["Set --tags (current: )"]);

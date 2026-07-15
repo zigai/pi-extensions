@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { openArgumentForm } from "../form/open.js";
+import { openArgumentForm, type OpenArgumentFormOptions } from "../form/open.js";
 import { combineSkillAdditionalInput, decideArgumentIssueAction } from "../invocation.js";
 import { parseTypedCommandArgs } from "../parser.js";
 import type { TypedCommandRegistry } from "../registry.js";
@@ -119,10 +119,11 @@ export async function renderTypedSkillInput(
             notifyIssues(ctx, issueMessages);
             return undefined;
         }
-        const collected = await openArgumentForm(command, parsed, formMode, ctx, {
-            appearance,
-            ...(signal === undefined ? {} : { signal }),
-        });
+        let formOptions: OpenArgumentFormOptions = { appearance };
+        if (signal !== undefined) {
+            formOptions = { appearance, signal };
+        }
+        const collected = await openArgumentForm(command, parsed, formMode, ctx, formOptions);
         if (collected === undefined) {
             return undefined;
         }

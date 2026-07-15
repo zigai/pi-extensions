@@ -1,4 +1,3 @@
-import { basename, dirname, isAbsolute, join } from "node:path";
 import Type, { type Static } from "typebox";
 import Schema from "./typebox-schema.js";
 import { casesHandled } from "./exhaustive.js";
@@ -25,13 +24,8 @@ import type {
     TypedCompletionItem,
 } from "./types.js";
 
-export type CompletionPathEntry = {
-    readonly name: string;
-    readonly directory: boolean;
-};
-
 export type CompletionPathLookup = {
-    list(directory: string): Promise<readonly CompletionPathEntry[]>;
+    complete(query: string, cwd: string): Promise<readonly TypedCompletionItem[]>;
 };
 
 export type CompletionScheduler = {
@@ -316,50 +310,8 @@ async function pathCompletionItems(
     query: string,
     capabilities: CompletionCapabilities,
 ): Promise<TypedCompletionItem[]> {
-    const root = capabilities.cwd;
-    let raw = query;
-    if (raw.length === 0) {
-        raw = ".";
-    }
-    let directoryPart = dirname(raw);
-    let filePrefix = basename(raw);
-    if (raw.endsWith("/")) {
-        directoryPart = raw;
-        filePrefix = "";
-    }
-    let lookupDirectory = join(root, directoryPart);
-    if (isAbsolute(directoryPart)) {
-        lookupDirectory = directoryPart;
-    }
-    let valuePrefix = "";
-    if (raw.endsWith("/")) {
-        valuePrefix = raw;
-    } else if (directoryPart !== ".") {
-        valuePrefix = `${directoryPart}/`;
-    }
-
     try {
-        const entries = await capabilities.paths.list(lookupDirectory);
-        return entries
-            .filter((entry) => entry.name.startsWith(filePrefix))
-            .sort((left, right) => left.name.localeCompare(right.name))
-            .map((entry) => {
-                let value = `${valuePrefix}${entry.name}`;
-                if (entry.directory) {
-                    value += "/";
-                }
-                let label = entry.name;
-                let description = "file";
-                if (entry.directory) {
-                    label = `${entry.name}/`;
-                    description = "directory";
-                }
-                return {
-                    value,
-                    label,
-                    description,
-                };
-            });
+        return [...(await capabilities.paths.complete(query, capabilities.cwd))];
     } catch {
         return [];
     }
@@ -389,6 +341,18 @@ async function asyncArgumentValueItems(
     }
     if (definition.ui?.widget === "path") {
         return pathCompletionItems(query, context.capabilities);
+    }
+    return syncArgumentValueItems(definition, query, context);
+}
+
+function argumentValueItemsForMode(
+    definition: ArgumentDefinition,
+    query: string,
+    context: CommandLineContext,
+    mode: "async" | "sync",
+): ValueCompletionItem[] | Promise<ValueCompletionItem[]> {
+    if (mode === "async") {
+        return asyncArgumentValueItems(definition, query, context);
     }
     return syncArgumentValueItems(definition, query, context);
 }
@@ -440,10 +404,7 @@ function inlineFlagValueCompletion(
         }
         return mapped;
     };
-    const items =
-        mode === "async"
-            ? asyncArgumentValueItems(definition, query, context)
-            : syncArgumentValueItems(definition, query, context);
+    const items = argumentValueItemsForMode(definition, query, context, mode);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }
@@ -485,10 +446,12 @@ function valueCompletionForPreviousFlag(
         }
         return mapValueItemsForInsertion(items);
     };
-    const items =
-        mode === "async"
-            ? asyncArgumentValueItems(definition, context.currentPrefix, context)
-            : syncArgumentValueItems(definition, context.currentPrefix, context);
+    const items = argumentValueItemsForMode(
+        definition,
+        context.currentPrefix,
+        context,
+        mode,
+    );
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }
@@ -599,10 +562,7 @@ function nextPositionalValueCompletion(
         }
         return mapValueItemsForInsertion(items);
     };
-    const items =
-        mode === "async"
-            ? asyncArgumentValueItems(definition, query, context)
-            : syncArgumentValueItems(definition, query, context);
+    const items = argumentValueItemsForMode(definition, query, context, mode);
     if (isPromiseLike(items)) {
         return items.then(mapItems);
     }

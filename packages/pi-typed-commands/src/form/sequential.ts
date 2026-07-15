@@ -75,7 +75,10 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             return undefined;
         }
 
-        return this.active() ? this.state : undefined;
+        if (!this.active()) {
+            return undefined;
+        }
+        return this.state;
     }
 
     private active(): boolean {
@@ -83,7 +86,10 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
     }
 
     private dialogOptions(): { signal?: AbortSignal } {
-        return this.signal === undefined ? {} : { signal: this.signal };
+        if (this.signal === undefined) {
+            return {};
+        }
+        return { signal: this.signal };
     }
 
     private async promptArgument(name: string, definition: ArgumentDefinition): Promise<boolean> {

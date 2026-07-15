@@ -89,7 +89,11 @@ async function openEditorCommandForm(
 
     const serialized = serializeTypedCommandArgs(command, args);
     const invocationName = command.invocationName ?? command.name;
-    ctx.ui.setEditorText(serialized.length === 0 ? `/${invocationName}` : `/${invocationName} ${serialized}`);
+    let editorText = `/${invocationName}`;
+    if (serialized.length > 0) {
+        editorText += ` ${serialized}`;
+    }
+    ctx.ui.setEditorText(editorText);
 }
 
 function thrownValueKind(error: unknown): string {

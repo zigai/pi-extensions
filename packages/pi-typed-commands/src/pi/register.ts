@@ -8,6 +8,7 @@ import { createCommandHandle } from "../command/handle.js";
 import { normalizeRegisteredCommand } from "../command/registered-command.js";
 import { decideArgumentIssueAction } from "../invocation.js";
 import { parseTypedCommandArgs } from "../parser.js";
+import type { OpenArgumentFormOptions } from "../form/open.js";
 import { createPiCompletionCapabilities, getTypedArgumentCompletions } from "./completions.js";
 import { getPiTypedCommandRegistry } from "./registry.js";
 import type { TypedCommandRegistry } from "../registry.js";
@@ -44,9 +45,18 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     registry: TypedCommandRegistry,
 ): Promise<InferArguments<FlatArgumentDefinitions> | undefined> {
     const parsed = parseTypedCommandArgs(command, rawArgs);
-    const [{ getTypedCommandSessionOptions }, { resolveTypedCommandUxOptions }] =
-        await Promise.all([import("./session-state.js"), import("./settings.js")]);
-    const options = getTypedCommandSessionOptions(ctx) ?? resolveTypedCommandUxOptions();
+    const [
+        { getTypedCommandSessionOptions },
+        { resolvePiTypedCommandsConfigSnapshot, resolveTypedCommandUxOptions },
+    ] = await Promise.all([import("./session-state.js"), import("./settings.js")]);
+    let options = getTypedCommandSessionOptions(ctx);
+    if (options === undefined) {
+        const snapshot = resolvePiTypedCommandsConfigSnapshot({
+            cwd: ctx.cwd,
+            projectTrusted: ctx.isProjectTrusted(),
+        });
+        options = resolveTypedCommandUxOptions({}, snapshot);
+    }
     if (parsed.mode === "help") {
         const { notifyDetailedHelp } = await import("./help.js");
         notifyDetailedHelp(ctx, command, options.appearance);
@@ -66,10 +76,11 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
             return undefined;
         }
         const { openArgumentForm } = await import("../form/open.js");
-        const collected = await openArgumentForm(command, parsed, formMode, ctx, {
-            appearance: options.appearance,
-            ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
-        });
+        let formOptions: OpenArgumentFormOptions = { appearance: options.appearance };
+        if (ctx.signal !== undefined) {
+            formOptions = { appearance: options.appearance, signal: ctx.signal };
+        }
+        const collected = await openArgumentForm(command, parsed, formMode, ctx, formOptions);
         if (collected === undefined) {
             return undefined;
         }

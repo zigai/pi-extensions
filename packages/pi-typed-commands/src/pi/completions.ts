@@ -1,4 +1,5 @@
 import { readdir } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
 import {
     getTypedArgumentCompletions as resolveTypedArgumentCompletions,
@@ -57,6 +58,47 @@ class PiCompletionScheduler implements CompletionScheduler {
     }
 }
 
+async function completePathItems(query: string, cwd: string): Promise<TypedCompletionItem[]> {
+    let raw = query;
+    if (raw.length === 0) {
+        raw = ".";
+    }
+    let directoryPart = dirname(raw);
+    let filePrefix = basename(raw);
+    if (raw.endsWith("/")) {
+        directoryPart = raw;
+        filePrefix = "";
+    }
+    let lookupDirectory = join(cwd, directoryPart);
+    if (isAbsolute(directoryPart)) {
+        lookupDirectory = directoryPart;
+    }
+    let valuePrefix = "";
+    if (raw.endsWith("/")) {
+        valuePrefix = raw;
+    } else if (directoryPart !== ".") {
+        valuePrefix = `${directoryPart}/`;
+    }
+
+    const entries = await readdir(lookupDirectory, { withFileTypes: true });
+    return entries
+        .filter((entry) => entry.name.startsWith(filePrefix))
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((entry) => {
+            let value = `${valuePrefix}${entry.name}`;
+            if (entry.isDirectory()) {
+                value += "/";
+            }
+            let label = entry.name;
+            let description = "file";
+            if (entry.isDirectory()) {
+                label = `${entry.name}/`;
+                description = "directory";
+            }
+            return { value, label, description };
+        });
+}
+
 /** Compose completion decisions with Pi/Node filesystem, cancellation, and registry adapters. */
 export function createPiCompletionCapabilities(
     cwd: string,
@@ -67,13 +109,7 @@ export function createPiCompletionCapabilities(
         cwd,
         commands,
         paths: {
-            async list(directory) {
-                const entries = await readdir(directory, { withFileTypes: true });
-                return entries.map((entry) => ({
-                    name: entry.name,
-                    directory: entry.isDirectory(),
-                }));
-            },
+            complete: completePathItems,
         },
         scheduler: new PiCompletionScheduler(signal),
     };
@@ -106,7 +142,10 @@ export async function getTypedArgumentCompletions<TDefinitions extends ArgumentD
     capabilities: CompletionCapabilities,
 ): Promise<AutocompleteItem[] | null> {
     const items = await resolveTypedArgumentCompletions(command, argumentPrefix, capabilities);
-    return items === null ? null : items.map(toAutocompleteItem);
+    if (items === null) {
+        return null;
+    }
+    return items.map(toAutocompleteItem);
 }
 
 /** Pi editor projection for library-owned completion decisions. */
@@ -122,5 +161,8 @@ export async function getTypedAutocompleteSuggestions(
         cursorCol,
         capabilities,
     );
-    return decision === undefined ? undefined : toAutocompleteSuggestions(decision);
+    if (decision === undefined) {
+        return undefined;
+    }
+    return toAutocompleteSuggestions(decision);
 }
