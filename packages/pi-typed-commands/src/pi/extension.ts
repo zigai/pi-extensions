@@ -8,6 +8,33 @@ import {
 import { TypedCommandUxSession } from "./ux-session.js";
 import { getPiTypedCommandRegistry } from "./registry.js";
 
+const PI_UX_INSTALLATIONS_KEY = Symbol.for("pi-typed-args.ux-installations.v1");
+
+type SharedTypedCommandUxInstallation = {
+    mergeOptions(options: TypedCommandUxOptions): void;
+};
+
+type GlobalWithTypedCommandUxInstallations = typeof globalThis & {
+    [PI_UX_INSTALLATIONS_KEY]?: WeakMap<object, SharedTypedCommandUxInstallation>;
+};
+
+function getTypedCommandUxInstallations(): WeakMap<object, SharedTypedCommandUxInstallation> {
+    const globalObject: GlobalWithTypedCommandUxInstallations = globalThis;
+    let installations = globalObject[PI_UX_INSTALLATIONS_KEY];
+    if (installations === undefined) {
+        installations = new WeakMap();
+        globalObject[PI_UX_INSTALLATIONS_KEY] = installations;
+    }
+    return installations;
+}
+
+function installationKey(pi: ExtensionAPI): object {
+    if (typeof pi.events === "object" && pi.events !== null) {
+        return pi.events;
+    }
+    return pi;
+}
+
 /**
  * Install the live editor helper, typed autocomplete bridge, and Tab-to-form shortcut.
  *
@@ -15,8 +42,21 @@ import { getPiTypedCommandRegistry } from "./registry.js";
  * call it directly when composing pi-typed-args into a custom extension entrypoint.
  */
 export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxOptions = {}): void {
+    const installations = getTypedCommandUxInstallations();
+    const key = installationKey(pi);
+    const existing = installations.get(key);
+    if (existing !== undefined) {
+        existing.mergeOptions(options);
+        return;
+    }
+
     const registry = getPiTypedCommandRegistry();
     const session = new TypedCommandUxSession(pi, options, registry);
+    installations.set(key, {
+        mergeOptions(nextOptions) {
+            session.mergeConfiguredOptions(nextOptions);
+        },
+    });
 
     pi.on("session_start", async (_event, ctx) => {
         refreshTypedSkills(pi, registry);

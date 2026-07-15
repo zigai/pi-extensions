@@ -24,6 +24,7 @@ import {
 import {
     resolvePiTypedCommandsConfigSnapshot,
     resolveTypedCommandUxOptions,
+    type ResolvedPiTypedCommandsConfigSnapshot,
     type ResolvedTypedCommandUxOptions,
 } from "./settings.js";
 import { completePartialFlagOnTab } from "./tab-completion.js";
@@ -142,25 +143,32 @@ export class TypedCommandUxSession {
     private submittedInvalidEditorText: string | undefined;
     private armedDoubleTabEditorText: string | undefined;
     private helperWidgetSignature: string | undefined;
+    private configSnapshot: ResolvedPiTypedCommandsConfigSnapshot | undefined;
     private options: ResolvedTypedCommandUxOptions;
 
     constructor(
         private readonly pi: ExtensionAPI,
-        private readonly configuredOptions: TypedCommandUxOptions,
+        private configuredOptions: TypedCommandUxOptions,
         private readonly registry: TypedCommandRegistry,
     ) {
         this.options = resolveTypedCommandUxOptions(configuredOptions);
+    }
+
+    /** Merge explicit composition options without installing a second Pi UX bridge. */
+    mergeConfiguredOptions(options: TypedCommandUxOptions): void {
+        this.configuredOptions = { ...this.configuredOptions, ...options };
+        this.options = resolveTypedCommandUxOptions(this.configuredOptions, this.configSnapshot);
     }
 
     async start(ctx: ExtensionContext): Promise<void> {
         await this.stop();
         this.helperWidgetSignature = undefined;
         this.active = true;
-        const snapshot = resolvePiTypedCommandsConfigSnapshot({
+        this.configSnapshot = resolvePiTypedCommandsConfigSnapshot({
             cwd: ctx.cwd,
             projectTrusted: ctx.isProjectTrusted(),
         });
-        this.options = resolveTypedCommandUxOptions(this.configuredOptions, snapshot);
+        this.options = resolveTypedCommandUxOptions(this.configuredOptions, this.configSnapshot);
         if (!ctx.hasUI) {
             return;
         }

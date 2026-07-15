@@ -121,6 +121,11 @@ installTypedCommandUx(pi, { formTrigger: "double-tab" });
 With this option, the first Tab arms the form shortcut and the second opens it. Typing any other
 key or changing the command text resets the sequence.
 
+Multiple `installTypedCommandUx()` calls composed into the same Pi host share one live UX bridge,
+even though Pi gives each extension a scoped API object. Later explicit options are merged into that
+bridge, so a custom extension can require double-Tab even when the standalone `pi-typed-args`
+extension was loaded first.
+
 Forms can also open automatically for missing required arguments or invalid values, depending on command options.
 
 The selected field is marked with `›` and accented so users can tell which value arrow keys, space, or typing will edit.

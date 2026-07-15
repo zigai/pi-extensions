@@ -11,6 +11,7 @@ import { isFocusable, type Component, type Focusable, type TUI } from "@earendil
 export type TestExtensionEventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
 
 export type TestExtensionApiOverrides = {
+    readonly events?: ExtensionAPI["events"];
     readonly on?: (name: string, handler: TestExtensionEventHandler) => void;
     readonly getCommands?: ExtensionAPI["getCommands"];
     readonly registerCommand?: ExtensionAPI["registerCommand"];
@@ -74,6 +75,7 @@ function externalPiContract<TContract extends ExternalPiContract>(value: object)
 
 export function createTestExtensionApi(overrides: TestExtensionApiOverrides = {}): ExtensionAPI {
     return externalPiContract<ExtensionAPI>({
+        events: overrides.events ?? {},
         on: overrides.on ?? (() => {}),
         getCommands: overrides.getCommands ?? (() => []),
         registerCommand: overrides.registerCommand ?? (() => {}),

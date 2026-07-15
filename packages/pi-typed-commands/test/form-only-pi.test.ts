@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { defineTypedCommand } from "../src/command/definition.js";
+import { installTypedCommandUx } from "../src/pi/extension.js";
 import { registerTypedCommand } from "../src/pi/register.js";
+import { getPiTypedCommandRegistry } from "../src/pi/registry.js";
 import {
     registerSubmittedInvalidCommandHandler,
     stageExpandedFormArguments,
@@ -153,6 +155,102 @@ describe("Pi form-only arguments", () => {
             assert.equal(customCalls, 1);
         } finally {
             await session.stop();
+        }
+    });
+
+    it("deduplicates composed UX installs and merges a later double-Tab trigger", async () => {
+        const command: RegisteredTypedCommand = {
+            name: "deduplicated-double-tab-form-test",
+            description: "Test composed double Tab",
+            args: {
+                task: { type: "string", position: 0, rest: true },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+            target: { kind: "extension", run() {} },
+        };
+        const registry = getPiTypedCommandRegistry();
+        registry.register(command);
+
+        const firstHandlers = new Map<
+            string,
+            Array<(event: unknown, ctx: ExtensionContext) => unknown>
+        >();
+        const secondHandlers = new Map<
+            string,
+            Array<(event: unknown, ctx: ExtensionContext) => unknown>
+        >();
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        let customCalls = 0;
+        const editorText = "/deduplicated-double-tab-form-test Build";
+        const sharedEvents = createTestExtensionApi().events;
+        const firstPi = createTestExtensionApi({
+            events: sharedEvents,
+            on(name, handler) {
+                const current = firstHandlers.get(name) ?? [];
+                firstHandlers.set(name, [...current, handler]);
+            },
+        });
+        const secondPi = createTestExtensionApi({
+            events: sharedEvents,
+            on(name, handler) {
+                const current = secondHandlers.get(name) ?? [];
+                secondHandlers.set(name, [...current, handler]);
+            },
+        });
+        const ctx = createTestExtensionContext({
+            cwd: process.cwd(),
+            hasUI: true,
+            isProjectTrusted: () => false,
+            mode: "tui",
+            ui: {
+                addAutocompleteProvider() {},
+                custom: async () => {
+                    customCalls += 1;
+                    return undefined;
+                },
+                getEditorText: () => editorText,
+                notify() {},
+                onTerminalInput(handler: (data: string) => { consume?: boolean } | undefined) {
+                    terminalInput = handler;
+                    return () => {
+                        terminalInput = undefined;
+                    };
+                },
+                setEditorText() {},
+                setWidget() {},
+            },
+        });
+
+        installTypedCommandUx(firstPi);
+        installTypedCommandUx(secondPi, { formTrigger: "double-tab" });
+
+        try {
+            assert.equal(firstHandlers.get("session_start")?.length, 1);
+            assert.equal(firstHandlers.get("input")?.length, 1);
+            assert.equal(firstHandlers.get("session_shutdown")?.length, 1);
+            assert.equal(secondHandlers.size, 0);
+
+            const start = firstHandlers.get("session_start")?.[0];
+            assert.ok(start);
+            await start({}, ctx);
+            assert.ok(terminalInput);
+
+            assert.deepEqual(terminalInput("\t"), { consume: true });
+            assert.equal(customCalls, 0);
+            assert.deepEqual(terminalInput("\t"), { consume: true });
+            await Promise.resolve();
+            assert.equal(customCalls, 1);
+        } finally {
+            const shutdown = firstHandlers.get("session_shutdown")?.[0];
+            if (shutdown !== undefined) {
+                await shutdown({}, ctx);
+            }
+            registry.unregister(command);
         }
     });
 });
