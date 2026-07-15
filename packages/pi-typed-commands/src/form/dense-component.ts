@@ -115,6 +115,10 @@ function formatValue(value: ArgumentValue): string {
     return String(value);
 }
 
+function formatInlineValue(value: ArgumentValue): string {
+    return formatValue(value).replace(/\r\n|\r|\n/g, " ↵ ");
+}
+
 function stringSelections(value: ArgumentValue): readonly string[] {
     if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
         return [];
@@ -538,10 +542,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         }
 
         if (selected && isTextareaWidget(field.definition)) {
-            return this.theme.fg(
-                this.appearance.colors.focusedValue,
-                paddedCell(formatValue(this.state[field.name]), width),
-            );
+            return this.theme.fg(this.appearance.colors.focusedValue, paddedCell("", width));
         }
 
         if (selected && isTextWidget(field.definition)) {
@@ -556,7 +557,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             case "string":
             case "number":
             case "enum": {
-                const rawValue = paddedCell(formatValue(this.state[field.name]), width);
+                const rawValue = paddedCell(formatInlineValue(this.state[field.name]), width);
                 if (selected) {
                     return this.theme.fg(this.appearance.colors.focusedValue, rawValue);
                 }

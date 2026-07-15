@@ -296,6 +296,66 @@ describe("dense argument form", () => {
         );
     });
 
+    it("renders multiline textareas without embedding terminal line breaks in form rows", async () => {
+        const definitions = {
+            task: {
+                type: "string",
+                title: "Goal request",
+                ui: { widget: "textarea", rows: 5 },
+            },
+            exact: { type: "boolean", title: "Use exact wording" },
+        } satisfies FlatArgumentDefinitions;
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "multiline",
+            description: "Multiline form",
+            args: definitions,
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: { task: "first\nsecond", exact: false },
+            provided: new Set(["task"]),
+            issues: [],
+            mode: "run",
+        };
+
+        let selectedLines: string[] = [];
+        let collapsedLines: string[] = [];
+        const ctx = createTestExtensionCommandContext({
+            mode: "tui",
+            ui: {
+                custom: async (factory) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, () => {}),
+                    );
+                    component.focused = true;
+                    component.handleInput("\u001b[200~\nthird\u001b[201~");
+                    selectedLines = component.render(100);
+                    component.handleInput("\t");
+                    collapsedLines = component.render(100);
+                    return undefined;
+                },
+            },
+        });
+
+        await openArgumentForm(command, parsed, "all", ctx, formOptions);
+
+        for (const line of [...selectedLines, ...collapsedLines]) {
+            assert.doesNotMatch(line, /[\r\n]/);
+        }
+        assert.equal(
+            selectedLines.filter((line) => line.includes("Goal request")).length,
+            1,
+            JSON.stringify(selectedLines),
+        );
+        assert.ok(selectedLines.some((line) => line.includes("first")));
+        assert.ok(selectedLines.some((line) => line.includes("second")));
+        assert.ok(selectedLines.some((line) => line.includes("third")));
+        assert.ok(
+            collapsedLines.some((line) => line.includes("first ↵ second ↵ third")),
+            JSON.stringify(collapsedLines),
+        );
+    });
+
     it("computes read-only field values", async () => {
         const definitions: FlatArgumentDefinitions = {
             source: { type: "string", default: "api" },
