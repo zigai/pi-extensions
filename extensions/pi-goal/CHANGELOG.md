@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.36 - 2026-07-14
+
 - Refresh the local development lock and documented compatibility baseline to Pi 0.80.7; deliberate per-run `agent_end` continuation handling remains unchanged.
 
 ## 0.1.35 - 2026-07-11
