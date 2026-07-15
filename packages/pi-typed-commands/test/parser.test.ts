@@ -209,6 +209,35 @@ describe("parseTypedCommandArgs", () => {
         }
     });
 
+    it("reconstructs defaulted leaves before returning typed success", () => {
+        const compiled = compileTypedCommandDefinition({
+            name: "default-presence-proof",
+            description: "Default presence proof",
+            args: { ref: { type: "string", default: "main" } },
+        });
+        if (!compiled.ok) {
+            assert.fail("expected default-presence grammar to compile");
+        }
+        const parsed = parseTypedCommandArgs(
+            { args: compiled.command.args, compiled: compiled.command },
+            "",
+        );
+        const withoutDefault = {
+            ...parsed,
+            grammar: compiled.command,
+            values: {},
+            sources: new Map(),
+        };
+
+        const result = toTypedParseResult(compiled.command, withoutDefault);
+
+        assert.equal(result.status, "success");
+        if (result.status === "success") {
+            assert.deepEqual(result.value, { ref: "main" });
+            assert.equal(result.sources.get("ref"), "default");
+        }
+    });
+
     it("parses named enum, string, boolean, and number args", () => {
         const parsed = parseTypedCommandArgs(
             command,

@@ -754,11 +754,23 @@ function includesIssue(issues: readonly ParseIssue[], candidate: ParseIssue): bo
 function validatedParsedValues(
     grammar: CompiledCommand,
     parsed: ParsedCommandArguments,
-): { values: Record<string, ArgumentValue>; issues: ParseIssue[] } {
+): {
+    values: Record<string, ArgumentValue>;
+    issues: ParseIssue[];
+    reconstructedDefaults: ReadonlySet<string>;
+} {
     const values: Record<string, ArgumentValue> = {};
     const issues = [...parsed.issues];
+    const reconstructedDefaults = new Set<string>();
     for (const argument of grammar.arguments) {
-        const value: unknown = parsed.values[argument.key];
+        let value: unknown = parsed.values[argument.key];
+        if (value === undefined) {
+            const defaultValue = applyArgumentDefault(argument.definition);
+            if (defaultValue !== undefined) {
+                value = cloneDefaultValue(defaultValue);
+                reconstructedDefaults.add(argument.key);
+            }
+        }
         const argumentIssues = argument.validate(value);
         if (argumentIssues.length === 0 && isArgumentValue(value)) {
             if (value !== undefined) {
@@ -772,7 +784,7 @@ function validatedParsedValues(
             }
         }
     }
-    return { values, issues };
+    return { values, issues, reconstructedDefaults };
 }
 
 function typedDraft<TDefinitions extends ArgumentDefinitions>(
@@ -812,11 +824,17 @@ function typedProvided<TDefinitions extends ArgumentDefinitions>(
 function typedSources<TDefinitions extends ArgumentDefinitions>(
     grammar: CompiledCommand<TDefinitions>,
     sources: ReadonlyMap<string, "explicit" | "default"> | undefined,
+    reconstructedDefaults: ReadonlySet<string>,
 ): ReadonlyMap<ArgumentPath<TDefinitions>, "explicit" | "default"> {
     const typed = new Map<ArgumentPath<TDefinitions>, "explicit" | "default">();
     for (const [key, source] of sources ?? []) {
         if (isArgumentPath(grammar, key)) {
             typed.set(key, source);
+        }
+    }
+    for (const key of reconstructedDefaults) {
+        if (isArgumentPath(grammar, key) && !typed.has(key)) {
+            typed.set(key, "default");
         }
     }
     return typed;
@@ -851,7 +869,7 @@ export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: zero validation issues proves every required/defaulted leaf is present.
         value: partial as InferArguments<TDefinitions>,
         provided,
-        sources: typedSources(grammar, parsed.sources),
+        sources: typedSources(grammar, parsed.sources, validated.reconstructedDefaults),
     };
 }
 

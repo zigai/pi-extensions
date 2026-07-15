@@ -50,20 +50,6 @@ export function registeredCommandFromCompiledDefinition<TDefinitions extends Arg
     return command;
 }
 
-/** Compile a definition into normalized registered-command metadata used by pure helpers. */
-export function registeredCommandForDefinition<TDefinitions extends ArgumentDefinitions>(
-    definition: Pick<
-        TypedCommandDefinition<TDefinitions>,
-        "name" | "description" | "args" | "refine"
-    >,
-): RegisteredTypedCommand<TDefinitions> & { readonly compiled: CompiledCommand<TDefinitions> } {
-    const compiled = compileTypedCommandDefinition(definition);
-    if (!compiled.ok) {
-        throw definitionError(definition.name, compiled.diagnostics);
-    }
-    return registeredCommandFromCompiledDefinition(definition, compiled.command);
-}
-
 /** Normalize a user command definition into metadata consumed by Pi registration and UX adapters. */
 export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
     definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,

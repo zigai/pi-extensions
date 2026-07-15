@@ -1,7 +1,6 @@
 import {
     expandGroupedArgumentValues,
     flattenGroupedArgumentDefinitions,
-    flattenGroupedArgumentValues,
     hasArgumentGroups,
 } from "../arguments.js";
 import type {
@@ -10,7 +9,6 @@ import type {
     FlatArgumentDefinitions,
     InferArguments,
     ParsedArgumentDraft,
-    SerializableArgumentValues,
     TypedCommandRefinement,
     TypedCommandRefinementContext,
 } from "../types.js";
@@ -57,17 +55,6 @@ function refinementContext<TDefinitions extends ArgumentDefinitions>(
         }
     }
     return { provided };
-}
-
-/** Flatten nested handler values into dotted parser values when a definition contains groups. */
-export function maybeFlattenGroupedValues<TDefinitions extends ArgumentDefinitions>(
-    values: SerializableArgumentValues<TDefinitions>,
-    definitions: TDefinitions,
-): Record<string, unknown> {
-    if (!hasArgumentGroups(definitions)) {
-        return { ...values };
-    }
-    return flattenGroupedArgumentValues(values, definitions);
 }
 
 /** Adapt grouped refinement callbacks to the parser's flat dotted-value representation. */
