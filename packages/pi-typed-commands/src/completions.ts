@@ -483,7 +483,7 @@ function valueCompletionForPreviousFlag(
     return mapItems(items);
 }
 
-function hasEndOfOptions(tokens: Token[]): boolean {
+function hasEndOfOptions(tokens: readonly Token[]): boolean {
     return tokens.some((token) => token.quote === undefined && token.value === "--");
 }
 
@@ -517,7 +517,7 @@ function currentTokenIsFlagValue(context: CommandLineContext): boolean {
 
 function nextPositionalValueCompletion(
     context: CommandLineContext,
-    tokens: Token[],
+    tokens: readonly Token[],
 ): MaybePromise<AutocompleteItem[] | undefined> {
     if (currentTokenIsFlagValue(context)) {
         return undefined;
@@ -611,7 +611,7 @@ type CompletionDecision = {
 
 type CompletionBranch = (
     context: CommandLineContext,
-    tokens: Token[],
+    tokens: readonly Token[],
 ) => MaybePromise<AutocompleteItem[] | undefined>;
 
 const VALUE_COMPLETION_BRANCHES: readonly CompletionBranch[] = [
@@ -622,7 +622,7 @@ const VALUE_COMPLETION_BRANCHES: readonly CompletionBranch[] = [
 
 function flagCompletionDecision(
     context: CommandLineContext,
-    tokens: Token[],
+    tokens: readonly Token[],
 ): CompletionDecision | undefined {
     if (hasEndOfOptions(tokens)) {
         return undefined;
@@ -646,7 +646,7 @@ function flagCompletionDecision(
 
 async function resolveCompletionDecisionAsync(
     context: CommandLineContext,
-    tokens: Token[],
+    tokens: readonly Token[],
 ): Promise<CompletionDecision | undefined> {
     for (const branch of VALUE_COMPLETION_BRANCHES) {
         const items = await branch(context, tokens);
@@ -659,7 +659,7 @@ async function resolveCompletionDecisionAsync(
 
 function resolveCompletionDecisionSync(
     context: CommandLineContext,
-    tokens: Token[],
+    tokens: readonly Token[],
 ): CompletionDecision | undefined {
     for (const branch of VALUE_COMPLETION_BRANCHES) {
         const items = syncItems(branch(context, tokens));
