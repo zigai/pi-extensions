@@ -11,7 +11,7 @@ import {
     validateArgumentDefinitions,
     validateArgumentValue,
 } from "../src/schema.js";
-import type { FlatArgumentDefinitions } from "../src/types.js";
+import type { ArgumentDefinition, FlatArgumentDefinitions } from "../src/types.js";
 
 const definitions: FlatArgumentDefinitions = {
     action: {
@@ -38,6 +38,12 @@ const definitions: FlatArgumentDefinitions = {
         default: 1,
     },
 };
+
+function definitionNamed(name: string): ArgumentDefinition {
+    const definition = definitions[name];
+    assert.ok(definition, `missing ${name} definition`);
+    return definition;
+}
 
 describe("typed command schema", () => {
     it("orders positional args before flags", () => {
@@ -68,19 +74,20 @@ describe("typed command schema", () => {
             ok: false,
             message: "--count expects an integer",
         });
-        assert.deepEqual(validateArgumentValue("branchName", definitions.branchName!, ""), {
+        const branchName = definitionNamed("branchName");
+        assert.deepEqual(validateArgumentValue("branchName", branchName, ""), {
             ok: false,
             message: "--branch-name must be at least 1 characters",
         });
         assert.deepEqual(
-            validateArgumentValue("branchName", definitions.branchName!, "bad branch"),
+            validateArgumentValue("branchName", branchName, "bad branch"),
             {
                 ok: false,
                 message: "--branch-name must match pattern ^[a-zA-Z0-9/_-]+$",
             },
         );
         assert.deepEqual(
-            validateArgumentValue("branchName", definitions.branchName!, "", {
+            validateArgumentValue("branchName", branchName, "", {
                 nameStyle: "field",
             }),
             {
@@ -92,8 +99,8 @@ describe("typed command schema", () => {
 
     it("applies defaults and derives display hints", () => {
         assert.deepEqual(applyArgumentDefaults(definitions, {}), { count: 1 });
-        assert.equal(argumentValueHint(definitions.branchName!, "branchName"), "branch-name");
-        assert.equal(argumentValueHint(definitions.action!, "action"), "create|delete");
+        assert.equal(argumentValueHint(definitionNamed("branchName"), "branchName"), "branch-name");
+        assert.equal(argumentValueHint(definitionNamed("action"), "action"), "create|delete");
     });
 
     it("compiles arguments into immutable behavior objects", () => {
@@ -125,11 +132,11 @@ describe("typed command schema", () => {
             many: { type: "multi-enum", values: ["a"], minItems: 3, maxItems: 1 },
             commaMulti: { type: "multi-enum", values: ["a,b"] },
             badCompletionTimeout: { type: "string", completionTimeoutMs: -1 },
-            defaulted: { type: "string", required: true, default: "main" } as never,
+            defaulted: { type: "string", required: true, default: "main" },
             first: { type: "string", position: 0 },
             second: { type: "string", required: true, position: 1 },
             duplicatePosition: { type: "string", position: 1 },
-            badTitle: { type: "string", title: 123 as never },
+            badTitle: { type: "string", title: 123 },
             badRows: { type: "string", ui: { rows: 0 } },
             restBeforeOther: { type: "string", position: 2, rest: true },
             afterRest: { type: "string", position: 3 },
@@ -169,28 +176,26 @@ describe("typed command schema", () => {
     });
 
     it("returns diagnostics for malformed runtime definitions instead of throwing", () => {
-        const compiled = compileTypedCommandDefinition({
-            name: "bad-runtime",
-            description: "Bad runtime definitions",
-            args: {
-                stringValues: { type: "enum", values: "abc" },
-                numericValues: { type: "enum", values: [1, 2] },
-                numericFlag: { type: "string", flag: 123 },
-                stringAliases: { type: "string", aliases: "x" },
-                unknownType: { type: "date" },
-                missingDefinition: null,
-                stringRequired: { type: "string", required: "yes" },
-                stringInteger: { type: "number", integer: "yes" },
-                // SAFETY: this test intentionally bypasses compile-time definition checks to
-                // exercise diagnostics for JavaScript/runtime callers.
-            } as never,
-        });
+        class BehaviorBearingDefinition {
+            readonly type = "string";
 
-        assert.equal(compiled.ok, false);
-        if (compiled.ok) {
-            assert.fail("malformed runtime definitions should not compile");
+            describe(): string {
+                return "unsupported behavior";
+            }
         }
-        const text = compiled.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+
+        const diagnostics = validateArgumentDefinitions({
+            stringValues: { type: "enum", values: "abc" },
+            numericValues: { type: "enum", values: [1, 2] },
+            numericFlag: { type: "string", flag: 123 },
+            stringAliases: { type: "string", aliases: "x" },
+            unknownType: { type: "date" },
+            missingDefinition: null,
+            stringRequired: { type: "string", required: "yes" },
+            stringInteger: { type: "number", integer: "yes" },
+            behaviorBearing: new BehaviorBearingDefinition(),
+        });
+        const text = diagnostics.map((diagnostic) => diagnostic.message).join("\n");
 
         assert.match(text, /stringValues\.values must be a list of strings/);
         assert.match(text, /numericValues\.values\[0\] must be a string/);
@@ -200,6 +205,7 @@ describe("typed command schema", () => {
         assert.match(text, /missingDefinition: argument definition must be an object/);
         assert.match(text, /stringRequired\.required must be a boolean/);
         assert.match(text, /stringInteger\.integer must be a boolean/);
+        assert.match(text, /behaviorBearing: argument definition must be a plain object/);
 
         assert.deepEqual(validateArgumentDefinitions(null), [
             {

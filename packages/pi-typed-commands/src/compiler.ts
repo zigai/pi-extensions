@@ -1,5 +1,8 @@
 import { compileArgumentBehavior } from "./behavior.js";
-import { flattenGroupedArgumentDefinitions } from "./arguments.js";
+import {
+    flattenGroupedArgumentDefinitions,
+    isArgumentGroupDefinition,
+} from "./arguments.js";
 import { diagnosticMessages } from "./diagnostics.js";
 import {
     createArgumentLookup,
@@ -8,45 +11,118 @@ import {
     validateArgumentDefinitions,
 } from "./schema.js";
 import type {
+    ArgumentDefinition,
     ArgumentDefinitions,
+    ArgumentGroupDefinition,
+    ArgumentUi,
     CompileResult,
     CompiledCommand,
     TypedCommandDefinition,
 } from "./types.js";
+import { ARGUMENT_GROUP } from "./types.js";
 
-function cloneValue<T>(value: T): T {
-    if (value instanceof RegExp) {
-        return new RegExp(value.source, value.flags) as T;
+function cloneArgumentUi(ui: ArgumentUi): ArgumentUi {
+    const cloned = { ...ui };
+    if (ui.custom !== undefined) {
+        cloned.custom = { ...ui.custom };
     }
-    if (Array.isArray(value)) {
-        const items = value as readonly unknown[];
-        return items.map((item) => cloneValue(item)) as T;
-    }
-    if (typeof value === "object" && value !== null) {
-        const clone: Record<PropertyKey, unknown> = {};
-        for (const key of Reflect.ownKeys(value)) {
-            clone[key] = cloneValue((value as Record<PropertyKey, unknown>)[key]);
-        }
-        return clone as T;
-    }
-    return value;
+    return cloned;
 }
 
-function freezeValue<T>(value: T): T {
-    if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
-        return value;
+function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefinition {
+    const cloned: ArgumentDefinition = { ...definition };
+    if (definition.aliases !== undefined) {
+        cloned.aliases = [...definition.aliases];
     }
-    for (const nested of Object.values(value)) {
-        freezeValue(nested);
+    if (definition.ui !== undefined) {
+        cloned.ui = cloneArgumentUi(definition.ui);
     }
-    return Object.freeze(value);
+    if (
+        cloned.type === "string" &&
+        definition.type === "string" &&
+        definition.pattern instanceof RegExp
+    ) {
+        cloned.pattern = new RegExp(definition.pattern.source, definition.pattern.flags);
+    }
+    if (
+        cloned.type === "multi-enum" &&
+        definition.type === "multi-enum" &&
+        definition.default !== undefined
+    ) {
+        cloned.default = [...definition.default];
+    }
+    if (cloned.type === "enum" && definition.type === "enum") {
+        cloned.values = [...definition.values];
+    }
+    if (cloned.type === "multi-enum" && definition.type === "multi-enum") {
+        cloned.values = [...definition.values];
+    }
+    return cloned;
+}
+
+function cloneDefinitionGraph(definitions: ArgumentDefinitions): ArgumentDefinitions {
+    const cloned: Record<string, ArgumentDefinition | ArgumentGroupDefinition> = {};
+    for (const [name, definition] of Object.entries(definitions)) {
+        if (isArgumentGroupDefinition(definition)) {
+            const args = cloneDefinitionGraph(definition.args);
+            cloned[name] = {
+                args,
+                [ARGUMENT_GROUP]: args,
+                ...(definition.title === undefined ? {} : { title: definition.title }),
+                ...(definition.description === undefined
+                    ? {}
+                    : { description: definition.description }),
+            };
+            continue;
+        }
+        cloned[name] = cloneArgumentDefinition(definition);
+    }
+    return cloned;
+}
+
+function freezeArgumentDefinition(definition: ArgumentDefinition): void {
+    if (definition.aliases !== undefined) {
+        Object.freeze(definition.aliases);
+    }
+    if (definition.type === "multi-enum" && definition.default !== undefined) {
+        Object.freeze(definition.default);
+    }
+    if (definition.type === "enum" || definition.type === "multi-enum") {
+        Object.freeze(definition.values);
+    }
+    if (definition.ui?.custom !== undefined) {
+        Object.freeze(definition.ui.custom);
+    }
+    if (definition.ui !== undefined) {
+        Object.freeze(definition.ui);
+    }
+    if (definition.type === "string" && definition.pattern instanceof RegExp) {
+        Object.freeze(definition.pattern);
+    }
+    Object.freeze(definition);
+}
+
+function freezeDefinitionGraph(definitions: ArgumentDefinitions): void {
+    for (const definition of Object.values(definitions)) {
+        if (isArgumentGroupDefinition(definition)) {
+            freezeDefinitionGraph(definition.args);
+            Object.freeze(definition);
+            continue;
+        }
+        freezeArgumentDefinition(definition);
+    }
+    Object.freeze(definitions);
 }
 
 /** Deep-clone and freeze argument definitions so later caller mutation cannot affect compiled commands. */
 export function cloneAndFreezeDefinitions<TDefinitions extends ArgumentDefinitions>(
     definitions: TDefinitions,
 ): TDefinitions {
-    return freezeValue(cloneValue(definitions));
+    const cloned = cloneDefinitionGraph(definitions);
+    freezeDefinitionGraph(cloned);
+    // SAFETY: cloneDefinitionGraph reconstructs every member of the closed ArgumentDefinitions
+    // graph without changing keys, discriminants, literals, or behavior-hook references.
+    return cloned as TDefinitions;
 }
 
 class ImmutableReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
@@ -94,8 +170,8 @@ class ImmutableReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
 export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDefinitions>(
     definition: Pick<TypedCommandDefinition<TDefinitions>, "name" | "description" | "args">,
 ): CompiledCommand<TDefinitions> {
-    const flattenedDefinitions = flattenGroupedArgumentDefinitions(definition.args);
-    const args = cloneAndFreezeDefinitions(flattenedDefinitions);
+    const definitions = cloneAndFreezeDefinitions(definition.args);
+    const args = Object.freeze(flattenGroupedArgumentDefinitions(definitions));
     const lookup = createArgumentLookup(args);
     const argumentEntries = orderedArgumentEntries(args);
     const compiledArguments = Object.freeze(
@@ -106,6 +182,7 @@ export function compileTypedCommandGrammar<const TDefinitions extends ArgumentDe
     return Object.freeze({
         name: definition.name,
         description: definition.description,
+        definitions,
         args,
         arguments: compiledArguments,
         argumentByName: new ImmutableReadonlyMap(

@@ -197,10 +197,14 @@ export function quoteSerializedValue(value: string, force = false): string {
 function serializeValue(
     definition: ArgumentDefinition,
     name: string,
-    value: ArgumentValue,
+    value: unknown,
 ): string[] {
     if (value === undefined) {
         return [];
+    }
+    const validation = validateArgumentValue(name, definition, value);
+    if (!validation.ok) {
+        throw new TypeError(validation.message);
     }
     switch (definition.type) {
         case "boolean": {
@@ -318,5 +322,5 @@ export function compileArgumentBehavior(
     } else if (completionValuesForArgument(definition).length > 0) {
         compiled.complete = (query: string) => staticCompletionItems(definition, query);
     }
-    return Object.freeze(compiled) as CompiledArgument;
+    return Object.freeze(compiled);
 }

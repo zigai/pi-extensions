@@ -1,4 +1,8 @@
 import { quoteSerializedValue } from "./behavior.js";
+import {
+    expandGroupedArgumentValues,
+    hasArgumentGroups,
+} from "./arguments.js";
 import { compileTypedCommandGrammar } from "./compiler.js";
 import { normalizeFlagName } from "./names.js";
 import {
@@ -10,6 +14,7 @@ import {
 import type {
     ArgumentDefinition,
     ArgumentDefinitions,
+    ArgumentPath,
     ArgumentValue,
     CompiledCommand,
     FlatArgumentDefinitions,
@@ -28,31 +33,31 @@ export { quoteSerializedValue };
 /** Token produced from a raw typed-argument string. */
 export type Token = {
     /** Parsed token value with surrounding quotes removed and supported escapes resolved. */
-    value: string;
+    readonly value: string;
     /** Exact source slice that produced the token. */
-    raw: string;
+    readonly raw: string;
     /** Inclusive UTF-16 offset in the input. */
-    start: number;
+    readonly start: number;
     /** Exclusive UTF-16 offset in the input. */
-    end: number;
+    readonly end: number;
     /** Quote character used anywhere in the token, when present. */
-    quote?: "'" | '"';
+    readonly quote?: "'" | '"';
     /** Whether at least one escape sequence was consumed. */
-    escaped: boolean;
+    readonly escaped: boolean;
 };
 
 /** Token stream produced from a raw typed-argument string. */
 export type TokenizeResult = {
     /** Parsed tokens with quotes removed and escapes resolved. */
-    tokens: string[];
+    readonly tokens: readonly string[];
     /** Whether the input ended before a quoted string was closed. */
-    unterminatedQuote: boolean;
+    readonly unterminatedQuote: boolean;
 };
 
 /** Lossless tokenization result used by completions and diagnostics that need source spans. */
 export type LexResult = {
-    tokens: Token[];
-    unterminatedQuote: boolean;
+    readonly tokens: readonly Token[];
+    readonly unterminatedQuote: boolean;
 };
 
 type ParsedFlagToken = {
@@ -70,6 +75,7 @@ type ParsableTypedCommand<TDefinitions extends ArgumentDefinitions> = {
 type TypedCommandGrammar = CompiledCommand;
 
 type MutableParsedCommandArguments = {
+    grammar?: CompiledCommand;
     values: Record<string, ArgumentValue>;
     provided: Set<string>;
     sources?: Map<string, "explicit" | "default">;
@@ -144,10 +150,8 @@ export function lexTypedArgumentString(input: string): LexResult {
             start: tokenStart,
             end,
             escaped,
+            ...(tokenQuote === undefined ? {} : { quote: tokenQuote }),
         };
-        if (tokenQuote !== undefined) {
-            token.quote = tokenQuote;
-        }
         tokens.push(token);
         tokenStarted = false;
         current = "";
@@ -295,7 +299,7 @@ function tokenCanBeValueForDefinition(token: Token, definition: ArgumentDefiniti
     return definition.type === "number" && isNumericToken(token);
 }
 
-function isStringArrayValue(value: ArgumentValue): value is readonly string[] {
+function isStringArrayValue(value: unknown): value is readonly string[] {
     return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
 }
 
@@ -307,36 +311,9 @@ function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
 }
 
 function serializableRecord<TDefinitions extends ArgumentDefinitions>(
-    values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, ArgumentValue>>,
-): Readonly<Record<string, ArgumentValue>> {
-    return values as Readonly<Record<string, ArgumentValue>>;
-}
-
-function typedDraft<TDefinitions extends ArgumentDefinitions>(
-    values: Readonly<Record<string, ArgumentValue>>,
-): ParsedArgumentDraft<TDefinitions> {
-    return values as ParsedArgumentDraft<TDefinitions>;
-}
-
-function typedValues<TDefinitions extends ArgumentDefinitions>(
-    values: Readonly<Record<string, ArgumentValue>>,
-): InferArguments<TDefinitions> {
-    return values as InferArguments<TDefinitions>;
-}
-
-function typedProvided<TDefinitions extends ArgumentDefinitions>(
-    provided: ReadonlySet<string>,
-): ReadonlySet<keyof TDefinitions & string> {
-    return provided as ReadonlySet<keyof TDefinitions & string>;
-}
-
-function typedSources<TDefinitions extends ArgumentDefinitions>(
-    sources: ReadonlyMap<string, "explicit" | "default"> | undefined,
-): ReadonlyMap<keyof TDefinitions & string, "explicit" | "default"> {
-    return (sources ?? new Map()) as ReadonlyMap<
-        keyof TDefinitions & string,
-        "explicit" | "default"
-    >;
+    values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+    return values;
 }
 
 export function getTypedCommandRefinementIssues(
@@ -359,13 +336,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     private readonly command: ParsableTypedCommand<TDefinitions>;
     private readonly grammar: TypedCommandGrammar;
     private readonly rawArgs: string;
-    private readonly result: MutableParsedCommandArguments = {
-        values: {},
-        provided: new Set<string>(),
-        sources: new Map<string, "explicit" | "default">(),
-        issues: [],
-        mode: "run",
-    };
+    private readonly result: MutableParsedCommandArguments;
     private readonly occurrencesByName = new Map<string, RawArgumentOccurrence[]>();
     private tokens: Token[] = [];
     private index = 0;
@@ -376,6 +347,14 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         this.command = command;
         this.grammar = commandGrammar(command);
         this.rawArgs = rawArgs;
+        this.result = {
+            values: {},
+            provided: new Set<string>(),
+            sources: new Map<string, "explicit" | "default">(),
+            issues: [],
+            mode: "run",
+        };
+        Object.defineProperty(this.result, "grammar", { value: this.grammar });
     }
 
     parse(): ParsedCommandArguments {
@@ -689,7 +668,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
 /** Serialize typed argument values into a raw string that `parseTypedCommandArgs` can read. */
 export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     command: Pick<ParsableTypedCommand<TDefinitions>, "args" | "compiled">,
-    values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, ArgumentValue>>,
+    values: SerializableArgumentValues<TDefinitions> | Readonly<Record<string, unknown>>,
 ): string {
     const grammar = commandGrammar(command);
     const flatValues = serializableRecord(values);
@@ -698,6 +677,13 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
         const value = flatValues[argument.key];
         if (isPositionalArgument(argument.definition)) {
             if (value !== undefined) {
+                const issues = argument.validate(value);
+                if (issues.length > 0) {
+                    const issue = issues[0];
+                    if (issue !== undefined) {
+                        throw new TypeError(issue.message);
+                    }
+                }
                 parts.push(quoteSerializedValue(String(value), String(value).startsWith("-")));
             }
         } else {
@@ -720,26 +706,123 @@ export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     return new ArgumentParser(command, rawArgs).parse();
 }
 
-/** Convert parser details into the discriminated result returned by defined commands. */
+function isArgumentValue(value: unknown): value is ArgumentValue {
+    return (
+        value === undefined ||
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        isStringArrayValue(value)
+    );
+}
+
+function includesIssue(issues: readonly ParseIssue[], candidate: ParseIssue): boolean {
+    return issues.some(
+        (issue) =>
+            issue.kind === candidate.kind &&
+            issue.name === candidate.name &&
+            issue.message === candidate.message,
+    );
+}
+
+function validatedParsedValues(
+    grammar: CompiledCommand,
+    parsed: ParsedCommandArguments,
+): { values: Record<string, ArgumentValue>; issues: ParseIssue[] } {
+    const values: Record<string, ArgumentValue> = {};
+    const issues = [...parsed.issues];
+    for (const argument of grammar.arguments) {
+        const value: unknown = parsed.values[argument.key];
+        const argumentIssues = argument.validate(value);
+        if (argumentIssues.length === 0 && isArgumentValue(value)) {
+            if (value !== undefined) {
+                values[argument.key] = value;
+            }
+            continue;
+        }
+        for (const issue of argumentIssues) {
+            if (!includesIssue(issues, issue)) {
+                issues.push(issue);
+            }
+        }
+    }
+    return { values, issues };
+}
+
+function typedDraft<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    values: Readonly<Record<string, ArgumentValue>>,
+): ParsedArgumentDraft<TDefinitions> {
+    const grouped = hasArgumentGroups(grammar.definitions)
+        ? expandGroupedArgumentValues(values, grammar.definitions)
+        : { ...values };
+    // SAFETY: validatedParsedValues retained only leaves accepted by their compiled definitions;
+    // expandGroupedArgumentValues changes paths into the matching source-definition tree only.
+    return grouped as ParsedArgumentDraft<TDefinitions>;
+}
+
+function isArgumentPath<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    key: string,
+): key is ArgumentPath<TDefinitions> {
+    return Object.hasOwn(grammar.args, key);
+}
+
+function typedProvided<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    provided: ReadonlySet<string>,
+): ReadonlySet<ArgumentPath<TDefinitions>> {
+    const paths = new Set<ArgumentPath<TDefinitions>>();
+    for (const key of provided) {
+        if (isArgumentPath(grammar, key)) {
+            paths.add(key);
+        }
+    }
+    return paths;
+}
+
+function typedSources<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
+    sources: ReadonlyMap<string, "explicit" | "default"> | undefined,
+): ReadonlyMap<ArgumentPath<TDefinitions>, "explicit" | "default"> {
+    const typed = new Map<ArgumentPath<TDefinitions>, "explicit" | "default">();
+    for (const [key, source] of sources ?? []) {
+        if (isArgumentPath(grammar, key)) {
+            typed.set(key, source);
+        }
+    }
+    return typed;
+}
+
+/** Convert parser details using the exact compiled grammar that produced them. */
 export function toTypedParseResult<TDefinitions extends ArgumentDefinitions>(
+    grammar: CompiledCommand<TDefinitions>,
     parsed: ParsedCommandArguments,
 ): TypedParseResult<TDefinitions> {
+    if (parsed.grammar !== grammar) {
+        throw new TypeError("Parsed arguments were produced by a different compiled grammar");
+    }
     if (parsed.mode === "help") {
         return { status: "help" };
     }
-    if (parsed.issues.length > 0) {
+    const validated = validatedParsedValues(grammar, parsed);
+    const partial = typedDraft(grammar, validated.values);
+    const provided = typedProvided(grammar, parsed.provided);
+    if (validated.issues.length > 0) {
         return {
             status: "error",
-            issues: parsed.issues,
-            partial: typedDraft<TDefinitions>(parsed.values),
-            provided: typedProvided<TDefinitions>(parsed.provided),
+            issues: validated.issues,
+            partial,
+            provided,
         };
     }
     return {
         status: "success",
-        value: typedValues<TDefinitions>(parsed.values),
-        provided: typedProvided<TDefinitions>(parsed.provided),
-        sources: typedSources<TDefinitions>(parsed.sources),
+        // SAFETY: every compiled argument validated successfully, which establishes all required
+        // leaves and defaults represented by InferArguments.
+        value: partial as InferArguments<TDefinitions>,
+        provided,
+        sources: typedSources(grammar, parsed.sources),
     };
 }
 

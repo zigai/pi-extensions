@@ -1,8 +1,8 @@
-import { flattenGroupedArgumentDefinitions } from "../arguments.js";
 import { compileTypedCommandDefinition } from "../compiler.js";
 import { diagnosticMessages } from "../diagnostics.js";
 import type {
     ArgumentDefinitions,
+    CompiledCommand,
     DefinitionDiagnostic,
     DefinedTypedCommand,
     RegisteredTypedCommand,
@@ -24,12 +24,14 @@ export function registeredCommandForDefinition<TDefinitions extends ArgumentDefi
         TypedCommandDefinition<TDefinitions>,
         "name" | "description" | "args" | "refine"
     >,
-): RegisteredTypedCommand<TDefinitions> {
+): RegisteredTypedCommand<TDefinitions> & { readonly compiled: CompiledCommand<TDefinitions> } {
     const compiled = compileTypedCommandDefinition(definition);
     if (!compiled.ok) {
         throw definitionError(definition.name, compiled.diagnostics);
     }
-    const command: RegisteredTypedCommand<TDefinitions> = {
+    const command: RegisteredTypedCommand<TDefinitions> & {
+        readonly compiled: CompiledCommand<TDefinitions>;
+    } = {
         name: definition.name,
         description: definition.description,
         args: compiled.command.args,
@@ -47,18 +49,19 @@ export function registeredCommandForDefinition<TDefinitions extends ArgumentDefi
 /** Normalize a user command definition into metadata consumed by Pi registration and UX adapters. */
 export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
     definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
-): RegisteredTypedCommand<TDefinitions> {
-    const runtimeArgs = flattenGroupedArgumentDefinitions(definition.args);
+): RegisteredTypedCommand<TDefinitions> & { readonly compiled: CompiledCommand<TDefinitions> } {
     const compiled = compileTypedCommandDefinition({
         name: definition.name,
         description: definition.description,
-        args: runtimeArgs,
+        args: definition.args,
     });
     if (!compiled.ok) {
         throw definitionError(definition.name, compiled.diagnostics);
     }
 
-    const command: RegisteredTypedCommand<TDefinitions> = {
+    const command: RegisteredTypedCommand<TDefinitions> & {
+        readonly compiled: CompiledCommand<TDefinitions>;
+    } = {
         name: definition.name,
         description: definition.description,
         args: compiled.command.args,

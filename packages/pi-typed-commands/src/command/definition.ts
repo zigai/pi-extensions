@@ -1,5 +1,9 @@
 import { cloneAndFreezeDefinitions, compileTypedCommandDefinition } from "../compiler.js";
-import { parseTypedCommandArgs, serializeTypedCommandArgs } from "../parser.js";
+import {
+    parseTypedCommandArgs,
+    serializeTypedCommandArgs,
+    toTypedParseResult,
+} from "../parser.js";
 import { formatCommandUsage, formatDetailedHelp } from "../usage.js";
 import type {
     ArgumentDefinitions,
@@ -7,7 +11,7 @@ import type {
     SerializableArgumentValues,
     TypedCommandDefinition,
 } from "../types.js";
-import { maybeFlattenGroupedValues, typedParseResultForDefinition } from "./grouped-values.js";
+import { maybeFlattenGroupedValues } from "./grouped-values.js";
 import { definitionError, registeredCommandForDefinition } from "./registered-command.js";
 
 /** Define a typed command once, preserving literal argument inference and exposing pure helpers. */
@@ -27,10 +31,7 @@ export function defineTypedCommand<const TDefinitions extends ArgumentDefinition
     const defined = {
         ...normalizedDefinition,
         parse(rawArgs: string) {
-            return typedParseResultForDefinition(
-                parseTypedCommandArgs(command, rawArgs),
-                normalizedDefinition.args,
-            );
+            return toTypedParseResult(command.compiled, parseTypedCommandArgs(command, rawArgs));
         },
         serialize(values: SerializableArgumentValues<TDefinitions>) {
             return serializeTypedCommandArgs(

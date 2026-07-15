@@ -81,8 +81,12 @@ function helperHasNamedFlag(rawArgs: string): boolean {
     return /(?:^|\s)--?[^\s-]/.test(rawArgs);
 }
 
-function formatHelperValue(value: unknown): string {
-    if (Array.isArray(value)) {
+function isHelperMultiValue(value: ArgumentValue): value is readonly string[] {
+    return Array.isArray(value);
+}
+
+function formatHelperValue(value: ArgumentValue): string {
+    if (isHelperMultiValue(value)) {
         return value.map((item) => formatHelperValue(item)).join(",");
     }
     if (value === undefined) {
@@ -94,13 +98,13 @@ function formatHelperValue(value: unknown): string {
     if (typeof value === "number" || typeof value === "boolean") {
         return String(value);
     }
-    return JSON.stringify(value);
+    return casesHandled(value);
 }
 
 function providedHelperToken(
     name: string,
     definition: ArgumentDefinition,
-    value: unknown,
+    value: ArgumentValue,
     valueSeparator: string,
 ): string {
     if (isPositionalArgument(definition)) {
@@ -125,7 +129,7 @@ type InlineHelpItem = {
     definition: ArgumentDefinition;
     state: InlineHelpDisplayState;
     valueSource?: InlineHelpValueSource;
-    value?: unknown;
+    value?: ArgumentValue;
     index: number;
 };
 
@@ -321,7 +325,7 @@ function inlineTokenCoreSegments(
                 defaultHelperToken(
                     item.name,
                     item.definition,
-                    item.value as ArgumentValue | undefined,
+                    item.value,
                     appearance.format.valueSeparator,
                 ),
             );
@@ -406,10 +410,23 @@ function renderInlineHelpToken(
 }
 
 function orderGroups(order: InlineHelpOrder): InlineHelpDisplayState[] {
-    if (order === "definition") {
-        return ["active", "required", "available"];
+    switch (order) {
+        case "active-required-available":
+        case "definition":
+            return ["active", "required", "available"];
+        case "active-available-required":
+            return ["active", "available", "required"];
+        case "required-active-available":
+            return ["required", "active", "available"];
+        case "required-available-active":
+            return ["required", "available", "active"];
+        case "available-active-required":
+            return ["available", "active", "required"];
+        case "available-required-active":
+            return ["available", "required", "active"];
+        default:
+            return casesHandled(order);
     }
-    return order.split("-") as InlineHelpDisplayState[];
 }
 
 function orderedInlineHelpItems(

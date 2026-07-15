@@ -12,19 +12,20 @@ import {
     type StringArgumentDefinition,
 } from "./types.js";
 
-type ArgumentOptions<TDefinition extends ArgumentDefinition> = TDefinition extends unknown
-    ? Omit<TDefinition, "type">
+type DistributiveOmit<TValue, TKey extends PropertyKey> = TValue extends unknown
+    ? Omit<TValue, TKey>
     : never;
 
+type ArgumentOptions<TDefinition extends ArgumentDefinition> = DistributiveOmit<
+    TDefinition,
+    "type"
+>;
+
 type EnumArgumentOptions<TValues extends readonly string[]> =
-    EnumArgumentDefinition<TValues> extends unknown
-        ? Omit<EnumArgumentDefinition<TValues>, "type" | "values">
-        : never;
+    DistributiveOmit<EnumArgumentDefinition<TValues>, "type" | "values">;
 
 type MultiEnumArgumentOptions<TValues extends readonly string[]> =
-    MultiEnumArgumentDefinition<TValues> extends unknown
-        ? Omit<MultiEnumArgumentDefinition<TValues>, "type" | "values">
-        : never;
+    DistributiveOmit<MultiEnumArgumentDefinition<TValues>, "type" | "values">;
 
 /** Create a string argument definition while preserving literal option types for inference. */
 export function stringArgument<const TOptions extends ArgumentOptions<StringArgumentDefinition>>(
@@ -34,7 +35,7 @@ export function stringArgument(): StringArgumentDefinition;
 export function stringArgument(
     options: ArgumentOptions<StringArgumentDefinition> = {},
 ): StringArgumentDefinition {
-    return { type: "string", ...options } as StringArgumentDefinition;
+    return { type: "string", ...options };
 }
 
 /** Create a number argument definition while preserving literal option types for inference. */
@@ -45,7 +46,7 @@ export function numberArgument(): NumberArgumentDefinition;
 export function numberArgument(
     options: ArgumentOptions<NumberArgumentDefinition> = {},
 ): NumberArgumentDefinition {
-    return { type: "number", ...options } as NumberArgumentDefinition;
+    return { type: "number", ...options };
 }
 
 /** Create a boolean flag definition while preserving literal option types for inference. */
@@ -56,7 +57,7 @@ export function booleanArgument(): BooleanArgumentDefinition;
 export function booleanArgument(
     options: ArgumentOptions<BooleanArgumentDefinition> = {},
 ): BooleanArgumentDefinition {
-    return { type: "boolean", ...options } as BooleanArgumentDefinition;
+    return { type: "boolean", ...options };
 }
 
 /** Create an enum definition whose readonly values are reflected in handler value types. */
@@ -71,7 +72,7 @@ export function enumArgument<const TValues extends readonly string[]>(
     values: TValues,
     options: EnumArgumentOptions<TValues> = {},
 ): EnumArgumentDefinition<TValues> {
-    return { type: "enum", values, ...options } as EnumArgumentDefinition<TValues>;
+    return { type: "enum", values, ...options };
 }
 
 /** Create a multi-enum definition whose readonly values are reflected in selected value types. */
@@ -86,7 +87,7 @@ export function multiEnumArgument<const TValues extends readonly string[]>(
     values: TValues,
     options: MultiEnumArgumentOptions<TValues> = {},
 ): MultiEnumArgumentDefinition<TValues> {
-    return { type: "multi-enum", values, ...options } as MultiEnumArgumentDefinition<TValues>;
+    return { type: "multi-enum", values, ...options };
 }
 
 function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
@@ -141,13 +142,37 @@ export function flattenGroupedArgumentDefinitions(
     return flattened;
 }
 
+/** Flatten grouped definitions while preserving unparsed leaves as unknown boundary input. */
+export function flattenUnknownGroupedArgumentDefinitions(
+    definitions: Readonly<Record<string, unknown>>,
+    prefix = "",
+): Record<string, unknown> {
+    const flattened: Record<string, unknown> = {};
+    for (const [name, definition] of Object.entries(definitions)) {
+        const key = groupedKey(prefix, name);
+        if (
+            isRecord(definition) &&
+            ARGUMENT_GROUP in definition &&
+            isRecord(definition.args)
+        ) {
+            Object.assign(
+                flattened,
+                flattenUnknownGroupedArgumentDefinitions(definition.args, key),
+            );
+            continue;
+        }
+        flattened[key] = definition;
+    }
+    return flattened;
+}
+
 /** Flatten nested handler values into dotted parser/serializer values using the definition tree. */
 export function flattenGroupedArgumentValues(
     values: Readonly<Record<string, unknown>>,
     definitions: ArgumentDefinitions,
     prefix = "",
-): Record<string, ArgumentValue> {
-    const flattened: Record<string, ArgumentValue> = {};
+): Record<string, unknown> {
+    const flattened: Record<string, unknown> = {};
     for (const [name, definition] of Object.entries(definitions)) {
         const key = groupedKey(prefix, name);
         if (isArgumentGroupDefinition(definition)) {
@@ -160,7 +185,7 @@ export function flattenGroupedArgumentValues(
             }
             continue;
         }
-        flattened[key] = values[name] as ArgumentValue;
+        flattened[key] = values[name];
     }
     return flattened;
 }

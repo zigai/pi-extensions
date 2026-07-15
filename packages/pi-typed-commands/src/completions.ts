@@ -63,13 +63,13 @@ type ProviderCompletionItem = {
     replacement?: string;
 };
 
-function tokenizeLoose(input: string): Token[] {
+function tokenizeLoose(input: string): readonly Token[] {
     return lexTypedArgumentString(input).tokens;
 }
 
 function providedArgumentNames<TDefinitions extends ArgumentDefinitions>(
     command: RegisteredTypedCommand<TDefinitions>,
-    tokens: Token[],
+    tokens: readonly Token[],
 ): Set<string> {
     const lookup = createArgumentLookup(command.args);
     const provided = new Set<string>();

@@ -1,4 +1,7 @@
-import { flattenGroupedArgumentDefinitions } from "./arguments.js";
+import {
+    flattenGroupedArgumentDefinitions,
+    flattenUnknownGroupedArgumentDefinitions,
+} from "./arguments.js";
 import { createDefinitionDiagnostic } from "./diagnostics.js";
 import { casesHandled } from "./exhaustive.js";
 import { formatFlagName, normalizeFlagName, toKebabCase } from "./names.js";
@@ -188,6 +191,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    if (!isRecord(value)) {
+        return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
+
 function isArgumentType(value: unknown): value is ArgumentDefinition["type"] {
     return typeof value === "string" && ARGUMENT_TYPES.has(value);
 }
@@ -352,6 +363,16 @@ function validateCustomWidgetShape(
         );
         return false;
     }
+    if (!isPlainRecord(custom)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.custom",
+            "argument.ui.custom.unsupported-object",
+            `${name}.ui.custom must be a plain object`,
+        );
+        return false;
+    }
 
     let valid = true;
     for (const field of ["renderValue", "handleInput"] as const) {
@@ -382,6 +403,16 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
             "ui",
             "argument.ui.invalid",
             `${name}.ui must be an object`,
+        );
+        return false;
+    }
+    if (!isPlainRecord(ui)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui",
+            "argument.ui.unsupported-object",
+            `${name}.ui must be a plain object`,
         );
         return false;
     }
@@ -434,6 +465,15 @@ function validateArgumentDefinitionShape(
             diagnostics,
             "argument.definition.invalid",
             `${name}: argument definition must be an object`,
+            [name],
+        );
+        return false;
+    }
+    if (!isPlainRecord(definition)) {
+        addDefinitionDiagnostic(
+            diagnostics,
+            "argument.definition.unsupported-object",
+            `${name}: argument definition must be a plain object`,
             [name],
         );
         return false;
@@ -548,7 +588,7 @@ function validateFlagName(
     flags.set(flag, owner);
 }
 
-function isStringArrayValue(value: ArgumentValue): value is string[] {
+function isStringArrayValue(value: unknown): value is string[] {
     return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
 }
 
@@ -584,7 +624,7 @@ function supportsRestPosition(definition: ArgumentDefinition): boolean {
 export function validateArgumentValue(
     name: string,
     definition: ArgumentDefinition,
-    value: ArgumentValue,
+    value: unknown,
     options?: ArgumentMessageOptions,
 ): ArgumentValueValidation {
     const displayName = formatArgumentMessageName(name, definition, options);
@@ -1120,11 +1160,7 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
         return diagnostics;
     }
 
-    // SAFETY: the raw map shape was checked above; each flattened value is still treated as
-    // unknown and parsed by validateArgumentDefinitionShape before compiler code can use it.
-    const flatDefinitions = flattenGroupedArgumentDefinitions(
-        definitions as ArgumentDefinitions,
-    ) as Record<string, unknown>;
+    const flatDefinitions = flattenUnknownGroupedArgumentDefinitions(definitions);
     const validDefinitions: Record<string, ArgumentDefinition> = {};
     const names = Object.keys(flatDefinitions);
     const flags = new Map<string, string>();

@@ -75,6 +75,10 @@ describe("compile-time API inference", () => {
                     port: numberArgument(),
                 }),
             },
+            refine(_values, context) {
+                expectType<ReadonlySet<"database.host" | "database.port">>(context.provided);
+                return [];
+            },
             run(values) {
                 expectType<string>(values.database.host);
                 expectType<number | undefined>(values.database.port);
@@ -136,6 +140,17 @@ describe("compile-time API inference", () => {
             stringArgument({ required: true, default: "main" });
             // @ts-expect-error dynamic requiredness cannot be combined with defaults.
             stringArgument({ required: dynamicRequired, default: "main" });
+            // @ts-expect-error enum factories preserve required/default exclusivity.
+            enumArgument(["dev", "prod"], { required: true, default: "dev" });
+            // @ts-expect-error enum factories reject dynamic requiredness with defaults.
+            enumArgument(["dev", "prod"], { required: dynamicRequired, default: "dev" });
+            // @ts-expect-error multi-enum factories preserve required/default exclusivity.
+            multiEnumArgument(["api", "web"], { required: true, default: ["api"] });
+            // @ts-expect-error multi-enum factories reject dynamic requiredness with defaults.
+            multiEnumArgument(["api", "web"], {
+                required: dynamicRequired,
+                default: ["api"],
+            });
 
             defineTypedCommand({
                 name: "invalid-contract-demo",

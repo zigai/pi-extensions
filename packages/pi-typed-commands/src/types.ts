@@ -311,6 +311,15 @@ export type ParsedArgumentDraft<TDefinitions extends ArgumentDefinitions> = {
     readonly [TKey in keyof TDefinitions]?: InferArgumentValue<TDefinitions[TKey]>;
 };
 
+/** Dotted parser path for one leaf in a possibly grouped argument-definition tree. */
+export type ArgumentPath<TDefinitions extends ArgumentDefinitions> = {
+    [TKey in keyof TDefinitions & string]: TDefinitions[TKey] extends ArgumentGroupDefinition<
+        infer TGroup
+    >
+        ? `${TKey}.${ArgumentPath<TGroup>}`
+        : TKey;
+}[keyof TDefinitions & string];
+
 /** Values accepted by typed-command serializers, where callers may include only fields to emit. */
 export type SerializableArgumentValues<TDefinitions extends ArgumentDefinitions> = {
     readonly [TKey in keyof TDefinitions]?: InferArgumentValue<TDefinitions[TKey]>;
@@ -366,7 +375,7 @@ export type TypedCommandRefinementIssue = {
 };
 
 export type TypedCommandRefinementContext<TDefinitions extends ArgumentDefinitions> = {
-    provided: ReadonlySet<keyof TDefinitions & string>;
+    provided: ReadonlySet<ArgumentPath<TDefinitions>>;
 };
 
 /** Command-level cross-field validation. */
@@ -400,7 +409,7 @@ export type RegisteredTypedCommand<TDefinitions extends ArgumentDefinitions = Ar
         /** Discriminated runtime target for extension commands and typed skills. */
         target?: InvocationTarget<FlatArgumentDefinitions>;
         /** Immutable compiled command schema. */
-        compiled?: CompiledCommand;
+        compiled?: CompiledCommand<TDefinitions>;
         /** Concrete invocation name assigned by Pi or the registry, including duplicate suffixes. */
         invocationName?: string;
         /** Unique wrapper registration identity. */
@@ -479,8 +488,8 @@ export type CompiledArgument<TValue extends ArgumentValue = ArgumentValue> = {
     readonly aliases: readonly string[];
     readonly position?: number;
     decode(occurrences: readonly RawArgumentOccurrence[]): DecodeResult;
-    validate(value: TValue | undefined): readonly ParseIssue[];
-    serialize(value: TValue): readonly string[];
+    validate(value: unknown): readonly ParseIssue[];
+    serialize(value: unknown): readonly string[];
     describe(): ArgumentDescription;
     complete?(
         query: string,
@@ -490,9 +499,11 @@ export type CompiledArgument<TValue extends ArgumentValue = ArgumentValue> = {
 };
 
 /** Immutable internal representation consumed by parsing, formatting, completion, forms, and Pi. */
-export type CompiledCommand<_TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> = {
+export type CompiledCommand<TDefinitions extends ArgumentDefinitions = ArgumentDefinitions> = {
     readonly name: string;
     readonly description: string;
+    /** Immutable source definition tree whose type evidence this grammar was compiled from. */
+    readonly definitions: TDefinitions;
     readonly args: FlatArgumentDefinitions;
     readonly arguments: readonly CompiledArgument[];
     readonly argumentByName: ReadonlyMap<string, CompiledArgument>;
@@ -537,6 +548,8 @@ export type ParseIssue = {
 
 /** Parsed raw slash-command arguments before conversion to `TypedParseResult`. */
 export type ParsedCommandArguments = {
+    /** Exact compiled grammar that parsed this snapshot. */
+    readonly grammar?: CompiledCommand;
     /** Parsed values plus defaults that could be applied without prompting. */
     readonly values: Readonly<Record<string, ArgumentValue>>;
     /** Argument names explicitly provided by the user, even when their value failed to parse. */
@@ -553,15 +566,15 @@ export type TypedParseResult<TDefinitions extends ArgumentDefinitions> =
     | {
           status: "success";
           value: InferArguments<TDefinitions>;
-          provided: ReadonlySet<keyof TDefinitions & string>;
-          sources: ReadonlyMap<keyof TDefinitions & string, "explicit" | "default">;
+          provided: ReadonlySet<ArgumentPath<TDefinitions>>;
+          sources: ReadonlyMap<ArgumentPath<TDefinitions>, "explicit" | "default">;
       }
     | { status: "help" }
     | {
           status: "error";
           issues: readonly ParseIssue[];
           partial: ParsedArgumentDraft<TDefinitions>;
-          provided: ReadonlySet<keyof TDefinitions & string>;
+          provided: ReadonlySet<ArgumentPath<TDefinitions>>;
       };
 
 /** Which fields the argument form should show. */
