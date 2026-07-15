@@ -110,13 +110,10 @@ describe("typed command schema", () => {
             ok: false,
             message: "--branch-name must be at least 1 characters",
         });
-        assert.deepEqual(
-            validateArgumentValue("branchName", branchName, "bad branch"),
-            {
-                ok: false,
-                message: "--branch-name must match pattern ^[a-zA-Z0-9/_-]+$",
-            },
-        );
+        assert.deepEqual(validateArgumentValue("branchName", branchName, "bad branch"), {
+            ok: false,
+            message: "--branch-name must match pattern ^[a-zA-Z0-9/_-]+$",
+        });
         assert.deepEqual(
             validateArgumentValue("branchName", branchName, "", {
                 nameStyle: "field",

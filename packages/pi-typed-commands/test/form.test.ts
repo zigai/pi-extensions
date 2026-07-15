@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { CURSOR_MARKER, type Component, type TUI } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
 import { DEFAULT_PI_TYPED_COMMANDS_APPEARANCE } from "../src/pi/presentation-config.js";
 import type {
@@ -9,6 +8,13 @@ import type {
     ParsedCommandArguments,
 } from "../src/types.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
+import {
+    createTestExtensionCommandContext,
+    createTestKeybindings,
+    createTestTheme,
+    createTestTui,
+    requireInteractiveComponent,
+} from "./pi-test-adapter.js";
 
 const symbols = {
     selectedCheckbox: "■",
@@ -17,23 +23,12 @@ const symbols = {
     unselectedRadio: "○",
 };
 
-const theme = {
-    bold: (text: string) => text,
-    fg: (_color: string, text: string) => text,
-};
+const theme = createTestTheme();
 
 const formOptions = { appearance: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE };
 
-const tui = {
-    terminal: { rows: 24, columns: 80 },
-    requestRender() {},
-} as unknown as TUI;
-
-type TestFormComponent = Component & {
-    focused: boolean;
-    handleInput(data: string): void;
-    render(width: number): string[];
-};
+const tui = createTestTui();
+const keybindings = createTestKeybindings();
 
 describe("dense argument form", () => {
     it("shows field names instead of CLI flags in validation messages", async () => {
@@ -63,24 +58,21 @@ describe("dense argument form", () => {
         };
 
         let renderedLines: string[] = [];
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
                 notify() {},
-                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
-                    const component = (await factory(
-                        tui,
-                        theme as never,
-                        {} as never,
-                        () => {},
-                    )) as TestFormComponent;
+                custom: async (factory) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, () => {}),
+                    );
 
                     component.focused = true;
                     renderedLines = component.render(80);
                     return undefined;
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         await openArgumentForm(command, parsed, "missing", ctx, formOptions);
 
@@ -114,20 +106,17 @@ describe("dense argument form", () => {
         };
 
         let countLine = "";
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
                 notify() {},
-                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                custom: async (factory) => {
                     let result: unknown;
-                    const component = (await factory(
-                        tui,
-                        theme as never,
-                        {} as never,
-                        (next: unknown) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, (next: unknown) => {
                             result = next;
-                        },
-                    )) as TestFormComponent;
+                        }),
+                    );
 
                     component.focused = true;
                     component.handleInput("a");
@@ -138,7 +127,7 @@ describe("dense argument form", () => {
                     return result;
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
@@ -183,17 +172,14 @@ describe("dense argument form", () => {
         };
 
         let renderedLines: string[] = [];
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
                 notify() {},
-                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
-                    const component = (await factory(
-                        tui,
-                        theme as never,
-                        {} as never,
-                        () => {},
-                    )) as TestFormComponent;
+                custom: async (factory) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, () => {}),
+                    );
 
                     component.focused = true;
                     component.handleInput("\t");
@@ -201,7 +187,7 @@ describe("dense argument form", () => {
                     return undefined;
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
@@ -233,24 +219,21 @@ describe("dense argument form", () => {
         };
 
         let renderedLines: string[] = [];
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
                 notify() {},
-                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
-                    const component = (await factory(
-                        tui,
-                        theme as never,
-                        {} as never,
-                        () => {},
-                    )) as TestFormComponent;
+                custom: async (factory) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, () => {}),
+                    );
 
                     component.focused = true;
                     renderedLines = component.render(80);
                     return undefined;
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
@@ -285,17 +268,14 @@ describe("dense argument form", () => {
 
         let initialLines: string[] = [];
         let afterTabLines: string[] = [];
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
                 notify() {},
-                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
-                    const component = (await factory(
-                        tui,
-                        theme as never,
-                        {} as never,
-                        () => {},
-                    )) as TestFormComponent;
+                custom: async (factory) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, () => {}),
+                    );
 
                     component.focused = true;
                     initialLines = component.render(80);
@@ -304,7 +284,7 @@ describe("dense argument form", () => {
                     return undefined;
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
@@ -342,27 +322,24 @@ describe("dense argument form", () => {
             issues: [],
             mode: "run",
         };
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
                 notify() {},
-                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                custom: async (factory) => {
                     let result: unknown;
-                    const component = (await factory(
-                        tui,
-                        theme as never,
-                        {} as never,
-                        (next: unknown) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, (next: unknown) => {
                             result = next;
-                        },
-                    )) as TestFormComponent;
+                        }),
+                    );
 
                     component.focused = true;
                     component.handleInput("\r");
                     return result;
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
@@ -390,20 +367,17 @@ describe("dense argument form", () => {
         };
 
         let countLine = "";
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
                 notify() {},
-                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
+                custom: async (factory) => {
                     let result: unknown;
-                    const component = (await factory(
-                        tui,
-                        theme as never,
-                        {} as never,
-                        (next: unknown) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, (next: unknown) => {
                             result = next;
-                        },
-                    )) as TestFormComponent;
+                        }),
+                    );
 
                     component.focused = true;
                     component.handleInput("\t");
@@ -414,7 +388,7 @@ describe("dense argument form", () => {
                     return result;
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
@@ -423,6 +397,50 @@ describe("dense argument form", () => {
             `expected cursor after defaulted number, got ${JSON.stringify(countLine)}`,
         );
         assert.equal(result?.count, 16);
+    });
+
+    it("cancels the form when Escape is pressed", async () => {
+        const command: RegisteredTypedCommand = {
+            name: "escape-cancel",
+            description: "Escape cancellation",
+            args: { path: { type: "string", required: true } },
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: {},
+            provided: new Set(),
+            issues: [
+                {
+                    kind: "missing-required",
+                    message: "--path is required",
+                    name: "path",
+                },
+            ],
+            mode: "run",
+        };
+        let doneCalled = false;
+        const ctx = createTestExtensionCommandContext({
+            mode: "tui",
+            ui: {
+                custom: async (factory) => {
+                    let result: unknown;
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, (next: unknown) => {
+                            doneCalled = true;
+                            result = next;
+                        }),
+                    );
+                    component.focused = true;
+                    component.handleInput("\u001b");
+                    return result;
+                },
+            },
+        });
+
+        const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
+
+        assert.equal(doneCalled, true);
+        assert.equal(result, undefined);
     });
 });
 
@@ -463,7 +481,7 @@ describe("sequential argument form", () => {
             mode: "run",
         };
         const notifications: string[] = [];
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "rpc",
             ui: {
                 notify(message: string) {
@@ -473,7 +491,7 @@ describe("sequential argument form", () => {
                     return Promise.resolve("5");
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         const result = await openArgumentForm(command, parsed, "missing", ctx, formOptions);
 
@@ -512,7 +530,7 @@ describe("sequential argument form", () => {
         };
         const prompts: string[] = [];
         const notifications: string[] = [];
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             mode: "rpc",
             ui: {
                 notify(message: string) {
@@ -523,7 +541,7 @@ describe("sequential argument form", () => {
                     return Promise.resolve("api,worker");
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         const result = await openArgumentForm(command, parsed, "missing", ctx, formOptions);
 

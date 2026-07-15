@@ -6,6 +6,7 @@ import { describe, it } from "vitest";
 import {
     getTypedArgumentCompletions as resolveTypedArgumentCompletions,
     getTypedAutocompleteSuggestions as resolveTypedAutocompleteSuggestions,
+    type CompletionCapabilities,
 } from "../src/completions.js";
 import {
     formatCommandUsage,
@@ -14,7 +15,9 @@ import {
 } from "../src/index.js";
 import { createTypedCommandRegistry } from "../src/registry.js";
 import { createPiCompletionCapabilities } from "../src/pi/completions.js";
+import type { ArgumentDefinition } from "../src/types.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
+import { createTestSignal } from "./pi-test-adapter.js";
 
 const completionRegistry = createTypedCommandRegistry();
 function completionCapabilities() {
@@ -25,18 +28,52 @@ function registerTypedCommandMetadata(command: RegisteredTypedCommand): string {
     return completionRegistry.register(command);
 }
 
+function withRegisteredCommand<T>(command: RegisteredTypedCommand, run: () => T): T {
+    registerTypedCommandMetadata(command);
+    try {
+        return run();
+    } finally {
+        completionRegistry.unregister(command);
+    }
+}
+
+async function withRegisteredCommandAsync<T>(
+    command: RegisteredTypedCommand,
+    run: () => Promise<T>,
+): Promise<T> {
+    registerTypedCommandMetadata(command);
+    try {
+        return await run();
+    } finally {
+        completionRegistry.unregister(command);
+    }
+}
+
 function getTypedArgumentCompletions(
     command: RegisteredTypedCommand,
     argumentPrefix: string,
+    capabilities: CompletionCapabilities = completionCapabilities(),
 ) {
-    return resolveTypedArgumentCompletions(command, argumentPrefix, completionCapabilities());
+    return resolveTypedArgumentCompletions(command, argumentPrefix, capabilities);
 }
 
-function getTypedAutocompleteSuggestions(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-) {
+type StringCompletionProvider = NonNullable<
+    Extract<ArgumentDefinition, { readonly type: "string" }>["complete"]
+>;
+
+function malformedJavaScriptCompletionProvider(): StringCompletionProvider {
+    const provider = () => [
+        { value: 123 },
+        { value: "feature", label: 456, description: "valid item" },
+        { value: "quoted", replacement: '"quoted value"' },
+    ];
+    // SAFETY: This fixture deliberately simulates an untyped JavaScript extension returning
+    // malformed provider items. The production completion boundary validates every item before use.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    return provider as StringCompletionProvider;
+}
+
+function getTypedAutocompleteSuggestions(lines: string[], cursorLine: number, cursorCol: number) {
     return resolveTypedAutocompleteSuggestions(
         lines,
         cursorLine,
@@ -553,27 +590,27 @@ describe("formatCommandUsage", () => {
 
 describe("getTypedAutocompleteSuggestions", () => {
     it("suggests flags for typed commands", () => {
-        registerTypedCommandMetadata(command);
+        withRegisteredCommand(command, () => {
+            const suggestions = getTypedAutocompleteSuggestions(["/deploy --e"], 0, 11);
 
-        const suggestions = getTypedAutocompleteSuggestions(["/deploy --e"], 0, 11);
-
-        assert.equal(suggestions?.prefix, "--e");
-        assert.deepEqual(
-            suggestions?.items.map((item) => item.label),
-            ["--env"],
-        );
+            assert.equal(suggestions?.prefix, "--e");
+            assert.deepEqual(
+                suggestions?.items.map((item) => item.label),
+                ["--env"],
+            );
+        });
     });
 
     it("completes inline enum values", () => {
-        registerTypedCommandMetadata(command);
+        withRegisteredCommand(command, () => {
+            const suggestions = getTypedAutocompleteSuggestions(["/deploy --env=d"], 0, 15);
 
-        const suggestions = getTypedAutocompleteSuggestions(["/deploy --env=d"], 0, 15);
-
-        assert.equal(suggestions?.prefix, "--env=d");
-        assert.deepEqual(
-            suggestions?.items.map((item) => item.value),
-            ["--env=dev"],
-        );
+            assert.equal(suggestions?.prefix, "--env=d");
+            assert.deepEqual(
+                suggestions?.items.map((item) => item.value),
+                ["--env=dev"],
+            );
+        });
     });
 
     it("completes values through Pi's command completion entry point", async () => {
@@ -615,13 +652,14 @@ describe("getTypedAutocompleteSuggestions", () => {
     it("honors provider-supplied replacement text", async () => {
         const refCommand: RegisteredTypedCommand = {
             ...command,
+            name: "replacement-demo",
             args: {
                 ref: {
                     type: "string",
                     complete: () => [
                         {
                             value: "feature branch",
-                            replacement: '"feature branch"',
+                            replacement: '"provider-selected value"',
                             replaceRange: { start: 6, end: 13 },
                         },
                     ],
@@ -631,33 +669,47 @@ describe("getTypedAutocompleteSuggestions", () => {
 
         const suggestions = await getTypedArgumentCompletions(refCommand, "--ref feature");
 
-        assert.deepEqual(
-            suggestions?.map((item) => item.value),
-            ['"feature branch"'],
-        );
+        assert.deepEqual(suggestions, [
+            {
+                value: '"provider-selected value"',
+                label: "feature branch",
+                replacementReady: true,
+            },
+        ]);
+
+        withRegisteredCommand(refCommand, () => {
+            const line = "/replacement-demo --ref feature";
+            const editorSuggestions = getTypedAutocompleteSuggestions([line], 0, line.length);
+
+            assert.equal(editorSuggestions?.prefix, "feature");
+            assert.deepEqual(
+                editorSuggestions?.items.map((item) => item.value),
+                ['"provider-selected value"'],
+            );
+        });
     });
 
     it("completes positional values", async () => {
-        registerTypedCommandMetadata(branchCommand);
+        await withRegisteredCommandAsync(branchCommand, async () => {
+            const directSuggestions = await getTypedArgumentCompletions(branchCommand, "c");
+            const editorSuggestions = getTypedAutocompleteSuggestions(["/branch d"], 0, 9);
 
-        const directSuggestions = await getTypedArgumentCompletions(branchCommand, "c");
-        const editorSuggestions = getTypedAutocompleteSuggestions(["/branch d"], 0, 9);
-
-        assert.deepEqual(
-            directSuggestions?.map((item) => item.value),
-            ["create"],
-        );
-        assert.deepEqual(
-            editorSuggestions?.items.map((item) => item.value),
-            ["delete"],
-        );
+            assert.deepEqual(
+                directSuggestions?.map((item) => item.value),
+                ["create"],
+            );
+            assert.deepEqual(
+                editorSuggestions?.items.map((item) => item.value),
+                ["delete"],
+            );
+        });
     });
 
     it("stops completing flags after the end-of-options marker", async () => {
-        registerTypedCommandMetadata(command);
-
-        assert.equal(await getTypedArgumentCompletions(command, "-- --e"), null);
-        assert.equal(getTypedAutocompleteSuggestions(["/deploy -- --e"], 0, 14), undefined);
+        await withRegisteredCommandAsync(command, async () => {
+            assert.equal(await getTypedArgumentCompletions(command, "-- --e"), null);
+            assert.equal(getTypedAutocompleteSuggestions(["/deploy -- --e"], 0, 14), undefined);
+        });
     });
 
     it("supports async value completion providers", async () => {
@@ -699,12 +751,7 @@ describe("getTypedAutocompleteSuggestions", () => {
             args: {
                 ref: {
                     type: "string",
-                    complete: () =>
-                        [
-                            { value: 123 },
-                            { value: "feature", label: 456, description: "valid item" },
-                            { value: "quoted", replacement: '"quoted value"' },
-                        ] as never,
+                    complete: malformedJavaScriptCompletionProvider(),
                 },
             },
         };
@@ -722,6 +769,22 @@ describe("getTypedAutocompleteSuggestions", () => {
         );
     });
 
+    it("contains asynchronously rejected completion providers", async () => {
+        const rejectingCommand: RegisteredTypedCommand = {
+            ...command,
+            args: {
+                ref: {
+                    type: "string",
+                    async completeAsync() {
+                        throw new Error("provider rejected");
+                    },
+                },
+            },
+        };
+
+        assert.equal(await getTypedArgumentCompletions(rejectingCommand, "--ref f"), null);
+    });
+
     it("times out async completion providers and passes an abort signal", async () => {
         let sawSignal = false;
         let aborted = false;
@@ -733,22 +796,39 @@ describe("getTypedAutocompleteSuggestions", () => {
                     completionTimeoutMs: 1,
                     completeAsync(_query, context) {
                         sawSignal = context.signal !== undefined;
+                        const completion = createTestSignal<[]>();
                         context.signal?.addEventListener("abort", () => {
                             aborted = true;
+                            completion.resolve([]);
                         });
-                        return new Promise(() => {});
+                        return completion.promise;
                     },
                 },
             },
         };
+        const capabilities: CompletionCapabilities = {
+            ...completionCapabilities(),
+            scheduler: {
+                async run(work, timeoutMs) {
+                    assert.equal(timeoutMs, 1);
+                    const controller = new AbortController();
+                    const workCompletion = work(controller.signal);
+                    controller.abort();
+                    await workCompletion;
+                    return undefined;
+                },
+            },
+        };
 
-        assert.equal(await getTypedArgumentCompletions(timeoutCommand, "--ref f"), null);
+        assert.equal(
+            await getTypedArgumentCompletions(timeoutCommand, "--ref f", capabilities),
+            null,
+        );
         assert.equal(sawSignal, true);
         assert.equal(aborted, true);
     });
 
     it("completes command widget values from typed commands", async () => {
-        registerTypedCommandMetadata(command);
         const commandArgument: RegisteredTypedCommand = {
             ...command,
             args: {
@@ -756,12 +836,14 @@ describe("getTypedAutocompleteSuggestions", () => {
             },
         };
 
-        const suggestions = await getTypedArgumentCompletions(commandArgument, "--next /de");
+        await withRegisteredCommandAsync(command, async () => {
+            const suggestions = await getTypedArgumentCompletions(commandArgument, "--next /de");
 
-        assert.deepEqual(
-            suggestions?.map((item) => item.value),
-            ["/deploy"],
-        );
+            assert.deepEqual(
+                suggestions?.map((item) => item.value),
+                ["/deploy"],
+            );
+        });
     });
 
     it("completes path widget values from the cwd", async () => {
@@ -789,26 +871,26 @@ describe("getTypedAutocompleteSuggestions", () => {
     });
 
     it("keeps repeatable multi-enum flags available", () => {
-        registerTypedCommandMetadata(command);
+        withRegisteredCommand(command, () => {
+            const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags api "], 0, 19);
 
-        const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags api "], 0, 19);
-
-        assert.equal(
-            suggestions?.items.some((item) => item.label === "--tags"),
-            true,
-        );
+            assert.equal(
+                suggestions?.items.some((item) => item.label === "--tags"),
+                true,
+            );
+        });
     });
 
     it("completes multi-enum values", () => {
-        registerTypedCommandMetadata(command);
+        withRegisteredCommand(command, () => {
+            const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags w"], 0, 16);
 
-        const suggestions = getTypedAutocompleteSuggestions(["/deploy --tags w"], 0, 16);
-
-        assert.equal(suggestions?.prefix, "w");
-        assert.deepEqual(
-            suggestions?.items.map((item) => item.value),
-            ["web", "worker"],
-        );
+            assert.equal(suggestions?.prefix, "w");
+            assert.deepEqual(
+                suggestions?.items.map((item) => item.value),
+                ["web", "worker"],
+            );
+        });
     });
 
     it("uses quoted source prefixes for editor value completions", () => {
@@ -825,22 +907,22 @@ describe("getTypedAutocompleteSuggestions", () => {
                 },
             },
         };
-        registerTypedCommandMetadata(quoteCommand);
+        withRegisteredCommand(quoteCommand, () => {
+            const quotedLine = '/quote-complete --ref "fea';
+            const quoted = getTypedAutocompleteSuggestions([quotedLine], 0, quotedLine.length);
+            const inlineLine = '/quote-complete --ref="pa';
+            const inline = getTypedAutocompleteSuggestions([inlineLine], 0, inlineLine.length);
 
-        const quotedLine = '/quote-complete --ref "fea';
-        const quoted = getTypedAutocompleteSuggestions([quotedLine], 0, quotedLine.length);
-        const inlineLine = '/quote-complete --ref="pa';
-        const inline = getTypedAutocompleteSuggestions([inlineLine], 0, inlineLine.length);
-
-        assert.equal(quoted?.prefix, '"fea');
-        assert.deepEqual(
-            quoted?.items.map((item) => item.value),
-            [JSON.stringify("feature branch"), JSON.stringify('feat"quote')],
-        );
-        assert.equal(inline?.prefix, '--ref="pa');
-        assert.deepEqual(
-            inline?.items.map((item) => item.value),
-            [`--ref=${JSON.stringify(String.raw`path\name`)}`],
-        );
+            assert.equal(quoted?.prefix, '"fea');
+            assert.deepEqual(
+                quoted?.items.map((item) => item.value),
+                [JSON.stringify("feature branch"), JSON.stringify('feat"quote')],
+            );
+            assert.equal(inline?.prefix, '--ref="pa');
+            assert.deepEqual(
+                inline?.items.map((item) => item.value),
+                [`--ref=${JSON.stringify(String.raw`path\name`)}`],
+            );
+        });
     });
 });

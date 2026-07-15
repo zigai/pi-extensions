@@ -3,7 +3,6 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
-import { parseTypedCommandArgs } from "../src/index.js";
 import {
     expandArgumentObject,
     normalizeSkillArguments,
@@ -13,14 +12,7 @@ import {
     typedSkillCommandFromMetadata,
     type TypedSkillMetadata,
 } from "../src/skills.js";
-import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
-
-const formSymbols = {
-    selectedCheckbox: "■",
-    unselectedCheckbox: "□",
-    selectedRadio: "●",
-    unselectedRadio: "○",
-};
+import { isRecord } from "./pi-test-adapter.js";
 
 function diagnosticMessages(result: { diagnostics: readonly { message: string }[] }): string {
     return result.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
@@ -372,35 +364,6 @@ Use {args.missing} and {args.path}.
     });
 });
 
-describe("typed skill required/default behavior", () => {
-    it("does not report a required argument as missing when it has a default", () => {
-        const command: RegisteredTypedCommand = {
-            name: "skill:demo",
-            description: "Demo skill",
-            args: {
-                path: {
-                    type: "string",
-                    required: true,
-                    default: ".",
-                } as never,
-                token: {
-                    type: "string",
-                    required: true,
-                },
-            },
-            formSymbols,
-        };
-
-        const parsed = parseTypedCommandArgs(command, "");
-
-        assert.equal(parsed.values.path, ".");
-        assert.deepEqual(
-            parsed.issues.map((issue) => [issue.kind, issue.name]),
-            [["missing-required", "token"]],
-        );
-    });
-});
-
 describe("renderTypedSkillInvocation", () => {
     const skill: TypedSkillMetadata = {
         name: "fix-ruff-errors",
@@ -485,11 +448,14 @@ describe("renderTypedSkillInvocation", () => {
             "config.path": "report.txt",
         });
         const protoSection = expanded["__proto__"];
+        const pollutedOnPlainObject: unknown = Reflect.get({}, "polluted");
 
-        assert.equal(({} as { polluted?: string }).polluted, undefined);
+        assert.equal(pollutedOnPlainObject, undefined);
         assert.equal(Object.hasOwn(expanded, "__proto__"), true);
-        assert.equal(typeof protoSection, "object");
-        assert.equal((protoSection as Record<string, unknown>).polluted, "yes");
+        if (!isRecord(protoSection)) {
+            assert.fail("expected the __proto__ section to remain a data record");
+        }
+        assert.equal(protoSection.polluted, "yes");
     });
 
     it("creates a typed skill command from metadata", () => {

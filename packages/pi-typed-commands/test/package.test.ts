@@ -54,13 +54,15 @@ describe("package subpath exports", () => {
     });
 
     it("keeps the published skill JSON schema aligned with the TypeBox source", () => {
-        const schema = JSON.parse(readFileSync("schemas/skill-arguments.schema.json", "utf8"));
+        const schema: unknown = JSON.parse(
+            readFileSync("schemas/skill-arguments.schema.json", "utf8"),
+        );
 
         assert.deepEqual(schema, skillArgumentsJsonSchema());
     });
 
     it("keeps the published config JSON schema aligned with the TypeBox source", () => {
-        const schema = JSON.parse(readFileSync("config.schema.json", "utf8"));
+        const schema: unknown = JSON.parse(readFileSync("config.schema.json", "utf8"));
 
         assert.deepEqual(schema, piTypedCommandsConfigJsonSchema());
     });

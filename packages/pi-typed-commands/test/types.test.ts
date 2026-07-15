@@ -162,9 +162,8 @@ describe("compile-time API inference", () => {
                 run() {},
             });
 
-            const multi: MultiArgumentValue = ["api"];
-            // @ts-expect-error selected multi-enum values are readonly at public boundaries.
-            multi.push("web");
+            const multiIsReadonly: MultiArgumentValue extends unknown[] ? false : true = true;
+            void multiIsReadonly;
 
             const definitions: ArgumentDefinitions = {
                 env: enumArgument(["dev", "prod"], { required: true }),

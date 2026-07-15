@@ -10,12 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "vitest";
-import {
-    CONFIG_DIR_NAME,
-    type ExtensionAPI,
-    type ExtensionCommandContext,
-} from "@earendil-works/pi-coding-agent";
-import type { Component, TUI } from "@earendil-works/pi-tui";
+import { CONFIG_DIR_NAME, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { openArgumentForm } from "../src/form.js";
 import {
     DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON,
@@ -37,6 +32,18 @@ import type {
     ParsedCommandArguments,
 } from "../src/types.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
+import {
+    createTestExtensionApi,
+    createTestExtensionCommandContext,
+    createTestExtensionContext,
+    createTestKeybindings,
+    createTestTheme,
+    createTestTui,
+    requireFocusableComponent,
+    requireTestWidgetFactory,
+    type TestExtensionEventHandler,
+    type TestWidgetFactory,
+} from "./pi-test-adapter.js";
 
 const formSymbols = {
     selectedCheckbox: "■",
@@ -45,26 +52,13 @@ const formSymbols = {
     unselectedRadio: "○",
 };
 
-const identityTheme = {
-    bold: (text: string) => text,
-    fg: (_color: string, text: string) => text,
-};
-
-const tui = {
-    terminal: { rows: 24, columns: 80 },
-    requestRender() {},
-} as unknown as TUI;
+const identityTheme = createTestTheme();
+const tui = createTestTui();
+const keybindings = createTestKeybindings();
 
 function resolveAppearance(cwd: string = process.cwd(), projectTrusted = true) {
     return resolvePiTypedCommandsConfigSnapshot({ cwd, projectTrusted }).settings.appearance;
 }
-
-type TestFormComponent = Component & {
-    focused: boolean;
-    render(width: number): string[];
-};
-
-type ExtensionEventHandler = (event: unknown, ctx: unknown) => unknown;
 
 function withAgentDir<T>(agentDir: string, run: () => T): T {
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -107,9 +101,9 @@ function writeProjectConfig(cwd: string, config: unknown): void {
 }
 
 function firstHandler(
-    handlers: Map<string, ExtensionEventHandler[]>,
+    handlers: Map<string, TestExtensionEventHandler[]>,
     name: string,
-): ExtensionEventHandler {
+): TestExtensionEventHandler {
     const handler = handlers.get(name)?.[0];
     if (handler === undefined) {
         throw new Error(`missing ${name} handler`);
@@ -136,18 +130,16 @@ describe("global presentation config", () => {
 
         withAgentDir(agentDir, () => {
             const appearance = resolveAppearance();
+            const scaffoldedConfig: unknown = JSON.parse(
+                readFileSync(getPiTypedCommandsGlobalConfigPath(agentDir), "utf8"),
+            );
+            const scaffoldedSchema: unknown = JSON.parse(
+                readFileSync(getPiTypedCommandsGlobalConfigSchemaPath(agentDir), "utf8"),
+            );
 
             assert.equal(appearance.inlineHelp.order, "active-required-available");
-            assert.deepEqual(
-                JSON.parse(readFileSync(getPiTypedCommandsGlobalConfigPath(agentDir), "utf8")),
-                DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON,
-            );
-            assert.deepEqual(
-                JSON.parse(
-                    readFileSync(getPiTypedCommandsGlobalConfigSchemaPath(agentDir), "utf8"),
-                ),
-                piTypedCommandsConfigJsonSchema(),
-            );
+            assert.deepEqual(scaffoldedConfig, DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON);
+            assert.deepEqual(scaffoldedSchema, piTypedCommandsConfigJsonSchema());
         });
     });
 
@@ -308,18 +300,18 @@ describe("global presentation config", () => {
         const configPath = getPiTypedCommandsGlobalConfigPath(agentDir);
         mkdirSync(join(configPath, ".."), { recursive: true });
         writeFileSync(configPath, "{private malformed config");
-        const handlers = new Map<string, ExtensionEventHandler[]>();
+        const handlers = new Map<string, TestExtensionEventHandler[]>();
         const notifications: Array<{ message: string; level: string | undefined }> = [];
-        const pi = {
-            on(name: string, handler: ExtensionEventHandler) {
+        const pi = createTestExtensionApi({
+            on(name, handler) {
                 const current = handlers.get(name) ?? [];
                 handlers.set(name, [...current, handler]);
             },
             getCommands() {
                 return [];
             },
-        } as unknown as ExtensionAPI;
-        const ctx = {
+        });
+        const ctx = createTestExtensionContext({
             cwd: process.cwd(),
             hasUI: true,
             ui: {
@@ -335,7 +327,7 @@ describe("global presentation config", () => {
                     notifications.push({ message, level });
                 },
             },
-        };
+        });
 
         try {
             await withAgentDirAsync(agentDir, async () => {
@@ -365,33 +357,11 @@ describe("global presentation config", () => {
 
         withAgentDir(agentDir, () => {
             const appearance = resolveAppearance();
+            const refreshedSchema: unknown = JSON.parse(readFileSync(schemaPath, "utf8"));
 
             assert.equal(appearance.inlineHelp.order, "active-required-available");
             assert.equal(readFileSync(configPath, "utf8"), "{not json");
-            assert.deepEqual(
-                JSON.parse(readFileSync(schemaPath, "utf8")),
-                piTypedCommandsConfigJsonSchema(),
-            );
-        });
-    });
-
-    it("refreshes stale global schema without rewriting user config", () => {
-        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
-        const configPath = getPiTypedCommandsGlobalConfigPath(agentDir);
-        const schemaPath = getPiTypedCommandsGlobalConfigSchemaPath(agentDir);
-        mkdirSync(join(configPath, ".."), { recursive: true });
-        writeFileSync(configPath, "{not json");
-        writeFileSync(schemaPath, "{}\n");
-
-        withAgentDir(agentDir, () => {
-            const appearance = resolveAppearance();
-
-            assert.equal(appearance.inlineHelp.order, "active-required-available");
-            assert.equal(readFileSync(configPath, "utf8"), "{not json");
-            assert.deepEqual(
-                JSON.parse(readFileSync(schemaPath, "utf8")),
-                piTypedCommandsConfigJsonSchema(),
-            );
+            assert.deepEqual(refreshedSchema, piTypedCommandsConfigJsonSchema());
         });
     });
 
@@ -518,10 +488,10 @@ describe("global presentation config", () => {
                 metadata: { types: true },
             },
         }).inlineHelp;
-        const calls: string[] = [];
+        const calls: Array<{ color: string; text: string }> = [];
         const theme = {
             fg(color: string, text: string) {
-                calls.push(color);
+                calls.push({ color, text });
                 return text;
             },
         };
@@ -534,10 +504,10 @@ describe("global presentation config", () => {
             appearance,
         );
 
-        assert.ok(calls.includes("success"));
-        assert.ok(calls.includes("error"));
-        assert.ok(calls.includes("syntaxType"));
-        assert.ok(calls.includes("warning"));
+        assert.ok(calls.some((call) => call.color === "success" && call.text.includes("count")));
+        assert.ok(calls.some((call) => call.color === "error" && call.text.includes("--path")));
+        assert.ok(calls.some((call) => call.color === "syntaxType" && call.text === ":int"));
+        assert.ok(calls.some((call) => call.color === "warning" && call.text.includes("expects")));
     });
 
     it("applies global form marker, symbols, layout, description, and footer modes", async () => {
@@ -586,32 +556,28 @@ describe("global presentation config", () => {
             mode: "run",
         };
         let renderedLines: string[] = [];
-        const colorCalls: string[] = [];
-        const recordingTheme = {
-            bold: (text: string) => text,
+        const colorCalls: Array<{ color: string; text: string }> = [];
+        const recordingTheme = createTestTheme({
             fg(color: string, text: string) {
-                colorCalls.push(color);
+                colorCalls.push({ color, text });
                 return text;
             },
-        };
-        const ctx = {
+        });
+        const ctx = createTestExtensionCommandContext({
             cwd: projectDir,
             mode: "tui",
             ui: {
                 notify() {},
-                custom: async (factory: Parameters<ExtensionCommandContext["ui"]["custom"]>[0]) => {
-                    const component = (await factory(
-                        tui,
-                        recordingTheme as never,
-                        {} as never,
-                        () => {},
-                    )) as TestFormComponent;
+                custom: async (factory) => {
+                    const component = requireFocusableComponent(
+                        await factory(tui, recordingTheme, keybindings, () => {}),
+                    );
                     component.focused = true;
                     renderedLines = component.render(80);
                     return undefined;
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         await withAgentDirAsync(agentDir, () =>
             openArgumentForm(command, parsed, "all", ctx, {
@@ -635,9 +601,17 @@ describe("global presentation config", () => {
             !renderedLines.some((line) => line.includes("esc cancel")),
             JSON.stringify(renderedLines),
         );
-        assert.ok(colorCalls.includes("success"));
-        assert.ok(colorCalls.includes("toolTitle"));
-        assert.ok(colorCalls.includes("syntaxString"));
+        assert.ok(
+            colorCalls.some(
+                (call) => call.color === "success" && call.text.includes("form-appearance"),
+            ),
+        );
+        assert.ok(
+            colorCalls.some((call) => call.color === "toolTitle" && call.text.includes("Enabled")),
+        );
+        assert.ok(
+            colorCalls.some((call) => call.color === "syntaxString" && call.text.includes("☑")),
+        );
     });
 
     it("uses global appearance for typed skill inline help", async () => {
@@ -658,31 +632,31 @@ describe("global presentation config", () => {
             body: "Use {args.path}.",
         });
 
-        const handlers = new Map<string, ExtensionEventHandler[]>();
-        type HelperWidgetFactory = (
-            tui: unknown,
-            theme: { fg(color: string, text: string): string },
-        ) => { render(width: number): string[] };
-        let widgetFactory: HelperWidgetFactory | undefined;
-        const pi = {
-            on(name: string, handler: ExtensionEventHandler) {
+        const handlers = new Map<string, TestExtensionEventHandler[]>();
+        let widgetFactory: TestWidgetFactory | undefined;
+        const pi = createTestExtensionApi({
+            on(name, handler) {
                 const current = handlers.get(name) ?? [];
                 handlers.set(name, [...current, handler]);
             },
             getCommands() {
                 return [];
             },
-        } as unknown as ExtensionAPI;
-        const ctx = {
+        });
+        const ctx = createTestExtensionContext({
             cwd: process.cwd(),
             hasUI: true,
-            mode: "interactive",
+            mode: "tui",
             ui: {
                 getEditorText() {
                     return "/skill:appearance-demo";
                 },
-                setWidget(_key: string, value: unknown) {
-                    widgetFactory = value as HelperWidgetFactory | undefined;
+                setWidget(_key, value) {
+                    if (value === undefined) {
+                        widgetFactory = undefined;
+                    } else {
+                        widgetFactory = requireTestWidgetFactory(value);
+                    }
                 },
                 onTerminalInput() {
                     return () => {};
@@ -690,7 +664,7 @@ describe("global presentation config", () => {
                 addAutocompleteProvider() {},
                 notify() {},
             },
-        };
+        });
 
         try {
             await withAgentDirAsync(agentDir, async () => {
@@ -702,7 +676,7 @@ describe("global presentation config", () => {
             if (widgetFactory === undefined) {
                 assert.fail("expected helper widget to be installed");
             }
-            const widget = widgetFactory(undefined, identityTheme);
+            const widget = widgetFactory(tui, identityTheme);
             const [line] = widget.render(200);
             assert.match(line ?? "", /<--path <path>>/);
         } finally {
@@ -722,27 +696,25 @@ describe("global presentation config", () => {
             },
         });
 
-        type RegisteredCommandOptions = {
-            handler(rawArgs: string, ctx: ExtensionCommandContext): Promise<void> | void;
-        };
-
-        let registeredHandler: RegisteredCommandOptions["handler"] | undefined;
-        const pi = {
-            registerCommand(_name: string, options: RegisteredCommandOptions) {
-                registeredHandler = (rawArgs, ctx) => options.handler(rawArgs, ctx);
+        let registeredHandler:
+            | ((rawArgs: string, ctx: ExtensionCommandContext) => Promise<void>)
+            | undefined;
+        const pi = createTestExtensionApi({
+            registerCommand(_name, options) {
+                registeredHandler = options.handler;
             },
-        } as unknown as ExtensionAPI;
+        });
         const notifications: Array<{ message: string; level: string | undefined }> = [];
-        const ctx = {
+        const ctx = createTestExtensionCommandContext({
             cwd: projectDir,
             hasUI: true,
-            mode: "interactive",
+            mode: "tui",
             ui: {
                 notify(message: string, level?: string) {
                     notifications.push({ message, level });
                 },
             },
-        } as unknown as ExtensionCommandContext;
+        });
 
         const handle = registerTypedCommand(pi, {
             name: "help-settings",
