@@ -97,7 +97,7 @@ export function parseSkillMarkdown(content: string): ParseSkillMarkdownResult {
             diagnostics: [
                 skillArgumentDiagnostic({
                     code: "skill.frontmatter.yaml.invalid",
-                    message: "frontmatter contains invalid YAML",
+                    message: "frontmatter: invalid YAML",
                     path: ["frontmatter"],
                 }),
             ],

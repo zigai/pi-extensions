@@ -107,7 +107,7 @@ Body
 
         assert.equal(parsed.status, "invalid");
         if (parsed.status === "invalid") {
-            assert.equal(diagnosticMessages(parsed), "frontmatter contains invalid YAML");
+            assert.equal(diagnosticMessages(parsed), "frontmatter: invalid YAML");
         }
     });
 
@@ -121,7 +121,7 @@ Body
 
         assert.equal(parsed.status, "invalid");
         if (parsed.status === "invalid") {
-            assert.equal(diagnosticMessages(parsed), "frontmatter contains invalid YAML");
+            assert.equal(diagnosticMessages(parsed), "frontmatter: invalid YAML");
             assert.doesNotMatch(JSON.stringify(parsed.diagnostics), /private-source-value/);
         }
     });
