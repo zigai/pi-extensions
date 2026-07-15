@@ -511,15 +511,18 @@ describe("global presentation config", () => {
         };
 
         renderInlineHelper(
-            { command, rawArgs: "bad --panes", trailingBody: "" },
+            { command, rawArgs: "bad", trailingBody: "" },
             200,
             theme,
-            { submittedInvalidEditorText: "/appearance-helper bad --panes" },
+            { submittedInvalidEditorText: "/appearance-helper bad" },
             appearance,
         );
 
         assert.ok(calls.some((call) => call.color === "success" && call.text.includes("count")));
         assert.ok(calls.some((call) => call.color === "error" && call.text.includes("--path")));
+        assert.ok(
+            calls.some((call) => call.color === "borderMuted" && call.text.includes("--panes")),
+        );
         assert.ok(calls.some((call) => call.color === "syntaxType" && call.text === ":int"));
         assert.ok(calls.some((call) => call.color === "warning" && call.text.includes("expects")));
     });

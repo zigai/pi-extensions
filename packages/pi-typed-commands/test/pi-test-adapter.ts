@@ -36,6 +36,7 @@ export type TestUiOverrides = {
         ) => { readonly consume?: boolean; readonly data?: string } | undefined,
     ) => () => void;
     readonly setEditorText?: (text: string) => void;
+    readonly select?: ExtensionUIContext["select"];
     readonly setWidget?: (
         key: string,
         content: string[] | TestWidgetFactory | undefined,
@@ -98,6 +99,7 @@ function createTestContextValue(overrides: TestContextOverrides): object {
             notify: overrides.ui?.notify ?? (() => {}),
             onTerminalInput: overrides.ui?.onTerminalInput ?? (() => () => {}),
             setEditorText: overrides.ui?.setEditorText ?? (() => {}),
+            select: overrides.ui?.select ?? (async () => undefined),
             setWidget: overrides.ui?.setWidget ?? (() => {}),
         },
     };

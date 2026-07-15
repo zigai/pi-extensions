@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { describe, it } from "vitest";
 import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { defineTypedCommand } from "../src/command/definition.js";
@@ -8,15 +9,21 @@ import { getPiTypedCommandRegistry } from "../src/pi/registry.js";
 import {
     registerSubmittedInvalidCommandHandler,
     stageExpandedFormArguments,
+    takeExpandedFormArguments,
 } from "../src/pi/session-state.js";
 import { resolveTypedCommandUxOptions } from "../src/pi/settings.js";
 import { TypedCommandUxSession } from "../src/pi/ux-session.js";
 import { createTypedCommandRegistry } from "../src/registry.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
+import { typedSkillCommandFromMetadata } from "../src/skills/command.js";
 import {
     createTestExtensionApi,
     createTestExtensionCommandContext,
     createTestExtensionContext,
+    createTestKeybindings,
+    createTestSignal,
+    createTestTheme,
+    createTestTui,
 } from "./pi-test-adapter.js";
 
 describe("Pi form-only arguments", () => {
@@ -153,6 +160,193 @@ describe("Pi form-only arguments", () => {
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await session.waitForFormCompletion();
             assert.equal(customCalls, 1);
+        } finally {
+            await session.stop();
+        }
+    });
+
+    it.each(["cancellation", "shutdown", "replacement"] as const)(
+        "prevents expanded extension-form side effects after %s",
+        async (lifecycle) => {
+            const registry = createTypedCommandRegistry();
+            let handlerRuns = 0;
+            const command: RegisteredTypedCommand = {
+                name: `expanded-${lifecycle}-test`,
+                description: "Expanded form lifecycle test",
+                args: {
+                    task: { type: "string", position: 0, rest: true },
+                    maximumTimeMinutes: { type: "number", formOnly: true },
+                },
+                formSymbols: {
+                    selectedCheckbox: "■",
+                    unselectedCheckbox: "□",
+                    selectedRadio: "●",
+                    unselectedRadio: "○",
+                },
+                target: {
+                    kind: "extension",
+                    run() {
+                        handlerRuns += 1;
+                    },
+                },
+            };
+            registry.register(command);
+
+            const editorText = `/${command.name} Build`;
+            const editorUpdates: string[] = [];
+            const formStarted = createTestSignal<void>();
+            const abortObserved = createTestSignal<void>();
+            const formCompletion = createTestSignal<unknown>();
+            let cancelForm: (() => void) | undefined;
+            let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+            const pi = createTestExtensionApi();
+            const ctx = createTestExtensionContext({
+                mode: "tui",
+                ui: {
+                    custom: async (factory) => {
+                        const done = (value: unknown): void => {
+                            if (lifecycle !== "cancellation" && value === undefined) {
+                                abortObserved.resolve();
+                                return;
+                            }
+                            formCompletion.resolve(value);
+                        };
+                        await factory(
+                            createTestTui(),
+                            createTestTheme(),
+                            createTestKeybindings(),
+                            done,
+                        );
+                        cancelForm = () => {
+                            done(undefined);
+                        };
+                        formStarted.resolve();
+                        return formCompletion.promise;
+                    },
+                    getEditorText() {
+                        return editorText;
+                    },
+                    onTerminalInput(handler) {
+                        terminalInput = handler;
+                        return () => {
+                            terminalInput = undefined;
+                        };
+                    },
+                    setEditorText(value) {
+                        editorUpdates.push(value);
+                    },
+                },
+            });
+            const session = new TypedCommandUxSession(pi, {}, registry);
+
+            try {
+                await session.start(ctx);
+                assert.ok(terminalInput);
+                assert.deepEqual(terminalInput("\t"), { consume: true });
+                await formStarted.promise;
+
+                if (lifecycle === "cancellation") {
+                    assert.ok(cancelForm);
+                    cancelForm();
+                    await session.waitForFormCompletion();
+                } else if (lifecycle === "shutdown") {
+                    const shutdown = session.stop();
+                    await abortObserved.promise;
+                    formCompletion.resolve({
+                        confirmed: true,
+                        state: { task: "Build", maximumTimeMinutes: 60 },
+                    });
+                    await shutdown;
+                } else {
+                    const restart = session.start(ctx);
+                    await abortObserved.promise;
+                    formCompletion.resolve({
+                        confirmed: true,
+                        state: { task: "Build", maximumTimeMinutes: 60 },
+                    });
+                    await restart;
+                }
+
+                assert.deepEqual(editorUpdates, []);
+                assert.equal(handlerRuns, 0);
+                assert.equal(takeExpandedFormArguments(ctx, command.name, editorText), undefined);
+            } finally {
+                await session.stop();
+            }
+        },
+    );
+
+    it("prevents stale skill completion from clearing or sending after session restart", async () => {
+        const registry = createTypedCommandRegistry();
+        const command = typedSkillCommandFromMetadata({
+            name: "replacement-skill-test",
+            description: "Replacement skill",
+            filePath: join(process.cwd(), "SKILL.md"),
+            baseDir: process.cwd(),
+            args: { path: { type: "string", required: true } },
+            body: "Use {args.path}.",
+        });
+        registry.register(command);
+
+        const formStarted = createTestSignal<void>();
+        const abortObserved = createTestSignal<void>();
+        const formCompletion = createTestSignal<unknown>();
+        const editorUpdates: string[] = [];
+        let sentMessageCount = 0;
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        const pi = createTestExtensionApi({
+            sendUserMessage() {
+                sentMessageCount += 1;
+            },
+        });
+        const ctx = createTestExtensionContext({
+            mode: "tui",
+            ui: {
+                custom: async (factory) => {
+                    await factory(
+                        createTestTui(),
+                        createTestTheme(),
+                        createTestKeybindings(),
+                        (value: unknown) => {
+                            if (value === undefined) {
+                                abortObserved.resolve();
+                                return;
+                            }
+                            formCompletion.resolve(value);
+                        },
+                    );
+                    formStarted.resolve();
+                    return formCompletion.promise;
+                },
+                getEditorText() {
+                    return "/skill:replacement-skill-test";
+                },
+                onTerminalInput(handler) {
+                    terminalInput = handler;
+                    return () => {
+                        terminalInput = undefined;
+                    };
+                },
+                setEditorText(value) {
+                    editorUpdates.push(value);
+                },
+            },
+        });
+        const session = new TypedCommandUxSession(pi, {}, registry);
+
+        try {
+            await session.start(ctx);
+            assert.ok(terminalInput);
+            assert.deepEqual(terminalInput("\t"), { consume: true });
+            await formStarted.promise;
+
+            const restart = session.start(ctx);
+            await abortObserved.promise;
+            formCompletion.resolve({ confirmed: true, state: { path: "stale.txt" } });
+            await restart;
+
+            assert.deepEqual(editorUpdates, []);
+            assert.equal(sentMessageCount, 0);
         } finally {
             await session.stop();
         }

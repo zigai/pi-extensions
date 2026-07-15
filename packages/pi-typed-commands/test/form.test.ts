@@ -9,6 +9,7 @@ import {
     createTestExtensionCommandContext,
     createTestKeybindings,
     createTestTheme,
+    createTestSignal,
     createTestTui,
     requireInteractiveComponent,
 } from "./pi-test-adapter.js";
@@ -442,6 +443,100 @@ describe("dense argument form", () => {
 });
 
 describe("sequential argument form", () => {
+    it("cancels pending input through the caller AbortSignal without applying its stale value", async () => {
+        const definitions = {
+            path: { type: "string" },
+        } satisfies FlatArgumentDefinitions;
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "cancel-input",
+            description: "Cancel pending input",
+            args: definitions,
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: {},
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+        const controller = new AbortController();
+        const promptStarted = createTestSignal<AbortSignal | undefined>();
+        const promptCompletion = createTestSignal<string | undefined>();
+        const notifications: string[] = [];
+        const ctx = createTestExtensionCommandContext({
+            mode: "rpc",
+            ui: {
+                input(_title, _placeholder, options) {
+                    promptStarted.resolve(options?.signal);
+                    return promptCompletion.promise;
+                },
+                notify(message) {
+                    notifications.push(message);
+                },
+            },
+        });
+
+        const formCompletion = openArgumentForm(command, parsed, "all", ctx, {
+            ...formOptions,
+            signal: controller.signal,
+        });
+        const receivedSignal = await promptStarted.promise;
+        assert.equal(receivedSignal, controller.signal);
+
+        controller.abort();
+        promptCompletion.resolve("stale.txt");
+
+        assert.equal(await formCompletion, undefined);
+        assert.deepEqual(notifications, []);
+    });
+
+    it("cancels pending selection through the caller AbortSignal without applying its stale value", async () => {
+        const definitions = {
+            enabled: { type: "boolean" },
+        } satisfies FlatArgumentDefinitions;
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "cancel-selection",
+            description: "Cancel pending selection",
+            args: definitions,
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: {},
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+        const controller = new AbortController();
+        const promptStarted = createTestSignal<AbortSignal | undefined>();
+        const promptCompletion = createTestSignal<string | undefined>();
+        const notifications: string[] = [];
+        const ctx = createTestExtensionCommandContext({
+            mode: "rpc",
+            ui: {
+                notify(message) {
+                    notifications.push(message);
+                },
+                select(_title, _options, dialogOptions) {
+                    promptStarted.resolve(dialogOptions?.signal);
+                    return promptCompletion.promise;
+                },
+            },
+        });
+
+        const formCompletion = openArgumentForm(command, parsed, "all", ctx, {
+            ...formOptions,
+            signal: controller.signal,
+        });
+        const receivedSignal = await promptStarted.promise;
+        assert.equal(receivedSignal, controller.signal);
+
+        controller.abort();
+        promptCompletion.resolve("true");
+
+        assert.equal(await formCompletion, undefined);
+        assert.deepEqual(notifications, []);
+    });
+
     it("runs command refinement after collecting form values", async () => {
         const definitions = {
             start: { type: "number", required: true },
