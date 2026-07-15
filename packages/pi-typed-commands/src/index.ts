@@ -23,7 +23,6 @@ export type {
     FlatArgumentDefinitions,
     EnumArgumentDefinition,
     InferArguments,
-    MaybePromise,
     MultiArgumentValue,
     MultiEnumArgumentDefinition,
     NumberArgumentDefinition,

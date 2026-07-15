@@ -270,11 +270,12 @@ async function asyncProviderArgumentValueItems(
     query: string,
     context: CommandLineContext,
 ): Promise<ValueCompletionItem[]> {
-    if (definition.completeAsync === undefined) {
+    const completeAsync = definition.completeAsync;
+    if (completeAsync === undefined) {
         return syncProviderArgumentValueItems(definition, query, context);
     }
     const completed = await context.capabilities.scheduler.run(
-        (signal) => definition.completeAsync?.(query, completionContext(context, signal)) ?? Promise.resolve([]),
+        (signal) => completeAsync(query, completionContext(context, signal)),
         normalizedCompletionTimeoutMs(definition),
     );
     return mapProviderCompletionItems(completed);

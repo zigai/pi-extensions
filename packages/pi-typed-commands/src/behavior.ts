@@ -334,9 +334,10 @@ export function compileArgumentBehavior(
     } else if (completionValuesForArgument(definition).length > 0) {
         compiled.complete = (query: string) => staticCompletionItems(definition, query);
     }
-    if (definition.completeAsync !== undefined) {
+    const completeAsync = definition.completeAsync;
+    if (completeAsync !== undefined) {
         compiled.completeAsync = (query: string, context: TypedCompletionContext) =>
-            definition.completeAsync?.(query, context) ?? Promise.resolve([]);
+            completeAsync(query, context);
     }
     return Object.freeze(compiled);
 }

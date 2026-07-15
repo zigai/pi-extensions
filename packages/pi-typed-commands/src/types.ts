@@ -142,8 +142,6 @@ export type TypedCompletionContext<TDefinitions extends ArgumentDefinitions = Ar
         readonly signal?: AbortSignal;
     };
 
-export type MaybePromise<T> = T | Promise<T>;
-
 export type TypedCompletionProvider<
     TDefinitions extends ArgumentDefinitions = ArgumentDefinitions,
 > = (

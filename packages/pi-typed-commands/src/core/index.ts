@@ -46,7 +46,6 @@ export type {
     MultiArgumentValue,
     ParseIssue,
     ParseIssueKind,
-    MaybePromise,
     ParsedArgumentDraft,
     PrimitiveArgumentValue,
     SerializableArgumentValues,
