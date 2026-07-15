@@ -22,10 +22,10 @@ describe("codex look config", () => {
             diffLineNumberStyle: "dual",
             narrowDiffLayout: "paired",
             sideBySideLayout: "content-aware",
-            addedRowBackground: null,
-            deletedRowBackground: null,
-            addedContentBackground: null,
-            deletedContentBackground: null,
+            addedRowBackground: "#162E1C",
+            deletedRowBackground: "#3B1E1C",
+            addedContentBackground: "#0B441F",
+            deletedContentBackground: "#5C2321",
             instructionPathColor: null,
             dimUnchangedDiffText: false,
         });
@@ -97,12 +97,22 @@ describe("codex look config", () => {
         expect(config.appearance.diffLineNumberStyle).toBe("single");
     });
 
-    it("allows the added-row background to inherit Pi explicitly", () => {
+    it("allows diff backgrounds to inherit Pi explicitly", () => {
         const config = parseCodexLookConfig({
-            appearance: { addedRowBackground: null },
+            appearance: {
+                addedRowBackground: null,
+                deletedRowBackground: null,
+                addedContentBackground: null,
+                deletedContentBackground: null,
+            },
         });
 
-        expect(config.appearance.addedRowBackground).toBeNull();
+        expect(config.appearance).toMatchObject({
+            addedRowBackground: null,
+            deletedRowBackground: null,
+            addedContentBackground: null,
+            deletedContentBackground: null,
+        });
     });
 
     it("parses user-configured tool call indicators", () => {

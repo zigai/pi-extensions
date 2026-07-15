@@ -142,10 +142,10 @@
         "diffLineNumberStyle": "dual",
         "narrowDiffLayout": "paired",
         "sideBySideLayout": "content-aware",
-        "addedRowBackground": null,
-        "deletedRowBackground": null,
-        "addedContentBackground": null,
-        "deletedContentBackground": null,
+        "addedRowBackground": "#162E1C",
+        "deletedRowBackground": "#3B1E1C",
+        "addedContentBackground": "#0B441F",
+        "deletedContentBackground": "#5C2321",
         "instructionPathColor": null,
         "dimUnchangedDiffText": false
       }

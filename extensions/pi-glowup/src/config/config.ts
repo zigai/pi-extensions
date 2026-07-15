@@ -91,10 +91,10 @@ export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
         diffLineNumberStyle: "dual",
         narrowDiffLayout: "paired",
         sideBySideLayout: "content-aware",
-        addedRowBackground: null,
-        deletedRowBackground: null,
-        addedContentBackground: null,
-        deletedContentBackground: null,
+        addedRowBackground: "#162E1C",
+        deletedRowBackground: "#3B1E1C",
+        addedContentBackground: "#0B441F",
+        deletedContentBackground: "#5C2321",
         instructionPathColor: null,
         dimUnchangedDiffText: false,
     },
@@ -529,14 +529,17 @@ export function parseCodexLookConfig(
                     ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.addedRowBackground
                     : appearance.addedRowBackground,
             deletedRowBackground:
-                appearance.deletedRowBackground ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedRowBackground,
+                appearance.deletedRowBackground === undefined
+                    ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedRowBackground
+                    : appearance.deletedRowBackground,
             addedContentBackground:
-                appearance.addedContentBackground ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.addedContentBackground,
+                appearance.addedContentBackground === undefined
+                    ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.addedContentBackground
+                    : appearance.addedContentBackground,
             deletedContentBackground:
-                appearance.deletedContentBackground ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedContentBackground,
+                appearance.deletedContentBackground === undefined
+                    ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedContentBackground
+                    : appearance.deletedContentBackground,
             instructionPathColor:
                 appearance.instructionPathColor ??
                 DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.instructionPathColor,

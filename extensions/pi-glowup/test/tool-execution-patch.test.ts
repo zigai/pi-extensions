@@ -59,6 +59,10 @@ type FakeToolExecutionPrototype = {
 
 function noop(): void {}
 
+function stripAnsi(text: string): string {
+    return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu"), "");
+}
+
 const renderContext: FakeRenderContext = {
     args: {},
     toolCallId: "call-1",
@@ -420,7 +424,7 @@ describe("tool execution patches", () => {
             .join("\n");
 
         expect(rendered).toContain("Patch removed.ts (-2)");
-        expect(rendered).toContain("2   -two");
+        expect(stripAnsi(rendered ?? "")).toContain("2   -two");
     });
 
     it("uses explicit Codex-look plugins over native built-in renderers", () => {

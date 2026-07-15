@@ -4,8 +4,8 @@ The global configuration file is `~/.pi/agent/pi-codex-look/config.json`.
 
 ## Choosing a diff look
 
-Start with the four layout settings below. Leave color overrides at `null` unless the active Pi
-theme needs adjustment.
+Start with the four layout settings below. The default colors are tuned for the bundled dark syntax
+theme; set an individual color to `null` to derive it from the active Pi theme instead.
 
 The default combines two ideas from [Hunk](https://github.com/modem-dev/hunk): a compact stack
 gutter with separate old/new coordinates and a stronger word-diff shade inside a subtle row tint.
@@ -17,8 +17,8 @@ gutter with separate old/new coordinates and a stronger word-diff shade inside a
 | Traditional blocks    | `full-row`       | `dual`       | `traditional` | `fixed`         |
 
 `two-tone` paints each changed row with a subtle red or green shade and paints Pierre's changed
-word spans with a stronger shade. The stronger shade is derived with a minimum visual separation
-from the row shade. `changed-spans` leaves the row neutral and paints only changed spans.
+word spans with a stronger shade. When a content shade is `null`, it is derived with a minimum
+visual separation from the row shade. `changed-spans` leaves the row neutral and paints only changed spans.
 `full-row` uses one semantic shade across the row.
 
 `dual` uses aligned old and new columns in compact unified diffs. Deletions populate only the old
@@ -36,10 +36,10 @@ show the coordinate belonging to each pane before its change marker, matching Hu
 | `appearance.diffLineNumberStyle`      | `dual`, `single`                        | Select the compact unified line-number gutter.                 |
 | `appearance.narrowDiffLayout`         | `paired`, `traditional`                 | Pair similar replacements or group deletions before additions. |
 | `appearance.sideBySideLayout`         | `content-aware`, `fixed`                | Select content-fit or fixed-width split eligibility.           |
-| `appearance.addedRowBackground`       | `null` or `#RRGGBB`                     | Override the subtle/base addition shade.                       |
-| `appearance.deletedRowBackground`     | `null` or `#RRGGBB`                     | Override the subtle/base deletion shade.                       |
-| `appearance.addedContentBackground`   | `null` or `#RRGGBB`                     | Override the stronger added intraline shade.                   |
-| `appearance.deletedContentBackground` | `null` or `#RRGGBB`                     | Override the stronger deleted intraline shade.                 |
+| `appearance.addedRowBackground`       | `#162E1C`                               | Set the base addition shade; `null` derives it from Pi.        |
+| `appearance.deletedRowBackground`     | `#3B1E1C`                               | Set the base deletion shade; `null` derives it from Pi.        |
+| `appearance.addedContentBackground`   | `#0B441F`                               | Set the stronger added shade; `null` derives it.               |
+| `appearance.deletedContentBackground` | `#5C2321`                               | Set the stronger deleted shade; `null` derives it.             |
 | `appearance.dimUnchangedDiffText`     | `false`                                 | Dim unchanged text around changed spans.                       |
 | `appearance.instructionPathColor`     | `null` or `#RRGGBB`                     | Override Skill and AGENTS path text.                           |
 
@@ -83,10 +83,10 @@ For compatibility with the previous appearance, `addedRowBackground` and
     "diffLineNumberStyle": "dual",
     "narrowDiffLayout": "paired",
     "sideBySideLayout": "content-aware",
-    "addedRowBackground": null,
-    "deletedRowBackground": null,
-    "addedContentBackground": null,
-    "deletedContentBackground": null,
+    "addedRowBackground": "#162E1C",
+    "deletedRowBackground": "#3B1E1C",
+    "addedContentBackground": "#0B441F",
+    "deletedContentBackground": "#5C2321",
     "instructionPathColor": null,
     "dimUnchangedDiffText": false
   },
