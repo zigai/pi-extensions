@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -95,6 +95,38 @@ describe("OpenAI sidecar metadata", () => {
             sourceInfo: makeSourceInfo(skillPath),
             disableModelInvocation: false,
         };
+        const { pi, handlers } = createExtensionHarness([]);
+        extension(pi);
+
+        const systemPrompt = `prefix${formatSkillsForPrompt([skill])}suffix`;
+        const result = await handlers.beforeAgentStart({
+            type: "before_agent_start",
+            prompt: "hello",
+            systemPrompt,
+            systemPromptOptions: {
+                cwd: process.cwd(),
+                skills: [skill],
+            },
+        } as BeforeAgentStartEvent);
+
+        expect(result?.systemPrompt).toBe("prefixsuffix");
+    });
+
+    it("removes deleted skills from the model prompt", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: deleted\ndescription: Deleted skill",
+            body: "# Deleted",
+        });
+        const skill = {
+            name: "deleted",
+            description: "Deleted skill",
+            filePath: skillPath,
+            baseDir: dirname(skillPath),
+            sourceInfo: makeSourceInfo(skillPath),
+            disableModelInvocation: false,
+        };
+        await unlink(skillPath);
+
         const { pi, handlers } = createExtensionHarness([]);
         extension(pi);
 
@@ -412,6 +444,30 @@ describe("user invocable metadata", () => {
         expect(notify).toHaveBeenCalledWith('Skill "hidden" is not user-invocable.', "warning");
     });
 
+    it("handles direct invocation of a deleted skill", async () => {
+        const skillPath = await writeSkill({
+            frontmatter: "name: deleted\ndescription: Deleted skill",
+            body: "# Deleted",
+        });
+        await unlink(skillPath);
+
+        const notify = vi.fn();
+        const { pi, handlers } = createExtensionHarness([makeSkillCommand("deleted", skillPath)]);
+        extension(pi);
+
+        const result = await handlers.input(
+            {
+                type: "input",
+                text: "/skill:deleted",
+                source: "interactive",
+            },
+            makeContext(notify),
+        );
+
+        expect(result).toEqual({ action: "handled" });
+        expect(notify).toHaveBeenCalledWith('Skill "deleted" is no longer available.', "warning");
+    });
+
     it("expands visible skill invocations with dynamic context", async () => {
         const skillPath = await writeSkill({
             frontmatter: "name: visible\ndescription: Visible skill",
@@ -438,7 +494,7 @@ describe("user invocable metadata", () => {
         });
     });
 
-    it("filters hidden skills from slash autocomplete suggestions", async () => {
+    it("filters hidden and deleted skills from slash autocomplete suggestions", async () => {
         const hiddenPath = await writeSkill({
             frontmatter: "name: hidden\ndescription: Hidden skill\nuser-invocable: false",
             body: "# Hidden",
@@ -447,15 +503,25 @@ describe("user invocable metadata", () => {
             frontmatter: "name: visible\ndescription: Visible skill",
             body: "# Visible",
         });
+        const deletedPath = await writeSkill({
+            frontmatter: "name: deleted\ndescription: Deleted skill",
+            body: "# Deleted",
+        });
+        await unlink(deletedPath);
         const suggestions = await internals.filterUserInvocableSuggestions(
             {
                 prefix: "/skill:",
                 items: [
                     { value: "/skill:hidden", label: "/skill:hidden" },
                     { value: "/skill:visible", label: "/skill:visible" },
+                    { value: "/skill:deleted", label: "/skill:deleted" },
                 ],
             },
-            [makeSkillCommand("hidden", hiddenPath), makeSkillCommand("visible", visiblePath)],
+            [
+                makeSkillCommand("hidden", hiddenPath),
+                makeSkillCommand("visible", visiblePath),
+                makeSkillCommand("deleted", deletedPath),
+            ],
         );
 
         expect(suggestions.items).toEqual([{ value: "/skill:visible", label: "/skill:visible" }]);

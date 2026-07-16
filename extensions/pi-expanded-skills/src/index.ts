@@ -251,6 +251,13 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
         }
 
         const metadata = await loadSkillMetadata(command.sourceInfo.path);
+        if (metadata === undefined) {
+            if (ctx.hasUI) {
+                ctx.ui.notify(`Skill "${invocation.name}" is no longer available.`, "warning");
+            }
+            return { action: "handled" };
+        }
+
         if (!metadata.userInvocable) {
             if (ctx.hasUI) {
                 ctx.ui.notify(`Skill "${invocation.name}" is not user-invocable.`, "warning");
@@ -258,7 +265,14 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
             return { action: "handled" };
         }
 
-        const rawContent = await readFile(command.sourceInfo.path, "utf-8");
+        const rawContent = await readSkillFile(command.sourceInfo.path);
+        if (rawContent === undefined) {
+            if (ctx.hasUI) {
+                ctx.ui.notify(`Skill "${invocation.name}" is no longer available.`, "warning");
+            }
+            return { action: "handled" };
+        }
+
         const renderedContent = await renderSkillContent(
             rawContent,
             dirname(command.sourceInfo.path),
@@ -337,7 +351,7 @@ export default function extension(pi: SkillExtensionAPI, options?: ExtensionOpti
             textContent.text,
             target.skillBaseDir,
             createPiCommandExecutor(pi),
-            metadata.shell,
+            metadata?.shell,
         );
         return {
             content: event.content.map((content) =>
@@ -837,15 +851,22 @@ async function filterModelInvocableSkills(skills: readonly Skill[]): Promise<Ski
     const filtered: Skill[] = [];
     for (const skill of skills) {
         const metadata = await loadSkillMetadata(skill.filePath, skill);
-        if (!metadata.disableModelInvocation) {
+        if (metadata !== undefined && !metadata.disableModelInvocation) {
             filtered.push(skill);
         }
     }
     return filtered;
 }
 
-async function loadSkillMetadata(filePath: string, loadedSkill?: Skill): Promise<SkillMetadata> {
-    const rawContent = await readFile(filePath, "utf-8");
+async function loadSkillMetadata(
+    filePath: string,
+    loadedSkill?: Skill,
+): Promise<SkillMetadata | undefined> {
+    const rawContent = await readSkillFile(filePath);
+    if (rawContent === undefined) {
+        return undefined;
+    }
+
     const { frontmatter } = parseFrontmatter(rawContent);
     const allowImplicitInvocation = await loadOpenAiAllowImplicitInvocation(dirname(filePath));
     const frontmatterDisableModelInvocation =
@@ -857,6 +878,17 @@ async function loadSkillMetadata(filePath: string, loadedSkill?: Skill): Promise
         userInvocable: frontmatter["user-invocable"] !== false,
         shell: parseDynamicShell(frontmatter.shell),
     };
+}
+
+async function readSkillFile(filePath: string): Promise<string | undefined> {
+    try {
+        return await readFile(filePath, "utf-8");
+    } catch (cause: unknown) {
+        if (isNodeError(cause) && cause.code === "ENOENT") {
+            return undefined;
+        }
+        throw cause;
+    }
 }
 
 async function loadOpenAiAllowImplicitInvocation(skillDir: string): Promise<boolean | undefined> {
@@ -1083,7 +1115,7 @@ async function filterUserInvocableSuggestions(
             .filter((command) => command.source === "skill")
             .map(async (command) => {
                 const metadata = await loadSkillMetadata(command.sourceInfo.path);
-                if (!metadata.userInvocable) {
+                if (metadata === undefined || !metadata.userInvocable) {
                     hiddenNames.add(command.name);
                 }
             }),
