@@ -24,3 +24,15 @@ jobs:
 
       - name: Check
         run: npm run check
+
+      - name: Informational TUI benchmark smoke
+        run: npm run benchmark:tui -- --quick
+
+      - name: Upload PTY failure frames
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-codex-look-pty-failure
+          path: artifacts/pty/
+          if-no-files-found: ignore
+          retention-days: 7
