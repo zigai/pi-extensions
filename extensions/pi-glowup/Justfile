@@ -17,6 +17,14 @@ lint:
 test:
     npm test
 
+# Run informational TUI benchmarks
+benchmark:
+    npm run benchmark:tui
+
+# Run a short informational TUI benchmark smoke
+benchmark-quick:
+    npm run benchmark:tui -- --quick
+
 # Run all non-mutating checks
 check:
     npm run check
