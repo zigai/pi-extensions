@@ -36,10 +36,10 @@ show the coordinate belonging to each pane before its change marker, matching Hu
 | `appearance.diffLineNumberStyle`      | `dual`, `single`                        | Select the compact unified line-number gutter.                 |
 | `appearance.narrowDiffLayout`         | `paired`, `traditional`                 | Pair similar replacements or group deletions before additions. |
 | `appearance.sideBySideLayout`         | `content-aware`, `fixed`                | Select content-fit or fixed-width split eligibility.           |
-| `appearance.addedRowBackground`       | `#162E1C`                               | Set the base addition shade; `null` derives it from Pi.        |
-| `appearance.deletedRowBackground`     | `#3B1E1C`                               | Set the base deletion shade; `null` derives it from Pi.        |
-| `appearance.addedContentBackground`   | `#0B441F`                               | Set the stronger added shade; `null` derives it.               |
-| `appearance.deletedContentBackground` | `#5C2321`                               | Set the stronger deleted shade; `null` derives it.             |
+| `appearance.addedRowBackground`       | `#213A2B`                               | Set the base addition shade; `null` derives it from Pi.        |
+| `appearance.deletedRowBackground`     | `#4A221D`                               | Set the base deletion shade; `null` derives it from Pi.        |
+| `appearance.addedContentBackground`   | `#0D5728`                               | Set the stronger added shade; `null` derives it.               |
+| `appearance.deletedContentBackground` | `#762925`                               | Set the stronger deleted shade; `null` derives it.             |
 | `appearance.dimUnchangedDiffText`     | `false`                                 | Dim unchanged text around changed spans.                       |
 | `appearance.instructionPathColor`     | `null` or `#RRGGBB`                     | Override Skill and AGENTS path text.                           |
 
@@ -83,10 +83,10 @@ For compatibility with the previous appearance, `addedRowBackground` and
     "diffLineNumberStyle": "dual",
     "narrowDiffLayout": "paired",
     "sideBySideLayout": "content-aware",
-    "addedRowBackground": "#162E1C",
-    "deletedRowBackground": "#3B1E1C",
-    "addedContentBackground": "#0B441F",
-    "deletedContentBackground": "#5C2321",
+    "addedRowBackground": "#213A2B",
+    "deletedRowBackground": "#4A221D",
+    "addedContentBackground": "#0D5728",
+    "deletedContentBackground": "#762925",
     "instructionPathColor": null,
     "dimUnchangedDiffText": false
   },

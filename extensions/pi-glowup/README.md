@@ -19,10 +19,10 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 | `appearance.diffLineNumberStyle`          | `"dual"`                                                        | Show aligned `dual` old/new gutters or the previous `single` gutter.        |
 | `appearance.narrowDiffLayout`             | `"paired"`                                                      | Pair similar old/new rows or use `traditional` block ordering.              |
 | `appearance.sideBySideLayout`             | `"content-aware"`                                               | Use content-aware split selection or the `fixed` 140-column cutoff.         |
-| `appearance.addedRowBackground`           | `"#162E1C"`                                                     | Set the subtle addition-row shade; `null` derives it from Pi.               |
-| `appearance.deletedRowBackground`         | `"#3B1E1C"`                                                     | Set the subtle deletion-row shade; `null` derives it from Pi.               |
-| `appearance.addedContentBackground`       | `"#0B441F"`                                                     | Set the stronger added intraline shade; `null` derives it.                  |
-| `appearance.deletedContentBackground`     | `"#5C2321"`                                                     | Set the stronger deleted intraline shade; `null` derives it.                |
+| `appearance.addedRowBackground`           | `"#213A2B"`                                                     | Set the subtle addition-row shade; `null` derives it from Pi.               |
+| `appearance.deletedRowBackground`         | `"#4A221D"`                                                     | Set the subtle deletion-row shade; `null` derives it from Pi.               |
+| `appearance.addedContentBackground`       | `"#0D5728"`                                                     | Set the stronger added intraline shade; `null` derives it.                  |
+| `appearance.deletedContentBackground`     | `"#762925"`                                                     | Set the stronger deleted intraline shade; `null` derives it.                |
 | `appearance.instructionPathColor`         | `null`                                                          | Override Skill/AGENTS path text with a `#RRGGBB` color; `null` uses Pi.     |
 | `appearance.dimUnchangedDiffText`         | `false`                                                         | Dim unchanged text inside changed diff rows.                                |
 | `debugLog.enabled`                        | `false`                                                         | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
@@ -54,10 +54,10 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
     "diffLineNumberStyle": "dual",
     "narrowDiffLayout": "paired",
     "sideBySideLayout": "content-aware",
-    "addedRowBackground": "#162E1C",
-    "deletedRowBackground": "#3B1E1C",
-    "addedContentBackground": "#0B441F",
-    "deletedContentBackground": "#5C2321",
+    "addedRowBackground": "#213A2B",
+    "deletedRowBackground": "#4A221D",
+    "addedContentBackground": "#0D5728",
+    "deletedContentBackground": "#762925",
     "instructionPathColor": null,
     "dimUnchangedDiffText": false
   },
