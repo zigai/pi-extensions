@@ -7,8 +7,6 @@ import {
     type BeforeProviderRequestEvent,
     type BeforeAgentStartEvent,
     type ContextEvent,
-    type ExtensionAPI,
-    type ExtensionContext,
     type InputEvent,
     type InputEventResult,
     type SlashCommandInfo,
@@ -22,30 +20,27 @@ import extension, {
     packageName,
     parseOpenAiAllowImplicitInvocation,
     renderSkillContent,
+    type SkillExtensionAPI,
+    type SkillExtensionContext,
+    type SkillExtensionEventHandlers,
 } from "../src/index.ts";
 
-type RegisteredHandlers = {
-    readonly agentStart: () => Promise<void>;
-    readonly beforeProviderRequest: (
-        event: BeforeProviderRequestEvent,
-        ctx?: ExtensionContext,
-    ) => Promise<unknown>;
-    readonly beforeAgentStart: (
-        event: BeforeAgentStartEvent,
-    ) => Promise<{ readonly systemPrompt?: string } | void>;
-    readonly context: (
-        event: ContextEvent,
-        ctx?: ExtensionContext,
-    ) => Promise<{ readonly messages?: ContextEvent["messages"] } | void>;
-    readonly input: (event: InputEvent, ctx: ExtensionContext) => Promise<InputEventResult | void>;
-    readonly toolResult: (
-        event: ToolResultEvent,
-        ctx?: ExtensionContext,
-    ) => Promise<{
-        readonly content?: ToolResultEvent["content"];
-        readonly details?: unknown;
-        readonly isError?: boolean;
-    } | void>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+const defaultSkillExtensionContext: SkillExtensionContext = {
+    hasUI: true,
+    ui: {
+        addAutocompleteProvider: () => undefined,
+        notify: () => undefined,
+    },
+    cwd: process.cwd(),
+    sessionManager: {
+        getSessionId: () => "test-session",
+        getSessionFile: () => join(process.cwd(), "test-session.jsonl"),
+    },
+    model: { provider: "test-provider", id: "test-model" },
 };
 
 describe("extension entrypoint", () => {
@@ -219,10 +214,14 @@ describe("skill usage tracking", () => {
             }),
         );
 
+        const [record] = records;
+        if (!isRecord(record) || typeof record.timestamp !== "string") {
+            throw new Error("Expected a skill usage record with an ISO timestamp.");
+        }
+        expect(record.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
         expect(records).toEqual([
             expect.objectContaining({
                 schemaVersion: 1,
-                timestamp: expect.any(String),
                 event: "agent_read",
                 sessionId: "session-123",
                 sessionFile: "/tmp/session-123.jsonl",
@@ -300,7 +299,7 @@ describe("skill usage tracking", () => {
             makeContext(vi.fn(), { cwd: dirname(skillPath), sessionId: "session-user" }),
         );
 
-        expect(records).toEqual([expect.not.objectContaining({ args: expect.any(String) })]);
+        expect(records[0]).not.toHaveProperty("args");
         expect(records[0]).toEqual(
             expect.objectContaining({
                 event: "user_invocation",
@@ -448,7 +447,6 @@ describe("user invocable metadata", () => {
             frontmatter: "name: visible\ndescription: Visible skill",
             body: "# Visible",
         });
-
         const suggestions = await internals.filterUserInvocableSuggestions(
             {
                 prefix: "/skill:",
@@ -484,8 +482,15 @@ async function writeSkill(options: {
     return skillPath;
 }
 
+function requireHandler<THandler>(handler: THandler | undefined): THandler {
+    if (handler === undefined) {
+        throw new Error("Expected extension handler to be registered.");
+    }
+    return handler;
+}
+
 function createExtensionHarness(
-    commands: readonly SlashCommandInfo[],
+    commands: SlashCommandInfo[],
     execResult?: {
         readonly stdout: string;
         readonly stderr?: string;
@@ -493,16 +498,41 @@ function createExtensionHarness(
         readonly killed?: boolean;
     },
 ): {
-    readonly pi: ExtensionAPI;
+    readonly pi: SkillExtensionAPI;
     readonly events: string[];
-    readonly handlers: RegisteredHandlers;
+    readonly handlers: {
+        readonly agentStart: () => Promise<void>;
+        readonly beforeProviderRequest: (
+            event: BeforeProviderRequestEvent,
+            ctx?: SkillExtensionContext,
+        ) => Promise<unknown>;
+        readonly beforeAgentStart: (
+            event: BeforeAgentStartEvent,
+        ) => Promise<{ readonly systemPrompt?: string } | void>;
+        readonly context: (
+            event: ContextEvent,
+            ctx?: SkillExtensionContext,
+        ) => Promise<{ readonly messages?: ContextEvent["messages"] } | void>;
+        readonly input: (
+            event: InputEvent,
+            ctx: SkillExtensionContext,
+        ) => Promise<InputEventResult | void>;
+        readonly toolResult: (
+            event: ToolResultEvent,
+            ctx?: SkillExtensionContext,
+        ) => Promise<{
+            readonly content?: ToolResultEvent["content"];
+            readonly details?: unknown;
+            readonly isError?: boolean;
+        } | void>;
+    };
 } {
     const events: string[] = [];
-    const capturedHandlers = new Map<string, unknown>();
-    const pi = {
-        on: (eventName: string, handler: unknown) => {
+    const capturedHandlers: Partial<SkillExtensionEventHandlers> = {};
+    const pi: SkillExtensionAPI = {
+        on(eventName, handler) {
             events.push(eventName);
-            capturedHandlers.set(eventName, handler);
+            capturedHandlers[eventName] = handler;
         },
         getCommands: () => commands,
         exec: async () => ({
@@ -514,41 +544,32 @@ function createExtensionHarness(
     };
 
     return {
-        // SAFETY: Tests provide the ExtensionAPI members exercised by this extension.
-        pi: pi as unknown as ExtensionAPI,
+        pi,
         events,
         handlers: {
             agentStart: async () => {
-                const handler = capturedHandlers.get(
-                    "agent_start",
-                ) as RegisteredHandlers["agentStart"];
-                return handler();
+                await requireHandler(capturedHandlers.agent_start)(
+                    { type: "agent_start" },
+                    defaultSkillExtensionContext,
+                );
             },
             beforeProviderRequest: async (event, ctx = makeContext(vi.fn())) => {
-                const handler = capturedHandlers.get(
-                    "before_provider_request",
-                ) as RegisteredHandlers["beforeProviderRequest"];
-                return handler(event, ctx);
+                return requireHandler(capturedHandlers.before_provider_request)(event, ctx);
             },
             beforeAgentStart: async (event) => {
-                const handler = capturedHandlers.get(
-                    "before_agent_start",
-                ) as RegisteredHandlers["beforeAgentStart"];
-                return handler(event);
+                return requireHandler(capturedHandlers.before_agent_start)(
+                    event,
+                    defaultSkillExtensionContext,
+                );
             },
             context: async (event, ctx = makeContext(vi.fn())) => {
-                const handler = capturedHandlers.get("context") as RegisteredHandlers["context"];
-                return handler(event, ctx);
+                return requireHandler(capturedHandlers.context)(event, ctx);
             },
             input: async (event, ctx) => {
-                const handler = capturedHandlers.get("input") as RegisteredHandlers["input"];
-                return handler(event, ctx);
+                return requireHandler(capturedHandlers.input)(event, ctx);
             },
             toolResult: async (event, ctx = makeContext(vi.fn())) => {
-                const handler = capturedHandlers.get(
-                    "tool_result",
-                ) as RegisteredHandlers["toolResult"];
-                return handler(event, ctx);
+                return requireHandler(capturedHandlers.tool_result)(event, ctx);
             },
         },
     };
@@ -596,14 +617,14 @@ function makeContext(
         readonly sessionFile?: string;
         readonly model?: { readonly provider: string; readonly id: string };
     },
-): ExtensionContext {
+): SkillExtensionContext {
     const cwd = options?.cwd ?? process.cwd();
     const sessionId = options?.sessionId ?? "test-session";
     const sessionFile = options?.sessionFile ?? join(cwd, "test-session.jsonl");
     return {
         hasUI: true,
-        mode: "tui",
         ui: {
+            addAutocompleteProvider: () => undefined,
             notify,
         },
         cwd,
@@ -612,5 +633,5 @@ function makeContext(
             getSessionFile: () => sessionFile,
         },
         model: options?.model ?? { provider: "test-provider", id: "test-model" },
-    } as ExtensionContext;
+    };
 }

@@ -3,13 +3,21 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
+    type AgentStartEvent,
+    type BeforeAgentStartEvent,
+    type BeforeAgentStartEventResult,
+    type BeforeProviderRequestEvent,
+    type BeforeProviderRequestEventResult,
     formatSkillsForPrompt,
     getAgentDir,
     isReadToolResult,
     parseFrontmatter,
+    type SessionStartEvent,
+    type ToolResultEvent,
     type ContextEvent,
     type ExtensionContext,
     type ExtensionAPI,
+    type InputEvent,
     type InputSource,
     type InputEventResult,
     type Skill,
@@ -68,6 +76,58 @@ type CompletionSuggestions = {
 
 type ExtensionOptions = {
     readonly skillUsageStore?: SkillUsageStore;
+};
+
+export type SkillExtensionContext = Pick<ExtensionContext, "cwd" | "hasUI"> & {
+    readonly model:
+        | {
+              readonly provider: string;
+              readonly id: string;
+          }
+        | undefined;
+    readonly sessionManager: Pick<
+        ExtensionContext["sessionManager"],
+        "getSessionFile" | "getSessionId"
+    >;
+    readonly ui: Pick<ExtensionContext["ui"], "addAutocompleteProvider" | "notify">;
+};
+
+type SkillExtensionHandler<TEvent, TResult = undefined> = (
+    event: TEvent,
+    ctx: SkillExtensionContext,
+) => Promise<TResult | void> | TResult | void;
+
+export type SkillExtensionEventHandlers = {
+    readonly agent_start: SkillExtensionHandler<AgentStartEvent>;
+    readonly before_agent_start: SkillExtensionHandler<
+        BeforeAgentStartEvent,
+        BeforeAgentStartEventResult
+    >;
+    readonly before_provider_request: SkillExtensionHandler<
+        BeforeProviderRequestEvent,
+        BeforeProviderRequestEventResult
+    >;
+    readonly context: SkillExtensionHandler<
+        ContextEvent,
+        { readonly messages?: ContextEvent["messages"] }
+    >;
+    readonly input: SkillExtensionHandler<InputEvent, InputEventResult>;
+    readonly session_start: SkillExtensionHandler<SessionStartEvent>;
+    readonly tool_result: SkillExtensionHandler<
+        ToolResultEvent,
+        {
+            readonly content?: ToolResultEvent["content"];
+            readonly details?: unknown;
+            readonly isError?: boolean;
+        }
+    >;
+};
+
+export type SkillExtensionAPI = Pick<ExtensionAPI, "exec" | "getCommands"> & {
+    on<TEvent extends keyof SkillExtensionEventHandlers>(
+        event: TEvent,
+        handler: SkillExtensionEventHandlers[TEvent],
+    ): void;
 };
 
 type SkillUsageStore = {
@@ -152,7 +212,7 @@ type TextBlockLike = {
 };
 
 /** Register enhanced cross-harness skill behavior. */
-export default function extension(pi: ExtensionAPI, options?: ExtensionOptions): void {
+export default function extension(pi: SkillExtensionAPI, options?: ExtensionOptions): void {
     const skillUsageStore =
         options?.skillUsageStore ?? createJsonlSkillUsageStore(defaultSkillUsageLogPath());
     const referencedSkillFiles = new Map<string, Promise<ReadonlySet<string>>>();
@@ -371,7 +431,7 @@ function defaultSkillUsageLogPath(): string {
 async function recordSkillUsage(
     store: SkillUsageStore,
     input: {
-        readonly ctx: ExtensionContext;
+        readonly ctx: SkillExtensionContext;
         readonly event: SkillUsageRecord["event"];
         readonly target: SkillFileTarget;
         readonly read?: SkillUsageRead;
@@ -389,7 +449,7 @@ async function recordSkillUsage(
 }
 
 function makeSkillUsageRecord(input: {
-    readonly ctx: ExtensionContext;
+    readonly ctx: SkillExtensionContext;
     readonly event: SkillUsageRecord["event"];
     readonly target: SkillFileTarget;
     readonly read?: SkillUsageRead;
@@ -422,7 +482,7 @@ async function recordMentionSkillUsageFromTexts(
     store: SkillUsageStore,
     input: {
         readonly commands: readonly SlashCommandInfo[];
-        readonly ctx: ExtensionContext;
+        readonly ctx: SkillExtensionContext;
         readonly seenMentionExpansionKeys: Set<string>;
         readonly source: SkillUsageMention["source"];
         readonly texts: readonly string[];
@@ -578,7 +638,7 @@ function hashSkillUsageSource(text: string): string {
     return createHash("sha256").update(text).digest("hex");
 }
 
-function makeSkillUsageContextFields(ctx: ExtensionContext): SkillUsageContextFields {
+function makeSkillUsageContextFields(ctx: SkillExtensionContext): SkillUsageContextFields {
     const sessionFile = ctx.sessionManager.getSessionFile();
     const model = ctx.model === undefined ? undefined : formatSkillUsageModel(ctx.model);
     return {
@@ -886,7 +946,7 @@ export async function renderSkillContent(
     );
 }
 
-function createPiCommandExecutor(pi: ExtensionAPI): DynamicCommandExecutor {
+function createPiCommandExecutor(pi: Pick<SkillExtensionAPI, "exec">): DynamicCommandExecutor {
     return async (command, shell, cwd) => {
         const [executable, args] = makeShellCommand(shell, command);
         return pi.exec(executable, args, {
