@@ -1281,6 +1281,23 @@ describe("Codex rendering helpers", () => {
         }
     });
 
+    it("expands tabs before painting fallback diff rows", () => {
+        configureRenderingAppearance({
+            ...classicAppearance,
+            diffBackgroundStyle: "full-row",
+            addedRowBackground: "#16351E",
+        });
+        const [addition] = renderCodexDiff(
+            plainTheme,
+            parseDiffSections("+1 \treturn value", "file.go"),
+            true,
+        ).render(40);
+
+        expect(addition).toBeDefined();
+        expect(addition).not.toContain("\t");
+        expect(visibleWidth(addition ?? "")).toBe(40);
+    });
+
     it("renders partial diff omission metadata without a code gutter", () => {
         const lines = renderCodexDiff(
             plainTheme,

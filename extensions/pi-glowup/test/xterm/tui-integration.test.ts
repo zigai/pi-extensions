@@ -290,6 +290,7 @@ describe("Pi TUI through headless xterm", () => {
  const unchanged = true;
 -const previousValue = 1;
 +export const nextValue = 2;
++\treturn tabIndentedValue;
 *** End Patch`;
         const tool = new ToolExecutionComponent(
             "apply_patch",
@@ -311,12 +312,15 @@ describe("Pi TUI through headless xterm", () => {
 
         const deletion = rowContaining(pendingTerminal, "previousValue");
         const addition = rowContaining(pendingTerminal, "nextValue");
+        const tabAddition = rowContaining(pendingTerminal, "tabIndentedValue");
         const context = rowContaining(pendingTerminal, "unchanged");
         const sentinel = rowContaining(pendingTerminal, "PLAIN_SENTINEL");
         expect(deletion.cells).toHaveLength(90);
         expect(addition.cells).toHaveLength(90);
+        expect(tabAddition.cells).toHaveLength(90);
         expect(deletion.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(addition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
+        expect(tabAddition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(
             context.cells
                 .filter((cell) => cell.chars !== "")

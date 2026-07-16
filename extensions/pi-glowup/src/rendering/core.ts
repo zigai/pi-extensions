@@ -2663,7 +2663,11 @@ function renderDiffRow(
         return [paintEmptyDiffRowBackground(parsed.kind, row, rowWidth, theme)];
     }
 
-    const wrappedContent = wrapDiffText(styledContent, availableWidth, options?.maxWrappedRows);
+    const wrappedContent = wrapDiffText(
+        expandTerminalTabs(styledContent),
+        availableWidth,
+        options?.maxWrappedRows,
+    );
 
     return wrappedContent.map((chunk, index) => {
         const styledGutter =
@@ -2674,6 +2678,10 @@ function renderDiffRow(
         const bounded = truncateToWidth(row, rowWidth, "");
         return paintDiffRowBackground(parsed.kind, bounded, rowWidth, theme);
     });
+}
+
+function expandTerminalTabs(text: string): string {
+    return text.replaceAll("\t", "    ");
 }
 
 function paintEmptyDiffRowBackground(
