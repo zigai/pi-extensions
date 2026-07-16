@@ -10,7 +10,19 @@
 - If overriding a built-in tool, preserve its execution semantics and result shape. Use side-channel renderer state for UI-only metadata when the built-in result has no details field.
 - If a custom or overridden tool mutates files, use Pi's file mutation queue around the whole read-modify-write window or reuse a Pi built-in tool definition that does so.
 - Tool renderers must return TUI components whose rendered lines do not exceed the provided width.
-- Validate changes with `npm run check` before handing off. For visual/TUI changes, also verify in a real Pi TTY session when possible.
+- Validate changes with `just check` before handing off. For visual/TUI changes, also verify in an isolated real Pi TTY session when possible.
+
+## TUI Testing
+
+- Run `just test` for the complete automated test suite, including headless xterm and real-process PTY tests.
+- Run `just check` for formatting, linting, typechecking, and the complete automated test suite.
+- Keep component tests for renderer semantics, width limits, bounded previews, and focused state transitions.
+- Use `@xterm/headless` integration tests for the seam from Pi's real `TUI` and `ToolExecutionComponent` through differential ANSI output to interpreted terminal cells. Assert redraws, stale-cell cleanup, wrapping, colors, backgrounds, resizing, and adjacent transcript integrity there.
+- Use `node-pty` real-process tests for actual Pi CLI loading, configured key input, resize, reload, persisted-session resume, and streaming lifecycle behavior. Drive deterministic local fixtures with the network guard enabled and inspect every synchronized terminal frame.
+- Keep PTY assertions semantic and invariant-based. Reject duplicate mutation blocks, stale content, raw argument JSON, internal paths, over-width or wrapped rows, and blank completion padding.
+- Write raw ANSI and interpreted frame artifacts only when a PTY test fails. CI uploads those failure artifacts; do not commit bulky recordings.
+- Use seeded property tests for streaming chunk boundaries, rewrites, truncation, CRLF, Unicode, width changes, component reuse, tool-call isolation, and cached-versus-cold equivalence.
+- Run `just benchmark` for the full informational TUI benchmark or `just benchmark-quick` for its smoke form. Keep performance timing out of Vitest assertions until a reviewed regression policy exists.
 
 ## Tool Rendering Contract
 
