@@ -40,7 +40,12 @@
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "test": "vitest run",
+    "test": "npm run test:vitest && npm run test:pty",
+    "test:vitest": "vitest run --exclude=test/pty/**",
+    "test:xterm": "vitest run test/xterm/tui-integration.test.ts",
+    "test:pty": "vitest run test/pty/pi-cli.test.ts",
+    "test:properties": "vitest run test/streaming-render-properties.test.ts",
+    "benchmark:tui": "node --expose-gc --import tsx benchmark/tui-rendering.ts",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
@@ -52,13 +57,19 @@
     "shiki": "^4.3.0"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.2",
     "@earendil-works/pi-coding-agent": "^0.80.2",
     "@earendil-works/pi-tui": "^0.80.2",
+    "@fast-check/vitest": "^0.4.1",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^4.1.9",
+    "@xterm/headless": "^6.0.0",
+    "fast-check": "^4.9.0",
+    "node-pty": "^1.1.0",
     "oxfmt": "^0.44.0",
     "oxlint": "^1.59.0",
     "oxlint-tsgolint": "^0.23.0",
+    "tsx": "^4.23.1",
     "typebox": "^1.1.38",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
@@ -83,6 +94,10 @@
     "node": ">=22.19.0 <27"
   },
   "packageManager": "npm@11.0.0",
+  "allowScripts": {
+    "node-pty@1.1.0": true,
+    "esbuild@0.28.1": true
+  },
   "pi": {
     "extensions": [
       "./src/index.ts"

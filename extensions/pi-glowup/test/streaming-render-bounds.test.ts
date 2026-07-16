@@ -1,4 +1,3 @@
-import { performance } from "node:perf_hooks";
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import type { CodexRenderTheme } from "../src/rendering/core.ts";
@@ -19,10 +18,8 @@ const plainTheme: CodexRenderTheme = {
     },
 };
 
-type StreamingRenderMetrics = {
-    readonly iterations: number;
-    readonly elapsedMs: number;
-    readonly heapDeltaBytes: number;
+type StreamingRenderBounds = {
+    readonly updates: number;
     readonly renderedLines: number;
     readonly renderedCharacters: number;
     readonly syntaxCacheEntries: number;
@@ -48,19 +45,13 @@ function renderedCharacters(lines: ReadonlyArray<string>): number {
     return characters;
 }
 
-function heapUsed(): number {
-    return process.memoryUsage().heapUsed;
-}
-
-function runStreamingWriteScenario(iterations: number): StreamingRenderMetrics {
+function runStreamingWriteScenario(updates: number): StreamingRenderBounds {
     clearSyntaxHighlightCache();
-    const startedHeap = heapUsed();
-    const startedMs = performance.now();
     let content = "";
     let lastComponent: Component | undefined;
     let lines: string[] = [];
 
-    for (let index = 1; index <= iterations; index += 1) {
+    for (let index = 1; index <= updates; index += 1) {
         content += `export const generatedValue${index} = ${index};\n`;
         lastComponent = renderWriteCallPreview({ path: "src/generated.ts", content }, plainTheme, {
             isError: false,
@@ -74,9 +65,7 @@ function runStreamingWriteScenario(iterations: number): StreamingRenderMetrics {
 
     const cache = syntaxHighlightCacheStats();
     return {
-        iterations,
-        elapsedMs: performance.now() - startedMs,
-        heapDeltaBytes: heapUsed() - startedHeap,
+        updates,
         renderedLines: lines.length,
         renderedCharacters: renderedCharacters(lines),
         syntaxCacheEntries: cache.entries,
@@ -84,16 +73,14 @@ function runStreamingWriteScenario(iterations: number): StreamingRenderMetrics {
     };
 }
 
-function runStreamingApplyPatchScenario(iterations: number): StreamingRenderMetrics {
+function runStreamingApplyPatchScenario(updates: number): StreamingRenderBounds {
     clearSyntaxHighlightCache();
     const renderer = createThirdPartyToolRenderer("apply_patch");
-    const startedHeap = heapUsed();
-    const startedMs = performance.now();
     let patch = "*** Begin Patch\n*** Update File: src/generated.ts\n@@\n";
     let lastComponent: Component | undefined;
     let lines: string[] = [];
 
-    for (let index = 1; index <= iterations; index += 1) {
+    for (let index = 1; index <= updates; index += 1) {
         patch += `+export const generatedValue${index} = ${index};\n`;
         lastComponent = renderer.renderCall({ patch }, plainTheme, {
             ...renderContext,
@@ -104,9 +91,7 @@ function runStreamingApplyPatchScenario(iterations: number): StreamingRenderMetr
 
     const cache = syntaxHighlightCacheStats();
     return {
-        iterations,
-        elapsedMs: performance.now() - startedMs,
-        heapDeltaBytes: heapUsed() - startedHeap,
+        updates,
         renderedLines: lines.length,
         renderedCharacters: renderedCharacters(lines),
         syntaxCacheEntries: cache.entries,
@@ -114,14 +99,12 @@ function runStreamingApplyPatchScenario(iterations: number): StreamingRenderMetr
     };
 }
 
-function runStreamingEditScenario(iterations: number): StreamingRenderMetrics {
+function runStreamingEditScenario(updates: number): StreamingRenderBounds {
     clearSyntaxHighlightCache();
-    const startedHeap = heapUsed();
-    const startedMs = performance.now();
     let newText = "";
     let lines: string[] = [];
 
-    for (let index = 1; index <= iterations; index += 1) {
+    for (let index = 1; index <= updates; index += 1) {
         newText += `export const generatedValue${index} = ${index};\n`;
         lines =
             renderStreamingEditCallPreview(
@@ -136,15 +119,14 @@ function runStreamingEditScenario(iterations: number): StreamingRenderMetrics {
                     argsComplete: false,
                     expanded: false,
                     labelMode: "lifecycle",
+                    lineNumberStart: 1,
                 },
             )?.render(120) ?? [];
     }
 
     const cache = syntaxHighlightCacheStats();
     return {
-        iterations,
-        elapsedMs: performance.now() - startedMs,
-        heapDeltaBytes: heapUsed() - startedHeap,
+        updates,
         renderedLines: lines.length,
         renderedCharacters: renderedCharacters(lines),
         syntaxCacheEntries: cache.entries,
@@ -152,7 +134,7 @@ function runStreamingEditScenario(iterations: number): StreamingRenderMetrics {
     };
 }
 
-describe("streaming render performance harness", () => {
+describe("streaming render structural bounds", () => {
     it("keeps synthetic partial write rendering bounded", () => {
         const metrics = runStreamingWriteScenario(300);
 
