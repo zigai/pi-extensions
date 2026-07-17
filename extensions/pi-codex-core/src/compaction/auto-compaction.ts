@@ -86,6 +86,7 @@ export function maybeTriggerCodexAutoCompaction(
 ): boolean {
     if (!config.compaction.enabled || !config.compaction.auto) return false;
     if (!ctx.isIdle()) return false;
+    if (ctx.hasPendingMessages()) return false;
     const usage = ctx.getContextUsage();
     if (!usage) return false;
     const usagePercent = usage.percent;

@@ -1613,6 +1613,31 @@ test("uses Pi model context for GPT-5.6 auto compaction", () => {
     cancelScheduledCodexAutoCompaction();
 });
 
+test("auto compaction waits for pending messages to drain", () => {
+    const compactCalls: unknown[] = [];
+    const pendingMessages = { value: true };
+    const ctx = makeAutoCompactionContext(
+        compactCalls,
+        { value: true },
+        {
+            sessionId: "auto-session-pending-messages",
+            pendingMessages: () => pendingMessages.value,
+        },
+    );
+    const config = {
+        ...DEFAULT_CODEX_CORE_CONFIG,
+        compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true, auto: true },
+    };
+
+    assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), false);
+    assert.equal(compactCalls.length, 0);
+
+    pendingMessages.value = false;
+    assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), true);
+    assert.equal(compactCalls.length, 1);
+    cancelScheduledCodexAutoCompaction();
+});
+
 test("auto compaction retries immediately after branch progress", () => {
     const compactCalls: unknown[] = [];
     let latestEntryId = "entry-a";
@@ -2302,6 +2327,7 @@ function makeAutoCompactionContext(
         readonly sessionId?: string;
         readonly usageTokens?: () => number;
         readonly latestEntryId?: () => string;
+        readonly pendingMessages?: () => boolean;
     } = {},
 ): ExtensionContext {
     const contextWindow = options.contextWindow ?? 100;
@@ -2309,6 +2335,7 @@ function makeAutoCompactionContext(
         hasUI: false,
         cwd: "/workspace",
         isIdle: () => idle.value,
+        hasPendingMessages: () => options.pendingMessages?.() ?? false,
         model: options.modelId
             ? {
                   provider: "openai-codex",
