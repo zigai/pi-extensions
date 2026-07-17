@@ -1,7 +1,6 @@
 {
-  "name": "pi-codex-core",
+  "name": "@zigai/pi-codex-core",
   "version": "0.1.0",
-  "private": true,
   "description": "Everything GPT models need to feel at home in Pi.",
   "keywords": [
     "pi",
@@ -31,6 +30,9 @@
   ],
   "type": "module",
   "main": "src/index.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "lint": "oxlint -c ./.oxlintrc.json . --format default",
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix --format default",

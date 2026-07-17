@@ -2,6 +2,12 @@
 
 Everything GPT models need to feel at home in Pi.
 
+## Install
+
+```sh
+pi install npm:@zigai/pi-codex-core
+```
+
 ## Features
 
 ### Tools
