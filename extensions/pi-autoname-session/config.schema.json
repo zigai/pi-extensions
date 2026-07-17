@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/my-user/pi-autoname-session/HEAD/config.schema.json",
+  "title": "Pi Autoname Session settings",
+  "description": "Settings for Pi Autoname Session.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./schemas/pi-autoname-session.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable the extension."
+    }
+  }
+}
