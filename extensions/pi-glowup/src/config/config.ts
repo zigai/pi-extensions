@@ -80,7 +80,7 @@ export const GLOWUP_CONFIG_SCHEMA_BASENAME = "config.schema.json";
 export const GLOWUP_CONFIG_SCHEMA_REFERENCE = `./${GLOWUP_CONFIG_SCHEMA_BASENAME}`;
 
 const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
-const GLOWUP_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-glowup/config.schema.json";
+const GLOWUP_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-look/config.schema.json";
 const MIN_SCRIPT_PREVIEW_CODE_LINES = 4;
 
 export const DEFAULT_GLOWUP_CONFIG_JSON = {

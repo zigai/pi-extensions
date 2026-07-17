@@ -10,15 +10,15 @@
     "pi-package",
     "rendering"
   ],
-  "homepage": "https://github.com/zigai/pi-glowup#readme",
+  "homepage": "https://github.com/zigai/pi-codex-look#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-glowup/issues"
+    "url": "https://github.com/zigai/pi-codex-look/issues"
   },
   "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-glowup.git"
+    "url": "git+https://github.com/zigai/pi-codex-look.git"
   },
   "files": [
     "src",
