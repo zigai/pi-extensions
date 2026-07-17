@@ -5,7 +5,7 @@ import {
     installAssistantSeparatorPatch,
 } from "../src/patches/assistant-separator.ts";
 
-const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator.render");
+const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.render");
 
 type FakeAssistantContent = {
     readonly type: string;
@@ -232,22 +232,22 @@ describe("assistant separator patch", () => {
             },
         };
         configureAssistantSeparatorPatch(true, prototype, containerPrototype);
-        const codexRender = Reflect.get(prototype, "render");
-        const codexAddChild = Reflect.get(containerPrototype, "addChild");
-        if (typeof codexRender !== "function" || typeof codexAddChild !== "function") {
-            throw new Error("expected Codex-look assistant wrappers");
+        const originalRender = Reflect.get(prototype, "render");
+        const originalAddChild = Reflect.get(containerPrototype, "addChild");
+        if (typeof originalRender !== "function" || typeof originalAddChild !== "function") {
+            throw new Error("expected Glowup assistant wrappers");
         }
         prototype.render = function renderWithLaterWrapper(
             this: FakeAssistantInstance,
             width: number,
         ): string[] {
-            return codexRender.call(this, width);
+            return originalRender.call(this, width);
         };
         containerPrototype.addChild = function addChildWithLaterWrapper(
             this: object,
             component: Component,
         ): void {
-            codexAddChild.call(this, component);
+            originalAddChild.call(this, component);
         };
         const laterRender = Reflect.get(prototype, "render");
         const laterAddChild = Reflect.get(containerPrototype, "addChild");

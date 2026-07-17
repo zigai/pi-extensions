@@ -10,7 +10,7 @@ describe("debug file logger", () => {
     });
 
     it("writes structured JSONL diagnostics to a relative file path", () => {
-        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
         const logger = new DebugFileLogger({
             extensionDirectory,
             reportWarning() {},
@@ -37,7 +37,7 @@ describe("debug file logger", () => {
     });
 
     it("does not create a file when disabled", () => {
-        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
         const logger = new DebugFileLogger({
             extensionDirectory,
             reportWarning() {},
@@ -55,7 +55,7 @@ describe("debug file logger", () => {
     });
 
     it("rotates the active file when it exceeds the configured byte limit", () => {
-        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
         const logger = new DebugFileLogger({
             extensionDirectory,
             reportWarning() {},
@@ -79,7 +79,7 @@ describe("debug file logger", () => {
     });
 
     it("does not rotate when maxBytes is null", () => {
-        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
         const logger = new DebugFileLogger({
             extensionDirectory,
             reportWarning() {},
@@ -100,7 +100,7 @@ describe("debug file logger", () => {
 
     it("samples memory on an unrefed timer and stops cleanly", () => {
         vi.useFakeTimers();
-        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-codex-look-debug-log-"));
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
         const logger = new DebugFileLogger({
             extensionDirectory,
             reportWarning() {},

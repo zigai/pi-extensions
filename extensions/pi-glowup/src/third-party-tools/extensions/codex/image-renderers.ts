@@ -1,7 +1,7 @@
 import {
     formatPathTarget,
     toolExpandHint,
-    type CodexRenderTheme,
+    type GlowupRenderTheme,
 } from "../../../rendering/core.ts";
 import { isActiveToolCall } from "../../../rendering/status-labels.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolResult } from "../../types.ts";
@@ -144,7 +144,7 @@ export function summarizeImagegenArgs(
 
 export function summarizeViewImageArgs(
     args: unknown,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: ThirdPartyToolRenderContext,
 ): string | undefined {
     if (!isRecord(args)) {

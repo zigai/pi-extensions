@@ -1,12 +1,12 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import { renderStreamingEditCallPreview } from "../src/rendering/edit-call-rendering.ts";
 import { clearSyntaxHighlightCache, syntaxHighlightCacheStats } from "../src/syntax/highlighter.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },

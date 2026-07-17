@@ -3,18 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-    DEFAULT_CODEX_LOOK_CONFIG_JSON,
-    codexLookConfigJsonSchema,
-    getCodexLookGlobalConfigPath,
-    getCodexLookGlobalConfigSchemaPath,
-    getCodexLookProjectConfigPath,
-    parseCodexLookConfig,
-    readCodexLookConfig,
+    DEFAULT_GLOWUP_CONFIG_JSON,
+    glowupConfigJsonSchema,
+    getGlowupGlobalConfigPath,
+    getGlowupGlobalConfigSchemaPath,
+    getGlowupProjectConfigPath,
+    parseGlowupConfig,
+    readGlowupConfig,
 } from "../src/config/config.ts";
 
-describe("codex look config", () => {
+describe("glowup config", () => {
     it("parses optional config with safe defaults", () => {
-        const config = parseCodexLookConfig({});
+        const config = parseGlowupConfig({});
 
         expect(config.preserveTools).toEqual([]);
         expect(config.appearance).toEqual({
@@ -56,7 +56,7 @@ describe("codex look config", () => {
     });
 
     it("parses user-configured rendering colors", () => {
-        const config = parseCodexLookConfig({
+        const config = parseGlowupConfig({
             appearance: {
                 diffBackgroundStyle: "full-row",
                 diffLineNumberStyle: "single",
@@ -86,7 +86,7 @@ describe("codex look config", () => {
     });
 
     it("keeps the previous compact diff appearance selectable", () => {
-        const config = parseCodexLookConfig({
+        const config = parseGlowupConfig({
             appearance: {
                 diffBackgroundStyle: "changed-spans",
                 diffLineNumberStyle: "single",
@@ -98,7 +98,7 @@ describe("codex look config", () => {
     });
 
     it("allows diff backgrounds to inherit Pi explicitly", () => {
-        const config = parseCodexLookConfig({
+        const config = parseGlowupConfig({
             appearance: {
                 addedRowBackground: null,
                 deletedRowBackground: null,
@@ -116,7 +116,7 @@ describe("codex look config", () => {
     });
 
     it("parses user-configured tool call indicators", () => {
-        const config = parseCodexLookConfig({
+        const config = parseGlowupConfig({
             toolCallIndicator: { symbol: "▸", bold: false },
         });
 
@@ -124,7 +124,7 @@ describe("codex look config", () => {
     });
 
     it("allows bracket pair coloring to be disabled", () => {
-        const config = parseCodexLookConfig({
+        const config = parseGlowupConfig({
             syntax: { bracketPairColoring: false },
         });
 
@@ -134,7 +134,7 @@ describe("codex look config", () => {
     it("ignores invalid config shapes with a safe warning", () => {
         const reportedWarnings: string[] = [];
 
-        const config = parseCodexLookConfig(
+        const config = parseGlowupConfig(
             {
                 preserveTools: ["mcp"],
                 unknownSetting: true,
@@ -164,16 +164,16 @@ describe("codex look config", () => {
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(reportedWarnings).toEqual([
-            expect.stringContaining("[pi-codex-look] Ignoring invalid test config:"),
+            expect.stringContaining("[pi-glowup] Ignoring invalid test config:"),
         ]);
         expect(reportedWarnings[0]).not.toContain("unknownSetting");
     });
 
     it("scaffolds missing global config and schema files", () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-config-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
 
-        const config = readCodexLookConfig({ agentDir });
+        const config = readGlowupConfig({ agentDir });
 
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog.path).toBe("debug.log");
@@ -185,23 +185,23 @@ describe("codex look config", () => {
         expect(config.writePreview.movingViewport).toBe(true);
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
-        expect(JSON.parse(readFileSync(getCodexLookGlobalConfigPath(agentDir), "utf8"))).toEqual(
-            DEFAULT_CODEX_LOOK_CONFIG_JSON,
+        expect(JSON.parse(readFileSync(getGlowupGlobalConfigPath(agentDir), "utf8"))).toEqual(
+            DEFAULT_GLOWUP_CONFIG_JSON,
         );
-        expect(
-            JSON.parse(readFileSync(getCodexLookGlobalConfigSchemaPath(agentDir), "utf8")),
-        ).toEqual(codexLookConfigJsonSchema());
+        expect(JSON.parse(readFileSync(getGlowupGlobalConfigSchemaPath(agentDir), "utf8"))).toEqual(
+            glowupConfigJsonSchema(),
+        );
     });
 
     it("does not overwrite malformed existing global config", () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-config-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
-        const configPath = getCodexLookGlobalConfigPath(agentDir);
+        const configPath = getGlowupGlobalConfigPath(agentDir);
         const reportedWarnings: string[] = [];
         mkdirSync(join(configPath, ".."), { recursive: true });
         writeFileSync(configPath, "{not json");
 
-        const config = readCodexLookConfig({
+        const config = readGlowupConfig({
             agentDir,
             reportWarning: (message) => reportedWarnings.push(message),
         });
@@ -222,21 +222,21 @@ describe("codex look config", () => {
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
         expect(reportedWarnings).toEqual([
-            expect.stringContaining(`[pi-codex-look] Failed to read ${configPath}:`),
+            expect.stringContaining(`[pi-glowup] Failed to read ${configPath}:`),
         ]);
     });
 
     it("refreshes stale global schema without rewriting user config", () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-config-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
-        const configPath = getCodexLookGlobalConfigPath(agentDir);
-        const schemaPath = getCodexLookGlobalConfigSchemaPath(agentDir);
+        const configPath = getGlowupGlobalConfigPath(agentDir);
+        const schemaPath = getGlowupGlobalConfigSchemaPath(agentDir);
         const reportedWarnings: string[] = [];
         mkdirSync(join(configPath, ".."), { recursive: true });
         writeFileSync(configPath, "{not json");
         writeFileSync(schemaPath, "{}\n");
 
-        const config = readCodexLookConfig({
+        const config = readGlowupConfig({
             agentDir,
             reportWarning: (message) => reportedWarnings.push(message),
         });
@@ -249,15 +249,15 @@ describe("codex look config", () => {
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.thirdPartyToolRenderers).toBe(true);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
-        expect(JSON.parse(readFileSync(schemaPath, "utf8"))).toEqual(codexLookConfigJsonSchema());
+        expect(JSON.parse(readFileSync(schemaPath, "utf8"))).toEqual(glowupConfigJsonSchema());
         expect(reportedWarnings).toEqual([
-            expect.stringContaining(`[pi-codex-look] Failed to read ${configPath}:`),
+            expect.stringContaining(`[pi-glowup] Failed to read ${configPath}:`),
         ]);
     });
 
     it("keeps checked-in config schema aligned with TypeBox source", () => {
         expect(JSON.parse(readFileSync("config.schema.json", "utf8"))).toEqual(
-            codexLookConfigJsonSchema(),
+            glowupConfigJsonSchema(),
         );
     });
 
@@ -269,22 +269,22 @@ describe("codex look config", () => {
             const json = match?.groups?.json;
 
             expect(json).toBeDefined();
-            expect(JSON.parse(json ?? "{}")).toEqual(DEFAULT_CODEX_LOOK_CONFIG_JSON);
+            expect(JSON.parse(json ?? "{}")).toEqual(DEFAULT_GLOWUP_CONFIG_JSON);
         },
     );
 
     it("keeps the checked-in config schema synchronized", () => {
         expect(JSON.parse(readFileSync("config.schema.json", "utf8"))).toEqual(
-            codexLookConfigJsonSchema(),
+            glowupConfigJsonSchema(),
         );
     });
 
     it("ignores project config unless trusted project config is included", () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-config-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
         const cwd = join(root, "project");
-        const globalConfigPath = getCodexLookGlobalConfigPath(agentDir);
-        const projectConfigPath = getCodexLookProjectConfigPath(cwd);
+        const globalConfigPath = getGlowupGlobalConfigPath(agentDir);
+        const projectConfigPath = getGlowupProjectConfigPath(cwd);
         mkdirSync(join(globalConfigPath, ".."), { recursive: true });
         mkdirSync(join(projectConfigPath, ".."), { recursive: true });
         writeFileSync(
@@ -320,7 +320,7 @@ describe("codex look config", () => {
             }),
         );
 
-        const config = readCodexLookConfig({ agentDir, cwd });
+        const config = readGlowupConfig({ agentDir, cwd });
 
         expect(config.preserveTools).toEqual(["mcp"]);
         expect(config.debugLog).toEqual({
@@ -343,11 +343,11 @@ describe("codex look config", () => {
     });
 
     it("merges trusted project config over global config", () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-config-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
         const cwd = join(root, "project");
-        const globalConfigPath = getCodexLookGlobalConfigPath(agentDir);
-        const projectConfigPath = getCodexLookProjectConfigPath(cwd);
+        const globalConfigPath = getGlowupGlobalConfigPath(agentDir);
+        const projectConfigPath = getGlowupProjectConfigPath(cwd);
         mkdirSync(join(globalConfigPath, ".."), { recursive: true });
         mkdirSync(join(projectConfigPath, ".."), { recursive: true });
         writeFileSync(
@@ -383,7 +383,7 @@ describe("codex look config", () => {
             }),
         );
 
-        const config = readCodexLookConfig({ agentDir, cwd }, { includeProjectConfig: true });
+        const config = readGlowupConfig({ agentDir, cwd }, { includeProjectConfig: true });
 
         expect(config.preserveTools).toEqual(["mcp"]);
         expect(config.debugLog).toEqual({

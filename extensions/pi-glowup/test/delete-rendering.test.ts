@@ -6,7 +6,7 @@ import { captureDeletedTextPreview } from "../src/rendering/delete-preview.ts";
 
 describe("delete rendering", () => {
     it("captures readable text before deletion with line counts", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-native-delete-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-native-delete-"));
         try {
             writeFileSync(path.join(cwd, "removed.ts"), "one\ntwo\nthree\n");
             const preview = await captureDeletedTextPreview(cwd, "removed.ts");
@@ -19,7 +19,7 @@ describe("delete rendering", () => {
     });
 
     it("does not capture binary or out-of-project paths", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-native-delete-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-native-delete-"));
         try {
             writeFileSync(path.join(cwd, "binary.bin"), Buffer.from([1, 0, 2]));
             expect(await captureDeletedTextPreview(cwd, "binary.bin")).toBeUndefined();

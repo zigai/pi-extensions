@@ -1,6 +1,6 @@
-# Codex-Look Tool Rendering
+# Glowup Tool Rendering
 
-Third-party extensions can add `codexLookRendering` to a tool definition to control how that tool appears when `pi-codex-look` is installed. Pi ignores this property when the extension is not installed.
+Third-party extensions can add `glowupRendering` to a tool definition to control how that tool appears when `pi-glowup` is installed. Pi ignores this property when the extension is not installed.
 
 Tool labels support two vocabulary modes. `static` keeps a stable operation label such as
 `Explore`, `Edit`, or `Check Agent`. `lifecycle` changes that label as execution progresses,
@@ -11,24 +11,24 @@ mode. Script previews intentionally keep their interpreter label (`Bash`, `Pytho
 
 ## Rendering Paths
 
-`pi-codex-look` has four rendering paths:
+`pi-glowup` has four rendering paths:
 
-- **Built-in Codex-look renderers** are internal renderers for Pi/Codex tools this extension knows well.
+- **Built-in Glowup renderers** are internal renderers for Pi/Codex tools this extension knows well.
 - **Original Pi renderers** are renderers already provided by a third-party tool.
-- **Compatibility renderers** are generic Codex-look renderers used for third-party tools that do not provide their own renderer.
-- **Passive adapters** are third-party `codexLookRendering` adapters that provide a compact Codex-look view without replacing the normal Pi renderer globally.
+- **Compatibility renderers** are generic Glowup renderers used for third-party tools that do not provide their own renderer.
+- **Passive adapters** are third-party `glowupRendering` adapters that provide a compact Glowup view without replacing the normal Pi renderer globally.
 
 ## Selection Order
 
 For a third-party tool, rendering is selected in this order:
 
-1. If the tool is preserved by config or by `codexLookRendering: "preserve"`, use its original Pi rendering.
-2. If the tool defines a `codexLookRendering` adapter, use that adapter.
-3. If `pi-codex-look` has an explicit built-in renderer for this tool family, use it.
+1. If the tool is preserved by config or by `glowupRendering: "preserve"`, use its original Pi rendering.
+2. If the tool defines a `glowupRendering` adapter, use that adapter.
+3. If `pi-glowup` has an explicit built-in renderer for this tool family, use it.
 4. If the tool already has its own Pi renderer, keep that renderer.
 5. Otherwise, use the generic compatibility renderer.
 
-This means existing rich tool renderers are preserved by default. A tool author only needs `codexLookRendering` when they want a specific Codex-look presentation.
+This means existing rich tool renderers are preserved by default. A tool author only needs `glowupRendering` when they want a specific Glowup presentation.
 
 ## Preserve A Tool Renderer
 
@@ -39,11 +39,11 @@ pi.registerTool({
   name: "rich_tool",
   label: "Rich Tool",
   // parameters, execute, render, etc.
-  codexLookRendering: "preserve",
+  glowupRendering: "preserve",
 });
 ```
 
-Users can also preserve tools from config with `preserveTools` in `~/.pi/agent/pi-codex-look/config.json`.
+Users can also preserve tools from config with `preserveTools` in `~/.pi/agent/pi-glowup/config.json`.
 
 ## When An Adapter Helps
 
@@ -59,10 +59,10 @@ For tiny tools with already-clear args and output, the fallback renderer may be 
 
 ## Typed Adapter Example
 
-Define the adapter next to the tool's typed args/result contract. Then pass those types to `CodexLookRenderingAdapter` and render from typed values directly.
+Define the adapter next to the tool's typed args/result contract. Then pass those types to `GlowupRenderingAdapter` and render from typed values directly.
 
 ```ts
-import type { CodexLookRenderingAdapter } from "pi-codex-look/protocol";
+import type { GlowupRenderingAdapter } from "pi-glowup/protocol";
 
 type DbQueryArgs = {
   readonly database: string;
@@ -78,7 +78,7 @@ type DbQueryResult = {
   };
 };
 
-const codexLookRendering = {
+const glowupRendering = {
   version: 1,
   renderCall({ database, sql }) {
     return {
@@ -99,13 +99,13 @@ const codexLookRendering = {
       ],
     };
   },
-} satisfies CodexLookRenderingAdapter<DbQueryArgs, DbQueryResult>;
+} satisfies GlowupRenderingAdapter<DbQueryArgs, DbQueryResult>;
 
 pi.registerTool({
   name: "db_query",
   label: "DB Query",
   // parameters, execute, etc.
-  codexLookRendering,
+  glowupRendering,
 });
 ```
 
@@ -113,6 +113,6 @@ In this example the adapter intentionally shows `database`, `sql`, row count, an
 
 ## Untyped Boundaries
 
-The default adapter generics are `unknown` because `pi-codex-look` can discover renderers from tools it did not compile with. If the adapter is not colocated with the tool's typed contract, parse or guard incoming values at the boundary before rendering.
+The default adapter generics are `unknown` because `pi-glowup` can discover renderers from tools it did not compile with. If the adapter is not colocated with the tool's typed contract, parse or guard incoming values at the boundary before rendering.
 
-Keep those guards in a small parser rather than scattering `Reflect.get` checks through the renderer body. Return `undefined` from `renderCall` or `renderResult` when the adapter cannot safely render; `pi-codex-look` will fall back to the compatibility renderer.
+Keep those guards in a small parser rather than scattering `Reflect.get` checks through the renderer body. Return `undefined` from `renderCall` or `renderResult` when the adapter cannot safely render; `pi-glowup` will fall back to the compatibility renderer.

@@ -1,8 +1,8 @@
 import { Container, Loader, Spacer, type Component } from "@earendil-works/pi-tui";
 
-const WORKING_WIDGET_SPACING_PATCH_KEY = Symbol.for("zigai.pi-codex-look.working-widget-spacing");
+const WORKING_WIDGET_SPACING_PATCH_KEY = Symbol.for("zigai.pi-glowup.working-widget-spacing");
 const WORKING_WIDGET_SPACING_PATCH_STATE_KEY = Symbol.for(
-    "zigai.pi-codex-look.working-widget-spacing.state",
+    "zigai.pi-glowup.working-widget-spacing.state",
 );
 
 type WorkingWidgetSpacingPatchState = {

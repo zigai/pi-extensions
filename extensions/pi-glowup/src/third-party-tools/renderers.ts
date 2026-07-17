@@ -10,19 +10,19 @@ import { createAgentRenderer, isAgentTool } from "./extensions/pi/agent-renderer
 import { createGoalRenderer, isGoalTool } from "./extensions/pi/goal-renderer.ts";
 import { createPiCoreRenderer, isPiCoreTool } from "./extensions/pi/core-renderer.ts";
 import { createGenericRenderer } from "./call-rendering.ts";
-import { codexLookRenderingAdapter, createProtocolRenderer } from "./protocol-renderer.ts";
+import { glowupRenderingAdapter, createProtocolRenderer } from "./protocol-renderer.ts";
 import { baseToolName, isRecord } from "./tool-values.ts";
 import {
-    CODEX_LOOK_RENDERING_PROPERTY,
+    GLOWUP_RENDERING_PROPERTY,
     type ThirdPartyToolRenderer,
     type ThirdPartyToolRendererPlugin,
     type ThirdPartyToolRenderingOptions,
     type ToolNameMatcher,
 } from "./types.ts";
 
-export { CODEX_LOOK_RENDERING_PROPERTY } from "./types.ts";
+export { GLOWUP_RENDERING_PROPERTY } from "./types.ts";
 export type {
-    CodexLookRenderingPreference,
+    GlowupRenderingPreference,
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
     ThirdPartyToolRendererPlugin,
@@ -88,7 +88,7 @@ function rendererPlugins(
     return [...(options?.renderers ?? []), ...DEFAULT_RENDERER_PLUGINS];
 }
 
-/** Returns whether Codex-look has an explicit renderer for this tool family. */
+/** Returns whether Glowup has an explicit renderer for this tool family. */
 export function hasThirdPartyToolRendererPlugin(
     toolName: string,
     options?: ThirdPartyToolRenderingOptions,
@@ -115,15 +115,15 @@ function hasPreservePreference(toolDefinition: unknown): boolean {
     if (!isRecord(toolDefinition)) {
         return false;
     }
-    return toolDefinition[CODEX_LOOK_RENDERING_PROPERTY] === "preserve";
+    return toolDefinition[GLOWUP_RENDERING_PROPERTY] === "preserve";
 }
 
-/** Returns whether a tool definition carries a passive Codex-look adapter. */
-export function hasCodexLookRenderingAdapter(toolDefinition: unknown): boolean {
-    return codexLookRenderingAdapter(toolDefinition, CODEX_LOOK_RENDERING_PROPERTY) !== undefined;
+/** Returns whether a tool definition carries a passive Glowup adapter. */
+export function hasGlowupRenderingAdapter(toolDefinition: unknown): boolean {
+    return glowupRenderingAdapter(toolDefinition, GLOWUP_RENDERING_PROPERTY) !== undefined;
 }
 
-/** Parses comma-separated tool names for `PI_CODEX_LOOK_PRESERVE_TOOLS`. */
+/** Parses comma-separated tool names for `PI_GLOWUP_PRESERVE_TOOLS`. */
 export function parsePreservedThirdPartyToolNames(value: string | undefined): string[] {
     if (value === undefined || value.length === 0) {
         return [];
@@ -134,7 +134,7 @@ export function parsePreservedThirdPartyToolNames(value: string | undefined): st
         .filter((name) => name.length > 0);
 }
 
-/** Returns whether Codex-look should leave a third-party tool renderer untouched. */
+/** Returns whether Glowup should leave a third-party tool renderer untouched. */
 export function shouldPreserveThirdPartyToolRenderer(options: {
     readonly toolName: string;
     readonly toolDefinition: unknown;
@@ -151,7 +151,7 @@ export function shouldPreserveThirdPartyToolRenderer(options: {
     return preserveTools.some((matcher) => matcherMatches(options.toolName, matcher));
 }
 
-/** Creates the best known Codex-look renderer for a third-party tool. */
+/** Creates the best known Glowup renderer for a third-party tool. */
 export function createThirdPartyToolRenderer(
     toolName: string,
     options?: ThirdPartyToolRenderingOptions,
@@ -162,7 +162,7 @@ export function createThirdPartyToolRenderer(
     const fallback =
         plugin?.createRenderer(toolName, options) ??
         createGenericRenderer(toolName, undefined, options?.labelMode);
-    const adapter = codexLookRenderingAdapter(toolDefinition, CODEX_LOOK_RENDERING_PROPERTY);
+    const adapter = glowupRenderingAdapter(toolDefinition, GLOWUP_RENDERING_PROPERTY);
     return adapter === undefined
         ? fallback
         : createProtocolRenderer(adapter, fallback, options?.labelMode);

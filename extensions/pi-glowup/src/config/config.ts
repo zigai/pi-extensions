@@ -22,7 +22,7 @@ import { parseScriptPreviewHeaderLayout } from "../script-preview/settings.ts";
 // `typebox/build/index.mjs/schema`; Node's require resolver honors package exports.
 const Schema = loadTypeboxSchema();
 
-export type CodexLookConfig = {
+export type GlowupConfig = {
     readonly preserveTools: readonly string[];
     readonly appearance: {
         readonly diffBackgroundStyle: DiffBackgroundStyle;
@@ -70,21 +70,21 @@ export type CodexLookConfig = {
 
 export type ConfigWarningReporter = (message: string) => void;
 
-export type CodexLookConfigLoadPolicy = {
+export type GlowupConfigLoadPolicy = {
     readonly includeProjectConfig?: boolean;
 };
 
-export const CODEX_LOOK_EXTENSION_ID = "pi-codex-look";
-export const CODEX_LOOK_CONFIG_BASENAME = "config.json";
-export const CODEX_LOOK_CONFIG_SCHEMA_BASENAME = "config.schema.json";
-export const CODEX_LOOK_CONFIG_SCHEMA_REFERENCE = `./${CODEX_LOOK_CONFIG_SCHEMA_BASENAME}`;
+export const GLOWUP_EXTENSION_ID = "pi-glowup";
+export const GLOWUP_CONFIG_BASENAME = "config.json";
+export const GLOWUP_CONFIG_SCHEMA_BASENAME = "config.schema.json";
+export const GLOWUP_CONFIG_SCHEMA_REFERENCE = `./${GLOWUP_CONFIG_SCHEMA_BASENAME}`;
 
 const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
-const CODEX_LOOK_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-look/config.schema.json";
+const GLOWUP_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-glowup/config.schema.json";
 const MIN_SCRIPT_PREVIEW_CODE_LINES = 4;
 
-export const DEFAULT_CODEX_LOOK_CONFIG_JSON = {
-    $schema: CODEX_LOOK_CONFIG_SCHEMA_REFERENCE,
+export const DEFAULT_GLOWUP_CONFIG_JSON = {
+    $schema: GLOWUP_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
     appearance: {
         diffBackgroundStyle: "two-tone",
@@ -266,7 +266,7 @@ const AppearanceConfigSchema = Type.Object(
     },
     { additionalProperties: false },
 );
-const CodexLookConfigSchema = Type.Object(
+const GlowupConfigSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
@@ -281,7 +281,7 @@ const CodexLookConfigSchema = Type.Object(
     },
     { additionalProperties: false },
 );
-const CodexLookConfigJsonSchema = Type.Object(
+const GlowupConfigJsonSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
@@ -305,7 +305,7 @@ const CodexLookConfigJsonSchema = Type.Object(
                 },
                 {
                     additionalProperties: false,
-                    default: DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance,
+                    default: DEFAULT_GLOWUP_CONFIG_JSON.appearance,
                 },
             ),
         ),
@@ -317,7 +317,7 @@ const CodexLookConfigJsonSchema = Type.Object(
                     maxBytes: Type.Optional(DebugLogMaxBytesSchema),
                     memorySampleIntervalMs: Type.Optional(Type.Integer({ minimum: 0 })),
                 },
-                { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog },
+                { additionalProperties: false, default: DEFAULT_GLOWUP_CONFIG_JSON.debugLog },
             ),
         ),
         toolLabels: Type.Optional(
@@ -327,7 +327,7 @@ const CodexLookConfigJsonSchema = Type.Object(
                         Type.Union([Type.Literal("static"), Type.Literal("lifecycle")]),
                     ),
                 },
-                { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels },
+                { additionalProperties: false, default: DEFAULT_GLOWUP_CONFIG_JSON.toolLabels },
             ),
         ),
         toolCallIndicator: Type.Optional(
@@ -338,7 +338,7 @@ const CodexLookConfigJsonSchema = Type.Object(
                 },
                 {
                     additionalProperties: false,
-                    default: DEFAULT_CODEX_LOOK_CONFIG_JSON.toolCallIndicator,
+                    default: DEFAULT_GLOWUP_CONFIG_JSON.toolCallIndicator,
                 },
             ),
         ),
@@ -349,7 +349,7 @@ const CodexLookConfigJsonSchema = Type.Object(
                 },
                 {
                     additionalProperties: false,
-                    default: DEFAULT_CODEX_LOOK_CONFIG_JSON.writePreview,
+                    default: DEFAULT_GLOWUP_CONFIG_JSON.writePreview,
                 },
             ),
         ),
@@ -370,13 +370,12 @@ const CodexLookConfigJsonSchema = Type.Object(
                             },
                             {
                                 additionalProperties: false,
-                                default:
-                                    DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.projectLanguageDetection,
+                                default: DEFAULT_GLOWUP_CONFIG_JSON.syntax.projectLanguageDetection,
                             },
                         ),
                     ),
                 },
-                { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax },
+                { additionalProperties: false, default: DEFAULT_GLOWUP_CONFIG_JSON.syntax },
             ),
         ),
         patches: Type.Optional(
@@ -388,7 +387,7 @@ const CodexLookConfigJsonSchema = Type.Object(
                     markdownSyntax: Type.Optional(Type.Boolean()),
                     thirdPartyToolRenderers: Type.Optional(Type.Boolean()),
                 },
-                { additionalProperties: false, default: DEFAULT_CODEX_LOOK_CONFIG_JSON.patches },
+                { additionalProperties: false, default: DEFAULT_GLOWUP_CONFIG_JSON.patches },
             ),
         ),
         scriptPreview: Type.Optional(
@@ -400,7 +399,7 @@ const CodexLookConfigJsonSchema = Type.Object(
                 },
                 {
                     additionalProperties: false,
-                    default: DEFAULT_CODEX_LOOK_CONFIG_JSON.scriptPreview,
+                    default: DEFAULT_GLOWUP_CONFIG_JSON.scriptPreview,
                 },
             ),
         ),
@@ -408,7 +407,7 @@ const CodexLookConfigJsonSchema = Type.Object(
     { additionalProperties: false },
 );
 
-type CodexLookConfigInput = Static<typeof CodexLookConfigSchema>;
+type GlowupConfigInput = Static<typeof GlowupConfigSchema>;
 
 function loadTypeboxSchema(): typeof TypeboxSchema {
     const require = createRequire(import.meta.url);
@@ -416,85 +415,85 @@ function loadTypeboxSchema(): typeof TypeboxSchema {
     return schemaModule.default;
 }
 
-export function getCodexLookGlobalConfigPath(agentDir: string = getAgentDir()): string {
-    return join(getCodexLookGlobalConfigDirectory(agentDir), CODEX_LOOK_CONFIG_BASENAME);
+export function getGlowupGlobalConfigPath(agentDir: string = getAgentDir()): string {
+    return join(getGlowupGlobalConfigDirectory(agentDir), GLOWUP_CONFIG_BASENAME);
 }
 
-export function getCodexLookProjectConfigPath(cwd: string): string {
-    return join(cwd, CONFIG_DIR_NAME, CODEX_LOOK_EXTENSION_ID, CODEX_LOOK_CONFIG_BASENAME);
+export function getGlowupProjectConfigPath(cwd: string): string {
+    return join(cwd, CONFIG_DIR_NAME, GLOWUP_EXTENSION_ID, GLOWUP_CONFIG_BASENAME);
 }
 
-export function getCodexLookGlobalConfigSchemaPath(agentDir: string = getAgentDir()): string {
-    return join(getCodexLookGlobalConfigDirectory(agentDir), CODEX_LOOK_CONFIG_SCHEMA_BASENAME);
+export function getGlowupGlobalConfigSchemaPath(agentDir: string = getAgentDir()): string {
+    return join(getGlowupGlobalConfigDirectory(agentDir), GLOWUP_CONFIG_SCHEMA_BASENAME);
 }
 
-export function getCodexLookGlobalConfigDirectory(agentDir: string = getAgentDir()): string {
-    return join(agentDir, CODEX_LOOK_EXTENSION_ID);
+export function getGlowupGlobalConfigDirectory(agentDir: string = getAgentDir()): string {
+    return join(agentDir, GLOWUP_EXTENSION_ID);
 }
 
-export function codexLookConfigJsonSchema(): unknown {
-    const schema = structuredClone(CodexLookConfigJsonSchema);
+export function glowupConfigJsonSchema(): unknown {
+    const schema = structuredClone(GlowupConfigJsonSchema);
     if (!isRecord(schema)) return schema;
     return {
         $schema: JSON_SCHEMA_DRAFT_URI,
-        $id: CODEX_LOOK_CONFIG_SCHEMA_ID,
+        $id: GLOWUP_CONFIG_SCHEMA_ID,
         ...schema,
     };
 }
 
-export function ensureCodexLookGlobalConfigFiles(
+export function ensureGlowupGlobalConfigFiles(
     agentDir: string = getAgentDir(),
     reportWarning: ConfigWarningReporter = defaultConfigWarningReporter,
 ): void {
     writeJsonFileIfMissing(
-        getCodexLookGlobalConfigPath(agentDir),
-        DEFAULT_CODEX_LOOK_CONFIG_JSON,
+        getGlowupGlobalConfigPath(agentDir),
+        DEFAULT_GLOWUP_CONFIG_JSON,
         reportWarning,
     );
     writeJsonFileIfChanged(
-        getCodexLookGlobalConfigSchemaPath(agentDir),
-        codexLookConfigJsonSchema(),
+        getGlowupGlobalConfigSchemaPath(agentDir),
+        glowupConfigJsonSchema(),
         reportWarning,
     );
 }
 
-export function readCodexLookConfig(
+export function readGlowupConfig(
     options: {
         readonly cwd?: string;
         readonly agentDir?: string;
         readonly reportWarning?: ConfigWarningReporter;
     } = {},
-    policy: CodexLookConfigLoadPolicy = {},
-): CodexLookConfig {
+    policy: GlowupConfigLoadPolicy = {},
+): GlowupConfig {
     const reportWarning = options.reportWarning ?? defaultConfigWarningReporter;
-    ensureCodexLookGlobalConfigFiles(options.agentDir, reportWarning);
-    const globalConfigPath = getCodexLookGlobalConfigPath(options.agentDir);
+    ensureGlowupGlobalConfigFiles(options.agentDir, reportWarning);
+    const globalConfigPath = getGlowupGlobalConfigPath(options.agentDir);
     const projectConfigPath =
         policy.includeProjectConfig === true && options.cwd !== undefined
-            ? getCodexLookProjectConfigPath(options.cwd)
+            ? getGlowupProjectConfigPath(options.cwd)
             : undefined;
-    const globalInput = parseCodexLookConfigInput(
+    const globalInput = parseGlowupConfigInput(
         readConfigInput(globalConfigPath, reportWarning) ?? {},
         { source: globalConfigPath, reportWarning },
     );
     const projectInput =
         projectConfigPath === undefined
             ? {}
-            : parseCodexLookConfigInput(readConfigInput(projectConfigPath, reportWarning) ?? {}, {
+            : parseGlowupConfigInput(readConfigInput(projectConfigPath, reportWarning) ?? {}, {
                   source: projectConfigPath,
                   reportWarning,
               });
-    return parseCodexLookConfig(mergeConfigInputs(globalInput, projectInput));
+    return parseGlowupConfig(mergeConfigInputs(globalInput, projectInput));
 }
 
-export function parseCodexLookConfig(
+export function parseGlowupConfig(
     input: unknown,
     options: {
         readonly source?: string;
         readonly reportWarning?: ConfigWarningReporter;
     } = {},
-): CodexLookConfig {
-    const config = parseCodexLookConfigInput(input, options);
+): GlowupConfig {
+    const config = parseGlowupConfigInput(input, options);
     const appearance = config.appearance ?? {};
     const scriptPreview = config.scriptPreview ?? {};
     const debugLog = config.debugLog ?? {};
@@ -514,46 +513,46 @@ export function parseCodexLookConfig(
         appearance: {
             diffBackgroundStyle:
                 appearance.diffBackgroundStyle ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.diffBackgroundStyle,
+                DEFAULT_GLOWUP_CONFIG_JSON.appearance.diffBackgroundStyle,
             diffLineNumberStyle:
                 appearance.diffLineNumberStyle ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.diffLineNumberStyle,
+                DEFAULT_GLOWUP_CONFIG_JSON.appearance.diffLineNumberStyle,
             narrowDiffLayout:
                 appearance.narrowDiffLayout ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.narrowDiffLayout,
+                DEFAULT_GLOWUP_CONFIG_JSON.appearance.narrowDiffLayout,
             sideBySideLayout:
                 appearance.sideBySideLayout ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.sideBySideLayout,
+                DEFAULT_GLOWUP_CONFIG_JSON.appearance.sideBySideLayout,
             addedRowBackground:
                 appearance.addedRowBackground === undefined
-                    ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.addedRowBackground
+                    ? DEFAULT_GLOWUP_CONFIG_JSON.appearance.addedRowBackground
                     : appearance.addedRowBackground,
             deletedRowBackground:
                 appearance.deletedRowBackground === undefined
-                    ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedRowBackground
+                    ? DEFAULT_GLOWUP_CONFIG_JSON.appearance.deletedRowBackground
                     : appearance.deletedRowBackground,
             addedContentBackground:
                 appearance.addedContentBackground === undefined
-                    ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.addedContentBackground
+                    ? DEFAULT_GLOWUP_CONFIG_JSON.appearance.addedContentBackground
                     : appearance.addedContentBackground,
             deletedContentBackground:
                 appearance.deletedContentBackground === undefined
-                    ? DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.deletedContentBackground
+                    ? DEFAULT_GLOWUP_CONFIG_JSON.appearance.deletedContentBackground
                     : appearance.deletedContentBackground,
             instructionPathColor:
                 appearance.instructionPathColor ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.instructionPathColor,
+                DEFAULT_GLOWUP_CONFIG_JSON.appearance.instructionPathColor,
             dimUnchangedDiffText:
                 appearance.dimUnchangedDiffText ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.appearance.dimUnchangedDiffText,
+                DEFAULT_GLOWUP_CONFIG_JSON.appearance.dimUnchangedDiffText,
         },
         debugLog: {
-            enabled: debugLog.enabled ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.enabled,
-            path: debugLog.path ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.path,
-            maxBytes: debugLog.maxBytes ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.maxBytes,
+            enabled: debugLog.enabled ?? DEFAULT_GLOWUP_CONFIG_JSON.debugLog.enabled,
+            path: debugLog.path ?? DEFAULT_GLOWUP_CONFIG_JSON.debugLog.path,
+            maxBytes: debugLog.maxBytes ?? DEFAULT_GLOWUP_CONFIG_JSON.debugLog.maxBytes,
             memorySampleIntervalMs:
                 debugLog.memorySampleIntervalMs ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.debugLog.memorySampleIntervalMs,
+                DEFAULT_GLOWUP_CONFIG_JSON.debugLog.memorySampleIntervalMs,
         },
         scriptFormatters: parseScriptFormatterCommandsValue(scriptPreview.formatters ?? {}, {
             source: `${options.source ?? "config"}.scriptPreview.formatters`,
@@ -564,70 +563,67 @@ export function parseCodexLookConfig(
         scriptHeaderLayout: parseScriptPreviewHeaderLayout(scriptPreview.headerLayout),
         scriptMaxCodePreviewLines:
             scriptPreview.maxCodePreviewLines ??
-            DEFAULT_CODEX_LOOK_CONFIG_JSON.scriptPreview.maxCodePreviewLines,
+            DEFAULT_GLOWUP_CONFIG_JSON.scriptPreview.maxCodePreviewLines,
         toolCallIndicator: {
-            symbol:
-                toolCallIndicator.symbol ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolCallIndicator.symbol,
-            bold: toolCallIndicator.bold ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolCallIndicator.bold,
+            symbol: toolCallIndicator.symbol ?? DEFAULT_GLOWUP_CONFIG_JSON.toolCallIndicator.symbol,
+            bold: toolCallIndicator.bold ?? DEFAULT_GLOWUP_CONFIG_JSON.toolCallIndicator.bold,
         },
         toolLabels: {
-            mode: toolLabels.mode ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.toolLabels.mode,
+            mode: toolLabels.mode ?? DEFAULT_GLOWUP_CONFIG_JSON.toolLabels.mode,
         },
         writePreview: {
             movingViewport:
                 writePreview.movingViewport ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.writePreview.movingViewport,
+                DEFAULT_GLOWUP_CONFIG_JSON.writePreview.movingViewport,
         },
         syntax: {
             preloadLanguages:
-                syntax.preloadLanguages ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.preloadLanguages,
+                syntax.preloadLanguages ?? DEFAULT_GLOWUP_CONFIG_JSON.syntax.preloadLanguages,
             bracketPairColoring:
-                syntax.bracketPairColoring ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.bracketPairColoring,
+                syntax.bracketPairColoring ?? DEFAULT_GLOWUP_CONFIG_JSON.syntax.bracketPairColoring,
             projectLanguageDetection: {
                 enabled:
                     projectLanguageDetection.enabled ??
-                    DEFAULT_CODEX_LOOK_CONFIG_JSON.syntax.projectLanguageDetection.enabled,
+                    DEFAULT_GLOWUP_CONFIG_JSON.syntax.projectLanguageDetection.enabled,
             },
         },
         patches: {
             assistantSeparator:
-                patches.assistantSeparator ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.patches.assistantSeparator,
+                patches.assistantSeparator ?? DEFAULT_GLOWUP_CONFIG_JSON.patches.assistantSeparator,
             workingWidgetSpacing:
                 patches.workingWidgetSpacing ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.patches.workingWidgetSpacing,
+                DEFAULT_GLOWUP_CONFIG_JSON.patches.workingWidgetSpacing,
             autocompleteCleanup:
                 patches.autocompleteCleanup ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.patches.autocompleteCleanup,
+                DEFAULT_GLOWUP_CONFIG_JSON.patches.autocompleteCleanup,
             markdownSyntax:
-                patches.markdownSyntax ?? DEFAULT_CODEX_LOOK_CONFIG_JSON.patches.markdownSyntax,
+                patches.markdownSyntax ?? DEFAULT_GLOWUP_CONFIG_JSON.patches.markdownSyntax,
             thirdPartyToolRenderers:
                 patches.thirdPartyToolRenderers ??
-                DEFAULT_CODEX_LOOK_CONFIG_JSON.patches.thirdPartyToolRenderers,
+                DEFAULT_GLOWUP_CONFIG_JSON.patches.thirdPartyToolRenderers,
         },
     };
 }
 
-function parseCodexLookConfigInput(
+function parseGlowupConfigInput(
     input: unknown,
     options: {
         readonly source?: string;
         readonly reportWarning?: ConfigWarningReporter;
     },
-): CodexLookConfigInput {
-    if (Schema.Check(CodexLookConfigSchema, input)) {
-        return Schema.Parse(CodexLookConfigSchema, input);
+): GlowupConfigInput {
+    if (Schema.Check(GlowupConfigSchema, input)) {
+        return Schema.Parse(GlowupConfigSchema, input);
     }
 
     options.reportWarning?.(
-        `[pi-codex-look] Ignoring invalid ${options.source ?? "config"}: ${configSchemaErrorSummary(input)}`,
+        `[pi-glowup] Ignoring invalid ${options.source ?? "config"}: ${configSchemaErrorSummary(input)}`,
     );
     return {};
 }
 
 function configSchemaErrorSummary(input: unknown): string {
-    const [, errors] = Schema.Errors(CodexLookConfigSchema, input);
+    const [, errors] = Schema.Errors(GlowupConfigSchema, input);
     const messages = errors.slice(0, 3).map((error) => {
         const path = error.instancePath.length > 0 ? error.instancePath : "/";
         return `${path} ${error.message}`;
@@ -662,7 +658,7 @@ function writeJsonFileIfMissing(
     } catch (cause: unknown) {
         if (hasNodeErrorCode(cause, "EEXIST")) return;
         const message = cause instanceof Error ? cause.message : String(cause);
-        reportWarning(`[pi-codex-look] Failed to create ${filePath}: ${message}`);
+        reportWarning(`[pi-glowup] Failed to create ${filePath}: ${message}`);
     }
 }
 
@@ -679,7 +675,7 @@ function writeJsonFileIfChanged(
         writeFileSync(filePath, nextContent, "utf8");
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
-        reportWarning(`[pi-codex-look] Failed to write ${filePath}: ${message}`);
+        reportWarning(`[pi-glowup] Failed to write ${filePath}: ${message}`);
     }
 }
 
@@ -691,7 +687,7 @@ function readConfigInput(configPath: string, reportWarning: ConfigWarningReporte
         return rawConfig;
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
-        reportWarning(`[pi-codex-look] Failed to read ${configPath}: ${message}`);
+        reportWarning(`[pi-glowup] Failed to read ${configPath}: ${message}`);
         return undefined;
     }
 }

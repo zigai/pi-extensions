@@ -4,9 +4,9 @@ import path from "node:path";
 import {
     formatPathTarget,
     makeComponent,
-    renderCodexCall,
-    renderCodexOutput,
-    type CodexRenderTheme,
+    renderGlowupCall,
+    renderGlowupOutput,
+    type GlowupRenderTheme,
 } from "./core.ts";
 import { isActiveToolCall, toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
 
@@ -300,7 +300,7 @@ export function summarizeEditCall(args: unknown, context: EditCallRenderContext)
 /** Renders the latest bounded replacement diff while edit arguments are still arriving. */
 export function renderStreamingEditCallPreview(
     args: unknown,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: EditCallRenderContext & { readonly expanded: boolean },
 ): Component | undefined {
     const pair = latestEditTextPair(args);
@@ -310,7 +310,7 @@ export function renderStreamingEditCallPreview(
 
     const record = isRecord(args) ? args : undefined;
     const path = record ? getString(record, "path") : undefined;
-    const header = renderCodexCall(theme, {
+    const header = renderGlowupCall(theme, {
         state: context.isError ? "error" : isActiveToolCall(context) ? "running" : "success",
         statusText: toolStatusLabel(context.labelMode ?? "static", context, {
             static: "Edit",
@@ -319,7 +319,7 @@ export function renderStreamingEditCallPreview(
         }),
         body: formatPathTarget(theme, path),
     });
-    const draft = renderCodexOutput(theme, streamingReplacementDraft(pair), {
+    const draft = renderGlowupOutput(theme, streamingReplacementDraft(pair), {
         expanded: context.expanded,
         mode: "head",
         maxPreviewLines: PARTIAL_EDIT_NEW_LINES + 1,

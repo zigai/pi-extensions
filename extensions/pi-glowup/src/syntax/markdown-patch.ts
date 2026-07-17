@@ -1,8 +1,8 @@
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { highlightSyntaxCode } from "./highlighter.ts";
 
-const MARKDOWN_PATCH_KEY = Symbol.for("zigai.pi-codex-look.syntax-markdown");
-const MARKDOWN_PATCH_STATE_KEY = Symbol.for("zigai.pi-codex-look.syntax-markdown.state");
+const MARKDOWN_PATCH_KEY = Symbol.for("zigai.pi-glowup.syntax-markdown");
+const MARKDOWN_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.syntax-markdown.state");
 
 let markdownSyntaxEnabled = false;
 let markdownRenderInjections = 0;
@@ -95,10 +95,7 @@ export function configureMarkdownSyntaxPatch(
     }
 
     const originalRender = prototype.render;
-    const wrapperRender = function renderWithCodexLookSyntax(
-        this: MarkdownInstance,
-        width: number,
-    ) {
+    const wrapperRender = function renderWithGlowupSyntax(this: MarkdownInstance, width: number) {
         const restoreSyntaxTheme =
             prototype[MARKDOWN_PATCH_STATE_KEY]?.enabled !== false
                 ? prepareSyntaxTheme(this)

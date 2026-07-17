@@ -1,25 +1,24 @@
 {
-  "name": "pi-codex-look",
+  "name": "@zigai/pi-glowup",
   "version": "0.1.0",
-  "private": true,
-  "description": "Compact Codex-style rendering for Pi read, search, list, and write tools.",
+  "description": "Compact, high-signal rendering for Pi tool calls and results.",
   "keywords": [
-    "codex-look",
+    "glowup",
     "pi",
     "pi-coding-agent",
     "pi-extension",
     "pi-package",
     "rendering"
   ],
-  "homepage": "https://github.com/zigai/pi-codex-look#readme",
+  "homepage": "https://github.com/zigai/pi-glowup#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-codex-look/issues"
+    "url": "https://github.com/zigai/pi-glowup/issues"
   },
   "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-codex-look.git"
+    "url": "git+https://github.com/zigai/pi-glowup.git"
   },
   "files": [
     "src",
@@ -34,6 +33,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./protocol": "./src/tool-rendering/protocol.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "lint": "oxlint -c ./.oxlintrc.json .",

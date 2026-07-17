@@ -1,11 +1,11 @@
-/** Tool definition property consumed by pi-codex-look when installed. */
-export const CODEX_LOOK_RENDERING_PROPERTY = "codexLookRendering";
+/** Tool definition property consumed by pi-glowup when installed. */
+export const GLOWUP_RENDERING_PROPERTY = "glowupRendering";
 
-/** Simple opt-out or neutral preference for Codex-look rendering. */
-export type CodexLookRenderingPreference = "auto" | "preserve";
+/** Simple opt-out or neutral preference for Glowup rendering. */
+export type GlowupRenderingPreference = "auto" | "preserve";
 
-/** Minimal tool-call render context exposed to passive Codex-look adapters. */
-export type CodexLookRenderContext = {
+/** Minimal tool-call render context exposed to passive Glowup adapters. */
+export type GlowupRenderContext = {
     readonly args: unknown;
     readonly toolCallId: string;
     readonly executionStarted: boolean;
@@ -16,48 +16,48 @@ export type CodexLookRenderContext = {
     readonly isError: boolean;
 };
 
-/** Minimal tool result shape exposed to passive Codex-look adapters. */
-export type CodexLookToolResult = {
+/** Minimal tool result shape exposed to passive Glowup adapters. */
+export type GlowupToolResult = {
     readonly content?: unknown;
     readonly details?: unknown;
 };
 
-/** Compact Codex-look call states available to passive adapters. */
-export type CodexLookCallState = "running" | "success" | "error" | "muted";
+/** Compact Glowup call states available to passive adapters. */
+export type GlowupCallState = "running" | "success" | "error" | "muted";
 
 /** Output preview strategy for text returned by passive adapters. */
-export type CodexLookOutputMode = "head" | "headTail" | "hidden";
+export type GlowupOutputMode = "head" | "headTail" | "hidden";
 
 /** Syntax hint for a rendered text block. */
-export type CodexLookSyntax = {
+export type GlowupSyntax = {
     readonly language?: string;
     readonly path?: string;
 };
 
-/** Compact tool call view rendered by pi-codex-look. */
-export type CodexLookCallView = {
+/** Compact tool call view rendered by pi-glowup. */
+export type GlowupCallView = {
     readonly kind: "call";
     readonly label: string;
     readonly activeLabel?: string;
     readonly completedLabel?: string;
     readonly body?: string;
-    readonly state?: CodexLookCallState;
+    readonly state?: GlowupCallState;
     readonly maxRenderedLines?: number;
     readonly expandable?: boolean;
 };
 
-/** Text output view rendered by pi-codex-look. */
-export type CodexLookOutputView = {
+/** Text output view rendered by pi-glowup. */
+export type GlowupOutputView = {
     readonly kind: "output";
     readonly text?: string;
-    readonly mode?: CodexLookOutputMode;
-    readonly syntax?: CodexLookSyntax;
+    readonly mode?: GlowupOutputMode;
+    readonly syntax?: GlowupSyntax;
     readonly maxPreviewLines?: number;
     readonly noOutputLabel?: string | null;
 };
 
-/** Section in a structured Codex-look view. */
-export type CodexLookSection =
+/** Section in a structured Glowup view. */
+export type GlowupSection =
     | {
           readonly kind: "text";
           readonly text: string;
@@ -71,47 +71,39 @@ export type CodexLookSection =
           readonly kind: "code";
           readonly title?: string;
           readonly text: string;
-          readonly syntax?: CodexLookSyntax;
+          readonly syntax?: GlowupSyntax;
       };
 
-/** Structured multi-section view rendered by pi-codex-look. */
-export type CodexLookSectionsView = {
+/** Structured multi-section view rendered by pi-glowup. */
+export type GlowupSectionsView = {
     readonly kind: "sections";
-    readonly sections: readonly CodexLookSection[];
+    readonly sections: readonly GlowupSection[];
     readonly maxPreviewLines?: number;
 };
 
-/** Intentionally empty Codex-look view. */
-export type CodexLookEmptyView = {
+/** Intentionally empty Glowup view. */
+export type GlowupEmptyView = {
     readonly kind: "empty";
 };
 
-/** View model returned by passive Codex-look adapters. */
-export type CodexLookView =
-    | CodexLookCallView
-    | CodexLookOutputView
-    | CodexLookSectionsView
-    | CodexLookEmptyView;
+/** View model returned by passive Glowup adapters. */
+export type GlowupView = GlowupCallView | GlowupOutputView | GlowupSectionsView | GlowupEmptyView;
 
-/** Passive adapter that pi-codex-look consumes only when this extension is installed. */
-export type CodexLookRenderingAdapter<
+/** Passive adapter that pi-glowup consumes only when this extension is installed. */
+export type GlowupRenderingAdapter<
     Args = unknown,
-    Result extends CodexLookToolResult = CodexLookToolResult,
+    Result extends GlowupToolResult = GlowupToolResult,
 > = {
     readonly version: 1;
-    readonly renderCall?: (
-        args: Args,
-        context: CodexLookRenderContext,
-    ) => CodexLookView | undefined;
+    readonly renderCall?: (args: Args, context: GlowupRenderContext) => GlowupView | undefined;
     readonly renderResult?: (
         result: Result,
         options: { readonly expanded: boolean; readonly isPartial: boolean },
-        context: CodexLookRenderContext,
-    ) => CodexLookView | undefined;
+        context: GlowupRenderContext,
+    ) => GlowupView | undefined;
 };
 
-/** Passive Codex-look rendering property accepted on third-party tool definitions. */
-export type CodexLookRendering<
-    Args = unknown,
-    Result extends CodexLookToolResult = CodexLookToolResult,
-> = CodexLookRenderingPreference | CodexLookRenderingAdapter<Args, Result>;
+/** Passive Glowup rendering property accepted on third-party tool definitions. */
+export type GlowupRendering<Args = unknown, Result extends GlowupToolResult = GlowupToolResult> =
+    | GlowupRenderingPreference
+    | GlowupRenderingAdapter<Args, Result>;

@@ -1,11 +1,11 @@
 import type { Component } from "@earendil-works/pi-tui";
 import {
     emptyComponent,
-    renderCodexCall,
-    renderCodexOutput,
+    renderGlowupCall,
+    renderGlowupOutput,
     toolExpandHint,
-    type CodexCallState,
-    type CodexRenderTheme,
+    type GlowupCallState,
+    type GlowupRenderTheme,
 } from "../rendering/core.ts";
 import {
     shouldDeferSimpleToolCall,
@@ -30,7 +30,7 @@ export type CallSummary = {
 };
 
 type CallOptions = {
-    readonly state: CodexCallState;
+    readonly state: GlowupCallState;
     readonly statusText: string;
     readonly body: string | undefined;
     readonly maxRenderedLines: number;
@@ -38,7 +38,7 @@ type CallOptions = {
     readonly expandable?: boolean;
 };
 
-export function callState(context: ThirdPartyToolRenderContext): CodexCallState {
+export function callState(context: ThirdPartyToolRenderContext): GlowupCallState {
     if (context.isError) {
         return "error";
     }
@@ -57,13 +57,13 @@ export function thirdPartyStatusLabel(
 }
 
 export function renderSimpleResult(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     result: ThirdPartyToolResult,
     options: { readonly expanded: boolean; readonly isPartial: boolean },
 ): Component {
     const output = textOutput(result);
     const language = detectStructuredOutputLanguage(output);
-    return renderCodexOutput(theme, output, {
+    return renderGlowupOutput(theme, output, {
         expanded: options.expanded,
         mode: "headTail",
         maxPreviewLines: 4,
@@ -72,17 +72,17 @@ export function renderSimpleResult(
     });
 }
 
-export function renderThirdPartyCall(theme: CodexRenderTheme, options: CallOptions): Component {
+export function renderThirdPartyCall(theme: GlowupRenderTheme, options: CallOptions): Component {
     const maxRenderedLines =
         options.expanded && options.expandable !== false ? undefined : options.maxRenderedLines;
     if (options.body === undefined) {
         if (maxRenderedLines === undefined) {
-            return renderCodexCall(theme, {
+            return renderGlowupCall(theme, {
                 state: options.state,
                 statusText: options.statusText,
             });
         }
-        return renderCodexCall(theme, {
+        return renderGlowupCall(theme, {
             state: options.state,
             statusText: options.statusText,
             maxRenderedLines,
@@ -91,13 +91,13 @@ export function renderThirdPartyCall(theme: CodexRenderTheme, options: CallOptio
     }
 
     if (maxRenderedLines === undefined) {
-        return renderCodexCall(theme, {
+        return renderGlowupCall(theme, {
             state: options.state,
             statusText: options.statusText,
             body: options.body,
         });
     }
-    return renderCodexCall(theme, {
+    return renderGlowupCall(theme, {
         state: options.state,
         statusText: options.statusText,
         body: options.body,

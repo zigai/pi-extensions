@@ -73,7 +73,7 @@ function parseOptionalPeerMetaRecord(
 }
 
 describe("package manifest", () => {
-    it("exports the passive Codex-look protocol for extension authors", () => {
+    it("exports the passive Glowup protocol for extension authors", () => {
         const manifest = readPackageJson();
 
         expect(manifest.exports?.["./protocol"]).toBe("./src/tool-rendering/protocol.ts");

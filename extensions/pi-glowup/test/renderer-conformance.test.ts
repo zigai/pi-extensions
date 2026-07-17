@@ -1,6 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import type { ThirdPartyToolResult } from "../src/third-party-tools/types.ts";
 
@@ -12,7 +12,7 @@ type RendererConformanceCase = {
     readonly result?: ThirdPartyToolResult;
 };
 
-const theme: CodexRenderTheme = {
+const theme: GlowupRenderTheme = {
     fg(_token, text) {
         return text;
     },

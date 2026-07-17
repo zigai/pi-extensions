@@ -4,10 +4,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getCodexLookGlobalConfigPath } from "../../src/config/config.ts";
+import { getGlowupGlobalConfigPath } from "../../src/config/config.ts";
 import { buildPierreDiffPayload } from "../../src/diffs/diff.ts";
 import { configureAutocompleteCleanupPatch } from "../../src/patches/autocomplete-cleanup.ts";
-import { CodexLookExtensionHarness } from "../support/extension-harness.ts";
+import { GlowupExtensionHarness } from "../support/extension-harness.ts";
 import { VirtualTerminal } from "../support/virtual-terminal.ts";
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
@@ -61,19 +61,19 @@ function rowContaining(terminal: VirtualTerminal, text: string) {
 describe("Pi TUI through headless xterm", () => {
     let root: string;
     let cwd: string;
-    let extension: CodexLookExtensionHarness;
+    let extension: GlowupExtensionHarness;
     let terminal: VirtualTerminal | undefined;
     let tui: TUI | undefined;
 
     beforeEach(async () => {
-        root = mkdtempSync(join(tmpdir(), "pi-codex-look-xterm-"));
+        root = mkdtempSync(join(tmpdir(), "pi-glowup-xterm-"));
         cwd = join(root, "workspace");
         const agentDir = join(root, "agent");
         mkdirSync(cwd, { recursive: true });
-        mkdirSync(join(agentDir, "pi-codex-look"), { recursive: true });
+        mkdirSync(join(agentDir, "pi-glowup"), { recursive: true });
         process.env[AGENT_DIR_ENV] = agentDir;
         writeFileSync(
-            getCodexLookGlobalConfigPath(agentDir),
+            getGlowupGlobalConfigPath(agentDir),
             JSON.stringify({
                 toolLabels: { mode: "lifecycle" },
                 appearance: {
@@ -86,7 +86,7 @@ describe("Pi TUI through headless xterm", () => {
             }),
         );
         initTheme("dark");
-        extension = new CodexLookExtensionHarness();
+        extension = new GlowupExtensionHarness();
         await extension.install(cwd);
     });
 

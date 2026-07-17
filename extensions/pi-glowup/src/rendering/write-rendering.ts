@@ -3,13 +3,13 @@ import { scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
 import {
     emptyComponent,
     formatPathTarget,
-    renderCodexCall,
-    renderCodexDiff,
-    renderCodexOutput,
+    renderGlowupCall,
+    renderGlowupDiff,
+    renderGlowupOutput,
     renderMutationCall,
     MUTATION_DIFF_PREVIEW_ROWS,
     toolExpandHint,
-    type CodexRenderTheme,
+    type GlowupRenderTheme,
     type DiffSection,
 } from "./core.ts";
 import { isActiveToolCall, toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
@@ -38,7 +38,7 @@ const MAX_PARTIAL_WRITE_LINE_CHARS = 2_000;
 
 type PartialWritePreviewUpdate = {
     readonly toolCallId: string;
-    readonly theme: CodexRenderTheme;
+    readonly theme: GlowupRenderTheme;
     readonly path: string;
     readonly content: string;
     readonly labelMode: ToolLabelMode;
@@ -311,7 +311,7 @@ type PreviewSnapshot = {
 class PartialWriteCallPreviewComponent implements Component {
     private readonly preview = new PartialWriteContentPreview();
     private readonly toolCallId: string;
-    private theme: CodexRenderTheme;
+    private theme: GlowupRenderTheme;
     private path = "";
     private labelMode: ToolLabelMode = "static";
     private mutationLabelColumnWidth: number | undefined;
@@ -354,13 +354,13 @@ class PartialWriteCallPreviewComponent implements Component {
             : this.preview.previewText({ movingViewport: this.movingViewport });
         const body =
             previewText.length === 0
-                ? renderCodexOutput(this.theme, "", {
+                ? renderGlowupOutput(this.theme, "", {
                       expanded: false,
                       mode: "head",
                       maxPreviewLines: 1,
                       noOutputLabel: "(empty file)",
                   })
-                : renderCodexDiff(
+                : renderGlowupDiff(
                       this.theme,
                       [writeDiffSection(this.path, previewText, added)],
                       true,
@@ -439,7 +439,7 @@ export function writeContentFromArgs(args: unknown): string | undefined {
 /** Renders a built-in write call with a bounded preview of the content being written. */
 export function renderWriteCallPreview(
     args: unknown,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: WriteCallContext,
 ): Component {
     const path = stringField(args, "path") ?? "";
@@ -454,7 +454,7 @@ export function renderWriteCallPreview(
         return emptyComponent();
     }
     if (content === undefined || context.isError) {
-        return renderCodexCall(theme, {
+        return renderGlowupCall(theme, {
             state: context.isError ? "error" : "success",
             statusText,
             body: formatPathTarget(theme, path),
@@ -487,13 +487,13 @@ export function renderWriteCallPreview(
     const boundedContent = boundedWriteContentPreview(content);
     const body =
         boundedContent.length === 0
-            ? renderCodexOutput(theme, "", {
+            ? renderGlowupOutput(theme, "", {
                   expanded: false,
                   mode: "head",
                   maxPreviewLines: 1,
                   noOutputLabel: "(empty file)",
               })
-            : renderCodexDiff(
+            : renderGlowupDiff(
                   theme,
                   [writeDiffSection(path, boundedContent, added)],
                   context.expanded,

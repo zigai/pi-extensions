@@ -8,15 +8,13 @@ import {
 import { Container, Spacer, type Component, visibleWidth } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
 
-const ASSISTANT_SEPARATOR_PATCH_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator");
-const ASSISTANT_SEPARATOR_PATCH_STATE_KEY = Symbol.for(
-    "zigai.pi-codex-look.assistant-separator.state",
-);
-const CHAT_TRANSITION_PATCH_KEY = Symbol.for("zigai.pi-codex-look.chat-transition-separator");
+const ASSISTANT_SEPARATOR_PATCH_KEY = Symbol.for("zigai.pi-glowup.assistant-separator");
+const ASSISTANT_SEPARATOR_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.state");
+const CHAT_TRANSITION_PATCH_KEY = Symbol.for("zigai.pi-glowup.chat-transition-separator");
 const CHAT_TRANSITION_PATCH_STATE_KEY = Symbol.for(
-    "zigai.pi-codex-look.chat-transition-separator.state",
+    "zigai.pi-glowup.chat-transition-separator.state",
 );
-const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-codex-look.assistant-separator.render");
+const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.render");
 
 type AssistantContent = {
     readonly type: string;

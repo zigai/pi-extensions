@@ -2,7 +2,7 @@ import { test, fc } from "@fast-check/vitest";
 import { visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { expect } from "vitest";
 import { clearApplyPatchRenderingState } from "../src/rendering/apply-patch-rendering.ts";
-import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 
@@ -10,7 +10,7 @@ const PROPERTY_SEED = 0x5eed_2026;
 const PROPERTY_RUNS = 60;
 const MAX_STREAMING_ROWS = 16;
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },

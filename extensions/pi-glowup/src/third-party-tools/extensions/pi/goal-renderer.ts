@@ -1,4 +1,4 @@
-import { renderCodexOutput } from "../../../rendering/core.ts";
+import { renderGlowupOutput } from "../../../rendering/core.ts";
 import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
 import type { ThirdPartyToolRenderer, ThirdPartyToolResult } from "../../types.ts";
 import {
@@ -148,7 +148,7 @@ export function createGoalRenderer(
         renderResult(result, options, theme) {
             const formatted = formatGoalResult(parseGoalFromResult(result));
             if (formatted !== undefined && formatted.length > 0) {
-                return renderCodexOutput(theme, formatted, {
+                return renderGlowupOutput(theme, formatted, {
                     expanded: options.expanded,
                     mode: "head",
                     maxPreviewLines: 2,

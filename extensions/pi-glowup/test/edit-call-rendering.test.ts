@@ -3,14 +3,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import {
     renderStreamingEditCallPreview,
     resolveStreamingEditLineNumber,
     summarizeEditCall,
 } from "../src/rendering/edit-call-rendering.ts";
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },
@@ -180,7 +180,7 @@ describe("edit call rendering", () => {
     });
 
     it("resolves streaming edit line numbers asynchronously from the real file", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-edit-lines-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-edit-lines-"));
         try {
             writeFileSync(path.join(cwd, "example.ts"), "one\ntwo\nthree\nfour\nfive\n");
             const args = {
@@ -203,7 +203,7 @@ describe("edit call rendering", () => {
     });
 
     it("caches ambiguous streaming edit lookups as unresolved", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-edit-lines-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-edit-lines-"));
         try {
             writeFileSync(path.join(cwd, "example.ts"), "same\nmiddle\nsame\n");
             const args = {

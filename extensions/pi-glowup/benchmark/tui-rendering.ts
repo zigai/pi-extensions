@@ -12,8 +12,8 @@ import {
 import { renderStreamingEditCallPreview } from "../src/rendering/edit-call-rendering.ts";
 import {
     configureRenderingAppearance,
-    renderCodexDiff,
-    type CodexRenderTheme,
+    renderGlowupDiff,
+    type GlowupRenderTheme,
 } from "../src/rendering/core.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 import {
@@ -63,7 +63,7 @@ type BenchmarkReport = {
     };
 };
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },
@@ -220,7 +220,7 @@ function renderColdLargeDiff(samples: number): readonly number[] {
         clearSyntaxHighlightCache();
         timings.push(
             measure(() => {
-                renderCodexDiff(
+                renderGlowupDiff(
                     plainTheme,
                     [
                         {

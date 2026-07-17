@@ -5,8 +5,8 @@ import { bundledSyntaxThemePath, SYNTAX_THEME_NAME } from "./theme-assets.ts";
 export { SYNTAX_THEME_NAME } from "./theme-assets.ts";
 
 const SYNTAX_OFF_VALUE = "off";
-const SYNTAX_ENV = "PI_CODEX_LOOK_SYNTAX";
-const SYNTAX_THEME_ENV = "PI_CODEX_LOOK_SYNTAX_THEME";
+const SYNTAX_ENV = "PI_GLOWUP_SYNTAX";
+const SYNTAX_THEME_ENV = "PI_GLOWUP_SYNTAX_THEME";
 
 type UnknownRecord = {
     readonly [key: string]: unknown;

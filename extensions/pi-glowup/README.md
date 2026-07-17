@@ -1,16 +1,22 @@
-# pi-codex-look
+# pi-glowup
 
-Compact Codex-style rendering for Pi tool calls and results.
+Compact, high-signal rendering for Pi tool calls and results.
+
+## Install
+
+```sh
+pi install npm:@zigai/pi-glowup
+```
 
 ## Contents
 
-- [Codex-look tool rendering](docs/tool-rendering.md)
+- [Glowup tool rendering](docs/tool-rendering.md)
 - [Configuration guide](docs/configuration.md)
 - [Script previews](docs/script-previews.md)
 
 ## Configuration
 
-Use global config at `~/.pi/agent/pi-codex-look/config.json`.
+Use global config at `~/.pi/agent/pi-glowup/config.json`.
 
 | Option                                    | Default                                                         | Purpose                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
@@ -101,5 +107,5 @@ Use global config at `~/.pi/agent/pi-codex-look/config.json`.
 
 ## Package Exports
 
-- Extension entrypoint: `pi-codex-look`
-- Passive rendering protocol types: `pi-codex-look/protocol`
+- Extension entrypoint: `pi-glowup`
+- Passive rendering protocol types: `pi-glowup/protocol`

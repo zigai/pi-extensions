@@ -1,6 +1,6 @@
 # Configuration
 
-The global configuration file is `~/.pi/agent/pi-codex-look/config.json`.
+The global configuration file is `~/.pi/agent/pi-glowup/config.json`.
 
 ## Choosing a diff look
 

@@ -89,7 +89,7 @@ describe("Pierre diff rendering", () => {
     });
 
     it("builds a replayable edit diff from pre- and post-execution snapshots", async () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-edit-snapshot-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-edit-snapshot-"));
         const filePath = join(root, "sample.ts");
         writeFileSync(filePath, "const limit = 2000;\n");
         const snapshot = await createEditSnapshot(root, "sample.ts");
@@ -209,7 +209,7 @@ describe("Pierre diff rendering", () => {
     });
 
     it("keeps unreadable existing files out of create-style write diffs", async () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-diff-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-diff-"));
         const filePath = join(root, "secret.txt");
         writeFileSync(filePath, "secret\n");
         chmodSync(filePath, 0);

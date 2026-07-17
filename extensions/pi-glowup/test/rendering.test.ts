@@ -12,15 +12,15 @@ import {
     makeComponent,
     parseDiffSections,
     parseScriptInvocation,
-    renderCodexCall,
-    renderCodexDiff,
-    renderCodexOutput,
+    renderGlowupCall,
+    renderGlowupDiff,
+    renderGlowupOutput,
     renderMutationCall,
     renderScriptCall,
-    type CodexRenderTheme,
+    type GlowupRenderTheme,
 } from "../src/rendering/core.ts";
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },
@@ -32,7 +32,7 @@ const plainTheme: CodexRenderTheme = {
     },
 };
 
-const tokenTheme: CodexRenderTheme = {
+const tokenTheme: GlowupRenderTheme = {
     fg(token: string, text: string): string {
         return `<${token}>${text}</${token}>`;
     },
@@ -63,7 +63,7 @@ function expectLinesWithinWidth(lines: ReadonlyArray<string>, width: number): vo
     }
 }
 
-describe("Codex rendering helpers", () => {
+describe("Glowup rendering helpers", () => {
     beforeEach(() => configureRenderingAppearance(classicAppearance));
 
     it("formats compact read and grep calls", () => {
@@ -118,7 +118,7 @@ describe("Codex rendering helpers", () => {
         });
         try {
             const read = formatReadAction(plainTheme, { path: "src/AGENTS.md" });
-            const diff = renderCodexDiff(
+            const diff = renderGlowupDiff(
                 plainTheme,
                 [{ lines: ["+1 added", "-2 deleted"], added: 1, removed: 1 }],
                 true,
@@ -213,7 +213,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("renders an incomplete streaming tool call without crashing", () => {
-        const component = renderCodexCall(plainTheme, {
+        const component = renderGlowupCall(plainTheme, {
             state: "running",
             statusText: "Run",
         });
@@ -222,7 +222,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("renders tool indicators in bold consistently by default", () => {
-        const styledTheme: CodexRenderTheme = {
+        const styledTheme: GlowupRenderTheme = {
             ...tokenTheme,
             bold(text: string): string {
                 return `<bold>${text}</bold>`;
@@ -230,25 +230,25 @@ describe("Codex rendering helpers", () => {
         };
 
         expect(
-            renderCodexCall(styledTheme, {
+            renderGlowupCall(styledTheme, {
                 state: "success",
                 statusText: "Bash",
             }).render(80)[0],
         ).toContain("<success><bold>•</bold></success>");
         expect(
-            renderCodexCall(styledTheme, {
+            renderGlowupCall(styledTheme, {
                 state: "error",
                 statusText: "Bash",
             }).render(80)[0],
         ).toContain("<toolDiffRemoved><bold>•</bold></toolDiffRemoved>");
         expect(
-            renderCodexCall(styledTheme, {
+            renderGlowupCall(styledTheme, {
                 state: "running",
                 statusText: "Bash",
             }).render(80)[0],
         ).toContain("<muted><bold>•</bold></muted>");
         expect(
-            renderCodexCall(styledTheme, {
+            renderGlowupCall(styledTheme, {
                 state: "muted",
                 statusText: "Explore",
             }).render(80)[0],
@@ -256,7 +256,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("uses the configured tool indicator symbol and weight", () => {
-        const styledTheme: CodexRenderTheme = {
+        const styledTheme: GlowupRenderTheme = {
             ...tokenTheme,
             bold(text: string): string {
                 return `<bold>${text}</bold>`;
@@ -265,7 +265,7 @@ describe("Codex rendering helpers", () => {
 
         configureToolCallIndicator({ symbol: "*", bold: false });
         try {
-            const rendered = renderCodexCall(styledTheme, {
+            const rendered = renderGlowupCall(styledTheme, {
                 state: "success",
                 statusText: "Bash",
             }).render(80)[0];
@@ -289,7 +289,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("renders mutation state and aligned statistics", () => {
-        const styledTheme: CodexRenderTheme = {
+        const styledTheme: GlowupRenderTheme = {
             ...tokenTheme,
             bold(text: string): string {
                 return `<bold>${text}</bold>`;
@@ -319,7 +319,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("marks collapsed call previews as truncated instead of expandable", () => {
-        const component = renderCodexCall(plainTheme, {
+        const component = renderGlowupCall(plainTheme, {
             state: "success",
             statusText: "Called",
             body: Array.from({ length: 8 }, (_value, index) => `line ${index + 1}`).join("\n"),
@@ -333,7 +333,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("wraps single-line collapsed call previews without truncating them", () => {
-        const component = renderCodexCall(plainTheme, {
+        const component = renderGlowupCall(plainTheme, {
             state: "success",
             statusText: "Bash",
             body: "npm run format -- alpha beta gamma delta epsilon zeta eta theta",
@@ -349,8 +349,8 @@ describe("Codex rendering helpers", () => {
         expect(rendered).not.toContain("…");
     });
 
-    it("collapses output to a Codex-sized head and tail preview", () => {
-        const component = renderCodexOutput(
+    it("collapses output to a compact head and tail preview", () => {
+        const component = renderGlowupOutput(
             plainTheme,
             ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"].join(
                 "\n",
@@ -373,7 +373,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("skips hidden collapsed output without building hidden preview lines", () => {
-        const component = renderCodexOutput(plainTheme, "line\n".repeat(100_000), {
+        const component = renderGlowupOutput(plainTheme, "line\n".repeat(100_000), {
             expanded: false,
             mode: "hidden",
             noOutputLabel: null,
@@ -383,7 +383,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("trims trailing blank output lines", () => {
-        const component = renderCodexOutput(plainTheme, "done\n\n\n", {
+        const component = renderGlowupOutput(plainTheme, "done\n\n\n", {
             expanded: true,
             maxPreviewLines: 5,
         });
@@ -392,9 +392,9 @@ describe("Codex rendering helpers", () => {
     });
 
     it("starts prefixed output with content after leading blank lines", () => {
-        const component = renderCodexOutput(
+        const component = renderGlowupOutput(
             plainTheme,
-            "\n> pi-codex-look@0.1.0 typecheck\n> tsc --noEmit\n",
+            "\n> pi-glowup@0.1.0 typecheck\n> tsc --noEmit\n",
             {
                 expanded: true,
                 maxPreviewLines: 5,
@@ -402,13 +402,13 @@ describe("Codex rendering helpers", () => {
         );
 
         expect(component.render(80)).toEqual([
-            "  └ > pi-codex-look@0.1.0 typecheck",
+            "  └ > pi-glowup@0.1.0 typecheck",
             "    > tsc --noEmit",
         ]);
     });
 
     it("keeps collapsed output compact when the raw tail is blank", () => {
-        const component = renderCodexOutput(
+        const component = renderGlowupOutput(
             plainTheme,
             [
                 "start",
@@ -436,7 +436,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("does not render carriage-return progress updates as blank tail rows", () => {
-        const component = renderCodexOutput(
+        const component = renderGlowupOutput(
             plainTheme,
             [
                 "WARNING Disk /var/lib/libvirt/images/vm.qcow2 is already in use.",
@@ -459,9 +459,9 @@ describe("Codex rendering helpers", () => {
     });
 
     it("drops bash status separator blanks before command exit lines", () => {
-        const component = renderCodexOutput(
+        const component = renderGlowupOutput(
             plainTheme,
-            "python3: can't open file '/home/zigai/Projects/pi-codex-look/packages.py': [Errno 2] No such file or directory\n\n\nCommand exited with code 2",
+            "python3: can't open file '/home/zigai/Projects/pi-glowup/packages.py': [Errno 2] No such file or directory\n\n\nCommand exited with code 2",
             {
                 expanded: false,
                 maxPreviewLines: 5,
@@ -469,7 +469,7 @@ describe("Codex rendering helpers", () => {
         );
 
         expect(component.render(140)).toEqual([
-            "  └ python3: can't open file '/home/zigai/Projects/pi-codex-look/packages.py': [Errno 2] No such file or directory",
+            "  └ python3: can't open file '/home/zigai/Projects/pi-glowup/packages.py': [Errno 2] No such file or directory",
             "    Command exited with code 2",
         ]);
     });
@@ -479,7 +479,7 @@ describe("Codex rendering helpers", () => {
             "oxfmt . packages/pi-ui-tweaks/src/index.ts packages/pi-ui-tweaks/test/index.test.ts packages/pi-ui-tweaks/README.md";
 
         for (const expanded of [false, true]) {
-            const component = renderCodexOutput(plainTheme, [longLine, "done"].join("\n"), {
+            const component = renderGlowupOutput(plainTheme, [longLine, "done"].join("\n"), {
                 expanded,
                 maxPreviewLines: 5,
             });
@@ -496,7 +496,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("keeps collapsed output compact without rendering middle lines", () => {
-        const component = renderCodexOutput(
+        const component = renderGlowupOutput(
             plainTheme,
             [
                 "start",
@@ -521,7 +521,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("keeps collapsed output compact across huge internal blank runs", () => {
-        const component = renderCodexOutput(plainTheme, `start${"\n".repeat(2_000)}end`, {
+        const component = renderGlowupOutput(plainTheme, `start${"\n".repeat(2_000)}end`, {
             expanded: false,
             maxPreviewLines: 5,
             omittedHint: "hint",
@@ -535,7 +535,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("keeps hidden collapsed output previews hidden without treating output as empty", () => {
-        const component = renderCodexOutput(plainTheme, "secret\noutput", {
+        const component = renderGlowupOutput(plainTheme, "secret\noutput", {
             expanded: false,
             mode: "hidden",
             maxPreviewLines: 5,
@@ -551,7 +551,7 @@ describe("Codex rendering helpers", () => {
                 command: "cat > /tmp/game.ts <<'EOF'\\n" + "const value = 1;\\n".repeat(200),
             },
         })}`;
-        const component = renderCodexOutput(plainTheme, [hugeLine, "done"].join("\n"), {
+        const component = renderGlowupOutput(plainTheme, [hugeLine, "done"].join("\n"), {
             expanded: false,
             maxPreviewLines: 5,
             omittedHint: "hint",
@@ -570,7 +570,7 @@ describe("Codex rendering helpers", () => {
 
     it("does not add a row marker to an already truncated output preview", () => {
         const long = "wrapped ".repeat(40);
-        const component = renderCodexOutput(
+        const component = renderGlowupOutput(
             plainTheme,
             [
                 `first ${long}`,
@@ -946,7 +946,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("renders script output with an arrow prefix", () => {
-        const component = renderCodexOutput(
+        const component = renderGlowupOutput(
             plainTheme,
             "import index ms 470 function\ninit syntax ms 152",
             {
@@ -1072,7 +1072,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("keeps output renderer lines within the supplied width", () => {
-        const component = renderCodexOutput(plainTheme, "alpha beta gamma delta epsilon", {
+        const component = renderGlowupOutput(plainTheme, "alpha beta gamma delta epsilon", {
             expanded: true,
             dimContent: false,
         });
@@ -1097,7 +1097,7 @@ describe("Codex rendering helpers", () => {
             "+1 from pathlib import Path\n+2 \n+3 def greet():",
             "file.py",
         );
-        const lines = renderCodexDiff(plainTheme, sections, false).render(80);
+        const lines = renderGlowupDiff(plainTheme, sections, false).render(80);
         const blankAddition = lines.find((line) => line.trimEnd() === "    2 +");
 
         expect(blankAddition).toBeDefined();
@@ -1117,7 +1117,7 @@ describe("Codex rendering helpers", () => {
             addedContentBackground: "#004400",
             deletedContentBackground: "#440000",
         });
-        const lines = renderCodexDiff(
+        const lines = renderGlowupDiff(
             plainTheme,
             parseDiffSections("-10 const value = 100;\n+20 const value = 200;", "value.ts"),
             true,
@@ -1154,7 +1154,7 @@ describe("Codex rendering helpers", () => {
             deletedContentBackground: "#440000",
         });
         const width = 80;
-        const lines = renderCodexDiff(
+        const lines = renderGlowupDiff(
             plainTheme,
             parseDiffSections(" 1 alpha\n+2 \n 2 omega\n 3 beta\n-4 \n 4 gamma", "blank-lines.txt"),
             true,
@@ -1179,7 +1179,7 @@ describe("Codex rendering helpers", () => {
             addedContentBackground: "#004400",
             deletedContentBackground: "#440000",
         });
-        const lines = renderCodexDiff(
+        const lines = renderGlowupDiff(
             plainTheme,
             parseDiffSections(
                 [
@@ -1209,7 +1209,7 @@ describe("Codex rendering helpers", () => {
 
     it("derives shifted dual context coordinates in fallback diffs", () => {
         configureRenderingAppearance({ ...classicAppearance, diffLineNumberStyle: "dual" });
-        const lines = renderCodexDiff(
+        const lines = renderGlowupDiff(
             plainTheme,
             parseDiffSections(
                 "+2 inserted before context\n 2 shifted context\n-3 removed again\n 3 restored context",
@@ -1227,7 +1227,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("paints only changed spans while preserving unchanged syntax", () => {
-        const backgroundTheme: CodexRenderTheme = {
+        const backgroundTheme: GlowupRenderTheme = {
             ...plainTheme,
             bg(token, text) {
                 return `${token === "toolSuccessBg" ? "\u001b[42m" : "\u001b[41m"}${text}\u001b[49m`;
@@ -1237,7 +1237,7 @@ describe("Codex rendering helpers", () => {
             "-1 const limit = args.limit ?? 2000;\n+1 const limit = args.limit ?? 4000;",
             "file.ts",
         );
-        const rendered = renderCodexDiff(backgroundTheme, sections, true).render(80).join("\n");
+        const rendered = renderGlowupDiff(backgroundTheme, sections, true).render(80).join("\n");
 
         expect(rendered).toContain("\u001b[41m2000\u001b[49m");
         expect(rendered).toContain("\u001b[42m4000\u001b[49m");
@@ -1247,7 +1247,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("omits a replacement side with no changed content", () => {
-        const lines = renderCodexDiff(
+        const lines = renderGlowupDiff(
             plainTheme,
             [
                 {
@@ -1284,14 +1284,14 @@ describe("Codex rendering helpers", () => {
             dimUnchangedDiffText: false,
         });
         try {
-            const backgroundTheme: CodexRenderTheme = {
+            const backgroundTheme: GlowupRenderTheme = {
                 ...plainTheme,
                 bg(token, text) {
                     return `${token === "toolSuccessBg" ? "\u001b[42m" : "\u001b[41m"}${text}\u001b[49m`;
                 },
             };
             const sections = parseDiffSections("-1 old\n 1 unchanged\n+2 new", "file.ts");
-            const renderedLines = renderCodexDiff(backgroundTheme, sections, true).render(80);
+            const renderedLines = renderGlowupDiff(backgroundTheme, sections, true).render(80);
             const rendered = renderedLines.join("\n");
 
             expect(rendered).toContain("\u001b[42m    2 +new");
@@ -1326,7 +1326,7 @@ describe("Codex rendering helpers", () => {
             diffBackgroundStyle: "full-row",
             addedRowBackground: "#16351E",
         });
-        const [addition] = renderCodexDiff(
+        const [addition] = renderGlowupDiff(
             plainTheme,
             parseDiffSections("+1 \treturn value", "file.go"),
             true,
@@ -1338,7 +1338,7 @@ describe("Codex rendering helpers", () => {
     });
 
     it("renders partial diff omission metadata without a code gutter", () => {
-        const lines = renderCodexDiff(
+        const lines = renderGlowupDiff(
             plainTheme,
             [
                 {
@@ -1357,7 +1357,7 @@ describe("Codex rendering helpers", () => {
 
     it("dims fallback diff line numbers for inserted and deleted rows", () => {
         const sections = parseDiffSections("-1 old\n+2 new", "file.ts");
-        const rendered = renderCodexDiff(tokenTheme, sections, true).render(120).join("\n");
+        const rendered = renderGlowupDiff(tokenTheme, sections, true).render(120).join("\n");
 
         expect(rendered).toContain("<dim>1 </dim><toolDiffRemoved>-</toolDiffRemoved>");
         expect(rendered).toContain("<dim>2 </dim><toolDiffAdded>+</toolDiffAdded>");
@@ -1365,7 +1365,7 @@ describe("Codex rendering helpers", () => {
 
     it("right-aligns fallback diff line numbers by the widest line number", () => {
         const sections = parseDiffSections("-8 old\n+9 new\n+10 ten", "file.ts");
-        const lines = renderCodexDiff(plainTheme, sections, true)
+        const lines = renderGlowupDiff(plainTheme, sections, true)
             .render(120)
             .map((line) => line.trimEnd());
 
@@ -1377,7 +1377,7 @@ describe("Codex rendering helpers", () => {
             "-1 old text that wraps\n+1 new text that wraps",
             "file.ts",
         );
-        const component = renderCodexDiff(plainTheme, sections, true);
+        const component = renderGlowupDiff(plainTheme, sections, true);
 
         const width = 14;
         const lines = component.render(width);
@@ -1388,7 +1388,7 @@ describe("Codex rendering helpers", () => {
 
     it("fills the terminal's final cell in compact diff previews", () => {
         const width = 78;
-        const lines = renderCodexDiff(
+        const lines = renderGlowupDiff(
             plainTheme,
             [
                 {
@@ -1411,7 +1411,7 @@ describe("Codex rendering helpers", () => {
 
     it("preserves every character when diff content wraps", () => {
         const content = "abcdefghijklmnopqrstuvwxyz".repeat(4);
-        const lines = renderCodexDiff(
+        const lines = renderGlowupDiff(
             plainTheme,
             [{ lines: [`+1 ${content}`], added: 1, removed: 0 }],
             true,
@@ -1434,7 +1434,7 @@ describe("Codex rendering helpers", () => {
             `-1 ${"x".repeat(1_000)}\n+1 ${"y".repeat(1_000)}`,
             "file.ts",
         );
-        const component = renderCodexDiff(plainTheme, sections, false);
+        const component = renderGlowupDiff(plainTheme, sections, false);
 
         const lines = component.render(20);
 
@@ -1451,7 +1451,7 @@ describe("Codex rendering helpers", () => {
             ).join("\n"),
             "file.ts",
         );
-        const lines = renderCodexDiff(plainTheme, sections, false).render(120);
+        const lines = renderGlowupDiff(plainTheme, sections, false).render(120);
         const rendered = lines.join("\n");
 
         expect(rendered).toContain("added line 1");
@@ -1477,7 +1477,7 @@ describe("Codex rendering helpers", () => {
             added: 1,
             removed: 1,
         };
-        const rendered = renderCodexDiff(plainTheme, [section], false, {
+        const rendered = renderGlowupDiff(plainTheme, [section], false, {
             collapsedLineBudget: 4,
         })
             .render(120)

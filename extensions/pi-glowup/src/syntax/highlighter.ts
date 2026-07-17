@@ -530,7 +530,7 @@ function selectSyntaxPreloadLanguages(
         if (normalizedLanguage === undefined || normalizedLanguage === "text") {
             ignoredConfiguredLanguages.push(configuredLanguage);
             options.reportWarning?.(
-                `[pi-codex-look] Ignoring unknown syntax preload language ${formatConfiguredLanguageForWarning(configuredLanguage)}`,
+                `[pi-glowup] Ignoring unknown syntax preload language ${formatConfiguredLanguageForWarning(configuredLanguage)}`,
             );
             continue;
         }

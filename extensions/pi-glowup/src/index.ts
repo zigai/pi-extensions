@@ -11,9 +11,9 @@ import {
     type ScriptFormatterCommands,
 } from "./script-preview/formatters.ts";
 import {
-    getCodexLookGlobalConfigDirectory,
-    readCodexLookConfig,
-    type CodexLookConfig,
+    getGlowupGlobalConfigDirectory,
+    readGlowupConfig,
+    type GlowupConfig,
 } from "./config/config.ts";
 import { DebugFileLogger, type DebugLogFields } from "./diagnostics/debug-logger.ts";
 import { configureAssistantSeparatorPatch } from "./patches/assistant-separator.ts";
@@ -35,14 +35,14 @@ import {
     makeComponent,
     parseDiffSections,
     parseScriptInvocation,
-    renderCodexCall,
-    renderCodexDiff,
-    renderCodexExplore,
-    renderCodexOutput,
+    renderGlowupCall,
+    renderGlowupDiff,
+    renderGlowupExplore,
+    renderGlowupOutput,
     renderMutationCall,
     renderScriptCall,
     MUTATION_DIFF_PREVIEW_ROWS,
-    type CodexRenderTheme,
+    type GlowupRenderTheme,
     type FindActionArgs,
     type GrepActionArgs,
     type LsActionArgs,
@@ -127,13 +127,13 @@ const editPreviews = new EditPreviewStore(300);
 const scriptPreviews = createScriptPreviewStore();
 const explorationGroups = new ExplorationGroupStore();
 const PARTIAL_BASH_COMMAND_PREVIEW_CHARS = 4_000;
-const PRESERVE_TOOLS_ENV = "PI_CODEX_LOOK_PRESERVE_TOOLS";
-const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
-const SCRIPT_HEADER_LAYOUT_ENV = "PI_CODEX_LOOK_SCRIPT_HEADER_LAYOUT";
+const PRESERVE_TOOLS_ENV = "PI_GLOWUP_PRESERVE_TOOLS";
+const SCRIPT_FORMATTERS_ENV = "PI_GLOWUP_SCRIPT_FORMATTERS";
+const SCRIPT_HEADER_LAYOUT_ENV = "PI_GLOWUP_SCRIPT_HEADER_LAYOUT";
 const MUTATION_LABEL_COLUMN_WIDTH = "Writing".length;
-const ACTIVE_MUTATION_ALIGNMENT_KEY = "codexLookActiveMutationAlignment";
-const MUTATION_RESULT_RENDERED_KEY = "codexLookMutationResultRendered";
-const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-codex-look.extension-loaded");
+const ACTIVE_MUTATION_ALIGNMENT_KEY = "glowupActiveMutationAlignment";
+const MUTATION_RESULT_RENDERED_KEY = "glowupMutationResultRendered";
+const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-glowup.extension-loaded");
 const builtInRenderCallCounts: Record<string, number> = {};
 const builtInRenderResultCounts: Record<string, number> = {};
 const streamingScriptIdentities = new StreamingScriptIdentityStore();
@@ -199,7 +199,7 @@ function diagnosticSnapshot(): DebugLogFields {
     };
 }
 
-function configDiagnostics(config: CodexLookConfig): DebugLogFields {
+function configDiagnostics(config: GlowupConfig): DebugLogFields {
     return {
         appearance: {
             diffBackgroundStyle: config.appearance.diffBackgroundStyle,
@@ -279,14 +279,14 @@ function syntaxPathFromToolArg(path: string | undefined): string | undefined {
 function renderExplorationResult(
     result: TextResult,
     expanded: boolean,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     options?: { readonly syntaxPath: string | undefined },
 ) {
     const output = textOutput(result);
     if (output === undefined) {
         return emptyComponent();
     }
-    return renderCodexOutput(theme, output, {
+    return renderGlowupOutput(theme, output, {
         expanded,
         mode: "hidden",
         prefixFirst: "",
@@ -366,7 +366,7 @@ function markMutationResultRendered(context: BuiltInRenderContext): void {
 }
 
 function renderExplorationCall(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: ExplorationRenderContext,
     action: string,
     labelMode: ToolLabelMode,
@@ -375,7 +375,7 @@ function renderExplorationCall(
     if (decision.kind === "child") {
         return emptyComponent();
     }
-    return renderCodexExplore(theme, decision.actions, {
+    return renderGlowupExplore(theme, decision.actions, {
         statusText: toolStatusLabel(
             labelMode,
             { isPartial: decision.active },
@@ -389,7 +389,7 @@ function registerExplorationBoundary(toolCallId: string): void {
     explorationGroups.registerBoundary(toolCallId);
 }
 
-function thirdPartyToolRenderingOptions(config: CodexLookConfig): ThirdPartyToolRenderingOptions {
+function thirdPartyToolRenderingOptions(config: GlowupConfig): ThirdPartyToolRenderingOptions {
     const preservedFromEnv = process.env[PRESERVE_TOOLS_ENV];
     return {
         labelMode: config.toolLabels.mode,
@@ -527,7 +527,7 @@ function hasImageContent(result: TextResult): boolean {
 }
 
 function scriptFormatterCommands(
-    config: CodexLookConfig,
+    config: GlowupConfig,
     reportWarning: (message: string) => void,
 ): ScriptFormatterCommands {
     const formattersFromEnv = process.env[SCRIPT_FORMATTERS_ENV];
@@ -540,13 +540,13 @@ function scriptFormatterCommands(
 }
 
 function scriptBlockFormatter(
-    config: CodexLookConfig,
+    config: GlowupConfig,
     reportWarning: (message: string) => void,
 ): ScriptBlockFormatter | undefined {
     return createCommandScriptFormatter(scriptFormatterCommands(config, reportWarning));
 }
 
-function scriptPreviewHeaderLayout(config: CodexLookConfig): ScriptPreviewHeaderLayout {
+function scriptPreviewHeaderLayout(config: GlowupConfig): ScriptPreviewHeaderLayout {
     const headerLayoutFromEnv = process.env[SCRIPT_HEADER_LAYOUT_ENV];
     return headerLayoutFromEnv === undefined
         ? config.scriptHeaderLayout
@@ -643,14 +643,14 @@ function renderBuiltInToolResult(settings: {
                 return renderEditResult(result, options, theme, context);
             case "delete":
                 return context.isError
-                    ? renderCodexOutput(theme, textOutput(result), {
+                    ? renderGlowupOutput(theme, textOutput(result), {
                           expanded: options.expanded,
                           mode: "head",
                           maxPreviewLines: 5,
                       })
                     : emptyComponent();
             case "webSearch":
-                return renderCodexOutput(theme, textOutput(result), {
+                return renderGlowupOutput(theme, textOutput(result), {
                     expanded: options.expanded,
                     mode: "head",
                     maxPreviewLines: 5,
@@ -763,7 +763,7 @@ function renderDeleteCall(
     const filePath = pathField(args);
     const preview =
         nativeDeletePreview(context.toolCallId) ?? persistedDeletePreview(context.result, filePath);
-    const header = renderCodexCall(theme, {
+    const header = renderGlowupCall(theme, {
         state: callState(context),
         statusText: toolStatusLabel(labelMode, context, {
             static: "Delete",
@@ -775,7 +775,7 @@ function renderDeleteCall(
     if (preview === undefined || preview.section.lines.length === 0) {
         return header;
     }
-    const body = renderCodexDiff(theme, [preview.section], context.expanded, {
+    const body = renderGlowupDiff(theme, [preview.section], context.expanded, {
         collapsedLineBudget: MUTATION_DIFF_PREVIEW_ROWS,
         maxWrappedRows: 1,
     });
@@ -791,7 +791,7 @@ function renderWebSearchCall(
     registerExplorationBoundary(context.toolCallId);
     const query = webSearchQuery(args);
     const active = context.isPartial || !context.argsComplete;
-    return renderCodexCall(theme, {
+    return renderGlowupCall(theme, {
         state: callState(context),
         statusText: toolStatusLabel(labelMode, context, {
             static: "Web Search",
@@ -873,7 +873,7 @@ function renderBashResult(
     const output = textOutput(result);
     const language = detectStructuredOutputLanguage(output);
     const script = parseScriptInvocation(commandField(context.args));
-    return renderCodexOutput(theme, output, {
+    return renderGlowupOutput(theme, output, {
         expanded: options.expanded,
         mode: "headTail",
         maxPreviewLines: 5,
@@ -922,7 +922,7 @@ function renderWriteResult(
             return fallback;
         }
     }
-    return renderCodexOutput(theme, textOutput(result), {
+    return renderGlowupOutput(theme, textOutput(result), {
         expanded: options.expanded,
         mode: "head",
         maxPreviewLines: 5,
@@ -966,7 +966,7 @@ function renderEditCall(
 
     const normalizedArgs = normalizedEditArgs(args);
     if (isActiveToolCall(context)) {
-        return renderCodexCall(theme, {
+        return renderGlowupCall(theme, {
             state: "running",
             statusText: toolStatusLabel(labelMode, context, {
                 static: "Edit",
@@ -987,7 +987,7 @@ function renderEditCall(
             : isActiveToolCall(context)
               ? "running"
               : "success";
-    return renderCodexCall(theme, {
+    return renderGlowupCall(theme, {
         state,
         statusText: summary.statusText,
         body: `${formatPathTarget(theme, summary.path)}${summary.suffix}`,
@@ -1027,12 +1027,12 @@ function renderEditResult(
             return renderPierreDiff(summaryPayload, theme, { expanded: options.expanded }, context);
         }
         const sections = parseDiffSections(result.details.diff, path);
-        return renderCodexDiff(theme, sections, options.expanded, {
+        return renderGlowupDiff(theme, sections, options.expanded, {
             collapsedLineBudget: MUTATION_DIFF_PREVIEW_ROWS,
             maxWrappedRows: 1,
         });
     }
-    return renderCodexOutput(theme, textOutput(result), {
+    return renderGlowupOutput(theme, textOutput(result), {
         expanded: options.expanded,
         mode: "head",
         maxPreviewLines: 5,
@@ -1040,7 +1040,7 @@ function renderEditResult(
 }
 
 async function startSyntaxHighlighting(options: {
-    readonly config: CodexLookConfig;
+    readonly config: GlowupConfig;
     readonly cwd: string | undefined;
     readonly reportWarning: (message: string) => void;
 }): Promise<void> {
@@ -1054,12 +1054,12 @@ async function startSyntaxHighlighting(options: {
             reportWarning: options.reportWarning,
         });
     } catch (cause: unknown) {
-        options.reportWarning(`[pi-codex-look] Syntax preload failed: ${errorMessage(cause)}`);
+        options.reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
     }
 }
 
 async function restartSyntaxHighlighting(options: {
-    readonly config: CodexLookConfig;
+    readonly config: GlowupConfig;
     readonly cwd: string | undefined;
     readonly reportWarning: (message: string) => void;
 }): Promise<void> {
@@ -1073,7 +1073,7 @@ async function restartSyntaxHighlighting(options: {
             reportWarning: options.reportWarning,
         });
     } catch (cause: unknown) {
-        options.reportWarning(`[pi-codex-look] Syntax preload failed: ${errorMessage(cause)}`);
+        options.reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
     }
 }
 
@@ -1191,7 +1191,7 @@ function refreshToolRows(context: Pick<ExtensionContext, "mode" | "ui">): void {
     }
 }
 
-export default async function codexLookExtension(pi: ExtensionAPI): Promise<void> {
+export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
     // SAFETY: The symbol property is extension-private metadata on the concrete
     // ExtensionAPI object. It does not alter Pi's public API or handler semantics.
     const guardedPi = pi as ExtensionAPI & { [key: symbol]: boolean | undefined };
@@ -1201,9 +1201,9 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     guardedPi[EXTENSION_LOADED_KEY] = true;
 
     const reportWarning = (message: string): void => console.warn(message);
-    let config = readCodexLookConfig({ reportWarning });
+    let config = readGlowupConfig({ reportWarning });
     const debugLogger = new DebugFileLogger({
-        extensionDirectory: getCodexLookGlobalConfigDirectory(),
+        extensionDirectory: getGlowupGlobalConfigDirectory(),
         reportWarning,
     });
     debugLogger.configure(config.debugLog);
@@ -1211,7 +1211,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
     let headerLayout = scriptPreviewHeaderLayout(config);
     let sessionGeneration = 0;
 
-    const applyConfig = (nextConfig: CodexLookConfig): void => {
+    const applyConfig = (nextConfig: GlowupConfig): void => {
         config = nextConfig;
         configureRenderingAppearance(config.appearance);
         configureToolCallIndicator(config.toolCallIndicator);
@@ -1367,7 +1367,7 @@ export default async function codexLookExtension(pi: ExtensionAPI): Promise<void
 
     pi.on("session_start", async (_event, ctx) => {
         sessionGeneration += 1;
-        const nextConfig = readCodexLookConfig(
+        const nextConfig = readGlowupConfig(
             { cwd: ctx.cwd, reportWarning },
             { includeProjectConfig: ctx.isProjectTrusted() },
         );

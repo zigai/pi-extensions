@@ -23,14 +23,14 @@ import type { DiffLineNumberStyle, NarrowDiffLayout, SideBySideLayout } from "..
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
 
-type CodexRenderBg = "toolSuccessBg" | "toolErrorBg";
+type GlowupRenderBg = "toolSuccessBg" | "toolErrorBg";
 
-export type CodexRenderTheme = {
+export type GlowupRenderTheme = {
     readonly fg: (token: ThemeColor, text: string) => string;
-    readonly bg?: (token: CodexRenderBg, text: string) => string;
+    readonly bg?: (token: GlowupRenderBg, text: string) => string;
     readonly bold: (text: string) => string;
     readonly getFgAnsi?: (token: ThemeColor) => string;
-    readonly getBgAnsi?: (token: CodexRenderBg) => string;
+    readonly getBgAnsi?: (token: GlowupRenderBg) => string;
 };
 
 export type DiffBackgroundStyle = "changed-spans" | "two-tone" | "full-row";
@@ -177,7 +177,7 @@ export type LsActionArgs = {
     readonly limit?: number;
 };
 
-export type CodexCallState = "running" | "success" | "error" | "muted";
+export type GlowupCallState = "running" | "success" | "error" | "muted";
 
 export type MutationSummary = {
     readonly label: string;
@@ -216,14 +216,14 @@ const MAX_COLLAPSED_OUTPUT_PREVIEW_LINES = Math.max(
 );
 const MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES = 64 * 1024;
 const UTF8_TRUNCATION_SUFFIX = "…";
-const RETAINED_OUTPUT_LOG_ENV = "PI_CODEX_LOOK_RETAINED_OUTPUT_LOG";
+const RETAINED_OUTPUT_LOG_ENV = "PI_GLOWUP_RETAINED_OUTPUT_LOG";
 
-function fg(theme: CodexRenderTheme, token: ThemeColor, text: string): string {
+function fg(theme: GlowupRenderTheme, token: ThemeColor, text: string): string {
     return theme.fg(token, text);
 }
 
 function actionText(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     text: string,
     options?: { readonly bold?: boolean },
 ): string {
@@ -231,26 +231,26 @@ function actionText(
     return fg(theme, "toolTitle", styled);
 }
 
-function shellCommand(theme: CodexRenderTheme, text: string): string {
+function shellCommand(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "syntaxFunction", text);
 }
 
-function shellText(theme: CodexRenderTheme, text: string): string {
+function shellText(theme: GlowupRenderTheme, text: string): string {
     if (text.length === 0) {
         return "";
     }
     return fg(theme, "toolTitle", text);
 }
 
-function shellOperator(theme: CodexRenderTheme, text: string): string {
+function shellOperator(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "syntaxOperator", text);
 }
 
-function shellFlag(theme: CodexRenderTheme, text: string): string {
+function shellFlag(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "syntaxKeyword", text);
 }
 
-function shellString(theme: CodexRenderTheme, text: string): string {
+function shellString(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "syntaxString", text);
 }
 
@@ -330,34 +330,34 @@ const initialShellHighlightState: ShellHighlightState = {
     subcommandSeen: false,
 };
 
-function dim(theme: CodexRenderTheme, text: string): string {
+function dim(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "dim", text);
 }
 
-function muted(theme: CodexRenderTheme, text: string): string {
+function muted(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "muted", text);
 }
 
-function pathText(theme: CodexRenderTheme, text: string): string {
+function pathText(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "accent", text);
 }
 
-function instructionPathText(theme: CodexRenderTheme, text: string): string {
+function instructionPathText(theme: GlowupRenderTheme, text: string): string {
     if (renderingAppearance.instructionPathColor !== null) {
         return `${trueColorOpen(renderingAppearance.instructionPathColor, false)}${text}${ansiStyles.color.close}`;
     }
     return fg(theme, "customMessageLabel", text);
 }
 
-function green(theme: CodexRenderTheme, text: string): string {
+function green(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "toolDiffAdded", text);
 }
 
-function red(theme: CodexRenderTheme, text: string): string {
+function red(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "toolDiffRemoved", text);
 }
 
-function success(theme: CodexRenderTheme, text: string): string {
+function success(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "success", text);
 }
 
@@ -489,7 +489,7 @@ function wrapPreviewPhysicalLines(
     restPrefix: string,
     maxPhysicalLines: number | undefined,
     omittedHint: string,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): string[] {
     if (maxPhysicalLines === undefined || text === undefined) {
         return wrapPrefixedLine(text, width, firstPrefix, restPrefix);
@@ -817,7 +817,7 @@ function reportRetainedOutput(
         return;
     }
     console.warn(
-        `[pi-codex-look] renderCodexOutput retained ${JSON.stringify({
+        `[pi-glowup] renderGlowupOutput retained ${JSON.stringify({
             expanded: retained.kind === "expanded",
             mode,
             inputBytes: Buffer.byteLength(input ?? "", "utf8"),
@@ -848,7 +848,7 @@ function visitPhysicalLines(text: string, visit: (line: string) => void): void {
     }
 }
 
-function renderBullet(theme: CodexRenderTheme, state: CodexCallState): string {
+function renderBullet(theme: GlowupRenderTheme, state: GlowupCallState): string {
     const indicator = toolCallIndicator.bold
         ? theme.bold(toolCallIndicator.symbol)
         : toolCallIndicator.symbol;
@@ -864,10 +864,10 @@ function renderBullet(theme: CodexRenderTheme, state: CodexCallState): string {
     return muted(theme, indicator);
 }
 
-export function renderCodexCall(
-    theme: CodexRenderTheme,
+export function renderGlowupCall(
+    theme: GlowupRenderTheme,
     options: {
-        readonly state: CodexCallState;
+        readonly state: GlowupCallState;
         readonly statusText: string;
         readonly body?: string;
         readonly maxRenderedLines?: number;
@@ -890,14 +890,14 @@ export function renderCodexCall(
     });
 }
 
-export function renderCodexBody(theme: CodexRenderTheme, text: string | undefined): Component {
+export function renderGlowupBody(theme: GlowupRenderTheme, text: string | undefined): Component {
     return makeComponent((width) => wrapPrefixedLine(text, width, "", ""));
 }
 
-export function renderCodexExplore(
-    theme: CodexRenderTheme,
+export function renderGlowupExplore(
+    theme: GlowupRenderTheme,
     actions: ReadonlyArray<string | undefined>,
-    options: { readonly statusText?: string; readonly state?: CodexCallState } = {},
+    options: { readonly statusText?: string; readonly state?: GlowupCallState } = {},
 ): Component {
     return makeComponent((width) => {
         const rendered = wrapPrefixedLine(
@@ -918,13 +918,13 @@ export function renderCodexExplore(
 }
 
 export function renderMutationCall(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     summary: MutationSummary,
     options: {
         readonly body?: Component;
         readonly labelColumnWidth?: number;
         readonly statDigitWidth?: number;
-        readonly state?: CodexCallState;
+        readonly state?: GlowupCallState;
     } = {},
 ): Component {
     return makeComponent((width) => {
@@ -943,7 +943,7 @@ export function renderMutationCall(
 }
 
 function formatMutationStats(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     summary: MutationSummary,
     statDigitWidth: number | undefined,
 ): string {
@@ -980,7 +980,7 @@ function renderCollapsedWrappedPreview(
         readonly prefixRest: string;
         readonly width: number;
         readonly omittedHint: string;
-        readonly theme: CodexRenderTheme;
+        readonly theme: GlowupRenderTheme;
     },
 ): string[] {
     const rendered = flattenWrappedRows(lines);
@@ -1024,8 +1024,8 @@ function renderCollapsedWrappedPreview(
     return [...head, ...tail, marker(options.prefixRest)];
 }
 
-export function renderCodexOutput(
-    theme: CodexRenderTheme,
+export function renderGlowupOutput(
+    theme: GlowupRenderTheme,
     text: string | undefined,
     options: {
         readonly expanded: boolean;
@@ -1161,7 +1161,7 @@ export function isPartialInstructionFilePath(path: string | undefined): boolean 
 }
 
 export function formatPathTarget(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     path: string | undefined,
     options: { readonly isPartial?: boolean } = {},
 ): string {
@@ -1712,7 +1712,7 @@ function bashHeredocHighlightFromLine(line: string): BashHeredocHighlight | unde
     return { marker, language: interpreter.language };
 }
 
-function highlightShellLine(theme: CodexRenderTheme, line: string): string {
+function highlightShellLine(theme: GlowupRenderTheme, line: string): string {
     const commentStart = shellCommentStart(line);
     const shellPart = commentStart === undefined ? line : line.slice(0, commentStart);
     const commentPart = commentStart === undefined ? "" : line.slice(commentStart);
@@ -1729,7 +1729,7 @@ function highlightShellLine(theme: CodexRenderTheme, line: string): string {
 
 function highlightBashScriptPreviewLines(
     lines: ReadonlyArray<string>,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): string[] {
     const highlighted: string[] = [];
     let heredoc: BashHeredocHighlight | undefined;
@@ -1774,7 +1774,7 @@ function highlightBashScriptPreviewLines(
 function highlightScriptPreviewLines(
     lines: ReadonlyArray<string>,
     language: string,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): string[] {
     if (language === "bash") {
         return highlightBashScriptPreviewLines(lines, theme);
@@ -1924,7 +1924,7 @@ function detachedScriptPreviewCode(code: string): string {
 }
 
 function wrapScriptLine(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     line: string,
     width: number,
     firstPrefix: string,
@@ -1932,7 +1932,11 @@ function wrapScriptLine(
     return wrapSinglePhysicalLineWithContinuation(line, width, firstPrefix, dim(theme, "  │   "));
 }
 
-function renderScriptHeader(theme: CodexRenderTheme, state: CodexCallState, label: string): string {
+function renderScriptHeader(
+    theme: GlowupRenderTheme,
+    state: GlowupCallState,
+    label: string,
+): string {
     return `${renderBullet(theme, state)} ${actionText(theme, label, { bold: true })}`;
 }
 
@@ -1961,10 +1965,10 @@ function resolveScriptHeaderLayout(
 }
 
 export function renderScriptCall(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     invocation: ScriptInvocation,
     options: {
-        readonly state: CodexCallState;
+        readonly state: GlowupCallState;
         readonly expanded: boolean;
         readonly maxCodePreviewLines?: number;
         readonly omittedHint?: string;
@@ -2117,7 +2121,7 @@ function isShellFlagToken(token: string): boolean {
     return /^--[A-Za-z0-9][\w-]*(?:=.*)?$/u.test(token) || /^-[A-Za-z0-9][\w-]*$/u.test(token);
 }
 
-function styleShellFlagToken(theme: CodexRenderTheme, token: string): string {
+function styleShellFlagToken(theme: GlowupRenderTheme, token: string): string {
     const equalsIndex = token.indexOf("=");
     if (token.startsWith("--") && equalsIndex > 2) {
         const value = token.slice(equalsIndex + 1);
@@ -2126,7 +2130,7 @@ function styleShellFlagToken(theme: CodexRenderTheme, token: string): string {
     return shellFlag(theme, token);
 }
 
-function shellValue(theme: CodexRenderTheme, token: string): string {
+function shellValue(theme: GlowupRenderTheme, token: string): string {
     return isQuotedShellString(token) ? shellString(theme, token) : shellText(theme, token);
 }
 
@@ -2166,7 +2170,7 @@ function shouldStyleShellSubcommand(state: ShellHighlightState, token: string): 
 }
 
 function styleShellToken(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     token: string,
     state: ShellHighlightState,
 ): { readonly styled: string; readonly state: ShellHighlightState } {
@@ -2233,7 +2237,7 @@ function styleShellToken(
     return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };
 }
 
-export function highlightShell(theme: CodexRenderTheme, command: string | undefined): string {
+export function highlightShell(theme: GlowupRenderTheme, command: string | undefined): string {
     const stripped = previewShellCommandForHighlight(stripShellWrapper(command));
     const highlighted = highlightSyntaxCode(stripped, "bash");
     if (highlighted.join("\n") !== stripped) {
@@ -2268,7 +2272,7 @@ function previewShellCommandForHighlight(command: string): string {
 }
 
 export function formatReadAction(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     args: ReadActionArgs,
     options: { readonly isPartial?: boolean } = {},
 ): string {
@@ -2280,7 +2284,7 @@ export function formatReadAction(
     return `${actionText(theme, "Read")} ${target}`;
 }
 
-export function formatFindAction(theme: CodexRenderTheme, args: FindActionArgs): string {
+export function formatFindAction(theme: GlowupRenderTheme, args: FindActionArgs): string {
     const parts = [`${actionText(theme, "Find")} ${args.pattern ?? "*"}`];
     if (args.path !== undefined && args.path.length > 0) {
         parts.push(`in ${pathText(theme, collapseHome(args.path))}`);
@@ -2291,7 +2295,7 @@ export function formatFindAction(theme: CodexRenderTheme, args: FindActionArgs):
     return parts.join(" ");
 }
 
-export function formatGrepAction(theme: CodexRenderTheme, args: GrepActionArgs): string {
+export function formatGrepAction(theme: GlowupRenderTheme, args: GrepActionArgs): string {
     const parts = [`${actionText(theme, "Search")} ${args.pattern ?? ""}`.trim()];
     if (args.path !== undefined && args.path.length > 0) {
         parts.push(`in ${pathText(theme, collapseHome(args.path))}`);
@@ -2305,7 +2309,7 @@ export function formatGrepAction(theme: CodexRenderTheme, args: GrepActionArgs):
     return parts.join(" ");
 }
 
-export function formatLsAction(theme: CodexRenderTheme, args: LsActionArgs): string {
+export function formatLsAction(theme: GlowupRenderTheme, args: LsActionArgs): string {
     const parts = [
         `${actionText(theme, "List")} ${pathText(theme, collapseHome(args.path ?? "."))}`,
     ];
@@ -2590,7 +2594,7 @@ function renderDiffRow(
     line: string,
     width: number,
     leftPrefix: string,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     options?: {
         readonly path?: string;
         readonly lineNumberWidth?: number;
@@ -2689,7 +2693,7 @@ function paintEmptyDiffRowBackground(
     kind: "insert" | "delete" | "context",
     row: string,
     rowWidth: number,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     isReplacement: boolean,
 ): string {
     if (kind === "context" || configuredDiffBackgroundStyle() !== "two-tone" || !isReplacement) {
@@ -2707,7 +2711,7 @@ function paintEmptyDiffRowBackground(
 
 function diffSpanBackground(
     kind: "insert" | "delete" | "context",
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): { readonly open: string; readonly close: string } | undefined {
     const style = configuredDiffBackgroundStyle();
     if (kind === "context" || style === "full-row") {
@@ -2744,7 +2748,7 @@ function paintDiffRowBackground(
     kind: "insert" | "delete" | "context",
     row: string,
     rowWidth: number,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): string {
     const style = configuredDiffBackgroundStyle();
     if (kind === "context" || (style !== "full-row" && style !== "two-tone")) {
@@ -2760,7 +2764,7 @@ function paintDiffRowBackground(
 
 function diffRowBackgroundAnsi(
     kind: "insert" | "delete",
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): string | undefined {
     const configured = configuredDiffBackgroundAnsi(kind);
     if (configured !== undefined) {
@@ -2772,7 +2776,7 @@ function diffRowBackgroundAnsi(
 
 function diffSemanticForegroundAnsi(
     kind: "insert" | "delete",
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): string | undefined {
     const token = kind === "insert" ? "toolDiffAdded" : "toolDiffRemoved";
     return theme.getFgAnsi?.(token) ?? extractStyledAnsi(theme.fg, token);
@@ -2785,7 +2789,7 @@ function extractStyledAnsi<TToken extends string>(
     if (style === undefined) {
         return undefined;
     }
-    const sentinel = "__PI_CODEX_LOOK_STYLE__";
+    const sentinel = "__PI_GLOWUP_STYLE__";
     const wrapped = style(token, sentinel);
     const sentinelIndex = wrapped.indexOf(sentinel);
     if (sentinelIndex <= 0) {
@@ -2797,7 +2801,7 @@ function extractStyledAnsi<TToken extends string>(
 function styleDiffContent(
     kind: "insert" | "delete" | "context",
     content: string,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): string {
     if (hasAnsi(content)) {
         return content;
@@ -2880,7 +2884,7 @@ function styleDiffGutter(
     kind: "insert" | "delete" | "context",
     lineNumber: string,
     sign: string,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): string {
     const marker =
         kind === "insert"
@@ -2972,8 +2976,8 @@ function collapsedDiffLineIndices(
     );
 }
 
-export function renderCodexDiff(
-    theme: CodexRenderTheme,
+export function renderGlowupDiff(
+    theme: GlowupRenderTheme,
     sections: ReadonlyArray<DiffSection>,
     expanded: boolean,
     options: {

@@ -1,9 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import codexLookExtension from "../../src/index.ts";
+import glowupExtension from "../../src/index.ts";
 
 type ExtensionHandler = (...args: unknown[]) => unknown;
 
-export class CodexLookExtensionHarness {
+export class GlowupExtensionHarness {
     private readonly handlersByEvent = new Map<string, ExtensionHandler[]>();
     private readonly extensionApi: ExtensionAPI;
 
@@ -20,13 +20,13 @@ export class CodexLookExtensionHarness {
                 this.handlersByEvent.set(eventName, handlers);
             },
         };
-        // SAFETY: pi-codex-look only consumes ExtensionAPI.on during registration. Tests drive
+        // SAFETY: pi-glowup only consumes ExtensionAPI.on during registration. Tests drive
         // every registered callback through the representative event context below.
         this.extensionApi = apiBoundary as unknown as ExtensionAPI;
     }
 
     async install(cwd: string, branch: readonly unknown[] = []): Promise<void> {
-        await codexLookExtension(this.extensionApi);
+        await glowupExtension(this.extensionApi);
         await this.emit(
             "session_start",
             { type: "session_start", reason: "startup" },

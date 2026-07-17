@@ -7,14 +7,14 @@ import type { Component } from "@earendil-works/pi-tui";
 import {
     emptyComponent,
     formatPathTarget,
-    renderCodexCall,
-    renderCodexOutput,
+    renderGlowupCall,
+    renderGlowupOutput,
 } from "../rendering/core.ts";
 import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
 import {
     createThirdPartyToolRenderer,
     hasThirdPartyToolRendererPlugin,
-    hasCodexLookRenderingAdapter,
+    hasGlowupRenderingAdapter,
     shouldPreserveThirdPartyToolRenderer,
     type ThirdPartyToolRenderer,
     type ThirdPartyToolRenderContext,
@@ -22,13 +22,13 @@ import {
     type ThirdPartyToolResult,
 } from "../third-party-tools/renderers.ts";
 
-const BUILT_IN_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.built-in-renderers");
-const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for("zigai.pi-codex-look.built-in-renderer-state");
-const THIRD_PARTY_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.third-party-renderers");
+const BUILT_IN_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-glowup.built-in-renderers");
+const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.built-in-renderer-state");
+const THIRD_PARTY_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-glowup.third-party-renderers");
 const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
-    "zigai.pi-codex-look.third-party-renderer-state",
+    "zigai.pi-glowup.third-party-renderer-state",
 );
-const WRITE_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-codex-look.write-renderer");
+const WRITE_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-glowup.write-renderer");
 const MAX_THIRD_PARTY_RENDERERS = 100;
 
 type RenderShellMode = "default" | "self";
@@ -127,7 +127,7 @@ function nativeBuiltInToolName(toolName: string): BuiltInToolName | undefined {
     }
 }
 
-/** Returns the Codex-look renderer family for Pi/Cursor/Grok-compatible tool names. */
+/** Returns the Glowup renderer family for Pi/Cursor/Grok-compatible tool names. */
 export function compatBuiltInToolName(toolName: string): BuiltInToolName | undefined {
     switch (toolName) {
         case "Read":
@@ -251,7 +251,7 @@ function shouldUseThirdPartyRenderer(
         return false;
     }
 
-    if (hasCodexLookRenderingAdapter(definition)) {
+    if (hasGlowupRenderingAdapter(definition)) {
         return true;
     }
 
@@ -349,7 +349,7 @@ function isWriteToolInstance(instance: ToolExecutionInstance): boolean {
 const writeCallRenderer: ThirdPartyToolRenderer["renderCall"] = (args, theme, context) => {
     const record = typeof args === "object" && args !== null ? args : undefined;
     const path = record === undefined ? undefined : Reflect.get(record, "path");
-    return renderCodexCall(theme, {
+    return renderGlowupCall(theme, {
         state: context.isError ? "error" : context.isPartial ? "muted" : "success",
         statusText: "Write",
         body: formatPathTarget(theme, typeof path === "string" ? path : undefined),
@@ -359,7 +359,7 @@ const writeCallRenderer: ThirdPartyToolRenderer["renderCall"] = (args, theme, co
 const writeResultRenderer: ThirdPartyToolRenderer["renderResult"] = (result, options, theme) => {
     const output = resultText(result);
     const language = detectStructuredOutputLanguage(output);
-    return renderCodexOutput(theme, output, {
+    return renderGlowupOutput(theme, output, {
         expanded: options.expanded,
         mode: "head",
         maxPreviewLines: 5,
@@ -367,7 +367,7 @@ const writeResultRenderer: ThirdPartyToolRenderer["renderResult"] = (result, opt
     });
 };
 
-/** Enables, updates, or disables render-only Codex-look renderers for built-in tool names. */
+/** Enables, updates, or disables render-only Glowup renderers for built-in tool names. */
 export function configureBuiltInToolRendererPatch(
     enabled: boolean,
     options?: BuiltInToolRendererOptions,
@@ -398,7 +398,7 @@ export function configureBuiltInToolRendererPatch(
     let state: BuiltInRendererPatchState;
 
     const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
-        function getCodexLookBuiltInCallRenderer(this: ToolExecutionInstance) {
+        function getGlowupBuiltInCallRenderer(this: ToolExecutionInstance) {
             const toolName = builtInToolName(this);
             const originalRenderer = originalGetCallRenderer?.call(this);
             if (!state.enabled || toolName === undefined) {
@@ -415,7 +415,7 @@ export function configureBuiltInToolRendererPatch(
         };
 
     const getResultRenderer: RendererPatchWrappers["getResultRenderer"] =
-        function getCodexLookBuiltInResultRenderer(this: ToolExecutionInstance) {
+        function getGlowupBuiltInResultRenderer(this: ToolExecutionInstance) {
             const toolName = builtInToolName(this);
             const originalRenderer = originalGetResultRenderer?.call(this);
             if (!state.enabled || toolName === undefined) {
@@ -434,14 +434,14 @@ export function configureBuiltInToolRendererPatch(
         };
 
     const getRenderShell: RendererPatchWrappers["getRenderShell"] =
-        function getCodexLookBuiltInRenderShell(this: ToolExecutionInstance) {
+        function getGlowupBuiltInRenderShell(this: ToolExecutionInstance) {
             return state.enabled && builtInToolName(this) !== undefined
                 ? "self"
                 : (originalGetRenderShell?.call(this) ?? "default");
         };
 
     const hasRendererDefinition: RendererPatchWrappers["hasRendererDefinition"] =
-        function hasCodexLookBuiltInRendererDefinition(this: ToolExecutionInstance) {
+        function hasGlowupBuiltInRendererDefinition(this: ToolExecutionInstance) {
             return state.enabled && builtInToolName(this) !== undefined
                 ? true
                 : (originalHasRendererDefinition?.call(this) ?? false);
@@ -486,7 +486,7 @@ export function toolRendererPatchStats(
     };
 }
 
-/** Installs render-only Codex-look renderers for built-in tool names. */
+/** Installs render-only Glowup renderers for built-in tool names. */
 export function installBuiltInToolRendererPatch(
     options: BuiltInToolRendererOptions,
     prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
@@ -584,16 +584,14 @@ export function installBuiltInWriteRendererPatch(
     const originalGetRenderShell = prototype.getRenderShell;
     const originalHasRendererDefinition = prototype.hasRendererDefinition;
 
-    prototype.getCallRenderer = function getCodexLookWriteCallRenderer(
-        this: ToolExecutionInstance,
-    ) {
+    prototype.getCallRenderer = function getGlowupWriteCallRenderer(this: ToolExecutionInstance) {
         if (isWriteToolInstance(this)) {
             return writeCallRenderer;
         }
         return originalGetCallRenderer?.call(this);
     };
 
-    prototype.getResultRenderer = function getCodexLookWriteResultRenderer(
+    prototype.getResultRenderer = function getGlowupWriteResultRenderer(
         this: ToolExecutionInstance,
     ) {
         if (isWriteToolInstance(this)) {
@@ -602,14 +600,14 @@ export function installBuiltInWriteRendererPatch(
         return originalGetResultRenderer?.call(this);
     };
 
-    prototype.getRenderShell = function getCodexLookWriteRenderShell(this: ToolExecutionInstance) {
+    prototype.getRenderShell = function getGlowupWriteRenderShell(this: ToolExecutionInstance) {
         if (isWriteToolInstance(this)) {
             return "self";
         }
         return originalGetRenderShell?.call(this) ?? "default";
     };
 
-    prototype.hasRendererDefinition = function hasCodexLookWriteRendererDefinition(
+    prototype.hasRendererDefinition = function hasGlowupWriteRendererDefinition(
         this: ToolExecutionInstance,
     ) {
         if (isWriteToolInstance(this)) {
@@ -621,7 +619,7 @@ export function installBuiltInWriteRendererPatch(
     prototype[WRITE_RENDERER_PATCH_KEY] = true;
 }
 
-/** Enables, updates, or disables Codex-look fallback renderers for non-native tools. */
+/** Enables, updates, or disables Glowup fallback renderers for non-native tools. */
 export function configureThirdPartyToolRendererPatch(
     enabled: boolean,
     options?: ThirdPartyToolRenderingOptions,
@@ -649,7 +647,7 @@ export function configureThirdPartyToolRendererPatch(
     let state: ThirdPartyRendererPatchState;
 
     const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
-        function getCodexLookCallRenderer(this: ToolExecutionInstance) {
+        function getGlowupCallRenderer(this: ToolExecutionInstance) {
             const hasOriginalRendererDefinition = hasExplicitToolRenderer(this);
             if (
                 state.enabled &&
@@ -677,7 +675,7 @@ export function configureThirdPartyToolRendererPatch(
         };
 
     const getResultRenderer: RendererPatchWrappers["getResultRenderer"] =
-        function getCodexLookResultRenderer(this: ToolExecutionInstance) {
+        function getGlowupResultRenderer(this: ToolExecutionInstance) {
             const hasOriginalRendererDefinition = hasExplicitToolRenderer(this);
             if (
                 state.enabled &&
@@ -693,24 +691,21 @@ export function configureThirdPartyToolRendererPatch(
             return originalGetResultRenderer?.call(this);
         };
 
-    const getRenderShell: RendererPatchWrappers["getRenderShell"] =
-        function getCodexLookRenderShell(this: ToolExecutionInstance) {
-            const hasOriginalRendererDefinition = hasExplicitToolRenderer(this);
-            if (
-                state.enabled &&
-                shouldUseThirdPartyRenderer(
-                    this,
-                    state.renderingOptions,
-                    hasOriginalRendererDefinition,
-                )
-            ) {
-                return "self";
-            }
-            return originalGetRenderShell?.call(this) ?? "default";
-        };
+    const getRenderShell: RendererPatchWrappers["getRenderShell"] = function getGlowupRenderShell(
+        this: ToolExecutionInstance,
+    ) {
+        const hasOriginalRendererDefinition = hasExplicitToolRenderer(this);
+        if (
+            state.enabled &&
+            shouldUseThirdPartyRenderer(this, state.renderingOptions, hasOriginalRendererDefinition)
+        ) {
+            return "self";
+        }
+        return originalGetRenderShell?.call(this) ?? "default";
+    };
 
     const hasRendererDefinition: RendererPatchWrappers["hasRendererDefinition"] =
-        function hasCodexLookRendererDefinition(this: ToolExecutionInstance) {
+        function hasGlowupRendererDefinition(this: ToolExecutionInstance) {
             const hasOriginalRendererDefinition = hasExplicitToolRenderer(this);
             if (
                 state.enabled &&
@@ -748,7 +743,7 @@ export function configureThirdPartyToolRendererPatch(
     prototype[THIRD_PARTY_RENDERER_PATCH_KEY] = true;
 }
 
-/** Installs an idempotent Codex-look fallback renderer for non-native tools. */
+/** Installs an idempotent Glowup fallback renderer for non-native tools. */
 export function installThirdPartyToolRendererPatch(
     options?: ThirdPartyToolRenderingOptions,
     prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,

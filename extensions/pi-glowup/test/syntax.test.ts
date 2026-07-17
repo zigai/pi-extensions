@@ -11,10 +11,10 @@ import {
     configureRenderingAppearance,
     highlightShell,
     parseDiffSections,
-    renderCodexDiff,
-    renderCodexOutput,
+    renderGlowupDiff,
+    renderGlowupOutput,
     renderScriptCall,
-    type CodexRenderTheme,
+    type GlowupRenderTheme,
 } from "../src/rendering/core.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
@@ -72,7 +72,7 @@ const piTheme = new Theme(
     { name: "zigai-dark-test" },
 );
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },
@@ -136,17 +136,17 @@ describe("central syntax highlighting", () => {
     it("loads syntax env config including default, custom override, and off switch", () => {
         expect(loadSyntaxConfig()).toEqual({
             enabled: true,
-            themeName: "pi-codex-look-darker-modern",
+            themeName: "pi-glowup-darker-modern",
             themePath: bundledThemePath,
         });
-        expect(loadSyntaxConfig({ PI_CODEX_LOOK_SYNTAX_THEME: "/tmp/theme.json" })).toEqual({
+        expect(loadSyntaxConfig({ PI_GLOWUP_SYNTAX_THEME: "/tmp/theme.json" })).toEqual({
             enabled: true,
-            themeName: "pi-codex-look-darker-modern",
+            themeName: "pi-glowup-darker-modern",
             themePath: "/tmp/theme.json",
         });
-        expect(loadSyntaxConfig({ PI_CODEX_LOOK_SYNTAX: "off" })).toEqual({
+        expect(loadSyntaxConfig({ PI_GLOWUP_SYNTAX: "off" })).toEqual({
             enabled: false,
-            reason: "PI_CODEX_LOOK_SYNTAX=off",
+            reason: "PI_GLOWUP_SYNTAX=off",
         });
     });
 
@@ -385,7 +385,7 @@ describe("central syntax highlighting", () => {
     });
 
     it("highlights code output previews when a path is known", () => {
-        const rendered = renderCodexOutput(plainTheme, "const value = 1;", {
+        const rendered = renderGlowupOutput(plainTheme, "const value = 1;", {
             expanded: false,
             syntax: { path: "src/example.ts" },
         })
@@ -406,7 +406,7 @@ describe("central syntax highlighting", () => {
             "}",
         ].join("\n");
         const expectedCommentLine = highlightSyntaxCode(code, "typescript")[1];
-        const renderedCommentLine = renderCodexOutput(plainTheme, code, {
+        const renderedCommentLine = renderGlowupOutput(plainTheme, code, {
             expanded: false,
             maxPreviewLines: 8,
             syntax: { path: "src/example.ts" },
@@ -460,7 +460,7 @@ describe("central syntax highlighting", () => {
             instructionPathColor: null,
             dimUnchangedDiffText: false,
         });
-        const rendered = renderCodexDiff(
+        const rendered = renderGlowupDiff(
             plainTheme,
             parseDiffSections(
                 " 7 import pytest\n+9 def test_value():\n-9 def old_value():",
@@ -476,7 +476,7 @@ describe("central syntax highlighting", () => {
     });
 
     it("uses surrounding TOML diff context for inline table braces", () => {
-        const rendered = renderCodexDiff(
+        const rendered = renderGlowupDiff(
             plainTheme,
             parseDiffSections(
                 [
@@ -498,7 +498,7 @@ describe("central syntax highlighting", () => {
     });
 
     it("does not highlight TOML after diff ellipses as invalid", () => {
-        const rendered = renderCodexDiff(
+        const rendered = renderGlowupDiff(
             plainTheme,
             parseDiffSections(
                 [
@@ -533,7 +533,7 @@ describe("central syntax highlighting", () => {
     });
 
     it("uses the same VS Code theme for Pierre diff highlighting", async () => {
-        const directory = mkdtempSync(join(tmpdir(), "pi-codex-look-syntax-"));
+        const directory = mkdtempSync(join(tmpdir(), "pi-glowup-syntax-"));
         const filePath = join(directory, "example.ts");
         writeFileSync(filePath, "const value = call(1);\n");
 

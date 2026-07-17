@@ -104,14 +104,14 @@ describe("autocomplete cleanup patch", () => {
     it("does not clobber autocomplete cleanup wrappers installed later", () => {
         const prototype = createPrototype();
         configureAutocompleteCleanupPatch(true, prototype);
-        const codexClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
-        if (typeof codexClearAutocompleteUi !== "function") {
-            throw new Error("expected Codex-look autocomplete wrapper");
+        const originalClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
+        if (typeof originalClearAutocompleteUi !== "function") {
+            throw new Error("expected Glowup autocomplete wrapper");
         }
         prototype.clearAutocompleteUi = function clearAutocompleteUiWithLaterWrapper(
             this: FakeEditor,
         ): void {
-            codexClearAutocompleteUi.call(this);
+            originalClearAutocompleteUi.call(this);
         };
         const laterClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
         const editor = createEditor({ prefix: "/set", active: true, clearOnShrink: true });

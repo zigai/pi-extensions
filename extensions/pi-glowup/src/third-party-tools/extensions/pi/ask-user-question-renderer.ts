@@ -1,4 +1,4 @@
-import { renderCodexOutput, type CodexRenderTheme } from "../../../rendering/core.ts";
+import { renderGlowupOutput, type GlowupRenderTheme } from "../../../rendering/core.ts";
 import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
 import type {
     ThirdPartyToolRenderContext,
@@ -88,7 +88,7 @@ function parseAskUserQuestions(args: unknown): ReadonlyArray<AskUserQuestionItem
 }
 
 function formatAskUserQuestionHeadline(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     item: AskUserQuestionItem,
     index: number,
     totalQuestions: number,
@@ -101,7 +101,7 @@ function formatAskUserQuestionHeadline(
 }
 
 function formatAskUserQuestionOptions(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     item: AskUserQuestionItem,
     expanded: boolean,
 ): ReadonlyArray<string> {
@@ -129,7 +129,7 @@ function formatAskUserQuestionOptions(
 
 function summarizeAskUserQuestionArgs(
     args: unknown,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     expanded: boolean,
     context: ThirdPartyToolRenderContext,
 ): string | undefined {
@@ -198,7 +198,7 @@ function findAskUserQuestionItem(
 function summarizeAskUserQuestionResult(
     result: ThirdPartyToolResult,
     args: unknown,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     expanded: boolean,
 ): string | undefined {
     const output = textOutput(result);
@@ -249,7 +249,7 @@ export function createAskUserQuestionRenderer(
                 options.expanded,
             );
             if (summary !== undefined && summary.length > 0) {
-                return renderCodexOutput(theme, summary, {
+                return renderGlowupOutput(theme, summary, {
                     expanded: options.expanded,
                     mode: "head",
                     maxPreviewLines: 6,

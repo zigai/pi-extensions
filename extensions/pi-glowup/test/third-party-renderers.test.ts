@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import type { CodexRenderTheme } from "../src/rendering/core.ts";
-import type { CodexLookRenderingAdapter } from "../src/tool-rendering/protocol.ts";
+import type { GlowupRenderTheme } from "../src/rendering/core.ts";
+import type { GlowupRenderingAdapter } from "../src/tool-rendering/protocol.ts";
 import {
-    CODEX_LOOK_RENDERING_PROPERTY,
+    GLOWUP_RENDERING_PROPERTY,
     createThirdPartyToolRenderer,
-    hasCodexLookRenderingAdapter,
+    hasGlowupRenderingAdapter,
     parsePreservedThirdPartyToolNames,
     shouldPreserveThirdPartyToolRenderer,
 } from "../src/third-party-tools/renderers.ts";
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(token: string, text: string): string {
         return token === "accent" ? `<accent>${text}</accent>` : text;
     },
@@ -89,7 +89,7 @@ describe("third-party tool renderers", () => {
         }
     });
 
-    it("uses passive codexLookRendering adapters when present", () => {
+    it("uses passive glowupRendering adapters when present", () => {
         type DbQueryArgs = {
             readonly sql: string;
         };
@@ -114,14 +114,12 @@ describe("third-party tool renderers", () => {
                     mode: "head",
                 };
             },
-        } satisfies CodexLookRenderingAdapter<DbQueryArgs, DbQueryResult>;
+        } satisfies GlowupRenderingAdapter<DbQueryArgs, DbQueryResult>;
         const renderer = createThirdPartyToolRenderer("db_query", undefined, {
-            [CODEX_LOOK_RENDERING_PROPERTY]: rendering,
+            [GLOWUP_RENDERING_PROPERTY]: rendering,
         });
 
-        expect(hasCodexLookRenderingAdapter({ [CODEX_LOOK_RENDERING_PROPERTY]: rendering })).toBe(
-            true,
-        );
+        expect(hasGlowupRenderingAdapter({ [GLOWUP_RENDERING_PROPERTY]: rendering })).toBe(true);
         expect(
             renderer
                 .renderCall({ sql: "select * from users" }, plainTheme, renderContext)
@@ -152,11 +150,11 @@ describe("third-party tool renderers", () => {
                     completedLabel: "Queried DB",
                 };
             },
-        } satisfies CodexLookRenderingAdapter;
+        } satisfies GlowupRenderingAdapter;
         const renderer = createThirdPartyToolRenderer(
             "db_query",
             { labelMode: "lifecycle" },
-            { [CODEX_LOOK_RENDERING_PROPERTY]: rendering },
+            { [GLOWUP_RENDERING_PROPERTY]: rendering },
         );
 
         const active = renderer
@@ -174,7 +172,7 @@ describe("third-party tool renderers", () => {
         expect(completed).toContain("Queried DB");
     });
 
-    it("renders unknown tools as compact Codex-style calls", () => {
+    it("renders unknown tools as compact Glowup calls", () => {
         const renderer = createLifecycleRenderer("custom_tool");
 
         const lines = renderer
@@ -1076,7 +1074,7 @@ describe("third-party tool renderers", () => {
         expect(
             shouldPreserveThirdPartyToolRenderer({
                 toolName: "another_tool",
-                toolDefinition: { [CODEX_LOOK_RENDERING_PROPERTY]: "preserve" },
+                toolDefinition: { [GLOWUP_RENDERING_PROPERTY]: "preserve" },
             }),
         ).toBe(true);
     });

@@ -32,7 +32,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: pi-codex-look-pty-failure
+          name: pi-glowup-pty-failure
           path: artifacts/pty/
           if-no-files-found: ignore
           retention-days: 7

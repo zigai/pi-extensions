@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { configureRenderingAppearance, type CodexRenderTheme } from "../src/rendering/core.ts";
+import { configureRenderingAppearance, type GlowupRenderTheme } from "../src/rendering/core.ts";
 import {
     captureApplyPatchPreimages,
     clearApplyPatchRenderingState,
@@ -11,7 +11,7 @@ import {
 } from "../src/rendering/apply-patch-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },
@@ -147,7 +147,7 @@ describe("apply_patch renderer", () => {
     });
 
     it("derives real line numbers for coordinate-less edit hunks from the preimage", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-update-"));
         try {
             writeFileSync(
                 path.join(cwd, "example.ts"),
@@ -182,7 +182,7 @@ describe("apply_patch renderer", () => {
     });
 
     it("derives line numbers for coordinate-less update hunks outside cwd", async () => {
-        const root = mkdtempSync(path.join(tmpdir(), "pi-codex-look-outside-update-"));
+        const root = mkdtempSync(path.join(tmpdir(), "pi-glowup-outside-update-"));
         const cwd = path.join(root, "workspace");
         const targetDir = path.join(root, "global-config");
         mkdirSync(cwd);
@@ -223,7 +223,7 @@ describe("apply_patch renderer", () => {
     });
 
     it("leaves ambiguous coordinate-less update hunks unnumbered", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-ambiguous-update-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-ambiguous-update-"));
         try {
             writeFileSync(path.join(cwd, "example.txt"), "same\nmiddle\nsame\n");
             const patch = `*** Begin Patch
@@ -255,7 +255,7 @@ describe("apply_patch renderer", () => {
     });
 
     it("leaves insertion-only coordinate-less update hunks unnumbered", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-insertion-update-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-insertion-update-"));
         try {
             writeFileSync(path.join(cwd, "example.txt"), "existing\n");
             const patch = `*** Begin Patch
@@ -283,7 +283,7 @@ describe("apply_patch renderer", () => {
     });
 
     it("does not consult the current filesystem while rendering completed history", () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-update-"));
         try {
             writeFileSync(path.join(cwd, "example.ts"), "line one\nline two\nline three\n");
             const patch = `*** Begin Patch
@@ -327,7 +327,7 @@ describe("apply_patch renderer", () => {
     });
 
     it("accounts for earlier hunk line shifts when deriving later line numbers", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-update-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-update-"));
         try {
             writeFileSync(
                 path.join(cwd, "example.ts"),
@@ -444,7 +444,7 @@ describe("apply_patch renderer", () => {
     });
 
     it("uses preimages captured by tool-call preflight for streaming updates", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-streaming-patch-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-streaming-patch-"));
         try {
             writeFileSync(
                 path.join(cwd, "example.ts"),
@@ -694,7 +694,7 @@ describe("apply_patch renderer", () => {
     });
 
     it("retains readable deleted text with an honest removed-line count", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-codex-look-delete-"));
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-delete-"));
         const filePath = path.join(cwd, "removed.ts");
         writeFileSync(filePath, "one\ntwo\nthree\n");
         const renderer = createThirdPartyToolRenderer("apply_patch", {

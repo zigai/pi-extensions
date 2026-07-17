@@ -5,13 +5,13 @@ import {
     formatPathTarget,
     makeComponent,
     parseDiffSections,
-    renderCodexBody,
-    renderCodexCall,
-    renderCodexDiff,
-    renderCodexOutput,
+    renderGlowupBody,
+    renderGlowupCall,
+    renderGlowupDiff,
+    renderGlowupOutput,
     renderMutationCall,
     MUTATION_DIFF_PREVIEW_ROWS,
-    type CodexRenderTheme,
+    type GlowupRenderTheme,
     type DiffLineCoordinates,
     type DiffSection,
 } from "./core.ts";
@@ -999,7 +999,7 @@ class PartialApplyPatchPreview {
 
 type PartialApplyPatchPreviewUpdate = {
     readonly patch: string;
-    readonly theme: CodexRenderTheme;
+    readonly theme: GlowupRenderTheme;
     readonly expanded: boolean;
     readonly labelMode: ToolLabelMode;
     readonly toolCallId: string;
@@ -1008,7 +1008,7 @@ type PartialApplyPatchPreviewUpdate = {
 class PartialApplyPatchCallPreviewComponent implements Component {
     private readonly preview = new PartialApplyPatchPreview();
     private readonly toolCallId: string;
-    private theme: CodexRenderTheme;
+    private theme: GlowupRenderTheme;
     private expanded = false;
     private labelMode: ToolLabelMode = "static";
     private patch = "";
@@ -1046,7 +1046,7 @@ class PartialApplyPatchCallPreviewComponent implements Component {
                 : hydratedSection;
         const component =
             section === undefined
-                ? renderCodexCall(this.theme, {
+                ? renderGlowupCall(this.theme, {
                       state: "running",
                       statusText: toolStatusLabel(
                           this.labelMode,
@@ -1114,12 +1114,12 @@ function completedDiffLineBudget(lineCount: number, maxRenderedRows: number): nu
 
 function completedSectionDiff(
     section: ApplyPatchSection,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
 ): Component | undefined {
     if (section.lines.length === 0) {
         return undefined;
     }
-    return renderCodexDiff(theme, [section], false, {
+    return renderGlowupDiff(theme, [section], false, {
         collapsedLineBudget: completedDiffLineBudget(
             section.lines.length,
             MAX_PARTIAL_PATCH_PREVIEW_LINES,
@@ -1145,19 +1145,19 @@ function patchCallLabel(labelMode: ToolLabelMode, context: PatchCallLifecycleCon
 
 function renderCompletedPatchViewport(
     summary: ApplyPatchSummary,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
 ): Component {
     const firstSection = summary.sections[0];
     if (firstSection === undefined) {
-        return renderCodexBody(theme, "");
+        return renderGlowupBody(theme, "");
     }
 
     return renderStandalonePatchSections(summary.sections, theme, false, context, labelMode);
 }
 
-function deleteStats(theme: CodexRenderTheme, section: ApplyPatchSection): string {
+function deleteStats(theme: GlowupRenderTheme, section: ApplyPatchSection): string {
     return section.countsKnown && section.removed > 0
         ? ` (${theme.fg("toolDiffRemoved", `-${section.removed}`)})`
         : "";
@@ -1165,7 +1165,7 @@ function deleteStats(theme: CodexRenderTheme, section: ApplyPatchSection): strin
 
 function completedPatchSection(
     section: ApplyPatchSection,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     expanded: boolean,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
@@ -1174,11 +1174,11 @@ function completedPatchSection(
     const diff = expanded
         ? section.lines.length === 0
             ? undefined
-            : renderCodexDiff(theme, [section], true)
+            : renderGlowupDiff(theme, [section], true)
         : completedSectionDiff(section, theme);
     const header =
         section.kind === "delete" && !section.countsKnown
-            ? renderCodexCall(theme, {
+            ? renderGlowupCall(theme, {
                   state: context.isError === true ? "muted" : "success",
                   statusText: label,
                   body: `${formatPathTarget(theme, section.path ?? "file")}${deleteStats(theme, section)}`,
@@ -1204,7 +1204,7 @@ function completedPatchSection(
 
 function renderStandalonePatchSections(
     sections: readonly ApplyPatchSection[],
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     expanded: boolean,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
@@ -1222,7 +1222,7 @@ function renderStandalonePatchSections(
 
 function renderSinglePatchSection(
     section: ApplyPatchSection,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     expanded: boolean,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
@@ -1231,7 +1231,7 @@ function renderSinglePatchSection(
     if (isActiveToolCall(context)) {
         const header =
             section.kind === "delete"
-                ? renderCodexCall(theme, {
+                ? renderGlowupCall(theme, {
                       state: "running",
                       statusText: label,
                       body: formatPathTarget(theme, section.path ?? "file"),
@@ -1248,22 +1248,22 @@ function renderSinglePatchSection(
                   );
         const body =
             section.lines.length === 0
-                ? renderCodexBody(theme, theme.fg("dim", "    …"))
-                : renderCodexDiff(theme, [section], false, {
+                ? renderGlowupBody(theme, theme.fg("dim", "    …"))
+                : renderGlowupDiff(theme, [section], false, {
                       collapsedLineBudget: MAX_PARTIAL_PATCH_PREVIEW_LINES,
                       maxWrappedRows: 1,
                   });
         return renderPartialPatchViewport(header, body);
     }
     if (section.kind === "delete") {
-        const header = renderCodexCall(theme, {
+        const header = renderGlowupCall(theme, {
             state: "muted",
             statusText: label,
             body: formatPathTarget(theme, section.path ?? "file"),
         });
         return header;
     }
-    const body = renderCodexDiff(theme, [section], expanded);
+    const body = renderGlowupDiff(theme, [section], expanded);
     return renderMutationCall(
         theme,
         {
@@ -1278,7 +1278,7 @@ function renderSinglePatchSection(
 
 function renderApplyPatchSummary(
     summary: ApplyPatchSummary,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     expanded: boolean,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
@@ -1290,7 +1290,7 @@ function renderApplyPatchSummary(
     if (summary.sections.length === 1) {
         const section = summary.sections[0];
         return section === undefined
-            ? renderCodexBody(theme, "")
+            ? renderGlowupBody(theme, "")
             : renderSinglePatchSection(section, theme, expanded, context, labelMode);
     }
 
@@ -1299,7 +1299,7 @@ function renderApplyPatchSummary(
 
 function renderApplyPatchFallbackCall(
     args: unknown,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: ThirdPartyToolRenderContext,
     labelMode: ToolLabelMode,
 ): Component {
@@ -1309,9 +1309,9 @@ function renderApplyPatchFallbackCall(
     const state = isActiveToolCall(context) ? "running" : "muted";
     const statusText = patchCallLabel(labelMode, context);
     if (active) {
-        return renderCodexCall(theme, { state, statusText });
+        return renderGlowupCall(theme, { state, statusText });
     }
-    return renderCodexCall(theme, {
+    return renderGlowupCall(theme, {
         state,
         statusText,
         body: lines > 0 ? `${lines} patch lines` : "patch",
@@ -1320,7 +1320,7 @@ function renderApplyPatchFallbackCall(
 
 function renderPartialApplyPatchCall(
     patch: string,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: ThirdPartyToolRenderContext,
     labelMode: ToolLabelMode,
 ): Component {
@@ -1355,15 +1355,15 @@ function textOutput(result: ThirdPartyToolResult): string | undefined {
 function renderApplyPatchFailure(
     result: ThirdPartyToolResult,
     options: { readonly expanded: boolean },
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     labelMode: ToolLabelMode,
 ): Component {
     return makeComponent((width) => [
-        ...renderCodexCall(theme, {
+        ...renderGlowupCall(theme, {
             state: "error",
             statusText: labelMode === "lifecycle" ? "Failed to patch" : "Patch",
         }).render(width),
-        ...renderCodexOutput(theme, textOutput(result), {
+        ...renderGlowupOutput(theme, textOutput(result), {
             expanded: options.expanded,
             mode: "head",
             maxPreviewLines: 5,
@@ -1450,7 +1450,7 @@ export function createApplyPatchRenderer(
             ) {
                 return emptyComponent();
             }
-            return renderCodexOutput(theme, textOutput(result), {
+            return renderGlowupOutput(theme, textOutput(result), {
                 expanded: options.expanded,
                 mode: "head",
                 maxPreviewLines: 5,

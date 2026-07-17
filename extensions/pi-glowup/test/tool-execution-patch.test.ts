@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CodexRenderTheme } from "../src/rendering/core.ts";
+import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import type {
     ThirdPartyToolRenderer,
     ThirdPartyToolRendererPlugin,
@@ -12,7 +12,7 @@ import {
     installThirdPartyToolRendererPatch,
 } from "../src/patches/tool-execution-patch.ts";
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },
@@ -328,7 +328,7 @@ describe("tool execution patches", () => {
         ).toEqual(["existing renderer"]);
     });
 
-    it("auto-converts unknown third-party tools to self-shell Codex rendering", () => {
+    it("auto-converts unknown third-party tools to self-shell Glowup rendering", () => {
         const prototype = createPrototype();
         installThirdPartyToolRendererPatch(undefined, prototype);
 
@@ -391,7 +391,7 @@ describe("tool execution patches", () => {
         ).toEqual(["existing renderer"]);
     });
 
-    it("uses explicit Codex-look plugins over native renderers", () => {
+    it("uses explicit Glowup plugins over native renderers", () => {
         const prototype = createPrototype();
         prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
             return true;
@@ -475,7 +475,7 @@ describe("tool execution patches", () => {
         expect(rendered).not.toContain("removed.ts (-1)");
     });
 
-    it("uses explicit Codex-look plugins over native built-in renderers", () => {
+    it("uses explicit Glowup plugins over native built-in renderers", () => {
         const prototype = createPrototype();
         prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
             return true;
@@ -502,7 +502,7 @@ describe("tool execution patches", () => {
         ).toContain("Patch src/new.ts (+1)");
     });
 
-    it("uses passive Codex-look adapters over native third-party renderers", () => {
+    it("uses passive Glowup adapters over native third-party renderers", () => {
         const prototype = createPrototype();
         prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
             return true;
@@ -513,7 +513,7 @@ describe("tool execution patches", () => {
             toolName: "db_query",
             toolDefinition: {
                 renderCall: () => ({ render: () => [], invalidate: noop }),
-                codexLookRendering: {
+                glowupRendering: {
                     version: 1,
                     renderCall: () => ({
                         kind: "call",
@@ -540,7 +540,7 @@ describe("tool execution patches", () => {
         const makeInstance = (label: string): FakeToolExecutionInstance => ({
             toolName: "dynamic_tool",
             toolDefinition: {
-                codexLookRendering: {
+                glowupRendering: {
                     version: 1,
                     renderCall: () => ({ kind: "call", label }),
                 },
@@ -608,12 +608,12 @@ describe("tool execution patches", () => {
         };
 
         configureThirdPartyToolRendererPatch(true, undefined, prototype);
-        const codexGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
-        if (typeof codexGetCallRenderer !== "function") {
-            throw new Error("expected Codex-look call renderer wrapper");
+        const originalGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+        if (typeof originalGetCallRenderer !== "function") {
+            throw new Error("expected Glowup call renderer wrapper");
         }
         prototype.getCallRenderer = function getLaterCallRenderer(this: object) {
-            return codexGetCallRenderer.call(this);
+            return originalGetCallRenderer.call(this);
         };
         const laterGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
 

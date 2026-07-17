@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Component } from "@earendil-works/pi-tui";
-import { configureRenderingAppearance, type CodexRenderTheme } from "../src/rendering/core.ts";
+import { configureRenderingAppearance, type GlowupRenderTheme } from "../src/rendering/core.ts";
 import {
     renderSuccessfulWriteResultFallback,
     renderWriteCallPreview,
 } from "../src/rendering/write-rendering.ts";
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },
@@ -18,7 +18,7 @@ const plainTheme: CodexRenderTheme = {
     },
 };
 
-const dimMarkerTheme: CodexRenderTheme = {
+const dimMarkerTheme: GlowupRenderTheme = {
     fg(token: string, text: string): string {
         return token === "dim" ? `<dim>${text}</dim>` : text;
     },
@@ -81,7 +81,7 @@ describe("write rendering", () => {
     });
 
     it("uses the Pi addition background for written content", () => {
-        const backgroundTheme: CodexRenderTheme = {
+        const backgroundTheme: GlowupRenderTheme = {
             ...plainTheme,
             bg(token, text) {
                 return `<${token}>${text}</${token}>`;

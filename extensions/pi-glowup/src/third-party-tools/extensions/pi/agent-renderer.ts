@@ -1,4 +1,4 @@
-import { renderCodexOutput } from "../../../rendering/core.ts";
+import { renderGlowupOutput } from "../../../rendering/core.ts";
 import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
 import type {
     ThirdPartyToolRenderContext,
@@ -295,7 +295,7 @@ export function createAgentRenderer(
         renderResult(result, options, theme) {
             const summary = agentResultSummary(result);
             if (summary !== undefined && summary.length > 0) {
-                return renderCodexOutput(theme, summary, {
+                return renderGlowupOutput(theme, summary, {
                     expanded: options.expanded,
                     mode: "head",
                     maxPreviewLines: 6,

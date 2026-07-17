@@ -1,7 +1,7 @@
 import {
     emptyComponent,
-    renderCodexOutput,
-    type CodexRenderTheme,
+    renderGlowupOutput,
+    type GlowupRenderTheme,
 } from "../../../rendering/core.ts";
 import type {
     ThirdPartyToolRenderContext,
@@ -60,7 +60,7 @@ function codexCallLabels(toolName: string): ToolLifecycleLabels {
 function codexCallBody(
     toolName: string,
     args: unknown,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: ThirdPartyToolRenderContext,
 ): string | undefined {
     const normalized = baseToolName(toolName);
@@ -79,7 +79,7 @@ function codexCallBody(
 function codexResultSummary(
     toolName: string,
     result: ThirdPartyToolResult,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     options: { readonly expanded: boolean },
 ): string | undefined {
     const normalized = baseToolName(toolName);
@@ -122,7 +122,7 @@ export function createCodexRenderer(
                 expanded: options.expanded,
             });
             if (summary !== undefined && summary.length > 0) {
-                return renderCodexOutput(theme, summary, {
+                return renderGlowupOutput(theme, summary, {
                     expanded: options.expanded,
                     mode: "head",
                     maxPreviewLines: codexResultPreviewLines(toolName),

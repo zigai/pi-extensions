@@ -1,8 +1,8 @@
 import {
     emptyComponent,
-    renderCodexOutput,
-    type CodexCallState,
-    type CodexRenderTheme,
+    renderGlowupOutput,
+    type GlowupCallState,
+    type GlowupRenderTheme,
 } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import {
@@ -12,16 +12,16 @@ import {
     thirdPartyStatusLabel,
 } from "./call-rendering.ts";
 import type {
-    CodexLookRenderingAdapter,
-    CodexLookSection,
-    CodexLookView,
+    GlowupRenderingAdapter,
+    GlowupSection,
+    GlowupView,
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
 } from "./types.ts";
 
-function renderCodexLookView(
-    view: CodexLookView,
-    theme: CodexRenderTheme,
+function renderGlowupView(
+    view: GlowupView,
+    theme: GlowupRenderTheme,
     context: ThirdPartyToolRenderContext,
     options: { readonly expanded: boolean; readonly isPartial: boolean },
     labelMode: ToolLabelMode,
@@ -41,7 +41,7 @@ function renderCodexLookView(
                 ...(view.expandable === undefined ? {} : { expandable: view.expandable }),
             });
         case "output":
-            return renderCodexOutput(theme, view.text, {
+            return renderGlowupOutput(theme, view.text, {
                 expanded: options.expanded,
                 mode: view.mode ?? "headTail",
                 maxPreviewLines: view.maxPreviewLines ?? 5,
@@ -49,7 +49,7 @@ function renderCodexLookView(
                 ...(view.syntax === undefined ? {} : { syntax: view.syntax }),
             });
         case "sections":
-            return renderCodexOutput(theme, sectionText(view.sections, theme), {
+            return renderGlowupOutput(theme, sectionText(view.sections, theme), {
                 expanded: options.expanded,
                 mode: "headTail",
                 maxPreviewLines: view.maxPreviewLines ?? 5,
@@ -60,11 +60,11 @@ function renderCodexLookView(
     }
 }
 
-function sectionText(sections: readonly CodexLookSection[], theme: CodexRenderTheme): string {
+function sectionText(sections: readonly GlowupSection[], theme: GlowupRenderTheme): string {
     return sections.map((section) => formatSection(section, theme)).join("\n");
 }
 
-function formatSection(section: CodexLookSection, theme: CodexRenderTheme): string {
+function formatSection(section: GlowupSection, theme: GlowupRenderTheme): string {
     switch (section.kind) {
         case "text":
             return section.text;
@@ -78,9 +78,9 @@ function formatSection(section: CodexLookSection, theme: CodexRenderTheme): stri
     return "";
 }
 
-/** Creates a renderer from a passive `codexLookRendering` adapter object. */
+/** Creates a renderer from a passive `glowupRendering` adapter object. */
 export function createProtocolRenderer(
-    adapter: CodexLookRenderingAdapter,
+    adapter: GlowupRenderingAdapter,
     fallback: ThirdPartyToolRenderer,
     labelMode: ToolLabelMode = "static",
 ): ThirdPartyToolRenderer {
@@ -90,7 +90,7 @@ export function createProtocolRenderer(
             if (view === undefined) {
                 return fallback.renderCall(args, theme, context);
             }
-            return renderCodexLookView(
+            return renderGlowupView(
                 view,
                 theme,
                 context,
@@ -106,12 +106,12 @@ export function createProtocolRenderer(
             if (view === undefined) {
                 return fallback.renderResult(result, options, theme, context);
             }
-            return renderCodexLookView(view, theme, context, options, labelMode);
+            return renderGlowupView(view, theme, context, options, labelMode);
         },
     };
 }
 
-export function isCodexLookRenderingAdapter(value: unknown): value is CodexLookRenderingAdapter {
+export function isGlowupRenderingAdapter(value: unknown): value is GlowupRenderingAdapter {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return false;
     }
@@ -123,10 +123,10 @@ export function isCodexLookRenderingAdapter(value: unknown): value is CodexLookR
     return typeof renderCall === "function" || typeof renderResult === "function";
 }
 
-export function codexLookRenderingAdapter(
+export function glowupRenderingAdapter(
     toolDefinition: unknown,
     propertyName: string,
-): CodexLookRenderingAdapter | undefined {
+): GlowupRenderingAdapter | undefined {
     if (
         typeof toolDefinition !== "object" ||
         toolDefinition === null ||
@@ -135,9 +135,9 @@ export function codexLookRenderingAdapter(
         return undefined;
     }
     const value = Reflect.get(toolDefinition, propertyName);
-    return isCodexLookRenderingAdapter(value) ? value : undefined;
+    return isGlowupRenderingAdapter(value) ? value : undefined;
 }
 
-export function codexLookViewState(state: CodexCallState): CodexCallState {
+export function glowupViewState(state: GlowupCallState): GlowupCallState {
     return state;
 }

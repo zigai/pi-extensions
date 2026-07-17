@@ -8,8 +8,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getCodexLookGlobalConfigPath } from "../src/config/config.ts";
-import codexLookExtension from "../src/index.ts";
+import { getGlowupGlobalConfigPath } from "../src/config/config.ts";
+import glowupExtension from "../src/index.ts";
 import { disposeSyntaxHighlighting, isSyntaxHighlightingReady } from "../src/syntax/highlighter.ts";
 
 type SessionStartEvent = {
@@ -137,7 +137,7 @@ class FakeExtensionApi {
 }
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
-const SCRIPT_FORMATTERS_ENV = "PI_CODEX_LOOK_SCRIPT_FORMATTERS";
+const SCRIPT_FORMATTERS_ENV = "PI_GLOWUP_SCRIPT_FORMATTERS";
 
 describe("extension lifecycle", () => {
     const originalAgentDir = process.env[AGENT_DIR_ENV];
@@ -160,12 +160,12 @@ describe("extension lifecycle", () => {
 
     it("initializes syntax highlighting without diagnostics by default", async () => {
         vi.useFakeTimers();
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         const agentDir = join(root, "agent");
         process.env[AGENT_DIR_ENV] = agentDir;
         const pi = new FakeExtensionApi();
 
-        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await glowupExtension(pi as unknown as ExtensionAPI);
 
         expect(pi.registeredToolCount).toBe(0);
         expect(vi.getTimerCount()).toBe(0);
@@ -175,7 +175,7 @@ describe("extension lifecycle", () => {
 
         expect(vi.getTimerCount()).toBe(0);
         expect(isSyntaxHighlightingReady()).toBe(true);
-        expect(existsSync(join(agentDir, "pi-codex-look", "debug.log"))).toBe(false);
+        expect(existsSync(join(agentDir, "pi-glowup", "debug.log"))).toBe(false);
 
         await pi.shutdownSession();
 
@@ -184,19 +184,19 @@ describe("extension lifecycle", () => {
 
     it("starts diagnostic logging only when explicitly enabled", async () => {
         vi.useFakeTimers();
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         const agentDir = join(root, "agent");
         process.env[AGENT_DIR_ENV] = agentDir;
-        const configPath = getCodexLookGlobalConfigPath(agentDir);
-        mkdirSync(join(agentDir, "pi-codex-look"), { recursive: true });
+        const configPath = getGlowupGlobalConfigPath(agentDir);
+        mkdirSync(join(agentDir, "pi-glowup"), { recursive: true });
         writeFileSync(configPath, JSON.stringify({ debugLog: { enabled: true } }));
         const pi = new FakeExtensionApi();
 
-        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await glowupExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(join(root, "project"), false);
 
         expect(vi.getTimerCount()).toBe(1);
-        expect(readLogEvents(join(agentDir, "pi-codex-look", "debug.log"))).toEqual(
+        expect(readLogEvents(join(agentDir, "pi-glowup", "debug.log"))).toEqual(
             expect.arrayContaining(["config_applied", "extension_loaded", "session_start"]),
         );
 
@@ -204,11 +204,11 @@ describe("extension lifecycle", () => {
     });
 
     it("keeps syntax ready across reload teardown", async () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
 
-        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await glowupExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(join(root, "project"), false);
         await pi.shutdownSession("reload");
 
@@ -216,25 +216,25 @@ describe("extension lifecycle", () => {
     });
 
     it("refreshes retained tool components after TUI syntax startup", async () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
 
-        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await glowupExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(join(root, "project"), false, "tui");
 
         expect(pi.toolExpansionRefreshes).toBe(1);
     });
 
     it("does not block bash tool-call preflight on configured script formatters", async () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         process.env[SCRIPT_FORMATTERS_ENV] = JSON.stringify({
             python: [process.execPath, "-e", "setTimeout(() => {}, 1000)"],
         });
         const pi = new FakeExtensionApi();
 
-        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await glowupExtension(pi as unknown as ExtensionAPI);
 
         expect(pi.runBashToolCall("python - <<'PY'\nprint('hi')\nPY")).toEqual([undefined]);
 
@@ -242,10 +242,10 @@ describe("extension lifecycle", () => {
     });
 
     it("renders generic Bash calls before a long-running command completes", async () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-codex-look-lifecycle-"));
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
-        await codexLookExtension(pi as unknown as ExtensionAPI);
+        await glowupExtension(pi as unknown as ExtensionAPI);
         initTheme("dark");
 
         // SAFETY: ToolExecutionComponent only calls requestRender() on this boundary in the

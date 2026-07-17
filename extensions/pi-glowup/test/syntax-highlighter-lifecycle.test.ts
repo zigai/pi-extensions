@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Component } from "@earendil-works/pi-tui";
 import type { Highlighter } from "shiki";
 import { afterEach, describe, expect, it } from "vitest";
-import { renderScriptCall, type CodexRenderTheme } from "../src/rendering/core.ts";
+import { renderScriptCall, type GlowupRenderTheme } from "../src/rendering/core.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../src/syntax/code-component.ts";
 import {
@@ -23,7 +23,7 @@ import {
     type SyntaxHighlighterFactory,
 } from "../src/syntax/highlighter.ts";
 
-const plainTheme: CodexRenderTheme = {
+const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
         return text;
     },
@@ -273,7 +273,7 @@ describe("syntax highlighter lifecycle", () => {
     });
 
     it("adds project-detected languages to configured preloads", async () => {
-        const directory = mkdtempSync(join(tmpdir(), "pi-codex-look-languages-"));
+        const directory = mkdtempSync(join(tmpdir(), "pi-glowup-languages-"));
         let requestedLanguages: string[] = [];
         const factory: SyntaxHighlighterFactory = async (options) => {
             requestedLanguages = stringLanguageNames(options.langs);
@@ -538,7 +538,7 @@ describe("syntax highlighter lifecycle", () => {
         expect(isSyntaxHighlightingReady()).toBe(false);
         expect(highlightSyntaxCode("import sys", "python")).toEqual(["import sys"]);
 
-        await initializeSyntaxHighlighting({ PI_CODEX_LOOK_SYNTAX: "off" });
+        await initializeSyntaxHighlighting({ PI_GLOWUP_SYNTAX: "off" });
 
         expect(isSyntaxHighlightingReady()).toBe(false);
         expect(highlightSyntaxCode("import sys", "python")).toEqual(["import sys"]);

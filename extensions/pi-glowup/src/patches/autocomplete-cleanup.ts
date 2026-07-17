@@ -1,8 +1,8 @@
 import { Editor, type TUI } from "@earendil-works/pi-tui";
 
-const AUTOCOMPLETE_CLEANUP_PATCH_KEY = Symbol.for("zigai.pi-codex-look.autocomplete-cleanup");
+const AUTOCOMPLETE_CLEANUP_PATCH_KEY = Symbol.for("zigai.pi-glowup.autocomplete-cleanup");
 const AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY = Symbol.for(
-    "zigai.pi-codex-look.autocomplete-cleanup.state",
+    "zigai.pi-glowup.autocomplete-cleanup.state",
 );
 
 type AutocompleteCleanupPatchState = {

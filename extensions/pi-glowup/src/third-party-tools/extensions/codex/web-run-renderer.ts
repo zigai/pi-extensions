@@ -1,4 +1,4 @@
-import type { CodexRenderTheme } from "../../../rendering/core.ts";
+import type { GlowupRenderTheme } from "../../../rendering/core.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolResult } from "../../types.ts";
 import { RENDER_THEME_TOKENS } from "../../../syntax/palette.ts";
 import {
@@ -57,11 +57,11 @@ function trimUrlEnd(text: string): string {
     return result;
 }
 
-function styleUrlText(theme: CodexRenderTheme, text: string): string {
+function styleUrlText(theme: GlowupRenderTheme, text: string): string {
     return theme.fg(RENDER_THEME_TOKENS.url, text);
 }
 
-function highlightUrlText(theme: CodexRenderTheme, text: string): string {
+function highlightUrlText(theme: GlowupRenderTheme, text: string): string {
     let output = "";
     let cursor = 0;
     for (const match of text.matchAll(URL_PATTERN)) {
@@ -90,7 +90,7 @@ function highlightUrlText(theme: CodexRenderTheme, text: string): string {
 
 export function summarizeWebRunArgs(
     args: unknown,
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     context: ThirdPartyToolRenderContext,
 ): string | undefined {
     if (!isRecord(args)) {
@@ -146,7 +146,7 @@ function isUsefulWebRunTitle(title: string): boolean {
     return normalized.length > 2 && !/^\d+[.)]?$/u.test(normalized);
 }
 
-function formatWebRunSourceLabel(theme: CodexRenderTheme, text: string): string | undefined {
+function formatWebRunSourceLabel(theme: GlowupRenderTheme, text: string): string | undefined {
     const match = WEB_RUN_TITLE_URL_PATTERN.exec(text.trim());
     const groups = match?.groups;
     if (!groups) {
@@ -170,7 +170,7 @@ type WebRunSourceCollection = {
 };
 
 function collectWebRunSourceLabel(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     line: string,
     collection: WebRunSourceCollection,
 ): void {
@@ -343,7 +343,7 @@ function formatWebRunHighlights(
 }
 
 function webRunOutputSummary(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     output: string | undefined,
     sourceCount: number | undefined,
     options: { readonly expanded: boolean },
@@ -395,7 +395,7 @@ function webRunOutputSummary(
 }
 
 export function webRunResultSummary(
-    theme: CodexRenderTheme,
+    theme: GlowupRenderTheme,
     result: ThirdPartyToolResult,
     options: { readonly expanded: boolean },
 ): string | undefined {

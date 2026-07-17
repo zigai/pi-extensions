@@ -17,13 +17,13 @@ describe("script formatter settings", () => {
 
         expect(
             parseScriptFormatterCommands("not json", {
-                source: "PI_CODEX_LOOK_SCRIPT_FORMATTERS",
+                source: "PI_GLOWUP_SCRIPT_FORMATTERS",
                 reportWarning: (message) => warnings.push(message),
             }).size,
         ).toBe(0);
 
         expect(warnings).toEqual([
-            "[pi-codex-look] Ignoring invalid PI_CODEX_LOOK_SCRIPT_FORMATTERS: expected JSON object",
+            "[pi-glowup] Ignoring invalid PI_GLOWUP_SCRIPT_FORMATTERS: expected JSON object",
         ]);
     });
 
@@ -47,7 +47,7 @@ describe("script formatter settings", () => {
         expect(commands.has("typescript")).toBe(false);
         expect(commands.has("ruby")).toBe(false);
         expect(warnings).toEqual([
-            "[pi-codex-look] Ignoring invalid formatter command entries in config.scriptPreview.formatters: javascript, typescript, ruby",
+            "[pi-glowup] Ignoring invalid formatter command entries in config.scriptPreview.formatters: javascript, typescript, ruby",
         ]);
     });
 

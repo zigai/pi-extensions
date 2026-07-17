@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
-import type { CodexLookConfig, ConfigWarningReporter } from "../config/config.ts";
+import type { GlowupConfig, ConfigWarningReporter } from "../config/config.ts";
 
 export type DebugLogValue =
     | string
@@ -15,7 +15,7 @@ export type DebugLogFields = {
     readonly [key: string]: DebugLogValue | undefined;
 };
 
-type DebugLogConfig = CodexLookConfig["debugLog"];
+type DebugLogConfig = GlowupConfig["debugLog"];
 
 type ResolvedDebugLogConfig = {
     readonly filePath: string;
@@ -131,7 +131,7 @@ export class DebugFileLogger {
         }
         this.writeFailureReported = true;
         this.reportWarning(
-            `[pi-codex-look] Failed to write debug log ${filePath}: ${errorMessage(cause)}`,
+            `[pi-glowup] Failed to write debug log ${filePath}: ${errorMessage(cause)}`,
         );
     }
 }

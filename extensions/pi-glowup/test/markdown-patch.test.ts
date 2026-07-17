@@ -53,12 +53,12 @@ describe("markdown syntax patch", () => {
             },
         };
         configureMarkdownSyntaxPatch(true, prototype);
-        const codexRender = Reflect.get(prototype, "render");
-        if (typeof codexRender !== "function") {
-            throw new Error("expected Codex-look markdown wrapper");
+        const originalRender = Reflect.get(prototype, "render");
+        if (typeof originalRender !== "function") {
+            throw new Error("expected Glowup markdown wrapper");
         }
         prototype.render = function renderWithLaterWrapper(width: number): string[] {
-            return codexRender.call(this, width);
+            return originalRender.call(this, width);
         };
         const laterRender = Reflect.get(prototype, "render");
 

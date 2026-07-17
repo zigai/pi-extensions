@@ -2,7 +2,7 @@
 
 ## Pi Extension Workflow
 
-- This repository is a standalone Pi package for the `pi-codex-look` extension.
+- This repository is a standalone Pi package for the `pi-glowup` extension.
 - Keep Pi resources declared explicitly in `package.json` under the `pi` manifest.
 - The extension entrypoint is `src/index.ts` and must export a default factory that receives Pi's `ExtensionAPI`.
 - Do not edit Pi's installed source code. Use Pi's public extension API and exported SDK helpers.
@@ -50,7 +50,7 @@
 - Include `"$schema"` in JSON examples when the scaffolded default config includes it, but do not explain it in prose.
 - Option tables should list actual user-editable setting keys, preferably dot paths like `tools.webSearch`; avoid vague category rows such as `tools`, `openai`, or `appearance` unless that object is edited as a single meaningful value.
 - If a setting has no default, document it in the option table but do not invent a value for it in JSON.
-- In README configuration sections, mention only the global path `~/.pi/agent/pi-codex-look/config.json`; do not mention trusted project overrides or project-specific config paths.
+- In README configuration sections, mention only the global path `~/.pi/agent/pi-glowup/config.json`; do not mention trusted project overrides or project-specific config paths.
 - `docs/configuration.md` may include advanced project override details only in a dedicated Advanced section when they are genuinely useful.
 - Do not mention TypeBox, `getAgentDir()`, `CONFIG_DIR_NAME`, schema refresh mechanics, user-owned/extension-owned terminology, or malformed-config overwrite policy in README/config docs.
 - Keep lifecycle implementation policy in `AGENTS.md`, tests, and source code rather than user docs.

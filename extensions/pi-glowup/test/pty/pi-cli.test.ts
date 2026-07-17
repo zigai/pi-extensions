@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getCodexLookGlobalConfigPath } from "../../src/config/config.ts";
+import { getGlowupGlobalConfigPath } from "../../src/config/config.ts";
 import { PiPtyProcess, type PiProcessOptions, type PtyScreenFrame } from "./pi-process-harness.ts";
 
 const CTRL_O = "\u000f";
@@ -17,20 +17,20 @@ type FixtureWorkspace = {
 };
 
 function createFixtureWorkspace(): FixtureWorkspace {
-    const root = mkdtempSync(join(tmpdir(), "pi-codex-look-pty-"));
+    const root = mkdtempSync(join(tmpdir(), "pi-glowup-pty-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     const extensionDirectory = join(agentDir, "extensions");
-    const configDirectory = join(agentDir, "pi-codex-look");
+    const configDirectory = join(agentDir, "pi-glowup");
     mkdirSync(cwd, { recursive: true });
     mkdirSync(extensionDirectory, { recursive: true });
     mkdirSync(configDirectory, { recursive: true });
 
-    const codexLookPath = resolve("src/index.ts");
+    const glowupPath = resolve("src/index.ts");
     const providerPath = resolve("test/pty/fixtures/offline-provider.ts");
     writeFileSync(
-        join(extensionDirectory, "codex-look.ts"),
-        `export { default } from ${JSON.stringify(codexLookPath)};\n`,
+        join(extensionDirectory, "glowup.ts"),
+        `export { default } from ${JSON.stringify(glowupPath)};\n`,
     );
     writeFileSync(
         join(extensionDirectory, "offline-provider.ts"),
@@ -38,7 +38,7 @@ function createFixtureWorkspace(): FixtureWorkspace {
     );
     copyFileSync(resolve("test/pty/fixtures/settings.json"), join(agentDir, "settings.json"));
     copyFileSync(resolve("test/pty/fixtures/keybindings.json"), join(agentDir, "keybindings.json"));
-    copyFileSync(resolve("test/pty/fixtures/config.json"), getCodexLookGlobalConfigPath(agentDir));
+    copyFileSync(resolve("test/pty/fixtures/config.json"), getGlowupGlobalConfigPath(agentDir));
     const sessionPath = join(root, "restored-session.jsonl");
     const sessionFixture = readFileSync(
         resolve("test/pty/fixtures/restored-session.jsonl"),

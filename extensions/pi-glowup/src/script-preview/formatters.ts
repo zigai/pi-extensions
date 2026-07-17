@@ -42,7 +42,7 @@ let activeFormatterCount = 0;
 const queuedFormatters: FormatterQueueEntry[] = [];
 
 function reportFormatterWarning(options: ScriptFormatterParseOptions, message: string): void {
-    options.reportWarning?.(`[pi-codex-look] ${message}`);
+    options.reportWarning?.(`[pi-glowup] ${message}`);
 }
 
 function formatterSource(options: ScriptFormatterParseOptions): string {

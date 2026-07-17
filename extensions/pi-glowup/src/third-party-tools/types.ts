@@ -1,42 +1,42 @@
 import type { Component } from "@earendil-works/pi-tui";
-import type { CodexRenderTheme } from "../rendering/core.ts";
+import type { GlowupRenderTheme } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
-import type { CodexLookRenderContext, CodexLookToolResult } from "../tool-rendering/protocol.ts";
+import type { GlowupRenderContext, GlowupToolResult } from "../tool-rendering/protocol.ts";
 
 export {
-    CODEX_LOOK_RENDERING_PROPERTY,
-    type CodexLookRendering,
-    type CodexLookRenderingAdapter,
-    type CodexLookRenderingPreference,
-    type CodexLookSection,
-    type CodexLookView,
+    GLOWUP_RENDERING_PROPERTY,
+    type GlowupRendering,
+    type GlowupRenderingAdapter,
+    type GlowupRenderingPreference,
+    type GlowupSection,
+    type GlowupView,
 } from "../tool-rendering/protocol.ts";
 
-/** Matcher used to opt selected third-party tools out of Codex-look conversion. */
+/** Matcher used to opt selected third-party tools out of Glowup conversion. */
 export type ToolNameMatcher = string | RegExp | ((toolName: string) => boolean);
 
-/** Render context consumed by Codex-look's internal third-party renderers. */
-export type ThirdPartyToolRenderContext = CodexLookRenderContext & {
+/** Render context consumed by Glowup's internal third-party renderers. */
+export type ThirdPartyToolRenderContext = GlowupRenderContext & {
     readonly lastComponent?: Component | undefined;
     readonly cwd?: string;
     readonly invalidate?: () => void;
     readonly result?: ThirdPartyToolResult | undefined;
 };
 
-/** Minimal result shape consumed by Codex-look third-party renderers. */
-export type ThirdPartyToolResult = CodexLookToolResult;
+/** Minimal result shape consumed by Glowup third-party renderers. */
+export type ThirdPartyToolResult = GlowupToolResult;
 
-/** Codex-look renderer pair for a non-native tool. */
+/** Glowup renderer pair for a non-native tool. */
 export type ThirdPartyToolRenderer = {
     readonly renderCall: (
         args: unknown,
-        theme: CodexRenderTheme,
+        theme: GlowupRenderTheme,
         context: ThirdPartyToolRenderContext,
     ) => Component;
     readonly renderResult: (
         result: ThirdPartyToolResult,
         options: { readonly expanded: boolean; readonly isPartial: boolean },
-        theme: CodexRenderTheme,
+        theme: GlowupRenderTheme,
         context: ThirdPartyToolRenderContext,
     ) => Component;
 };
