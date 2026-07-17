@@ -252,41 +252,32 @@ test("rejects parsed environment IDs before mutation", async () => {
     }
 });
 
-test("denies traversal and external absolute paths while allowing absolute paths in cwd", async () => {
+test("allows traversal and absolute paths outside the working directory", async () => {
     const base = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-boundary-"));
     const root = join(base, "root");
     const outside = join(base, "outside");
     await mkdir(root);
     await mkdir(outside);
     try {
-        const traversalFailure = expectApplyPatchFailure(
-            await applyPatchText(
-                wrapPatch("*** Add File: ../outside/traversal.txt\n+denied"),
-                root,
-            ),
-        );
-        assert.equal(traversalFailure.kind, "unauthorizedPath");
-        const absoluteFailure = expectApplyPatchFailure(
-            await applyPatchText(
-                wrapPatch(`*** Add File: ${join(outside, "absolute.txt")}\n+denied`),
-                root,
-            ),
-        );
-        assert.equal(absoluteFailure.kind, "unauthorizedPath");
-        await assert.rejects(readFile(join(outside, "traversal.txt"), "utf8"));
-        await assert.rejects(readFile(join(outside, "absolute.txt"), "utf8"));
+        const absolutePath = join(outside, "absolute.txt");
+        await writeFile(absolutePath, "before\n");
+        const patch = wrapPatch(`*** Add File: ../outside/traversal.txt
++created
+*** Update File: ${absolutePath}
+@@
+-before
++after`);
 
-        const absoluteInsidePath = join(root, "absolute-inside.txt");
-        expectApplyPatchSuccess(
-            await applyPatchText(wrapPatch(`*** Add File: ${absoluteInsidePath}\n+allowed`), root),
-        );
-        assert.equal(await readFile(absoluteInsidePath, "utf8"), "allowed\n");
+        expectApplyPatchSuccess(await applyPatchText(patch, root));
+
+        assert.equal(await readFile(join(outside, "traversal.txt"), "utf8"), "created\n");
+        assert.equal(await readFile(absolutePath, "utf8"), "after\n");
     } finally {
         await rm(base, { recursive: true, force: true });
     }
 });
 
-test("denies paths that escape cwd through an existing symlink", async () => {
+test("allows paths outside the working directory through an existing symlink", async () => {
     const base = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-symlink-"));
     const root = join(base, "root");
     const outside = join(base, "outside");
@@ -294,11 +285,13 @@ test("denies paths that escape cwd through an existing symlink", async () => {
     await mkdir(outside);
     await symlink(outside, join(root, "escape"), "dir");
     try {
-        const failure = expectApplyPatchFailure(
-            await applyPatchText(wrapPatch("*** Add File: escape/through-link.txt\n+denied"), root),
+        expectApplyPatchSuccess(
+            await applyPatchText(
+                wrapPatch("*** Add File: escape/through-link.txt\n+created"),
+                root,
+            ),
         );
-        assert.equal(failure.kind, "unauthorizedPath");
-        await assert.rejects(readFile(join(outside, "through-link.txt"), "utf8"));
+        assert.equal(await readFile(join(outside, "through-link.txt"), "utf8"), "created\n");
     } finally {
         await rm(base, { recursive: true, force: true });
     }
@@ -456,6 +449,39 @@ test("apply_patch tool executes patch argument and formats parser errors", async
         );
     } finally {
         await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("apply_patch tool updates an absolute path outside its working directory", async () => {
+    const base = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-tool-external-"));
+    const root = join(base, "root");
+    const externalPath = join(base, "config.toml");
+    await mkdir(root);
+    await writeFile(externalPath, "enabled = false\n");
+    try {
+        const tool = createApplyPatchTool();
+        const patch = wrapPatch(`*** Update File: ${externalPath}
+@@
+-enabled = false
++enabled = true`);
+
+        const result = await tool.execute(
+            "call-external",
+            { patch },
+            undefined,
+            undefined,
+            makeExtensionContext(root, true),
+        );
+
+        assert.equal(await readFile(externalPath, "utf8"), "enabled = true\n");
+        assert.deepEqual(result.details.affectedPaths.modified, [externalPath]);
+        assert.ok(
+            tool.promptGuidelines?.some((guideline) =>
+                guideline.includes("absolute paths are accepted"),
+            ),
+        );
+    } finally {
+        await rm(base, { recursive: true, force: true });
     }
 });
 

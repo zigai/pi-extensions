@@ -90,7 +90,7 @@ export function createApplyPatchTool(): ToolDefinition<
         promptGuidelines: [
             "Use apply_patch to edit files.",
             "The patch must start with *** Begin Patch and end with *** End Patch.",
-            "Use *** Add File, *** Delete File, and *** Update File sections. Paths are relative, and added lines start with +.",
+            "Use *** Add File, *** Delete File, and *** Update File sections. Relative paths resolve from the working directory; absolute paths are accepted. Added lines start with +.",
         ],
         parameters: APPLY_PATCH_PARAMETERS,
         prepareArguments: prepareApplyPatchArguments,
