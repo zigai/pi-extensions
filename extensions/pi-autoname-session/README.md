@@ -5,7 +5,7 @@ Automatically name new Pi sessions
 ## Install
 
 ```sh
-pi install git:github.com/my-user/pi-autoname-session
+pi install git:github.com/zigai/pi-autoname-session
 ```
 
 For this private package on this machine, load the local working copy from Pi settings:

@@ -18,8 +18,7 @@ export const extensionSettingsDefinition = defineExtensionSettings({
     id: "pi-autoname-session",
     title: "Pi Autoname Session",
     description: "Settings for Pi Autoname Session.",
-    schemaId:
-        "https://raw.githubusercontent.com/my-user/pi-autoname-session/HEAD/config.schema.json",
+    schemaId: "https://raw.githubusercontent.com/zigai/pi-autoname-session/HEAD/config.schema.json",
     schema: settingsSchema,
 });
 

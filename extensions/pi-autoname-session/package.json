@@ -10,15 +10,15 @@
     "pi-extension",
     "pi-package"
   ],
-  "homepage": "https://github.com/my-user/pi-autoname-session#readme",
+  "homepage": "https://github.com/zigai/pi-autoname-session#readme",
   "bugs": {
-    "url": "https://github.com/my-user/pi-autoname-session/issues"
+    "url": "https://github.com/zigai/pi-autoname-session/issues"
   },
   "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/my-user/pi-autoname-session.git"
+    "url": "git+https://github.com/zigai/pi-autoname-session.git"
   },
   "files": [
     "src",
@@ -33,8 +33,8 @@
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "test": "vitest run",
-    "coverage": "vitest run --coverage",
+    "test": "vitest run --passWithNoTests",
+    "coverage": "vitest run --coverage --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "check": "npm run config:check && npm run format:check && npm run lint && npm run typecheck && npm test",
     "verify": "npm run check",
