@@ -2543,13 +2543,6 @@ function changedRangesForDiffLines(
                 const changed = changedTextRanges(deletion.content, insertion.content);
                 ranges[deletion.index] = changed.before;
                 ranges[insertion.index] = changed.after;
-                continue;
-            }
-            if (deletion !== undefined && deletion.content.length > 0) {
-                ranges[deletion.index] = [{ start: 0, end: deletion.content.length }];
-            }
-            if (insertion !== undefined && insertion.content.length > 0) {
-                ranges[insertion.index] = [{ start: 0, end: insertion.content.length }];
             }
         }
         deletions = [];
@@ -2660,7 +2653,15 @@ function renderDiffRow(
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);
         const row = truncateToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
-        return [paintEmptyDiffRowBackground(parsed.kind, row, rowWidth, theme)];
+        return [
+            paintEmptyDiffRowBackground(
+                parsed.kind,
+                row,
+                rowWidth,
+                theme,
+                options?.changedRanges !== undefined,
+            ),
+        ];
     }
 
     const wrappedContent = wrapDiffText(
@@ -2689,8 +2690,9 @@ function paintEmptyDiffRowBackground(
     row: string,
     rowWidth: number,
     theme: CodexRenderTheme,
+    isReplacement: boolean,
 ): string {
-    if (kind === "context" || configuredDiffBackgroundStyle() !== "two-tone") {
+    if (kind === "context" || configuredDiffBackgroundStyle() !== "two-tone" || !isReplacement) {
         return paintDiffRowBackground(kind, row, rowWidth, theme);
     }
 

@@ -1144,7 +1144,7 @@ describe("Codex rendering helpers", () => {
         expectLinesWithinWidth(lines, 80);
     });
 
-    it("uses the intraline shade for blank additions and deletions in two-tone mode", () => {
+    it("uses only the row shade for standalone blank additions and deletions", () => {
         configureRenderingAppearance({
             ...classicAppearance,
             diffBackgroundStyle: "two-tone",
@@ -1162,10 +1162,49 @@ describe("Codex rendering helpers", () => {
         const addition = lines.find((line) => line.includes("2 +")) ?? "";
         const deletion = lines.find((line) => line.includes("4 -")) ?? "";
 
-        expect(addition).toContain("\u001b[48;2;0;68;0m");
-        expect(deletion).toContain("\u001b[48;2;68;0;0m");
+        expect(addition).toContain("\u001b[48;2;0;34;0m");
+        expect(addition).not.toContain("\u001b[48;2;0;68;0m");
+        expect(deletion).toContain("\u001b[48;2;34;0;0m");
+        expect(deletion).not.toContain("\u001b[48;2;68;0;0m");
         expect(visibleWidth(addition)).toBe(width);
         expect(visibleWidth(deletion)).toBe(width);
+    });
+
+    it("reserves intraline shades for replacements, not fully added or deleted lines", () => {
+        configureRenderingAppearance({
+            ...classicAppearance,
+            diffBackgroundStyle: "two-tone",
+            addedRowBackground: "#002200",
+            deletedRowBackground: "#220000",
+            addedContentBackground: "#004400",
+            deletedContentBackground: "#440000",
+        });
+        const lines = renderCodexDiff(
+            plainTheme,
+            parseDiffSections(
+                [
+                    "+1 fully added line",
+                    " 1 first context",
+                    "-2 fully deleted line",
+                    " 2 second context",
+                    "-3 const value = 100;",
+                    "+3 const value = 200;",
+                ].join("\n"),
+                "value.ts",
+            ),
+            true,
+        ).render(80);
+        const fullAddition = lines.find((line) => line.includes("fully added")) ?? "";
+        const fullDeletion = lines.find((line) => line.includes("fully deleted")) ?? "";
+        const replacementDeletion = lines.find((line) => line.includes("100")) ?? "";
+        const replacementAddition = lines.find((line) => line.includes("200")) ?? "";
+
+        expect(fullAddition).toContain("\u001b[48;2;0;34;0m");
+        expect(fullAddition).not.toContain("\u001b[48;2;0;68;0m");
+        expect(fullDeletion).toContain("\u001b[48;2;34;0;0m");
+        expect(fullDeletion).not.toContain("\u001b[48;2;68;0;0m");
+        expect(replacementDeletion).toContain("\u001b[48;2;68;0;0m");
+        expect(replacementAddition).toContain("\u001b[48;2;0;68;0m");
     });
 
     it("derives shifted dual context coordinates in fallback diffs", () => {

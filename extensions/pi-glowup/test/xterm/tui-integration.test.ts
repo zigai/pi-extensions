@@ -77,7 +77,7 @@ describe("Pi TUI through headless xterm", () => {
             JSON.stringify({
                 toolLabels: { mode: "lifecycle" },
                 appearance: {
-                    diffBackgroundStyle: "full-row",
+                    diffBackgroundStyle: "two-tone",
                     addedRowBackground: "#16351E",
                     deletedRowBackground: "#3B1E1C",
                     addedContentBackground: "#0B441F",
@@ -287,6 +287,7 @@ describe("Pi TUI through headless xterm", () => {
         const patch = `*** Begin Patch
 *** Update File: src/colors.ts
 @@
+-const removedOnly = true;
  const unchanged = true;
 -const previousValue = 1;
 +export const nextValue = 2;
@@ -310,17 +311,24 @@ describe("Pi TUI through headless xterm", () => {
         activeTui.start();
         await pendingTerminal.settle();
 
+        const standaloneDeletion = rowContaining(pendingTerminal, "removedOnly");
         const deletion = rowContaining(pendingTerminal, "previousValue");
         const addition = rowContaining(pendingTerminal, "nextValue");
         const tabAddition = rowContaining(pendingTerminal, "tabIndentedValue");
         const context = rowContaining(pendingTerminal, "unchanged");
         const sentinel = rowContaining(pendingTerminal, "PLAIN_SENTINEL");
+        expect(standaloneDeletion.cells).toHaveLength(90);
         expect(deletion.cells).toHaveLength(90);
         expect(addition.cells).toHaveLength(90);
         expect(tabAddition.cells).toHaveLength(90);
+        expect(standaloneDeletion.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(deletion.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(addition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(tabAddition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
+        expect(new Set(standaloneDeletion.cells.map((cell) => cell.background)).size).toBe(1);
+        expect(new Set(tabAddition.cells.map((cell) => cell.background)).size).toBe(1);
+        expect(new Set(deletion.cells.map((cell) => cell.background)).size).toBeGreaterThan(1);
+        expect(new Set(addition.cells.map((cell) => cell.background)).size).toBeGreaterThan(1);
         expect(
             context.cells
                 .filter((cell) => cell.chars !== "")
