@@ -1,7 +1,6 @@
 {
-  "name": "pi-branch",
+  "name": "@zigai/pi-branch",
   "version": "0.1.0",
-  "private": true,
   "description": "Pi package for branching the current session into parallel tmux or Ghostty panes.",
   "keywords": [
     "branch",
@@ -23,6 +22,9 @@
     "url": "git+https://github.com/zigai/pi-branch.git"
   },
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "lint": "oxlint -c ./.oxlintrc.json .",
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",

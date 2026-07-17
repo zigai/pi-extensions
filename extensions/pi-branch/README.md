@@ -5,7 +5,7 @@ This Pi extension branches the current session into parallel tmux or Ghostty pan
 ## Install
 
 ```sh
-pi install git:github.com/zigai/pi-branch
+pi install npm:@zigai/pi-branch
 ```
 
 ## Commands
