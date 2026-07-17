@@ -554,7 +554,6 @@ function readConfigInput(configPath: string): ConfigInputReadResult {
         return { value: rawConfig, diagnostics: [] };
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
-        console.warn(`[pi-codex-core] Failed to read ${configPath}: ${message}`);
         const reason = cause instanceof SyntaxError ? "malformed-json" : "unreadable";
         return {
             value: undefined,
