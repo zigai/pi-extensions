@@ -5,15 +5,7 @@ Enhanced cross-harness skill compatibility for Pi.
 ## Install
 
 ```sh
-pi install git:github.com/zigai/pi-enhanced-skills
-```
-
-For this private package on this machine, load the local working copy from Pi settings:
-
-```json
-{
-  "packages": ["/home/zigai/Projects/pi-enhanced-skills"]
-}
+pi install npm:@zigai/pi-enhanced-skills
 ```
 
 ## Extension

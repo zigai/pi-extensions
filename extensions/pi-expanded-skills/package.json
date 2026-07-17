@@ -1,7 +1,6 @@
 {
-  "name": "pi-enhanced-skills",
+  "name": "@zigai/pi-enhanced-skills",
   "version": "0.1.0",
-  "private": true,
   "description": "Enhanced Pi skills",
   "keywords": [
     "enhanced-skills",
@@ -25,6 +24,9 @@
     "README.md"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "src/index.ts",
   "scripts": {
     "lint": "oxlint -c ./.oxlintrc.json .",
