@@ -30,6 +30,7 @@ Use global config at `~/.pi/agent/pi-typed-args/config.json`.
 | `appearance.form.layout.descriptions`           | `"inline"`                    | Show descriptions inline, focused, or hidden.          |
 | `appearance.form.layout.instructions`           | `"full"`                      | Show full, short, or hidden instructions.              |
 | `appearance.inlineHelp.layout`                  | `"compact"`                   | Use the compact live-helper layout.                    |
+| `appearance.inlineHelp.choiceDisplay`           | `"contextual"`                | Show fixed choices contextually or inside tokens.      |
 | `appearance.inlineHelp.order`                   | `"active-required-available"` | Order active, required, and available tokens.          |
 | `appearance.inlineHelp.metadata.types`          | `false`                       | Show type metadata in the live helper.                 |
 | `appearance.inlineHelp.metadata.defaults`       | `true`                        | Show default values in the live helper.                |
@@ -94,6 +95,7 @@ Use global config at `~/.pi/agent/pi-typed-args/config.json`.
     },
     "inlineHelp": {
       "layout": "compact",
+      "choiceDisplay": "contextual",
       "order": "active-required-available",
       "metadata": {
         "types": false,

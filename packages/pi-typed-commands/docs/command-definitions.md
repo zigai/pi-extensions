@@ -104,4 +104,100 @@ const range = defineTypedCommand({
 
 Keep refinement deterministic and synchronous. Put filesystem, network, or model checks in a separate pre-run stage.
 
+## Subcommands
+
+Use `subcommands` for CLI-style branches with their own arguments, refinements, form metadata, and colocated handlers. Root `args` are shared by every branch. A root `run` handler is optional; when present, invoking the command without a subcommand runs it.
+
+```ts
+const workspace = defineTypedCommand({
+  name: "workspace",
+  description: "Manage workspaces",
+  args: {
+    verbose: { type: "boolean", default: false },
+  },
+  run(args) {
+    // /workspace --verbose
+  },
+  subcommands: {
+    create: {
+      description: "Create a workspace",
+      aliases: ["new"],
+      args: {
+        path: { type: "string", required: true },
+      },
+      run(args) {
+        // args.path and the shared args.verbose are typed here
+      },
+    },
+    remove: {
+      description: "Remove a workspace",
+      args: {
+        force: { type: "boolean", ui: { widget: "confirm" } },
+      },
+      run(args) {},
+    },
+  },
+});
+```
+
+```text
+/workspace create --path demo --verbose
+/workspace new --path demo
+/workspace remove --force
+```
+
+The subcommand token comes first. Shared arguments are flags and may appear after it; shared positional arguments are rejected because they would make branch selection ambiguous. Shared and local argument keys may not collide.
+
+`/workspace --help` lists the branches, while `/workspace create --help` shows branch-specific help. Completion and inline help suggest subcommands before one is selected, then switch to only the selected branch's grammar. Tab on the root opens a subcommand picker; Tab after a selected branch opens that branch's form.
+
+`parse()` adds a `subcommand` discriminant for branch results. Use `serializeSubcommand()` to include the branch token:
+
+```ts
+workspace.serializeSubcommand({
+  subcommand: "create",
+  args: { path: "feature branch", verbose: true },
+});
+// create --verbose --path="feature branch"
+```
+
+Set `formPolicy` on the root or an individual subcommand to `"manual"`, `"missing"`, `"invalid"`, or `"always"`. The default is `"missing"`.
+
+Set `inlineHelp: "hidden"` when a command should retain typed parsing, completion, and Tab-opened forms without rendering the compact live helper above or below the editor. The default is `"auto"`.
+
+## Inline ghost text
+
+Set `ghostText` to opt into dimmed, visual-only text on the same line as an exact slash-command invocation. It may be a static string or a synchronous resolver:
+
+```ts
+const deploy = defineTypedCommand({
+  name: "deploy",
+  description: "Deploy services and websites",
+  args: {},
+  ghostText: ({ ctx }) => `choose a target in ${ctx.cwd}`,
+  run() {},
+  subcommands: {
+    service: {
+      description: "Deploy a service",
+      aliases: ["svc"],
+      ghostText: "choose a service",
+      args: {},
+      run() {},
+    },
+    website: {
+      description: "Deploy the website",
+      ghostText: ({ ctx }) => `deploy the website from ${ctx.cwd}`,
+      args: {},
+      run() {},
+    },
+  },
+});
+```
+
+`/deploy` shows the root hint. `/deploy service` and `/deploy svc` show the `service` hint, while `/deploy website` shows the `website` hint. Root and branch definitions are independent and are not inherited. The hint remains visible through trailing whitespace, so `/deploy ` keeps the root hint and `/deploy service ` keeps the branch hint. Partial commands, partial subcommands, arguments containing non-whitespace input, multiline input, empty resolver output, and resolver failures show no ghost text. The resolver receives `ctx`, the root `commandName`, and the canonical `subcommand` when a branch is selected. Keep it synchronous and side-effect free because it runs during editor rendering.
+
+Ghost text is never inserted into editor content, history, or submitted input. Omitting `ghostText` preserves the normal editor exactly.
+Line breaks and terminal control characters in resolved text are converted to spaces so the hint remains on one editor line.
+
+Set `formPresets: true` to enable project-scoped recent values and named presets in the Tab-opened form workflow. After editing, users can apply values directly or save and apply a named preset. Sensitive fields are never persisted. Trusted projects store presets under Pi's project configuration directory; other contexts use the global agent directory. Malformed preset files are reported and never overwritten.
+
 `parse()` error results also expose `partial` as `ParsedArgumentDraft<TDefinitions>`. `serialize(values)` accepts `SerializableArgumentValues<TDefinitions>`, a readonly object containing only the fields to emit.

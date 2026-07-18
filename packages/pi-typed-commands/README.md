@@ -71,7 +71,21 @@ Users of your extension can then run:
 /deploy --help     # show generated help
 ```
 
-While users type a command, Pi shows a compact live helper above the editor by default with parsed values, defaults, and remaining arguments. `Tab` completes an unambiguous partial flag such as `/deploy --r<Tab>` to `/deploy --ref `, or opens the form from a completed command such as `/deploy<Tab>`. Inline validation waits until the user moves past an argument or submits the command, so value-taking flags do not error while their value is still being typed.
+While users type a command, Pi shows a compact live helper above the editor by default with parsed values, defaults, and remaining arguments. `Tab` completes unambiguous partial flags and fixed choices—for example, `/deploy --r<Tab>` becomes `/deploy --ref ` and `/branch --layout sepa<Tab>` becomes `/branch --layout separate `—or opens the form when there is nothing to complete. Inline validation waits until the user moves past an argument or submits the command, so value-taking flags do not error while their value is still being typed.
+
+Commands can opt into visual-only ghost text on the same editor line. It appears after an exact command or subcommand invocation, remains while the user types only trailing spaces, and disappears when they start an argument or other input:
+
+```ts
+const deploy = defineTypedCommand({
+  name: "deploy",
+  description: "Deploy a ref",
+  ghostText: ({ ctx }) => `choose a target in ${ctx.cwd}`,
+  args: {},
+  run() {},
+});
+```
+
+The ghost text is dimmed presentation; it is never added to the submitted editor value. Omitting `ghostText` leaves the editor unchanged.
 
 If you compose the Pi UX bridge yourself, move the helper below the input editor with:
 
@@ -111,6 +125,7 @@ Use global config at `~/.pi/agent/pi-typed-args/config.json`.
 | `appearance.form.layout.descriptions`           | `"inline"`                    | Show descriptions inline, focused, or hidden.          |
 | `appearance.form.layout.instructions`           | `"full"`                      | Show full, short, or hidden instructions.              |
 | `appearance.inlineHelp.layout`                  | `"compact"`                   | Use the compact live-helper layout.                    |
+| `appearance.inlineHelp.choiceDisplay`           | `"contextual"`                | Show fixed choices contextually or inside tokens.      |
 | `appearance.inlineHelp.order`                   | `"active-required-available"` | Order active, required, and available tokens.          |
 | `appearance.inlineHelp.metadata.types`          | `false`                       | Show type metadata in the live helper.                 |
 | `appearance.inlineHelp.metadata.defaults`       | `true`                        | Show default values in the live helper.                |
@@ -175,6 +190,7 @@ Use global config at `~/.pi/agent/pi-typed-args/config.json`.
     },
     "inlineHelp": {
       "layout": "compact",
+      "choiceDisplay": "contextual",
       "order": "active-required-available",
       "metadata": {
         "types": false,
@@ -218,16 +234,20 @@ Use global config at `~/.pi/agent/pi-typed-args/config.json`.
 
 ## Supported argument types
 
-| Type         | What it is for                             | Common options                                                     |
-| ------------ | ------------------------------------------ | ------------------------------------------------------------------ |
-| `string`     | Text, paths, names, refs, freeform values  | `minLength`, `maxLength`, `pattern`, `default`, `position`, `rest` |
-| `number`     | Numeric values                             | `integer`, `min`, `max`, `default`                                 |
-| `boolean`    | Flags and toggles                          | `--flag`, `--flag true`, `--no-flag`, `default`                    |
-| `enum`       | One value from a fixed set                 | `values`, `default`, `position`                                    |
-| `multi-enum` | Readonly multiple values from a fixed set  | repeated flags, comma-separated values, no commas in values        |
-| `group()`    | Nested handler objects with flat CLI flags | `group({ host, port })` becomes flags like `--database-host`       |
+| Type          | What it is for                             | Common options                                                     |
+| ------------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| `string`      | Text, paths, names, refs, freeform values  | `minLength`, `maxLength`, `pattern`, `default`, `position`, `rest` |
+| `number`      | Numeric values                             | `integer`, `min`, `max`, `default`                                 |
+| `boolean`     | Flags and toggles                          | `--flag`, `--flag true`, `--no-flag`, `default`                    |
+| `enum`        | One value from a fixed set                 | `values`, `optionDescriptions`, `default`, `position`              |
+| `multi-enum`  | Readonly multiple values from a fixed set  | repeated flags, comma-separated values, no commas in values        |
+| `string-list` | Readonly freeform string values            | repeated flags, comma-separated values, `minItems`, `maxItems`     |
+| `key-value`   | Readonly string record                     | repeated `key=value` entries, `minItems`, `maxItems`               |
+| `group()`     | Nested handler objects with flat CLI flags | `group({ host, port })` becomes flags like `--database-host`       |
 
 All argument definitions can also use common metadata such as `description`, `title`, `required`, `flag`, `aliases`, `placeholder`, `occurrence`, `complete`, `completionTimeoutMs`, and `ui`.
+
+Commands may define CLI-style `subcommands`; each branch owns its arguments, refinement, form metadata, aliases, and typed handler while inheriting shared root flags. The helper, completion engine, generated help, parser, serializer, and expanded form all switch to the selected branch.
 
 ## Documentation
 

@@ -11,6 +11,8 @@ Use a top-level `arguments` object:
 name: fix-ruff-errors
 description: Fix Ruff lint errors in Python projects.
 form_title: Fix Ruff errors
+metadata:
+  ghostText: Choose a path and Ruff options
 arguments:
   path:
     type: string
@@ -32,17 +34,28 @@ Safe fixes enabled: `{args.fix}`.
 Rules: `{args.rules}`.
 ```
 
+`metadata.ghostText` is optional. It renders static, dimmed text on the same editor line as the exact `/skill:name` invocation, remains visible through trailing spaces, and disappears when the user starts an argument. It is visual only and is never included in the skill input. `SKILL.md` is declarative, so dynamic resolver functions are available only to TypeScript command definitions.
+
 ## YAML field names
 
 Skill YAML uses serializable names for fields that are camelCase in TypeScript:
 
-| YAML         | TypeScript   |
-| ------------ | ------------ |
-| `multi_enum` | `multi-enum` |
-| `min_length` | `minLength`  |
-| `max_length` | `maxLength`  |
-| `min_items`  | `minItems`   |
-| `max_items`  | `maxItems`   |
+| YAML                  | TypeScript           |
+| --------------------- | -------------------- |
+| `multi_enum`          | `multi-enum`         |
+| `min_length`          | `minLength`          |
+| `max_length`          | `maxLength`          |
+| `min_items`           | `minItems`           |
+| `max_items`           | `maxItems`           |
+| `option_descriptions` | `optionDescriptions` |
+| `string_list`         | `string-list`        |
+| `key_value`           | `key-value`          |
+| `copy_from`           | `ui.copyFrom`        |
+| `visible_when`        | `ui.visibleWhen`     |
+| `enabled_when`        | `ui.enabledWhen`     |
+| `required_when`       | `ui.requiredWhen`    |
+
+Serializable skill arguments also support semantic string `format`, `sensitive`, numeric `step`/`unit`, `examples`, `string_list`, `key_value`, and the expanded built-in widget set. Skill conditions are declarative booleans; TypeScript commands may additionally use value-dependent functions.
 
 ## Placeholders
 

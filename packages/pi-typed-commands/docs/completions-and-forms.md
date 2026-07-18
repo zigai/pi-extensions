@@ -72,6 +72,18 @@ The completion engine supports:
 
 It respects `--` as an end-of-options marker and keeps repeatable multi-enum flags available.
 
+## Inline ghost text
+
+`ghostText` is an opt-in command or subcommand definition. When configured, its text is dimmed directly after the exact invocation on the editor line:
+
+```text
+/deploy  choose a target
+```
+
+Only `/deploy` is editor content. The hint is presentation-only and remains visible while the user types trailing spaces. It disappears for a partial command, a partial subcommand, any non-whitespace argument input, multiline input, or a cursor that is not at the end. An exact subcommand or alias selects that branch's independently configured hint. Static strings and synchronous TypeScript resolvers are supported; commands without `ghostText` retain the normal editor.
+
+The separate live helper continues to follow its existing `inlineHelp` policy. If another extension supplies an editor that cannot be safely decorated, Pi Typed Args leaves that editor intact and continues using the normal helper.
+
 ## Live editor helper
 
 When the Pi UX bridge is installed, typed commands render a compact helper above the editor by default while a slash command is being typed. The helper shows active values first, including meaningful defaults such as `[count=1]`, then remaining available arguments in a dimmed style.
@@ -98,9 +110,24 @@ Inline helper presentation can be customized with `appearance.inlineHelp` in the
 }
 ```
 
-`Tab` completes unambiguous partial flags before opening the form. For example, `/branch -pro<Tab>` becomes `/branch --prompt `. A completed command such as `/branch<Tab>` opens the dense form.
+`Tab` completes unambiguous partial flags and fixed choices before opening the form. For example, `/branch -pro<Tab>` becomes `/branch --prompt ` and `/branch --layout sepa<Tab>` becomes `/branch --layout separate `. Fixed-choice completion also works with `--layout=sepa`, positional enums, and comma-separated `multi-enum` values. When there is no completion to apply, a completed command such as `/branch<Tab>` opens the dense form.
 
 Inline errors are deferred while the user is still typing the current token. A value-taking flag such as `/branch --prompt ` stays quiet until a value is supplied, another argument is started, or the command is submitted.
+
+Fixed enum choices use a contextual row by default while their value is being entered:
+
+```text
+[count=6] [--layout=<value>] [--keep-open]
+          layout: separate  current-tab  new-tab
+```
+
+Set `appearance.inlineHelp.choiceDisplay` to `"inline"` to keep the choices inside the argument token instead:
+
+```text
+[count=6] [--layout=<separate|current-tab|new-tab>] [--keep-open]
+```
+
+Both modes respect `appearance.inlineHelp.metadata.enumValues`; disabling it hides the concrete choices.
 
 ## TUI forms
 
@@ -131,6 +158,12 @@ Forms can also open automatically for missing required arguments or invalid valu
 The selected field is marked with `›` and accented so users can tell which value arrow keys, space, or typing will edit.
 
 Dense form presentation can be customized with `appearance.form`. The setting applies to extension commands and typed skills. Command metadata cannot override configured colors or layout.
+
+The dense form uses Pi's injected semantic keybinding manager rather than fixed terminal keys. Pi defaults, `keybindings.json` overrides, and extension-contributed bindings therefore apply to submit, newline, selection, cursor movement, cancellation, tabbing, and undo. Footer hints are generated from the active bindings.
+
+Completion-backed string fields use the same `complete`, `completeAsync`, path, directory, file, and command providers as the slash-command editor. Results retain labels and descriptions, and async providers keep the same cancellation and timeout behavior.
+
+Forms keep command-level refinement failures open and associate messages with `path` and `relatedPaths`. They also show a live, sensitive-value-safe command preview, scroll long forms around the focused field, render grouped definitions as sections, distinguish true/false/unset booleans, and require explicit acceptance for `confirm` widgets.
 
 ## Form-only arguments
 
@@ -232,6 +265,10 @@ Supported widget names are:
 - `custom`
 
 `readOnly`, `hidden`, and `compute` can be static booleans or functions of the current form values.
+
+`visibleWhen`, `enabledWhen`, and `requiredWhen` provide positive conditional rules. `disabled` is the inverse editing control, `copyFrom` initializes an unset value from another field, `section` names a form section, and `advanced: true` places the field in the Advanced section. Dense and sequential form adapters apply the same metadata.
+
+`textarea` and `code` fields delegate editing to Pi's editor, so configured newline, cursor, undo, and submission bindings continue to work. Path-like and completion-backed fields use the editor's searchable completion list.
 
 ## Custom widgets
 

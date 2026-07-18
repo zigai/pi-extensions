@@ -4,13 +4,30 @@ Arguments describe the values a command accepts. The same definitions drive pars
 
 ## Built-in types
 
-| Type         | Value type                          | Notes                                                                           |
-| ------------ | ----------------------------------- | ------------------------------------------------------------------------------- |
-| `string`     | `string`                            | Supports `minLength`, `maxLength`, `pattern`, `rest`, and text-like widgets.    |
-| `number`     | `number`                            | Supports `integer`, `min`, and `max`.                                           |
-| `boolean`    | `boolean`                           | Supports `--flag`, `--flag true`, `--flag false`, and `--no-flag`.              |
-| `enum`       | one string from `values`            | Preserves literal unions when values are inline or built with `enumArgument()`. |
-| `multi-enum` | readonly string array from `values` | Supports repeated flags and comma-separated values.                             |
+| Type          | Value type                          | Notes                                                                           |
+| ------------- | ----------------------------------- | ------------------------------------------------------------------------------- |
+| `string`      | `string`                            | Supports `minLength`, `maxLength`, `pattern`, `rest`, and text-like widgets.    |
+| `number`      | `number`                            | Supports `integer`, `min`, and `max`.                                           |
+| `boolean`     | `boolean`                           | Supports `--flag`, `--flag true`, `--flag false`, and `--no-flag`.              |
+| `enum`        | one string from `values`            | Preserves literal unions when values are inline or built with `enumArgument()`. |
+| `multi-enum`  | readonly string array from `values` | Supports repeated flags and comma-separated values.                             |
+| `string-list` | readonly string array               | Repeatable freeform strings from repeated flags or comma-separated values.      |
+| `key-value`   | readonly string record              | Repeatable `key=value` entries returned as a readonly record.                   |
+
+Use `optionDescriptions` on an `enum` to explain each choice in an expanded radio form:
+
+```ts
+layout: {
+  type: "enum",
+  values: ["separate", "current-tab", "new-tab"],
+  optionDescriptions: {
+    separate: "One tab/window per fork",
+    "current-tab": "Add panes beside the current Pi session",
+    "new-tab": "Put all forks in one new split tab/window",
+  },
+  ui: { widget: "radio" },
+}
+```
 
 ## Shared fields
 
@@ -29,6 +46,13 @@ Most arguments can use:
 - `complete` - value completion provider;
 - `completionTimeoutMs` - async completion timeout in milliseconds, defaulting to 1000 and disabled with `0`;
 - `ui` - form presentation metadata.
+- `examples` - example values shown in detailed help.
+
+Strings can use semantic `format` validation for `email`, `url`, `date`, `time`, `datetime`, `duration`, and `json`. Set `sensitive: true` for masked form input and redacted helper/default output. Sensitive values are omitted from serialization and staged privately when a form writes the rest of a command back to the editor.
+
+Numbers support `step` and `unit`; a stepped number uses the `stepper` form control by default.
+
+Additional form widgets include `secret`, `file`, `directory`, `list`, `key-value`, `duration`, `date`, `time`, `datetime`, `url`, `email`, `json`, `code`, and `stepper`.
 
 `required: true` and `default` are mutually exclusive. A required argument must come from the user. A defaulted argument is optional but non-null in the handler. TypeScript rejects that combination in public definition types, and runtime validation reports it for untyped/loaded schemas.
 
