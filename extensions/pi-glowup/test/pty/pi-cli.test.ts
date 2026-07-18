@@ -83,6 +83,7 @@ function expectTerminalInvariants(frame: PtyScreenFrame, internalPaths: readonly
     expect(frame.text).not.toContain("Patch patch");
     expect(frame.text).not.toContain("undefined");
     expect(frame.text).not.toContain("NaN");
+    expect(frame.text).not.toContain("�");
     expect(frame.text).not.toMatch(/"patch"\s*:/u);
     expect(frame.text).not.toContain("artifacts/pty");
     for (const internalPath of internalPaths) expect(frame.text).not.toContain(internalPath);
@@ -142,7 +143,10 @@ describe("actual Pi CLI in a real PTY", () => {
             const initial = await pi.waitForFrame(
                 (frame) =>
                     frame.text.includes("Patched restored.ts") &&
-                    frame.text.includes("SESSION_SENTINEL"),
+                    frame.text.includes("SESSION_SENTINEL") &&
+                    frame.text.includes("ASK_RESTORE_SENTINEL") &&
+                    frame.text.includes("Asked User") &&
+                    frame.text.includes("Choose one:"),
                 PTY_TIMEOUT_MS,
             );
             expectTerminalInvariants(initial, [
@@ -152,6 +156,9 @@ describe("actual Pi CLI in a real PTY", () => {
             const initialBlock = mutationBlock(initial, "restored.ts", "SESSION_SENTINEL");
             expect(initialBlock).toContain("to expand");
             expect(initialBlock).not.toContain("restored5");
+            expect(initial.text).toContain("Candidates · Which candidates should be restored?");
+            expect(initial.text).toContain("Stable only");
+            expect(initial.text).not.toContain("questions: 1 item");
 
             let nextSequence = pi.frames().length;
             pi.sendKey(CTRL_O);
@@ -258,6 +265,7 @@ describe("actual Pi CLI in a real PTY", () => {
             }
             expect(countMatches(completed.text, /Patched src\/current\.ts/gu)).toBe(1);
             expect(completed.text).toContain("CURRENT_STREAM_MARKER");
+            expect(completed.text).toContain("🧪");
             expect(completed.text).not.toContain("Done!");
             expect(trailingBlankRowsBefore(completed, "STREAM_COMPLETE")).toBeLessThanOrEqual(1);
         } catch (cause: unknown) {

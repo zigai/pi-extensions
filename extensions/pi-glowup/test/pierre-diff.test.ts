@@ -208,6 +208,32 @@ describe("Pierre diff rendering", () => {
         }
     });
 
+    it("neutralizes terminal controls embedded in diff content", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: "const value = 'old';\n",
+            newContent: "const value = 'before\u001b[2Jafter\u001b]2;owned\u0007';\n",
+            oldSizeBytes: 21,
+            newSizeBytes: 42,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+
+        const rendered = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, invalidate() {} },
+        )
+            .render(120)
+            .join("\n");
+
+        expect(stripAnsi(rendered)).toContain("before␛[2Jafter␛]2;owned␇");
+        expect(rendered).not.toContain("\u001b[2J");
+        expect(rendered).not.toContain("\u001b]2;owned");
+        expect(rendered).not.toContain("\u0007");
+    });
+
     it("keeps unreadable existing files out of create-style write diffs", async () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-diff-"));
         const filePath = join(root, "secret.txt");

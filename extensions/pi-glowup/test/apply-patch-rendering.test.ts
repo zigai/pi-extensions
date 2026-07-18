@@ -443,6 +443,26 @@ describe("apply_patch renderer", () => {
         expectLinesWithinWidth(lines, 100);
     });
 
+    it("does not split emoji graphemes when bounding a streaming patch line", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+        });
+        const partialPatch = `*** Begin Patch\n*** Add File: src/new.ts\n+${"a".repeat(
+            1_997,
+        )}🧪${"z".repeat(10)}`;
+        const rendered = renderer
+            .renderCall({ patch: partialPatch }, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(2_200)
+            .join("\n");
+
+        expect(Buffer.from(rendered, "utf8").toString("utf8")).toBe(rendered);
+        expect(rendered).not.toContain("�");
+    });
+
     it("uses preimages captured by tool-call preflight for streaming updates", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-streaming-patch-"));
         try {

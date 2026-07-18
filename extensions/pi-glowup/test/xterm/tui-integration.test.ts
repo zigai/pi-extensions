@@ -175,6 +175,37 @@ describe("Pi TUI through headless xterm", () => {
         expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[?2026h");
     });
 
+    it("neutralizes tool-supplied terminal controls before they reach the PTY", async () => {
+        const pendingTerminal = new VirtualTerminal(100, 20);
+        const activeTui = new TUI(pendingTerminal);
+        const tool = new ToolExecutionComponent(
+            "imagegen",
+            "call-xterm-controls",
+            { prompt: "before\u001b[2Jafter\u001b]2;owned\u0007\tend" },
+            undefined,
+            undefined,
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        activeTui.addChild(new LinesComponent(["BEFORE_CONTROL_SENTINEL"]));
+        activeTui.addChild(tool);
+        activeTui.addChild(new LinesComponent(["AFTER_CONTROL_SENTINEL"]));
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+
+        const screen = pendingTerminal.screenText();
+        const rawWrites = pendingTerminal.rawWrites().join("");
+        expect(screen).toContain("BEFORE_CONTROL_SENTINEL");
+        expect(screen).toContain("AFTER_CONTROL_SENTINEL");
+        expect(screen).toContain("before␛[2Jafter␛]2;owned␇ end");
+        expect(rawWrites).not.toContain("\u001b]2;owned");
+        expect(rawWrites).not.toContain("owned\u0007");
+        expect(rawWrites).not.toContain("\t");
+    });
+
     it("removes and restores the Pierre split divider across wide-narrow-wide redraws", async () => {
         const pendingTerminal = new VirtualTerminal(180, 30);
         const activeTui = new TUI(pendingTerminal);

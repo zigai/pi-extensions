@@ -150,10 +150,12 @@ describe("tool execution patches", () => {
     it("passes persisted results to restored built-in call renderers", () => {
         const prototype = createPrototype();
         let receivedResult: unknown;
+        let receivedArgsComplete: boolean | undefined;
         installBuiltInToolRendererPatch(
             {
                 renderCall: (_toolName, _args, _theme, context) => {
                     receivedResult = context.result;
+                    receivedArgsComplete = context.argsComplete;
                     return { render: () => ["restored"], invalidate: noop };
                 },
                 renderResult: () => undefined,
@@ -166,9 +168,16 @@ describe("tool execution patches", () => {
             result: { content: [], details: { diff: "+1 restored" } },
         };
 
-        prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80);
+        prototype.getCallRenderer
+            .call(instance)?.({}, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                executionStarted: false,
+            })
+            .render(80);
 
         expect(receivedResult).toEqual({ content: [], details: { diff: "+1 restored" } });
+        expect(receivedArgsComplete).toBe(true);
     });
 
     it("does not inject results into actively executed built-in call renderers", () => {
@@ -451,6 +460,57 @@ describe("tool execution patches", () => {
 
         expect(rendered).toContain("Patch removed.ts (-2)");
         expect(stripAnsi(rendered ?? "")).toContain("2   -two");
+    });
+
+    it("parses complete structured arguments for restored third-party calls", () => {
+        const prototype = createPrototype();
+        installThirdPartyToolRendererPatch({ labelMode: "lifecycle" }, prototype);
+        const instance: FakeToolExecutionInstance = {
+            toolName: "ask_user_question",
+            toolDefinition: {},
+            result: {
+                content: [
+                    {
+                        type: "text",
+                        text: 'User has answered your questions: "Which candidates?"="Stable only".',
+                    },
+                ],
+            },
+        };
+
+        const rendered = prototype.getCallRenderer
+            .call(instance)?.(
+                {
+                    questions: [
+                        {
+                            header: "Candidates",
+                            question: "Which candidates?",
+                            options: [
+                                {
+                                    label: "Stable only",
+                                    description: "Use stable candidates.",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                plainTheme,
+                {
+                    ...renderContext,
+                    argsComplete: false,
+                    executionStarted: false,
+                    isPartial: false,
+                },
+            )
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("Asked User");
+        expect(rendered).toContain("Candidates");
+        expect(rendered).toContain("Which candidates?");
+        expect(rendered).toContain("Choose one:");
+        expect(rendered).toContain("Stable only");
+        expect(rendered).not.toContain("questions: 1 item");
     });
 
     it("does not inject results into actively executed third-party call renderers", () => {

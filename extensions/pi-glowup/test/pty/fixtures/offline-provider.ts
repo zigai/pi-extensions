@@ -28,12 +28,13 @@ const shrunkPatch = [
     "+export const obsolete = 'OBSOLETE_STREAM_MARKER';",
 ].join("\n");
 
-const currentPatch = [
+const currentPatchPrefix = [
     "*** Begin Patch",
     "*** Add File: src/current.ts",
-    "+export const current = 'CURRENT_STREAM_MARKER';",
-    "*** End Patch",
+    "+export const current = 'CURRENT_STREAM_MARKER_",
 ].join("\n");
+const splitEmojiPatch = `${currentPatchPrefix}${"🧪".slice(0, 1)}`;
+const currentPatch = `${currentPatchPrefix}🧪';\n*** End Patch`;
 
 const zeroUsage = {
     input: 0,
@@ -104,7 +105,13 @@ function streamPatchResponse(
     stream.push({ type: "start", partial: output });
     stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
 
-    const snapshots = [undefined, obsoletePatch, shrunkPatch, currentPatch] as const;
+    const snapshots = [
+        undefined,
+        obsoletePatch,
+        shrunkPatch,
+        splitEmojiPatch,
+        currentPatch,
+    ] as const;
     let snapshotIndex = 0;
     let timer: NodeJS.Timeout | undefined;
     let finished = false;
@@ -199,7 +206,7 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
             return Promise.resolve({
                 content: [{ type: "text" as const, text: "Done!" }],
                 details: {
-                    diff: "src/current.ts\n+1 export const current = 'CURRENT_STREAM_MARKER';\n",
+                    diff: "src/current.ts\n+1 export const current = 'CURRENT_STREAM_MARKER_🧪';\n",
                     lineSummary: {
                         files: [
                             {

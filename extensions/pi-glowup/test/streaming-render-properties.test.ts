@@ -94,6 +94,18 @@ function streamingPrefixes(patch: string, chunkSizes: readonly number[]): readon
     for (let index = patch.indexOf("\r\n"); index >= 0; index = patch.indexOf("\r\n", index + 2)) {
         cuts.add(index + 1);
     }
+    for (let index = 0; index < patch.length - 1; index += 1) {
+        const codeUnit = patch.charCodeAt(index);
+        const nextCodeUnit = patch.charCodeAt(index + 1);
+        if (
+            codeUnit >= 0xd800 &&
+            codeUnit <= 0xdbff &&
+            nextCodeUnit >= 0xdc00 &&
+            nextCodeUnit <= 0xdfff
+        ) {
+            cuts.add(index + 1);
+        }
+    }
     const secondSection = patch.indexOf("*** Add File:", patch.indexOf("*** Add File:") + 1);
     if (secondSection >= 0) {
         cuts.add(secondSection);
@@ -132,6 +144,7 @@ function expectBoundedFrame(lines: readonly string[], width: number): void {
     expect(lines.length).toBeLessThanOrEqual(MAX_STREAMING_ROWS);
     for (const line of lines) {
         expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        expect(Buffer.from(line, "utf8").toString("utf8")).toBe(line);
     }
 }
 

@@ -179,6 +179,26 @@ describe("edit call rendering", () => {
         }
     });
 
+    it("does not split emoji graphemes when bounding a streaming replacement", () => {
+        const newText = `a🧪${"b".repeat(1_998)}`;
+        const component = renderStreamingEditCallPreview(
+            { path: "src/rendering.ts", edits: [{ oldText: "old", newText }] },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: true,
+                argsComplete: false,
+                expanded: false,
+                labelMode: "lifecycle",
+                lineNumberStart: 1,
+            },
+        );
+        const rendered = component?.render(2_200).join("\n") ?? "";
+
+        expect(Buffer.from(rendered, "utf8").toString("utf8")).toBe(rendered);
+        expect(rendered).not.toContain("�");
+    });
+
     it("resolves streaming edit line numbers asynchronously from the real file", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-edit-lines-"));
         try {

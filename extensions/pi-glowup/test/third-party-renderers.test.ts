@@ -45,6 +45,12 @@ function compactRenderedText(text: string): string {
     return text.replace(/[│└]/gu, " ").replace(/\s+/gu, " ");
 }
 
+function expectWellFormedLines(lines: readonly string[]): void {
+    for (const line of lines) {
+        expect(Buffer.from(line, "utf8").toString("utf8")).toBe(line);
+    }
+}
+
 describe("third-party tool renderers", () => {
     it("keeps every renderer family within tiny terminal widths", () => {
         const cases: ReadonlyArray<{ readonly toolName: string; readonly args: unknown }> = [
@@ -85,6 +91,7 @@ describe("third-party tool renderers", () => {
                         `${testCase.toolName} exceeded width ${width}`,
                     ).toBeLessThanOrEqual(width);
                 }
+                expectWellFormedLines(lines);
             }
         }
     });
@@ -345,6 +352,22 @@ describe("third-party tool renderers", () => {
         expect(rendered).toContain("Browser");
         expect(rendered).toContain("steps: 5000 items");
         expect(rendered).not.toContain("secretly large");
+    });
+
+    it("uses singular item counts in partial argument previews", () => {
+        const renderer = createThirdPartyToolRenderer("custom_tool");
+
+        const rendered = renderer
+            .renderCall({ questions: [{ question: "Only one" }] }, plainTheme, {
+                ...renderContext,
+                argsComplete: false,
+                isPartial: true,
+            })
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("questions: 1 item");
+        expect(rendered).not.toContain("questions: 1 items");
     });
 
     it("uses Chrome DevTools labels for MCP gateway calls", () => {
@@ -778,6 +801,19 @@ describe("third-party tool renderers", () => {
         expect(lines.some((line) => line.includes("Second lighting line."))).toBe(true);
         expect(lines.some((line) => line.includes("Third material line."))).toBe(true);
         expect(rendered).not.toContain('"First composition line.');
+    });
+
+    it("wraps imagegen prompts without splitting emoji graphemes", () => {
+        const renderer = createThirdPartyToolRenderer("imagegen");
+        const prompt = `${"a".repeat(87)}🧪${"b".repeat(10)}`;
+        const lines = renderer
+            .renderCall({ prompt }, plainTheme, { ...renderContext, expanded: true })
+            .render(120);
+        const promptLines = lines.slice(1).map((line) => line.replace(/^\s*│\s?/u, ""));
+
+        expectWellFormedLines(lines);
+        expect(promptLines.join("")).toBe(prompt);
+        expect(lines.some((line) => line.includes("🧪"))).toBe(true);
     });
 
     it("summarizes imagegen results without exposing internal artifact paths", () => {

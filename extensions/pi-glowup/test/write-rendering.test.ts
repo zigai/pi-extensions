@@ -196,6 +196,53 @@ describe("write rendering", () => {
         expect(rendered).not.toContain("to expand");
     });
 
+    it.each([false, true])(
+        "preserves every character of long expanded write lines when isPartial=%s",
+        (isPartial) => {
+            const content = "abcdefghijklmnopqrstuvwxyz".repeat(8);
+            const component = renderWriteCallPreview(
+                { path: "src/generated.ts", content },
+                plainTheme,
+                {
+                    isError: false,
+                    isPartial,
+                    expanded: true,
+                    labelMode: "lifecycle",
+                },
+            );
+            const diffLines = component.render(40).slice(1);
+            const reconstructed = diffLines
+                .map((line, index) => {
+                    if (index === 0) {
+                        return line.slice(line.indexOf("+") + 1).trimEnd();
+                    }
+                    return line.trim();
+                })
+                .join("");
+
+            expect(reconstructed).toBe(content);
+            expect(diffLines.join("\n")).not.toContain("…");
+        },
+    );
+
+    it("does not split emoji graphemes when bounding a streaming line", () => {
+        const content = `${"a".repeat(1_998)}🧪Z`;
+        const component = renderWriteCallPreview(
+            { path: "src/generated.ts", content },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: true,
+                expanded: false,
+                labelMode: "lifecycle",
+            },
+        );
+        const rendered = component.render(2_200).join("\n");
+
+        expect(Buffer.from(rendered, "utf8").toString("utf8")).toBe(rendered);
+        expect(rendered).not.toContain("�");
+    });
+
     it("keeps both ends of a completed collapsed write", () => {
         const content = Array.from(
             { length: 40 },

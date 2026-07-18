@@ -391,6 +391,24 @@ describe("Glowup rendering helpers", () => {
         expect(component.render(80)).toEqual(["  └ done"]);
     });
 
+    it("renders unsafe terminal controls visibly instead of executing them", () => {
+        const component = renderGlowupOutput(
+            plainTheme,
+            "before\u001b[2Jafter\u001b]2;owned\u0007\tend",
+            {
+                expanded: true,
+            },
+        );
+        const rendered = component.render(100).join("\n");
+
+        expect(rendered).toContain("before␛[2Jafter␛]2;owned␇   end");
+        expect(rendered).not.toContain("\u001b[2J");
+        expect(rendered).not.toContain("\u001b]2;owned");
+        expect(rendered).not.toContain("\u0007");
+        expect(rendered).not.toContain("\t");
+        expectLinesWithinWidth(component.render(8), 8);
+    });
+
     it("starts prefixed output with content after leading blank lines", () => {
         const component = renderGlowupOutput(
             plainTheme,
