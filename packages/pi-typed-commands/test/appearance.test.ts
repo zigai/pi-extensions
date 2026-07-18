@@ -122,6 +122,22 @@ function helperCommand(): RegisteredTypedCommand {
     };
 }
 
+function choiceHelperCommand(): RegisteredTypedCommand {
+    return {
+        name: "choice-helper",
+        description: "Choice helper",
+        args: {
+            count: { type: "number", integer: true, position: 0, default: 1 },
+            layout: {
+                type: "enum",
+                values: ["separate", "current-tab", "new-tab"],
+            },
+            panes: { type: "boolean" },
+        },
+        formSymbols,
+    };
+}
+
 describe("global presentation config", () => {
     it("scaffolds missing global config and schema files", () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
@@ -437,6 +453,102 @@ describe("global presentation config", () => {
             `${" ".repeat("/appearance-helper".length + 2)}` +
                 "[count=1] [--panes]  [--path <path>]",
         );
+    });
+
+    it("hides inline help for commands that opt out", () => {
+        const command: RegisteredTypedCommand = {
+            ...helperCommand(),
+            inlineHelp: "hidden",
+        };
+
+        const lines = renderInlineHelper(
+            { command, rawArgs: "1 --panes", trailingBody: "" },
+            200,
+            identityTheme,
+        );
+
+        assert.deepEqual(lines, []);
+    });
+
+    it("shows fixed choices on a contextual row by default", () => {
+        const command = choiceHelperCommand();
+        const lines = renderInlineHelper(
+            { command, rawArgs: "6 --layout=", trailingBody: "" },
+            200,
+            identityTheme,
+        );
+
+        assert.deepEqual(lines, [
+            `${" ".repeat("/choice-helper".length + 2)}` +
+                "[count=6] [--layout=<value>]  [--panes]",
+            `${" ".repeat("/choice-helper".length + 2)}` + "layout: separate  current-tab  new-tab",
+        ]);
+    });
+
+    it("wraps contextual fixed choices without hiding valid values", () => {
+        const command = choiceHelperCommand();
+        const lines = renderInlineHelper(
+            { command, rawArgs: "6 --layout=", trailingBody: "" },
+            38,
+            identityTheme,
+        );
+
+        assert.ok(
+            lines.some((line) => line.includes("separate")),
+            JSON.stringify(lines),
+        );
+        assert.ok(
+            lines.some((line) => line.includes("current-tab")),
+            JSON.stringify(lines),
+        );
+        assert.ok(
+            lines.some((line) => line.includes("new-tab")),
+            JSON.stringify(lines),
+        );
+    });
+
+    it("supports fixed choices inside the active token", () => {
+        const command = choiceHelperCommand();
+        const appearance = resolvePiTypedCommandsAppearance({
+            inlineHelp: { choiceDisplay: "inline" },
+        }).inlineHelp;
+        const lines = renderInlineHelper(
+            { command, rawArgs: "6 --layout=", trailingBody: "" },
+            200,
+            identityTheme,
+            {},
+            appearance,
+        );
+
+        assert.deepEqual(lines, [
+            `${" ".repeat("/choice-helper".length + 2)}` +
+                "[count=6] [--layout=<separate|current-tab|new-tab>]  [--panes]",
+        ]);
+    });
+
+    it("defers invalid-choice errors until the value is committed or submitted", () => {
+        const command = choiceHelperCommand();
+        const editingLines = renderInlineHelper(
+            { command, rawArgs: "6 --layout=wrong", trailingBody: "" },
+            200,
+            identityTheme,
+        );
+        const committedLines = renderInlineHelper(
+            { command, rawArgs: "6 --layout=wrong ", trailingBody: "" },
+            200,
+            identityTheme,
+        );
+        const submittedLines = renderInlineHelper(
+            { command, rawArgs: "6 --layout=wrong", trailingBody: "" },
+            200,
+            identityTheme,
+            { submittedInvalidEditorText: "/choice-helper 6 --layout=wrong" },
+        );
+
+        assert.ok(editingLines.some((line) => line.includes("layout: separate")));
+        assert.ok(!editingLines.some((line) => line.includes("must be one of")));
+        assert.ok(committedLines.some((line) => line.includes("must be one of")));
+        assert.ok(submittedLines.some((line) => line.includes("must be one of")));
     });
 
     it("renders type-rich inline helper tokens and custom ordering", () => {

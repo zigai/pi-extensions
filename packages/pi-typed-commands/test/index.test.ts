@@ -19,6 +19,7 @@ import {
 } from "../src/invocation.js";
 import { getPiTypedCommandRegistry } from "../src/pi/registry.js";
 import { notifySkillDiagnosticsForText, refreshTypedSkills } from "../src/pi/skill-input.js";
+import { completeTypedCommandOnTab } from "../src/pi/tab-completion.js";
 import { typedSkillCommandFromMetadata } from "../src/skills.js";
 import type { ParseIssue } from "../src/types.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
@@ -33,6 +34,7 @@ import {
     isTransformInputResult,
     requireTestWidgetFactory,
     type TestExtensionEventHandler,
+    type TestExtensionApiOverrides,
     type TestWidgetFactory,
 } from "./pi-test-adapter.js";
 
@@ -126,6 +128,23 @@ describe("registerTypedCommand", () => {
         assert.equal(getTypedCommand("atomic-failure"), undefined);
     });
 
+    it("preserves command-level inline helper visibility", () => {
+        const pi = createTestExtensionApi();
+        const handle = registerTypedCommand(pi, {
+            name: "hidden-helper-test",
+            description: "Hidden helper test",
+            inlineHelp: "hidden",
+            args: { value: { type: "string", position: 0 } },
+            run() {},
+        });
+
+        try {
+            assert.equal(getTypedCommand("hidden-helper-test")?.inlineHelp, "hidden");
+        } finally {
+            handle.dispose();
+        }
+    });
+
     it("defines commands with typed parse helpers and disposable registration handles", () => {
         const deploy = defineTypedCommand({
             name: "typed-deploy-test",
@@ -191,6 +210,217 @@ describe("registerTypedCommand", () => {
             assert.deepEqual(parsed.value.database, { host: "localhost", port: 5432 });
         }
         assert.equal(serialized, "--database-host=localhost --database-port=5432");
+    });
+
+    it("parses, serializes, and documents CLI-style subcommands", () => {
+        const command = defineTypedCommand({
+            name: "workspace-test",
+            description: "Manage workspaces",
+            args: {
+                verbose: { type: "boolean", default: false },
+            },
+            run(args) {
+                assert.equal(typeof args.verbose, "boolean");
+            },
+            subcommands: {
+                create: {
+                    description: "Create a workspace",
+                    aliases: ["new"],
+                    args: {
+                        path: { type: "string", required: true },
+                        count: { type: "number", integer: true, default: 1 },
+                    },
+                    run(args) {
+                        assert.equal(typeof args.path, "string");
+                        assert.equal(typeof args.count, "number");
+                        assert.equal(typeof args.verbose, "boolean");
+                    },
+                },
+                remove: {
+                    description: "Remove a workspace",
+                    args: {
+                        force: { type: "boolean" },
+                    },
+                    run(args) {
+                        assert.equal(typeof args.force, "boolean");
+                    },
+                },
+            },
+        });
+
+        const root = command.parse("--verbose");
+        assert.equal(root.status, "success");
+        if (root.status === "success" && !("subcommand" in root)) {
+            assert.equal(root.value.verbose, true);
+        }
+
+        const create = command.parse("create --path demo --verbose");
+        assert.equal(create.status, "success");
+        assert.ok("subcommand" in create);
+        if (!("subcommand" in create)) {
+            assert.fail("expected a subcommand parse result");
+        }
+        assert.equal(create.subcommand, "create");
+        if (
+            create.status === "success" &&
+            "subcommand" in create &&
+            create.subcommand === "create"
+        ) {
+            assert.equal(create.value.path, "demo");
+            assert.equal(create.value.count, 1);
+            assert.equal(create.value.verbose, true);
+        }
+
+        const alias = command.parse("new --path alias-demo");
+        assert.equal(alias.status, "success");
+        assert.ok("subcommand" in alias);
+        if (!("subcommand" in alias)) {
+            assert.fail("expected an aliased subcommand parse result");
+        }
+        assert.equal(alias.subcommand, "create");
+        assert.equal(
+            command.serializeSubcommand({
+                subcommand: "create",
+                args: { path: "feature branch", count: 2, verbose: true },
+            }),
+            'create --verbose --path="feature branch" --count=2',
+        );
+
+        const help = command.formatHelp();
+        assert.match(help, /Subcommands:/);
+        assert.match(help, /create, aliases new/);
+        assert.match(help, /\/workspace-test create/);
+    });
+
+    it("rejects colliding shared and subcommand arguments", () => {
+        assert.throws(
+            () =>
+                defineTypedCommand({
+                    name: "collision-test",
+                    description: "Collision",
+                    args: { force: { type: "boolean" } },
+                    subcommands: {
+                        run: {
+                            description: "Run",
+                            args: { force: { type: "boolean" } },
+                            run() {},
+                        },
+                    },
+                }),
+            /argument force conflicts with a shared argument/,
+        );
+    });
+
+    it("reports a missing branch when a subcommand-only command has no selection", () => {
+        const command = defineTypedCommand({
+            name: "subcommand-only-test",
+            description: "Subcommand only",
+            args: {},
+            subcommands: {
+                inspect: {
+                    description: "Inspect",
+                    args: {},
+                    run() {},
+                },
+            },
+        });
+
+        const parsed = command.parse("");
+        assert.equal(parsed.status, "error");
+        if (parsed.status === "error") {
+            assert.equal(parsed.issues[0]?.kind, "missing-subcommand");
+        }
+        assert.equal(command.parse("--help").status, "help");
+        assert.match(command.formatHelp(), /inspect/);
+    });
+
+    it("runs the selected colocated subcommand handler", async () => {
+        let registered:
+            | Parameters<NonNullable<TestExtensionApiOverrides["registerCommand"]>>[1]
+            | undefined;
+        const calls: string[] = [];
+        const pi = createTestExtensionApi({
+            registerCommand(_name, command) {
+                registered = command;
+                return "handler-subcommand-test";
+            },
+        });
+        const handle = registerTypedCommand(pi, {
+            name: "handler-subcommand-test",
+            description: "Subcommand handlers",
+            args: { verbose: { type: "boolean", default: false } },
+            run() {
+                calls.push("root");
+            },
+            subcommands: {
+                create: {
+                    description: "Create",
+                    args: { path: { type: "string", required: true } },
+                    run(args) {
+                        calls.push(`create:${args.path}:${String(args.verbose)}`);
+                    },
+                },
+            },
+        });
+        try {
+            assert.notEqual(registered, undefined);
+            const subcommandCompletions = await registered?.getArgumentCompletions?.("cr");
+            assert.equal(
+                subcommandCompletions?.some((item) => item.value === "create "),
+                true,
+            );
+            assert.deepEqual(
+                completeTypedCommandOnTab(
+                    "/handler-subcommand-test cr",
+                    getPiTypedCommandRegistry(),
+                ),
+                {
+                    handled: true,
+                    editorText: "/handler-subcommand-test create ",
+                },
+            );
+            await registered?.handler(
+                "create --path demo --verbose",
+                createTestExtensionCommandContext({ hasUI: false }),
+            );
+            assert.deepEqual(calls, ["create:demo:true"]);
+        } finally {
+            handle.dispose();
+        }
+    });
+
+    it("supports semantic strings, repeatable lists, key-values, and sensitive values", () => {
+        const command = defineTypedCommand({
+            name: "rich-input-test",
+            description: "Rich inputs",
+            args: {
+                email: { type: "string", format: "email", required: true },
+                timeout: { type: "string", format: "duration" },
+                tags: { type: "string-list", occurrence: "append" },
+                env: { type: "key-value", occurrence: "append" },
+                token: { type: "string", sensitive: true },
+            },
+            run() {},
+        });
+
+        const parsed = command.parse(
+            "--email dev@example.com --timeout 5m --tags api,web --tags worker --env A=1 --env B=two --token secret",
+        );
+        assert.equal(parsed.status, "success");
+        if (parsed.status === "success") {
+            assert.deepEqual(parsed.value.tags, ["api", "web", "worker"]);
+            assert.deepEqual(parsed.value.env, { A: "1", B: "two" });
+        }
+        assert.equal(command.parse("--email invalid").status, "error");
+        assert.equal(
+            command.serialize({
+                email: "dev@example.com",
+                tags: ["api", "worker"],
+                env: { A: "1" },
+                token: "must-not-serialize",
+            }),
+            "--email=dev@example.com --tags=api,worker --env=A=1",
+        );
     });
 
     it("keeps registered command schemas immutable after caller mutation", () => {
@@ -886,6 +1116,65 @@ describe("typed command live helper", () => {
             await firstHandler(handlers, "session_shutdown")({}, ctx);
             unregisterTypedCommandMetadata(command);
         }
+    });
+
+    it("tab-completes fixed choices in named, inline, positional, and repeated forms", () => {
+        const command: RegisteredTypedCommand = {
+            name: "choice-tab-test",
+            description: "Complete fixed choices",
+            args: {
+                mode: {
+                    type: "enum",
+                    values: ["dry-run", "deploy"],
+                    position: 0,
+                },
+                layout: {
+                    type: "enum",
+                    values: ["separate", "current-tab", "new-tab"],
+                },
+                tags: {
+                    type: "multi-enum",
+                    values: ["api", "web", "worker"],
+                },
+            },
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+        };
+        const commands = {
+            get(name: string) {
+                if (name === command.name) {
+                    return command;
+                }
+                return undefined;
+            },
+            list() {
+                return [command];
+            },
+        };
+
+        assert.deepEqual(completeTypedCommandOnTab("/choice-tab-test --layout sepa", commands), {
+            handled: true,
+            editorText: "/choice-tab-test --layout separate ",
+        });
+        assert.deepEqual(completeTypedCommandOnTab("/choice-tab-test --layout=cur", commands), {
+            handled: true,
+            editorText: "/choice-tab-test --layout=current-tab ",
+        });
+        assert.deepEqual(completeTypedCommandOnTab("/choice-tab-test dr", commands), {
+            handled: true,
+            editorText: "/choice-tab-test dry-run ",
+        });
+        assert.deepEqual(completeTypedCommandOnTab("/choice-tab-test --tags=api,wo", commands), {
+            handled: true,
+            editorText: "/choice-tab-test --tags=api,worker ",
+        });
+        assert.deepEqual(completeTypedCommandOnTab("/choice-tab-test --layout ", commands), {
+            handled: false,
+        });
     });
 
     it("reports detached argument-form failures", async () => {

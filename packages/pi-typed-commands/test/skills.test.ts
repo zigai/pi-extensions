@@ -46,6 +46,39 @@ describe("normalizeSkillArguments", () => {
                 min_items: 1,
                 occurrence: "append",
             },
+            layout: {
+                type: "enum",
+                values: ["separate", "current-tab"],
+                option_descriptions: {
+                    separate: "One tab/window per fork",
+                    "current-tab": "Add panes beside this Pi",
+                },
+            },
+            contacts: {
+                type: "string_list",
+                default: ["dev@example.com"],
+                min_items: 1,
+                ui: { widget: "list", section: "Delivery", advanced: true },
+            },
+            environment: {
+                type: "key_value",
+                default: { MODE: "safe" },
+                ui: { widget: "key-value", required_when: true },
+            },
+            timeout: {
+                type: "number",
+                default: 5,
+                step: 5,
+                unit: "minutes",
+                ui: { widget: "stepper" },
+            },
+            email: {
+                type: "string",
+                format: "email",
+                sensitive: true,
+                examples: ["dev@example.com"],
+                ui: { widget: "secret" },
+            },
             config: {
                 output_path: {
                     type: "string",
@@ -65,6 +98,23 @@ describe("normalizeSkillArguments", () => {
         assert.deepEqual(result.args.rules?.values, ["E", "F"]);
         assert.equal(result.args.rules?.minItems, 1);
         assert.equal(result.args.rules?.occurrence, "append");
+        assert.equal(result.args.layout?.type, "enum");
+        assert.deepEqual(result.args.layout?.optionDescriptions, {
+            separate: "One tab/window per fork",
+            "current-tab": "Add panes beside this Pi",
+        });
+        assert.equal(result.args.contacts?.type, "string-list");
+        assert.deepEqual(result.args.contacts?.default, ["dev@example.com"]);
+        assert.equal(result.args.contacts?.ui?.section, "Delivery");
+        assert.equal(result.args.environment?.type, "key-value");
+        assert.deepEqual(result.args.environment?.default, { MODE: "safe" });
+        assert.equal(result.args.environment?.ui?.requiredWhen, true);
+        assert.equal(result.args.timeout?.type, "number");
+        assert.equal(result.args.timeout?.step, 5);
+        assert.equal(result.args.timeout?.unit, "minutes");
+        assert.equal(result.args.email?.type, "string");
+        assert.equal(result.args.email?.format, "email");
+        assert.equal(result.args.email?.sensitive, true);
         assert.equal(result.args["config.output_path"]?.type, "string");
         assert.equal(result.args["config.output_path"]?.required, true);
     });
@@ -74,6 +124,9 @@ describe("normalizeSkillArguments", () => {
 name: demo
 description: Demo skill
 form_title: Demo Form
+metadata:
+  ghostText: Choose a path
+  author: demo-author
 arguments:
   path:
     type: string
@@ -87,6 +140,10 @@ Use {args.path}.
             assert.equal(parsed.frontmatter.name, "demo");
             assert.equal(parsed.frontmatter.description, "Demo skill");
             assert.equal(parsed.frontmatter.formTitle, "Demo Form");
+            assert.deepEqual(parsed.frontmatter.metadata, {
+                ghostText: "Choose a path",
+                author: "demo-author",
+            });
             assert.deepEqual(parsed.frontmatter.arguments, { path: { type: "string" } });
             assert.equal(parsed.body, "Use {args.path}.");
         }
@@ -139,6 +196,8 @@ name: 123
 description: false
 form_title:
   nested: value
+metadata:
+  ghostText: 123
 arguments:
   path:
     type: string
@@ -153,6 +212,26 @@ Body
             assert.match(messages, /frontmatter\.name must be a string/);
             assert.match(messages, /frontmatter\.description must be a string/);
             assert.match(messages, /frontmatter\.form_title must be a string/);
+            assert.match(messages, /frontmatter\.metadata\.ghostText must be a string/);
+        }
+    });
+
+    it("requires skill metadata to be an object", () => {
+        const parsed = parseSkillMarkdown(`---
+name: demo
+description: Demo skill
+metadata: invalid
+arguments:
+  path:
+    type: string
+---
+
+Body
+`);
+
+        assert.equal(parsed.status, "invalid");
+        if (parsed.status === "invalid") {
+            assert.match(diagnosticMessages(parsed), /frontmatter\.metadata must be an object/);
         }
     });
 
@@ -316,6 +395,9 @@ name: demo
 registration: should be ignored
 description: Demo skill
 form_title: Demo Form
+metadata:
+  ghostText: Choose a path to inspect
+  author: preserved
 arguments:
   path:
     type: string
@@ -332,9 +414,14 @@ Use {args.path}.
         if (result.status === "ok") {
             assert.equal(result.metadata.name, "demo");
             assert.equal(result.metadata.formTitle, "Demo Form");
+            assert.equal(result.metadata.ghostText, "Choose a path to inspect");
             assert.equal(result.metadata.args.path?.type, "string");
             assert.equal(result.metadata.args.path?.required, true);
             assert.equal(result.metadata.body, "Use {args.path}.");
+            assert.equal(
+                typedSkillCommandFromMetadata(result.metadata).ghostText,
+                "Choose a path to inspect",
+            );
         }
     });
 
@@ -375,6 +462,7 @@ describe("renderTypedSkillInvocation", () => {
         baseDir: "/tmp/skills/fix-ruff-errors",
         body: "Run on {args.path}. Fix: {args.fix}. Output: {args.config.output_path}.",
         args: {},
+        ghostText: "Choose files to lint",
     };
 
     it("renders placeholders as JSON data literals including nested argument paths", () => {
@@ -467,6 +555,7 @@ describe("renderTypedSkillInvocation", () => {
         assert.equal(command.name, "skill:fix-ruff-errors");
         assert.equal(command.source, "skill");
         assert.equal(command.target?.kind, "skill");
+        assert.equal(command.ghostText, "Choose files to lint");
         assert.equal(command.skill.filePath, skill.filePath);
     });
 });

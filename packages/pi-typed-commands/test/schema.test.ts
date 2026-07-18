@@ -155,6 +155,11 @@ describe("typed command schema", () => {
             range: { type: "number", min: 10, max: 1 },
             text: { type: "string", minLength: 5, maxLength: 2, pattern: "[" },
             choice: { type: "enum", values: ["dev", "dev", ""] },
+            choiceDescriptions: {
+                type: "enum",
+                values: ["dev"],
+                optionDescriptions: { prod: "Production", dev: "" },
+            },
             many: { type: "multi-enum", values: ["a"], minItems: 3, maxItems: 1 },
             commaMulti: { type: "multi-enum", values: ["a,b"] },
             badCompletionTimeout: { type: "string", completionTimeoutMs: -1 },
@@ -174,6 +179,11 @@ describe("typed command schema", () => {
         assert.match(text, /text\.pattern must be a valid regular expression/);
         assert.match(text, /choice\.values contains duplicate value dev/);
         assert.match(text, /choice\.values may not contain empty strings/);
+        assert.match(text, /choiceDescriptions\.optionDescriptions\.prod must match an enum value/);
+        assert.match(
+            text,
+            /choiceDescriptions\.optionDescriptions\.dev must be a non-empty string/,
+        );
         assert.match(text, /many\.minItems must be less than or equal to maxItems/);
         assert.match(text, /commaMulti\.values may not contain commas/);
         assert.match(

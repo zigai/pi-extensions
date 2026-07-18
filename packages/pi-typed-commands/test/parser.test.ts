@@ -6,6 +6,7 @@ import { describe, it } from "vitest";
 import {
     getTypedArgumentCompletions as resolveTypedArgumentCompletions,
     getTypedAutocompleteSuggestions as resolveTypedAutocompleteSuggestions,
+    getTypedFormValueCompletions,
     type CompletionCapabilities,
 } from "../src/completions.js";
 import {
@@ -710,6 +711,37 @@ describe("formatCommandUsage", () => {
 });
 
 describe("getTypedAutocompleteSuggestions", () => {
+    it("reuses completion providers for expanded form fields", async () => {
+        const definition: ArgumentDefinition = {
+            type: "string",
+            complete(query, context) {
+                assert.equal(context.values.environment, "prod");
+                return [
+                    {
+                        value: `${query}-result`,
+                        label: "Resolved value",
+                        description: "Completion-backed form option",
+                    },
+                ];
+            },
+        };
+
+        const items = await getTypedFormValueCompletions(
+            definition,
+            "fea",
+            { values: { environment: "prod" }, provided: new Set(["environment"]) },
+            completionCapabilities(),
+        );
+
+        assert.deepEqual(items, [
+            {
+                value: "fea-result",
+                label: "Resolved value",
+                description: "Completion-backed form option",
+            },
+        ]);
+    });
+
     it("keeps independently composed command registries isolated", () => {
         const left = createTypedCommandRegistry();
         const right = createTypedCommandRegistry();

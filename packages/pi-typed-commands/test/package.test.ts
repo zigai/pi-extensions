@@ -4,6 +4,7 @@ import { describe, it } from "vitest";
 import {
     defineTypedCommand as defineLeanTypedCommand,
     registerTypedCommand,
+    type TypedCommandGhostTextContext,
 } from "pi-typed-args/command";
 import { compileTypedCommandDefinition, enumArgument, group } from "pi-typed-args/core";
 import { createTypedCommandUxExtension, defineTypedCommand } from "pi-typed-args/pi";
@@ -11,6 +12,7 @@ import {
     normalizeSkillArguments,
     readTypedSkillMetadataResult,
     skillArgumentsJsonSchema,
+    type SkillFrontmatterMetadata,
 } from "pi-typed-args/skills";
 import { createHeadlessFormModel, type FormMode } from "pi-typed-args/pi-tui";
 import { piTypedCommandsConfigJsonSchema } from "../src/pi/config-schema.js";
@@ -18,6 +20,9 @@ import { piTypedCommandsConfigJsonSchema } from "../src/pi/config-schema.js";
 describe("package subpath exports", () => {
     it("loads the public core, pi, skills, and pi-tui subpaths", () => {
         const mode: FormMode = "all";
+        const ghostContextLabel = (context: TypedCommandGhostTextContext): string =>
+            context.commandName;
+        const skillMetadata: SkillFrontmatterMetadata = { ghostText: "Choose a target" };
         const command = defineTypedCommand({
             name: "subpath-demo",
             description: "Subpath demo",
@@ -48,6 +53,8 @@ describe("package subpath exports", () => {
         assert.equal(typeof defineLeanTypedCommand, "function");
         assert.equal(typeof registerTypedCommand, "function");
         assert.equal(typeof readTypedSkillMetadataResult, "function");
+        assert.equal(skillMetadata.ghostText, "Choose a target");
+        assert.equal(typeof ghostContextLabel, "function");
         assert.equal(grouped.args.host?.type, "enum");
         assert.equal(compiled.ok, true);
         assert.deepEqual(normalized.diagnostics, []);

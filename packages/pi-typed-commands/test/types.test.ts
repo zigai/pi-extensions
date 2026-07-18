@@ -17,6 +17,37 @@ import { compileTypedCommandDefinition } from "../src/compiler.js";
 function expectType<T>(_value: T): void {}
 
 describe("compile-time API inference", () => {
+    it("types dynamic root and subcommand ghost text context", () => {
+        const command = defineTypedCommand({
+            name: "ghost-context-demo",
+            description: "Ghost context demo",
+            args: {},
+            ghostText({ ctx, commandName, subcommand }) {
+                expectType<string>(ctx.cwd);
+                expectType<string>(commandName);
+                expectType<string | undefined>(subcommand);
+                return ctx.cwd;
+            },
+            subcommands: {
+                inspect: {
+                    description: "Inspect",
+                    args: {},
+                    ghostText({ ctx, commandName, subcommand }) {
+                        expectType<string>(ctx.cwd);
+                        expectType<string>(commandName);
+                        expectType<string | undefined>(subcommand);
+                        return "inspect a target";
+                    },
+                    run() {},
+                },
+            },
+            run() {},
+        });
+
+        assert.equal(typeof command.ghostText, "function");
+        assert.equal(typeof command.subcommands?.inspect.ghostText, "function");
+    });
+
     it("preserves enum literals without as const and narrows parse results", () => {
         const command = defineTypedCommand({
             name: "type-demo",

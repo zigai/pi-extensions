@@ -6,7 +6,15 @@ import type {
     KeybindingsManager,
     Theme,
 } from "@earendil-works/pi-coding-agent";
-import { isFocusable, type Component, type Focusable, type TUI } from "@earendil-works/pi-tui";
+import {
+    isFocusable,
+    KeybindingsManager as TestTuiKeybindingsManager,
+    TUI_KEYBINDINGS,
+    type Component,
+    type Focusable,
+    type KeybindingsConfig,
+    type TUI,
+} from "@earendil-works/pi-tui";
 
 export type TestExtensionEventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
 
@@ -23,6 +31,7 @@ export type TestWidgetFactory = (tui: TUI, theme: Theme) => Component;
 export type TestUiOverrides = {
     readonly addAutocompleteProvider?: (factory: unknown) => void;
     readonly custom?: (factory: Parameters<ExtensionUIContext["custom"]>[0]) => Promise<unknown>;
+    readonly getEditorComponent?: ExtensionUIContext["getEditorComponent"];
     readonly getEditorText?: () => string;
     readonly input?: (
         title: string,
@@ -36,12 +45,14 @@ export type TestUiOverrides = {
         ) => { readonly consume?: boolean; readonly data?: string } | undefined,
     ) => () => void;
     readonly setEditorText?: (text: string) => void;
+    readonly setEditorComponent?: ExtensionUIContext["setEditorComponent"];
     readonly select?: ExtensionUIContext["select"];
     readonly setWidget?: (
         key: string,
         content: string[] | TestWidgetFactory | undefined,
         options?: { readonly placement?: "aboveEditor" | "belowEditor" },
     ) => void;
+    readonly theme?: Theme;
 };
 
 export type TestContextOverrides = {
@@ -84,6 +95,13 @@ export function createTestExtensionApi(overrides: TestExtensionApiOverrides = {}
     });
 }
 
+export function createTestTheme(overrides: TestThemeOverrides = {}): Theme {
+    return externalPiContract<Theme>({
+        bold: overrides.bold ?? ((text: string) => text),
+        fg: overrides.fg ?? ((_color: string, text: string) => text),
+    });
+}
+
 function createTestContextValue(overrides: TestContextOverrides): object {
     return {
         cwd: overrides.cwd ?? process.cwd(),
@@ -94,13 +112,16 @@ function createTestContextValue(overrides: TestContextOverrides): object {
         ui: {
             addAutocompleteProvider: overrides.ui?.addAutocompleteProvider ?? (() => {}),
             custom: overrides.ui?.custom ?? (async () => undefined),
+            getEditorComponent: overrides.ui?.getEditorComponent ?? (() => undefined),
             getEditorText: overrides.ui?.getEditorText ?? (() => ""),
             input: overrides.ui?.input ?? (async () => undefined),
             notify: overrides.ui?.notify ?? (() => {}),
             onTerminalInput: overrides.ui?.onTerminalInput ?? (() => () => {}),
             setEditorText: overrides.ui?.setEditorText ?? (() => {}),
+            setEditorComponent: overrides.ui?.setEditorComponent ?? (() => {}),
             select: overrides.ui?.select ?? (async () => undefined),
             setWidget: overrides.ui?.setWidget ?? (() => {}),
+            theme: overrides.ui?.theme ?? createTestTheme(),
         },
     };
 }
@@ -122,15 +143,12 @@ export function createTestTui(): TUI {
     });
 }
 
-export function createTestTheme(overrides: TestThemeOverrides = {}): Theme {
-    return externalPiContract<Theme>({
-        bold: overrides.bold ?? ((text: string) => text),
-        fg: overrides.fg ?? ((_color: string, text: string) => text),
+export function createTestKeybindings(userBindings?: KeybindingsConfig): KeybindingsManager {
+    const keybindings = new TestTuiKeybindingsManager(TUI_KEYBINDINGS, userBindings);
+    return externalPiContract<KeybindingsManager>({
+        matches: keybindings.matches.bind(keybindings),
+        getKeys: keybindings.getKeys.bind(keybindings),
     });
-}
-
-export function createTestKeybindings(): KeybindingsManager {
-    return externalPiContract<KeybindingsManager>({});
 }
 
 export type InteractiveTestComponent = Component &
