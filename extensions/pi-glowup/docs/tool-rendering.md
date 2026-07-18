@@ -1,38 +1,134 @@
 # Glowup Tool Rendering
 
-Third-party extensions can add `glowupRendering` to a tool definition to control how that tool appears when `pi-glowup` is installed. Pi ignores this property when the extension is not installed.
+Tool owners can add a `glowupRendering` property to a Pi tool definition. Pi ignores this property
+when `pi-glowup` is not installed. The property is a versioned, declarative protocol; it does not
+expose Pi's TUI components, themes, ANSI sequences, or Glowup's internal modules.
 
-Tool labels support two vocabulary modes. `static` keeps a stable operation label such as
-`Explore`, `Edit`, or `Check Agent`. `lifecycle` changes that label as execution progresses,
-for example `Exploring` → `Explored`, `Editing` → `Edited`, and `Checking Agent` →
-`Checked Agent`. Patch calls use `Patch` in static mode and `Patching` → `Patched` in lifecycle
-mode. Script previews intentionally keep their interpreter label (`Bash`, `Python`,
-`Node`, and similar) in both modes.
+Tool-specific rendering belongs next to the tool that owns its argument and result contracts. This
+repository provides the protocol, style engine, generic compatibility renderer, and the existing
+compatibility renderers for Agent Browser, Codex, MCP, goals, agents, questions, and `apply_patch`.
+Those existing renderers stay here until each owning package ships and verifies an equivalent
+protocol adapter. They are migrated independently rather than removed in advance.
 
-## Rendering Paths
+## Rendering selection
 
-`pi-glowup` has four rendering paths:
+For a tool, Glowup uses this order:
 
-- **Built-in Glowup renderers** are internal renderers for Pi/Codex tools this extension knows well.
-- **Original Pi renderers** are renderers already provided by a third-party tool.
-- **Compatibility renderers** are generic Glowup renderers used for third-party tools that do not provide their own renderer.
-- **Passive adapters** are third-party `glowupRendering` adapters that provide a compact Glowup view without replacing the normal Pi renderer globally.
+1. A configured preserve rule or `glowupRendering: "preserve"` keeps the original Pi renderer.
+2. A valid tool-owned `glowupRendering` adapter supplies Glowup views.
+3. A known tool without an owner adapter uses its transitional compatibility renderer in Glowup.
+4. An existing renderer for any other tool remains unchanged.
+5. The generic compatibility renderer is used only when no renderer exists.
 
-## Selection Order
+The generic renderer is deliberately domain-neutral. It uses the tool definition label when
+available, produces bounded summaries, redacts secret-like fields, and does not infer semantics
+from unknown tool names. Known transitional renderers retain their current domain-specific
+summaries until migration is complete.
 
-For a third-party tool, rendering is selected in this order:
+## Protocol version 2
 
-1. If the tool is preserved by config or by `glowupRendering: "preserve"`, use its original Pi rendering.
-2. If the tool defines a `glowupRendering` adapter, use that adapter.
-3. If `pi-glowup` has an explicit built-in renderer for this tool family, use it.
-4. If the tool already has its own Pi renderer, keep that renderer.
-5. Otherwise, use the generic compatibility renderer.
+Import only from `pi-glowup/protocol`:
 
-This means existing rich tool renderers are preserved by default. A tool author only needs `glowupRendering` when they want a specific Glowup presentation.
+```ts
+import {
+  call,
+  code,
+  defineGlowupRenderer,
+  output,
+  stack,
+  summary,
+  type GlowupRenderer,
+} from "pi-glowup/protocol";
 
-## Preserve A Tool Renderer
+type DbQueryArgs = {
+  readonly database: string;
+  readonly sql: string;
+};
 
-Use `"preserve"` when a tool should always keep its own Pi renderer, even if compatibility rendering is enabled:
+type DbQueryResult = {
+  readonly details?: {
+    readonly rowCount?: number;
+  };
+};
+
+const glowupRendering = defineGlowupRenderer<DbQueryArgs, DbQueryResult>({
+  version: 2,
+  parseArgs(value) {
+    if (typeof value !== "object" || value === null) return undefined;
+    if (!("database" in value) || !("sql" in value)) return undefined;
+    return typeof value.database === "string" && typeof value.sql === "string"
+      ? { database: value.database, sql: value.sql }
+      : undefined;
+  },
+  parseResult(value) {
+    if (typeof value !== "object" || value === null) return undefined;
+    if (!("details" in value) || typeof value.details !== "object" || value.details === null) {
+      return {};
+    }
+    if (!("rowCount" in value.details) || typeof value.details.rowCount !== "number") {
+      return { details: {} };
+    }
+    return { details: { rowCount: value.details.rowCount } };
+  },
+  renderCall(args) {
+    return call(
+      { static: "DB Query", running: "Querying DB", completed: "Queried DB" },
+      {
+        body: stack([
+          summary([{ label: "Database", value: args.database }]),
+          code(args.sql, { syntax: { language: "sql" } }),
+        ]),
+      },
+    );
+  },
+  renderResult(result) {
+    const rows = result.details?.rowCount ?? 0;
+    return output(`${rows} rows`, { preview: { mode: "head" } });
+  },
+});
+
+const typedCheck: GlowupRenderer<DbQueryArgs, DbQueryResult> = glowupRendering;
+
+pi.registerTool({
+  name: "db_query",
+  label: "DB Query",
+  // parameters, execute, and the tool's own renderer...
+  glowupRendering: typedCheck,
+});
+```
+
+The generic parameters are compile-time guidance only. Restored sessions, serialized tool calls,
+and third-party results still cross a runtime boundary, so adapters should parse values before
+using them. Returning `undefined` from a parser or render method asks Glowup to use the generic
+fallback for that slot. Returning `empty()` intentionally suppresses the slot.
+
+## Components
+
+Protocol components are semantic rather than visual:
+
+- `call` renders a lifecycle-aware tool call.
+- `output` renders bounded text output.
+- `summary` renders label/value rows.
+- `code` renders syntax-aware code.
+- `list`, `text`, and `stack` compose structured content.
+- `empty` intentionally renders nothing.
+
+Use semantic tones and syntax metadata instead of applying colors yourself. The active Glowup
+configuration controls label mode, colors, indicators, width wrapping, expansion hints, and
+terminal safety.
+
+## Partial and expanded rendering
+
+`GlowupCallContext` reports the tool call id, lifecycle phase, argument completeness, partial state,
+expanded state, image preference, and error state. Result rendering receives the original parsed
+arguments through `GlowupResultContext`.
+
+All output remains bounded even when expanded. The renderer enforces width, Unicode, terminal
+control, and preview-size limits after applying style.
+
+## Preserving an existing renderer
+
+Use `preserve` when a tool should always keep its own Pi renderer:
 
 ```ts
 pi.registerTool({
@@ -43,76 +139,5 @@ pi.registerTool({
 });
 ```
 
-Users can also preserve tools from config with `preserveTools` in `~/.pi/agent/pi-glowup/config.json`.
-
-## When An Adapter Helps
-
-The generic compatibility renderer can already preview args and results. A passive adapter is useful when the tool knows information the fallback cannot infer:
-
-- which fields are important enough to show in the collapsed call
-- which fields are noisy or sensitive and should be hidden
-- how to label the action in domain language
-- how to summarize results without dumping raw output
-- which syntax or preview limits make the output readable
-
-For tiny tools with already-clear args and output, the fallback renderer may be good enough.
-
-## Typed Adapter Example
-
-Define the adapter next to the tool's typed args/result contract. Then pass those types to `GlowupRenderingAdapter` and render from typed values directly.
-
-```ts
-import type { GlowupRenderingAdapter } from "pi-glowup/protocol";
-
-type DbQueryArgs = {
-  readonly database: string;
-  readonly sql: string;
-  readonly params?: readonly unknown[];
-  readonly connectionId?: string;
-};
-
-type DbQueryResult = {
-  readonly details?: {
-    readonly rowCount?: number;
-    readonly durationMs?: number;
-  };
-};
-
-const glowupRendering = {
-  version: 1,
-  renderCall({ database, sql }) {
-    return {
-      kind: "call",
-      label: `Query ${database}`,
-      activeLabel: `Querying ${database}`,
-      completedLabel: `Queried ${database}`,
-      body: sql,
-      maxRenderedLines: 6,
-    };
-  },
-  renderResult({ details }) {
-    return {
-      kind: "sections",
-      sections: [
-        { kind: "summary", label: "Rows", text: String(details?.rowCount ?? 0) },
-        { kind: "summary", label: "Time", text: `${details?.durationMs ?? 0}ms` },
-      ],
-    };
-  },
-} satisfies GlowupRenderingAdapter<DbQueryArgs, DbQueryResult>;
-
-pi.registerTool({
-  name: "db_query",
-  label: "DB Query",
-  // parameters, execute, etc.
-  glowupRendering,
-});
-```
-
-In this example the adapter intentionally shows `database`, `sql`, row count, and timing. It omits fields like `params` and `connectionId` from the collapsed call because the fallback renderer cannot know whether those fields are useful, noisy, or sensitive. `label` is used in static mode; lifecycle mode uses `activeLabel` and `completedLabel`. When those lifecycle labels are omitted, the adapter falls back to `Calling {label}` and `Called {label}`.
-
-## Untyped Boundaries
-
-The default adapter generics are `unknown` because `pi-glowup` can discover renderers from tools it did not compile with. If the adapter is not colocated with the tool's typed contract, parse or guard incoming values at the boundary before rendering.
-
-Keep those guards in a small parser rather than scattering `Reflect.get` checks through the renderer body. Return `undefined` from `renderCall` or `renderResult` when the adapter cannot safely render; `pi-glowup` will fall back to the compatibility renderer.
+Users can also preserve tools through `preserveTools` in
+`~/.pi/agent/pi-glowup/config.json`.

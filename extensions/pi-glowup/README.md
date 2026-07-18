@@ -1,6 +1,6 @@
 # pi-glowup
 
-Compact, high-signal rendering for Pi tool calls and results.
+Compact, high-signal rendering for Pi tool calls and results. Inspired by Codex CLI.
 
 ## Install
 
@@ -104,8 +104,3 @@ Use global config at `~/.pi/agent/pi-glowup/config.json`.
   }
 }
 ```
-
-## Package Exports
-
-- Extension entrypoint: `pi-glowup`
-- Passive rendering protocol types: `pi-glowup/protocol`
