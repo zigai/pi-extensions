@@ -1,7 +1,7 @@
 {
   "name": "@zigai/pi-toggles",
   "version": "0.1.0",
-  "description": "",
+  "description": "Central capability policy, profiles, conditions, and session overrides for Pi",
   "keywords": [
     "pi",
     "pi-coding-agent",
@@ -21,15 +21,17 @@
   },
   "files": [
     "src",
+    "!src/**/*.test.ts",
+    "docs",
     "README.md",
     "config.schema.json",
     "LICENSE"
   ],
   "type": "module",
+  "main": "src/index.ts",
   "publishConfig": {
     "access": "public"
   },
-  "main": "src/index.ts",
   "scripts": {
     "lint": "oxlint -c ./.oxlintrc.json .",
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
@@ -44,10 +46,13 @@
     "config:check": "pi-extension-settings check"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.1.2"
+    "@zigai/pi-extension-settings": "0.1.2",
+    "glob": "^13.0.6"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.10",
     "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@earendil-works/pi-tui": "^0.80.10",
     "@types/node": "^24.13.3",
     "@vitest/coverage-v8": "^4.1.10",
     "oxfmt": "^0.59.0",
@@ -58,11 +63,19 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
     "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
       "optional": true
     },
     "typebox": {

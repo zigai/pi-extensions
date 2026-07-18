@@ -1,0 +1,332 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+    createAgentSession,
+    DefaultResourceLoader,
+    SessionManager,
+    SettingsManager,
+} from "@earendil-works/pi-coding-agent";
+import { afterEach, describe, expect, it } from "vitest";
+import extension from "./index.ts";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+    await Promise.all(
+        temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+    );
+});
+
+async function createLoader(
+    cwd: string,
+    agentDir: string,
+    noSkills = true,
+): Promise<DefaultResourceLoader> {
+    const settingsManager = SettingsManager.inMemory();
+    const loader = new DefaultResourceLoader({
+        cwd,
+        agentDir,
+        settingsManager,
+        extensionFactories: [{ name: "pi-toggles-test", factory: extension }],
+        noSkills,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+    });
+    await loader.reload();
+    return loader;
+}
+
+describe("Pi Toggles extension runtime", () => {
+    it("removes a session-disabled tool and restores the decision when the saved session is reopened", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-toggles-integration-"));
+        temporaryDirectories.push(root);
+        const cwd = join(root, "project");
+        const agentDir = join(root, "agent");
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+
+        try {
+            await mkdir(cwd, { recursive: true });
+            const firstLoader = await createLoader(cwd, agentDir);
+            const firstManager = SessionManager.create(cwd, join(root, "sessions"));
+            firstManager.appendMessage({
+                role: "user",
+                content: "Existing session",
+                timestamp: Date.now(),
+            });
+            firstManager.appendMessage({
+                role: "assistant",
+                content: [{ type: "text", text: "Ready" }],
+                api: "openai-responses",
+                provider: "openai",
+                model: "test-model",
+                usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+                stopReason: "stop",
+                timestamp: Date.now(),
+            });
+            const first = await createAgentSession({
+                cwd,
+                agentDir,
+                resourceLoader: firstLoader,
+                sessionManager: firstManager,
+                settingsManager: SettingsManager.inMemory(),
+            });
+            await first.session.bindExtensions({ mode: "print" });
+            const sessionFile = first.session.sessionFile;
+            expect(sessionFile).toBeDefined();
+            expect(first.session.agent.state.tools.map((tool) => tool.name)).toContain("write");
+
+            await first.session.prompt("/toggles set write off --scope session");
+            expect(first.session.agent.state.tools.map((tool) => tool.name)).not.toContain("write");
+            expect(
+                first.session.sessionManager
+                    .getEntries()
+                    .some(
+                        (entry) =>
+                            entry.type === "custom" && entry.customType === "pi-toggles-policy",
+                    ),
+            ).toBe(true);
+            first.session.dispose();
+
+            if (sessionFile === undefined) {
+                throw new Error("Expected a persisted session file.");
+            }
+            const secondLoader = await createLoader(cwd, agentDir);
+            const second = await createAgentSession({
+                cwd,
+                agentDir,
+                resourceLoader: secondLoader,
+                sessionManager: SessionManager.open(sessionFile, join(root, "sessions")),
+                settingsManager: SettingsManager.inMemory(),
+            });
+            expect(
+                second.session.sessionManager
+                    .getEntries()
+                    .some(
+                        (entry) =>
+                            entry.type === "custom" && entry.customType === "pi-toggles-policy",
+                    ),
+            ).toBe(true);
+            await second.session.bindExtensions({ mode: "print" });
+            try {
+                expect(second.session.agent.state.tools.map((tool) => tool.name)).not.toContain(
+                    "write",
+                );
+            } finally {
+                second.session.dispose();
+            }
+
+            const newSessionLoader = await createLoader(cwd, agentDir);
+            const newSession = await createAgentSession({
+                cwd,
+                agentDir,
+                resourceLoader: newSessionLoader,
+                sessionManager: SessionManager.inMemory(cwd),
+                settingsManager: SettingsManager.inMemory(),
+            });
+            await newSession.session.bindExtensions({ mode: "print" });
+            try {
+                expect(newSession.session.agent.state.tools.map((tool) => tool.name)).toContain(
+                    "write",
+                );
+            } finally {
+                newSession.session.dispose();
+            }
+        } finally {
+            if (previousAgentDir === undefined) {
+                delete process.env.PI_CODING_AGENT_DIR;
+            } else {
+                process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+            }
+        }
+    });
+
+    it("keeps a lazy tool out of the initial set and activates it through capability search", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-toggles-lazy-"));
+        temporaryDirectories.push(root);
+        const cwd = join(root, "project");
+        const agentDir = join(root, "agent");
+        const settingsDir = join(agentDir, "extension-settings");
+        await mkdir(settingsDir, { recursive: true });
+        await writeFile(
+            join(settingsDir, "pi-toggles.json"),
+            `${JSON.stringify(
+                {
+                    enabled: true,
+                    overrides: [
+                        {
+                            target: { kind: "tool", source: "builtin", name: "write" },
+                            state: "lazy",
+                        },
+                        {
+                            target: { kind: "tool", source: "builtin", name: "ghost" },
+                            state: "off",
+                        },
+                    ],
+                },
+                null,
+                2,
+            )}\n`,
+            "utf8",
+        );
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+
+        try {
+            const loader = await createLoader(cwd, agentDir);
+            const created = await createAgentSession({
+                cwd,
+                agentDir,
+                resourceLoader: loader,
+                sessionManager: SessionManager.inMemory(cwd),
+                settingsManager: SettingsManager.inMemory(),
+            });
+            await created.session.bindExtensions({ mode: "print" });
+            try {
+                const initialNames = created.session.agent.state.tools.map((tool) => tool.name);
+                expect(initialNames).not.toContain("write");
+                expect(initialNames).toContain("search_capabilities");
+                const search = created.session.agent.state.tools.find(
+                    (tool) => tool.name === "search_capabilities",
+                );
+                if (search === undefined) {
+                    throw new Error("Expected search_capabilities to be active.");
+                }
+                const result = await search.execute("search-1", { query: "write files" });
+                expect(result.content).toContainEqual({
+                    type: "text",
+                    text: "Activated lazy tools: write",
+                });
+                expect(created.session.agent.state.tools.map((tool) => tool.name)).toContain(
+                    "write",
+                );
+
+                await created.session.prompt("/toggles reset ghost --scope global");
+                await created.session.prompt("/toggles set write off --scope global");
+                expect(created.session.agent.state.tools.map((tool) => tool.name)).not.toContain(
+                    "write",
+                );
+                const saved = await readFile(join(settingsDir, "pi-toggles.json"), "utf8");
+                expect(saved.match(/"name": "write"/g)).toHaveLength(1);
+                expect(saved).toContain('"state": "off"');
+                expect(saved).not.toContain('"state": "lazy"');
+                expect(saved).not.toContain('"name": "ghost"');
+
+                await created.session.prompt("/toggles reset write --scope global");
+                expect(created.session.agent.state.tools.map((tool) => tool.name)).toContain(
+                    "write",
+                );
+            } finally {
+                created.session.dispose();
+            }
+        } finally {
+            if (previousAgentDir === undefined) {
+                delete process.env.PI_CODING_AGENT_DIR;
+            } else {
+                process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+            }
+        }
+    });
+
+    it("filters skill metadata and blocks off skill expansion through real Pi hooks", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-toggles-skills-"));
+        temporaryDirectories.push(root);
+        const cwd = join(root, "project");
+        const agentDir = join(root, "agent");
+        await mkdir(join(agentDir, "skills", "review"), { recursive: true });
+        await mkdir(cwd, { recursive: true });
+        await writeFile(
+            join(agentDir, "skills", "review", "SKILL.md"),
+            "---\nname: review\ndescription: Review code carefully\n---\n\n# Review\n",
+            "utf8",
+        );
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+
+        try {
+            const loader = await createLoader(cwd, agentDir, false);
+            const skill = loader
+                .getSkills()
+                .skills.find((candidate) => candidate.name === "review");
+            if (skill === undefined) {
+                throw new Error("Expected review skill to be discovered.");
+            }
+            await mkdir(join(agentDir, "extension-settings"), { recursive: true });
+            await writeFile(
+                join(agentDir, "extension-settings", "pi-toggles.json"),
+                `${JSON.stringify({
+                    enabled: true,
+                    overrides: [
+                        {
+                            target: {
+                                kind: "skill",
+                                source: skill.sourceInfo.source,
+                                name: skill.name,
+                            },
+                            state: "off",
+                        },
+                    ],
+                })}\n`,
+                "utf8",
+            );
+            const created = await createAgentSession({
+                cwd,
+                agentDir,
+                resourceLoader: loader,
+                sessionManager: SessionManager.inMemory(cwd),
+                settingsManager: SettingsManager.inMemory(),
+            });
+            await created.session.bindExtensions({ mode: "print" });
+            try {
+                const skills = loader.getSkills().skills;
+                const before = await created.session.extensionRunner.emitBeforeAgentStart(
+                    "Review this",
+                    undefined,
+                    created.session.systemPrompt,
+                    { cwd, skills },
+                );
+                expect(before?.systemPrompt).not.toContain("<name>review</name>");
+                expect(
+                    await created.session.extensionRunner.emitInput(
+                        "/skill:review focus on security",
+                        undefined,
+                        "interactive",
+                    ),
+                ).toEqual({ action: "handled" });
+
+                await created.session.prompt("/toggles set review user-only --scope session");
+                expect(
+                    await created.session.extensionRunner.emitInput(
+                        "/skill:review focus on security",
+                        undefined,
+                        "interactive",
+                    ),
+                ).toEqual({ action: "continue" });
+                const userOnly = await created.session.extensionRunner.emitBeforeAgentStart(
+                    "Review this",
+                    undefined,
+                    created.session.systemPrompt,
+                    { cwd, skills },
+                );
+                expect(userOnly?.systemPrompt).not.toContain("<name>review</name>");
+            } finally {
+                created.session.dispose();
+            }
+        } finally {
+            if (previousAgentDir === undefined) {
+                delete process.env.PI_CODING_AGENT_DIR;
+            } else {
+                process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+            }
+        }
+    });
+});

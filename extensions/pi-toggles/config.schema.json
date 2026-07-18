@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/zigai/pi-toggles/HEAD/config.schema.json",
   "title": "Pi Toggles settings",
-  "description": "Settings for Pi Toggles.",
+  "description": "Central capability policy, profiles, conditions, and session overrides for Pi.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -14,7 +14,1530 @@
     "enabled": {
       "type": "boolean",
       "default": true,
-      "description": "Enable the extension."
+      "description": "Enforce Pi Toggles policy while preserving the recovery command."
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "unknownCondition": {
+          "type": "string",
+          "const": "no-match",
+          "default": "no-match",
+          "description": "Treat unknown or failed condition facts as a non-match."
+        },
+        "lazyToolLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5,
+          "description": "Maximum tools activated by one lazy capability search."
+        },
+        "showStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a compact footer status when policy changes Pi or has diagnostics."
+        }
+      },
+      "additionalProperties": false,
+      "default": {},
+      "description": "Default policy-engine behavior."
+    },
+    "activeProfile": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+      "description": "Persistent profile selected at this settings scope."
+    },
+    "overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "target",
+          "state"
+        ],
+        "properties": {
+          "target": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "tool",
+                  "skill",
+                  "command",
+                  "system-fragment"
+                ],
+                "description": "Kind of Pi capability selected by a policy decision."
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Declared capability name to match."
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Pi sourceInfo.source value to match."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Source-relative or canonical resource path to match."
+              }
+            },
+            "additionalProperties": false
+          },
+          "state": {
+            "enum": [
+              "inherit",
+              "on",
+              "off",
+              "lazy",
+              "name-only",
+              "user-only"
+            ],
+            "description": "Desired capability state. Available states depend on the capability kind."
+          }
+        },
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Explicit persistent capability decisions."
+    },
+    "profiles": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+          "type": "object",
+          "required": [
+            "decisions",
+            "promptFragments"
+          ],
+          "properties": {
+            "decisions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "target",
+                  "state"
+                ],
+                "properties": {
+                  "target": {
+                    "type": "object",
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "tool",
+                          "skill",
+                          "command",
+                          "system-fragment"
+                        ],
+                        "description": "Kind of Pi capability selected by a policy decision."
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Declared capability name to match."
+                      },
+                      "source": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Pi sourceInfo.source value to match."
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Source-relative or canonical resource path to match."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "state": {
+                    "enum": [
+                      "inherit",
+                      "on",
+                      "off",
+                      "lazy",
+                      "name-only",
+                      "user-only"
+                    ],
+                    "description": "Desired capability state. Available states depend on the capability kind."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "default": [],
+              "description": "Capability decisions activated by this profile."
+            },
+            "promptFragments": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+              },
+              "default": [],
+              "description": "System-prompt fragment IDs activated by this profile."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "default": {},
+      "description": "Named bundles of capability decisions and prompt fragments."
+    },
+    "promptFragments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "priority"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "text"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "inline"
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 50000
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "path"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "file"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "priority": {
+            "type": "integer",
+            "default": 0
+          },
+          "when": {
+            "$defs": {
+              "Condition": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "all"
+                    ],
+                    "properties": {
+                      "all": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "Condition"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "any"
+                    ],
+                    "properties": {
+                      "any": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "Condition"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "not"
+                    ],
+                    "properties": {
+                      "not": {
+                        "$ref": "Condition"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "equals"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "equals": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "notEquals"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "notEquals": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "in"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "in": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "notIn"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "notIn": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "contains"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "contains": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "startsWith"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "startsWith": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "endsWith"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "endsWith": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "lessThan"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "lessThan": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "lessThanOrEqual"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "lessThanOrEqual": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "greaterThan"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "greaterThan": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "greaterThanOrEqual"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "greaterThanOrEqual": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "isDefined"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "isDefined": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ],
+                "$id": "Condition"
+              }
+            },
+            "$ref": "Condition",
+            "description": "Declarative condition evaluated against typed Pi and project context facts."
+          }
+        },
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Owned system-prompt fragments available to profiles and conditions."
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "priority",
+          "when",
+          "decisions",
+          "activateProfiles"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+          },
+          "priority": {
+            "type": "integer",
+            "default": 0
+          },
+          "when": {
+            "$defs": {
+              "Condition": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "all"
+                    ],
+                    "properties": {
+                      "all": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "Condition"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "any"
+                    ],
+                    "properties": {
+                      "any": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "Condition"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "not"
+                    ],
+                    "properties": {
+                      "not": {
+                        "$ref": "Condition"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "equals"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "equals": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "notEquals"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "notEquals": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "in"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "in": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "notIn"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "notIn": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "contains"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "contains": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "startsWith"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "startsWith": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "endsWith"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "endsWith": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "lessThan"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "lessThan": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "lessThanOrEqual"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "lessThanOrEqual": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "greaterThan"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "greaterThan": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "greaterThanOrEqual"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "greaterThanOrEqual": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "fact",
+                      "isDefined"
+                    ],
+                    "properties": {
+                      "fact": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Registered context fact name, such as model.provider or project.fileExists."
+                      },
+                      "args": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[a-zA-Z0-9][a-zA-Z0-9._-]*$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "description": "Typed arguments supplied to a context fact."
+                      },
+                      "isDefined": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ],
+                "$id": "Condition"
+              }
+            },
+            "$ref": "Condition",
+            "description": "Declarative condition evaluated against typed Pi and project context facts."
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "target",
+                "state"
+              ],
+              "properties": {
+                "target": {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "tool",
+                        "skill",
+                        "command",
+                        "system-fragment"
+                      ],
+                      "description": "Kind of Pi capability selected by a policy decision."
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Declared capability name to match."
+                    },
+                    "source": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Pi sourceInfo.source value to match."
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Source-relative or canonical resource path to match."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "state": {
+                  "enum": [
+                    "inherit",
+                    "on",
+                    "off",
+                    "lazy",
+                    "name-only",
+                    "user-only"
+                  ],
+                  "description": "Desired capability state. Available states depend on the capability kind."
+                }
+              },
+              "additionalProperties": false
+            },
+            "default": [],
+            "description": "Capability decisions contributed while this rule matches."
+          },
+          "activateProfiles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+            },
+            "default": [],
+            "description": "Profiles contributed while this rule matches."
+          }
+        },
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Conditional decisions and profile activations."
     }
   }
 }
