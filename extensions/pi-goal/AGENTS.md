@@ -25,7 +25,7 @@ Those write duplicate package entries under `.pi/` for the current project, caus
 npm run verify
 ```
 
-Runs `tsc --noEmit`, the platform-smoke harness checks, and the full Node test suite (`test/*.test.ts`).
+Runs `tsc --noEmit`, the platform-smoke harness checks, and the full Vitest suite (`test/*.test.ts`).
 
 For release-sensitive changes, also use the local Crabbox platform gate documented in `docs/platform-smoke.md`:
 
@@ -40,14 +40,14 @@ The required gate runs the full suite plus a real model-backed goal-tool smoke o
 
 ## Layout
 
-| Area | Modules |
-|------|---------|
-| Wiring | `src/index.ts`, `goal-runtime-controller.ts` |
-| User / model API | `commands.ts`, `tools.ts`, `prompts.ts`, `format.ts`, `clipboard.ts`, `prompts/create-goal.md` |
-| Runtime events | `goal-runtime-event-handlers.ts`, `goal-runtime-*-handlers.ts` |
-| Transitions | `goal-transition.ts`, `goal-transition-effects.ts`, `goal-state-controller.ts` |
-| Stale continuations | `stale-queued-work-*.ts` |
-| Recovery | `recovery*.ts` |
-| Domain | `state.ts`, `types.ts`, `goal-persistence.ts` |
+| Area                | Modules                                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| Wiring              | `src/index.ts`, `goal-runtime-controller.ts`                                                   |
+| User / model API    | `commands.ts`, `tools.ts`, `prompts.ts`, `format.ts`, `clipboard.ts`, `prompts/create-goal.md` |
+| Runtime events      | `goal-runtime-event-handlers.ts`, `goal-runtime-*-handlers.ts`                                 |
+| Transitions         | `goal-transition.ts`, `goal-transition-effects.ts`, `goal-state-controller.ts`                 |
+| Stale continuations | `stale-queued-work-*.ts`                                                                       |
+| Recovery            | `recovery*.ts`                                                                                 |
+| Domain              | `state.ts`, `types.ts`, `goal-persistence.ts`                                                  |
 
 Current structural audit and remediation record: `docs/CODEBASE_AUDIT.md`.

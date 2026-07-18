@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Consolidate generated and raw goal creation into `/goal`; default task text now uses a
+  configurable dynamic creation template, while `-r` stores an exact objective.
+- Integrate the local `pi-typed-args` checkout by filesystem path and add a double-Tab expanded
+  goal view with form-only minimum and maximum active-time constraints in whole minutes; materialize
+  and bundle that local runtime so packed goal-extension artifacts remain self-contained, and share
+  one UX bridge with an already-loaded standalone typed-command extension.
+- Remove token budgets and the `/goal copy`, `/goal clear`, and `/goal resume cancel` management
+  surfaces; keep token usage informational.
+- Add `timeLimited` maximum-time handling, minimum-time completion enforcement, configurable
+  prompt settings, and end-to-end regression coverage for the new command and lifecycle contract.
+- Add a resumable `blocked` goal state and allow `update_goal` to report either evidence-backed
+  completion or an actionable blocker.
+- Add a flat, arrow-navigable expanded form with explicit wording mode and objective adjustment;
+  configure active-goal disabled tools in the extension settings JSON, with active-only enforcement
+  and restoration of prior tool states.
+- Keep the exact objective in compact continuations and streamline goal-writing and completion
+  guidance around scope boundaries, current evidence, and explicit blocked conditions.
+- Accept both array and keyed-object `npm pack --json` output in platform-smoke package checks.
+- Delegate proactive and manual compaction entirely to the Pi host; active goals now only persist
+  and resume around host compaction, avoiding mid-turn abort and queued-message races with other
+  extensions.
+- Replace the Node test runner and mock timers with Vitest.
+- Add Just recipes and npm scripts for Oxfmt formatting and Vitest V8 coverage; automatic fixes
+  now finish by formatting the project.
+- Rewrite the README as a concise user landing page and move detailed command, configuration, and
+  interactive release-smoke guidance into focused documentation.
+
 ## 0.1.36 - 2026-07-14
 
 - Refresh the local development lock and documented compatibility baseline to Pi 0.80.7; deliberate per-run `agent_end` continuation handling remains unchanged.
@@ -222,7 +249,6 @@
 
 - Updated the local pi package baseline to `@earendil-works/*` `0.75.3` and refreshed the npm lockfile.
 - Removed tracked CueLoop runtime state from the package and ignored local `.cueloop/` artifacts.
-
 
 ## 0.1.9 - 2026-05-09
 

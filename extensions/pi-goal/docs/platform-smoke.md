@@ -28,11 +28,11 @@ npm run smoke:platform:windows-native
 
 ## Targets
 
-| Target | Crabbox provider | Shell contract |
-| --- | --- | --- |
-| `macos` | `ssh` static localhost | POSIX shell on macOS |
-| `ubuntu` | `local-container` | POSIX shell in an Ubuntu Node container |
-| `windows-native` | `parallels` | native Windows PowerShell |
+| Target           | Crabbox provider       | Shell contract                          |
+| ---------------- | ---------------------- | --------------------------------------- |
+| `macos`          | `ssh` static localhost | POSIX shell on macOS                    |
+| `ubuntu`         | `local-container`      | POSIX shell in an Ubuntu Node container |
+| `windows-native` | `parallels`            | native Windows PowerShell               |
 
 ## Required environment
 
@@ -88,6 +88,74 @@ Each required target runs `platform-build` and `goal-runtime-smoke`.
 4. Capture pi stdout/stderr and session JSONL.
 5. Assert the final marker, verified file, `pi-codex-goal` custom entries, built-in `read` tool evidence, and complete goal status.
 
+## Interactive `/goal` smoke
+
+The model-backed platform smoke exercises goal tools through non-interactive `pi -p`; it does not
+prove the real TUI slash-command submission path. Release-sensitive changes that affect command
+parsing, TUI submission, goal command behavior, hidden continuation, or post-tool completion must
+also record manual interactive evidence.
+
+The evidence record must include the submitted command, model, session directory, final assistant
+evidence, and confirmation that the session JSONL contains the `/goal` command path, filesystem
+verification, and `update_goal` completion.
+
+Pi must be able to authenticate to a capable model. Start a clean interactive session from the
+repository:
+
+```sh
+rm -f /tmp/pi-codex-goal-fast.txt /tmp/pi-codex-goal-slash-smoke.txt
+rm -rf /tmp/pi-codex-goal-slash-smoke-session
+pi --model <model-id> --session-dir /tmp/pi-codex-goal-slash-smoke-session
+```
+
+For a fast command-path check, submit:
+
+```text
+/goal Create /tmp/pi-codex-goal-fast.txt containing PI_GOAL_FAST_OK; verify with cat; mark complete; report final status.
+```
+
+Expected evidence:
+
+```text
+Verified file path: /tmp/pi-codex-goal-fast.txt
+Verified content: PI_GOAL_FAST_OK
+Final goal status: complete
+```
+
+For a fuller path that requires goal inspection and filesystem verification, submit:
+
+```text
+/goal Create /tmp/pi-codex-goal-slash-smoke.txt containing PI_GOAL_SLASH_OK, verify the file content from the filesystem, inspect the current goal, and mark the goal complete only after verification. Final reply must include the verified file path, verified content, and final goal status.
+```
+
+Expected evidence:
+
+```text
+Verified file path: /tmp/pi-codex-goal-slash-smoke.txt
+Verified content: PI_GOAL_SLASH_OK
+Final goal status: complete
+```
+
+`/goal` is an interactive editor command. Do not use `pi -p '/goal ...'` as a slash-command smoke;
+print mode sends an initial model prompt instead of reliably exercising editor command submission.
+For headless checks, prompt the model to call `create_goal`, `get_goal`, and `update_goal` directly.
+
+For tmux automation, send the prompt as literal text and submit with CSI-u Enter (`ESC [ 13 u`):
+
+```sh
+tmux send-keys -t "$TMUX_SESSION" -l '/goal Create /tmp/pi-codex-goal-fast.txt containing PI_GOAL_FAST_OK; verify with cat; mark complete; report final status.'
+tmux send-keys -t "$TMUX_SESSION" -l $'\033[13u'
+```
+
+Normal `tmux send-keys Enter` works in many environments, but CSI-u Enter is the robust scripted
+path through Pi's TUI key parser. The fast prompt intentionally uses shell `cat`; require the
+built-in `read` tool when that path is under test.
+
+If a run remains on `Working...` after a built-in `read` result, capture the session JSONL and TUI
+pane before retrying. A healthy read-verification path contains a `toolName: "read"` result, an
+`update_goal` result with `status: "complete"`, and a final assistant message. If only the TUI path
+stalls, treat it as a Pi host/tool-resume reproduction until evidence points to goal continuation.
+
 ## Artifact contract
 
 Every target writes artifacts under:
@@ -121,17 +189,6 @@ failures.md            # only when assertions fail
 ```
 
 `goal-runtime-smoke` also writes `goal-runtime-result.json`, `pi-run.stdout.txt`, `pi-run.stderr.txt`, and `session.jsonl`.
-
-Interactive `/goal` smoke checks are manual by default and are release evidence, not a replacement for `goal-runtime-smoke`. Record manual interactive `/goal` evidence for release-sensitive changes that touch slash-command parsing, TUI submission, goal command behavior, hidden continuation, or post-tool completion. The evidence record must include the prompt submitted, model, session directory, final assistant evidence, and confirmation that the session JSONL contains the `/goal` command path, file verification, and `update_goal` completion.
-
-If you automate them through tmux, send the prompt as literal text and submit with CSI-u Enter (`ESC [ 13 u`). This fast example intentionally uses shell `cat`; change the prompt to require the built-in `read` tool when that path is under test:
-
-```sh
-tmux send-keys -t "$TMUX_SESSION" -l '/goal Create /tmp/pi-codex-goal-fast.txt containing PI_GOAL_FAST_OK; verify with cat; mark complete; report final status.'
-tmux send-keys -t "$TMUX_SESSION" -l $'\033[13u'
-```
-
-Normal `tmux send-keys Enter` works in many environments, but CSI-u Enter is the robust scripted path through Pi's TUI key parser.
 
 The suites record failures as artifacts before reporting failure so the host can inspect the real target evidence. If a multi-suite target run fails before any suite starts, it writes a `warmup-failure` artifact directory with Crabbox stdout/stderr, timing, exit-code, and assertion evidence. `target.json` records the Crabbox provider, target, work root, and image/template identifiers used for the run. Each target also writes a `lease-cleanup` artifact directory with `crabbox.stop.*` files; cleanup failure is a failing test result. Ubuntu and Windows runs also invoke Crabbox cleanup for stale provider-owned state after stopping the owned lease. Static macOS SSH cleanup remains host-owned because Crabbox can only remove its local claim there.
 
