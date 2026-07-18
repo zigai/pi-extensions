@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 
 import {
   assistantMessage,
@@ -349,8 +349,7 @@ test("compaction between stale context abort and cleanup does not persist, accou
     assert.ok(oldQueued);
     const oldMessage = queuedCustomMessage(oldQueued, 1);
 
-    await harness.runCommand("clear");
-    await harness.runTool("create_goal", { objective: "new goal" });
+    await harness.runCommand("new goal");
     const replacement = harness.snapshot().goal;
     assert.equal(replacement?.objective, "new goal");
     const entryCountBeforeCompaction = harness.entries.length;
@@ -425,7 +424,10 @@ test("mixed stale and current follow-up batch neutralizes stale work without abo
 
   assert.equal(harness.abortCount, 0);
   assert.equal(contextResult.messages.length, 2);
-  assert.match(String(providerContextMessageAt(contextResult, 0).content), /queued hidden goal continuation was stale/);
+  assert.match(
+    String(providerContextMessageAt(contextResult, 0).content),
+    /queued hidden goal continuation was stale/,
+  );
   assert.deepEqual(providerContextMessageAt(contextResult, 0).details, {
     kind: "stale_continuation",
     goalId: oldGoalId,

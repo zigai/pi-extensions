@@ -47,21 +47,17 @@ export function consumePendingStaleAgentEnd(
 ): boolean {
   const pendingGoalIds = pendingGoalIdsFromObligations(cleanup.pendingAgentEndObligations);
   const matchedGoalIds = pendingStaleQueuedGoalWorkIdsFromMessages(messages, pendingGoalIds);
-  const goalMatch = consumeGoalBearingTerminal(
-    cleanup.pendingAgentEndObligations,
-    matchedGoalIds,
-    ["older", "active"],
-  );
+  const goalMatch = consumeGoalBearingTerminal(cleanup.pendingAgentEndObligations, matchedGoalIds, [
+    "older",
+    "active",
+  ]);
   if (goalMatch.consumed) {
     return true;
   }
   if (!matchesAnonymousStaleAgentEnd(messages)) {
     return false;
   }
-  return consumeAnonymousTerminal(
-    cleanup.pendingAgentEndObligations,
-    ["older", "active"],
-  ).consumed;
+  return consumeAnonymousTerminal(cleanup.pendingAgentEndObligations, ["older", "active"]).consumed;
 }
 
 export type AbortingAgentEndConsumption = {
@@ -214,7 +210,7 @@ function consumeGoalBearingTerminal(
   const remainingGoalIds = new Set(matchedGoalIds);
 
   for (const phase of phaseOrder) {
-    for (let index = 0; index < obligations.length; ) {
+    for (let index = 0; index < obligations.length;) {
       const obligation = obligations[index]!;
       if (
         obligation.phase !== phase ||

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 
 import { isAbortedAssistantMessage } from "../src/goal-accounting.js";
 import { createStaleQueuedWorkGuard } from "../src/stale-queued-work-guard.js";

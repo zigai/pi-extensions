@@ -167,7 +167,9 @@ export function isRecoveryPendingAttention(
   return attention?.kind === "pending";
 }
 
-export function reasonFromRecoveryPendingAttention(attention: RecoveryAttention | null): string | null {
+export function reasonFromRecoveryPendingAttention(
+  attention: RecoveryAttention | null,
+): string | null {
   return attention?.kind === "pending" ? attention.reason : null;
 }
 

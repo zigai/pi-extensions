@@ -2,10 +2,24 @@
   "name": "pi-codex-goal",
   "version": "0.1.36",
   "description": "Codex-style goal tracking and continuation for pi.",
-  "type": "module",
-  "author": "Mitch Fultz (https://github.com/fitchmultz)",
+  "keywords": [
+    "codex",
+    "extension",
+    "goal",
+    "pi",
+    "pi-extension",
+    "pi-package"
+  ],
+  "homepage": "https://github.com/fitchmultz/pi-codex-goal#readme",
+  "bugs": {
+    "url": "https://github.com/fitchmultz/pi-codex-goal/issues"
+  },
   "license": "MIT",
-  "main": "src/index.ts",
+  "author": "Mitch Fultz (https://github.com/fitchmultz)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fitchmultz/pi-codex-goal.git"
+  },
   "files": [
     "src",
     "docs",
@@ -18,41 +32,40 @@
     "CHANGELOG.md",
     "LICENSE"
   ],
-  "keywords": [
-    "pi-package",
-    "pi",
-    "pi-extension",
-    "extension",
-    "codex",
-    "goal"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/fitchmultz/pi-codex-goal.git"
-  },
-  "bugs": {
-    "url": "https://github.com/fitchmultz/pi-codex-goal/issues"
-  },
-  "homepage": "https://github.com/fitchmultz/pi-codex-goal#readme",
-  "pi": {
-    "extensions": [
-      "./src/index.ts"
-    ],
-    "prompts": [
-      "./prompts"
-    ]
-  },
+  "type": "module",
+  "main": "src/index.ts",
   "scripts": {
-    "test": "node --import tsx --test test/*.test.ts",
+    "lint": "oxlint -c ./.oxlintrc.json src test && oxlint -c ./.oxlintrc.json --disable-typescript-plugin scripts platform-smoke.config.mjs",
+    "lint:fix": "oxlint -c ./.oxlintrc.json src test --fix && oxlint -c ./.oxlintrc.json --disable-typescript-plugin scripts platform-smoke.config.mjs --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check:platform-smoke": "node scripts/platform-smoke/check.mjs",
-    "verify": "npm run typecheck && npm run check:platform-smoke && npm test",
+    "check": "npm run lint && npm run typecheck && npm run check:platform-smoke && npm test",
+    "verify": "npm run check",
     "smoke:platform": "node scripts/platform-smoke.mjs",
     "smoke:platform:doctor": "node scripts/platform-smoke.mjs doctor",
     "smoke:platform:macos": "node scripts/platform-smoke.mjs run --target macos",
     "smoke:platform:ubuntu": "node scripts/platform-smoke.mjs run --target ubuntu",
     "smoke:platform:windows-native": "node scripts/platform-smoke.mjs run --target windows-native",
     "smoke:platform:all": "node scripts/platform-smoke.mjs doctor --skip-windows-disposable-probe && node scripts/platform-smoke.mjs run --target macos,ubuntu,windows-native"
+  },
+  "dependencies": {
+    "pi-typed-args": "file:../pi-typed-commands"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.7",
+    "@earendil-works/pi-coding-agent": "^0.80.7",
+    "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "oxfmt": "^0.59.0",
+    "oxlint": "^1.74.0",
+    "oxlint-tsgolint": "^0.24.0",
+    "typebox": "1.1.39",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -70,16 +83,16 @@
       "optional": true
     }
   },
-  "devDependencies": {
-    "@earendil-works/pi-ai": "^0.80.7",
-    "@earendil-works/pi-coding-agent": "^0.80.7",
-    "@types/node": "^25.9.1",
-    "tsx": "^4.22.3",
-    "typebox": "1.1.39",
-    "typescript": "^6.0.3"
-  },
+  "bundledDependencies": [
+    "pi-typed-args"
+  ],
   "engines": {
     "node": ">=24.0.0"
   },
-  "packageManager": "npm@11.16.0"
+  "packageManager": "npm@11.16.0",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
 }

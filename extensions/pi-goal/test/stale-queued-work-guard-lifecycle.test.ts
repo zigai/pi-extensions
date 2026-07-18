@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 
 import { createStaleQueuedWorkGuard } from "../src/stale-queued-work-guard.js";
 
@@ -10,7 +10,9 @@ function effectTypes(plan: { effects: Array<{ type: string }> }): string[] {
 type GuardTransitionCase = {
   label: string;
   steps: Array<(guard: ReturnType<typeof createStaleQueuedWorkGuard>) => void>;
-  act: (guard: ReturnType<typeof createStaleQueuedWorkGuard>) => { skip: boolean; effects: string[] } | null;
+  act: (
+    guard: ReturnType<typeof createStaleQueuedWorkGuard>,
+  ) => { skip: boolean; effects: string[] } | null;
   lifecycle: string;
   result: { skip: boolean; effects: string[] } | null;
 };

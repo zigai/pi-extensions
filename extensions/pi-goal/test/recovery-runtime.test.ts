@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
-import {
-  createGoalRecoveryMachine,
-  setRecoveryPausedAttention,
-} from "../src/recovery-machine.js";
+import { createGoalRecoveryMachine, setRecoveryPausedAttention } from "../src/recovery-machine.js";
 import type { StatusContext } from "../src/goal-runtime-status.js";
 import { createGoalRecoveryRuntime } from "../src/recovery-runtime.js";
 import { CONTEXT_OVERFLOW_SIGNATURE } from "../src/recovery.js";
@@ -14,7 +11,8 @@ const activeGoal: ThreadGoal = {
   goalId: "goal-a",
   objective: "ship it",
   status: "active",
-  tokenBudget: null,
+  minimumActiveSeconds: null,
+  maximumActiveSeconds: null,
   usage: { tokensUsed: 0, activeSeconds: 0 },
   createdAt: 0,
   updatedAt: 0,

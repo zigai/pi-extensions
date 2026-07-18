@@ -88,7 +88,9 @@ function customContentFromUnknown(content: unknown): string | QueuedGoalUserCont
 }
 
 /** Copies provider-context fields into a carrier with the runtime-required timestamp. */
-export function toQueuedGoalContextCarrier(message: QueuedGoalContextInput): QueuedGoalContextCarrier | null {
+export function toQueuedGoalContextCarrier(
+  message: QueuedGoalContextInput,
+): QueuedGoalContextCarrier | null {
   if (typeof message.timestamp !== "number") {
     return null;
   }

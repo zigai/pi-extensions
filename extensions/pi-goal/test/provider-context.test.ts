@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 
 import {
   compactContinuationPrompt,
@@ -56,18 +56,24 @@ test("provider context dedupes many active continuations without refreshing the 
   const result = requireProviderContextResult(results);
   assert.equal(result.messages.length, 3);
 
-  assert.match(String(providerContextMessageAt(result, 0).content), /Superseded hidden goal continuation bookkeeping/);
+  assert.match(
+    String(providerContextMessageAt(result, 0).content),
+    /Superseded hidden goal continuation bookkeeping/,
+  );
   assert.deepEqual(providerContextMessageAt(result, 0).details, {
     kind: "superseded_continuation",
     goalId: goal.goalId,
   });
-  assert.match(String(providerContextMessageAt(result, 1).content), /Superseded hidden goal continuation bookkeeping/);
+  assert.match(
+    String(providerContextMessageAt(result, 1).content),
+    /Superseded hidden goal continuation bookkeeping/,
+  );
 
   const latestContent = String(providerContextMessageAt(result, 2).content);
   assert.match(latestContent, /Tokens used: 99/);
   assert.match(latestContent, /Time spent pursuing goal: 42s/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
-  assert.doesNotMatch(latestContent, /<untrusted_objective>/);
+  assert.match(latestContent, /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/);
 });
 
 test("active provider-context user marker without passthrough binding remains verbatim", async () => {
@@ -120,13 +126,19 @@ test("active provider-context dedupe preserves historical user marker mixed with
   const result = requireProviderContextResult(contextResults);
   assert.equal(result.messages.length, 3);
 
-  assert.match(String(providerContextMessageAt(result, 0).content), /Superseded hidden goal continuation bookkeeping/);
+  assert.match(
+    String(providerContextMessageAt(result, 0).content),
+    /Superseded hidden goal continuation bookkeeping/,
+  );
   assert.deepEqual(providerContextMessageAt(result, 1).content, userMessage.content);
-  assert.match(String(userContentFromUnknown(providerContextMessageAt(result, 1).content)[0]?.text), /<untrusted_objective>/);
+  assert.match(
+    String(userContentFromUnknown(providerContextMessageAt(result, 1).content)[0]?.text),
+    /<untrusted_objective>/,
+  );
 
   const latestContent = String(providerContextMessageAt(result, 2).content);
   assert.match(latestContent, /Tokens used: 99/);
-  assert.doesNotMatch(latestContent, /<untrusted_objective>/);
+  assert.match(latestContent, /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
 });
 
@@ -200,12 +212,18 @@ test("active goal provider-context dedupe preserves pasted marker input mixed wi
   assert.equal(result.messages.length, 3);
 
   assert.deepEqual(providerContextMessageAt(result, 1).content, userMessage.content);
-  assert.match(String(userContentFromUnknown(providerContextMessageAt(result, 1).content)[0]?.text), /<untrusted_objective>/);
-  assert.match(String(providerContextMessageAt(result, 0).content), /Superseded hidden goal continuation bookkeeping/);
+  assert.match(
+    String(userContentFromUnknown(providerContextMessageAt(result, 1).content)[0]?.text),
+    /<untrusted_objective>/,
+  );
+  assert.match(
+    String(providerContextMessageAt(result, 0).content),
+    /Superseded hidden goal continuation bookkeeping/,
+  );
 
   const latestContent = String(providerContextMessageAt(result, 2).content);
   assert.match(latestContent, /Tokens used: 99/);
-  assert.doesNotMatch(latestContent, /<untrusted_objective>/);
+  assert.match(latestContent, /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
 });
 
@@ -275,7 +293,13 @@ test("completed goals are not treated as active during continuation dedupe", asy
   ]);
 
   const result = requireProviderContextResult(results);
-  assert.match(String(providerContextMessageAt(result, 0).content), /queued hidden goal continuation was stale/);
-  assert.match(String(providerContextMessageAt(result, 1).content), /queued hidden goal continuation was stale/);
+  assert.match(
+    String(providerContextMessageAt(result, 0).content),
+    /queued hidden goal continuation was stale/,
+  );
+  assert.match(
+    String(providerContextMessageAt(result, 1).content),
+    /queued hidden goal continuation was stale/,
+  );
   assert.equal(harness.snapshot().goal?.status, "complete");
 });

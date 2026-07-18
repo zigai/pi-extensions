@@ -116,15 +116,11 @@ export interface GoalRuntimeInputContextHandlerContext extends StaleQueuedWorkEf
 }
 
 export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectContext {
-  runtimeState: Pick<
-    GoalRuntimeState,
-    "currentTurnIndex" | "proactiveCompactionPending" | "recoveryState" | "staleQueuedWorkGuard"
-  >;
+  runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "staleQueuedWorkGuard">;
   stateController: Pick<
     GoalStateController,
     | "beginOverflowRecovery"
     | "flushGoalPersistence"
-    | "getGoal"
     | "maybeFlushRuntimePersistence"
     | "pauseForAbort"
   >;
@@ -134,11 +130,11 @@ export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectCont
 }
 
 export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectContext {
-  runtimeState: Pick<
-    GoalRuntimeState,
-    "agentRunSequence" | "proactiveCompactionPending" | "staleQueuedWorkGuard"
+  runtimeState: Pick<GoalRuntimeState, "agentRunSequence" | "staleQueuedWorkGuard">;
+  stateController: Pick<
+    GoalStateController,
+    "beginOverflowRecovery" | "flushGoalPersistence" | "pauseForAbort"
   >;
-  stateController: Pick<GoalStateController, "beginOverflowRecovery" | "flushGoalPersistence" | "pauseForAbort">;
   continuation: Pick<
     GoalRuntimeContinuationPort,
     "clearPassthroughContinuationInput" | "maybeContinue"
@@ -154,11 +150,7 @@ export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectCon
 export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectContext {
   runtimeState: Pick<
     GoalRuntimeState,
-    | "agentRunSequence"
-    | "currentTurnIndex"
-    | "proactiveCompactionPending"
-    | "recoveryState"
-    | "staleQueuedWorkGuard"
+    "agentRunSequence" | "currentTurnIndex" | "recoveryState" | "staleQueuedWorkGuard"
   >;
   stateController: Pick<
     GoalStateController,
@@ -176,7 +168,11 @@ export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectC
   goalAccounting: GoalAccountingPort;
   recoveryRuntime: Pick<RecoveryRuntimePort, "onSessionCompact">;
   resetErrorRecovery: () => void;
-  resumeGoalWithContinuation: (goalId: string, source: GoalEntrySource, ctx: StatusContext) => GoalResult;
+  resumeGoalWithContinuation: (
+    goalId: string,
+    source: GoalEntrySource,
+    ctx: StatusContext,
+  ) => GoalResult;
 }
 
 export interface GoalRuntimeOverflowRecoveryContext {
@@ -198,7 +194,11 @@ export interface GoalRuntimeEventContext {
   providerLimitAutoResume: ProviderLimitAutoResumePort;
   clearActiveAccounting: () => void;
   resetErrorRecovery: () => void;
-  resumeGoalWithContinuation: (goalId: string, source: GoalEntrySource, ctx: StatusContext) => GoalResult;
+  resumeGoalWithContinuation: (
+    goalId: string,
+    source: GoalEntrySource,
+    ctx: StatusContext,
+  ) => GoalResult;
 }
 
 export type QueuedGoalWorkMessage = {

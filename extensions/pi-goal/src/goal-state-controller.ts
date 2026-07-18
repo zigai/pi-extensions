@@ -23,22 +23,26 @@ import {
   reconstructHostOverflowCapNeedsUserReset,
   updateGoalStatus,
 } from "./state.js";
-import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type GoalResult, type ThreadGoal } from "./types.js";
+import {
+  CUSTOM_ENTRY_TYPE,
+  type GoalEntrySource,
+  type GoalResult,
+  type ThreadGoal,
+} from "./types.js";
 
 interface GoalStateControllerDeps {
   pi: Pick<ExtensionAPI, "appendEntry">;
   persistence: GoalPersistence;
   getRecoveryState: () => GoalRecoveryMachineState;
   transitionEffectHandlers: GoalTransitionEffectHandlers;
+  syncGoalToolPolicy: (goal: ThreadGoal | null) => void;
   refreshUi: (ctx: StatusContext) => void;
 }
 
 export interface GoalStateController {
-  applyGoalTransition: (
-    request: GoalTransitionRequest,
-    ctx: StatusContext | null,
-  ) => boolean;
+  applyGoalTransition: (request: GoalTransitionRequest, ctx: StatusContext | null) => boolean;
   beginOverflowRecovery: (ctx: StatusContext) => void;
+  blockGoal: (source: GoalEntrySource, ctx: ExtensionContext) => GoalResult;
   completeGoal: (source: GoalEntrySource, ctx: ExtensionContext) => GoalResult;
   flushGoalPersistence: GoalPersistence["flushGoalPersistence"];
   getGoal: () => ThreadGoal | null;
@@ -47,7 +51,7 @@ export interface GoalStateController {
   pauseForAbort: (ctx: ExtensionContext) => void;
   persistHostOverflowUserReset: (needsReset: boolean) => void;
   reloadFromSession: (ctx: ExtensionContext) => void;
-  resumePausedGoal: (ctx: StatusContext) => void;
+  resumeStoppedGoal: (ctx: StatusContext) => void;
 }
 
 export function createGoalStateController(deps: GoalStateControllerDeps) {
@@ -69,6 +73,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     if (plan.persist === "clear") {
       const clearedGoalId = getGoal()?.goalId ?? null;
       deps.persistence.appendClearEntry(clearedGoalId, plan.source);
+      deps.syncGoalToolPolicy(null);
       applyGoalTransitionEffects(plan.afterPersist, deps.transitionEffectHandlers);
       if (ctx) {
         deps.refreshUi(ctx);
@@ -77,6 +82,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     }
 
     if (plan.persist === "skip") {
+      deps.syncGoalToolPolicy(getGoal());
       applyGoalTransitionEffects(plan.afterPersist, deps.transitionEffectHandlers);
       if (ctx) {
         deps.refreshUi(ctx);
@@ -86,6 +92,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
 
     if (plan.persist === "defer") {
       deps.persistence.setGoalSnapshot(plan.nextGoal);
+      deps.syncGoalToolPolicy(plan.nextGoal);
       if (ctx) {
         deps.refreshUi(ctx);
       }
@@ -94,6 +101,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
 
     deps.persistence.setGoalSnapshot(plan.nextGoal);
     const persisted = deps.persistence.flushGoalPersistence(plan.source);
+    deps.syncGoalToolPolicy(plan.nextGoal);
     applyGoalTransitionEffects(plan.afterPersist, deps.transitionEffectHandlers);
     if (ctx) {
       deps.refreshUi(ctx);
@@ -134,6 +142,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     const reconstructed = reconstructGoal(branch).goal;
     deps.persistence.setGoalSnapshot(reconstructed);
     deps.persistence.syncPersistedSnapshot(reconstructed);
+    deps.syncGoalToolPolicy(reconstructed);
     syncHostOverflowUserResetFromSession(
       deps.getRecoveryState(),
       reconstructHostOverflowCapNeedsUserReset(branch),
@@ -154,9 +163,9 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     applyGoalTransition({ kind: "abort_pause" }, ctx);
   };
 
-  const resumePausedGoal = (ctx: StatusContext): void => {
+  const resumeStoppedGoal = (ctx: StatusContext): void => {
     const goal = getGoal();
-    if (!goal || goal.status !== "paused") {
+    if (!goal || (goal.status !== "paused" && goal.status !== "blocked")) {
       return;
     }
 
@@ -176,9 +185,23 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     return result;
   };
 
+  const blockGoal = (source: GoalEntrySource, ctx: ExtensionContext): GoalResult => {
+    const goal = getGoal();
+    const result = updateGoalStatus(goal, "blocked");
+    if (!result.ok || !result.goal) {
+      return result;
+    }
+    if (goal && goalsEquivalent(goal, result.goal)) {
+      return result;
+    }
+    applyGoalTransition({ kind: "set", nextGoal: result.goal, source }, ctx);
+    return result;
+  };
+
   const controller: GoalStateController = {
     applyGoalTransition,
     beginOverflowRecovery,
+    blockGoal,
     completeGoal,
     flushGoalPersistence: deps.persistence.flushGoalPersistence,
     getGoal,
@@ -187,7 +210,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     pauseForAbort,
     persistHostOverflowUserReset,
     reloadFromSession,
-    resumePausedGoal,
+    resumeStoppedGoal,
   };
 
   return controller;

@@ -70,9 +70,7 @@ function transition(
   return { state, plan };
 }
 
-export function lifecycleKindFromState(
-  state: StaleQueuedWorkState,
-): StaleQueuedWorkLifecycleKind {
+export function lifecycleKindFromState(state: StaleQueuedWorkState): StaleQueuedWorkLifecycleKind {
   return state.kind;
 }
 
@@ -114,9 +112,7 @@ function beginObservingFromIdleOrAwaiting(
     kind: "observingTurn",
     staleGoalIds: new Set(),
     hasRunnableWork: false,
-    ...(state.kind === "awaitingTerminalCleanup"
-      ? { terminalCleanup: state.terminalCleanup }
-      : {}),
+    ...(state.kind === "awaitingTerminalCleanup" ? { terminalCleanup: state.terminalCleanup } : {}),
   };
 }
 
@@ -159,9 +155,7 @@ function reduceObservingContextAbort(
   }
 
   const pendingTurnEndIndexes = new Set(state.terminalCleanup?.pendingTurnEndIndexes ?? []);
-  const pendingAgentEndObligations = [
-    ...(state.terminalCleanup?.pendingAgentEndObligations ?? []),
-  ];
+  const pendingAgentEndObligations = [...(state.terminalCleanup?.pendingAgentEndObligations ?? [])];
   markAllObligationsOlder({ pendingTurnEndIndexes, pendingAgentEndObligations });
   setAnonymousMatching(pendingAgentEndObligations, true);
   noteTerminalEvents(pendingTurnEndIndexes, currentTurnIndex);
@@ -182,17 +176,11 @@ function reduceObservingContextAbort(
   );
 }
 
-function consumeCleanupTurnEnd(
-  cleanup: TerminalCleanup,
-  turnIndex: number | null,
-): boolean {
+function consumeCleanupTurnEnd(cleanup: TerminalCleanup, turnIndex: number | null): boolean {
   return consumePendingStaleTurnEnd(cleanup, turnIndex);
 }
 
-function consumeCleanupAgentEnd(
-  cleanup: TerminalCleanup,
-  messages: AgentEndMessage[],
-): boolean {
+function consumeCleanupAgentEnd(cleanup: TerminalCleanup, messages: AgentEndMessage[]): boolean {
   return consumePendingStaleAgentEnd(cleanup, messages);
 }
 
@@ -239,9 +227,7 @@ function applyDefaultTransition(
         `Missing stale queued-work reducer handler for ${event.type} in ${lifecycle}`,
       );
     default:
-      throw new Error(
-        `Unknown stale queued-work default action for ${event.type} in ${lifecycle}`,
-      );
+      throw new Error(`Unknown stale queued-work default action for ${event.type} in ${lifecycle}`);
   }
 }
 

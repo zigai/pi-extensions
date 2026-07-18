@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mock, test } from "node:test";
+import { test, vi } from "vitest";
 
 import { pendingRecoveryShutdownReason } from "../src/goal-runtime-session-handlers.js";
 import { createRecoveryPausedAttention, createRecoveryPendingAttention } from "../src/recovery.js";
@@ -225,7 +225,7 @@ test("session_tree to a different active goal clears stale overflow recovery and
 });
 
 test("delayed session_compact keeps goal active without premature pause or extension follow-up", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -241,11 +241,14 @@ test("delayed session_compact keeps goal active without premature pause or exten
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
 
-    await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+    await harness.emit(
+      "session_compact",
+      sessionCompactEvent({ reason: "overflow", willRetry: true }),
+    );
 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });

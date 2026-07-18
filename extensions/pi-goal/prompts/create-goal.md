@@ -1,48 +1,51 @@
----
-description: Convert a plain task into a strict evidence-based pi-codex goal and create it
-argument-hint: "<task>"
----
+The user explicitly requested a new long-running goal from this task:
 
-User task:
-$@
+<untrusted_task>
+{{task}}
+</untrusted_task>
 
-Turn the user task into exactly one durable pi-codex-goal objective, then call the goal creation tool with that objective.
+Requested goal constraints (user-configured data):
+<untrusted_goal_constraints>
+{{constraints}}
+</untrusted_goal_constraints>
 
-This prompt invocation is an explicit user request to set a new goal. When the goal creation tool exposes `replace_existing`, pass `replace_existing: true` so an existing active, paused, or budget-limited goal is replaced instead of requiring `/goal clear` first.
+Current thread goal:
+<untrusted_current_goal>
+{{currentGoal}}
+</untrusted_current_goal>
 
-Do not set a token budget limit unless the user explicitly provides a budget/limit in the task. If no explicit budget is provided, omit the token budget field entirely.
+Turn the task into exactly one durable pi-codex-goal objective, then call `create_goal` with that objective and `replace_existing: true`.
 
-The goal must be a completion contract, not a task summary. Preserve the user's full intent. Do not weaken broad acceptance criteria such as "all", "any", "complete", "no tech debt", "do it right", "fully", or "hard acceptance criteria".
+The goal must be a completion contract, not a task summary. Preserve the user's full intent and explicit acceptance criteria without inventing unrelated work.
 
 The goal must require:
 
 1. Outcome
    - State what must be true when complete.
    - Preserve the full requested end state.
-   - Do not narrow scope after the fact unless the original user task explicitly defined that scope.
+   - Do not narrow scope after the fact unless the original task explicitly defined that scope.
 
 2. Verification evidence
    - Name the concrete evidence required before completion.
    - Include relevant tests, lint, type checks, builds, smoke checks, diffs, docs, generated outputs, rendered UI inspection, or artifact checks when applicable.
-   - If the repo has an existing local CI/validation command, require it unless clearly irrelevant.
+   - If the repository has an existing local CI or validation command, require it unless clearly irrelevant.
 
-3. Constraints
-   - Preserve existing behavior unless the task explicitly changes it.
-   - Do not discard user changes.
-   - Do not leave unapproved shortcuts, compatibility shims, TODO placeholders, dead code, duplicated logic, hidden assumptions, or undocumented behavior changes.
+3. Constraints and boundaries
+   - Preserve the user's stated constraints and relevant existing behavior.
+   - State what may change, what must not change, and which actions still require approval.
+   - Do not discard user changes or treat the goal as broader authority than the original request.
 
 4. Iteration policy
-   - After each attempt, inspect evidence, update the plan, and keep taking the next low-risk useful step.
+   - After each attempt, inspect evidence and take the next low-risk useful step.
    - Do not stop at a plan when implementation or verification remains.
-   - If validation fails, triage and fix the cause rather than reporting partial completion.
+   - If validation fails, triage the cause rather than treating partial progress as completion.
 
 5. Completion audit
-   - Before marking the goal complete, map every explicit requirement in the goal to fresh evidence from files, commands, diffs, tests, screenshots, artifacts, or logs.
+   - Before marking the goal complete, map every explicit requirement to fresh evidence from files, commands, diffs, tests, screenshots, artifacts, or logs.
    - The goal is not complete if any requirement is unverified, narrowed, deferred, or only probably satisfied.
-   - Phrases like "for the scope this is complete", "good enough", "out of scope", or "remaining tech debt" are not valid completion evidence unless the original user task explicitly allowed that limitation.
 
 6. Blocked stop condition
-   - If completion is impossible with current access, tools, budget, or missing decisions, stop without marking complete.
-   - Report attempted paths, evidence gathered, exact blockers, remaining unmet requirements, and what input would unblock progress.
+   - If no safe in-scope path remains without unavailable input, authority, access, or dependencies, call `update_goal` with status `blocked` instead of marking complete.
+   - Report attempted paths, exact blockers, remaining requirements, and what would unblock progress.
 
-Use concise imperative language in the goal. If the task is blank or only whitespace, infer the goal based on the conversation context or ask the user to clarify.
+Use concise imperative language in the goal. If the task is blank or only whitespace, ask the user to clarify.

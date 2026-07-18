@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mock, test } from "node:test";
+import { test, vi } from "vitest";
 
 import {
   createRuntimeHarness,
@@ -23,7 +23,7 @@ async function startQueuedContinuation(harness: RuntimeHarness): Promise<void> {
 }
 
 test("willRetry session compaction falls back after grace when host retry never starts", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await startQueuedContinuation(harness);
@@ -41,12 +41,12 @@ test("willRetry session compaction falls back after grace when host retry never 
       goalId: goal?.goalId,
     });
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("willRetry session compaction fallback keeps polling while session is busy", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness({ idle: false });
     await startQueuedContinuation(harness);
@@ -60,12 +60,12 @@ test("willRetry session compaction fallback keeps polling while session is busy"
     flushContinuationScheduler();
     assert.equal(harness.sentMessages.length, 1);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("willRetry session compaction fallback survives preflight without an agent start", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await startQueuedContinuation(harness);
@@ -81,12 +81,12 @@ test("willRetry session compaction fallback survives preflight without an agent 
     flushContinuationScheduler();
     assert.equal(harness.sentMessages.length, 1);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("willRetry session compaction fallback is cancelled when host retry starts", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await startQueuedContinuation(harness);
@@ -97,6 +97,6 @@ test("willRetry session compaction fallback is cancelled when host retry starts"
     flushContinuationScheduler();
     assert.equal(harness.sentMessages.length, 0);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });

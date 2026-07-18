@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -16,7 +16,8 @@ const activeGoal: ThreadGoal = {
   goalId: "goal-a",
   objective: "ship it",
   status: "active",
-  tokenBudget: null,
+  minimumActiveSeconds: null,
+  maximumActiveSeconds: null,
   usage: { tokensUsed: 0, activeSeconds: 0 },
   createdAt: 0,
   updatedAt: 0,
@@ -49,12 +50,13 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
       clearContinuation: () => {},
       clearActiveAccounting: () => {},
       resetRecovery: () => {},
-      clearBudgetWarning: () => {},
+      clearTimeLimitWarning: () => {},
       clearHostOverflowRecovery: () => {},
       setRecoveryPausedAttention: () => {},
       markContinuationQueued: () => {},
       stopStatusRefresh: () => {},
     },
+    syncGoalToolPolicy: () => {},
     refreshUi: () => {
       refreshCount += 1;
     },

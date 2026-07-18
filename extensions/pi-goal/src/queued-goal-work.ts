@@ -51,8 +51,8 @@ type RewrittenQueuedGoalWorkMessage =
   | StaleQueuedGoalCustomMessage
   | StaleQueuedGoalUserMessage;
 
-type ProviderContextRewrite<TMessage extends QueuedGoalContextInput> =
-  TMessage & RewrittenQueuedGoalWorkMessage;
+type ProviderContextRewrite<TMessage extends QueuedGoalContextInput> = TMessage &
+  RewrittenQueuedGoalWorkMessage;
 
 /** Single typed bridge from concrete queued-goal rewrites back onto provider-context messages. */
 function mergeProviderContextMessage<TMessage extends QueuedGoalContextInput>(
@@ -66,7 +66,11 @@ function mergeProviderContextMessage<TMessage extends QueuedGoalContextInput>(
 }
 
 function isSupersededContinuationDetails(details: unknown): boolean {
-  return details !== null && typeof details === "object" && (details as { kind?: unknown }).kind === "superseded_continuation";
+  return (
+    details !== null &&
+    typeof details === "object" &&
+    (details as { kind?: unknown }).kind === "superseded_continuation"
+  );
 }
 
 function textContentFromMessageContent(content: unknown): string | null {
@@ -87,7 +91,10 @@ function continuationGoalIdFromMessageContent(content: unknown): string | null {
   return text === null ? null : continuationGoalIdFromPrompt(text);
 }
 
-function staleGoalContinuationMessage(queuedGoalId: string, currentGoal: ThreadGoal | null): string {
+function staleGoalContinuationMessage(
+  queuedGoalId: string,
+  currentGoal: ThreadGoal | null,
+): string {
   const currentState = currentGoal
     ? `Current goal id: ${currentGoal.goalId}; current status: ${currentGoal.status}.`
     : "There is no current goal.";
@@ -240,7 +247,9 @@ export function applyQueuedGoalProviderContextRewrites<TMessage extends QueuedGo
   options: {
     goal: ThreadGoal | null;
     resolveStaleQueuedGoalWorkMessageId: (message: QueuedGoalContextInput) => string | null;
-    resolveActiveContinuationQueuedGoalWorkMessageId: (message: QueuedGoalContextInput) => string | null;
+    resolveActiveContinuationQueuedGoalWorkMessageId: (
+      message: QueuedGoalContextInput,
+    ) => string | null;
   },
 ): { messages: TMessage[]; changed: boolean } {
   let changed = false;

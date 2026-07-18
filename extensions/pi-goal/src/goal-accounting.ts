@@ -1,13 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { budgetLimitPrompt } from "./prompts.js";
+import { timeLimitPrompt } from "./prompts.js";
 import { applyUsage } from "./state.js";
 import { CUSTOM_ENTRY_TYPE, type ThreadGoal } from "./types.js";
 
 export interface AccountingState {
   activeGoalId: string | null;
   lastAccountedAt: number | null;
-  budgetWarningSentFor: string | null;
+  timeLimitWarningSentFor: string | null;
 }
 
 export interface AssistantUsage {
@@ -25,7 +25,7 @@ export function createAccountingState(): AccountingState {
   return {
     activeGoalId: null,
     lastAccountedAt: null,
-    budgetWarningSentFor: null,
+    timeLimitWarningSentFor: null,
   };
 }
 
@@ -80,25 +80,29 @@ export function createGoalAccounting(deps: GoalAccountingDeps) {
 
   const accountProgress = (
     ctx: ExtensionContext,
-    allowBudgetSteering: boolean,
+    allowTimeLimitSteering: boolean,
     completedTurnTokens = 0,
-    accountBudgetLimited = false,
+    accountTimeLimited = false,
   ): void => {
     const goal = deps.getGoal();
     const accounting = deps.getAccounting();
-    const canAccount = goal?.status === "active" || (accountBudgetLimited && goal?.status === "budgetLimited");
+    const canAccount =
+      goal?.status === "active" || (accountTimeLimited && goal?.status === "timeLimited");
     if (!goal || accounting.activeGoalId !== goal.goalId || !canAccount) {
       beginAccounting();
       return;
     }
 
     const now = Date.now();
-    const elapsed = accounting.lastAccountedAt === null ? 0 : Math.floor((now - accounting.lastAccountedAt) / 1000);
+    const elapsed =
+      accounting.lastAccountedAt === null
+        ? 0
+        : Math.floor((now - accounting.lastAccountedAt) / 1000);
     accounting.lastAccountedAt = now;
 
     const result = applyUsage(goal, completedTurnTokens, elapsed, {
       expectedGoalId: accounting.activeGoalId,
-      accountBudgetLimited,
+      accountTimeLimited,
     });
     if (!result.changed || !result.goal) {
       return;
@@ -106,14 +110,18 @@ export function createGoalAccounting(deps: GoalAccountingDeps) {
 
     deps.applyRuntimeAccountingTransition(ctx, result.goal);
 
-    if (allowBudgetSteering && result.crossedBudget && accounting.budgetWarningSentFor !== result.goal.goalId) {
-      accounting.budgetWarningSentFor = result.goal.goalId;
+    if (
+      allowTimeLimitSteering &&
+      result.crossedTimeLimit &&
+      accounting.timeLimitWarningSentFor !== result.goal.goalId
+    ) {
+      accounting.timeLimitWarningSentFor = result.goal.goalId;
       deps.sendMessage(
         {
           customType: CUSTOM_ENTRY_TYPE,
-          content: budgetLimitPrompt(result.goal),
+          content: timeLimitPrompt(result.goal),
           display: false,
-          details: { kind: "budget_limit", goalId: result.goal.goalId },
+          details: { kind: "time_limit", goalId: result.goal.goalId },
         },
         { triggerTurn: true, deliverAs: "steer" },
       );

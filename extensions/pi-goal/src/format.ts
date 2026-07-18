@@ -12,7 +12,8 @@ export interface GoalToolRecord {
   goalId: string;
   objective: string;
   status: GoalStatus;
-  tokenBudget: number | null;
+  minimumActiveSeconds: number | null;
+  maximumActiveSeconds: number | null;
   tokensUsed: number;
   timeUsedSeconds: number;
   createdAt: number;
@@ -21,8 +22,9 @@ export interface GoalToolRecord {
 
 export interface GoalToolResponse {
   goal: GoalToolRecord | null;
-  remainingTokens: number | null;
-  completionBudgetReport: string | null;
+  minimumTimeRemainingSeconds: number | null;
+  maximumTimeRemainingSeconds: number | null;
+  completionUsageReport: string | null;
 }
 
 export function formatDuration(seconds: number): string {
@@ -77,33 +79,26 @@ export function formatTokenValue(value: number): string {
   return `${compact} (${exact})`;
 }
 
-export function formatBudget(goal: ThreadGoal): string {
-  if (goal.tokenBudget === null) {
-    return `${formatTokenValue(goal.usage.tokensUsed)} tokens`;
-  }
-  return `${formatTokenValue(goal.usage.tokensUsed)}/${formatTokenValue(goal.tokenBudget)} tokens`;
-}
-
 function statusLabel(status: GoalStatus): string {
-  return status === "budgetLimited" ? "limited by budget" : status;
+  return status === "timeLimited" ? "limited by maximum time" : status;
 }
 
 function commandHint(status: GoalStatus): string {
   if (status === "active") {
-    return "/goal copy, /goal pause, /goal clear";
+    return "/goal pause";
   }
-  if (status === "paused") {
-    return "/goal copy, /goal resume, /goal clear";
+  if (status === "paused" || status === "blocked") {
+    return "/goal resume";
   }
   if (status === "complete") {
-    return "/goal copy, /goal <objective> to replace, /goal clear";
+    return "/goal <goal> to replace";
   }
-  return "/goal copy, /goal clear";
+  return "/goal <goal> to replace";
 }
 
 export function formatGoalSummary(goal: ThreadGoal | null): string {
   if (!goal) {
-    return ["Usage: /goal <objective>", "No goal is currently set."].join("\n");
+    return ["Usage: /goal <goal> or /goal -r <goal>", "No goal is currently set."].join("\n");
   }
 
   const lines = [
@@ -113,19 +108,14 @@ export function formatGoalSummary(goal: ThreadGoal | null): string {
     `Tokens used: ${formatTokenValue(goal.usage.tokensUsed)}`,
   ];
 
-  if (goal.tokenBudget !== null) {
-    lines.push(`Token budget: ${formatTokenValue(goal.tokenBudget)}`);
+  if (goal.minimumActiveSeconds !== null) {
+    lines.push(`Minimum active time: ${formatDuration(goal.minimumActiveSeconds)}`);
   }
-
+  if (goal.maximumActiveSeconds !== null) {
+    lines.push(`Maximum active time: ${formatDuration(goal.maximumActiveSeconds)}`);
+  }
   lines.push(`Hint: ${commandHint(goal.status)}`);
   return lines.join("\n");
-}
-
-function compactBudgetUsage(goal: ThreadGoal): string {
-  if (goal.tokenBudget === null) {
-    return `${formatCompactTokenValue(goal.usage.tokensUsed)} tokens`;
-  }
-  return `${formatCompactTokenValue(goal.usage.tokensUsed)} / ${formatCompactTokenValue(goal.tokenBudget)}`;
 }
 
 export function formatFooterStatus(
@@ -137,15 +127,12 @@ export function formatFooterStatus(
     return undefined;
   }
 
-  if (goal.status === "budgetLimited") {
-    if (goal.tokenBudget !== null) {
-      return `Goal unmet (${compactBudgetUsage(goal)} tokens)`;
-    }
-    return "Goal abandoned";
+  if (goal.status === "timeLimited") {
+    return `Goal reached its maximum active time (${formatDuration(goal.usage.activeSeconds)})`;
   }
 
   if (goal.status === "paused" && providerLimitAutoResumeScheduled) {
-    return "Goal paused because the provider usage limit was reached. Auto-resume will retry in about 5 minutes. Use /goal resume to resume now or /goal resume cancel to stop auto-resume.";
+    return "Goal paused because the provider usage limit was reached. Auto-resume will retry in about 5 minutes. Use /goal resume to resume now.";
   }
 
   const recoveryAttentionMessage = formatRecoveryAttention(recoveryAttention);
@@ -154,8 +141,8 @@ export function formatFooterStatus(
   }
 
   if (goal.status === "active") {
-    if (goal.tokenBudget !== null) {
-      return `Pursuing goal (${compactBudgetUsage(goal)})`;
+    if (goal.maximumActiveSeconds !== null) {
+      return `Pursuing goal (${formatDuration(goal.usage.activeSeconds)} / ${formatDuration(goal.maximumActiveSeconds)} max)`;
     }
     if (goal.usage.activeSeconds > 0) {
       return `Pursuing goal (${formatDuration(goal.usage.activeSeconds)})`;
@@ -167,9 +154,10 @@ export function formatFooterStatus(
     return "Goal paused (/goal resume)";
   }
 
-  if (goal.tokenBudget !== null) {
-    return `Goal achieved (${formatCompactTokenValue(goal.usage.tokensUsed)} tokens)`;
+  if (goal.status === "blocked") {
+    return "Goal blocked (/goal resume after resolving the blocker)";
   }
+
   if (goal.usage.activeSeconds > 0) {
     return `Goal achieved (${formatDuration(goal.usage.activeSeconds)})`;
   }
@@ -181,7 +169,8 @@ export function toToolGoal(goal: ThreadGoal): GoalToolRecord {
     goalId: goal.goalId,
     objective: goal.objective,
     status: goal.status,
-    tokenBudget: goal.tokenBudget,
+    minimumActiveSeconds: goal.minimumActiveSeconds,
+    maximumActiveSeconds: goal.maximumActiveSeconds,
     tokensUsed: goal.usage.tokensUsed,
     timeUsedSeconds: goal.usage.activeSeconds,
     createdAt: goal.createdAt,
@@ -189,18 +178,25 @@ export function toToolGoal(goal: ThreadGoal): GoalToolRecord {
   };
 }
 
-export function remainingTokens(goal: ThreadGoal | null): number | null {
-  if (!goal || goal.tokenBudget === null) {
+export function minimumTimeRemainingSeconds(goal: ThreadGoal | null): number | null {
+  if (!goal || goal.minimumActiveSeconds === null) {
     return null;
   }
-  return Math.max(0, goal.tokenBudget - goal.usage.tokensUsed);
+  return Math.max(0, goal.minimumActiveSeconds - goal.usage.activeSeconds);
 }
 
-export function completionBudgetReport(goal: ThreadGoal | null): string | null {
+export function maximumTimeRemainingSeconds(goal: ThreadGoal | null): number | null {
+  if (!goal || goal.maximumActiveSeconds === null) {
+    return null;
+  }
+  return Math.max(0, goal.maximumActiveSeconds - goal.usage.activeSeconds);
+}
+
+export function completionUsageReport(goal: ThreadGoal | null): string | null {
   if (!goal || goal.status !== "complete") {
     return null;
   }
-  if (goal.tokenBudget === null && goal.usage.activeSeconds <= 0) {
+  if (goal.usage.activeSeconds <= 0 && goal.usage.tokensUsed <= 0) {
     return null;
   }
 
@@ -208,23 +204,25 @@ export function completionBudgetReport(goal: ThreadGoal | null): string | null {
   if (goal.usage.activeSeconds > 0) {
     parts.push(`time used: ${formatDuration(goal.usage.activeSeconds)}.`);
   }
-  if (goal.tokenBudget !== null) {
-    parts.push(`tokens used: ${formatInteger(goal.usage.tokensUsed)} of ${formatInteger(goal.tokenBudget)}.`);
-  } else if (goal.usage.tokensUsed > 0) {
+  if (goal.usage.tokensUsed > 0) {
     parts.push(`tokens used: ${formatInteger(goal.usage.tokensUsed)}.`);
   }
 
-  return `Goal achieved. Report final budget usage to the user: ${parts.join(" ")}`;
+  return `Goal achieved. Report final usage to the user: ${parts.join(" ")}`;
 }
 
-export function goalToolResponse(goal: ThreadGoal | null, includeCompletionBudgetReport = false): GoalToolResponse {
+export function goalToolResponse(
+  goal: ThreadGoal | null,
+  includeCompletionUsageReport = false,
+): GoalToolResponse {
   return {
     goal: goal ? toToolGoal(goal) : null,
-    remainingTokens: remainingTokens(goal),
-    completionBudgetReport: includeCompletionBudgetReport ? completionBudgetReport(goal) : null,
+    minimumTimeRemainingSeconds: minimumTimeRemainingSeconds(goal),
+    maximumTimeRemainingSeconds: maximumTimeRemainingSeconds(goal),
+    completionUsageReport: includeCompletionUsageReport ? completionUsageReport(goal) : null,
   };
 }
 
-export function toToolText(goal: ThreadGoal | null, includeCompletionBudgetReport = false): string {
-  return JSON.stringify(goalToolResponse(goal, includeCompletionBudgetReport), null, 2);
+export function toToolText(goal: ThreadGoal | null, includeCompletionUsageReport = false): string {
+  return JSON.stringify(goalToolResponse(goal, includeCompletionUsageReport), null, 2);
 }

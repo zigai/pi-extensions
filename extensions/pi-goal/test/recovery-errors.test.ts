@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mock, test } from "node:test";
+import { test, vi } from "vitest";
 
 import { formatFooterStatus } from "../src/format.js";
 import {
@@ -35,7 +35,9 @@ test("non-retryable provider errors pause active goals immediately", async () =>
     harness.footerStatuses.at(-1),
     formatFooterStatus(
       harness.snapshot().goal,
-      createRecoveryPausedAttention("non-retryable provider error (invalid tool call state: malformed function arguments)"),
+      createRecoveryPausedAttention(
+        "non-retryable provider error (invalid tool call state: malformed function arguments)",
+      ),
     ),
   );
 });
@@ -188,7 +190,7 @@ test("zero-output length overflow suppresses continuation and shows overflow rec
 });
 
 test("host overflow compaction falls back to goal continuation when host retry never starts", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -214,12 +216,12 @@ test("host overflow compaction falls back to goal continuation when host retry n
       goalId: goal?.goalId,
     });
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("host overflow compaction fallback does not duplicate a host retry turn", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -238,7 +240,7 @@ test("host overflow compaction fallback does not duplicate a host retry turn", a
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
@@ -303,7 +305,10 @@ test("repeated silent stop overflow after host compaction pauses without blockin
   assert.equal(harness.sentMessages.length, 0);
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal needs attention/);
 
-  const manualCompaction = await harness.emit("session_before_compact", sessionBeforeCompactEvent());
+  const manualCompaction = await harness.emit(
+    "session_before_compact",
+    sessionBeforeCompactEvent(),
+  );
   assert.notDeepEqual(manualCompaction[0], { cancel: true });
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -333,6 +338,9 @@ test("repeated zero-output length overflow after host compaction pauses without 
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
 
-  const manualCompaction = await harness.emit("session_before_compact", sessionBeforeCompactEvent());
+  const manualCompaction = await harness.emit(
+    "session_before_compact",
+    sessionBeforeCompactEvent(),
+  );
   assert.notDeepEqual(manualCompaction[0], { cancel: true });
 });

@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 
-import { toQueuedGoalContextCarrier, toQueuedGoalWorkSource, userContentFromUnknown } from "../src/queued-goal-messages.js";
+import {
+  toQueuedGoalContextCarrier,
+  toQueuedGoalWorkSource,
+  userContentFromUnknown,
+} from "../src/queued-goal-messages.js";
 import {
   applyQueuedGoalProviderContextRewrites,
   extensionQueuedGoalWorkMessageId,
   extensionQueuedGoalWorkMessageIdForRuntime,
 } from "../src/queued-goal-work.js";
-import { compactContinuationPrompt, continuationGoalIdFromPrompt, continuationPrompt } from "../src/prompts.js";
+import {
+  compactContinuationPrompt,
+  continuationGoalIdFromPrompt,
+  continuationPrompt,
+} from "../src/prompts.js";
 import type { ThreadGoal } from "../src/types.js";
 import { goalCustomContextMessage, goalUserContextMessage } from "./support/runtime-harness.js";
 
@@ -15,14 +23,16 @@ const activeGoal: ThreadGoal = {
   goalId: "goal-1",
   objective: "ship it",
   status: "active",
-  tokenBudget: null,
+  minimumActiveSeconds: null,
+  maximumActiveSeconds: null,
   usage: { tokensUsed: 0, activeSeconds: 0 },
   createdAt: 0,
   updatedAt: 0,
 };
 
-const resolveStaleQueuedGoalWorkMessageId = (message: Parameters<typeof extensionQueuedGoalWorkMessageIdForRuntime>[0]) =>
-  extensionQueuedGoalWorkMessageIdForRuntime(message, continuationGoalIdFromPrompt);
+const resolveStaleQueuedGoalWorkMessageId = (
+  message: Parameters<typeof extensionQueuedGoalWorkMessageIdForRuntime>[0],
+) => extensionQueuedGoalWorkMessageIdForRuntime(message, continuationGoalIdFromPrompt);
 
 test("toQueuedGoalWorkSource ignores unrelated custom messages", () => {
   const unrelated = toQueuedGoalContextCarrier({
@@ -52,7 +62,10 @@ test("applyQueuedGoalProviderContextRewrites rewrites stale custom and user queu
 
   assert.equal(customResult.changed, true);
   assert.equal(customResult.messages[0]?.display, false);
-  assert.match(String(customResult.messages[0]?.content), /queued hidden goal continuation was stale/);
+  assert.match(
+    String(customResult.messages[0]?.content),
+    /queued hidden goal continuation was stale/,
+  );
   assert.deepEqual(customResult.messages[0]?.details, {
     kind: "stale_continuation",
     goalId: activeGoal.goalId,
@@ -67,7 +80,10 @@ test("applyQueuedGoalProviderContextRewrites rewrites stale custom and user queu
   });
 
   assert.equal(userResult.changed, true);
-  assert.match(String(userContentFromUnknown(userResult.messages[0]?.content)[0]?.text), /queued hidden goal continuation was stale/);
+  assert.match(
+    String(userContentFromUnknown(userResult.messages[0]?.content)[0]?.text),
+    /queued hidden goal continuation was stale/,
+  );
 });
 
 test("applyQueuedGoalProviderContextRewrites supersedes older custom continuations without refreshing the latest", () => {
@@ -151,5 +167,8 @@ test("applyQueuedGoalProviderContextRewrites leaves an active user marker verbat
 
   assert.equal(changed, true);
   assert.deepEqual(messages[1]?.content, userMarker.content);
-  assert.match(String(userContentFromUnknown(messages[1]?.content)[0]?.text), /<untrusted_objective>/);
+  assert.match(
+    String(userContentFromUnknown(messages[1]?.content)[0]?.text),
+    /<untrusted_objective>/,
+  );
 });

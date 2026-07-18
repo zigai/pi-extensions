@@ -15,15 +15,19 @@ interface GoalPersistenceDeps {
   pi: Pick<ExtensionAPI, "appendEntry">;
 }
 
-function canPersistRuntimeUsageEntry(goal: ThreadGoal, lastPersistedGoal: ThreadGoal | null): boolean {
+function canPersistRuntimeUsageEntry(
+  goal: ThreadGoal,
+  lastPersistedGoal: ThreadGoal | null,
+): boolean {
   return Boolean(
     lastPersistedGoal &&
-      goal.goalId === lastPersistedGoal.goalId &&
-      goal.objective === lastPersistedGoal.objective &&
-      goal.tokenBudget === lastPersistedGoal.tokenBudget &&
-      goal.createdAt === lastPersistedGoal.createdAt &&
-      isRuntimeUsageGoalStatus(goal.status) &&
-      isRuntimeUsageGoalStatus(lastPersistedGoal.status),
+    goal.goalId === lastPersistedGoal.goalId &&
+    goal.objective === lastPersistedGoal.objective &&
+    goal.minimumActiveSeconds === lastPersistedGoal.minimumActiveSeconds &&
+    goal.maximumActiveSeconds === lastPersistedGoal.maximumActiveSeconds &&
+    goal.createdAt === lastPersistedGoal.createdAt &&
+    isRuntimeUsageGoalStatus(goal.status) &&
+    isRuntimeUsageGoalStatus(lastPersistedGoal.status),
   );
 }
 

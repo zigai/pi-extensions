@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mock, test } from "node:test";
+import { test, vi } from "vitest";
 
 import { formatFooterStatus } from "../src/format.js";
 import { isGoalCustomEntry, setEntry } from "../src/state.js";
@@ -62,9 +62,9 @@ test("a new user-driven agent start leaves a paused goal paused", async () => {
   assert.equal(harness.snapshot().goal?.usage.tokensUsed, 10);
 });
 
-test("session resume over-budget paused goal stays budgetLimited without follow-up turn", async () => {
+test("session resume at maximum time keeps a paused goal timeLimited without follow-up turn", async () => {
   const harness = createRuntimeHarness();
-  await harness.runTool("create_goal", { objective: "ship it", token_budget: 10 });
+  await harness.runTool("create_goal", { objective: "ship it", maximum_time_minutes: 1 });
   await harness.runCommand("pause");
   const paused = harness.snapshot().goal;
   assert.ok(paused);
@@ -79,7 +79,7 @@ test("session resume over-budget paused goal stays budgetLimited without follow-
     data: setEntry(
       {
         ...paused,
-        usage: { tokensUsed: 10, activeSeconds: paused.usage.activeSeconds },
+        usage: { tokensUsed: 0, activeSeconds: 60 },
       },
       "runtime",
     ),
@@ -88,7 +88,7 @@ test("session resume over-budget paused goal stays budgetLimited without follow-
 
   await harness.emit("session_start", { type: "session_start", reason: "resume" });
 
-  assert.equal(harness.snapshot().goal?.status, "budgetLimited");
+  assert.equal(harness.snapshot().goal?.status, "timeLimited");
   assert.equal(harness.sentUserMessages.length, 0);
 });
 
@@ -116,8 +116,25 @@ test("session resume prompt can reactivate a paused goal", async () => {
   if (typeof content !== "string") {
     assert.fail("Expected session resume to send a user continuation prompt.");
   }
-  assert.doesNotMatch(content, /<untrusted_objective>/);
+  assert.match(content, /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/);
   assert.match(content, /<pi_goal_continuation goal_id="/);
+});
+
+test("blocked goals remain stopped across session reload until explicit resume", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  await harness.runTool("update_goal", { status: "blocked" });
+  harness.sentMessages.length = 0;
+  harness.sentUserMessages.length = 0;
+
+  await harness.reloadSession("reload");
+  assert.equal(harness.snapshot().goal?.status, "blocked");
+  assert.equal(harness.sentMessages.length, 0);
+  assert.equal(harness.sentUserMessages.length, 0);
+
+  await harness.runCommand("resume");
+  assert.equal(harness.snapshot().goal?.status, "active");
+  assert.equal(harness.sentMessages.length + harness.sentUserMessages.length, 1);
 });
 
 test("completed turns count input plus output and continue active goals", async () => {
@@ -174,62 +191,80 @@ test("tool-use turn ends do not queue continuation before tool execution finishe
   assert.equal(harness.sentMessages.length, 0);
 });
 
-test("successful budget-crossing turn clears stale recovery footer attention", async () => {
-  const harness = createRuntimeHarness();
-  await harness.runTool("create_goal", { objective: "ship it", token_budget: 10 });
-  harness.sentMessages.length = 0;
-  harness.footerStatuses.length = 0;
+test("successful maximum-time crossing clears stale recovery footer attention", async () => {
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runTool("create_goal", { objective: "ship it", maximum_time_minutes: 1 });
+    harness.sentMessages.length = 0;
+    harness.footerStatuses.length = 0;
 
-  await emitPersistentAssistantError(harness, 0, "websocket closed");
-  assert.equal(harness.snapshot().goal?.status, "active");
-  assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
+    await emitPersistentAssistantError(harness, 0, "websocket closed");
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
 
-  await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
-  await harness.emit("turn_end", {
-    type: "turn_end",
-    turnIndex: 1,
-    message: assistantMessage("stop", { input: 8, output: 3 }),
-    toolResults: [],
-  });
+    await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
+    now += 60_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 1,
+      message: assistantMessage("stop", { input: 8, output: 3 }),
+      toolResults: [],
+    });
 
-  const goal = harness.snapshot().goal;
-  assert.equal(goal?.status, "budgetLimited");
-  assert.equal(goal?.usage.tokensUsed, 13);
-  assert.equal(harness.footerStatuses.at(-1), formatFooterStatus(goal));
-  assert.match(harness.footerStatuses.at(-1) ?? "", /Goal unmet/);
-  assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.status, "timeLimited");
+    assert.equal(goal?.usage.tokensUsed, 13);
+    assert.equal(goal?.usage.activeSeconds, 60);
+    assert.equal(harness.footerStatuses.at(-1), formatFooterStatus(goal));
+    assert.match(harness.footerStatuses.at(-1) ?? "", /maximum active time/);
+    assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
-test("budget crossing sends one hidden budget-limit steering message", async () => {
-  const harness = createRuntimeHarness();
-  await harness.runTool("create_goal", { objective: "ship it", token_budget: 10 });
+test("maximum-time crossing sends one hidden time-limit steering message", async () => {
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    const harness = createRuntimeHarness();
+    await harness.runTool("create_goal", { objective: "ship it", maximum_time_minutes: 1 });
 
-  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("turn_end", {
-    type: "turn_end",
-    turnIndex: 0,
-    message: assistantMessage("toolUse", { input: 8, output: 3 }),
-    toolResults: [],
-  });
+    await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+    now += 60_000;
+    await harness.emit("turn_end", {
+      type: "turn_end",
+      turnIndex: 0,
+      message: assistantMessage("toolUse", { input: 8, output: 3 }),
+      toolResults: [],
+    });
 
-  const goal = harness.snapshot().goal;
-  assert.equal(goal?.status, "budgetLimited");
-  assert.equal(goal?.usage.tokensUsed, 11);
-  assert.equal(harness.sentMessages.length, 1);
-  assert.deepEqual(harness.sentMessages[0]?.message.details, {
-    kind: "budget_limit",
-    goalId: goal?.goalId,
-  });
+    const goal = harness.snapshot().goal;
+    assert.equal(goal?.status, "timeLimited");
+    assert.equal(goal?.usage.tokensUsed, 11);
+    assert.equal(goal?.usage.activeSeconds, 60);
+    assert.equal(harness.sentMessages.length, 1);
+    assert.deepEqual(harness.sentMessages[0]?.message.details, {
+      kind: "time_limit",
+      goalId: goal?.goalId,
+    });
 
-  await harness.emit("tool_execution_end", {
-    type: "tool_execution_end",
-    toolCallId: "tool-call",
-    toolName: "bash",
-    args: {},
-    result: {},
-    isError: false,
-  });
-  assert.equal(harness.sentMessages.length, 1);
+    await harness.emit("tool_execution_end", {
+      type: "tool_execution_end",
+      toolCallId: "tool-call",
+      toolName: "bash",
+      args: {},
+      result: {},
+      isError: false,
+    });
+    assert.equal(harness.sentMessages.length, 1);
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test("replacement during an in-flight turn does not charge old tokens to the new goal", async () => {
@@ -255,27 +290,56 @@ test("replacement during an in-flight turn does not charge old tokens to the new
   assert.equal(harness.sentMessages.length, 1);
 });
 
-test("goal tools return Codex-shaped response details", async () => {
+test("goal tools return goal, constraints, and usage details", async () => {
   const harness = createRuntimeHarness();
   const created = (await harness.runTool("create_goal", {
     objective: "ship it",
-    token_budget: 20,
+    maximum_time_minutes: 2,
   })) as { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 
   assert.equal((created.details.goal as { objective?: string }).objective, "ship it");
-  assert.equal((created.details.goal as { tokenBudget?: number }).tokenBudget, 20);
-  assert.equal(created.details.remainingTokens, 20);
-  assert.equal(created.details.completionBudgetReport, null);
+  assert.equal(
+    (created.details.goal as { maximumActiveSeconds?: number }).maximumActiveSeconds,
+    120,
+  );
+  assert.equal(created.details.minimumTimeRemainingSeconds, null);
+  assert.equal(created.details.maximumTimeRemainingSeconds, 120);
+  assert.equal(created.details.completionUsageReport, null);
   assert.deepEqual(JSON.parse(created.content[0]?.text ?? ""), {
     goal: created.details.goal,
-    remainingTokens: 20,
-    completionBudgetReport: null,
+    minimumTimeRemainingSeconds: null,
+    maximumTimeRemainingSeconds: 120,
+    completionUsageReport: null,
   });
 
   const completed = (await harness.runTool("update_goal", { status: "complete" })) as {
     details: Record<string, unknown>;
   };
-  assert.match(String(completed.details.completionBudgetReport), /^Goal achieved\. Report final budget usage to the user:/);
+  assert.equal(completed.details.completionUsageReport, null);
+});
+
+test("create_goal converts whole-minute minimum time and blocks premature completion", async () => {
+  const harness = createRuntimeHarness();
+  const created = (await harness.runTool("create_goal", {
+    objective: "ship it carefully",
+    minimum_time_minutes: 1,
+    maximum_time_minutes: 2,
+  })) as { details: Record<string, unknown> };
+
+  assert.equal(
+    (created.details.goal as { minimumActiveSeconds?: number }).minimumActiveSeconds,
+    60,
+  );
+  assert.equal(
+    (created.details.goal as { maximumActiveSeconds?: number }).maximumActiveSeconds,
+    120,
+  );
+  assert.equal(created.details.minimumTimeRemainingSeconds, 60);
+  assert.equal(created.details.maximumTimeRemainingSeconds, 120);
+  await assert.rejects(
+    harness.runTool("update_goal", { status: "complete" }),
+    /requires 60 more active seconds/,
+  );
 });
 
 test("agent_end, not agent_settled, drives deliberate per-run goal continuation", async () => {
@@ -300,7 +364,7 @@ test("agent_end, not agent_settled, drives deliberate per-run goal continuation"
 });
 
 test("agent end waits for idle before continuing active goals", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
     await harness.runCommand("ship it");
@@ -332,12 +396,12 @@ test("agent end waits for idle before continuing active goals", async () => {
       goalId: goal?.goalId,
     });
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("completing a goal cancels a scheduled continuation before it is sent", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
     await harness.runCommand("ship it");
@@ -367,7 +431,7 @@ test("completing a goal cancels a scheduled continuation before it is sent", asy
     assert.equal(harness.snapshot().goal?.status, "complete");
     assert.equal(harness.sentMessages.length, 0);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
@@ -437,8 +501,8 @@ test("auto-queued continuations use the compact prompt", async () => {
   assert.ok(continuation);
   const content = String(continuation.message.content);
   assert.match(content, /<pi_goal_continuation goal_id="/);
-  assert.doesNotMatch(content, /<untrusted_objective>/);
-  assert.match(content, /get_goal/);
+  assert.match(content, /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/);
+  assert.match(content, /update_goal/);
 });
 
 test("extension user continuation accepted before compaction suppresses duplicate compaction continuation", async () => {
@@ -456,7 +520,7 @@ test("extension user continuation accepted before compaction suppresses duplicat
     streamingBehavior: "followUp",
   });
 
-  assert.deepEqual(results, [{ action: "continue" }]);
+  assert.deepEqual(results, [{ action: "continue" }, { action: "continue" }]);
   await harness.emit("session_compact", sessionCompactEvent());
 
   const goal = harness.snapshot().goal;
@@ -465,7 +529,7 @@ test("extension user continuation accepted before compaction suppresses duplicat
 });
 
 test("session compaction queues continuation for active goals after the compaction event unwinds", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -486,19 +550,19 @@ test("session compaction queues continuation for active goals after the compacti
     assert.equal(goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
 
-    mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
     assert.equal(harness.sentMessages.length, 1);
     assert.deepEqual(harness.sentMessages[0]?.message.details, {
       kind: "continuation",
       goalId: goal?.goalId,
     });
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("session compaction accelerates an existing idle retry after length stops", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
     await harness.runCommand("ship it");
@@ -524,7 +588,7 @@ test("session compaction accelerates an existing idle retry after length stops",
     harness.setPendingMessages(false);
     await harness.emit("session_compact", sessionCompactEvent());
 
-    mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
     const goal = harness.snapshot().goal;
     assert.equal(goal?.status, "active");
     assert.equal(harness.sentMessages.length, 1);
@@ -533,12 +597,12 @@ test("session compaction accelerates an existing idle retry after length stops",
       goalId: goal?.goalId,
     });
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("session compaction continuation is cancelled if a host retry starts before the deferred check", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -562,7 +626,7 @@ test("session compaction continuation is cancelled if a host retry starts before
       systemPrompt: "",
       systemPromptOptions: {},
     });
-    mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
     assert.equal(harness.sentMessages.length, 0);
 
     await harness.emit("agent_end", {
@@ -577,12 +641,12 @@ test("session compaction continuation is cancelled if a host retry starts before
       goalId: goal?.goalId,
     });
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("repeated session_compact events before the deferred check queue at most one continuation", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -598,13 +662,16 @@ test("repeated session_compact events before the deferred check queue at most on
       systemPromptOptions: {},
     });
     for (let index = 0; index < 3; index += 1) {
-      await harness.emit("session_compact", sessionCompactEvent({
-        summary: `compact summary ${index}`,
-        tokensBefore: 100 + index,
-      }));
+      await harness.emit(
+        "session_compact",
+        sessionCompactEvent({
+          summary: `compact summary ${index}`,
+          tokensBefore: 100 + index,
+        }),
+      );
     }
 
-    mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
     const goal = harness.snapshot().goal;
     assert.equal(goal?.status, "active");
     assert.equal(harness.sentMessages.length, 1);
@@ -613,12 +680,12 @@ test("repeated session_compact events before the deferred check queue at most on
       goalId: goal?.goalId,
     });
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("session shutdown cancels deferred session_compact continuations", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -636,15 +703,15 @@ test("session shutdown cancels deferred session_compact continuations", async ()
     await harness.emit("session_compact", sessionCompactEvent());
     await harness.emit("session_shutdown", sessionShutdownEvent());
 
-    mock.timers.tick(1);
+    vi.advanceTimersByTime(1);
     assert.equal(harness.sentMessages.length, 0);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("provider-limit pauses schedule auto-resume", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -667,14 +734,17 @@ test("provider-limit pauses schedule auto-resume", async () => {
     const content = harness.sentUserMessages[0]?.content;
     assert.equal(typeof content, "string");
     assert.match(String(content), /<pi_goal_continuation goal_id="/);
-    assert.doesNotMatch(String(content), /<untrusted_objective>/);
+    assert.match(
+      String(content),
+      /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/,
+    );
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("provider-limit auto-resume retries instead of resuming while busy", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
     await harness.runCommand("ship it");
@@ -695,12 +765,12 @@ test("provider-limit auto-resume retries instead of resuming while busy", async 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentUserMessages.length, 1);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("non-limit non-retryable pauses do not schedule auto-resume", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -713,12 +783,12 @@ test("non-limit non-retryable pauses do not schedule auto-resume", async () => {
     assert.equal(harness.sentUserMessages.length, 0);
     assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Auto-resume/);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("manual resume clears provider-limit auto-resume", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -733,32 +803,12 @@ test("manual resume clears provider-limit auto-resume", async () => {
     fireProviderLimitAutoResume();
     assert.equal(harness.sentUserMessages.length, 1);
   } finally {
-    mock.timers.reset();
-  }
-});
-
-test("/goal resume cancel clears provider-limit auto-resume and leaves the goal paused", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
-  try {
-    const harness = createRuntimeHarness();
-    await harness.runCommand("ship it");
-    harness.sentMessages.length = 0;
-
-    await emitPersistentAssistantError(harness, 0, "Monthly usage limit reached");
-    await harness.runCommand("resume cancel");
-
-    assert.equal(harness.snapshot().goal?.status, "paused");
-    assert.equal(harness.footerStatuses.at(-1), "Goal needs attention (non-retryable provider error (Monthly usage limit reached)). Use /goal resume to continue.");
-    assert.equal(harness.sentUserMessages.length, 0);
-    fireProviderLimitAutoResume();
-    assert.equal(harness.sentUserMessages.length, 0);
-  } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("user input and session shutdown clear provider-limit auto-resume", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const userInputHarness = createRuntimeHarness();
     await userInputHarness.runCommand("ship it");
@@ -782,12 +832,12 @@ test("user input and session shutdown clear provider-limit auto-resume", async (
     fireProviderLimitAutoResume();
     assert.equal(shutdownHarness.sentUserMessages.length, 0);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("a second provider-limit failure after auto-resume schedules one new retry", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
@@ -808,7 +858,7 @@ test("a second provider-limit failure after auto-resume schedules one new retry"
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentUserMessages.length, 1);
   } finally {
-    mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 

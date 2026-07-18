@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import {
   CONTEXT_OVERFLOW_SIGNATURE,
@@ -125,7 +125,10 @@ test("provider-limit classifier recognizes only quota and usage-limit errors", (
     assert.equal(isProviderLimitError(errorMessage), true, errorMessage);
   }
   assert.equal(isProviderLimitError("usage limit has been reached for this account"), true);
-  assert.equal(isProviderLimitError("invalid tool call state: malformed function arguments"), false);
+  assert.equal(
+    isProviderLimitError("invalid tool call state: malformed function arguments"),
+    false,
+  );
   assert.equal(isProviderLimitError("invalid api key"), false);
   assert.equal(isProviderLimitError(undefined), false);
 });
@@ -160,7 +163,10 @@ test("recovery pending attention helpers round-trip structured reasons", () => {
   assert.equal(isRecoveryPendingAttention({ kind: "paused", reason }), false);
   assert.equal(isRecoveryPendingAttention(null), false);
   assert.equal(reasonFromRecoveryPendingAttention(null), null);
-  assert.equal(recoveryAttentionMessage(reason), `Goal needs attention (${reason}). Use /goal resume to continue.`);
+  assert.equal(
+    recoveryAttentionMessage(reason),
+    `Goal needs attention (${reason}). Use /goal resume to continue.`,
+  );
 });
 
 test("changing context overflow messages share one recovery signature and reach the host cap", () => {
@@ -171,17 +177,19 @@ test("changing context overflow messages share one recovery signature and reach 
   ];
 
   for (const errorMessage of messages.slice(0, 1)) {
-    const action = planRecoveryForAssistantError(
-      state,
-      { role: "assistant", stopReason: "error", errorMessage },
-    );
+    const action = planRecoveryForAssistantError(state, {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage,
+    });
     assert.equal(action.type, "noop");
   }
 
-  const finalAction = planRecoveryForAssistantError(
-    state,
-    { role: "assistant", stopReason: "error", errorMessage: messages[1]! },
-  );
+  const finalAction = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: messages[1]!,
+  });
   assert.equal(finalAction.type, "pause");
   assert.equal(state.counters.compactionAttempts, 2);
   assert.equal(state.counters.signature, CONTEXT_OVERFLOW_SIGNATURE);
@@ -204,28 +212,31 @@ test("counters reset transient attempts on signature change but preserve overflo
 test("overflow compaction attempts survive intervening transient provider errors", () => {
   const state = createGoalRecoveryMachine();
 
-  const firstOverflow = planRecoveryForAssistantError(
-    state,
-    { role: "assistant", stopReason: "error", errorMessage: "context_length_exceeded" },
-  );
+  const firstOverflow = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "context_length_exceeded",
+  });
   assert.equal(firstOverflow.type, "noop");
   assert.equal(state.counters.compactionAttempts, 1);
 
   onRecoverySessionCompact(state);
   assert.equal(state.counters.compactionAttempts, 1);
 
-  const transient = planRecoveryForAssistantError(
-    state,
-    { role: "assistant", stopReason: "error", errorMessage: "websocket closed" },
-  );
+  const transient = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "websocket closed",
+  });
   assert.equal(transient.type, "pending");
   assert.equal(state.counters.compactionAttempts, 1);
   assert.equal(state.counters.signature, "websocket closed");
 
-  const secondOverflow = planRecoveryForAssistantError(
-    state,
-    { role: "assistant", stopReason: "error", errorMessage: "context_length_exceeded" },
-  );
+  const secondOverflow = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "context_length_exceeded",
+  });
   assert.equal(secondOverflow.type, "pause");
   assert.equal(state.counters.compactionAttempts, 2);
 });
@@ -240,10 +251,11 @@ test("varied retryable transient errors stay active without tripping signature-s
   ];
 
   for (const errorMessage of errors) {
-    const action = planRecoveryForAssistantError(
-      state,
-      { role: "assistant", stopReason: "error", errorMessage },
-    );
+    const action = planRecoveryForAssistantError(state, {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage,
+    });
     assert.equal(action.type, "pending", `${errorMessage} should surface pending attention`);
     assert.equal(state.counters.transientAttempts, 1, `${errorMessage} should reset per signature`);
   }
@@ -254,10 +266,11 @@ test("repeated identical transient errors stay pending without host-default paus
   const errorMessage = "websocket closed";
 
   for (let index = 0; index < 10; index += 1) {
-    const action = planRecoveryForAssistantError(
-      state,
-      { role: "assistant", stopReason: "error", errorMessage },
-    );
+    const action = planRecoveryForAssistantError(state, {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage,
+    });
     assert.equal(action.type, "pending", `attempt ${index + 1} should stay pending`);
     assert.equal(state.counters.transientAttempts, index + 1);
   }
@@ -349,10 +362,11 @@ test("recovery session compact preserves overflow attempt counts after host comp
 
 test("recovery session compact preserves non-overflow pending attention and counters", () => {
   const state = createGoalRecoveryMachine();
-  const action = planRecoveryForAssistantError(
-    state,
-    { role: "assistant", stopReason: "error", errorMessage: "websocket closed" },
-  );
+  const action = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "websocket closed",
+  });
   assert.equal(action.type, "pending");
   setRecoveryPendingAttention(state, action.reason);
 
@@ -373,10 +387,11 @@ test("recovery plans pause after compaction cap even when compaction attempts ar
     transientAttempts: 0,
     compactionAttempts: 1,
   };
-  const action = planRecoveryForAssistantError(
-    state,
-    { role: "assistant", stopReason: "error", errorMessage: "context_length_exceeded" },
-  );
+  const action = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "context_length_exceeded",
+  });
   assert.equal(action.type, "pause");
 });
 
@@ -398,42 +413,38 @@ test("repeat overflow compaction is due once host recovery cap is reached", () =
 
 test("retryable transient errors surface pending attention instead of pausing", () => {
   const state = createGoalRecoveryMachine();
-  const action = planRecoveryForAssistantError(
-    state,
-    {
-      role: "assistant",
-      stopReason: "error",
-      errorMessage: "exceeded request buffer limit while retrying upstream",
-    },
-  );
+  const action = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "exceeded request buffer limit while retrying upstream",
+  });
   assert.equal(action.type, "pending");
   assert.equal(state.counters.transientAttempts, 1);
 });
 
 test("recovery plans noop for first overflow and pending for first transient error", () => {
-  const overflow = planRecoveryForAssistantError(
-    createGoalRecoveryMachine(),
-    { role: "assistant", stopReason: "error", errorMessage: "context_length_exceeded" },
-  );
+  const overflow = planRecoveryForAssistantError(createGoalRecoveryMachine(), {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "context_length_exceeded",
+  });
   assert.equal(overflow.type, "noop");
 
-  const transient = planRecoveryForAssistantError(
-    createGoalRecoveryMachine(),
-    { role: "assistant", stopReason: "error", errorMessage: "websocket closed" },
-  );
+  const transient = planRecoveryForAssistantError(createGoalRecoveryMachine(), {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "websocket closed",
+  });
   assert.equal(transient.type, "pending");
 });
 
 test("non-retryable provider errors pause immediately", () => {
   const state = createGoalRecoveryMachine();
-  const action = planRecoveryForAssistantError(
-    state,
-    {
-      role: "assistant",
-      stopReason: "error",
-      errorMessage: "invalid tool call state: malformed function arguments",
-    },
-  );
+  const action = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "invalid tool call state: malformed function arguments",
+  });
   assert.equal(action.type, "pause");
   if (action.type === "pause") {
     assert.match(action.reason, /non-retryable provider error/);
@@ -442,10 +453,11 @@ test("non-retryable provider errors pause immediately", () => {
 
 test("terminal provider-limit errors pause immediately instead of pending host retry", () => {
   const state = createGoalRecoveryMachine();
-  const action = planRecoveryForAssistantError(
-    state,
-    { role: "assistant", stopReason: "error", errorMessage: "insufficient_quota 429" },
-  );
+  const action = planRecoveryForAssistantError(state, {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "insufficient_quota 429",
+  });
 
   assert.equal(action.type, "pause");
   if (action.type === "pause") {

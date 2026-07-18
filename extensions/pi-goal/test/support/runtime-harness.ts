@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
-import { mock } from "node:test";
+import { vi } from "vitest";
 
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 import goalExtension, { __testHooks } from "../../src/index.js";
 import { isContextOverflowError } from "../../src/recovery.js";
@@ -77,19 +81,28 @@ export function sessionShutdownEvent(
   return { type: "session_shutdown", reason };
 }
 
-export function createRuntimeHarness(options: {
-  idle?: boolean;
-  pendingMessages?: boolean;
-  compactBehavior?: "success" | "error" | "unavailable";
-  compactCompletion?: "immediate" | "manual";
-  contextWindow?: number;
-  contextUsage?: ReturnType<ExtensionContext["getContextUsage"]>;
-} = {}) {
+export function createRuntimeHarness(
+  options: {
+    idle?: boolean;
+    pendingMessages?: boolean;
+    compactBehavior?: "success" | "error" | "unavailable";
+    compactCompletion?: "immediate" | "manual";
+    contextWindow?: number;
+    contextUsage?: ReturnType<ExtensionContext["getContextUsage"]>;
+    availableTools?: readonly string[];
+    activeTools?: readonly string[];
+    cwd?: string;
+    projectTrusted?: boolean;
+  } = {},
+) {
+  const cwd = options.cwd ?? "/tmp";
   const entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]> = [];
   const handlers = new Map<string, EventHandler[]>();
   const sentMessages: SentMessage[] = [];
   const sentUserMessages: SentUserMessage[] = [];
   const tools = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>();
+  const availableToolNames = new Set(options.availableTools ?? []);
+  const activeToolNames = new Set(options.activeTools ?? options.availableTools ?? []);
   const compactCalls: Array<{
     customInstructions?: string;
     onComplete?: (result: {
@@ -109,7 +122,9 @@ export function createRuntimeHarness(options: {
     contextUsage: options.contextUsage,
     hostOverflowRecoveryAttempted: false,
   };
-  let commandHandler: ((args: string, ctx: ExtensionCommandContext) => void | Promise<void>) | null = null;
+  let commandHandler:
+    | ((args: string, ctx: ExtensionCommandContext) => void | Promise<void>)
+    | null = null;
   let ctx: ExtensionCommandContext;
   let entryIndex = 0;
 
@@ -145,8 +160,12 @@ export function createRuntimeHarness(options: {
       },
     },
     exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
-    getActiveTools: () => [],
-    getAllTools: () => [],
+    getActiveTools: () => [...activeToolNames],
+    getAllTools: () =>
+      [...availableToolNames].map((name) => ({
+        name,
+        description: `${name} test tool`,
+      })) as ReturnType<ExtensionAPI["getAllTools"]>,
     getCommands: () => [],
     getFlag: () => undefined,
     getSessionName: () => undefined,
@@ -167,6 +186,8 @@ export function createRuntimeHarness(options: {
     },
     registerShortcut() {},
     registerTool(tool) {
+      availableToolNames.add(tool.name);
+      activeToolNames.add(tool.name);
       tools.set(tool.name, (params) =>
         tool.execute(
           "tool-call",
@@ -183,8 +204,13 @@ export function createRuntimeHarness(options: {
     sendUserMessage(content, options) {
       sentUserMessages.push({ content, options });
     },
-    setActiveTools() {
-      unsupportedHarnessMethod("pi.setActiveTools");
+    setActiveTools(names) {
+      activeToolNames.clear();
+      for (const name of names) {
+        if (availableToolNames.has(name)) {
+          activeToolNames.add(name);
+        }
+      }
     },
     setLabel() {
       unsupportedHarnessMethod("pi.setLabel");
@@ -204,7 +230,7 @@ export function createRuntimeHarness(options: {
   const sessionManager: ExtensionCommandContext["sessionManager"] = {
     buildContextEntries: () => entries,
     getBranch: () => entries,
-    getCwd: () => "/tmp",
+    getCwd: () => cwd,
     getEntries: () => entries,
     getEntry: () => undefined,
     getHeader: () => null,
@@ -257,7 +283,7 @@ export function createRuntimeHarness(options: {
     abort() {
       runtime.abortCount += 1;
     },
-    cwd: "/tmp",
+    cwd,
     fork: async () => ({ cancelled: false }),
     getContextUsage: () => runtime.contextUsage,
     getSystemPrompt: () => "",
@@ -292,7 +318,7 @@ export function createRuntimeHarness(options: {
     },
     hasPendingMessages: () => runtime.pendingMessages,
     isIdle: () => runtime.idle,
-    isProjectTrusted: () => true,
+    isProjectTrusted: () => options.projectTrusted ?? true,
     mode: "tui",
     model: undefined,
     modelRegistry: {} as ExtensionCommandContext["modelRegistry"],
@@ -329,7 +355,11 @@ export function createRuntimeHarness(options: {
 
   async function runCommand(args: string): Promise<void> {
     assert.ok(commandHandler);
-    await commandHandler(args, ctx);
+    const managementCommand = args === "pause" || args === "resume" || args.length === 0;
+    // Most runtime tests exercise continuation/recovery mechanics and need deterministic direct
+    // goal creation. The public default now asks the model to generate an objective, so route test
+    // objectives through the explicit raw mode while preserving management command spellings.
+    await commandHandler(managementCommand || args.startsWith("-") ? args : `-r ${args}`, ctx);
   }
 
   async function emit(event: string, payload: object): Promise<unknown[]> {
@@ -363,6 +393,9 @@ export function createRuntimeHarness(options: {
     reloadSession,
     sentMessages,
     sentUserMessages,
+    get activeTools() {
+      return [...activeToolNames];
+    },
     setIdle(idle: boolean) {
       runtime.idle = idle;
     },
@@ -401,11 +434,11 @@ export interface TestAssistantUsage {
 }
 
 export function flushContinuationScheduler(): void {
-  mock.timers.tick(__testHooks.continuationRetryMs);
+  vi.advanceTimersByTime(__testHooks.continuationRetryMs);
 }
 
 export function fireProviderLimitAutoResume(): void {
-  mock.timers.tick(__testHooks.providerLimitAutoResumeMs);
+  vi.advanceTimersByTime(__testHooks.providerLimitAutoResumeMs);
 }
 
 export function countGoalSetEntries(
@@ -438,7 +471,9 @@ export function countGoalUsageEntries(
   }).length;
 }
 
-export async function emitToolExecutionEnd(harness: ReturnType<typeof createRuntimeHarness>): Promise<void> {
+export async function emitToolExecutionEnd(
+  harness: ReturnType<typeof createRuntimeHarness>,
+): Promise<void> {
   await harness.emit("tool_execution_end", {
     type: "tool_execution_end",
     toolCallId: "tool-call",
@@ -487,14 +522,20 @@ function parseProviderContextHandlerResult(result: unknown): ProviderContextHand
     return undefined;
   }
 
-  assert.ok(result && typeof result === "object", "Expected provider context handler result object.");
+  assert.ok(
+    result && typeof result === "object",
+    "Expected provider context handler result object.",
+  );
   const candidate = result as { messages?: unknown };
   assert.ok(Array.isArray(candidate.messages), "Expected provider context handler messages array.");
 
   const messages: QueuedGoalContextCarrier[] = [];
   for (const [index, message] of candidate.messages.entries()) {
     const carrier = toQueuedGoalContextCarrier(message as QueuedGoalContextInput);
-    assert.ok(carrier, `Expected provider context message ${index} to include a numeric timestamp.`);
+    assert.ok(
+      carrier,
+      `Expected provider context message ${index} to include a numeric timestamp.`,
+    );
     messages.push(carrier);
   }
 

@@ -34,9 +34,7 @@ export function replaceHarnessBranchWithGoal(
   return branchGoal;
 }
 
-export async function givenOverflowPausedGoal(
-  objective = "ship it",
-): Promise<{
+export async function givenOverflowPausedGoal(objective = "ship it"): Promise<{
   harness: RuntimeHarness;
   goal: NonNullable<ReturnType<RuntimeHarness["snapshot"]>["goal"]>;
 }> {
@@ -45,7 +43,10 @@ export async function givenOverflowPausedGoal(
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await emitPersistentAssistantError(harness, attempt, "context_length_exceeded");
-    await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow", willRetry: true }));
+    await harness.emit(
+      "session_compact",
+      sessionCompactEvent({ reason: "overflow", willRetry: true }),
+    );
     if (harness.snapshot().goal?.status === "active") {
       await harness.emit("agent_start", { type: "agent_start" });
     }
@@ -71,9 +72,7 @@ export async function givenPendingTransientRecovery(
   return harness;
 }
 
-export async function givenPendingOverflowRecovery(
-  objective = "ship it",
-): Promise<RuntimeHarness> {
+export async function givenPendingOverflowRecovery(objective = "ship it"): Promise<RuntimeHarness> {
   const harness = createRuntimeHarness({ compactBehavior: "unavailable" });
   await harness.runCommand(objective);
   harness.sentMessages.length = 0;

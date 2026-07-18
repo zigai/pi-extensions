@@ -109,7 +109,9 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
 
   const hasPendingRecoveryAttention = (): boolean => {
     const goal = deps.getGoal();
-    return Boolean(goal?.status === "active" && isRecoveryPendingAttention(deps.getRecoveryState().attention));
+    return Boolean(
+      goal?.status === "active" && isRecoveryPendingAttention(deps.getRecoveryState().attention),
+    );
   };
 
   const sendContinuation = (goalToContinue: ThreadGoal): void => {
@@ -128,11 +130,11 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
   const canPlanContinuationFor = (goal: ThreadGoal | null): goal is ThreadGoal => {
     return Boolean(
       !deps.staleQueuedWorkGuard.isBlockingContinuation() &&
-        goal &&
-        goal.status === "active" &&
-        continuationQueuedFor !== goal.goalId &&
-        !hasPendingRecoveryAttention() &&
-        !recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase),
+      goal &&
+      goal.status === "active" &&
+      continuationQueuedFor !== goal.goalId &&
+      !hasPendingRecoveryAttention() &&
+      !recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase),
     );
   };
 
@@ -189,14 +191,17 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     scheduleContinuationCheck(goal.goalId, ctx, 0);
   };
 
-  const canSchedulePostCompactFallbackFor = (goal: ThreadGoal | null, prepareContinuation?: () => boolean): goal is ThreadGoal => {
+  const canSchedulePostCompactFallbackFor = (
+    goal: ThreadGoal | null,
+    prepareContinuation?: () => boolean,
+  ): goal is ThreadGoal => {
     return Boolean(
       !deps.staleQueuedWorkGuard.isBlockingContinuation() &&
-        goal &&
-        goal.status === "active" &&
-        continuationQueuedFor !== goal.goalId &&
-        !hasPendingRecoveryAttention() &&
-        (prepareContinuation || !recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase)),
+      goal &&
+      goal.status === "active" &&
+      continuationQueuedFor !== goal.goalId &&
+      !hasPendingRecoveryAttention() &&
+      (prepareContinuation || !recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase)),
     );
   };
 

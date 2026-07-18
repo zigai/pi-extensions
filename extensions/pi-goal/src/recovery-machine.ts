@@ -90,13 +90,19 @@ export function onRecoverySessionCompact(state: GoalRecoveryMachineState): void 
   }
 }
 
-export function setRecoveryPendingAttention(state: GoalRecoveryMachineState, reason: string): RecoveryAttention {
+export function setRecoveryPendingAttention(
+  state: GoalRecoveryMachineState,
+  reason: string,
+): RecoveryAttention {
   const attention = createRecoveryPendingAttention(reason);
   state.attention = attention;
   return attention;
 }
 
-export function setRecoveryPausedAttention(state: GoalRecoveryMachineState, reason: string): RecoveryAttention {
+export function setRecoveryPausedAttention(
+  state: GoalRecoveryMachineState,
+  reason: string,
+): RecoveryAttention {
   const attention = createRecoveryPausedAttention(reason);
   state.attention = attention;
   return attention;
@@ -189,7 +195,9 @@ export function planRecoveryForAssistantError(
   };
 }
 
-export function planRecoveryForSilentContextOverflow(state: GoalRecoveryMachineState): RecoveryAction {
+export function planRecoveryForSilentContextOverflow(
+  state: GoalRecoveryMachineState,
+): RecoveryAction {
   return incrementOverflowCompactionAttempts(state);
 }
 

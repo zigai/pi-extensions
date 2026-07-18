@@ -59,7 +59,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
   return {
     onSessionStart: (async (event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
-      runtimeState.proactiveCompactionPending = false;
       deps.providerLimitAutoResume.clear();
       stateController.reloadFromSession(ctx);
       goalAccounting.beginAccounting();
@@ -81,7 +80,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
 
     onSessionTree: (async (_event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
-      runtimeState.proactiveCompactionPending = false;
       deps.providerLimitAutoResume.clear();
       stateController.reloadFromSession(ctx);
       goalAccounting.beginAccounting();
@@ -104,11 +102,12 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
     }) satisfies ExtensionHandler<SessionBeforeCompactEvent>,
 
     onSessionCompact: (async (event, ctx) => {
-      if (runStaleQueuedWorkPlan(runtimeState.staleQueuedWorkGuard.planSessionCompact(), ctx, deps)) {
+      if (
+        runStaleQueuedWorkPlan(runtimeState.staleQueuedWorkGuard.planSessionCompact(), ctx, deps)
+      ) {
         return;
       }
 
-      runtimeState.proactiveCompactionPending = false;
       stateController.flushGoalPersistence("runtime");
       const wasRecoveringFromHostOverflow = recoveryPhaseBlocksContinuation(
         runtimeState.recoveryState.phase,
@@ -130,11 +129,14 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
 
     onSessionShutdown: (async (_event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
-      runtimeState.proactiveCompactionPending = false;
       deps.providerLimitAutoResume.clear();
       continuation.clearPassthroughContinuationInput();
       continuation.clearContinuationTimer();
-      applyStaleQueuedWorkEffects(runtimeState.staleQueuedWorkGuard.planSessionShutdown().effects, ctx, deps);
+      applyStaleQueuedWorkEffects(
+        runtimeState.staleQueuedWorkGuard.planSessionShutdown().effects,
+        ctx,
+        deps,
+      );
 
       goalAccounting.accountProgress(ctx, false, 0, true);
       stateController.flushGoalPersistence("runtime");
@@ -164,11 +166,16 @@ export function pendingRecoveryShutdownReason({
   return reasonFromRecoveryPendingAttention(recoveryState.attention);
 }
 
-function hasPendingRecoveryAttention({ runtimeState, stateController }: GoalRuntimeSessionHandlerContext): boolean {
-  return pendingRecoveryShutdownReason({
-    recoveryState: runtimeState.recoveryState,
-    getGoal: stateController.getGoal,
-  }) !== null;
+function hasPendingRecoveryAttention({
+  runtimeState,
+  stateController,
+}: GoalRuntimeSessionHandlerContext): boolean {
+  return (
+    pendingRecoveryShutdownReason({
+      recoveryState: runtimeState.recoveryState,
+      getGoal: stateController.getGoal,
+    }) !== null
+  );
 }
 
 function pauseForPendingRecoveryShutdown(

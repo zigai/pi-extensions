@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import test from "node:test";
+import { test } from "vitest";
 
 function run(command: string, args: string[]) {
   return spawnSync(command, args, {
@@ -12,32 +12,45 @@ function run(command: string, args: string[]) {
 }
 
 function readScriptInventory() {
-  const result = run(process.execPath, ["--input-type=module", "-e", String.raw`
+  const result = run(process.execPath, [
+    "--input-type=module",
+    "-e",
+    String.raw`
 import { platformSmokeCheckTest, platformSmokePackageScripts, platformSmokeSyntaxScripts } from "./scripts/platform-smoke/script-inventory.mjs";
 console.log(JSON.stringify({ platformSmokeCheckTest, platformSmokePackageScripts, platformSmokeSyntaxScripts }));
-`]);
+`,
+  ]);
   assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout) as { platformSmokeCheckTest: string; platformSmokePackageScripts: string[]; platformSmokeSyntaxScripts: string[] };
+  return JSON.parse(result.stdout) as {
+    platformSmokeCheckTest: string;
+    platformSmokePackageScripts: string[];
+    platformSmokeSyntaxScripts: string[];
+  };
 }
 
 test("platform smoke scripts have working syntax and help", () => {
   const inventory = readScriptInventory();
   assert.equal(inventory.platformSmokeCheckTest, "test/platform-smoke.check.ts");
-  assert.ok(inventory.platformSmokeSyntaxScripts.includes("scripts/platform-smoke/platform-build.mjs"));
+  assert.ok(
+    inventory.platformSmokeSyntaxScripts.includes("scripts/platform-smoke/platform-build.mjs"),
+  );
   assert.ok(inventory.platformSmokeSyntaxScripts.includes("scripts/platform-smoke/check.mjs"));
   for (const path of inventory.platformSmokeSyntaxScripts) {
     assert.equal(run(process.execPath, ["--check", path]).status, 0, path);
   }
 
   assert.ok(existsSync("scripts/platform-smoke/platform-build-windows.ps1"));
-  const powershellScript = readFileSync("scripts/platform-smoke/platform-build-windows.ps1", "utf8");
+  const powershellScript = readFileSync(
+    "scripts/platform-smoke/platform-build-windows.ps1",
+    "utf8",
+  );
   assert.match(powershellScript, /platform-build\.mjs/);
   assert.doesNotMatch(powershellScript, /npm run verify/);
 
   const goalRuntimeScript = readFileSync("scripts/platform-smoke/goal-runtime-smoke.mjs", "utf8");
   assert.match(goalRuntimeScript, /"install", "-l", installPath, "--approve"/);
   assert.match(goalRuntimeScript, /"list", "--approve"/);
-  assert.match(goalRuntimeScript, /"--approve", "--model"/);
+  assert.match(goalRuntimeScript, /"--approve",\s*"--model"/);
   assert.match(goalRuntimeScript, /built-in read tool/);
   assert.match(goalRuntimeScript, /readToolObserved/);
 
@@ -57,11 +70,11 @@ test("platform smoke scripts have working syntax and help", () => {
 
   const readme = readFileSync("README.md", "utf8");
   const platformDocs = readFileSync("docs/platform-smoke.md", "utf8");
-  for (const text of [readme, platformDocs]) {
-    assert.match(text, /manual interactive `\/goal` evidence/);
-    assert.match(text, /session JSONL contains the `\/goal` command path/);
-    assert.match(text, /`update_goal` completion/);
-  }
+  assert.match(readme, /\[Platform smoke testing\]\(docs\/platform-smoke\.md\)/);
+  assert.doesNotMatch(readme, /^## Interactive `?\/goal`? smoke/m);
+  assert.match(platformDocs, /^## Interactive `\/goal` smoke/m);
+  assert.match(platformDocs, /session JSONL contains the `\/goal` command path/);
+  assert.match(platformDocs, /`update_goal` completion/);
 });
 
 test("platform smoke config and package scripts require macOS, Ubuntu, and native Windows", () => {
@@ -74,10 +87,20 @@ test("platform smoke config and package scripts require macOS, Ubuntu, and nativ
   assert.ok(packageJson.files?.includes("scripts"));
   assert.ok(packageJson.files?.includes("platform-smoke.config.mjs"));
   assert.ok(packageJson.files?.includes(".crabboxignore"));
-  assert.equal(packageJson.scripts?.["check:platform-smoke"], "node scripts/platform-smoke/check.mjs");
-  assert.match(packageJson.scripts?.["verify"] ?? "", /check:platform-smoke/);
-  assert.equal(packageJson.scripts?.["smoke:platform:doctor"], "node scripts/platform-smoke.mjs doctor");
-  assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /doctor --skip-windows-disposable-probe/);
+  assert.equal(
+    packageJson.scripts?.["check:platform-smoke"],
+    "node scripts/platform-smoke/check.mjs",
+  );
+  assert.match(packageJson.scripts?.check ?? "", /check:platform-smoke/);
+  assert.equal(packageJson.scripts?.verify, "npm run check");
+  assert.equal(
+    packageJson.scripts?.["smoke:platform:doctor"],
+    "node scripts/platform-smoke.mjs doctor",
+  );
+  assert.match(
+    packageJson.scripts?.["smoke:platform:all"] ?? "",
+    /doctor --skip-windows-disposable-probe/,
+  );
   assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /macos,ubuntu,windows-native/);
   assert.match(packageJson.scripts?.["smoke:platform:windows-native"] ?? "", /windows-native/);
 
@@ -293,18 +316,32 @@ try {
 test("npm pack includes platform smoke docs and scripts", () => {
   const result = run("npm", ["pack", "--dry-run", "--json"]);
   assert.equal(result.status, 0, result.stderr);
-  const packs = JSON.parse(result.stdout) as Array<{ files: Array<{ path: string }> }>;
-  const paths = new Set(packs[0]?.files.map((file) => file.path) ?? []);
+  type PackDescription = { files: Array<{ path: string }> };
+  const parsed = JSON.parse(result.stdout) as PackDescription[] | Record<string, PackDescription>;
+  const pack = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
+  const paths = new Set(pack?.files.map((file) => file.path) ?? []);
   for (const path of [
     "docs/platform-smoke.md",
     ".crabboxignore",
     "platform-smoke.config.mjs",
+    "node_modules/pi-typed-args/package.json",
+    "node_modules/pi-typed-args/src/pi/index.ts",
     ...readScriptInventory().platformSmokePackageScripts,
   ]) {
     assert.ok(paths.has(path), `expected npm pack to include ${path}`);
   }
   for (const forbidden of [".artifacts/", ".crabbox/", ".debug/", ".env", ".env."]) {
-    assert.equal([...paths].some((path) => path === forbidden || path.startsWith(forbidden)), false);
+    assert.equal(
+      [...paths].some((path) => path === forbidden || path.startsWith(forbidden)),
+      false,
+    );
   }
-  assert.equal([...paths].some((path) => path.endsWith(".tgz")), false);
+  assert.equal(
+    [...paths].some((path) => path.endsWith(".tgz")),
+    false,
+  );
+  assert.equal(
+    [...paths].some((path) => path.startsWith("../") || path.includes("/../")),
+    false,
+  );
 });

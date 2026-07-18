@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 
 import {
   assistantMessage,
@@ -31,7 +31,7 @@ test("stale prompt continuation input is handled before agent start", async () =
     source: "extension",
   });
 
-  assert.deepEqual(results[0], { action: "handled" });
+  assert.deepEqual(results.at(-1), { action: "handled" });
   assert.equal(harness.snapshot().goal?.status, "complete");
   assert.equal(harness.abortCount, 0);
 });
@@ -53,7 +53,7 @@ for (const source of ["interactive", "rpc"] as const) {
       text: prompt,
       source,
     });
-    assert.equal(inputResults[0], undefined);
+    assert.equal(inputResults.at(-1), undefined);
 
     const beforeAgentStartResults = await harness.emit("before_agent_start", {
       type: "before_agent_start",
@@ -142,7 +142,10 @@ test("stale custom goal work messages are replaced before provider context", asy
   const result = requireProviderContextResult(results);
   const replacedMessage = providerContextMessageAt(result, 0);
   assert.equal(typeof replacedMessage?.content, "string");
-  assert.match(String(replacedMessage?.content), /queued hidden goal continuation was stale and has been cancelled/);
+  assert.match(
+    String(replacedMessage?.content),
+    /queued hidden goal continuation was stale and has been cancelled/,
+  );
   assert.deepEqual(replacedMessage?.details, {
     kind: "stale_continuation",
     goalId: harness.snapshot().goal?.goalId,
@@ -193,7 +196,11 @@ test("stale provider context replacement covers queued work kinds and prompt mar
   assert.equal(result.messages.length, staleMessages.length);
   for (const [index, message] of result.messages.entries()) {
     if (message.role === "custom") {
-      assert.equal(typeof message.content, "string", `custom message ${index} should use string content`);
+      assert.equal(
+        typeof message.content,
+        "string",
+        `custom message ${index} should use string content`,
+      );
       assert.match(String(message.content), /do not perform work for the queued goal id above/);
       assert.deepEqual(message.details, {
         kind: "stale_continuation",
