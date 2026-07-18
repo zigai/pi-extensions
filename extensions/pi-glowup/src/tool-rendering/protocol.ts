@@ -1,14 +1,20 @@
-/** Tool definition property consumed by pi-glowup when installed. */
-export const GLOWUP_RENDERING_PROPERTY = "glowupRendering";
+/** Property read from a Pi tool definition when Glowup is installed. */
+export const GLOWUP_RENDERING_PROPERTY = "glowupRendering" as const;
 
-/** Simple opt-out or neutral preference for Glowup rendering. */
-export type GlowupRenderingPreference = "auto" | "preserve";
+/** Protocol version implemented by this package. */
+export const GLOWUP_RENDERING_VERSION = 2 as const;
 
-/** Minimal tool-call render context exposed to passive Glowup adapters. */
-export type GlowupRenderContext = {
-    readonly args: unknown;
+/** Explicit request to keep a tool's own Pi renderer. Omission means automatic selection. */
+export type GlowupRenderingPreference = "preserve";
+
+/** Execution phase used by declarative Glowup renderers. */
+export type GlowupExecutionPhase = "pending" | "running" | "complete";
+
+/** Context available while rendering a tool call. */
+export type GlowupCallContext = {
+    readonly toolName: string;
     readonly toolCallId: string;
-    readonly executionStarted: boolean;
+    readonly phase: GlowupExecutionPhase;
     readonly argsComplete: boolean;
     readonly isPartial: boolean;
     readonly expanded: boolean;
@@ -16,94 +22,235 @@ export type GlowupRenderContext = {
     readonly isError: boolean;
 };
 
-/** Minimal tool result shape exposed to passive Glowup adapters. */
+/** Context available while rendering a tool result. */
+export type GlowupResultContext<Args = unknown> = GlowupCallContext & {
+    /** Original call arguments, parsed by the adapter when it provides a parser. */
+    readonly args: Args;
+};
+
+/** Minimal result shape used by the generic renderer. */
 export type GlowupToolResult = {
     readonly content?: unknown;
     readonly details?: unknown;
 };
 
-/** Compact Glowup call states available to passive adapters. */
-export type GlowupCallState = "running" | "success" | "error" | "muted";
+/** Semantic tones understood by the Glowup style engine. */
+export type GlowupTone =
+    | "default"
+    | "muted"
+    | "dim"
+    | "accent"
+    | "success"
+    | "error"
+    | "path"
+    | "url"
+    | "code";
 
-/** Output preview strategy for text returned by passive adapters. */
-export type GlowupOutputMode = "head" | "headTail" | "hidden";
+/** Inline text with optional semantic styling. */
+export type GlowupInline =
+    | string
+    | {
+          readonly kind: "text";
+          readonly text: string;
+          readonly tone?: GlowupTone;
+          readonly bold?: boolean;
+      };
 
-/** Syntax hint for a rendered text block. */
+/** Syntax metadata for code-bearing blocks. */
 export type GlowupSyntax = {
     readonly language?: string;
     readonly path?: string;
 };
 
-/** Compact tool call view rendered by pi-glowup. */
-export type GlowupCallView = {
-    readonly kind: "call";
-    readonly label: string;
-    readonly activeLabel?: string;
-    readonly completedLabel?: string;
-    readonly body?: string;
-    readonly state?: GlowupCallState;
-    readonly maxRenderedLines?: number;
+/** Shared collapsed/expanded preview policy. */
+export type GlowupPreview = {
+    readonly mode?: "head" | "headTail" | "hidden";
+    readonly collapsedLines?: number;
+    readonly expandedLines?: number;
     readonly expandable?: boolean;
 };
 
-/** Text output view rendered by pi-glowup. */
-export type GlowupOutputView = {
+/** Lifecycle labels used by a call component. */
+export type GlowupCallLabels = {
+    readonly static: string;
+    readonly running?: string;
+    readonly completed?: string;
+    readonly failed?: string;
+};
+
+/** Plain text component. */
+export type GlowupTextNode = {
+    readonly kind: "text";
+    readonly text: GlowupInline;
+};
+
+/** Structured label/value row. */
+export type GlowupSummaryNode = {
+    readonly kind: "summary";
+    readonly rows: ReadonlyArray<{
+        readonly label: GlowupInline;
+        readonly value: GlowupInline;
+    }>;
+};
+
+/** Syntax-aware code component. */
+export type GlowupCodeNode = {
+    readonly kind: "code";
+    readonly text: string;
+    readonly title?: GlowupInline;
+    readonly syntax?: GlowupSyntax;
+    readonly preview?: GlowupPreview;
+};
+
+/** Bounded list component. */
+export type GlowupListNode = {
+    readonly kind: "list";
+    readonly items: ReadonlyArray<GlowupInline | GlowupNode>;
+    readonly preview?: GlowupPreview;
+};
+
+/** Tool call component. */
+export type GlowupCallNode = {
+    readonly kind: "call";
+    readonly labels: GlowupCallLabels;
+    readonly body?: GlowupNode;
+    readonly preview?: GlowupPreview;
+};
+
+/** Tool output component. */
+export type GlowupOutputNode = {
     readonly kind: "output";
     readonly text?: string;
-    readonly mode?: GlowupOutputMode;
     readonly syntax?: GlowupSyntax;
-    readonly maxPreviewLines?: number;
+    readonly preview?: GlowupPreview;
     readonly noOutputLabel?: string | null;
 };
 
-/** Section in a structured Glowup view. */
-export type GlowupSection =
-    | {
-          readonly kind: "text";
-          readonly text: string;
-      }
-    | {
-          readonly kind: "summary";
-          readonly label?: string;
-          readonly text: string;
-      }
-    | {
-          readonly kind: "code";
-          readonly title?: string;
-          readonly text: string;
-          readonly syntax?: GlowupSyntax;
-      };
-
-/** Structured multi-section view rendered by pi-glowup. */
-export type GlowupSectionsView = {
-    readonly kind: "sections";
-    readonly sections: readonly GlowupSection[];
-    readonly maxPreviewLines?: number;
+/** Ordered component composition. */
+export type GlowupStackNode = {
+    readonly kind: "stack";
+    readonly children: ReadonlyArray<GlowupNode>;
 };
 
-/** Intentionally empty Glowup view. */
-export type GlowupEmptyView = {
+/** Intentionally empty component. */
+export type GlowupEmptyNode = {
     readonly kind: "empty";
 };
 
-/** View model returned by passive Glowup adapters. */
-export type GlowupView = GlowupCallView | GlowupOutputView | GlowupSectionsView | GlowupEmptyView;
+/** Declarative component tree understood by pi-glowup. */
+export type GlowupNode =
+    | GlowupCallNode
+    | GlowupOutputNode
+    | GlowupSummaryNode
+    | GlowupCodeNode
+    | GlowupListNode
+    | GlowupTextNode
+    | GlowupStackNode
+    | GlowupEmptyNode;
 
-/** Passive adapter that pi-glowup consumes only when this extension is installed. */
-export type GlowupRenderingAdapter<
-    Args = unknown,
-    Result extends GlowupToolResult = GlowupToolResult,
-> = {
-    readonly version: 1;
-    readonly renderCall?: (args: Args, context: GlowupRenderContext) => GlowupView | undefined;
+/** Public rendering adapter implemented by a tool owner. */
+export type GlowupRenderer<Args = unknown, Result = GlowupToolResult> = {
+    readonly version: typeof GLOWUP_RENDERING_VERSION;
+    readonly parseArgs?: (value: unknown) => Args | undefined;
+    readonly parseResult?: (value: unknown) => Result | undefined;
+    readonly renderCall?: (args: Args, context: GlowupCallContext) => GlowupNode | undefined;
     readonly renderResult?: (
         result: Result,
-        options: { readonly expanded: boolean; readonly isPartial: boolean },
-        context: GlowupRenderContext,
-    ) => GlowupView | undefined;
+        context: GlowupResultContext<Args>,
+    ) => GlowupNode | undefined;
 };
 
-/** Passive Glowup rendering property accepted on third-party tool definitions. */
-export type GlowupRendering<Args = unknown, Result extends GlowupToolResult = GlowupToolResult> =
+/** Rendering property accepted on a Pi tool definition. */
+export type GlowupRendering<Args = unknown, Result = GlowupToolResult> =
     | GlowupRenderingPreference
-    | GlowupRenderingAdapter<Args, Result>;
+    | GlowupRenderer<Args, Result>;
+
+/** Defines an immutable, versioned rendering adapter for a tool owner. */
+export function defineGlowupRenderer<Args = unknown, Result = GlowupToolResult>(
+    renderer: GlowupRenderer<Args, Result>,
+): GlowupRenderer<Args, Result> {
+    return renderer;
+}
+
+/** Creates a text component with semantic styling. */
+export function text(value: GlowupInline): GlowupTextNode {
+    return { kind: "text", text: value };
+}
+
+/** Creates a structured summary component. */
+export function summary(
+    rows: ReadonlyArray<{ readonly label: GlowupInline; readonly value: GlowupInline }>,
+): GlowupSummaryNode {
+    return { kind: "summary", rows };
+}
+
+/** Creates a syntax-aware code component. */
+export function code(
+    value: string,
+    options: {
+        readonly title?: GlowupInline;
+        readonly syntax?: GlowupSyntax;
+        readonly preview?: GlowupPreview;
+    } = {},
+): GlowupCodeNode {
+    return {
+        kind: "code",
+        text: value,
+        ...(options.title === undefined ? {} : { title: options.title }),
+        ...(options.syntax === undefined ? {} : { syntax: options.syntax }),
+        ...(options.preview === undefined ? {} : { preview: options.preview }),
+    };
+}
+
+/** Creates a bounded list component. */
+export function list(
+    items: ReadonlyArray<GlowupInline | GlowupNode>,
+    preview?: GlowupPreview,
+): GlowupListNode {
+    return {
+        kind: "list",
+        items,
+        ...(preview === undefined ? {} : { preview }),
+    };
+}
+
+/** Creates a tool call component. */
+export function call(
+    labels: GlowupCallLabels,
+    options: { readonly body?: GlowupNode; readonly preview?: GlowupPreview } = {},
+): GlowupCallNode {
+    return {
+        kind: "call",
+        labels,
+        ...(options.body === undefined ? {} : { body: options.body }),
+        ...(options.preview === undefined ? {} : { preview: options.preview }),
+    };
+}
+
+/** Creates an output component. */
+export function output(
+    value: string | undefined,
+    options: {
+        readonly syntax?: GlowupSyntax;
+        readonly preview?: GlowupPreview;
+        readonly noOutputLabel?: string | null;
+    } = {},
+): GlowupOutputNode {
+    return {
+        kind: "output",
+        ...(value === undefined ? {} : { text: value }),
+        ...(options.syntax === undefined ? {} : { syntax: options.syntax }),
+        ...(options.preview === undefined ? {} : { preview: options.preview }),
+        ...(options.noOutputLabel === undefined ? {} : { noOutputLabel: options.noOutputLabel }),
+    };
+}
+
+/** Creates an ordered component composition. */
+export function stack(children: ReadonlyArray<GlowupNode>): GlowupStackNode {
+    return { kind: "stack", children };
+}
+
+/** Creates an intentionally empty component. */
+export function empty(): GlowupEmptyNode {
+    return { kind: "empty" };
+}

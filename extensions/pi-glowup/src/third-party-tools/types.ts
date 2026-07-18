@@ -1,32 +1,31 @@
 import type { Component } from "@earendil-works/pi-tui";
 import type { GlowupRenderTheme } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
-import type { GlowupRenderContext, GlowupToolResult } from "../tool-rendering/protocol.ts";
-
-export {
-    GLOWUP_RENDERING_PROPERTY,
-    type GlowupRendering,
-    type GlowupRenderingAdapter,
-    type GlowupRenderingPreference,
-    type GlowupSection,
-    type GlowupView,
+import type {
+    GlowupCallContext,
+    GlowupExecutionPhase,
+    GlowupToolResult,
 } from "../tool-rendering/protocol.ts";
 
-/** Matcher used to opt selected third-party tools out of Glowup conversion. */
+/** Matcher used to preserve selected tools' original Pi renderers. */
 export type ToolNameMatcher = string | RegExp | ((toolName: string) => boolean);
 
-/** Render context consumed by Glowup's internal third-party renderers. */
-export type ThirdPartyToolRenderContext = GlowupRenderContext & {
-    readonly lastComponent?: Component | undefined;
+/** Internal context translated from Pi's ToolExecutionComponent. */
+export type ThirdPartyToolRenderContext = Omit<GlowupCallContext, "toolName" | "phase"> & {
+    readonly toolName?: string;
+    readonly phase?: GlowupExecutionPhase;
+    readonly args: unknown;
+    readonly executionStarted?: boolean;
     readonly cwd?: string;
     readonly invalidate?: () => void;
+    readonly lastComponent?: Component | undefined;
     readonly result?: ThirdPartyToolResult | undefined;
 };
 
-/** Minimal result shape consumed by Glowup third-party renderers. */
+/** Internal result shape used by the generic renderer. */
 export type ThirdPartyToolResult = GlowupToolResult;
 
-/** Glowup renderer pair for a non-native tool. */
+/** Pi-facing renderer produced by the private Glowup rendering engine. */
 export type ThirdPartyToolRenderer = {
     readonly renderCall: (
         args: unknown,
@@ -41,7 +40,7 @@ export type ThirdPartyToolRenderer = {
     ) => Component;
 };
 
-/** Registry entry for a known third-party tool family. */
+/** Registry entry for a transitional renderer that has not moved to its owning package yet. */
 export type ThirdPartyToolRendererPlugin = {
     readonly name: string;
     readonly matches: (toolName: string) => boolean;
@@ -51,10 +50,22 @@ export type ThirdPartyToolRendererPlugin = {
     ) => ThirdPartyToolRenderer;
 };
 
-/** Policy for automatic third-party tool renderer conversion. */
+/** Policy for third-party and generic compatibility rendering. */
 export type ThirdPartyToolRenderingOptions = {
     readonly enabled?: boolean;
     readonly preserveTools?: ReadonlyArray<ToolNameMatcher>;
     readonly renderers?: ReadonlyArray<ThirdPartyToolRendererPlugin>;
     readonly labelMode?: ToolLabelMode;
 };
+
+/** Builds a public-compatible execution context for internal renderers. */
+export function executionPhase(context: {
+    readonly executionStarted: boolean;
+    readonly argsComplete: boolean;
+    readonly isPartial: boolean;
+}): GlowupExecutionPhase {
+    if (context.isPartial || !context.argsComplete) {
+        return context.executionStarted ? "running" : "pending";
+    }
+    return "complete";
+}

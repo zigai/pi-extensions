@@ -11,18 +11,18 @@ import { createGoalRenderer, isGoalTool } from "./extensions/pi/goal-renderer.ts
 import { createPiCoreRenderer, isPiCoreTool } from "./extensions/pi/core-renderer.ts";
 import { createGenericRenderer } from "./call-rendering.ts";
 import { glowupRenderingAdapter, createProtocolRenderer } from "./protocol-renderer.ts";
-import { baseToolName, isRecord } from "./tool-values.ts";
-import {
-    GLOWUP_RENDERING_PROPERTY,
-    type ThirdPartyToolRenderer,
-    type ThirdPartyToolRendererPlugin,
-    type ThirdPartyToolRenderingOptions,
-    type ToolNameMatcher,
+import { baseToolName, isRecord, getNonEmptyString } from "./tool-values.ts";
+import { GLOWUP_RENDERING_PROPERTY } from "../tool-rendering/protocol.ts";
+import type {
+    ThirdPartyToolRenderer,
+    ThirdPartyToolRendererPlugin,
+    ThirdPartyToolRenderingOptions,
+    ToolNameMatcher,
 } from "./types.ts";
 
-export { GLOWUP_RENDERING_PROPERTY } from "./types.ts";
+export { GLOWUP_RENDERING_PROPERTY } from "../tool-rendering/protocol.ts";
+export type { GlowupRenderingPreference } from "../tool-rendering/protocol.ts";
 export type {
-    GlowupRenderingPreference,
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
     ThirdPartyToolRendererPlugin,
@@ -35,7 +35,9 @@ function isApplyPatchTool(toolName: string): boolean {
     return baseToolName(toolName) === "apply_patch";
 }
 
-const DEFAULT_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
+// Transitional compatibility renderers remain here until each owning package ships a protocol
+// adapter. Tool-owned adapters take precedence, so families can migrate independently.
+const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
     {
         name: "apply-patch",
         matches: isApplyPatchTool,
@@ -85,10 +87,10 @@ const DEFAULT_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
 function rendererPlugins(
     options: ThirdPartyToolRenderingOptions | undefined,
 ): ReadonlyArray<ThirdPartyToolRendererPlugin> {
-    return [...(options?.renderers ?? []), ...DEFAULT_RENDERER_PLUGINS];
+    return [...(options?.renderers ?? []), ...TRANSITIONAL_RENDERER_PLUGINS];
 }
 
-/** Returns whether Glowup has an explicit renderer for this tool family. */
+/** Returns whether Glowup has a renderer for a tool that has not migrated to an owner adapter. */
 export function hasThirdPartyToolRendererPlugin(
     toolName: string,
     options?: ThirdPartyToolRenderingOptions,
@@ -118,9 +120,13 @@ function hasPreservePreference(toolDefinition: unknown): boolean {
     return toolDefinition[GLOWUP_RENDERING_PROPERTY] === "preserve";
 }
 
-/** Returns whether a tool definition carries a passive Glowup adapter. */
+function toolDefinitionLabel(toolDefinition: unknown): string | undefined {
+    return isRecord(toolDefinition) ? getNonEmptyString(toolDefinition, "label") : undefined;
+}
+
+/** Returns whether a tool definition carries a valid public Glowup adapter. */
 export function hasGlowupRenderingAdapter(toolDefinition: unknown): boolean {
-    return glowupRenderingAdapter(toolDefinition, GLOWUP_RENDERING_PROPERTY) !== undefined;
+    return glowupRenderingAdapter(toolDefinition) !== undefined;
 }
 
 /** Parses comma-separated tool names for `PI_GLOWUP_PRESERVE_TOOLS`. */
@@ -134,7 +140,7 @@ export function parsePreservedThirdPartyToolNames(value: string | undefined): st
         .filter((name) => name.length > 0);
 }
 
-/** Returns whether Glowup should leave a third-party tool renderer untouched. */
+/** Returns whether Glowup should leave a tool's original renderer untouched. */
 export function shouldPreserveThirdPartyToolRenderer(options: {
     readonly toolName: string;
     readonly toolDefinition: unknown;
@@ -151,18 +157,17 @@ export function shouldPreserveThirdPartyToolRenderer(options: {
     return preserveTools.some((matcher) => matcherMatches(options.toolName, matcher));
 }
 
-/** Creates the best known Glowup renderer for a third-party tool. */
+/** Creates the owner adapter, transitional renderer, or generic compatibility renderer. */
 export function createThirdPartyToolRenderer(
     toolName: string,
     options?: ThirdPartyToolRenderingOptions,
     toolDefinition?: unknown,
 ): ThirdPartyToolRenderer {
-    const plugins = rendererPlugins(options);
-    const plugin = plugins.find((candidate) => candidate.matches(toolName));
+    const plugin = rendererPlugins(options).find((candidate) => candidate.matches(toolName));
     const fallback =
         plugin?.createRenderer(toolName, options) ??
-        createGenericRenderer(toolName, undefined, options?.labelMode);
-    const adapter = glowupRenderingAdapter(toolDefinition, GLOWUP_RENDERING_PROPERTY);
+        createGenericRenderer(toolName, toolDefinitionLabel(toolDefinition), options?.labelMode);
+    const adapter = glowupRenderingAdapter(toolDefinition);
     return adapter === undefined
         ? fallback
         : createProtocolRenderer(adapter, fallback, options?.labelMode);

@@ -5,17 +5,19 @@ import {
     takeGraphemePrefix,
     truncateGraphemeText,
 } from "../text-boundaries.ts";
-import { getString, isRecord } from "./tool-values.ts";
-
-type TextContent = {
-    readonly type?: unknown;
-    readonly text?: unknown;
-};
+import { getString } from "./tool-values.ts";
 
 const MAX_PREVIEW_CHARACTERS = 700;
 const MAX_PREVIEW_ARRAY_ITEMS = 20;
 const MAX_PREVIEW_OBJECT_PROPERTIES = 30;
 const MAX_PARTIAL_PREVIEW_PROPERTIES = 8;
+const MAX_PREVIEW_DEPTH = 5;
+const SENSITIVE_KEY_PATTERN =
+    /(?:pass(?:word|phrase)?|secret|token|api[_-]?key|auth(?:orization)?|cookie|credential|private[_-]?key|access[_-]?key)/iu;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function itemCount(count: number): string {
     return `${count} ${count === 1 ? "item" : "items"}`;
@@ -25,50 +27,23 @@ export function truncateText(text: string, maxCharacters: number): string {
     return truncateGraphemeText(text, maxCharacters);
 }
 
-function stringifyPreview(value: unknown): string | undefined {
-    if (value === undefined) {
-        return undefined;
-    }
-    if (typeof value === "string") {
-        return value;
-    }
-    if (typeof value === "number" || typeof value === "boolean" || value === null) {
-        return String(value);
-    }
-    if (typeof value === "bigint") {
-        return `${value.toString()}n`;
-    }
-    if (typeof value === "symbol") {
-        return value.description === undefined || value.description.length === 0
-            ? "Symbol"
-            : `Symbol(${value.description})`;
-    }
-    if (typeof value === "function") {
-        return value.name.length > 0 ? `[Function ${value.name}]` : "[Function]";
-    }
-
-    const seen = new WeakSet<object>();
+function safeRead(record: object, key: string): unknown {
     try {
-        const json = JSON.stringify(
-            value,
-            (_key, nestedValue: unknown) => {
-                return boundedPreviewValue(nestedValue, seen);
-            },
-            2,
-        );
-        return json;
-    } catch (cause: unknown) {
-        if (cause instanceof Error) {
-            return cause.message;
-        }
-        if (typeof cause === "string") {
-            return cause;
-        }
+        return Reflect.get(record, key);
+    } catch {
         return undefined;
     }
 }
 
-function boundedPreviewValue(value: unknown, seen: WeakSet<object>): unknown {
+function boundedPreviewValue(
+    value: unknown,
+    seen: WeakSet<object>,
+    depth: number,
+    key?: string,
+): unknown {
+    if (key !== undefined && SENSITIVE_KEY_PATTERN.test(key)) {
+        return "[redacted]";
+    }
     if (typeof value === "string") {
         return truncateText(value, MAX_PREVIEW_CHARACTERS);
     }
@@ -89,43 +64,56 @@ function boundedPreviewValue(value: unknown, seen: WeakSet<object>): unknown {
     if (seen.has(value)) {
         return "[Circular]";
     }
+    if (depth >= MAX_PREVIEW_DEPTH) {
+        return "[Object]";
+    }
     seen.add(value);
 
-    if (Array.isArray(value) && value.length > MAX_PREVIEW_ARRAY_ITEMS) {
-        return [
-            ...value.slice(0, MAX_PREVIEW_ARRAY_ITEMS),
-            `… +${itemCount(value.length - MAX_PREVIEW_ARRAY_ITEMS)}`,
-        ];
+    if (Array.isArray(value)) {
+        const output: unknown[] = [];
+        const limit = Math.min(value.length, MAX_PREVIEW_ARRAY_ITEMS);
+        for (let index = 0; index < limit; index += 1) {
+            output.push(boundedPreviewValue(safeRead(value, String(index)), seen, depth + 1));
+        }
+        if (value.length > limit) {
+            output.push(`… +${itemCount(value.length - limit)}`);
+        }
+        return output;
     }
-    if (!Array.isArray(value)) {
-        return boundedPreviewObject(value);
-    }
-    return value;
-}
 
-function boundedPreviewObject(value: object): object {
     const output: Record<string, unknown> = {};
     let copied = 0;
     let omitted = 0;
-
-    for (const key in value) {
-        if (!Object.prototype.propertyIsEnumerable.call(value, key)) {
+    for (const keyName of Object.keys(value)) {
+        if (copied >= MAX_PREVIEW_OBJECT_PROPERTIES) {
+            omitted += 1;
             continue;
         }
-        if (copied < MAX_PREVIEW_OBJECT_PROPERTIES) {
-            output[key] = Reflect.get(value, key);
-            copied += 1;
-        } else {
-            omitted += 1;
-        }
+        output[keyName] = boundedPreviewValue(safeRead(value, keyName), seen, depth + 1, keyName);
+        copied += 1;
     }
+    if (omitted > 0) {
+        output["…"] = `+${omitted} properties`;
+    }
+    return output;
+}
 
-    if (omitted === 0) {
+function stringifyPreview(value: unknown): string | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value === "string") {
         return value;
     }
+    if (typeof value === "number" || typeof value === "boolean" || value === null) {
+        return String(value);
+    }
 
-    output["…"] = `+${omitted} properties`;
-    return output;
+    try {
+        return JSON.stringify(boundedPreviewValue(value, new WeakSet<object>(), 0), null, 2);
+    } catch {
+        return undefined;
+    }
 }
 
 function trimAndTruncateText(text: string, maxCharacters: number): string | undefined {
@@ -147,7 +135,6 @@ function previewValue(value: unknown): string | undefined {
     if (typeof value === "string") {
         return trimAndTruncateText(value, MAX_PREVIEW_CHARACTERS);
     }
-
     const preview = stringifyPreview(value)?.trim();
     if (preview === undefined || preview.length === 0 || preview === "{}" || preview === "[]") {
         return undefined;
@@ -155,8 +142,49 @@ function previewValue(value: unknown): string | undefined {
     return truncateText(preview, MAX_PREVIEW_CHARACTERS);
 }
 
-export function previewArgs(args: unknown, fallback?: string): string | undefined {
-    return fallback ?? previewValue(args);
+function compactValue(value: unknown, key: string): string | undefined {
+    if (SENSITIVE_KEY_PATTERN.test(key)) {
+        return `${key}: [redacted]`;
+    }
+    if (typeof value === "string") {
+        const preview = compactWhitespaceText(takeGraphemePrefix(value, 192), 96);
+        return preview === undefined ? key : `${key}: ${preview}`;
+    }
+    if (typeof value === "number" || typeof value === "boolean" || value === null) {
+        return `${key}: ${String(value)}`;
+    }
+    if (typeof value === "bigint") {
+        return `${key}: ${value.toString()}n`;
+    }
+    if (Array.isArray(value)) {
+        return `${key}: ${itemCount(value.length)}`;
+    }
+    if (isRecord(value)) {
+        return `${key}: object`;
+    }
+    return value === undefined ? undefined : key;
+}
+
+function compactObjectPreview(value: Record<string, unknown>): string | undefined {
+    const parts: string[] = [];
+    let omitted = false;
+    for (const key of Object.keys(value)) {
+        if (parts.length >= MAX_PARTIAL_PREVIEW_PROPERTIES) {
+            omitted = true;
+            break;
+        }
+        const part = compactValue(safeRead(value, key), key);
+        if (part !== undefined) {
+            parts.push(part);
+        }
+    }
+    if (parts.length === 0) {
+        return undefined;
+    }
+    return truncateText(
+        `${parts.join(" • ")}${omitted ? " • more fields" : ""}`,
+        MAX_PREVIEW_CHARACTERS,
+    );
 }
 
 function previewPartialArgs(args: unknown, fallback?: string): string | undefined {
@@ -180,81 +208,49 @@ function previewPartialArgs(args: unknown, fallback?: string): string | undefine
     if (Array.isArray(args)) {
         return args.length === 0 ? undefined : itemCount(args.length);
     }
-    if (!isRecord(args)) {
-        return undefined;
-    }
-
-    const parts: string[] = [];
-    let omitted = false;
-    for (const key in args) {
-        if (!Object.prototype.propertyIsEnumerable.call(args, key)) {
-            continue;
-        }
-        if (parts.length >= MAX_PARTIAL_PREVIEW_PROPERTIES) {
-            omitted = true;
-            break;
-        }
-        const value = args[key];
-        if (typeof value === "string") {
-            const preview = compactWhitespaceText(takeGraphemePrefix(value, 96 * 2), 96);
-            parts.push(preview === undefined ? key : `${key}: ${preview}`);
-        } else if (
-            typeof value === "number" ||
-            typeof value === "boolean" ||
-            typeof value === "bigint" ||
-            value === null
-        ) {
-            parts.push(`${key}: ${String(value)}`);
-        } else if (Array.isArray(value)) {
-            parts.push(`${key}: ${itemCount(value.length)}`);
-        } else if (isRecord(value)) {
-            parts.push(`${key}: object`);
-        } else if (value !== undefined) {
-            parts.push(key);
-        }
-    }
-    if (parts.length === 0) {
-        return undefined;
-    }
-    const suffix = omitted ? " • more fields" : "";
-    return truncateText(`${parts.join(" • ")}${suffix}`, MAX_PREVIEW_CHARACTERS);
+    return isRecord(args) ? compactObjectPreview(args) : undefined;
 }
 
+/** Returns a bounded structured argument preview for expanded views. */
+export function previewArgs(args: unknown, fallback?: string): string | undefined {
+    return fallback ?? previewValue(args);
+}
+
+/** Returns a compact argument preview appropriate for the current execution phase. */
 export function previewArgsForContext(
     args: unknown,
     context: ThirdPartyToolRenderContext,
     fallback?: string,
 ): string | undefined {
-    return context.isPartial || !context.argsComplete
-        ? previewPartialArgs(args, fallback)
-        : previewArgs(args, fallback);
+    if (context.isPartial || !context.argsComplete) {
+        return previewPartialArgs(args, fallback);
+    }
+    return previewArgs(args, fallback);
 }
 
+/** Extracts all text content blocks from a tool result. */
 export function textOutput(result: ThirdPartyToolResult): string | undefined {
     const content = result.content;
     if (!Array.isArray(content)) {
         return undefined;
     }
 
-    let firstText: string | undefined;
-    let texts: string[] | undefined;
+    const texts: string[] = [];
     for (const item of content) {
-        if (!isRecord(item)) {
+        if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") {
             continue;
         }
-        const contentItem: TextContent = item;
-        if (contentItem.type !== "text" || typeof contentItem.text !== "string") {
-            continue;
-        }
-        if (firstText === undefined) {
-            firstText = contentItem.text;
-            continue;
-        }
-        texts ??= [firstText];
-        texts.push(contentItem.text);
+        texts.push(item.text);
     }
+    return texts.length === 0 ? undefined : texts.join("\n");
+}
 
-    return texts === undefined ? firstText : texts.join("\n");
+/** Extracts a small, redacted summary when a result has no text content. */
+export function detailsOutput(result: ThirdPartyToolResult): string | undefined {
+    if (!isRecord(result.details)) {
+        return undefined;
+    }
+    return compactObjectPreview(result.details);
 }
 
 export function compactWhitespaceText(text: string, maxCharacters: number): string | undefined {
@@ -283,13 +279,13 @@ export function compactWhitespaceText(text: string, maxCharacters: number): stri
 }
 
 export function compactQuotedText(
-    text: string | undefined,
+    value: string | undefined,
     maxCharacters = 96,
 ): string | undefined {
-    if (text === undefined || text.length === 0) {
+    if (value === undefined || value.length === 0) {
         return undefined;
     }
-    const compact = compactWhitespaceText(text, maxCharacters);
+    const compact = compactWhitespaceText(value, maxCharacters);
     return compact === undefined ? undefined : `"${compact}"`;
 }
 
@@ -315,42 +311,15 @@ export function countedSummary(
     return `${prefix}${values.length}`;
 }
 
-function hasNonWhitespaceText(text: string): boolean {
-    for (let index = 0; index < text.length; index += 1) {
-        if (text.charAt(index).trim().length > 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
+/** Visits non-empty output lines after normalizing CRLF and CR line endings. */
 export function visitNormalizedOutputLines(text: string, visit: (line: string) => void): boolean {
-    let lineStart = 0;
     let sawLine = false;
-
-    for (let index = 0; index <= text.length; index += 1) {
-        if (index < text.length) {
-            const charCode = text.charCodeAt(index);
-            if (charCode !== 10 && charCode !== 13) {
-                continue;
-            }
+    for (const line of text.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n")) {
+        if (line.trim().length === 0) {
+            continue;
         }
-
-        const line = text.slice(lineStart, index);
-        if (hasNonWhitespaceText(line)) {
-            sawLine = true;
-            visit(line);
-        }
-
-        if (
-            index < text.length &&
-            text.charCodeAt(index) === 13 &&
-            text.charCodeAt(index + 1) === 10
-        ) {
-            index += 1;
-        }
-        lineStart = index + 1;
+        sawLine = true;
+        visit(line);
     }
-
     return sawLine;
 }

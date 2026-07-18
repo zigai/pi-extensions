@@ -13,14 +13,15 @@ import {
 import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
 import {
     createThirdPartyToolRenderer,
-    hasThirdPartyToolRendererPlugin,
     hasGlowupRenderingAdapter,
+    hasThirdPartyToolRendererPlugin,
     shouldPreserveThirdPartyToolRenderer,
     type ThirdPartyToolRenderer,
     type ThirdPartyToolRenderContext,
     type ThirdPartyToolRenderingOptions,
     type ThirdPartyToolResult,
 } from "../third-party-tools/renderers.ts";
+import { executionPhase } from "../third-party-tools/types.ts";
 
 const BUILT_IN_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-glowup.built-in-renderers");
 const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.built-in-renderer-state");
@@ -35,6 +36,21 @@ type RenderShellMode = "default" | "self";
 
 type ToolExecutionInstance = object;
 
+type PiToolRenderContext = {
+    readonly args: unknown;
+    readonly toolCallId: string;
+    readonly executionStarted: boolean;
+    readonly argsComplete: boolean;
+    readonly isPartial: boolean;
+    readonly expanded: boolean;
+    readonly showImages: boolean;
+    readonly isError: boolean;
+    readonly cwd?: string;
+    readonly invalidate?: (() => void) | undefined;
+    readonly lastComponent?: Component | undefined;
+    readonly result?: ThirdPartyToolResult | undefined;
+};
+
 export type BuiltInToolName =
     | "read"
     | "bash"
@@ -46,7 +62,7 @@ export type BuiltInToolName =
     | "delete"
     | "webSearch";
 
-export type BuiltInToolRenderContext = ThirdPartyToolRenderContext & {
+export type BuiltInToolRenderContext = PiToolRenderContext & {
     readonly invalidate: () => void;
     readonly lastComponent: Component | undefined;
     readonly state: unknown;
@@ -218,13 +234,9 @@ function restoredCallRenderContext(
     result: ThirdPartyToolResult | undefined,
 ): BuiltInToolRenderContext;
 function restoredCallRenderContext(
-    context: ThirdPartyToolRenderContext,
+    context: BuiltInToolRenderContext,
     result: ThirdPartyToolResult | undefined,
-): ThirdPartyToolRenderContext;
-function restoredCallRenderContext(
-    context: ThirdPartyToolRenderContext,
-    result: ThirdPartyToolResult | undefined,
-): ThirdPartyToolRenderContext {
+): BuiltInToolRenderContext {
     if (result === undefined) {
         return context;
     }
@@ -234,6 +246,28 @@ function restoredCallRenderContext(
     // arguments are complete; preserve that fact for renderers that defer structured parsing while
     // arguments are still streaming.
     return { ...context, argsComplete: true, result };
+}
+
+function thirdPartyRenderContext(
+    toolName: string,
+    context: PiToolRenderContext,
+): ThirdPartyToolRenderContext {
+    return {
+        toolName,
+        toolCallId: context.toolCallId,
+        phase: executionPhase(context),
+        args: context.args,
+        executionStarted: context.executionStarted,
+        argsComplete: context.argsComplete,
+        isPartial: context.isPartial,
+        expanded: context.expanded,
+        showImages: context.showImages,
+        isError: context.isError,
+        ...(context.cwd === undefined ? {} : { cwd: context.cwd }),
+        ...(context.invalidate === undefined ? {} : { invalidate: context.invalidate }),
+        ...(context.lastComponent === undefined ? {} : { lastComponent: context.lastComponent }),
+        ...(context.result === undefined ? {} : { result: context.result }),
+    };
 }
 
 function hasExplicitToolRenderer(instance: ToolExecutionInstance): boolean {
@@ -689,11 +723,14 @@ export function configureThirdPartyToolRendererPatch(
                 );
                 if (renderer !== undefined) {
                     const result = currentToolResult(this);
-                    return (args, theme, context) =>
+                    return (args: unknown, theme: Theme, context: BuiltInToolRenderContext) =>
                         renderer.renderCall(
                             args,
                             theme,
-                            restoredCallRenderContext(context, result),
+                            thirdPartyRenderContext(
+                                getNonEmptyStringField(this, "toolName") ?? "tool",
+                                restoredCallRenderContext(context, result),
+                            ),
                         );
                 }
             }
@@ -711,8 +748,27 @@ export function configureThirdPartyToolRendererPatch(
                     hasOriginalRendererDefinition,
                 )
             ) {
-                return rendererForInstance(this, state.renderingOptions, state.rendererCache)
-                    ?.renderResult;
+                const renderer = rendererForInstance(
+                    this,
+                    state.renderingOptions,
+                    state.rendererCache,
+                );
+                const toolName = getNonEmptyStringField(this, "toolName");
+                if (renderer === undefined || toolName === undefined) {
+                    return undefined;
+                }
+                return (
+                    result: ThirdPartyToolResult,
+                    renderOptions: ToolRenderResultOptions,
+                    theme: Theme,
+                    context: BuiltInToolRenderContext,
+                ) =>
+                    renderer.renderResult(
+                        result,
+                        renderOptions,
+                        theme,
+                        thirdPartyRenderContext(toolName, context),
+                    );
             }
             return originalGetResultRenderer?.call(this);
         };

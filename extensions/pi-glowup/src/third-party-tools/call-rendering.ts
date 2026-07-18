@@ -20,7 +20,7 @@ import type {
     ThirdPartyToolResult,
 } from "./types.ts";
 import { displayToolName } from "./tool-values.ts";
-import { previewArgsForContext, textOutput } from "./previews.ts";
+import { detailsOutput, previewArgsForContext, textOutput } from "./previews.ts";
 
 export const DEFAULT_TOOL_CALL_PREVIEW_LINES = 6;
 
@@ -61,7 +61,7 @@ export function renderSimpleResult(
     result: ThirdPartyToolResult,
     options: { readonly expanded: boolean; readonly isPartial: boolean },
 ): Component {
-    const output = textOutput(result);
+    const output = textOutput(result) ?? detailsOutput(result);
     const language = detectStructuredOutputLanguage(output);
     return renderGlowupOutput(theme, output, {
         expanded: options.expanded,
