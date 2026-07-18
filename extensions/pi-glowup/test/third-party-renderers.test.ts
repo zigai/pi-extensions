@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { GlowupRenderTheme } from "../src/rendering/core.ts";
-import type { GlowupRenderingAdapter } from "../src/tool-rendering/protocol.ts";
+import { call, output, text, type GlowupRenderer } from "../src/tool-rendering/protocol.ts";
 import {
     GLOWUP_RENDERING_PROPERTY,
     createThirdPartyToolRenderer,
@@ -106,22 +106,16 @@ describe("third-party tool renderers", () => {
             };
         };
         const rendering = {
-            version: 1,
+            version: 2,
             renderCall(args) {
-                return {
-                    kind: "call",
-                    label: "DB Query",
-                    body: args.sql,
-                };
+                return call({ static: "DB Query" }, { body: text(args.sql) });
             },
             renderResult(result) {
-                return {
-                    kind: "output",
-                    text: `${result.details?.rowCount ?? 0} rows`,
-                    mode: "head",
-                };
+                return output(`${result.details?.rowCount ?? 0} rows`, {
+                    preview: { mode: "head" },
+                });
             },
-        } satisfies GlowupRenderingAdapter<DbQueryArgs, DbQueryResult>;
+        } satisfies GlowupRenderer<DbQueryArgs, DbQueryResult>;
         const renderer = createThirdPartyToolRenderer("db_query", undefined, {
             [GLOWUP_RENDERING_PROPERTY]: rendering,
         });
@@ -148,16 +142,15 @@ describe("third-party tool renderers", () => {
 
     it("uses adapter-specific lifecycle labels when configured", () => {
         const rendering = {
-            version: 1,
+            version: 2,
             renderCall() {
-                return {
-                    kind: "call",
-                    label: "DB Query",
-                    activeLabel: "Querying DB",
-                    completedLabel: "Queried DB",
-                };
+                return call({
+                    static: "DB Query",
+                    running: "Querying DB",
+                    completed: "Queried DB",
+                });
             },
-        } satisfies GlowupRenderingAdapter;
+        } satisfies GlowupRenderer;
         const renderer = createThirdPartyToolRenderer(
             "db_query",
             { labelMode: "lifecycle" },
@@ -177,6 +170,23 @@ describe("third-party tool renderers", () => {
 
         expect(active).toContain("Querying DB");
         expect(completed).toContain("Queried DB");
+    });
+
+    it("lets owner adapters replace transitional renderers one family at a time", () => {
+        const renderer = createThirdPartyToolRenderer("agent_browser", undefined, {
+            glowupRendering: {
+                version: 2,
+                renderCall: () => call({ static: "Owner Browser Renderer" }),
+            },
+        });
+
+        const rendered = renderer
+            .renderCall({ args: ["open", "https://example.com"] }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("Owner Browser Renderer");
+        expect(rendered).not.toContain("Open https://example.com");
     });
 
     it("renders unknown tools as compact Glowup calls", () => {
@@ -254,6 +264,26 @@ describe("third-party tool renderers", () => {
         expect(rendered).toContain('"lines":');
         expect(rendered).toContain("… +9980 items");
         expect(rendered).not.toContain("line 10000");
+    });
+
+    it("redacts secret-like fields in generic argument previews", () => {
+        const renderer = createThirdPartyToolRenderer("custom_tool");
+        const rendered = renderer
+            .renderCall(
+                {
+                    username: "alice",
+                    password: "do-not-show",
+                    nested: { accessToken: "also-do-not-show" },
+                },
+                plainTheme,
+                { ...renderContext, expanded: true },
+            )
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("[redacted]");
+        expect(rendered).not.toContain("do-not-show");
+        expect(rendered).not.toContain("also-do-not-show");
     });
 
     it("defers generic calls until their arguments are complete", () => {

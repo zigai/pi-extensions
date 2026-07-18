@@ -73,10 +73,19 @@ function parseOptionalPeerMetaRecord(
 }
 
 describe("package manifest", () => {
-    it("exports the passive Glowup protocol for extension authors", () => {
+    it("exports the Glowup tool-rendering protocol for extension authors", () => {
         const manifest = readPackageJson();
 
         expect(manifest.exports?.["./protocol"]).toBe("./src/tool-rendering/protocol.ts");
+    });
+
+    it("keeps the public protocol independent from Pi and internal renderer types", () => {
+        const protocol = readFileSync("src/tool-rendering/protocol.ts", "utf8");
+
+        expect(protocol).toContain("GLOWUP_RENDERING_VERSION = 2");
+        expect(protocol).not.toContain("@earendil-works");
+        expect(protocol).not.toContain("Component");
+        expect(protocol).not.toContain("GlowupRenderTheme");
     });
 
     it("keeps Pi core packages as peers instead of bundled runtime dependencies", () => {

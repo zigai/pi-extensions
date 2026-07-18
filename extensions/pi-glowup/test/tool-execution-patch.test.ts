@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GlowupRenderTheme } from "../src/rendering/core.ts";
+import { call, text } from "../src/tool-rendering/protocol.ts";
 import type {
     ThirdPartyToolRenderer,
     ThirdPartyToolRendererPlugin,
@@ -574,12 +575,8 @@ describe("tool execution patches", () => {
             toolDefinition: {
                 renderCall: () => ({ render: () => [], invalidate: noop }),
                 glowupRendering: {
-                    version: 1,
-                    renderCall: () => ({
-                        kind: "call",
-                        label: "DB Query",
-                        body: "select 1",
-                    }),
+                    version: 2,
+                    renderCall: () => call({ static: "DB Query" }, { body: text("select 1") }),
                 },
             },
         };
@@ -601,8 +598,8 @@ describe("tool execution patches", () => {
             toolName: "dynamic_tool",
             toolDefinition: {
                 glowupRendering: {
-                    version: 1,
-                    renderCall: () => ({ kind: "call", label }),
+                    version: 2,
+                    renderCall: () => call({ static: label }),
                 },
             },
         });
