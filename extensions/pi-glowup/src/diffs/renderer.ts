@@ -33,6 +33,7 @@ import {
     selectSemanticDiffIndices,
     type SemanticDiffRowKind,
 } from "../rendering/core.ts";
+import { neutralizeTerminalControls } from "../text-boundaries.ts";
 import { syntaxHighlightingVersion } from "../syntax/highlighter.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
@@ -272,7 +273,9 @@ class PierreDiffComponent implements Component {
 
         if (lines.length <= this.maxVisibleLines) {
             this.cachedWidth = safeWidth;
-            this.cachedLines = lines.map((line) => truncateToWidth(line, safeWidth, ""));
+            this.cachedLines = lines.map((line) =>
+                truncateToWidth(neutralizeTerminalControls(line), safeWidth, ""),
+            );
             return this.cachedLines;
         }
 
@@ -291,7 +294,7 @@ class PierreDiffComponent implements Component {
                 safeWidth,
                 baseStyle({ fg: this.palette.metadataFg, bg: this.palette.metadataBg }),
             ),
-        ].map((line) => truncateToWidth(line, safeWidth, ""));
+        ].map((line) => truncateToWidth(neutralizeTerminalControls(line), safeWidth, ""));
         return this.cachedLines;
     }
 
@@ -456,9 +459,17 @@ function renderPierreDiffSummary(payload: PierreSummaryDiffPayload, theme: Theme
             const headline = `${theme.fg("toolDiffContext", payload.path)} ${theme.fg("muted", changeStats)}`;
             const hint = "Use git diff or read the file directly to inspect the full change.";
             return [
-                truncateToWidth(headline, safeWidth, ""),
-                truncateToWidth(`  └ ${theme.fg("muted", summaryDetail(payload))}`, safeWidth, ""),
-                truncateToWidth(`    ${theme.fg("muted", hint)}`, safeWidth, ""),
+                truncateToWidth(neutralizeTerminalControls(headline), safeWidth, ""),
+                truncateToWidth(
+                    neutralizeTerminalControls(`  └ ${theme.fg("muted", summaryDetail(payload))}`),
+                    safeWidth,
+                    "",
+                ),
+                truncateToWidth(
+                    neutralizeTerminalControls(`    ${theme.fg("muted", hint)}`),
+                    safeWidth,
+                    "",
+                ),
             ];
         },
         invalidate() {},
@@ -951,7 +962,7 @@ function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle)
                 dim: segment.dim ?? base.dim,
             }),
         );
-        output += segment.text;
+        output += neutralizeTerminalControls(segment.text.replace(/[\r\n]/gu, ""));
     }
     output += openAnsi(base);
     return output;

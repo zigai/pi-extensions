@@ -1,4 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
+import { takeGraphemeSuffix, truncateGraphemeText } from "../text-boundaries.ts";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -212,20 +213,20 @@ function physicalLines(text: string): string[] {
 }
 
 function tailLineWindow(text: string, maxLines: number): TextLineWindow {
-    const start = Math.max(0, text.length - MAX_PARTIAL_EDIT_SCAN_CHARS);
-    const lines = physicalLines(text.slice(start));
+    const suffix = takeGraphemeSuffix(text, MAX_PARTIAL_EDIT_SCAN_CHARS);
+    const lines = physicalLines(suffix);
     return {
         lines: lines.slice(-maxLines),
-        omittedBefore: start > 0 || lines.length > maxLines,
+        omittedBefore: suffix.length < text.length || lines.length > maxLines,
         omittedAfter: false,
     };
 }
 
 function boundedEditLine(line: string): string {
     if (line.length <= MAX_PARTIAL_EDIT_LINE_CHARS) {
-        return line;
+        return truncateGraphemeText(line, MAX_PARTIAL_EDIT_LINE_CHARS);
     }
-    return `…${line.slice(-(MAX_PARTIAL_EDIT_LINE_CHARS - 1))}`;
+    return `…${takeGraphemeSuffix(line, MAX_PARTIAL_EDIT_LINE_CHARS - 1)}`;
 }
 
 function streamingReplacementDraft(pair: EditTextPair): string {

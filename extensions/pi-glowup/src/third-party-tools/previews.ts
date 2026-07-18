@@ -1,4 +1,10 @@
 import type { ThirdPartyToolRenderContext, ThirdPartyToolResult } from "./types.ts";
+import {
+    appendGraphemeEllipsis,
+    graphemes,
+    takeGraphemePrefix,
+    truncateGraphemeText,
+} from "../text-boundaries.ts";
 import { getString, isRecord } from "./tool-values.ts";
 
 type TextContent = {
@@ -11,11 +17,12 @@ const MAX_PREVIEW_ARRAY_ITEMS = 20;
 const MAX_PREVIEW_OBJECT_PROPERTIES = 30;
 const MAX_PARTIAL_PREVIEW_PROPERTIES = 8;
 
+function itemCount(count: number): string {
+    return `${count} ${count === 1 ? "item" : "items"}`;
+}
+
 export function truncateText(text: string, maxCharacters: number): string {
-    if (text.length <= maxCharacters) {
-        return text;
-    }
-    return `${text.slice(0, Math.max(0, maxCharacters - 1))}…`;
+    return truncateGraphemeText(text, maxCharacters);
 }
 
 function stringifyPreview(value: unknown): string | undefined {
@@ -87,7 +94,7 @@ function boundedPreviewValue(value: unknown, seen: WeakSet<object>): unknown {
     if (Array.isArray(value) && value.length > MAX_PREVIEW_ARRAY_ITEMS) {
         return [
             ...value.slice(0, MAX_PREVIEW_ARRAY_ITEMS),
-            `… +${value.length - MAX_PREVIEW_ARRAY_ITEMS} items`,
+            `… +${itemCount(value.length - MAX_PREVIEW_ARRAY_ITEMS)}`,
         ];
     }
     if (!Array.isArray(value)) {
@@ -133,10 +140,7 @@ function trimAndTruncateText(text: string, maxCharacters: number): string | unde
     if (start === end) {
         return undefined;
     }
-    if (end - start <= maxCharacters) {
-        return text.slice(start, end);
-    }
-    return `${text.slice(start, start + Math.max(0, maxCharacters - 1))}…`;
+    return truncateText(text.slice(start, end), maxCharacters);
 }
 
 function previewValue(value: unknown): string | undefined {
@@ -161,7 +165,7 @@ function previewPartialArgs(args: unknown, fallback?: string): string | undefine
     }
     if (typeof args === "string") {
         return compactWhitespaceText(
-            args.slice(0, MAX_PREVIEW_CHARACTERS * 2),
+            takeGraphemePrefix(args, MAX_PREVIEW_CHARACTERS * 2),
             MAX_PREVIEW_CHARACTERS,
         );
     }
@@ -174,7 +178,7 @@ function previewPartialArgs(args: unknown, fallback?: string): string | undefine
         return String(args);
     }
     if (Array.isArray(args)) {
-        return args.length === 0 ? undefined : `${args.length} items`;
+        return args.length === 0 ? undefined : itemCount(args.length);
     }
     if (!isRecord(args)) {
         return undefined;
@@ -192,7 +196,7 @@ function previewPartialArgs(args: unknown, fallback?: string): string | undefine
         }
         const value = args[key];
         if (typeof value === "string") {
-            const preview = compactWhitespaceText(value.slice(0, 96 * 2), 96);
+            const preview = compactWhitespaceText(takeGraphemePrefix(value, 96 * 2), 96);
             parts.push(preview === undefined ? key : `${key}: ${preview}`);
         } else if (
             typeof value === "number" ||
@@ -202,7 +206,7 @@ function previewPartialArgs(args: unknown, fallback?: string): string | undefine
         ) {
             parts.push(`${key}: ${String(value)}`);
         } else if (Array.isArray(value)) {
-            parts.push(`${key}: ${value.length} items`);
+            parts.push(`${key}: ${itemCount(value.length)}`);
         } else if (isRecord(value)) {
             parts.push(`${key}: object`);
         } else if (value !== undefined) {
@@ -257,21 +261,20 @@ export function compactWhitespaceText(text: string, maxCharacters: number): stri
     let output = "";
     let pendingWhitespace = false;
 
-    for (let index = 0; index < text.length; index += 1) {
-        const char = text[index] ?? "";
+    for (const char of graphemes(text)) {
         if (char.trim().length === 0) {
             pendingWhitespace = output.length > 0;
             continue;
         }
         if (pendingWhitespace) {
             if (output.length >= maxCharacters - 1) {
-                return `${output.slice(0, Math.max(0, maxCharacters - 1))}…`;
+                return appendGraphemeEllipsis(output, maxCharacters);
             }
             output += " ";
             pendingWhitespace = false;
         }
-        if (output.length >= maxCharacters) {
-            return `${output.slice(0, Math.max(0, maxCharacters - 1))}…`;
+        if (output.length + char.length > maxCharacters) {
+            return appendGraphemeEllipsis(output, maxCharacters);
         }
         output += char;
     }

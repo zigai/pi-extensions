@@ -213,6 +213,29 @@ function currentToolResult(instance: ToolExecutionInstance): ThirdPartyToolResul
     };
 }
 
+function restoredCallRenderContext(
+    context: BuiltInToolRenderContext,
+    result: ThirdPartyToolResult | undefined,
+): BuiltInToolRenderContext;
+function restoredCallRenderContext(
+    context: ThirdPartyToolRenderContext,
+    result: ThirdPartyToolResult | undefined,
+): ThirdPartyToolRenderContext;
+function restoredCallRenderContext(
+    context: ThirdPartyToolRenderContext,
+    result: ThirdPartyToolResult | undefined,
+): ThirdPartyToolRenderContext {
+    if (result === undefined) {
+        return context;
+    }
+
+    // Pi constructs restored ToolExecutionComponents with argsComplete=false, then replays the
+    // persisted result without calling setArgsComplete(). A persisted result proves that the call
+    // arguments are complete; preserve that fact for renderers that defer structured parsing while
+    // arguments are still streaming.
+    return { ...context, argsComplete: true, result };
+}
+
 function hasExplicitToolRenderer(instance: ToolExecutionInstance): boolean {
     for (const definition of [
         toolDefinition(instance),
@@ -406,10 +429,12 @@ export function configureBuiltInToolRendererPatch(
             }
             const result = currentToolResult(this);
             return (args, theme, context) => {
-                const rendered = state.renderingOptions.renderCall(toolName, args, theme, {
-                    ...context,
-                    ...(result === undefined ? {} : { result }),
-                });
+                const rendered = state.renderingOptions.renderCall(
+                    toolName,
+                    args,
+                    theme,
+                    restoredCallRenderContext(context, result),
+                );
                 return rendered ?? originalRenderer?.(args, theme, context) ?? emptyComponent();
             };
         };
@@ -665,10 +690,11 @@ export function configureThirdPartyToolRendererPatch(
                 if (renderer !== undefined) {
                     const result = currentToolResult(this);
                     return (args, theme, context) =>
-                        renderer.renderCall(args, theme, {
-                            ...context,
-                            ...(result === undefined ? {} : { result }),
-                        });
+                        renderer.renderCall(
+                            args,
+                            theme,
+                            restoredCallRenderContext(context, result),
+                        );
                 }
             }
             return originalGetCallRenderer?.call(this);

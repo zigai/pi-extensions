@@ -1,4 +1,5 @@
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import { appendGraphemeEllipsis, takeGraphemePrefix } from "../text-boundaries.ts";
 import {
     changedOnlyDiffSections,
     emptyComponent,
@@ -959,9 +960,9 @@ class PartialApplyPatchPreview {
 
     private displayCurrentLine(): string {
         if (!this.currentLineTruncated) {
-            return this.currentLine;
+            return takeGraphemePrefix(this.currentLine, this.currentLine.length);
         }
-        return `${this.currentLine.slice(0, MAX_PARTIAL_PATCH_LINE_CHARS - 1)}…`;
+        return appendGraphemeEllipsis(this.currentLine, MAX_PARTIAL_PATCH_LINE_CHARS);
     }
 
     private commitLine(line: string): void {

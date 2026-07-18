@@ -4,6 +4,11 @@ import {
     type GlowupRenderTheme,
 } from "../../../rendering/core.ts";
 import { isActiveToolCall } from "../../../rendering/status-labels.ts";
+import {
+    chunkGraphemeText,
+    takeGraphemePrefix,
+    takeGraphemeSuffix,
+} from "../../../text-boundaries.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolResult } from "../../types.ts";
 import { previewArgsForContext } from "../../previews.ts";
 import {
@@ -45,9 +50,9 @@ function wrapPromptLine(line: string): string[] {
             current = word;
             continue;
         }
-        for (let start = 0; start < word.length; start += IMAGEGEN_PROMPT_WRAP_CHARS) {
-            const chunk = word.slice(start, start + IMAGEGEN_PROMPT_WRAP_CHARS);
-            if (chunk.length === IMAGEGEN_PROMPT_WRAP_CHARS) {
+        const chunks = chunkGraphemeText(word, IMAGEGEN_PROMPT_WRAP_CHARS);
+        for (const [index, chunk] of chunks.entries()) {
+            if (index < chunks.length - 1 || chunk.length >= IMAGEGEN_PROMPT_WRAP_CHARS) {
                 lines.push(chunk);
             } else {
                 current = chunk;
@@ -81,16 +86,16 @@ function expandedImagegenPromptLines(text: string): string[] {
     }
     const sideChars = Math.floor(EXPANDED_IMAGEGEN_PROMPT_CHARS / 2);
     return [
-        ...wrappedPromptLines(text.slice(0, sideChars)),
+        ...wrappedPromptLines(takeGraphemePrefix(text, sideChars)),
         "… prompt truncated at 64 KiB",
-        ...wrappedPromptLines(text.slice(-sideChars)),
+        ...wrappedPromptLines(takeGraphemeSuffix(text, sideChars)),
     ];
 }
 
 function activeImagegenPromptLines(text: string): string[] {
-    const start = Math.max(0, text.length - PARTIAL_IMAGEGEN_PROMPT_SCAN_CHARS);
-    const lines = wrappedPromptLines(text.slice(start));
-    const omitted = start > 0 || lines.length > COLLAPSED_IMAGEGEN_PROMPT_LINES;
+    const suffix = takeGraphemeSuffix(text, PARTIAL_IMAGEGEN_PROMPT_SCAN_CHARS);
+    const lines = wrappedPromptLines(suffix);
+    const omitted = suffix.length < text.length || lines.length > COLLAPSED_IMAGEGEN_PROMPT_LINES;
     if (!omitted) {
         return lines;
     }

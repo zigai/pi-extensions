@@ -1,5 +1,6 @@
 import { PreviewStore } from "../rendering/edit-preview.ts";
 import type { ScriptInvocation } from "../rendering/core.ts";
+import { truncateUtf8ByGrapheme } from "../text-boundaries.ts";
 
 const MAX_SCRIPT_PREVIEW_ENTRIES = 300;
 const MAX_SCRIPT_PREVIEW_BYTES = 64 * 1024;
@@ -27,7 +28,7 @@ export function boundedScriptPreview(preview: ScriptInvocation): ScriptInvocatio
     );
     return {
         ...preview,
-        code: `${truncateUtf8(preview.code, maxCodeBytes)}${SCRIPT_PREVIEW_TRUNCATION_SUFFIX}`,
+        code: `${truncateUtf8ByGrapheme(preview.code, maxCodeBytes)}${SCRIPT_PREVIEW_TRUNCATION_SUFFIX}`,
     };
 }
 
@@ -37,18 +38,4 @@ function scriptPreviewBytes(preview: ScriptInvocation): number {
         Buffer.byteLength(preview.language, "utf8") +
         Buffer.byteLength(preview.code, "utf8")
     );
-}
-
-function truncateUtf8(text: string, maxBytes: number): string {
-    let byteLength = 0;
-    let endIndex = 0;
-    for (const char of text) {
-        const charBytes = Buffer.byteLength(char, "utf8");
-        if (byteLength + charBytes > maxBytes) {
-            break;
-        }
-        byteLength += charBytes;
-        endIndex += char.length;
-    }
-    return text.slice(0, endIndex);
 }

@@ -19,6 +19,7 @@ import {
 } from "../diffs/intraline.ts";
 import { strongerDiffBackgroundAnsi } from "../diffs/ansi-colors.ts";
 import type { DiffLineNumberStyle, NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
+import { neutralizeTerminalControls, truncateUtf8ByGrapheme } from "../text-boundaries.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
@@ -385,7 +386,7 @@ export function makeComponent(renderLines: (width: number) => string[]): Compone
             }
 
             const rendered = renderLines(safeWidth).map((line) =>
-                truncateToWidth(line, safeWidth, ""),
+                truncateToWidth(neutralizeTerminalControls(line), safeWidth, ""),
             );
             if (shouldCacheRenderedLines(rendered)) {
                 cachedWidth = safeWidth;
@@ -424,7 +425,7 @@ export function emptyComponent(): Component {
 
 function wrapStyledText(text: string, width: number): string[] {
     const safeWidth = Math.max(1, Math.floor(width));
-    const wrapped = wrapTextWithAnsi(text, safeWidth);
+    const wrapped = wrapTextWithAnsi(neutralizeTerminalControls(text), safeWidth);
     if (wrapped.length === 0) {
         return [""];
     }
@@ -731,7 +732,7 @@ function detachedPreviewLine(line: string, maxBytes: number): string {
     }
 
     const budget = Math.max(0, maxBytes - suffixBytes);
-    return detachString(`${truncateUtf8(line, budget)}${UTF8_TRUNCATION_SUFFIX}`);
+    return detachString(`${truncateUtf8ByGrapheme(line, budget)}${UTF8_TRUNCATION_SUFFIX}`);
 }
 
 function isPreviewMetaLine(line: string): boolean {
@@ -770,20 +771,6 @@ function highlightCodePreviewRuns(
 
     flushRun();
     return highlighted;
-}
-
-function truncateUtf8(text: string, maxBytes: number): string {
-    let bytes = 0;
-    let endIndex = 0;
-    for (const char of text) {
-        const charBytes = Buffer.byteLength(char, "utf8");
-        if (bytes + charBytes > maxBytes) {
-            break;
-        }
-        bytes += charBytes;
-        endIndex += char.length;
-    }
-    return text.slice(0, endIndex);
 }
 
 function detachString(text: string): string {
@@ -1920,7 +1907,7 @@ function detachedScriptPreviewCode(code: string): string {
         0,
         MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES - Buffer.byteLength(suffix, "utf8"),
     );
-    return detachString(`${truncateUtf8(code, budget)}${suffix}`);
+    return detachString(`${truncateUtf8ByGrapheme(code, budget)}${suffix}`);
 }
 
 function wrapScriptLine(

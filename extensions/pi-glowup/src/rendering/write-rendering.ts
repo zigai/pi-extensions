@@ -1,5 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
+import { truncateGraphemeText, truncateUtf8ByGrapheme } from "../text-boundaries.ts";
 import {
     emptyComponent,
     formatPathTarget,
@@ -83,10 +84,7 @@ function hasNonWhitespaceText(text: string): boolean {
 }
 
 function boundedPartialWriteLine(line: string): string {
-    if (line.length <= MAX_PARTIAL_WRITE_LINE_CHARS) {
-        return line;
-    }
-    return `${line.slice(0, Math.max(0, MAX_PARTIAL_WRITE_LINE_CHARS - 1))}…`;
+    return truncateGraphemeText(line, MAX_PARTIAL_WRITE_LINE_CHARS);
 }
 
 function writeDiffSection(path: string, preview: string, totalLines: number): DiffSection {
@@ -366,7 +364,7 @@ class PartialWriteCallPreviewComponent implements Component {
                       true,
                       {
                           collapsedLineBudget: PARTIAL_WRITE_PREVIEW_LINES,
-                          maxWrappedRows: 1,
+                          ...(this.expanded ? {} : { maxWrappedRows: 1 }),
                       },
                   );
         const component = renderMutationCall(
@@ -405,20 +403,6 @@ class PartialWriteCallPreviewComponent implements Component {
     }
 }
 
-function truncateUtf8(text: string, maxBytes: number): string {
-    let byteLength = 0;
-    let endIndex = 0;
-    for (const char of text) {
-        const charBytes = Buffer.byteLength(char, "utf8");
-        if (byteLength + charBytes > maxBytes) {
-            break;
-        }
-        byteLength += charBytes;
-        endIndex += char.length;
-    }
-    return text.slice(0, endIndex);
-}
-
 function boundedWriteContentPreview(content: string): string {
     if (Buffer.byteLength(content, "utf8") <= MAX_WRITE_PREVIEW_BYTES) {
         return content;
@@ -428,7 +412,7 @@ function boundedWriteContentPreview(content: string): string {
         0,
         MAX_WRITE_PREVIEW_BYTES - Buffer.byteLength(WRITE_PREVIEW_TRUNCATION_SUFFIX, "utf8"),
     );
-    return `${truncateUtf8(content, maxContentBytes)}${WRITE_PREVIEW_TRUNCATION_SUFFIX}`;
+    return `${truncateUtf8ByGrapheme(content, maxContentBytes)}${WRITE_PREVIEW_TRUNCATION_SUFFIX}`;
 }
 
 /** Returns the built-in write tool content argument when it is available to render. */
@@ -499,7 +483,7 @@ export function renderWriteCallPreview(
                   context.expanded,
                   {
                       collapsedLineBudget: PARTIAL_WRITE_PREVIEW_LINES,
-                      maxWrappedRows: 1,
+                      ...(context.expanded ? {} : { maxWrappedRows: 1 }),
                   },
               );
     return renderMutationCall(
