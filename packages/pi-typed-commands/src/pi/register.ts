@@ -7,7 +7,7 @@ import { defineTypedCommand } from "../command/definition.js";
 import { createCommandHandle } from "../command/handle.js";
 import { normalizeRegisteredCommand } from "../command/registered-command.js";
 import { decideArgumentIssueAction } from "../invocation.js";
-import { parseTypedCommandArgs } from "../parser.js";
+import { parseTypedCommandInvocation } from "../parser.js";
 import type { OpenArgumentFormOptions } from "../form/open.js";
 import { createPiCompletionCapabilities, getTypedArgumentCompletions } from "./completions.js";
 import { getPiTypedCommandRegistry } from "./registry.js";
@@ -26,7 +26,9 @@ import type {
     RegisteredTypedCommand,
     TypedCommandDefinition,
     TypedCommandHandle,
+    TypedSubcommandDefinitions,
 } from "./command-types.js";
+import { recordTypedCommandRecentValues } from "./presets.js";
 
 /** Notify Pi users about one or more typed-command issues. */
 export function notifyIssues(ctx: ExtensionContext, messages: string[]): void {
@@ -47,29 +49,75 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
     rawArgs: string,
     ctx: ExtensionCommandContext,
     registry: TypedCommandRegistry,
-): Promise<InferArguments<FlatArgumentDefinitions> | undefined> {
+): Promise<
+    | {
+          readonly command: RegisteredTypedCommand;
+          readonly args: InferArguments<FlatArgumentDefinitions>;
+      }
+    | undefined
+> {
     let editorText = `/${invocationName}`;
     if (rawArgs.length > 0) {
         editorText += ` ${rawArgs}`;
     }
+    const routed = parseTypedCommandInvocation(command, rawArgs);
+    let selectedCommand: RegisteredTypedCommand = command;
+    if (routed.route.status === "subcommand" && routed.route.subcommand !== undefined) {
+        selectedCommand = command.subcommands?.[routed.route.subcommand] ?? command;
+    }
     const expandedFormArguments = takeExpandedFormArguments(ctx, invocationName, editorText);
     if (expandedFormArguments !== undefined) {
-        return expandedFormArguments;
+        return { command: selectedCommand, args: expandedFormArguments };
     }
 
-    const parsed = parseTypedCommandArgs(command, rawArgs);
+    let parsed = routed.parsed;
+    if (routed.route.status === "missing" && routed.parsed.mode !== "help" && ctx.hasUI) {
+        let dialogOptions: { signal?: AbortSignal } | undefined;
+        if (ctx.signal !== undefined) {
+            dialogOptions = { signal: ctx.signal };
+        }
+        const subcommandName = await ctx.ui.select(
+            "Select subcommand",
+            Object.keys(command.subcommands ?? {}),
+            dialogOptions,
+        );
+        if (subcommandName === undefined) {
+            return undefined;
+        }
+        selectedCommand = command.subcommands?.[subcommandName] ?? command;
+        parsed = parseTypedCommandInvocation(selectedCommand, "").parsed;
+    }
     const { resolveTypedCommandSessionOptions } = await import("./session-state.js");
     const options = resolveTypedCommandSessionOptions(ctx);
     if (parsed.mode === "help") {
         const { notifyDetailedHelp } = await import("./help.js");
-        notifyDetailedHelp(ctx, command, options.appearance);
+        notifyDetailedHelp(ctx, selectedCommand, options.appearance);
         return undefined;
     }
 
     const issueMessages = parsed.issues.map((item) => item.message);
-    const formMode: FormMode = "missing";
+    const formPolicy = selectedCommand.formPolicy ?? "missing";
+    let formMode: FormMode = "missing";
+    if (formPolicy === "always") {
+        formMode = "all";
+    }
     let issueAction = decideArgumentIssueAction(parsed.issues);
-    if (shouldNotifyInsteadOfOpeningForm(parsed.issues)) {
+    if (formPolicy === "always") {
+        issueAction = "open-form";
+    } else if (formPolicy === "manual") {
+        issueAction = "notify";
+        if (parsed.issues.length === 0) {
+            issueAction = "ok";
+        }
+    } else if (formPolicy === "invalid") {
+        issueAction = "open-form";
+        if (parsed.issues.length === 0) {
+            issueAction = "ok";
+        }
+    } else if (
+        shouldNotifyInsteadOfOpeningForm(parsed.issues) &&
+        !parsed.issues.some((issue) => issue.kind === "missing-subcommand")
+    ) {
         issueAction = "notify";
     }
 
@@ -82,19 +130,37 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         let formOptions: OpenArgumentFormOptions = {
             appearance: options.appearance,
             title: resolveTypedCommandFormTitle(command, ctx),
+            completionCapabilities: createPiCompletionCapabilities(ctx.cwd, registry, ctx.signal),
         };
         if (ctx.signal !== undefined) {
             formOptions = {
                 appearance: options.appearance,
                 signal: ctx.signal,
                 title: resolveTypedCommandFormTitle(command, ctx),
+                completionCapabilities: createPiCompletionCapabilities(
+                    ctx.cwd,
+                    registry,
+                    ctx.signal,
+                ),
             };
         }
-        const collected = await openArgumentForm(command, parsed, formMode, ctx, formOptions);
+        const collected = await openArgumentForm(
+            selectedCommand,
+            parsed,
+            formMode,
+            ctx,
+            formOptions,
+        );
         if (collected === undefined) {
             return undefined;
         }
-        return collected;
+        if (
+            selectedCommand.formPresets === true &&
+            !recordTypedCommandRecentValues(ctx, selectedCommand, collected)
+        ) {
+            ctx.ui.notify("Typed command recent values could not be saved.", "warning");
+        }
+        return { command: selectedCommand, args: collected };
     }
 
     if (issueAction === "notify") {
@@ -124,7 +190,13 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         return undefined;
     }
 
-    return parsed.values;
+    return {
+        command: selectedCommand,
+        // SAFETY: the parser has no issues, so the selected compiled grammar established every
+        // required/defaulted leaf consumed by the registered handler.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: zero parser issues prove the handler value contract.
+        args: parsed.values as InferArguments<FlatArgumentDefinitions>,
+    };
 }
 
 /**
@@ -133,14 +205,24 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
  * The command is still registered with Pi's raw command system, but pi-typed-args parses,
  * validates, defaults, completes, and optionally prompts for arguments before calling `run`.
  */
-export function registerTypedCommand<const TDefinitions extends ArgumentDefinitions>(
+export function registerTypedCommand<
+    const TDefinitions extends ArgumentDefinitions,
+    const TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
+>(
     pi: ExtensionAPI,
-    definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
-): TypedCommandHandle<TDefinitions>;
-export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
+    definition:
+        | TypedCommandDefinition<TDefinitions, TSubcommands>
+        | DefinedTypedCommand<TDefinitions, TSubcommands>,
+): TypedCommandHandle<TDefinitions, TSubcommands>;
+export function registerTypedCommand<
+    TDefinitions extends ArgumentDefinitions,
+    TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
+>(
     pi: ExtensionAPI,
-    definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
-): TypedCommandHandle<TDefinitions> {
+    definition:
+        | TypedCommandDefinition<TDefinitions, TSubcommands>
+        | DefinedTypedCommand<TDefinitions, TSubcommands>,
+): TypedCommandHandle<TDefinitions, TSubcommands> {
     const name = definition.name;
     const registry = getPiTypedCommandRegistry();
 
@@ -156,24 +238,24 @@ export function registerTypedCommand<TDefinitions extends ArgumentDefinitions>(
             );
         },
         handler: async (rawArgs, ctx) => {
-            const args = await resolveCommandArguments(
+            const invocation = await resolveCommandArguments(
                 command,
                 invocationName,
                 rawArgs,
                 ctx,
                 registry,
             );
-            if (args === undefined) {
+            if (invocation === undefined) {
                 return;
             }
-            if (command.target?.kind !== "extension") {
+            if (invocation.command.target?.kind !== "extension") {
                 ctx.ui.notify(
                     `Typed command /${name} does not have an extension handler.`,
                     "error",
                 );
                 return;
             }
-            await command.target.run(args, ctx);
+            await invocation.command.target.run(invocation.args, ctx);
         },
     });
 

@@ -600,6 +600,9 @@
               "type": "string",
               "const": "compact"
             },
+            "choiceDisplay": {
+              "enum": ["contextual", "inline"]
+            },
             "order": {
               "enum": [
                 "active-required-available",
@@ -985,6 +988,7 @@
           "additionalProperties": true,
           "default": {
             "layout": "compact",
+            "choiceDisplay": "contextual",
             "order": "active-required-available",
             "metadata": {
               "types": false,
@@ -1091,6 +1095,7 @@
         },
         "inlineHelp": {
           "layout": "compact",
+          "choiceDisplay": "contextual",
           "order": "active-required-available",
           "metadata": {
             "types": false,

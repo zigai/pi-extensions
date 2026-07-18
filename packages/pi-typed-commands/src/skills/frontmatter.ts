@@ -22,12 +22,29 @@ function pointerSegments(pointer: string): string[] {
 }
 
 function frontmatterFieldError(error: TLocalizedValidationError): SkillArgumentDiagnostic {
-    const field = pointerSegments(error.instancePath)[0];
+    const segments = pointerSegments(error.instancePath);
+    const field = segments[0];
     if (field === "name" || field === "description" || field === "form_title") {
         return skillArgumentDiagnostic({
             code: `skill.frontmatter.${field}.invalid`,
             message: `frontmatter.${field} must be a string`,
             path: ["frontmatter", field],
+        });
+    }
+
+    if (field === "metadata") {
+        const metadataField = segments[1];
+        if (metadataField === "ghostText") {
+            return skillArgumentDiagnostic({
+                code: "skill.frontmatter.metadata.ghostText.invalid",
+                message: "frontmatter.metadata.ghostText must be a string",
+                path: ["frontmatter", "metadata", "ghostText"],
+            });
+        }
+        return skillArgumentDiagnostic({
+            code: "skill.frontmatter.metadata.invalid",
+            message: "frontmatter.metadata must be an object",
+            path: ["frontmatter", "metadata"],
         });
     }
 
@@ -71,6 +88,9 @@ function parseFrontmatterFields(
     }
     if (yaml.form_title !== undefined) {
         frontmatter.formTitle = yaml.form_title;
+    }
+    if (yaml.metadata !== undefined) {
+        frontmatter.metadata = { ...yaml.metadata };
     }
     if (yaml.arguments !== undefined) {
         frontmatter.arguments = yaml.arguments;

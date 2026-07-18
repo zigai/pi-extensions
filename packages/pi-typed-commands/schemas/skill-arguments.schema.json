@@ -58,6 +58,12 @@
         "description": {
           "type": "string"
         },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "title": {
           "type": "string"
         },
@@ -109,7 +115,21 @@
             "radio",
             "multiselect",
             "path",
+            "file",
+            "directory",
             "command",
+            "secret",
+            "list",
+            "key-value",
+            "duration",
+            "date",
+            "time",
+            "datetime",
+            "url",
+            "email",
+            "json",
+            "code",
+            "stepper",
             "readonly",
             "computed",
             "confirm"
@@ -120,6 +140,27 @@
           "minimum": 1
         },
         "title": {
+          "type": "string"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "visible_when": {
+          "type": "boolean"
+        },
+        "enabled_when": {
+          "type": "boolean"
+        },
+        "required_when": {
+          "type": "boolean"
+        },
+        "section": {
+          "type": "string"
+        },
+        "advanced": {
+          "type": "boolean"
+        },
+        "copy_from": {
           "type": "string"
         }
       },
@@ -135,6 +176,12 @@
         },
         "description": {
           "type": "string"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "title": {
           "type": "string"
@@ -168,7 +215,21 @@
                 "radio",
                 "multiselect",
                 "path",
+                "file",
+                "directory",
                 "command",
+                "secret",
+                "list",
+                "key-value",
+                "duration",
+                "date",
+                "time",
+                "datetime",
+                "url",
+                "email",
+                "json",
+                "code",
+                "stepper",
                 "readonly",
                 "computed",
                 "confirm"
@@ -179,6 +240,27 @@
               "minimum": 1
             },
             "title": {
+              "type": "string"
+            },
+            "disabled": {
+              "type": "boolean"
+            },
+            "visible_when": {
+              "type": "boolean"
+            },
+            "enabled_when": {
+              "type": "boolean"
+            },
+            "required_when": {
+              "type": "boolean"
+            },
+            "section": {
+              "type": "string"
+            },
+            "advanced": {
+              "type": "boolean"
+            },
+            "copy_from": {
               "type": "string"
             }
           },
@@ -197,6 +279,12 @@
         },
         "pattern": {
           "type": "string"
+        },
+        "format": {
+          "enum": ["email", "url", "date", "time", "datetime", "duration", "json"]
+        },
+        "sensitive": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -224,6 +312,12 @@
         "description": {
           "type": "string"
         },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "title": {
           "type": "string"
         },
@@ -257,7 +351,21 @@
                 "radio",
                 "multiselect",
                 "path",
+                "file",
+                "directory",
                 "command",
+                "secret",
+                "list",
+                "key-value",
+                "duration",
+                "date",
+                "time",
+                "datetime",
+                "url",
+                "email",
+                "json",
+                "code",
+                "stepper",
                 "readonly",
                 "computed",
                 "confirm"
@@ -268,6 +376,27 @@
               "minimum": 1
             },
             "title": {
+              "type": "string"
+            },
+            "disabled": {
+              "type": "boolean"
+            },
+            "visible_when": {
+              "type": "boolean"
+            },
+            "enabled_when": {
+              "type": "boolean"
+            },
+            "required_when": {
+              "type": "boolean"
+            },
+            "section": {
+              "type": "string"
+            },
+            "advanced": {
+              "type": "boolean"
+            },
+            "copy_from": {
               "type": "string"
             }
           },
@@ -284,6 +413,14 @@
         },
         "max": {
           "type": "number"
+        },
+        "step": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false,
@@ -311,6 +448,12 @@
         "description": {
           "type": "string"
         },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "title": {
           "type": "string"
         },
@@ -344,7 +487,21 @@
                 "radio",
                 "multiselect",
                 "path",
+                "file",
+                "directory",
                 "command",
+                "secret",
+                "list",
+                "key-value",
+                "duration",
+                "date",
+                "time",
+                "datetime",
+                "url",
+                "email",
+                "json",
+                "code",
+                "stepper",
                 "readonly",
                 "computed",
                 "confirm"
@@ -355,6 +512,27 @@
               "minimum": 1
             },
             "title": {
+              "type": "string"
+            },
+            "disabled": {
+              "type": "boolean"
+            },
+            "visible_when": {
+              "type": "boolean"
+            },
+            "enabled_when": {
+              "type": "boolean"
+            },
+            "required_when": {
+              "type": "boolean"
+            },
+            "section": {
+              "type": "string"
+            },
+            "advanced": {
+              "type": "boolean"
+            },
+            "copy_from": {
               "type": "string"
             }
           },
@@ -389,6 +567,12 @@
         "description": {
           "type": "string"
         },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "title": {
           "type": "string"
         },
@@ -422,7 +606,21 @@
                 "radio",
                 "multiselect",
                 "path",
+                "file",
+                "directory",
                 "command",
+                "secret",
+                "list",
+                "key-value",
+                "duration",
+                "date",
+                "time",
+                "datetime",
+                "url",
+                "email",
+                "json",
+                "code",
+                "stepper",
                 "readonly",
                 "computed",
                 "confirm"
@@ -433,6 +631,27 @@
               "minimum": 1
             },
             "title": {
+              "type": "string"
+            },
+            "disabled": {
+              "type": "boolean"
+            },
+            "visible_when": {
+              "type": "boolean"
+            },
+            "enabled_when": {
+              "type": "boolean"
+            },
+            "required_when": {
+              "type": "boolean"
+            },
+            "section": {
+              "type": "string"
+            },
+            "advanced": {
+              "type": "boolean"
+            },
+            "copy_from": {
               "type": "string"
             }
           },
@@ -449,6 +668,15 @@
           },
           "minItems": 1,
           "uniqueItems": true
+        },
+        "option_descriptions": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       },
       "additionalProperties": false,
@@ -474,6 +702,12 @@
         },
         "description": {
           "type": "string"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "title": {
           "type": "string"
@@ -507,7 +741,21 @@
                 "radio",
                 "multiselect",
                 "path",
+                "file",
+                "directory",
                 "command",
+                "secret",
+                "list",
+                "key-value",
+                "duration",
+                "date",
+                "time",
+                "datetime",
+                "url",
+                "email",
+                "json",
+                "code",
+                "stepper",
                 "readonly",
                 "computed",
                 "confirm"
@@ -518,6 +766,27 @@
               "minimum": 1
             },
             "title": {
+              "type": "string"
+            },
+            "disabled": {
+              "type": "boolean"
+            },
+            "visible_when": {
+              "type": "boolean"
+            },
+            "enabled_when": {
+              "type": "boolean"
+            },
+            "required_when": {
+              "type": "boolean"
+            },
+            "section": {
+              "type": "string"
+            },
+            "advanced": {
+              "type": "boolean"
+            },
+            "copy_from": {
               "type": "string"
             }
           },
@@ -563,6 +832,267 @@
         }
       ]
     },
+    "stringListArgument": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["string_list", "string-list"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "occurrence": {
+          "enum": ["error", "first", "last", "append"]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "boolean"
+        },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "enum": [
+                "text",
+                "textarea",
+                "number",
+                "toggle",
+                "select",
+                "radio",
+                "multiselect",
+                "path",
+                "file",
+                "directory",
+                "command",
+                "secret",
+                "list",
+                "key-value",
+                "duration",
+                "date",
+                "time",
+                "datetime",
+                "url",
+                "email",
+                "json",
+                "code",
+                "stepper",
+                "readonly",
+                "computed",
+                "confirm"
+              ]
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string"
+            },
+            "disabled": {
+              "type": "boolean"
+            },
+            "visible_when": {
+              "type": "boolean"
+            },
+            "enabled_when": {
+              "type": "boolean"
+            },
+            "required_when": {
+              "type": "boolean"
+            },
+            "section": {
+              "type": "string"
+            },
+            "advanced": {
+              "type": "boolean"
+            },
+            "copy_from": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "default": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "min_items": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_items": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "required": ["required", "default"],
+            "properties": {
+              "required": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "keyValueArgument": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["key_value", "key-value"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "occurrence": {
+          "enum": ["error", "first", "last", "append"]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "boolean",
+          "const": false
+        },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "enum": [
+                "text",
+                "textarea",
+                "number",
+                "toggle",
+                "select",
+                "radio",
+                "multiselect",
+                "path",
+                "file",
+                "directory",
+                "command",
+                "secret",
+                "list",
+                "key-value",
+                "duration",
+                "date",
+                "time",
+                "datetime",
+                "url",
+                "email",
+                "json",
+                "code",
+                "stepper",
+                "readonly",
+                "computed",
+                "confirm"
+              ]
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string"
+            },
+            "disabled": {
+              "type": "boolean"
+            },
+            "visible_when": {
+              "type": "boolean"
+            },
+            "enabled_when": {
+              "type": "boolean"
+            },
+            "required_when": {
+              "type": "boolean"
+            },
+            "section": {
+              "type": "string"
+            },
+            "advanced": {
+              "type": "boolean"
+            },
+            "copy_from": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "default": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "string"
+            }
+          }
+        },
+        "min_items": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_items": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "required": ["required", "default"],
+            "properties": {
+              "required": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
     "argument": {
       "anyOf": [
         {
@@ -579,6 +1109,12 @@
         },
         {
           "$ref": "#/$defs/multiEnumArgument"
+        },
+        {
+          "$ref": "#/$defs/stringListArgument"
+        },
+        {
+          "$ref": "#/$defs/keyValueArgument"
         }
       ]
     }

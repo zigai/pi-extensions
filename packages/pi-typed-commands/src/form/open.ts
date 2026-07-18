@@ -12,12 +12,15 @@ import { openDenseArgumentForm } from "./dense.js";
 import { SequentialArgumentForm } from "./sequential.js";
 import type { ResolvedPiTypedCommandsAppearance } from "../pi/presentation-config.js";
 import type { ArgumentFormContext } from "./context.js";
+import type { CompletionCapabilities } from "../completions.js";
 
 export type OpenArgumentFormOptions = {
     readonly appearance: ResolvedPiTypedCommandsAppearance;
     readonly signal?: AbortSignal;
     /** Title already adapted from any Pi-specific form-title callback. */
     readonly title?: string;
+    /** Runtime capabilities used by completion-backed form controls. */
+    readonly completionCapabilities?: CompletionCapabilities;
 };
 
 /**

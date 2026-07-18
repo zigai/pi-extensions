@@ -1,11 +1,19 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey } from "@earendil-works/pi-tui";
+import {
+    CustomEditor,
+    type ExtensionAPI,
+    type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { getKeybindings } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../form/open.js";
-import { parseTypedCommandArgs, serializeTypedCommandArgs } from "../parser.js";
+import {
+    parseTypedCommandArgs,
+    parseTypedCommandInvocation,
+    serializeTypedCommandArgs,
+} from "../parser.js";
 import type { TypedCommandRegistry } from "../registry.js";
-import { isFormOnlyArgument } from "../schema.js";
+import { isFormOnlyArgument, validateArgumentValue } from "../schema.js";
 import { isTypedSkillCommand } from "../skills/command.js";
-import type { TypedCommandUxOptions } from "../types.js";
+import type { ArgumentValue, TypedCommandUxOptions } from "../types.js";
 import { createPiCompletionCapabilities, getTypedAutocompleteSuggestions } from "./completions.js";
 import {
     commandDisplayName,
@@ -15,6 +23,7 @@ import {
 } from "./editor-invocation.js";
 import { notifyDetailedHelp } from "./help.js";
 import { resolveTypedCommandFormTitle } from "./form-title.js";
+import { resolveGhostText, withGhostText } from "./ghost-text.js";
 import { setHelperWidget, WIDGET_KEY } from "./helper.js";
 import { renderTypedSkillInput } from "./skill-input.js";
 import {
@@ -22,12 +31,25 @@ import {
     stageExpandedFormArguments,
 } from "./session-state.js";
 import {
+    loadTypedCommandPresets,
+    recordTypedCommandRecentValues,
+    saveTypedCommandPreset,
+} from "./presets.js";
+import {
     resolvePiTypedCommandsConfigSnapshot,
     resolveTypedCommandUxOptions,
     type ResolvedPiTypedCommandsConfigSnapshot,
     type ResolvedTypedCommandUxOptions,
 } from "./settings.js";
-import { completePartialFlagOnTab } from "./tab-completion.js";
+import { completeTypedCommandOnTab } from "./tab-completion.js";
+
+type PiEditorFactory = NonNullable<ReturnType<ExtensionContext["ui"]["getEditorComponent"]>>;
+
+type GhostTextEditorInstallation = {
+    readonly ctx: ExtensionContext;
+    readonly previous: PiEditorFactory | undefined;
+    readonly installed: PiEditorFactory;
+};
 
 async function openEditorCommandForm(
     pi: ExtensionAPI,
@@ -65,22 +87,139 @@ async function openEditorCommandForm(
         return;
     }
 
-    const parsed = parseTypedCommandArgs(command, rawArgs);
+    const routed = parseTypedCommandInvocation(command, rawArgs);
+    let selectedCommand = command;
+    let selectedSubcommand = routed.route.subcommand;
+    let selectedRawArgs = routed.route.rawArgs;
+    if (routed.route.status === "subcommand" && selectedSubcommand !== undefined) {
+        selectedCommand = command.subcommands?.[selectedSubcommand] ?? command;
+    } else if (
+        routed.route.status === "missing" ||
+        (rawArgs.trim().length === 0 && command.subcommands !== undefined)
+    ) {
+        const rootOption = "(root command)";
+        const options = Object.keys(command.subcommands ?? {});
+        if (command.hasRootHandler === true) {
+            options.unshift(rootOption);
+        }
+        const selected = await ctx.ui.select("Select subcommand", options, { signal });
+        if (selected === undefined || !isCurrent()) {
+            return;
+        }
+        if (selected === rootOption) {
+            selectedSubcommand = undefined;
+            selectedCommand = command;
+            selectedRawArgs = rawArgs;
+        } else {
+            selectedSubcommand = selected;
+            selectedCommand = command.subcommands?.[selected] ?? command;
+            selectedRawArgs = "";
+        }
+    }
+
+    let parsed = parseTypedCommandArgs(selectedCommand, selectedRawArgs);
+    if (selectedCommand.formPresets === true) {
+        const collection = loadTypedCommandPresets(ctx, selectedCommand);
+        if (collection === undefined) {
+            ctx.ui.notify("Typed command presets could not be read.", "warning");
+        } else {
+            const currentOption = "Current editor values";
+            const recentOption = "Recent values";
+            const presetPrefix = "Preset: ";
+            const presetOptions = Object.keys(collection.presets).map(
+                (name) => `${presetPrefix}${name}`,
+            );
+            const choices = [currentOption];
+            if (collection.recent !== undefined) {
+                choices.push(recentOption);
+            }
+            choices.push(...presetOptions);
+            if (choices.length > 1) {
+                const selectedPreset = await ctx.ui.select("Load form values", choices, {
+                    signal,
+                });
+                if (selectedPreset === undefined || !isCurrent()) {
+                    return;
+                }
+                let presetValues: Readonly<Record<string, ArgumentValue>> | undefined;
+                if (selectedPreset === recentOption) {
+                    presetValues = collection.recent;
+                } else if (selectedPreset.startsWith(presetPrefix)) {
+                    presetValues = collection.presets[selectedPreset.slice(presetPrefix.length)];
+                }
+                if (presetValues !== undefined) {
+                    const mergedValues: Record<string, ArgumentValue> = { ...presetValues };
+                    for (const [name, value] of Object.entries(parsed.values)) {
+                        if (parsed.sources?.get(name) !== "default") {
+                            mergedValues[name] = value;
+                        } else {
+                            mergedValues[name] ??= value;
+                        }
+                    }
+                    const presetNames = Object.keys(presetValues);
+                    const provided = new Set([...parsed.provided, ...presetNames]);
+                    const sources = new Map(parsed.sources ?? []);
+                    for (const name of presetNames) {
+                        sources.set(name, "explicit");
+                    }
+                    const issues = parsed.issues.filter((issue) => {
+                        if (issue.name === undefined) {
+                            return true;
+                        }
+                        const definition = selectedCommand.args[issue.name];
+                        if (definition === undefined) {
+                            return true;
+                        }
+                        return !validateArgumentValue(
+                            issue.name,
+                            definition,
+                            mergedValues[issue.name],
+                        ).ok;
+                    });
+                    parsed = { ...parsed, values: mergedValues, provided, sources, issues };
+                }
+            }
+        }
+    }
     if (parsed.mode === "help") {
-        if (isCurrent()) notifyDetailedHelp(ctx, command, options.appearance);
+        if (isCurrent()) notifyDetailedHelp(ctx, selectedCommand, options.appearance);
         return;
     }
 
-    const args = await openArgumentForm(command, parsed, "all", ctx, {
+    const args = await openArgumentForm(selectedCommand, parsed, "all", ctx, {
         appearance: options.appearance,
         signal,
-        title: resolveTypedCommandFormTitle(command, ctx),
+        title: resolveTypedCommandFormTitle(selectedCommand, ctx),
+        completionCapabilities: createPiCompletionCapabilities(ctx.cwd, registry, signal),
     });
     if (args === undefined || !isCurrent()) {
         return;
     }
 
-    if (command.target?.kind !== "extension") {
+    if (selectedCommand.formPresets === true) {
+        if (!recordTypedCommandRecentValues(ctx, selectedCommand, args)) {
+            ctx.ui.notify("Typed command recent values could not be saved.", "warning");
+        }
+        const action = await ctx.ui.select(
+            "Form action",
+            ["Apply to editor", "Apply and save preset"],
+            { signal },
+        );
+        if (action === undefined || !isCurrent()) {
+            return;
+        }
+        if (action === "Apply and save preset") {
+            const presetName = await ctx.ui.input("Preset name", "", { signal });
+            if (presetName === undefined || !isCurrent()) {
+                return;
+            }
+            if (!saveTypedCommandPreset(ctx, selectedCommand, presetName, args)) {
+                ctx.ui.notify("Typed command preset could not be saved.", "warning");
+            }
+        }
+    }
+
+    if (selectedCommand.target?.kind !== "extension") {
         if (isCurrent())
             ctx.ui.notify(
                 `Typed command /${command.name} does not have an extension handler.`,
@@ -89,17 +228,21 @@ async function openEditorCommandForm(
         return;
     }
 
-    const serialized = serializeTypedCommandArgs(command, args);
+    const serialized = serializeTypedCommandArgs(selectedCommand, args);
     const invocationName = command.invocationName ?? command.name;
     let editorText = `/${invocationName}`;
+    if (selectedSubcommand !== undefined) {
+        editorText += ` ${selectedSubcommand}`;
+    }
     if (serialized.length > 0) {
         editorText += ` ${serialized}`;
     }
-    const hasFormOnlyArguments = Object.values(command.args).some(isFormOnlyArgument);
-    if (
-        hasFormOnlyArguments &&
-        !stageExpandedFormArguments(ctx, invocationName, editorText, args)
-    ) {
+    const hasStagedArguments = Object.values(selectedCommand.args).some(
+        (definition) =>
+            isFormOnlyArgument(definition) ||
+            (definition.type === "string" && definition.sensitive === true),
+    );
+    if (hasStagedArguments && !stageExpandedFormArguments(ctx, invocationName, editorText, args)) {
         ctx.ui.notify("Typed command form values could not be staged.", "error");
         return;
     }
@@ -143,6 +286,7 @@ export class TypedCommandUxSession {
     private submittedInvalidEditorText: string | undefined;
     private armedDoubleTabEditorText: string | undefined;
     private helperWidgetSignature: string | undefined;
+    private ghostTextEditorInstallation: GhostTextEditorInstallation | undefined;
     private configSnapshot: ResolvedPiTypedCommandsConfigSnapshot | undefined;
     private options: ResolvedTypedCommandUxOptions;
 
@@ -176,6 +320,7 @@ export class TypedCommandUxSession {
             ctx.ui.notify(diagnostic.message, "warning");
         }
         const refresh = (): void => {
+            this.syncGhostTextEditor(ctx);
             this.refresh(ctx);
         };
 
@@ -197,6 +342,7 @@ export class TypedCommandUxSession {
 
     async stop(): Promise<void> {
         this.clearRefreshTimer();
+        this.uninstallGhostTextEditor();
         for (const callback of this.cleanup) {
             callback();
         }
@@ -244,6 +390,51 @@ export class TypedCommandUxSession {
         this.syncHelperWidget(ctx, helperInvocation, {
             submittedInvalidEditorText: this.submittedInvalidEditorText,
         });
+    }
+
+    private hasConfiguredGhostText(): boolean {
+        return this.registry.list().some((command) => {
+            if (command.ghostText !== undefined) {
+                return true;
+            }
+            return Object.values(command.subcommands ?? {}).some(
+                (subcommand) => subcommand.ghostText !== undefined,
+            );
+        });
+    }
+
+    private syncGhostTextEditor(ctx: ExtensionContext): void {
+        if (ctx.mode !== "tui" || !this.hasConfiguredGhostText()) {
+            this.uninstallGhostTextEditor();
+            return;
+        }
+        if (this.ghostTextEditorInstallation !== undefined) {
+            return;
+        }
+        const previous = ctx.ui.getEditorComponent();
+        const installed: PiEditorFactory = (tui, theme, keybindings) => {
+            const base =
+                previous?.(tui, theme, keybindings) ?? new CustomEditor(tui, theme, keybindings);
+            const decorated = withGhostText(
+                base,
+                () => resolveGhostText(base.getText(), this.registry, ctx)?.text,
+                (text) => ctx.ui.theme.fg("dim", text),
+            );
+            return decorated;
+        };
+        this.ghostTextEditorInstallation = { ctx, previous, installed };
+        ctx.ui.setEditorComponent(installed);
+    }
+
+    private uninstallGhostTextEditor(): void {
+        const installation = this.ghostTextEditorInstallation;
+        if (installation === undefined) {
+            return;
+        }
+        this.ghostTextEditorInstallation = undefined;
+        if (installation.ctx.ui.getEditorComponent() === installation.installed) {
+            installation.ctx.ui.setEditorComponent(installation.previous);
+        }
     }
 
     private showSubmittedInvalidCommand(ctx: ExtensionContext, editorText: string): void {
@@ -370,7 +561,7 @@ export class TypedCommandUxSession {
             this.clearHelperWidget(ctx);
             return undefined;
         }
-        if (!matchesKey(data, "tab")) {
+        if (!getKeybindings().matches(data, "tui.input.tab")) {
             this.submittedInvalidEditorText = undefined;
             this.armedDoubleTabEditorText = undefined;
             this.scheduleRefresh(ctx);
@@ -378,7 +569,7 @@ export class TypedCommandUxSession {
         }
 
         const editorText = ctx.ui.getEditorText();
-        const completion = completePartialFlagOnTab(editorText, this.registry);
+        const completion = completeTypedCommandOnTab(editorText, this.registry);
         if (completion.handled === true) {
             this.armedDoubleTabEditorText = undefined;
             if ("editorText" in completion && completion.editorText !== undefined) {

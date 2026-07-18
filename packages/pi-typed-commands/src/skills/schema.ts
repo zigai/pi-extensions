@@ -14,7 +14,21 @@ const SKILL_WIDGET_VALUES = [
     "radio",
     "multiselect",
     "path",
+    "file",
+    "directory",
     "command",
+    "secret",
+    "list",
+    "key-value",
+    "duration",
+    "date",
+    "time",
+    "datetime",
+    "url",
+    "email",
+    "json",
+    "code",
+    "stepper",
     "readonly",
     "computed",
     "confirm",
@@ -24,6 +38,7 @@ export const UnknownRecordYamlSchema = Type.Record(Type.String(), Type.Unknown()
 
 const sharedArgumentYamlProperties = {
     description: Type.Optional(Type.String()),
+    examples: Type.Optional(Type.Array(Type.String())),
     title: Type.Optional(Type.String()),
     required: Type.Optional(Type.Boolean()),
     placeholder: Type.Optional(Type.String()),
@@ -47,6 +62,13 @@ export const SkillArgumentUiYamlSchema = Type.Object(
         widget: Type.Optional(Type.Enum(SKILL_WIDGET_VALUES)),
         rows: Type.Optional(Type.Integer({ minimum: 1 })),
         title: Type.Optional(Type.String()),
+        disabled: Type.Optional(Type.Boolean()),
+        visible_when: Type.Optional(Type.Boolean()),
+        enabled_when: Type.Optional(Type.Boolean()),
+        required_when: Type.Optional(Type.Boolean()),
+        section: Type.Optional(Type.String()),
+        advanced: Type.Optional(Type.Boolean()),
+        copy_from: Type.Optional(Type.String()),
     },
     { additionalProperties: false },
 );
@@ -65,6 +87,8 @@ const nonEmptyStringArraySchema = Type.Array(Type.String({ minLength: 1 }), {
     uniqueItems: true,
 });
 
+const enumOptionDescriptionsSchema = Type.Record(Type.String(), Type.String({ minLength: 1 }));
+
 /** YAML DTO for a `type: string` skill argument. */
 export const StringSkillArgumentYamlSchema = Type.Object(
     {
@@ -75,6 +99,10 @@ export const StringSkillArgumentYamlSchema = Type.Object(
         min_length: Type.Optional(Type.Integer({ minimum: 0 })),
         max_length: Type.Optional(Type.Integer({ minimum: 0 })),
         pattern: Type.Optional(Type.String()),
+        format: Type.Optional(
+            Type.Enum(["email", "url", "date", "time", "datetime", "duration", "json"] as const),
+        ),
+        sensitive: Type.Optional(Type.Boolean()),
     },
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
@@ -90,6 +118,8 @@ export const NumberSkillArgumentYamlSchema = Type.Object(
         integer: Type.Optional(Type.Boolean()),
         min: Type.Optional(Type.Number()),
         max: Type.Optional(Type.Number()),
+        step: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+        unit: Type.Optional(Type.String({ minLength: 1 })),
     },
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
@@ -115,6 +145,7 @@ export const EnumSkillArgumentYamlSchema = Type.Object(
         rest: Type.Optional(Type.Literal(false)),
         default: Type.Optional(Type.String()),
         values: nonEmptyStringArraySchema,
+        option_descriptions: Type.Optional(enumOptionDescriptionsSchema),
     },
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
@@ -132,6 +163,31 @@ export const MultiEnumSkillArgumentYamlSchema = Type.Object(
     { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
 );
 
+/** YAML DTO for a repeatable freeform string list. */
+export const StringListSkillArgumentYamlSchema = Type.Object(
+    {
+        type: Type.Enum(["string_list", "string-list"] as const),
+        ...sharedArgumentYamlPropertiesWithUi,
+        default: Type.Optional(stringArraySchema),
+        min_items: Type.Optional(Type.Integer({ minimum: 0 })),
+        max_items: Type.Optional(Type.Integer({ minimum: 0 })),
+    },
+    { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
+);
+
+/** YAML DTO for repeatable `key=value` entries. */
+export const KeyValueSkillArgumentYamlSchema = Type.Object(
+    {
+        type: Type.Enum(["key_value", "key-value"] as const),
+        ...sharedArgumentYamlPropertiesWithUi,
+        rest: Type.Optional(Type.Literal(false)),
+        default: Type.Optional(Type.Record(Type.String(), Type.String())),
+        min_items: Type.Optional(Type.Integer({ minimum: 0 })),
+        max_items: Type.Optional(Type.Integer({ minimum: 0 })),
+    },
+    { additionalProperties: false, allOf: [noRequiredDefaultConflict] },
+);
+
 /** YAML DTO for one concrete typed skill argument. */
 export const SkillArgumentYamlSchema = Type.Union([
     StringSkillArgumentYamlSchema,
@@ -139,6 +195,8 @@ export const SkillArgumentYamlSchema = Type.Union([
     BooleanSkillArgumentYamlSchema,
     EnumSkillArgumentYamlSchema,
     MultiEnumSkillArgumentYamlSchema,
+    StringListSkillArgumentYamlSchema,
+    KeyValueSkillArgumentYamlSchema,
 ]);
 
 /** YAML frontmatter fields consumed by typed skill support. */
@@ -147,6 +205,14 @@ export const SkillFrontmatterYamlSchema = Type.Object(
         name: Type.Optional(Type.String()),
         description: Type.Optional(Type.String()),
         form_title: Type.Optional(Type.String()),
+        metadata: Type.Optional(
+            Type.Object(
+                {
+                    ghostText: Type.Optional(Type.String()),
+                },
+                { additionalProperties: true },
+            ),
+        ),
         arguments: Type.Optional(Type.Unknown()),
     },
     { additionalProperties: true },
@@ -194,12 +260,16 @@ export const SkillArgumentsYamlSchema = Type.Object(
             booleanArgument: BooleanSkillArgumentYamlSchema,
             enumArgument: EnumSkillArgumentYamlSchema,
             multiEnumArgument: MultiEnumSkillArgumentYamlSchema,
+            stringListArgument: StringListSkillArgumentYamlSchema,
+            keyValueArgument: KeyValueSkillArgumentYamlSchema,
             argument: Type.Union([
                 Type.Ref("#/$defs/stringArgument"),
                 Type.Ref("#/$defs/numberArgument"),
                 Type.Ref("#/$defs/booleanArgument"),
                 Type.Ref("#/$defs/enumArgument"),
                 Type.Ref("#/$defs/multiEnumArgument"),
+                Type.Ref("#/$defs/stringListArgument"),
+                Type.Ref("#/$defs/keyValueArgument"),
             ]),
         },
     },
@@ -211,6 +281,8 @@ export type NumberSkillArgumentYaml = Static<typeof NumberSkillArgumentYamlSchem
 export type BooleanSkillArgumentYaml = Static<typeof BooleanSkillArgumentYamlSchema>;
 export type EnumSkillArgumentYaml = Static<typeof EnumSkillArgumentYamlSchema>;
 export type MultiEnumSkillArgumentYaml = Static<typeof MultiEnumSkillArgumentYamlSchema>;
+export type StringListSkillArgumentYaml = Static<typeof StringListSkillArgumentYamlSchema>;
+export type KeyValueSkillArgumentYaml = Static<typeof KeyValueSkillArgumentYamlSchema>;
 export type SkillArgumentYaml = Static<typeof SkillArgumentYamlSchema>;
 export type SkillFrontmatterYaml = Static<typeof SkillFrontmatterYamlSchema>;
 

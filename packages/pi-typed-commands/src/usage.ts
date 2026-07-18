@@ -1,4 +1,5 @@
 import { toKebabCase } from "./names.js";
+import { casesHandled } from "./exhaustive.js";
 import {
     argumentFlagNames,
     argumentTypeHint,
@@ -143,6 +144,17 @@ export function formatCommandUsage<TDefinitions extends ArgumentDefinitions>(
         formatArgumentUsage(name, definition, options),
     );
     const commandName = command.invocationName ?? command.name;
+    if (command.subcommands !== undefined) {
+        let subcommandToken = "<subcommand>";
+        if (command.hasRootHandler === true) {
+            subcommandToken = "[<subcommand>]";
+        }
+        let sharedArguments = "";
+        if (parts.length > 0) {
+            sharedArguments = ` ${parts.join(" ")}`;
+        }
+        return `/${commandName}${sharedArguments} ${subcommandToken}`;
+    }
     if (parts.length === 0) {
         return `/${commandName}`;
     }
@@ -207,6 +219,62 @@ function detailedArgumentValueHint(
     return argumentValueHint(definition, name);
 }
 
+function detailedConstraints(definition: ArgumentDefinition): string[] {
+    switch (definition.type) {
+        case "string": {
+            const constraints: string[] = [];
+            if (definition.format !== undefined) constraints.push(`format ${definition.format}`);
+            if (definition.minLength !== undefined)
+                constraints.push(`minimum length ${definition.minLength}`);
+            if (definition.maxLength !== undefined)
+                constraints.push(`maximum length ${definition.maxLength}`);
+            return constraints;
+        }
+        case "number": {
+            const constraints: string[] = [];
+            if (definition.min !== undefined) constraints.push(`minimum ${definition.min}`);
+            if (definition.max !== undefined) constraints.push(`maximum ${definition.max}`);
+            if (definition.step !== undefined) constraints.push(`step ${definition.step}`);
+            if (definition.unit !== undefined) constraints.push(`unit ${definition.unit}`);
+            return constraints;
+        }
+        case "multi-enum":
+        case "string-list":
+        case "key-value": {
+            const constraints: string[] = [];
+            if (definition.minItems !== undefined)
+                constraints.push(`minimum ${definition.minItems} items`);
+            if (definition.maxItems !== undefined)
+                constraints.push(`maximum ${definition.maxItems} items`);
+            return constraints;
+        }
+        case "boolean":
+        case "enum":
+            return [];
+        default:
+            return casesHandled(definition);
+    }
+}
+
+function detailedDefault(definition: ArgumentDefinition): string {
+    if (definition.type === "string" && definition.sensitive === true) {
+        return "<redacted>";
+    }
+    const value = definition.default;
+    if (Array.isArray(value)) {
+        return value.join(",");
+    }
+    if (typeof value === "object" && value !== null) {
+        return Object.entries(value)
+            .map(([key, entryValue]) => `${key}=${entryValue}`)
+            .join(",");
+    }
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    return "";
+}
+
 /** Format detailed multi-line help for a registered typed command. */
 export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
     command: CoreRegisteredTypedCommand<TDefinitions>,
@@ -224,6 +292,21 @@ export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
         "Usage:",
         `  ${formatCommandUsage(command)}`,
     ];
+
+    if (command.subcommands !== undefined) {
+        lines.push("", "Subcommands:");
+        for (const [name, subcommand] of Object.entries(command.subcommands)) {
+            let label = `  ${name}`;
+            if ((subcommand.aliases?.length ?? 0) > 0) {
+                label += `, aliases ${subcommand.aliases?.join(", ") ?? ""}`;
+            }
+            lines.push(label);
+            if (metadata.descriptions) {
+                lines.push(`    ${subcommand.description}`);
+            }
+            lines.push(`    ${formatCommandUsage(subcommand)}`);
+        }
+    }
 
     let entries = orderedCommandArgumentEntries(command);
     if (options?.order === "required-first") {
@@ -254,7 +337,7 @@ export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
                 label += ", required";
             }
             if (metadata.defaults && definition.default !== undefined) {
-                label += `, default ${String(definition.default)}`;
+                label += `, default ${detailedDefault(definition)}`;
             }
             if (metadata.aliases) {
                 const aliases = detailedAliasLabels(name, definition);
@@ -265,6 +348,13 @@ export function formatDetailedHelp<TDefinitions extends ArgumentDefinitions>(
             lines.push(label);
             if (metadata.descriptions && definition.description !== undefined) {
                 lines.push(`    ${definition.description}`);
+            }
+            const constraints = detailedConstraints(definition);
+            if (constraints.length > 0) {
+                lines.push(`    ${constraints.join(", ")}`);
+            }
+            if ((definition.examples?.length ?? 0) > 0) {
+                lines.push(`    examples: ${definition.examples?.join(", ") ?? ""}`);
             }
         }
     }

@@ -13,6 +13,8 @@ import type {
     NumberArgumentDefinition,
     ParsedCommandArguments,
     StringArgumentDefinition,
+    StringListArgumentDefinition,
+    KeyValueArgumentDefinition,
 } from "../types.js";
 import type { RegisteredTypedCommand } from "../pi/command-types.js";
 import { formatIssues } from "../usage.js";
@@ -23,7 +25,25 @@ function currentValueText(value: ArgumentValue): string {
     if (value === undefined) {
         return "";
     }
+    if (Array.isArray(value)) {
+        return value.join(",");
+    }
+    if (typeof value === "object") {
+        return Object.entries(value)
+            .map(([key, entryValue]) => `${key}=${entryValue}`)
+            .join(",");
+    }
     return String(value);
+}
+
+function evaluateFormBoolean(
+    option: boolean | ((values: Readonly<Record<string, ArgumentValue>>) => boolean) | undefined,
+    state: Readonly<Record<string, ArgumentValue>>,
+): boolean {
+    if (typeof option === "function") {
+        return option({ ...state });
+    }
+    return option === true;
 }
 
 /** Sequential prompt-based argument form used outside TUI mode. */
@@ -59,7 +79,35 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         }
 
         for (const [name, definition] of Object.entries(this.command.args)) {
-            if (!shouldPromptArgument(name, definition, this.mode, this.parsed)) {
+            const copyFrom = definition.ui?.copyFrom;
+            if (
+                copyFrom !== undefined &&
+                this.state[name] === undefined &&
+                this.state[copyFrom] !== undefined
+            ) {
+                this.state[name] = this.state[copyFrom];
+            }
+            if (definition.ui?.compute !== undefined) {
+                this.state[name] = definition.ui.compute({ ...this.state });
+                continue;
+            }
+            if (
+                evaluateFormBoolean(definition.ui?.hidden, this.state) ||
+                (definition.ui?.visibleWhen !== undefined &&
+                    !evaluateFormBoolean(definition.ui.visibleWhen, this.state)) ||
+                evaluateFormBoolean(definition.ui?.readOnly, this.state) ||
+                evaluateFormBoolean(definition.ui?.disabled, this.state) ||
+                (definition.ui?.enabledWhen !== undefined &&
+                    !evaluateFormBoolean(definition.ui.enabledWhen, this.state)) ||
+                definition.ui?.widget === "readonly" ||
+                definition.ui?.widget === "computed"
+            ) {
+                continue;
+            }
+            if (
+                !shouldPromptArgument(name, definition, this.mode, this.parsed) &&
+                !evaluateFormBoolean(definition.ui?.requiredWhen, this.state)
+            ) {
                 continue;
             }
 
@@ -96,6 +144,8 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         switch (definition.type) {
             case "string":
             case "number":
+            case "string-list":
+            case "key-value":
                 return this.promptStringLike(name, definition);
             case "boolean":
                 return this.promptBoolean(name, definition);
@@ -115,7 +165,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         }
 
         const selected = await this.ctx.ui.select(
-            `Set ${formatFlagName(name)}`,
+            this.promptTitle(name, definition),
             options,
             this.dialogOptions(),
         );
@@ -142,7 +192,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         }
 
         const selected = await this.ctx.ui.select(
-            `Set ${formatFlagName(name)}`,
+            this.promptTitle(name, definition),
             options,
             this.dialogOptions(),
         );
@@ -169,7 +219,7 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             placeholder = definition.values.join(",");
         }
 
-        const title = `Set ${formatFlagName(name)} (current: ${currentValueText(current)})`;
+        const title = `${this.promptTitle(name, definition)} (current: ${currentValueText(current)})`;
         const input = await this.ctx.ui.input(title, placeholder, this.dialogOptions());
         if (!this.active() || input === undefined) {
             return false;
@@ -202,12 +252,16 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
 
     private async promptStringLike(
         name: string,
-        definition: StringArgumentDefinition | NumberArgumentDefinition,
+        definition:
+            | StringArgumentDefinition
+            | NumberArgumentDefinition
+            | StringListArgumentDefinition
+            | KeyValueArgumentDefinition,
     ): Promise<boolean> {
         const current = this.state[name];
         const placeholder = definition.placeholder ?? currentValueText(current);
 
-        const title = `Set ${formatFlagName(name)} (current: ${currentValueText(current)})`;
+        const title = `${this.promptTitle(name, definition)} (current: ${currentValueText(current)})`;
         const input = await this.ctx.ui.input(title, placeholder, this.dialogOptions());
         if (!this.active() || input === undefined) {
             return false;
@@ -232,19 +286,21 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
                 this.state[name] = input;
                 return true;
             }
-            case "number": {
-                const numberValue = coerceArgumentValue(
+            case "number":
+            case "string-list":
+            case "key-value": {
+                const coercedValue = coerceArgumentValue(
                     definition,
                     input,
                     name,
                     FORM_MESSAGE_OPTIONS,
                 );
-                if (!numberValue.ok) {
-                    if (this.active()) this.ctx.ui.notify(numberValue.issue.message, "error");
+                if (!coercedValue.ok) {
+                    if (this.active()) this.ctx.ui.notify(coercedValue.issue.message, "error");
                     return this.promptStringLike(name, definition);
                 }
 
-                this.state[name] = numberValue.value;
+                this.state[name] = coercedValue.value;
                 return true;
             }
             default:
@@ -275,7 +331,11 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
 
     private async applyEmptyTextInput(
         name: string,
-        definition: StringArgumentDefinition | NumberArgumentDefinition,
+        definition:
+            | StringArgumentDefinition
+            | NumberArgumentDefinition
+            | StringListArgumentDefinition
+            | KeyValueArgumentDefinition,
         current: ArgumentValue,
     ): Promise<boolean> {
         if (current !== undefined) {
@@ -297,6 +357,13 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
     private finalIssues(): string[] {
         const messages: string[] = [];
         for (const [name, definition] of Object.entries(this.command.args)) {
+            if (
+                evaluateFormBoolean(definition.ui?.requiredWhen, this.state) &&
+                this.state[name] === undefined
+            ) {
+                messages.push(`${toKebabCase(name)} is required`);
+                continue;
+            }
             const validation = validateArgumentValue(
                 name,
                 definition,
@@ -308,5 +375,13 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
             }
         }
         return messages;
+    }
+
+    private promptTitle(name: string, definition: ArgumentDefinition): string {
+        const title = definition.title ?? definition.ui?.title ?? formatFlagName(name);
+        if (definition.description === undefined) {
+            return `Set ${title}`;
+        }
+        return `Set ${title} — ${definition.description}`;
     }
 }

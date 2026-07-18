@@ -1,4 +1,5 @@
 import { createHeadlessFormModel } from "../pi-tui/form-model.js";
+import { getTypedCommandRefinementIssues, serializeTypedCommandArgs } from "../parser.js";
 import type {
     ArgumentDefinitions,
     ArgumentValue,
@@ -9,6 +10,17 @@ import type { RegisteredTypedCommand } from "../pi/command-types.js";
 import { ArgumentFormComponent, type FormResult } from "./dense-component.js";
 import type { OpenArgumentFormOptions } from "./open.js";
 import type { ArgumentFormContext } from "./context.js";
+
+function serializeFormPreview(
+    command: RegisteredTypedCommand,
+    values: Record<string, ArgumentValue>,
+): string {
+    const serialized = serializeTypedCommandArgs(command, values);
+    if (serialized.length === 0) {
+        return `/${command.name}`;
+    }
+    return `/${command.name} ${serialized}`;
+}
 
 function signalAborted(signal?: AbortSignal): boolean {
     return signal?.aborted === true;
@@ -27,7 +39,7 @@ function resolveFormTitle<TDefinitions extends ArgumentDefinitions>(
             return title;
         }
     }
-    return command.name;
+    return command.name.replace(" ", " › ");
 }
 
 /** Open the dense TUI argument form for a parsed typed command. */
@@ -51,7 +63,7 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
     let removeAbortListener = (): void => {};
     let result: FormResult | undefined;
     try {
-        result = await ctx.ui.custom<FormResult | undefined>((tui, theme, _keybindings, done) => {
+        result = await ctx.ui.custom<FormResult | undefined>((tui, theme, keybindings, done) => {
             const abort = (): void => {
                 done(undefined);
             };
@@ -67,6 +79,18 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
                 theme,
                 command.formSymbols,
                 appearance,
+                options.completionCapabilities,
+                keybindings,
+                (values) => getTypedCommandRefinementIssues(command, values, parsed.provided),
+                (values) => {
+                    const safeValues = { ...values };
+                    for (const [name, definition] of Object.entries(command.args)) {
+                        if (definition.type === "string" && definition.sensitive === true) {
+                            safeValues[name] = undefined;
+                        }
+                    }
+                    return serializeFormPreview(command, safeValues);
+                },
                 done,
                 initialSelection,
             );

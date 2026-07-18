@@ -9,6 +9,8 @@ import type {
     EnumArgumentDefinition,
     FlatArgumentDefinitions,
     MultiEnumArgumentDefinition,
+    StringListArgumentDefinition,
+    KeyValueArgumentDefinition,
     NumberArgumentDefinition,
     StringArgumentDefinition,
 } from "../types.js";
@@ -23,6 +25,8 @@ export type {
     EnumArgumentDefinition,
     FlatArgumentDefinitions,
     MultiEnumArgumentDefinition,
+    StringListArgumentDefinition,
+    KeyValueArgumentDefinition,
     NumberArgumentDefinition,
     StringArgumentDefinition,
 };
@@ -34,10 +38,16 @@ export type RawSkillArgumentDefinition = Record<string, unknown>;
 export type RawSkillArguments = Record<string, unknown>;
 
 /** Parsed subset of `SKILL.md` frontmatter used by typed skill support. */
+export type SkillFrontmatterMetadata = Readonly<Record<string, unknown>> & {
+    /** Optional static text rendered after an exact typed-skill slash invocation. */
+    readonly ghostText?: string;
+};
+
 export type SkillFrontmatter = {
     name?: string;
     description?: string;
     formTitle?: string;
+    metadata?: SkillFrontmatterMetadata;
     arguments?: unknown;
 };
 
@@ -55,6 +65,8 @@ export type TypedSkillMetadata = {
     body: string;
     args: FlatArgumentDefinitions;
     formTitle?: string;
+    /** Static ghost text loaded from `frontmatter.metadata.ghostText`. */
+    ghostText?: string;
 };
 
 /** Structured diagnostic produced while normalizing typed skill frontmatter. */

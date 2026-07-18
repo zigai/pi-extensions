@@ -89,6 +89,9 @@ export type InlineHelpOrder =
 /** Inline helper layout mode. */
 export type InlineHelpLayout = "compact";
 
+/** How fixed enum choices are presented in inline help. */
+export type InlineHelpChoiceDisplay = "contextual" | "inline";
+
 /** Dense-form argument description visibility mode. */
 export type FormDescriptionMode = "inline" | "focused" | "hidden";
 
@@ -127,6 +130,7 @@ export type FormAppearanceSettings = {
 /** User-facing inline-helper appearance settings from extension config. */
 export type InlineHelpAppearanceSettings = {
     layout?: InlineHelpLayout;
+    choiceDisplay?: InlineHelpChoiceDisplay;
     order?: InlineHelpOrder;
     metadata?: HelpMetadataSettings;
     colors?: Partial<Record<InlineHelpColorSlot, PiThemeColorName>>;
@@ -181,6 +185,7 @@ export type ResolvedHelpMetadata = Required<HelpMetadataSettings>;
 /** Fully resolved inline-helper appearance used by renderers. */
 export type ResolvedInlineHelpAppearance = {
     layout: InlineHelpLayout;
+    choiceDisplay: InlineHelpChoiceDisplay;
     order: InlineHelpOrder;
     metadata: ResolvedHelpMetadata;
     colors: Record<InlineHelpColorSlot, PiThemeColorName>;
@@ -303,6 +308,7 @@ export const DEFAULT_PI_TYPED_COMMANDS_APPEARANCE: ResolvedPiTypedCommandsAppear
     },
     inlineHelp: {
         layout: "compact",
+        choiceDisplay: "contextual",
         order: "active-required-available",
         metadata: DEFAULT_INLINE_METADATA,
         colors: DEFAULT_INLINE_HELP_COLORS,
@@ -410,6 +416,7 @@ const InlineHelpFormatSettingsSchema = Type.Object(
 const InlineHelpAppearanceSettingsSchema = Type.Object(
     {
         layout: Type.Optional(Type.Unknown()),
+        choiceDisplay: Type.Optional(Type.Unknown()),
         order: Type.Optional(Type.Unknown()),
         metadata: Type.Optional(Type.Unknown()),
         colors: Type.Optional(Type.Unknown()),
@@ -492,6 +499,7 @@ function cloneDefaultAppearance(): ResolvedPiTypedCommandsAppearance {
         },
         inlineHelp: {
             layout: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.layout,
+            choiceDisplay: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.choiceDisplay,
             order: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.order,
             metadata: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.metadata },
             colors: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.colors },
@@ -723,6 +731,7 @@ function parseInlineHelpAppearance(input: unknown): ResolvedInlineHelpAppearance
     if (settings === undefined) {
         return {
             layout: defaults.layout,
+            choiceDisplay: defaults.choiceDisplay,
             order: defaults.order,
             metadata: { ...defaults.metadata },
             colors: { ...defaults.colors },
@@ -730,8 +739,14 @@ function parseInlineHelpAppearance(input: unknown): ResolvedInlineHelpAppearance
         };
     }
 
+    const choiceDisplayModes = ["contextual", "inline"] as const;
     return {
         layout: parseEnum(settings.layout, defaults.layout, layoutModes),
+        choiceDisplay: parseEnum(
+            settings.choiceDisplay,
+            defaults.choiceDisplay,
+            choiceDisplayModes,
+        ),
         order: parseInlineHelpOrder(settings.order),
         metadata: mergeMetadata(settings.metadata, DEFAULT_INLINE_METADATA),
         colors: parseInlineHelpColors(settings.colors),

@@ -19,9 +19,12 @@ export function skillPathFromCommand(command: SlashCommandInfo): string | undefi
 export function typedSkillCommandFromMetadata(
     skill: TypedSkillMetadata,
 ): RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
-    const formFields: { formTitle?: string } = {};
+    const formFields: { formTitle?: string; ghostText?: string } = {};
     if (skill.formTitle !== undefined) {
         formFields.formTitle = skill.formTitle;
+    }
+    if (skill.ghostText !== undefined) {
+        formFields.ghostText = skill.ghostText;
     }
     const command: RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } = {
         name: `skill:${skill.name}`,

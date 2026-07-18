@@ -22,6 +22,7 @@ export const DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON = {
         },
         inlineHelp: {
             layout: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.layout,
+            choiceDisplay: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.choiceDisplay,
             order: DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.order,
             metadata: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.metadata },
             colors: { ...DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp.colors },
@@ -36,6 +37,7 @@ export const DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON = {
 
 const ThemeColorSchema = Type.Enum(PI_THEME_COLOR_NAMES);
 const WidgetPlacementSchema = Type.Enum(["aboveEditor", "belowEditor"] as const);
+const InlineHelpChoiceDisplaySchema = Type.Enum(["contextual", "inline"] as const);
 const InlineHelpOrderSchema = Type.Enum([
     "active-required-available",
     "active-available-required",
@@ -151,6 +153,7 @@ export const PiTypedCommandsConfigSchema = Type.Object(
                         Type.Object(
                             {
                                 layout: Type.Optional(Type.Literal("compact")),
+                                choiceDisplay: Type.Optional(InlineHelpChoiceDisplaySchema),
                                 order: Type.Optional(InlineHelpOrderSchema),
                                 metadata: Type.Optional(HelpMetadataSchema),
                                 colors: Type.Optional(

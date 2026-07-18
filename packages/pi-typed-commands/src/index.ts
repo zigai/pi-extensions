@@ -8,6 +8,7 @@ export type {
     ArgumentWidgetInputContext,
     ArgumentWidgetRenderContext,
     ArgumentWidgetTheme,
+    ArgumentFormKeybinding,
     CustomArgumentWidget,
     BooleanArgumentDefinition,
     ArgumentDescription,
@@ -18,12 +19,16 @@ export type {
     CoreCommandDefinition,
     DecodeResult,
     DefinitionDiagnostic,
+    EnumOptionDescriptions,
     FieldEditor,
     FlatArgumentDefinitions,
     EnumArgumentDefinition,
     InferArguments,
     MultiArgumentValue,
     MultiEnumArgumentDefinition,
+    StringListArgumentDefinition,
+    KeyValueArgumentDefinition,
+    KeyValueArgumentValue,
     NumberArgumentDefinition,
     ParsedArgumentDraft,
     ParseIssue,
@@ -49,8 +54,16 @@ export type {
     DefinedTypedCommand,
     TypedCommandDefinition,
     TypedCommandFormTitle,
+    TypedCommandFormPolicy,
+    TypedCommandGhostText,
+    TypedCommandGhostTextContext,
+    TypedCommandInlineHelp,
     TypedCommandHandler,
     TypedCommandHandle,
+    TypedSubcommandDefinition,
+    TypedSubcommandDefinitions,
+    TypedCommandParseResult,
+    SerializableSubcommandInvocation,
 } from "./pi/command-types.js";
 
 export {
@@ -63,6 +76,8 @@ export {
     hasArgumentGroups,
     isArgumentGroupDefinition,
     multiEnumArgument,
+    stringListArgument,
+    keyValueArgument,
     numberArgument,
     stringArgument,
 } from "./arguments.js";
@@ -73,8 +88,15 @@ export { createTypedCommandRegistry, TypedCommandRegistry } from "./registry.js"
 export type { TypedCommandLookup, TypedCommandSubscription } from "./registry.js";
 export { getTypedCommand, getTypedCommands } from "./pi/registry.js";
 export {
+    loadTypedCommandPresets,
+    recordTypedCommandRecentValues,
+    saveTypedCommandPreset,
+} from "./pi/presets.js";
+export type { TypedCommandPresetCollection, TypedCommandPresetContext } from "./pi/presets.js";
+export {
     lexTypedArgumentString,
     parseTypedCommandArgs,
+    parseTypedCommandInvocation,
     serializeTypedCommandArgs,
     toTypedParseResult,
 } from "./parser.js";
@@ -95,6 +117,7 @@ export type {
     SkillArgumentDiagnostic,
     SkillArgumentNormalizationResult,
     SkillFrontmatter,
+    SkillFrontmatterMetadata,
     TypedSkillDiagnostics,
     TypedSkillMetadata,
 } from "./skills/index.js";

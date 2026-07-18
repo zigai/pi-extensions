@@ -52,7 +52,7 @@ export function helperInvocationForEditorText(
 
     const { command } = invocation;
 
-    if (Object.keys(command.args).length === 0) {
+    if (Object.keys(command.args).length === 0 && command.subcommands === undefined) {
         return undefined;
     }
 

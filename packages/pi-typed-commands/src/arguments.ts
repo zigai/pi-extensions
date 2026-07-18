@@ -7,6 +7,8 @@ import {
     type EnumArgumentDefinition,
     type FlatArgumentDefinitions,
     type MultiEnumArgumentDefinition,
+    type StringListArgumentDefinition,
+    type KeyValueArgumentDefinition,
     type NumberArgumentDefinition,
     type StringArgumentDefinition,
 } from "./types.js";
@@ -93,6 +95,28 @@ export function multiEnumArgument<const TValues extends readonly string[]>(
     return { type: "multi-enum", values, ...options };
 }
 
+/** Create a repeatable freeform string-list argument. */
+export function stringListArgument<
+    const TOptions extends ArgumentOptions<StringListArgumentDefinition>,
+>(options: TOptions): StringListArgumentDefinition & TOptions;
+export function stringListArgument(): StringListArgumentDefinition;
+export function stringListArgument(
+    options: ArgumentOptions<StringListArgumentDefinition> = {},
+): StringListArgumentDefinition {
+    return { type: "string-list", ...options };
+}
+
+/** Create a string key/value argument parsed from `key=value` entries. */
+export function keyValueArgument<
+    const TOptions extends ArgumentOptions<KeyValueArgumentDefinition>,
+>(options: TOptions): KeyValueArgumentDefinition & TOptions;
+export function keyValueArgument(): KeyValueArgumentDefinition;
+export function keyValueArgument(
+    options: ArgumentOptions<KeyValueArgumentDefinition> = {},
+): KeyValueArgumentDefinition {
+    return { type: "key-value", ...options };
+}
+
 function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -170,11 +194,24 @@ function flattenGroupedArgumentDefinitionsInto(
     flattened: Record<string, ArgumentDefinition>,
     definitions: ArgumentDefinitions,
     prefix: string,
+    section?: string,
 ): void {
     for (const [name, definition] of Object.entries(definitions)) {
         const key = groupedKey(prefix, name);
         if (isArgumentGroupDefinition(definition)) {
-            flattenGroupedArgumentDefinitionsInto(flattened, definition.args, key);
+            const ownSection = definition.title ?? key;
+            let nextSection = ownSection;
+            if (section !== undefined) {
+                nextSection = `${section} › ${ownSection}`;
+            }
+            flattenGroupedArgumentDefinitionsInto(flattened, definition.args, key, nextSection);
+            continue;
+        }
+        if (section !== undefined && definition.ui?.section === undefined) {
+            assignUniqueDefinition(flattened, key, {
+                ...definition,
+                ui: { ...definition.ui, section },
+            });
             continue;
         }
         assignUniqueDefinition(flattened, key, definition);

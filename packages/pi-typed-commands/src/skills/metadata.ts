@@ -142,5 +142,8 @@ export function readTypedSkillMetadataResult(
     if (formTitle !== undefined) {
         metadata.formTitle = formTitle;
     }
+    if (frontmatter.metadata?.ghostText !== undefined) {
+        metadata.ghostText = frontmatter.metadata.ghostText;
+    }
     return { status: "ok", metadata };
 }

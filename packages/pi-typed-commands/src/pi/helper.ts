@@ -1,16 +1,26 @@
 import type { ExtensionContext, WidgetPlacement } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { resolveTypedCommandRoute } from "../command/subcommands.js";
 import { casesHandled } from "../exhaustive.js";
-import { lexTypedArgumentString, parseTypedCommandArgs } from "../parser.js";
+import { lexTypedArgumentString, parseTypedCommandArgs, type Token } from "../parser.js";
 import {
     argumentFlagNames,
     argumentTypeHint,
     argumentValueHint,
+    createArgumentLookup,
+    findArgumentName,
     formatArgumentFlagName,
     isPositionalArgument,
     orderedCommandArgumentEntries,
+    positionalArgumentEntries,
 } from "../schema.js";
-import type { ArgumentDefinition, ArgumentValue, ParseIssue } from "../types.js";
+import type {
+    ArgumentDefinition,
+    ArgumentValue,
+    EnumArgumentDefinition,
+    MultiEnumArgumentDefinition,
+    ParseIssue,
+} from "../types.js";
 import type { RegisteredTypedCommand } from "./command-types.js";
 import {
     commandDisplayName,
@@ -40,17 +50,34 @@ export function commandArgumentEntries(
     return orderedCommandArgumentEntries(command);
 }
 
+export type ChoiceArgumentDefinition = EnumArgumentDefinition | MultiEnumArgumentDefinition;
+
+export type ActiveChoiceContext = {
+    name: string;
+    definition: ChoiceArgumentDefinition;
+    query: string;
+    replacementStart: number;
+    replacementEnd: number;
+};
+
+function isChoiceArgumentDefinition(
+    definition: ArgumentDefinition,
+): definition is ChoiceArgumentDefinition {
+    return definition.type === "enum" || definition.type === "multi-enum";
+}
+
 function helperValueHint(
     name: string,
     definition: ArgumentDefinition,
     appearance: ResolvedInlineHelpAppearance,
 ): string {
-    if (
-        appearance.metadata.enumValues === false &&
-        (definition.type === "enum" || definition.type === "multi-enum") &&
-        definition.placeholder === undefined
-    ) {
-        return argumentTypeHint(definition);
+    if (isChoiceArgumentDefinition(definition) && definition.placeholder === undefined) {
+        if (appearance.metadata.enumValues === false) {
+            return argumentTypeHint(definition);
+        }
+        if (appearance.choiceDisplay === "contextual") {
+            return "value";
+        }
     }
     return argumentValueHint(definition, name);
 }
@@ -77,6 +104,212 @@ function helperHasNamedFlag(rawArgs: string): boolean {
     return /(?:^|\s)--?[^\s-]/.test(rawArgs);
 }
 
+function choiceContextForName(
+    command: RegisteredTypedCommand,
+    name: string,
+    query: string,
+    replacementStart: number,
+    replacementEnd: number,
+): ActiveChoiceContext | undefined {
+    const definition = command.args[name];
+    if (definition === undefined || !isChoiceArgumentDefinition(definition)) {
+        return undefined;
+    }
+    const commaIndex = query.lastIndexOf(",");
+    const queryAfterComma = query.slice(commaIndex + 1);
+    return {
+        name,
+        definition,
+        query: queryAfterComma,
+        replacementStart: replacementStart + commaIndex + 1,
+        replacementEnd,
+    };
+}
+
+function namedChoiceContext(
+    command: RegisteredTypedCommand,
+    rawArgs: string,
+    tokens: readonly Token[],
+): ActiveChoiceContext | undefined {
+    const lastToken = tokens[tokens.length - 1];
+    if (lastToken === undefined) {
+        return undefined;
+    }
+
+    const endsWithWhitespace = /\s$/.test(rawArgs);
+    const lookup = createArgumentLookup(command.args);
+    if (lastToken.quote === undefined && lastToken.value.startsWith("-")) {
+        const equalsIndex = lastToken.value.indexOf("=");
+        if (equalsIndex >= 0) {
+            if (endsWithWhitespace) {
+                return undefined;
+            }
+            const name = findArgumentName(lookup, lastToken.value.slice(0, equalsIndex));
+            if (name === undefined) {
+                return undefined;
+            }
+            return choiceContextForName(
+                command,
+                name,
+                lastToken.value.slice(equalsIndex + 1),
+                lastToken.start + equalsIndex + 1,
+                lastToken.end,
+            );
+        }
+        if (endsWithWhitespace) {
+            const name = findArgumentName(lookup, lastToken.value);
+            if (name !== undefined) {
+                return choiceContextForName(command, name, "", rawArgs.length, rawArgs.length);
+            }
+        }
+        return undefined;
+    }
+
+    if (endsWithWhitespace) {
+        return undefined;
+    }
+    const previousToken = tokens[tokens.length - 2];
+    if (
+        previousToken === undefined ||
+        previousToken.quote !== undefined ||
+        !previousToken.value.startsWith("-") ||
+        previousToken.value.includes("=")
+    ) {
+        return undefined;
+    }
+    const name = findArgumentName(lookup, previousToken.value);
+    if (name === undefined) {
+        return undefined;
+    }
+    return choiceContextForName(command, name, lastToken.value, lastToken.start, lastToken.end);
+}
+
+function flagConsumesHelperValue(definition: ArgumentDefinition): boolean {
+    switch (definition.type) {
+        case "string":
+        case "number":
+        case "enum":
+        case "multi-enum":
+        case "string-list":
+        case "key-value":
+            return true;
+        case "boolean":
+            return false;
+        default:
+            return casesHandled(definition);
+    }
+}
+
+function positionalChoiceContext(
+    command: RegisteredTypedCommand,
+    rawArgs: string,
+    tokens: readonly Token[],
+): ActiveChoiceContext | undefined {
+    const endsWithWhitespace = /\s$/.test(rawArgs);
+    const lookup = createArgumentLookup(command.args);
+    if (!endsWithWhitespace && tokens.length > 0) {
+        const currentToken = tokens[tokens.length - 1];
+        const earlierTokens = tokens.slice(0, -1);
+        const optionsEnded = earlierTokens.some(
+            (token) => token.quote === undefined && token.value === "--",
+        );
+        if (
+            !optionsEnded &&
+            currentToken?.quote === undefined &&
+            currentToken?.value.startsWith("-") === true
+        ) {
+            return undefined;
+        }
+
+        const previousToken = tokens[tokens.length - 2];
+        if (
+            !optionsEnded &&
+            previousToken?.quote === undefined &&
+            previousToken?.value.startsWith("-") === true &&
+            !previousToken.value.includes("=")
+        ) {
+            const previousName = findArgumentName(lookup, previousToken.value);
+            let previousDefinition: ArgumentDefinition | undefined;
+            if (previousName !== undefined) {
+                previousDefinition = command.args[previousName];
+            }
+            if (previousDefinition !== undefined && flagConsumesHelperValue(previousDefinition)) {
+                return undefined;
+            }
+        }
+    }
+
+    let completedTokenCount = tokens.length;
+    let query = "";
+    if (!endsWithWhitespace && tokens.length > 0) {
+        completedTokenCount -= 1;
+        query = tokens[tokens.length - 1]?.value ?? "";
+    }
+    let positionalIndex = 0;
+    let skipNextFlagValue = false;
+    let optionsEnded = false;
+    for (let index = 0; index < completedTokenCount; index += 1) {
+        const token = tokens[index];
+        if (token === undefined) {
+            continue;
+        }
+        if (skipNextFlagValue) {
+            skipNextFlagValue = false;
+            continue;
+        }
+        if (!optionsEnded && token.quote === undefined && token.value === "--") {
+            optionsEnded = true;
+            continue;
+        }
+        if (!optionsEnded && token.quote === undefined && token.value.startsWith("-")) {
+            let flag = token.value;
+            const equalsIndex = flag.indexOf("=");
+            if (equalsIndex >= 0) {
+                flag = flag.slice(0, equalsIndex);
+            }
+            const name = findArgumentName(lookup, flag);
+            let definition: ArgumentDefinition | undefined;
+            if (name !== undefined) {
+                definition = command.args[name];
+            }
+            if (
+                definition !== undefined &&
+                flagConsumesHelperValue(definition) &&
+                equalsIndex < 0
+            ) {
+                skipNextFlagValue = true;
+            }
+            continue;
+        }
+        positionalIndex += 1;
+    }
+
+    const entry = positionalArgumentEntries(command.args)[positionalIndex];
+    if (entry === undefined) {
+        return undefined;
+    }
+    let replacementStart = rawArgs.length;
+    let replacementEnd = rawArgs.length;
+    if (!endsWithWhitespace) {
+        const currentToken = tokens[tokens.length - 1];
+        if (currentToken !== undefined) {
+            replacementStart = currentToken.start;
+            replacementEnd = currentToken.end;
+        }
+    }
+    return choiceContextForName(command, entry[0], query, replacementStart, replacementEnd);
+}
+
+export function activeChoiceContext(
+    invocation: EditorTypedCommandInvocation,
+): ActiveChoiceContext | undefined {
+    const tokens = lexTypedArgumentString(invocation.rawArgs).tokens;
+    return (
+        namedChoiceContext(invocation.command, invocation.rawArgs, tokens) ??
+        positionalChoiceContext(invocation.command, invocation.rawArgs, tokens)
+    );
+}
+
 function isHelperMultiValue(value: ArgumentValue): value is readonly string[] {
     return Array.isArray(value);
 }
@@ -94,7 +327,16 @@ function formatHelperValue(value: ArgumentValue): string {
     if (typeof value === "number" || typeof value === "boolean") {
         return String(value);
     }
-    return casesHandled(value);
+    return Object.entries(value)
+        .map(([key, entryValue]) => `${key}=${entryValue}`)
+        .join(",");
+}
+
+function formatArgumentHelperValue(definition: ArgumentDefinition, value: ArgumentValue): string {
+    if (definition.type === "string" && definition.sensitive === true && value !== undefined) {
+        return "<redacted>";
+    }
+    return formatHelperValue(value);
 }
 
 function providedHelperToken(
@@ -107,6 +349,9 @@ function providedHelperToken(
         return `${name}${valueSeparator}${formatHelperValue(value)}`;
     }
     const flag = formatArgumentFlagName(name, definition);
+    if (definition.type === "string" && definition.sensitive === true) {
+        return `${flag}${valueSeparator}<redacted>`;
+    }
     if (definition.type === "boolean") {
         if (value === true) {
             return flag;
@@ -161,6 +406,9 @@ function defaultHelperToken(
         return `${name}${valueSeparator}${formatHelperValue(value)}`;
     }
     const flag = formatArgumentFlagName(name, definition);
+    if (definition.type === "string" && definition.sensitive === true) {
+        return `${flag}${valueSeparator}<redacted>`;
+    }
     if (definition.type === "boolean") {
         return `${flag}${valueSeparator}true`;
     }
@@ -260,7 +508,7 @@ function helperDefaultMetadata(definition: ArgumentDefinition): string | undefin
     if (definition.default === undefined) {
         return undefined;
     }
-    return `default ${formatHelperValue(definition.default)}`;
+    return `default ${formatArgumentHelperValue(definition, definition.default)}`;
 }
 
 function renderInlineMetadata(parts: string[]): string {
@@ -281,7 +529,24 @@ function inlineTokenSegments(
 function inlineTokenCoreSegments(
     item: InlineHelpItem,
     appearance: ResolvedInlineHelpAppearance,
+    choiceContext?: ActiveChoiceContext,
 ): InlineTokenCoreSegments {
+    if (choiceContext?.name === item.name && item.value === undefined) {
+        const label = `${inlineHelpLabel(item.name, item.definition)}${helperRequiredMarker(
+            item.definition,
+            appearance,
+        )}`;
+        return inlineTokenSegments(
+            label,
+            helperTypeSuffix(item.definition, appearance),
+            `${appearance.format.valueSeparator}<${helperValueHint(
+                item.name,
+                item.definition,
+                appearance,
+            )}>`,
+        );
+    }
+
     if (item.valueSource === "provided") {
         if (!appearance.metadata.types && !appearance.metadata.required) {
             return inlineTokenSegments(
@@ -305,13 +570,13 @@ function inlineTokenCoreSegments(
             return inlineTokenSegments(
                 label,
                 typeSuffix,
-                `${appearance.format.valueSeparator}${formatHelperValue(item.value)}`,
+                `${appearance.format.valueSeparator}${formatArgumentHelperValue(item.definition, item.value)}`,
             );
         }
         return inlineTokenSegments(
             label,
             typeSuffix,
-            `${appearance.format.valueSeparator}${formatHelperValue(item.value)}`,
+            `${appearance.format.valueSeparator}${formatArgumentHelperValue(item.definition, item.value)}`,
         );
     }
 
@@ -333,7 +598,7 @@ function inlineTokenCoreSegments(
         return inlineTokenSegments(
             label,
             helperTypeSuffix(item.definition, appearance),
-            `${appearance.format.valueSeparator}${formatHelperValue(item.value)}`,
+            `${appearance.format.valueSeparator}${formatArgumentHelperValue(item.definition, item.value)}`,
         );
     }
 
@@ -367,6 +632,7 @@ function renderInlineHelpToken(
     item: InlineHelpItem,
     theme: HelperTheme,
     appearance: ResolvedInlineHelpAppearance,
+    choiceContext?: ActiveChoiceContext,
 ): string {
     const metadataParts: string[] = [];
     if (
@@ -394,7 +660,7 @@ function renderInlineHelpToken(
     if (metadata.length > 0) {
         renderedMetadata = theme.fg(appearance.colors.metadata, metadata);
     }
-    const segments = inlineTokenCoreSegments(item, appearance);
+    const segments = inlineTokenCoreSegments(item, appearance, choiceContext);
     const stateColor = appearance.colors[item.state];
     return (
         renderColoredPart(theme, stateColor, appearance.format.tokenPrefix + segments.beforeType) +
@@ -543,12 +809,19 @@ function formatInlineIssueMessage(
 function inlineIssueLine(
     invocation: EditorTypedCommandInvocation,
     state: HelperRenderState,
+    choiceContext?: ActiveChoiceContext,
 ): string | undefined {
     const parsed = parseTypedCommandArgs(invocation.command, invocation.rawArgs);
-    const issue = parsed.issues.find(
-        (item) =>
-            item.kind !== "missing-required" && shouldShowInlineIssue(invocation, item, state),
-    );
+    const submitted = editorTextForInvocation(invocation) === state.submittedInvalidEditorText;
+    const issue = parsed.issues.find((item) => {
+        if (item.kind === "missing-required") {
+            return false;
+        }
+        if (!submitted && choiceContext?.name === item.name) {
+            return false;
+        }
+        return shouldShowInlineIssue(invocation, item, state);
+    });
     if (issue === undefined) {
         return undefined;
     }
@@ -559,6 +832,61 @@ type HelperTheme = {
     fg(color: string, text: string): string;
 };
 
+function renderContextualChoiceLines(
+    context: ActiveChoiceContext,
+    helperIndent: string,
+    width: number,
+    theme: HelperTheme,
+    appearance: ResolvedInlineHelpAppearance,
+): string[] {
+    const label = bareInlineArgumentLabel(context.name, context.definition);
+    const firstPrefix = `${helperIndent}${label}: `;
+    const continuationPrefix = " ".repeat(firstPrefix.length);
+    const separator = appearance.format.groupSeparator;
+    const rows: Array<{ prefix: string; values: string[] }> = [];
+    let prefix = firstPrefix;
+    let values: string[] = [];
+    let rowWidth = prefix.length;
+
+    for (const value of context.definition.values) {
+        let separatorWidth = 0;
+        if (values.length > 0) {
+            separatorWidth = separator.length;
+        }
+        if (values.length > 0 && rowWidth + separatorWidth + value.length > width) {
+            rows.push({ prefix, values });
+            prefix = continuationPrefix;
+            values = [];
+            rowWidth = prefix.length;
+        }
+        if (values.length > 0) {
+            rowWidth += separator.length;
+        }
+        values.push(value);
+        rowWidth += value.length;
+    }
+    if (values.length > 0) {
+        rows.push({ prefix, values });
+    }
+
+    return rows.map((row) => {
+        const renderedValues = row.values
+            .map((value) => {
+                let color = appearance.colors.type;
+                if (context.query.length > 0 && value.startsWith(context.query)) {
+                    color = appearance.colors.active;
+                }
+                return theme.fg(color, value);
+            })
+            .join(separator);
+        return truncateToWidth(
+            `${theme.fg(appearance.colors.active, row.prefix)}${renderedValues}`,
+            width,
+            "",
+        );
+    });
+}
+
 function renderCompactInlineHelper(
     invocation: EditorTypedCommandInvocation,
     width: number,
@@ -568,15 +896,47 @@ function renderCompactInlineHelper(
 ): string[] {
     const commandPrefix = `/${commandDisplayName(invocation.command)}`;
     const helperIndent = " ".repeat(commandPrefix.length + 2);
+    const choiceContext = activeChoiceContext(invocation);
     const items = collectInlineHelperItems(invocation, appearance);
     const tokenGroups = orderedInlineHelpItems(items, appearance).map((group) =>
         group
-            .map((item) => renderInlineHelpToken(item, theme, appearance))
+            .map((item) => renderInlineHelpToken(item, theme, appearance, choiceContext))
             .join(appearance.format.itemSeparator),
     );
     const commandLine = `${helperIndent}${tokenGroups.join(appearance.format.groupSeparator)}`;
-    const rendered = [truncateToWidth(commandLine, width, "")];
-    const issueLine = inlineIssueLine(invocation, state);
+    let rendered: string[] = [];
+    if (commandLine.trim().length > 0) {
+        rendered = wrapTextWithAnsi(commandLine, width);
+    }
+    const formOnlyCount = Object.values(invocation.command.args).filter(
+        (definition) => definition.formOnly === true,
+    ).length;
+    if (formOnlyCount > 0) {
+        let fieldSuffix = "s";
+        if (formOnlyCount === 1) {
+            fieldSuffix = "";
+        }
+        rendered.push(
+            truncateToWidth(
+                `${helperIndent}${theme.fg(
+                    appearance.colors.metadata,
+                    `↳ form: ${formOnlyCount} additional field${fieldSuffix}`,
+                )}`,
+                width,
+                "…",
+            ),
+        );
+    }
+    if (
+        appearance.choiceDisplay === "contextual" &&
+        appearance.metadata.enumValues &&
+        choiceContext !== undefined
+    ) {
+        rendered.push(
+            ...renderContextualChoiceLines(choiceContext, helperIndent, width, theme, appearance),
+        );
+    }
+    const issueLine = inlineIssueLine(invocation, state, choiceContext);
     if (issueLine !== undefined) {
         rendered.push(
             truncateToWidth(
@@ -597,6 +957,65 @@ export function renderInlineHelper(
     state: HelperRenderState = {},
     appearance: ResolvedInlineHelpAppearance = DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp,
 ): string[] {
+    if (invocation.command.inlineHelp === "hidden") {
+        return [];
+    }
+    const route = resolveTypedCommandRoute(invocation.command, invocation.rawArgs);
+    if (route.status === "subcommand" && route.subcommand !== undefined) {
+        const selected = invocation.command.subcommands?.[route.subcommand];
+        if (selected !== undefined) {
+            return renderInlineHelper(
+                {
+                    command: selected,
+                    rawArgs: route.rawArgs,
+                    trailingBody: invocation.trailingBody,
+                },
+                width,
+                theme,
+                state,
+                appearance,
+            );
+        }
+    }
+    if (
+        invocation.command.subcommands !== undefined &&
+        (route.status === "missing" ||
+            route.status === "unknown" ||
+            invocation.rawArgs.trim().length === 0)
+    ) {
+        const commandPrefix = `/${commandDisplayName(invocation.command)}`;
+        const indent = " ".repeat(commandPrefix.length + 2);
+        const tokens = Object.entries(invocation.command.subcommands).map(([name, subcommand]) => {
+            let aliases = "";
+            if (appearance.metadata.aliases) {
+                let aliasMetadata: string[] = [];
+                if ((subcommand.aliases?.length ?? 0) > 0) {
+                    aliasMetadata = [`aliases ${subcommand.aliases?.join(",") ?? ""}`];
+                }
+                aliases = renderInlineMetadata(aliasMetadata);
+            }
+            return theme.fg(
+                appearance.colors.required,
+                `${appearance.format.tokenPrefix}${name}${aliases}${appearance.format.tokenSuffix}`,
+            );
+        });
+        const lines = [
+            truncateToWidth(`${indent}${tokens.join(appearance.format.itemSeparator)}`, width, "…"),
+        ];
+        if (route.status === "unknown") {
+            lines.push(
+                truncateToWidth(
+                    `${indent}${theme.fg(
+                        appearance.colors.issue,
+                        `✕ Unknown subcommand '${route.token ?? ""}'`,
+                    )}`,
+                    width,
+                    "…",
+                ),
+            );
+        }
+        return lines;
+    }
     switch (appearance.layout) {
         case "compact":
             return renderCompactInlineHelper(invocation, width, theme, state, appearance);
@@ -613,7 +1032,7 @@ export function setHelperWidget(
     state: HelperRenderState = {},
     appearance: ResolvedInlineHelpAppearance = DEFAULT_PI_TYPED_COMMANDS_APPEARANCE.inlineHelp,
 ): void {
-    if (invocation === undefined) {
+    if (invocation === undefined || invocation.command.inlineHelp === "hidden") {
         ctx.ui.setWidget(WIDGET_KEY, undefined, { placement });
         return;
     }

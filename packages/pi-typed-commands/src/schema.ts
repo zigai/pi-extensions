@@ -13,6 +13,7 @@ import type {
     FlatArgumentDefinitions,
     ParseIssue,
     CoreRegisteredTypedCommand,
+    StringArgumentDefinition,
 } from "./types.js";
 
 const ARGUMENT_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
@@ -27,6 +28,8 @@ const ARGUMENT_TYPES: ReadonlySet<string> = new Set([
     "boolean",
     "enum",
     "multi-enum",
+    "string-list",
+    "key-value",
 ]);
 
 /** Parser lookup for non-positional flags, keyed by canonical flag name without leading dashes. */
@@ -187,7 +190,21 @@ const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "radio",
     "multiselect",
     "path",
+    "file",
+    "directory",
     "command",
+    "secret",
+    "list",
+    "key-value",
+    "duration",
+    "date",
+    "time",
+    "datetime",
+    "url",
+    "email",
+    "json",
+    "code",
+    "stepper",
     "readonly",
     "computed",
     "confirm",
@@ -204,6 +221,10 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
     }
     const prototype: unknown = Object.getPrototypeOf(value);
     return prototype === Object.prototype || prototype === null;
+}
+
+function isStringArrayValue(value: unknown): value is readonly string[] {
+    return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
 }
 
 function isArgumentType(value: unknown): value is ArgumentDefinition["type"] {
@@ -352,6 +373,55 @@ function validateValuesShape(
     return valid;
 }
 
+function validateEnumOptionDescriptionsShape(
+    name: string,
+    raw: Record<string, unknown>,
+    diagnostics: DefinitionDiagnostic[],
+): boolean {
+    if (!Object.hasOwn(raw, "optionDescriptions") || raw.optionDescriptions === undefined) {
+        return true;
+    }
+
+    const optionDescriptions = raw.optionDescriptions;
+    if (!isRecord(optionDescriptions) || !isPlainRecord(optionDescriptions)) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "optionDescriptions",
+            "argument.enum.option-descriptions.invalid",
+            `${name}.optionDescriptions must be a plain object of enum values to descriptions`,
+        );
+        return false;
+    }
+
+    let values: Set<string> | undefined;
+    if (isStringArrayValue(raw.values)) {
+        values = new Set(raw.values);
+    }
+    let valid = true;
+    for (const [value, description] of Object.entries(optionDescriptions)) {
+        if (values === undefined || !values.has(value)) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.enum.option-description.unknown-value",
+                `${name}.optionDescriptions.${value} must match an enum value`,
+                [name, "optionDescriptions", value],
+            );
+            valid = false;
+        }
+        if (typeof description !== "string" || description.length === 0) {
+            addDefinitionDiagnostic(
+                diagnostics,
+                "argument.enum.option-description.invalid",
+                `${name}.optionDescriptions.${value} must be a non-empty string`,
+                [name, "optionDescriptions", value],
+            );
+            valid = false;
+        }
+    }
+    return valid;
+}
+
 function validateCustomWidgetShape(
     name: string,
     custom: unknown,
@@ -435,7 +505,14 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
         );
         valid = false;
     }
-    for (const field of ["readOnly", "hidden"] as const) {
+    for (const field of [
+        "readOnly",
+        "hidden",
+        "disabled",
+        "visibleWhen",
+        "enabledWhen",
+        "requiredWhen",
+    ] as const) {
         const value = ui[field];
         if (value === undefined || typeof value === "boolean" || typeof value === "function") {
             continue;
@@ -446,6 +523,30 @@ function validateUiShape(name: string, ui: unknown, diagnostics: DefinitionDiagn
             `ui.${field}`,
             "argument.ui.boolean-option.invalid",
             `${name}.ui.${field} must be a boolean or function`,
+        );
+        valid = false;
+    }
+    for (const field of ["section", "copyFrom"] as const) {
+        const value = ui[field];
+        if (value === undefined || typeof value === "string") {
+            continue;
+        }
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            `ui.${field}`,
+            "argument.ui.string-option.invalid",
+            `${name}.ui.${field} must be a string`,
+        );
+        valid = false;
+    }
+    if (ui.advanced !== undefined && typeof ui.advanced !== "boolean") {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "ui.advanced",
+            "argument.ui.advanced.invalid",
+            `${name}.ui.advanced must be a boolean`,
         );
         valid = false;
     }
@@ -501,6 +602,20 @@ function validateArgumentDefinitionShape(
     for (const field of ["description", "flag", "title", "placeholder"] as const) {
         valid = validateOptionalStringField(name, definition, field, diagnostics) && valid;
     }
+    if (
+        definition.examples !== undefined &&
+        (!Array.isArray(definition.examples) ||
+            !definition.examples.every((example) => typeof example === "string"))
+    ) {
+        addArgumentDiagnostic(
+            diagnostics,
+            name,
+            "examples",
+            "argument.examples.invalid",
+            `${name}.examples must be a list of strings`,
+        );
+        valid = false;
+    }
     for (const field of ["required", "rest", "formOnly"] as const) {
         valid = validateOptionalBooleanField(name, definition, field, diagnostics) && valid;
     }
@@ -530,12 +645,41 @@ function validateArgumentDefinitionShape(
             );
             valid = false;
         }
+        if (
+            definition.format !== undefined &&
+            (typeof definition.format !== "string" ||
+                !["email", "url", "date", "time", "datetime", "duration", "json"].includes(
+                    definition.format,
+                ))
+        ) {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "format",
+                "argument.string.format.invalid",
+                `${name}.format is unsupported`,
+            );
+            valid = false;
+        }
+        if (definition.sensitive !== undefined && typeof definition.sensitive !== "boolean") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "sensitive",
+                "argument.string.sensitive.invalid",
+                `${name}.sensitive must be a boolean`,
+            );
+            valid = false;
+        }
     }
     if (definition.type === "number" && definition.integer !== undefined) {
         valid = validateOptionalBooleanField(name, definition, "integer", diagnostics) && valid;
     }
     if (definition.type === "enum" || definition.type === "multi-enum") {
         valid = validateValuesShape(name, definition, diagnostics) && valid;
+    }
+    if (definition.type === "enum") {
+        valid = validateEnumOptionDescriptionsShape(name, definition, diagnostics) && valid;
     }
 
     return valid;
@@ -595,10 +739,6 @@ function validateFlagName(
     flags.set(flag, owner);
 }
 
-function isStringArrayValue(value: unknown): value is string[] {
-    return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
-}
-
 function supportsAppendOccurrence(definition: ArgumentDefinition): boolean {
     switch (definition.type) {
         case "string":
@@ -607,6 +747,8 @@ function supportsAppendOccurrence(definition: ArgumentDefinition): boolean {
         case "enum":
             return false;
         case "multi-enum":
+        case "string-list":
+        case "key-value":
             return true;
         default:
             return casesHandled(definition);
@@ -617,13 +759,81 @@ function supportsRestPosition(definition: ArgumentDefinition): boolean {
     switch (definition.type) {
         case "string":
         case "multi-enum":
+        case "string-list":
             return true;
         case "number":
         case "boolean":
         case "enum":
+        case "key-value":
             return false;
         default:
             return casesHandled(definition);
+    }
+}
+
+function isValidCalendarDate(value: string): boolean {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (match === null) {
+        return false;
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+        date.getUTCFullYear() === year &&
+        date.getUTCMonth() === month - 1 &&
+        date.getUTCDate() === day
+    );
+}
+
+function validateStringFormat(
+    format: NonNullable<StringArgumentDefinition["format"]>,
+    value: string,
+): string | undefined {
+    switch (format) {
+        case "email":
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+                return "expects an email address";
+            }
+            return undefined;
+        case "url": {
+            try {
+                new URL(value);
+                return undefined;
+            } catch {
+                return "expects an absolute URL";
+            }
+        }
+        case "date":
+            if (!isValidCalendarDate(value)) {
+                return "expects a date in YYYY-MM-DD form";
+            }
+            return undefined;
+        case "time":
+            if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)) {
+                return "expects a time in HH:MM or HH:MM:SS form";
+            }
+            return undefined;
+        case "datetime":
+            if (Number.isNaN(Date.parse(value))) {
+                return "expects an ISO date-time";
+            }
+            return undefined;
+        case "duration":
+            if (!/^(?:\d+(?:\.\d+)?(?:ms|s|m|h|d|w))+$/.test(value)) {
+                return "expects a duration such as 30s, 5m, or 2h";
+            }
+            return undefined;
+        case "json":
+            try {
+                JSON.parse(value);
+                return undefined;
+            } catch {
+                return "expects valid JSON";
+            }
+        default:
+            return casesHandled(format);
     }
 }
 
@@ -683,6 +893,12 @@ export function validateArgumentValue(
                     };
                 }
             }
+            if (definition.format !== undefined) {
+                const formatIssue = validateStringFormat(definition.format, value);
+                if (formatIssue !== undefined) {
+                    return { ok: false, message: `${displayName} ${formatIssue}` };
+                }
+            }
             return { ok: true };
         }
         case "number": {
@@ -739,6 +955,47 @@ export function validateArgumentValue(
             }
             return { ok: true };
         }
+        case "string-list": {
+            if (!isStringArrayValue(value)) {
+                return { ok: false, message: `${displayName} expects a list of text values` };
+            }
+            if (definition.minItems !== undefined && value.length < definition.minItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at least ${definition.minItems} item(s)`,
+                };
+            }
+            if (definition.maxItems !== undefined && value.length > definition.maxItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at most ${definition.maxItems} item(s)`,
+                };
+            }
+            return { ok: true };
+        }
+        case "key-value": {
+            if (
+                !isRecord(value) ||
+                Array.isArray(value) ||
+                !Object.values(value).every((item) => typeof item === "string")
+            ) {
+                return { ok: false, message: `${displayName} expects key=value entries` };
+            }
+            const size = Object.keys(value).length;
+            if (definition.minItems !== undefined && size < definition.minItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at least ${definition.minItems} entry(s)`,
+                };
+            }
+            if (definition.maxItems !== undefined && size > definition.maxItems) {
+                return {
+                    ok: false,
+                    message: `${displayName} must include at most ${definition.maxItems} entry(s)`,
+                };
+            }
+            return { ok: true };
+        }
         default:
             return casesHandled(definition);
     }
@@ -783,13 +1040,13 @@ function validateUi(
                 `${name}.ui.widget must be one of: ${[...SUPPORTED_WIDGETS].join(", ")}`,
             );
         }
-        if (ui.widget === "number" && definition.type !== "number") {
+        if ((ui.widget === "number" || ui.widget === "stepper") && definition.type !== "number") {
             addArgumentDiagnostic(
                 diagnostics,
                 name,
                 "ui.widget",
                 "argument.ui.widget.type-mismatch",
-                `${name}.ui.widget number requires a number argument`,
+                `${name}.ui.widget ${ui.widget} requires a number argument`,
             );
         }
         if ((ui.widget === "toggle" || ui.widget === "confirm") && definition.type !== "boolean") {
@@ -817,6 +1074,55 @@ function validateUi(
                 "ui.widget",
                 "argument.ui.widget.type-mismatch",
                 `${name}.ui.widget multiselect requires a multi-enum argument`,
+            );
+        }
+        if (ui.widget === "list" && definition.type !== "string-list") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget list requires a string-list argument`,
+            );
+        }
+        if (ui.widget === "key-value" && definition.type !== "key-value") {
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget key-value requires a key-value argument`,
+            );
+        }
+        const pathLikeWidget = ["path", "file", "directory"].includes(ui.widget);
+        const stringWidget = [
+            "text",
+            "textarea",
+            "command",
+            "secret",
+            "duration",
+            "date",
+            "time",
+            "datetime",
+            "url",
+            "email",
+            "json",
+            "code",
+        ].includes(ui.widget);
+        if (
+            (stringWidget && definition.type !== "string") ||
+            (pathLikeWidget && definition.type !== "string" && definition.type !== "string-list")
+        ) {
+            let expectedType = "string";
+            if (pathLikeWidget) {
+                expectedType = "string or string-list";
+            }
+            addArgumentDiagnostic(
+                diagnostics,
+                name,
+                "ui.widget",
+                "argument.ui.widget.type-mismatch",
+                `${name}.ui.widget ${ui.widget} requires a ${expectedType} argument`,
             );
         }
     }
@@ -872,7 +1178,7 @@ function validateTypeSpecificRules(
             name,
             "occurrence",
             "argument.occurrence.type-mismatch",
-            `${name}.occurrence append is only valid for multi-enum arguments`,
+            `${name}.occurrence append is only valid for collection arguments`,
         );
     }
     if (
@@ -1042,10 +1348,66 @@ function validateTypeSpecificRules(
                     `${name}.min must be less than or equal to max`,
                 );
             }
+            if (
+                definition.step !== undefined &&
+                (!Number.isFinite(definition.step) || definition.step <= 0)
+            ) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "step",
+                    "argument.number.step.invalid",
+                    `${name}.step must be a positive finite number`,
+                );
+            }
+            if (definition.unit?.length === 0) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "unit",
+                    "argument.number.unit.invalid",
+                    `${name}.unit must not be empty`,
+                );
+            }
             break;
         }
         case "boolean":
             break;
+        case "string-list":
+        case "key-value": {
+            if (definition.minItems !== undefined && !isNonNegativeInteger(definition.minItems)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "minItems",
+                    "argument.collection.min-items.invalid",
+                    `${name}.minItems must be a non-negative integer`,
+                );
+            }
+            if (definition.maxItems !== undefined && !isNonNegativeInteger(definition.maxItems)) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "maxItems",
+                    "argument.collection.max-items.invalid",
+                    `${name}.maxItems must be a non-negative integer`,
+                );
+            }
+            if (
+                definition.minItems !== undefined &&
+                definition.maxItems !== undefined &&
+                definition.minItems > definition.maxItems
+            ) {
+                addArgumentDiagnostic(
+                    diagnostics,
+                    name,
+                    "minItems",
+                    "argument.collection.item-range.invalid",
+                    `${name}.minItems must be less than or equal to maxItems`,
+                );
+            }
+            break;
+        }
         case "enum":
         case "multi-enum": {
             if (definition.values.length === 0) {
@@ -1319,6 +1681,9 @@ export function applyArgumentDefault(definition: ArgumentDefinition): ArgumentVa
         if (isStringArrayValue(definition.default)) {
             return [...definition.default];
         }
+        if (typeof definition.default === "object") {
+            return { ...definition.default };
+        }
         return definition.default;
     }
     return undefined;
@@ -1468,6 +1833,44 @@ export function coerceArgumentValue(
             }
             return { ok: true, value: values };
         }
+        case "string-list": {
+            const values = raw
+                .split(",")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+            return { ok: true, value: values };
+        }
+        case "key-value": {
+            const entries: Record<string, string> = {};
+            for (const item of raw.split(",")) {
+                const equalsIndex = item.indexOf("=");
+                if (equalsIndex <= 0) {
+                    return {
+                        ok: false,
+                        issue: createParseIssue(
+                            "invalid-value",
+                            `${displayName} expects key=value`,
+                            name,
+                            item,
+                        ),
+                    };
+                }
+                const key = item.slice(0, equalsIndex).trim();
+                if (key.length === 0) {
+                    return {
+                        ok: false,
+                        issue: createParseIssue(
+                            "invalid-value",
+                            `${displayName} expects a non-empty key`,
+                            name,
+                            item,
+                        ),
+                    };
+                }
+                entries[key] = item.slice(equalsIndex + 1);
+            }
+            return { ok: true, value: entries };
+        }
         default:
             return casesHandled(definition);
     }
@@ -1478,6 +1881,8 @@ export function selectableArgumentValues(definition: ArgumentDefinition): Argume
     switch (definition.type) {
         case "string":
         case "number":
+        case "string-list":
+        case "key-value":
             return [];
         case "boolean": {
             const values: ArgumentValue[] = [true, false];
@@ -1511,6 +1916,9 @@ export function completionValuesForArgument(definition: ArgumentDefinition): str
         case "enum":
         case "multi-enum":
             return [...definition.values];
+        case "string-list":
+        case "key-value":
+            return [];
         default:
             return casesHandled(definition);
     }
@@ -1530,6 +1938,22 @@ export function normalizeTextArgumentInput(
             return input;
         case "number":
             return Number(trimmed);
+        case "string-list":
+            return trimmed
+                .split(",")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+        case "key-value": {
+            const entries: Record<string, string> = {};
+            for (const item of trimmed.split(",")) {
+                const equalsIndex = item.indexOf("=");
+                if (equalsIndex <= 0) {
+                    return undefined;
+                }
+                entries[item.slice(0, equalsIndex).trim()] = item.slice(equalsIndex + 1);
+            }
+            return entries;
+        }
         case "boolean":
         case "enum":
         case "multi-enum":
@@ -1546,6 +1970,8 @@ export function argumentTypeHint(definition: ArgumentDefinition): string {
         case "boolean":
         case "enum":
         case "multi-enum":
+        case "string-list":
+        case "key-value":
             return definition.type;
         case "number":
             if (definition.integer === true) {
@@ -1577,6 +2003,10 @@ export function argumentValueHint(definition: ArgumentDefinition, name?: string)
             return definition.values.join("|");
         case "multi-enum":
             return definition.values.join(",");
+        case "string-list":
+            return "value1,value2";
+        case "key-value":
+            return "key=value";
         default:
             return casesHandled(definition);
     }
@@ -1587,8 +2017,16 @@ export function formatArgumentDefault(definition: ArgumentDefinition): string {
     if (definition.default === undefined) {
         return "";
     }
+    if (definition.type === "string" && definition.sensitive === true) {
+        return "";
+    }
     if (Array.isArray(definition.default)) {
         return `=${definition.default.join(",")}`;
+    }
+    if (typeof definition.default === "object") {
+        return `=${Object.entries(definition.default)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(",")}`;
     }
     return `=${String(definition.default)}`;
 }

@@ -3,15 +3,19 @@ import type {
     DefinedTypedCommand,
     RegisteredTypedCommand,
     TypedCommandHandle,
+    TypedSubcommandDefinitions,
 } from "../pi/command-types.js";
 
 /** Create the disposable handle returned from typed command registration. */
-export function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
-    definition: DefinedTypedCommand<TDefinitions>,
+export function createCommandHandle<
+    TDefinitions extends ArgumentDefinitions,
+    TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
+>(
+    definition: DefinedTypedCommand<TDefinitions, TSubcommands>,
     command: RegisteredTypedCommand<TDefinitions>,
     invocationName: string,
     unregister: (command: RegisteredTypedCommand<TDefinitions>) => void,
-): TypedCommandHandle<TDefinitions> {
+): TypedCommandHandle<TDefinitions, TSubcommands> {
     let disposed = false;
     return Object.freeze({
         definition,
@@ -21,6 +25,9 @@ export function createCommandHandle<TDefinitions extends ArgumentDefinitions>(
         },
         serialize(values: SerializableArgumentValues<TDefinitions>) {
             return definition.serialize(values);
+        },
+        serializeSubcommand(invocation) {
+            return definition.serializeSubcommand(invocation);
         },
         formatUsage() {
             return definition.formatUsage();

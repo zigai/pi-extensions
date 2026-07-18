@@ -1,4 +1,5 @@
 import { quoteSerializedValue } from "./behavior.js";
+import { resolveTypedCommandRoute, type TypedCommandRoute } from "./command/subcommands.js";
 import {
     expandGroupedArgumentValues,
     flattenGroupedArgumentValues,
@@ -18,6 +19,7 @@ import type {
     ArgumentPath,
     ArgumentValue,
     CompiledCommand,
+    CoreRegisteredTypedCommand,
     FlatArgumentDefinitions,
     InferArguments,
     ParsedArgumentDraft,
@@ -71,6 +73,8 @@ type ParsableTypedCommand<TDefinitions extends ArgumentDefinitions> = {
     args: FlatArgumentDefinitions;
     compiled?: CompiledCommand<TDefinitions>;
     refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
+    subcommands?: Readonly<Record<string, CoreRegisteredTypedCommand>>;
+    hasRootHandler?: boolean;
 };
 
 type TypedCommandGrammar = CompiledCommand;
@@ -306,9 +310,21 @@ function isStringArrayValue(value: unknown): value is readonly string[] {
     return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
 }
 
+function isKeyValueArgumentValue(value: unknown): value is Readonly<Record<string, string>> {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        Object.values(value).every((item) => typeof item === "string")
+    );
+}
+
 function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
     if (isStringArrayValue(value)) {
         return [...value];
+    }
+    if (isKeyValueArgumentValue(value)) {
+        return { ...value };
     }
     return value;
 }
@@ -322,6 +338,11 @@ function serializedArgumentText(value: unknown): string | undefined {
     }
     if (isStringArrayValue(value)) {
         return value.join(",");
+    }
+    if (isKeyValueArgumentValue(value)) {
+        return Object.entries(value)
+            .map(([key, entryValue]) => `${key}=${entryValue}`)
+            .join(",");
     }
     return undefined;
 }
@@ -338,7 +359,17 @@ export function getTypedCommandRefinementIssues(
     const issues = refine(values, { provided });
     return issues.map((issue) => {
         const name = issue.path?.[0];
-        return createParseIssue("invalid-value", issue.message, name);
+        let parsedIssue: ParseIssue = createParseIssue("invalid-value", issue.message, name);
+        if (issue.code !== undefined) {
+            parsedIssue = { ...parsedIssue, code: issue.code };
+        }
+        const relatedNames = issue.relatedPaths
+            ?.map((path) => path[0])
+            .filter((related): related is string => related !== undefined);
+        if (relatedNames !== undefined && relatedNames.length > 0) {
+            return { ...parsedIssue, relatedNames };
+        }
+        return parsedIssue;
     });
 }
 
@@ -732,13 +763,68 @@ export function parseTypedCommandArgs<TDefinitions extends ArgumentDefinitions>(
     return new ArgumentParser(command, rawArgs).parse();
 }
 
+export type ParsedTypedCommandInvocation<TCommand extends CoreRegisteredTypedCommand> = {
+    readonly route: TypedCommandRoute<TCommand>;
+    readonly parsed: ParsedCommandArguments;
+};
+
+function subcommandRouteIssue<TCommand extends CoreRegisteredTypedCommand>(
+    route: TypedCommandRoute<TCommand>,
+): ParsedCommandArguments {
+    const available = Object.keys(route.root.subcommands ?? {});
+    let issue: ParseIssue = {
+        kind: "missing-subcommand",
+        message: `A subcommand is required. Available subcommands: ${available.join(", ")}`,
+    };
+    if (route.status === "unknown") {
+        issue = {
+            kind: "unknown-subcommand",
+            message: `Unknown subcommand ${route.token ?? ""}. Available subcommands: ${available.join(", ")}`,
+            token: route.token ?? "",
+        };
+    }
+    const parsed: ParsedCommandArguments = {
+        values: {},
+        provided: new Set<string>(),
+        sources: new Map<string, "explicit" | "default">(),
+        issues: [issue],
+        mode: "run",
+    };
+    if (route.root.compiled !== undefined) {
+        Object.defineProperty(parsed, "grammar", { value: route.root.compiled });
+    }
+    return parsed;
+}
+
+/** Resolve a CLI-style subcommand and parse against only the selected grammar branch. */
+export function parseTypedCommandInvocation<TCommand extends CoreRegisteredTypedCommand>(
+    command: TCommand,
+    rawArgs: string,
+): ParsedTypedCommandInvocation<TCommand> {
+    const route = resolveTypedCommandRoute(command, rawArgs);
+    if (route.status === "missing") {
+        const rootParsed = parseTypedCommandArgs(command, rawArgs);
+        if (rootParsed.mode === "help") {
+            return { route, parsed: rootParsed };
+        }
+    }
+    if (route.status === "missing" || route.status === "unknown") {
+        return { route, parsed: subcommandRouteIssue(route) };
+    }
+    return {
+        route,
+        parsed: parseTypedCommandArgs(route.command, route.rawArgs),
+    };
+}
+
 function isArgumentValue(value: unknown): value is ArgumentValue {
     return (
         value === undefined ||
         typeof value === "string" ||
         typeof value === "number" ||
         typeof value === "boolean" ||
-        isStringArrayValue(value)
+        isStringArrayValue(value) ||
+        isKeyValueArgumentValue(value)
     );
 }
 

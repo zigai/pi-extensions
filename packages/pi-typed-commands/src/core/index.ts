@@ -8,6 +8,8 @@ export {
     hasArgumentGroups,
     isArgumentGroupDefinition,
     multiEnumArgument,
+    stringListArgument,
+    keyValueArgument,
     numberArgument,
     stringArgument,
 } from "../arguments.js";
@@ -15,6 +17,7 @@ export { compileTypedCommandDefinition } from "../compiler.js";
 export {
     lexTypedArgumentString,
     parseTypedCommandArgs,
+    parseTypedCommandInvocation,
     serializeTypedCommandArgs,
     toTypedParseResult,
 } from "../parser.js";
@@ -44,6 +47,9 @@ export type {
     FlatArgumentDefinitions,
     InferArguments,
     MultiArgumentValue,
+    StringListArgumentDefinition,
+    KeyValueArgumentDefinition,
+    KeyValueArgumentValue,
     ParseIssue,
     ParseIssueKind,
     ParsedArgumentDraft,

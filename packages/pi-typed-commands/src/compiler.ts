@@ -36,8 +36,29 @@ function cloneArgumentUi(ui: ArgumentUi): ArgumentUi {
     if (ui.hidden !== undefined) {
         cloned.hidden = ui.hidden;
     }
+    if (ui.visibleWhen !== undefined) {
+        cloned.visibleWhen = ui.visibleWhen;
+    }
+    if (ui.enabledWhen !== undefined) {
+        cloned.enabledWhen = ui.enabledWhen;
+    }
+    if (ui.requiredWhen !== undefined) {
+        cloned.requiredWhen = ui.requiredWhen;
+    }
     if (ui.compute !== undefined) {
         cloned.compute = ui.compute;
+    }
+    if (ui.disabled !== undefined) {
+        cloned.disabled = ui.disabled;
+    }
+    if (ui.section !== undefined) {
+        cloned.section = ui.section;
+    }
+    if (ui.advanced !== undefined) {
+        cloned.advanced = ui.advanced;
+    }
+    if (ui.copyFrom !== undefined) {
+        cloned.copyFrom = ui.copyFrom;
     }
     if (ui.custom !== undefined) {
         const custom: CustomArgumentWidget = {};
@@ -56,6 +77,9 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     const cloned: ArgumentDefinition = { ...definition };
     if (definition.aliases !== undefined) {
         cloned.aliases = [...definition.aliases];
+    }
+    if (definition.examples !== undefined) {
+        cloned.examples = [...definition.examples];
     }
     if (definition.ui !== undefined) {
         cloned.ui = cloneArgumentUi(definition.ui);
@@ -80,8 +104,25 @@ function cloneArgumentDefinition(definition: ArgumentDefinition): ArgumentDefini
     ) {
         cloned.default = [...definition.default];
     }
+    if (
+        cloned.type === "string-list" &&
+        definition.type === "string-list" &&
+        definition.default !== undefined
+    ) {
+        cloned.default = [...definition.default];
+    }
+    if (
+        cloned.type === "key-value" &&
+        definition.type === "key-value" &&
+        definition.default !== undefined
+    ) {
+        cloned.default = { ...definition.default };
+    }
     if (cloned.type === "enum" && definition.type === "enum") {
         cloned.values = [...definition.values];
+        if (definition.optionDescriptions !== undefined) {
+            cloned.optionDescriptions = { ...definition.optionDescriptions };
+        }
     }
     if (cloned.type === "multi-enum" && definition.type === "multi-enum") {
         cloned.values = [...definition.values];
@@ -117,11 +158,23 @@ function freezeArgumentDefinition(definition: ArgumentDefinition): void {
     if (definition.aliases !== undefined) {
         Object.freeze(definition.aliases);
     }
+    if (definition.examples !== undefined) {
+        Object.freeze(definition.examples);
+    }
     if (definition.type === "multi-enum" && definition.default !== undefined) {
+        Object.freeze(definition.default);
+    }
+    if (
+        (definition.type === "string-list" || definition.type === "key-value") &&
+        definition.default !== undefined
+    ) {
         Object.freeze(definition.default);
     }
     if (definition.type === "enum" || definition.type === "multi-enum") {
         Object.freeze(definition.values);
+    }
+    if (definition.type === "enum" && definition.optionDescriptions !== undefined) {
+        Object.freeze(definition.optionDescriptions);
     }
     if (definition.ui?.custom !== undefined) {
         Object.freeze(definition.ui.custom);

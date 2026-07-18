@@ -11,6 +11,7 @@ import type {
     DefinedTypedCommand,
     RegisteredTypedCommand,
     TypedCommandDefinition,
+    TypedSubcommandDefinitions,
 } from "../pi/command-types.js";
 import { maybeWrapGroupedHandler, maybeWrapGroupedRefinement } from "./grouped-values.js";
 import { DEFAULT_FORM_SYMBOLS } from "./symbols.js";
@@ -44,15 +45,127 @@ export function registeredCommandFromCompiledDefinition<TDefinitions extends Arg
         description: definition.description,
         args: compiled.args,
         compiled,
+        hasRootHandler: true,
         formSymbols: DEFAULT_FORM_SYMBOLS,
         ...refinementFields,
     };
     return command;
 }
 
+function mergeArgumentDefinitions<
+    TShared extends ArgumentDefinitions,
+    TLocal extends ArgumentDefinitions,
+>(shared: TShared, local: TLocal, subcommandName: string): TShared & TLocal {
+    for (const name of Object.keys(local)) {
+        if (Object.hasOwn(shared, name)) {
+            throw new TypeError(
+                `Subcommand ${subcommandName} argument ${name} conflicts with a shared argument`,
+            );
+        }
+    }
+    return Object.assign({}, shared, local);
+}
+
+function normalizeSubcommands<
+    TDefinitions extends ArgumentDefinitions,
+    TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
+>(
+    definition:
+        | TypedCommandDefinition<TDefinitions, TSubcommands>
+        | DefinedTypedCommand<TDefinitions, TSubcommands>,
+    sharedDefinitions: TDefinitions,
+): Readonly<Record<string, RegisteredTypedCommand>> | undefined {
+    const definitions = definition.subcommands;
+    if (definitions === undefined) {
+        return undefined;
+    }
+
+    const normalized: Record<string, RegisteredTypedCommand> = {};
+    const names = new Set<string>();
+    for (const name in definitions) {
+        if (!Object.hasOwn(definitions, name)) {
+            continue;
+        }
+        const subcommand = definitions[name];
+        if (name.length === 0 || /\s/.test(name) || name.startsWith("-")) {
+            throw new TypeError(`Invalid subcommand name ${JSON.stringify(name)}`);
+        }
+        const spellings = [name, ...(subcommand.aliases ?? [])];
+        for (const spelling of spellings) {
+            if (spelling.length === 0 || /\s/.test(spelling) || spelling.startsWith("-")) {
+                throw new TypeError(`Invalid subcommand alias ${JSON.stringify(spelling)}`);
+            }
+            if (names.has(spelling)) {
+                throw new TypeError(`Duplicate subcommand name or alias ${spelling}`);
+            }
+            names.add(spelling);
+        }
+
+        const args = mergeArgumentDefinitions(sharedDefinitions, subcommand.args, name);
+        const compiled = compileTypedCommandDefinition({
+            name: `${definition.name} ${name}`,
+            description: subcommand.description,
+            args,
+        });
+        if (!compiled.ok) {
+            throw definitionError(`${definition.name} ${name}`, compiled.diagnostics);
+        }
+        const refine = maybeWrapGroupedRefinement(args, subcommand.refine);
+        const subcommandFields: {
+            refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
+            formTitle?: NonNullable<typeof subcommand.formTitle>;
+            formPolicy?: NonNullable<typeof subcommand.formPolicy>;
+            formPresets?: boolean;
+            inlineHelp?: NonNullable<typeof subcommand.inlineHelp>;
+            ghostText?: NonNullable<typeof subcommand.ghostText>;
+        } = {};
+        if (refine !== undefined) {
+            subcommandFields.refine = refine;
+        }
+        if (subcommand.formTitle !== undefined) {
+            subcommandFields.formTitle = subcommand.formTitle;
+        }
+        if (subcommand.formPolicy !== undefined) {
+            subcommandFields.formPolicy = subcommand.formPolicy;
+        }
+        if (subcommand.formPresets !== undefined) {
+            subcommandFields.formPresets = subcommand.formPresets;
+        }
+        if (subcommand.inlineHelp !== undefined) {
+            subcommandFields.inlineHelp = subcommand.inlineHelp;
+        }
+        if (subcommand.ghostText !== undefined) {
+            subcommandFields.ghostText = subcommand.ghostText;
+        }
+        normalized[name] = {
+            name: `${definition.name} ${name}`,
+            description: subcommand.description,
+            aliases: Object.freeze([...(subcommand.aliases ?? [])]),
+            args: compiled.command.args,
+            compiled: compiled.command,
+            formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...subcommand.formSymbols },
+            source: "extension",
+            target: {
+                kind: "extension",
+                run: maybeWrapGroupedHandler(args, subcommand.run),
+            },
+            ...subcommandFields,
+        };
+    }
+    if (Object.keys(normalized).length === 0) {
+        throw new TypeError(`Typed command /${definition.name} must not define empty subcommands`);
+    }
+    return Object.freeze(normalized);
+}
+
 /** Normalize a user command definition into metadata consumed by Pi registration and UX adapters. */
-export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefinitions>(
-    definition: TypedCommandDefinition<TDefinitions> | DefinedTypedCommand<TDefinitions>,
+export function normalizeRegisteredCommand<
+    TDefinitions extends ArgumentDefinitions,
+    TSubcommands extends TypedSubcommandDefinitions<TDefinitions>,
+>(
+    definition:
+        | TypedCommandDefinition<TDefinitions, TSubcommands>
+        | DefinedTypedCommand<TDefinitions, TSubcommands>,
 ): RegisteredTypedCommand<TDefinitions> & { readonly compiled: CompiledCommand<TDefinitions> } {
     const compiled = compileTypedCommandDefinition({
         name: definition.name,
@@ -68,12 +181,59 @@ export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefiniti
     const optionalFields: {
         refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
         formTitle?: NonNullable<TypedCommandDefinition<TDefinitions>["formTitle"]>;
+        formPolicy?: NonNullable<TypedCommandDefinition<TDefinitions>["formPolicy"]>;
+        formPresets?: boolean;
+        inlineHelp?: NonNullable<TypedCommandDefinition<TDefinitions>["inlineHelp"]>;
+        ghostText?: NonNullable<TypedCommandDefinition<TDefinitions>["ghostText"]>;
     } = {};
     if (refine !== undefined) {
         optionalFields.refine = refine;
     }
     if (formTitle !== undefined) {
         optionalFields.formTitle = formTitle;
+    }
+    if (definition.formPolicy !== undefined) {
+        optionalFields.formPolicy = definition.formPolicy;
+    }
+    if (definition.formPresets !== undefined) {
+        optionalFields.formPresets = definition.formPresets;
+    }
+    if (definition.inlineHelp !== undefined) {
+        optionalFields.inlineHelp = definition.inlineHelp;
+    }
+    if (definition.ghostText !== undefined) {
+        optionalFields.ghostText = definition.ghostText;
+    }
+    const run = definition.run;
+    if (run === undefined && definition.subcommands === undefined) {
+        throw new TypeError(`Typed command /${definition.name} must define run or subcommands`);
+    }
+
+    let target: RegisteredTypedCommand<TDefinitions>["target"];
+    if (run !== undefined) {
+        target = {
+            kind: "extension",
+            run: maybeWrapGroupedHandler(definition.args, run),
+        };
+    }
+    const subcommands = normalizeSubcommands(definition, compiled.command.definitions);
+    if (
+        subcommands !== undefined &&
+        Object.values(compiled.command.args).some((argument) => argument.position !== undefined)
+    ) {
+        throw new TypeError(
+            `Typed command /${definition.name} may not combine shared positional arguments with subcommands`,
+        );
+    }
+    const routingFields: {
+        target?: NonNullable<RegisteredTypedCommand<TDefinitions>["target"]>;
+        subcommands?: Readonly<Record<string, RegisteredTypedCommand>>;
+    } = {};
+    if (target !== undefined) {
+        routingFields.target = target;
+    }
+    if (subcommands !== undefined) {
+        routingFields.subcommands = subcommands;
     }
     const command: RegisteredTypedCommand<TDefinitions> & {
         readonly compiled: CompiledCommand<TDefinitions>;
@@ -82,13 +242,11 @@ export function normalizeRegisteredCommand<TDefinitions extends ArgumentDefiniti
         description: definition.description,
         args: compiled.command.args,
         compiled: compiled.command,
-        target: {
-            kind: "extension",
-            run: maybeWrapGroupedHandler(definition.args, definition.run),
-        },
         formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...definition.formSymbols },
         source: "extension",
+        hasRootHandler: run !== undefined,
         ...optionalFields,
+        ...routingFields,
     };
     return command;
 }

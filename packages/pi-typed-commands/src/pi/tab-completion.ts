@@ -1,9 +1,14 @@
+import { quoteSerializedValue } from "../parser.js";
+import { resolveTypedCommandRoute } from "../command/subcommands.js";
 import { formatArgumentFlagName, isPositionalArgument } from "../schema.js";
 import type { PiTypedCommandLookup, RegisteredTypedCommand } from "./command-types.js";
-import { commandInvocationForEditorText } from "./editor-invocation.js";
-import { commandArgumentEntries } from "./helper.js";
+import {
+    commandInvocationForEditorText,
+    type EditorTypedCommandInvocation,
+} from "./editor-invocation.js";
+import { activeChoiceContext, commandArgumentEntries } from "./helper.js";
 
-/** Result of attempting to handle Tab as typed-command flag completion. */
+/** Result of attempting to handle Tab as typed-command completion. */
 export type TabCompletionResult = { handled: false } | { handled: true; editorText?: string };
 
 type FlagCompletionCandidate = {
@@ -87,8 +92,54 @@ function flagCompletionForTab(
     return undefined;
 }
 
-/** Complete a partial named flag in editor text when Tab is pressed. */
-export function completePartialFlagOnTab(
+function fixedChoiceCompletionOnTab(
+    invocation: EditorTypedCommandInvocation,
+    firstLine: string,
+    rest: string,
+): TabCompletionResult {
+    const context = activeChoiceContext(invocation);
+    if (context === undefined) {
+        return { handled: false };
+    }
+
+    const candidates = context.definition.values.filter((value) => value.startsWith(context.query));
+    if (candidates.length === 0) {
+        return { handled: false };
+    }
+
+    let replacement: string | undefined;
+    let addTrailingSpace = false;
+    const exact = candidates.find((candidate) => candidate === context.query);
+    if (exact !== undefined) {
+        replacement = exact;
+        addTrailingSpace = true;
+    } else if (candidates.length === 1) {
+        replacement = candidates[0];
+        addTrailingSpace = true;
+    } else {
+        const sharedPrefix = commonStringPrefix(candidates);
+        if (sharedPrefix.length > context.query.length) {
+            replacement = sharedPrefix;
+        }
+    }
+
+    if (replacement === undefined) {
+        return { handled: context.query.length > 0 };
+    }
+
+    const serializedReplacement = quoteSerializedValue(replacement, replacement.startsWith("-"));
+    const rawArgsOffset = firstLine.length - invocation.rawArgs.length;
+    const replacementStart = rawArgsOffset + context.replacementStart;
+    const replacementEnd = rawArgsOffset + context.replacementEnd;
+    let completedLine = `${firstLine.slice(0, replacementStart)}${serializedReplacement}${firstLine.slice(replacementEnd)}`;
+    if (addTrailingSpace && context.replacementEnd === invocation.rawArgs.length) {
+        completedLine += " ";
+    }
+    return { handled: true, editorText: `${completedLine}${rest}` };
+}
+
+/** Complete a partial fixed choice or named flag in editor text when Tab is pressed. */
+export function completeTypedCommandOnTab(
     editorText: string,
     commands: PiTypedCommandLookup,
 ): TabCompletionResult {
@@ -105,6 +156,44 @@ export function completePartialFlagOnTab(
         rest = editorText.slice(firstLineEnd);
     }
 
+    const route = resolveTypedCommandRoute(invocation.command, invocation.rawArgs);
+    if (invocation.command.subcommands !== undefined && route.status !== "subcommand") {
+        const token = invocation.rawArgs.trim();
+        if (!token.includes(" ") && !token.startsWith("-")) {
+            const candidates = Object.entries(invocation.command.subcommands).flatMap(
+                ([name, subcommand]) =>
+                    [name, ...(subcommand.aliases ?? [])].filter((spelling) =>
+                        spelling.startsWith(token),
+                    ),
+            );
+            let replacement = commonStringPrefix(candidates);
+            if (candidates.length === 1) {
+                const onlyCandidate = candidates[0];
+                if (onlyCandidate !== undefined) {
+                    replacement = onlyCandidate;
+                }
+            }
+            if (replacement !== undefined && replacement.length > token.length) {
+                let trailingSpace = "";
+                if (candidates.length === 1) {
+                    trailingSpace = " ";
+                }
+                return {
+                    handled: true,
+                    editorText: `/${invocation.command.invocationName ?? invocation.command.name} ${replacement}${trailingSpace}${rest}`,
+                };
+            }
+            if (token.length > 0) {
+                return { handled: true };
+            }
+        }
+    }
+
+    const choiceCompletion = fixedChoiceCompletionOnTab(invocation, firstLine, rest);
+    if (choiceCompletion.handled) {
+        return choiceCompletion;
+    }
+
     const tokenMatch = /(?:^|\s)(-\S*)$/.exec(firstLine);
     if (tokenMatch === null) {
         return { handled: false };
@@ -115,7 +204,12 @@ export function completePartialFlagOnTab(
         return { handled: false };
     }
 
-    const completion = flagCompletionForTab(invocation.command, token);
+    let completionCommand = invocation.command;
+    if (route.status === "subcommand" && route.subcommand !== undefined) {
+        completionCommand =
+            invocation.command.subcommands?.[route.subcommand] ?? invocation.command;
+    }
+    const completion = flagCompletionForTab(completionCommand, token);
     if (completion === undefined) {
         return { handled: true };
     }

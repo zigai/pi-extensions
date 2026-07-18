@@ -48,6 +48,11 @@ export type CompletionCapabilities = {
     readonly completionTasks: CompletionTaskOwner;
 };
 
+export type FormValueCompletionContext = {
+    readonly values: Readonly<Record<string, import("./types.js").ArgumentValue>>;
+    readonly provided: ReadonlySet<string>;
+};
+
 type CommandLineContext = {
     command: CoreRegisteredTypedCommand;
     argsBeforeCursor: string;
@@ -140,6 +145,8 @@ function flagConsumesValue(definition: ArgumentDefinition): boolean {
         case "number":
         case "enum":
         case "multi-enum":
+        case "string-list":
+        case "key-value":
             return true;
         case "boolean":
             return false;
@@ -156,6 +163,8 @@ function supportsRepeatedCompletion(definition: ArgumentDefinition): boolean {
         case "enum":
             return false;
         case "multi-enum":
+        case "string-list":
+        case "key-value":
             return true;
         default:
             return casesHandled(definition);
@@ -351,6 +360,52 @@ async function pathCompletionItems(
     } catch {
         return [];
     }
+}
+
+/** Resolve one form field's value suggestions through the same providers used by the editor. */
+export async function getTypedFormValueCompletions(
+    definition: ArgumentDefinition,
+    query: string,
+    form: FormValueCompletionContext,
+    capabilities: CompletionCapabilities,
+): Promise<readonly TypedCompletionItem[]> {
+    const providerContext: TypedCompletionContext = {
+        values: form.values,
+        provided: form.provided,
+        cwd: capabilities.cwd,
+    };
+    if (definition.completeAsync !== undefined) {
+        const completed = await capabilities.scheduler.run(
+            (signal) =>
+                definition.completeAsync?.(query, { ...providerContext, signal }) ??
+                Promise.resolve([]),
+            normalizedCompletionTimeoutMs(definition),
+        );
+        return normalizeProviderCompletionItems(completed);
+    }
+    if (definition.complete !== undefined) {
+        try {
+            const completed: unknown = definition.complete(query, providerContext);
+            if (hasCallableThen(completed)) {
+                capabilities.completionTasks.own(Promise.resolve(completed));
+                return [];
+            }
+            return normalizeProviderCompletionItems(completed);
+        } catch {
+            return [];
+        }
+    }
+    if (
+        definition.ui?.widget === "path" ||
+        definition.ui?.widget === "file" ||
+        definition.ui?.widget === "directory"
+    ) {
+        return pathCompletionItems(query, capabilities);
+    }
+    if (definition.ui?.widget === "command") {
+        return commandCompletionItems(query, capabilities.commands);
+    }
+    return staticArgumentValueItems(definition, query);
 }
 
 function syncArgumentValueItems(
@@ -678,6 +733,94 @@ function resolveCompletionDecisionSync(
     return flagCompletionDecision(context, tokens);
 }
 
+function subcommandItems(
+    command: CoreRegisteredTypedCommand,
+    query: string,
+): TypedCompletionItem[] {
+    const items: TypedCompletionItem[] = [];
+    for (const [name, subcommand] of Object.entries(command.subcommands ?? {})) {
+        for (const spelling of [name, ...(subcommand.aliases ?? [])]) {
+            if (spelling.startsWith(query)) {
+                items.push({
+                    value: `${spelling} `,
+                    label: spelling,
+                    description: subcommand.description,
+                });
+            }
+        }
+    }
+    return items;
+}
+
+function subcommandCompletionDecision(context: CommandLineContext): CompletionDecision | undefined {
+    if (context.command.subcommands === undefined) {
+        return undefined;
+    }
+    const tokens = lexTypedArgumentString(context.argsBeforeCursor).tokens;
+    const first = tokens[0];
+    if (first === undefined) {
+        return { items: subcommandItems(context.command, ""), prefix: "" };
+    }
+    if (first.value.startsWith("-")) {
+        return undefined;
+    }
+    const selected = Object.entries(context.command.subcommands).find(
+        ([name, subcommand]) =>
+            name === first.value || subcommand.aliases?.includes(first.value) === true,
+    );
+    if (selected !== undefined) {
+        return undefined;
+    }
+    if (tokens.length === 1 && !context.argsBeforeCursor.endsWith(" ")) {
+        return {
+            items: subcommandItems(context.command, first.value),
+            prefix: first.raw,
+        };
+    }
+    return { items: [], prefix: context.replacementPrefix };
+}
+
+function selectedSubcommandContext(context: CommandLineContext): CommandLineContext {
+    const subcommands = context.command.subcommands;
+    if (subcommands === undefined) {
+        return context;
+    }
+    const first = lexTypedArgumentString(context.argsBeforeCursor).tokens[0];
+    if (first === undefined) {
+        return context;
+    }
+    const selected = Object.entries(subcommands).find(
+        ([name, subcommand]) =>
+            name === first.value || subcommand.aliases?.includes(first.value) === true,
+    );
+    if (selected === undefined) {
+        return context;
+    }
+    const argsBeforeCursor = context.argsBeforeCursor.slice(first.end).trimStart();
+    const tokens = lexTypedArgumentString(argsBeforeCursor).tokens;
+    const last = tokens[tokens.length - 1];
+    const trailingSpace = argsBeforeCursor.endsWith(" ");
+    let currentPrefix = last?.value ?? "";
+    let replacementPrefix = last?.raw ?? "";
+    let previousToken = tokens[tokens.length - 2];
+    if (trailingSpace) {
+        currentPrefix = "";
+        replacementPrefix = "";
+        previousToken = last;
+    }
+    const selectedContext: CommandLineContext = {
+        command: selected[1],
+        argsBeforeCursor,
+        currentPrefix,
+        replacementPrefix,
+        capabilities: context.capabilities,
+    };
+    if (previousToken !== undefined) {
+        selectedContext.previousToken = previousToken;
+    }
+    return selectedContext;
+}
+
 /**
  * Compute completions for Pi's command-level completion hook.
  *
@@ -717,9 +860,15 @@ export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinit
         context.previousToken = previousToken;
     }
 
-    return resolveCompletionDecisionAsync(context, tokens).then(
-        (decision) => decision?.items ?? null,
-    );
+    const subcommandDecision = subcommandCompletionDecision(context);
+    if (subcommandDecision !== undefined) {
+        return Promise.resolve(subcommandDecision.items);
+    }
+    const selectedContext = selectedSubcommandContext(context);
+    return resolveCompletionDecisionAsync(
+        selectedContext,
+        tokenizeLoose(selectedContext.argsBeforeCursor),
+    ).then((decision) => decision?.items ?? null);
 }
 
 function commandLineContext(
@@ -801,8 +950,13 @@ export function getTypedAutocompleteSuggestions(
         return undefined;
     }
 
-    const tokens = tokenizeLoose(context.argsBeforeCursor);
-    const decision = resolveCompletionDecisionSync(context, tokens);
+    const subcommandDecision = subcommandCompletionDecision(context);
+    if (subcommandDecision !== undefined) {
+        return subcommandDecision;
+    }
+    const selectedContext = selectedSubcommandContext(context);
+    const tokens = tokenizeLoose(selectedContext.argsBeforeCursor);
+    const decision = resolveCompletionDecisionSync(selectedContext, tokens);
     if (decision === undefined) {
         return undefined;
     }
@@ -820,5 +974,13 @@ export async function getTypedAutocompleteSuggestionsAsync(
     if (context === undefined) {
         return undefined;
     }
-    return resolveCompletionDecisionAsync(context, tokenizeLoose(context.argsBeforeCursor));
+    const subcommandDecision = subcommandCompletionDecision(context);
+    if (subcommandDecision !== undefined) {
+        return subcommandDecision;
+    }
+    const selectedContext = selectedSubcommandContext(context);
+    return resolveCompletionDecisionAsync(
+        selectedContext,
+        tokenizeLoose(selectedContext.argsBeforeCursor),
+    );
 }

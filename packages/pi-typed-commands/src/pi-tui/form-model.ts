@@ -16,6 +16,7 @@ export type FormField = {
     name: string;
     definition: ArgumentDefinition;
     issueMessages: string[];
+    section?: string;
 };
 
 /** Framework-independent form model shared by dense TUI and tests. */
@@ -87,14 +88,30 @@ export function createHeadlessFormModel(
     let initialSelection = -1;
 
     for (const [name, definition] of Object.entries(definitions)) {
-        if (initialSelection < 0 && shouldPromptArgument(name, definition, mode, parsed)) {
+        if (mode === "missing" && !shouldPromptArgument(name, definition, mode, parsed)) {
+            continue;
+        }
+        if (initialSelection < 0 && shouldPromptArgument(name, definition, "missing", parsed)) {
             initialSelection = fields.length;
         }
-        fields.push({
+        let configuredSection = definition.ui?.section;
+        if (configuredSection === undefined && definition.ui?.advanced === true) {
+            configuredSection = "Advanced";
+        }
+        let groupPath: string | undefined;
+        if (name.includes(".")) {
+            groupPath = name.slice(0, name.lastIndexOf("."));
+        }
+        const field: FormField = {
             name,
             definition,
             issueMessages: namedIssues.get(name) ?? [],
-        });
+        };
+        const section = configuredSection ?? groupPath;
+        if (section !== undefined) {
+            field.section = section;
+        }
+        fields.push(field);
     }
 
     if (initialSelection < 0) {

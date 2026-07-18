@@ -6,12 +6,16 @@ import {
     BooleanSkillArgumentYamlSchema,
     EnumSkillArgumentYamlSchema,
     MultiEnumSkillArgumentYamlSchema,
+    StringListSkillArgumentYamlSchema,
+    KeyValueSkillArgumentYamlSchema,
     NumberSkillArgumentYamlSchema,
     StringSkillArgumentYamlSchema,
     UnknownRecordYamlSchema,
     type BooleanSkillArgumentYaml,
     type EnumSkillArgumentYaml,
     type MultiEnumSkillArgumentYaml,
+    type StringListSkillArgumentYaml,
+    type KeyValueSkillArgumentYaml,
     type NumberSkillArgumentYaml,
     type SkillArgumentUiYaml,
     type SkillArgumentYaml,
@@ -25,6 +29,8 @@ import type {
     BooleanArgumentDefinition,
     EnumArgumentDefinition,
     MultiEnumArgumentDefinition,
+    StringListArgumentDefinition,
+    KeyValueArgumentDefinition,
     NumberArgumentDefinition,
     RawSkillArguments,
     SkillArgumentDiagnostic,
@@ -38,7 +44,9 @@ type SkillArgumentSchema =
     | typeof NumberSkillArgumentYamlSchema
     | typeof BooleanSkillArgumentYamlSchema
     | typeof EnumSkillArgumentYamlSchema
-    | typeof MultiEnumSkillArgumentYamlSchema;
+    | typeof MultiEnumSkillArgumentYamlSchema
+    | typeof StringListSkillArgumentYamlSchema
+    | typeof KeyValueSkillArgumentYamlSchema;
 
 const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "text",
@@ -49,7 +57,21 @@ const SUPPORTED_WIDGETS: ReadonlySet<string> = new Set([
     "radio",
     "multiselect",
     "path",
+    "file",
+    "directory",
     "command",
+    "secret",
+    "list",
+    "key-value",
+    "duration",
+    "date",
+    "time",
+    "datetime",
+    "url",
+    "email",
+    "json",
+    "code",
+    "stepper",
     "readonly",
     "computed",
     "confirm",
@@ -118,6 +140,12 @@ function normalizeArgumentType(type: unknown): SupportedSkillArgumentType | unde
     if (type === "multi_enum" || type === "multi-enum") {
         return "multi-enum";
     }
+    if (type === "string_list" || type === "string-list") {
+        return "string-list";
+    }
+    if (type === "key_value" || type === "key-value") {
+        return "key-value";
+    }
     return undefined;
 }
 
@@ -133,6 +161,10 @@ function schemaForArgumentType(type: SupportedSkillArgumentType): SkillArgumentS
             return EnumSkillArgumentYamlSchema;
         case "multi-enum":
             return MultiEnumSkillArgumentYamlSchema;
+        case "string-list":
+            return StringListSkillArgumentYamlSchema;
+        case "key-value":
+            return KeyValueSkillArgumentYamlSchema;
     }
 }
 
@@ -209,6 +241,12 @@ function fieldTypeMessage(
     }
     if (field.startsWith("values.")) {
         return `${name}.values must be a non-empty list of strings`;
+    }
+    if (field === "option_descriptions") {
+        return `${label} must be an object of enum values to non-empty descriptions`;
+    }
+    if (field.startsWith("option_descriptions.")) {
+        return `${name}.option_descriptions values must be non-empty strings`;
     }
     if (field === "default") {
         if (type === "number") {
@@ -288,6 +326,27 @@ function normalizeUi(raw: SkillArgumentUiYaml | undefined): ArgumentUi | undefin
     if (raw.title !== undefined) {
         ui.title = raw.title;
     }
+    if (raw.disabled !== undefined) {
+        ui.disabled = raw.disabled;
+    }
+    if (raw.visible_when !== undefined) {
+        ui.visibleWhen = raw.visible_when;
+    }
+    if (raw.enabled_when !== undefined) {
+        ui.enabledWhen = raw.enabled_when;
+    }
+    if (raw.required_when !== undefined) {
+        ui.requiredWhen = raw.required_when;
+    }
+    if (raw.section !== undefined) {
+        ui.section = raw.section;
+    }
+    if (raw.advanced !== undefined) {
+        ui.advanced = raw.advanced;
+    }
+    if (raw.copy_from !== undefined) {
+        ui.copyFrom = raw.copy_from;
+    }
 
     if (Object.keys(ui).length > 0) {
         return ui;
@@ -301,6 +360,9 @@ function applySharedFields<TDefinition extends ArgumentDefinition>(
 ): TDefinition {
     if (raw.description !== undefined) {
         definition.description = raw.description;
+    }
+    if (raw.examples !== undefined) {
+        definition.examples = raw.examples;
     }
     if (raw.title !== undefined) {
         definition.title = raw.title;
@@ -369,6 +431,12 @@ function assignStringConstraints(
             warnings.push(`${name}.pattern must be a valid regular expression`);
         }
     }
+    if (raw.format !== undefined) {
+        definition.format = raw.format;
+    }
+    if (raw.sensitive !== undefined) {
+        definition.sensitive = raw.sensitive;
+    }
 }
 
 function assignMultiEnumConstraints(
@@ -434,6 +502,12 @@ function normalizeNumberArgument(
     if (raw.max !== undefined) {
         definition.max = raw.max;
     }
+    if (raw.step !== undefined) {
+        definition.step = raw.step;
+    }
+    if (raw.unit !== undefined) {
+        definition.unit = raw.unit;
+    }
     if (
         definition.min !== undefined &&
         definition.max !== undefined &&
@@ -457,6 +531,9 @@ function normalizeEnumArgument(
         { type: "enum", values: raw.values },
         raw,
     );
+    if (raw.option_descriptions !== undefined) {
+        definition.optionDescriptions = raw.option_descriptions;
+    }
     if (raw.default !== undefined) {
         definition.default = raw.default;
     }
@@ -481,6 +558,35 @@ function normalizeMultiEnumArgument(
     return definition;
 }
 
+function normalizeStringListArgument(
+    name: string,
+    raw: StringListSkillArgumentYaml,
+    warnings: SkillDiagnosticSink,
+): StringListArgumentDefinition {
+    const definition: StringListArgumentDefinition = applySharedFields(
+        { type: "string-list" },
+        raw,
+    );
+    if (raw.min_items !== undefined) definition.minItems = raw.min_items;
+    if (raw.max_items !== undefined) definition.maxItems = raw.max_items;
+    if (raw.default !== undefined) definition.default = raw.default;
+    validateDefault(name, definition, warnings);
+    return definition;
+}
+
+function normalizeKeyValueArgument(
+    name: string,
+    raw: KeyValueSkillArgumentYaml,
+    warnings: SkillDiagnosticSink,
+): KeyValueArgumentDefinition {
+    const definition: KeyValueArgumentDefinition = applySharedFields({ type: "key-value" }, raw);
+    if (raw.min_items !== undefined) definition.minItems = raw.min_items;
+    if (raw.max_items !== undefined) definition.maxItems = raw.max_items;
+    if (raw.default !== undefined) definition.default = raw.default;
+    validateDefault(name, definition, warnings);
+    return definition;
+}
+
 function normalizeParsedArgument(
     name: string,
     raw: SkillArgumentYaml,
@@ -498,6 +604,12 @@ function normalizeParsedArgument(
         case "multi_enum":
         case "multi-enum":
             return normalizeMultiEnumArgument(name, raw, warnings);
+        case "string_list":
+        case "string-list":
+            return normalizeStringListArgument(name, raw, warnings);
+        case "key_value":
+        case "key-value":
+            return normalizeKeyValueArgument(name, raw, warnings);
     }
 }
 

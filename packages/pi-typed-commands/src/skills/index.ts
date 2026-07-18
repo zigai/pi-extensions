@@ -19,6 +19,7 @@ export type {
     SkillArgumentDiagnostic,
     SkillArgumentNormalizationResult,
     SkillFrontmatter,
+    SkillFrontmatterMetadata,
     TypedSkillDiagnostics,
     TypedSkillMetadata,
 } from "./types.js";

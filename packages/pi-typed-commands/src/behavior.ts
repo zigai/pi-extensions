@@ -31,6 +31,8 @@ function occurrencePolicy(definition: ArgumentDefinition): "error" | "first" | "
         case "enum":
             return "error";
         case "multi-enum":
+        case "string-list":
+        case "key-value":
             return "append";
         default:
             return casesHandled(definition);
@@ -53,12 +55,18 @@ function isStringArrayValue(value: ArgumentValue): value is string[] {
     return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
 }
 
+function isKeyValueArgumentValue(value: ArgumentValue): value is Readonly<Record<string, string>> {
+    return value !== undefined && typeof value === "object" && !Array.isArray(value);
+}
+
 function acceptsImplicitBooleanValue(definition: ArgumentDefinition): boolean {
     switch (definition.type) {
         case "string":
         case "number":
         case "enum":
         case "multi-enum":
+        case "string-list":
+        case "key-value":
             return false;
         case "boolean":
             return true;
@@ -78,6 +86,8 @@ function appendsOccurrenceValues(
         case "enum":
             return false;
         case "multi-enum":
+        case "string-list":
+        case "key-value":
             return policy === "append";
         default:
             return casesHandled(definition);
@@ -85,6 +95,13 @@ function appendsOccurrenceValues(
 }
 
 function appendValues(current: ArgumentValue, next: ArgumentValue): ArgumentValue {
+    if (isKeyValueArgumentValue(next)) {
+        let previous: Readonly<Record<string, string>> = {};
+        if (isKeyValueArgumentValue(current)) {
+            previous = current;
+        }
+        return { ...previous, ...next };
+    }
     if (!isStringArrayValue(next)) {
         return next;
     }
@@ -221,9 +238,29 @@ function serializeValue(definition: ArgumentDefinition, name: string, value: unk
                 `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value.join(","))}`,
             ];
         }
+        case "string-list": {
+            if (!Array.isArray(value) || value.length === 0) {
+                return [];
+            }
+            return [
+                `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value.join(","))}`,
+            ];
+        }
+        case "key-value": {
+            if (typeof value !== "object" || value === null || Array.isArray(value)) {
+                return [];
+            }
+            return Object.entries(value).map(
+                ([key, entryValue]) =>
+                    `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(`${key}=${entryValue}`)}`,
+            );
+        }
         case "string":
         case "enum":
             if (typeof value !== "string") {
+                return [];
+            }
+            if (definition.type === "string" && definition.sensitive === true) {
                 return [];
             }
             return [`${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value)}`];
