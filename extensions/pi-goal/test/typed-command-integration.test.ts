@@ -29,14 +29,14 @@ test("/goal accepts -r before free-form text and rejects inline expanded-form op
   }
 });
 
-test("/goal registers a flat arrow-navigable form without tool controls", () => {
+test("/goal registers a compact form with multiline objective editors", () => {
   const before = new Set(getTypedCommands());
   createRuntimeHarness();
   const command = getTypedCommands().find((candidate) => {
     if (before.has(candidate)) {
       return false;
     }
-    return candidate.name === "goal" && candidate.args.task?.ui?.widget === "text";
+    return candidate.name === "goal";
   });
   assert.ok(command);
 
@@ -50,27 +50,22 @@ test("/goal registers a flat arrow-navigable form without tool controls", () => 
     assert.notEqual(definition.ui?.advanced, true);
   }
 
+  assert.equal(command.args.task?.ui?.widget, "textarea");
+  assert.equal(command.args.task?.ui?.rows, 5);
+
   const raw = command.args.raw;
   assert.ok(raw);
-  assert.equal(raw?.ui?.widget, "custom");
-  assert.equal(
-    raw?.ui?.custom?.renderValue?.({
-      name: "raw",
-      definition: raw,
-      value: undefined,
-      values: {},
-      selected: false,
-      width: 20,
-      theme: { bold: (text) => text, fg: (_color, text) => text },
-      formatValue: String,
-    }),
-    "expand",
-  );
+  assert.equal(raw.type, "boolean");
+  assert.equal(raw?.ui?.widget, "toggle");
+  assert.equal(raw?.ui?.custom, undefined);
+  assert.equal(raw.title, "Raw goal");
+  assert.match(raw.description ?? "", /check.*exactly.*without model expansion/i);
 
   const adjustExisting = command.args.adjustExisting;
   const adjustedObjective = command.args.adjustedObjective;
-  assert.equal(adjustExisting?.formOnly, true);
-  assert.equal(adjustExisting?.ui?.widget, "custom");
+  assert.equal(adjustExisting?.ui?.widget, "toggle");
+  assert.equal(adjustExisting?.ui?.custom, undefined);
   assert.equal(adjustedObjective?.ui?.copyFrom, "currentObjective");
-  assert.equal(adjustedObjective?.ui?.widget, "text");
+  assert.equal(adjustedObjective?.ui?.widget, "textarea");
+  assert.equal(adjustedObjective?.ui?.rows, 5);
 });

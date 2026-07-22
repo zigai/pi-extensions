@@ -273,18 +273,19 @@ export function registerGoalCommand(pi: ExtensionAPI, host: CommandHost): void {
     name: "goal",
     description: "Create, inspect, pause, resume, or adjust a goal.",
     formTitle: "Goal",
-    ghostText: "describe a goal · double Tab for options",
+    ghostText: "describe a goal · -r for raw · double Tab for options",
     inlineHelp: "hidden",
     args: {
       task: {
         type: "string",
         position: 0,
         rest: true,
-        title: "Goal",
-        placeholder: "goal",
-        description: "What to accomplish.",
+        title: "Objective",
+        placeholder: "Describe the goal",
+        description: "Describe the outcome to accomplish.",
         ui: {
-          widget: "text",
+          widget: "textarea",
+          rows: 5,
           visibleWhen: (values) => values.adjustExisting !== true,
           requiredWhen: (values) => values.adjustExisting !== true,
         },
@@ -292,29 +293,11 @@ export function registerGoalCommand(pi: ExtensionAPI, host: CommandHost): void {
       raw: {
         type: "boolean",
         aliases: ["r"],
-        title: "Wording",
-        description: "Expand with the model, or preserve the exact text.",
+        title: "Raw goal",
+        description: "Check to use the entered text exactly, without model expansion.",
         ui: {
-          widget: "custom",
+          widget: "toggle",
           visibleWhen: (values) => values.adjustExisting !== true,
-          custom: {
-            renderValue: ({ value }) => (value === true ? "exact" : "expand"),
-            handleInput: (context) => {
-              if (context.matchesKeybinding("cursor-left")) {
-                context.setValue(false);
-                return true;
-              }
-              if (context.matchesKeybinding("cursor-right")) {
-                context.setValue(true);
-                return true;
-              }
-              if (context.data === " ") {
-                context.setValue(context.value !== true);
-                return true;
-              }
-              return false;
-            },
-          },
         },
       },
       minimumTimeMinutes: {
@@ -356,28 +339,10 @@ export function registerGoalCommand(pi: ExtensionAPI, host: CommandHost): void {
         title: "Adjust current goal",
         description: "Edit the current goal without resetting its status or usage.",
         ui: {
-          widget: "custom",
+          widget: "toggle",
           visibleWhen: () => {
             const goal = host.getGoal();
             return goal !== null && goal.status !== "complete" && goal.status !== "timeLimited";
-          },
-          custom: {
-            renderValue: ({ value }) => (value === true ? "yes" : "no"),
-            handleInput: (context) => {
-              if (context.matchesKeybinding("cursor-left")) {
-                context.setValue(false);
-                return true;
-              }
-              if (context.matchesKeybinding("cursor-right")) {
-                context.setValue(true);
-                return true;
-              }
-              if (context.data === " ") {
-                context.setValue(context.value !== true);
-                return true;
-              }
-              return false;
-            },
           },
         },
       },
@@ -385,9 +350,10 @@ export function registerGoalCommand(pi: ExtensionAPI, host: CommandHost): void {
         type: "string",
         formOnly: true,
         title: "Updated objective",
-        description: "Replacement wording for the current objective.",
+        description: "Rewrite the outcome to accomplish.",
         ui: {
-          widget: "text",
+          widget: "textarea",
+          rows: 5,
           copyFrom: "currentObjective",
           visibleWhen: (values) => values.adjustExisting === true,
           requiredWhen: (values) => values.adjustExisting === true,
