@@ -43,9 +43,9 @@ describe("README schema rendering", () => {
         expect(rendered).toContain(
             "| `optional` | string | — | Optional \\| setting. Second line. |",
         );
-        expect(rendered).toContain("| `limits` | number[] | `[1,2]` | Numeric limits. |");
+        expect(rendered).toContain("| `limits` | number[] | See below | Numeric limits. |");
         expect(rendered).toContain(
-            '| `mixed` | (`one` \\| integer)[] | `["one"]` | Mixed values. |',
+            "| `mixed` | (`one` \\| integer)[] | See below | Mixed values. |",
         );
         expect(rendered).toContain('| `choice` | `one` \\| `two` | `"one"`');
         expect(rendered).toContain("| `mystery` | unknown | `null`");

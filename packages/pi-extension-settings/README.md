@@ -78,7 +78,7 @@ npm run config:generate
 npm run config:check
 ```
 
-`generate` writes `config.schema.json` and add/updates the generated configuration section in the README.
+`generate` writes `config.schema.json` and adds or updates the generated configuration section in the README. Compact defaults stay in the option table; larger exact defaults remain available in a collapsed complete-settings block.
 
 `check` verifies that both artifacts are up to date without changing files, making it suitable for pre-commit and CI.
 

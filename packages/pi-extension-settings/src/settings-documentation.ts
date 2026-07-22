@@ -6,6 +6,8 @@ import { createDefaultSettingsDocument, createSettingsFileSchema } from "./schem
 export const README_GENERATED_START = "<!-- pi-extension-settings:start -->";
 export const README_GENERATED_END = "<!-- pi-extension-settings:end -->";
 
+const MAX_INLINE_DEFAULT_CHARACTERS = 48;
+
 type SettingsRow = {
     readonly path: string;
     readonly type: string;
@@ -76,8 +78,20 @@ function markdownCell(value: string): string {
     return value.replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
+function canRenderDefaultInline(value: JsonValue): boolean {
+    if (value === null || typeof value === "boolean" || typeof value === "number") return true;
+    if (typeof value === "string") {
+        return (
+            !value.includes("\n") && JSON.stringify(value).length <= MAX_INLINE_DEFAULT_CHARACTERS
+        );
+    }
+    if (Array.isArray(value)) return value.length === 0;
+    return Object.keys(value).length === 0;
+}
+
 function formatDefault(value: JsonValue | undefined): string {
     if (value === undefined) return "—";
+    if (!canRenderDefaultInline(value)) return "See below";
     return `\`${markdownCell(JSON.stringify(value))}\``;
 }
 
@@ -112,9 +126,14 @@ export function renderReadmeSettingsSection(
         "| --- | --- | --- | --- |",
         ...tableRows,
         "",
+        "<details>",
+        "<summary>Complete default settings</summary>",
+        "",
         "```json",
         JSON.stringify(defaultDocument, undefined, 2),
         "```",
+        "",
+        "</details>",
     ].join("\n");
 }
 

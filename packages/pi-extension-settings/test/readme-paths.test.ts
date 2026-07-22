@@ -1,5 +1,8 @@
+import { Type } from "typebox";
+
 import { describe, expect, it } from "vitest";
 
+import { defineExtensionSettings } from "../src/definition.ts";
 import {
     defaultGlobalSettingsDisplayPath,
     resolveGlobalSettingsPaths,
@@ -47,6 +50,42 @@ describe("README generation", () => {
         );
         expect(rendered).toContain('"$schema": "./schemas/pi-example.schema.json"');
         expect(rendered).toContain('"opacity": 0.8');
+        expect(rendered).toContain("| `tools` | string[] | See below | Enabled tool names. |");
+        expect(rendered).toContain(
+            "<details>\n<summary>Complete default settings</summary>\n\n```json",
+        );
+        expect(rendered).toContain("```\n\n</details>");
+    });
+
+    it("keeps long defaults out of the option table without losing their exact values", () => {
+        const definition = defineExtensionSettings({
+            id: "pi-verbose",
+            title: "Pi Verbose",
+            description: "Settings with defaults that do not fit readable table cells.",
+            schema: Type.Object(
+                {
+                    prompt: Type.String({
+                        default: "First line.\nSecond line.",
+                        description: "Prompt text.",
+                    }),
+                    label: Type.String({
+                        default:
+                            "A deliberately long single-line default that should not widen the table.",
+                        description: "Display label.",
+                    }),
+                },
+                { additionalProperties: false },
+            ),
+        });
+
+        const rendered = renderReadmeSettingsSection(definition);
+
+        expect(rendered).toContain("| `prompt` | string | See below | Prompt text. |");
+        expect(rendered).toContain("| `label` | string | See below | Display label. |");
+        expect(rendered).toContain('"prompt": "First line.\\nSecond line."');
+        expect(rendered).toContain(
+            '"label": "A deliberately long single-line default that should not widen the table."',
+        );
     });
 
     it("supports a custom user-facing path", () => {
