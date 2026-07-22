@@ -98,6 +98,30 @@ test("shutting down one Codex tokenizer does not affect another owner", async ()
     }
 });
 
+test("remote compaction requests always preserve encrypted reasoning context", () => {
+    const liteRequest = buildRemoteCompactionV2Request({
+        model: "gpt-5.6-sol",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+    assert.deepEqual(liteRequest.reasoning, { effort: "low", context: "all_turns" });
+    assert.deepEqual(liteRequest.include, ["reasoning.encrypted_content"]);
+
+    const unknownModelRequest = buildRemoteCompactionV2Request({
+        model: "gpt-future",
+        input: [{ role: "user", content: "compact" }],
+        instructions: "system",
+        promptCacheKey: "session",
+        verbosity: "low",
+        fast: false,
+    });
+    assert.deepEqual(unknownModelRequest.reasoning, { summary: "auto" });
+    assert.deepEqual(unknownModelRequest.include, ["reasoning.encrypted_content"]);
+});
+
 test("creates native compaction using remote compaction v2", async () => {
     let requestUrl = "";
     let requestBody: unknown;
@@ -1091,7 +1115,10 @@ test("shrinks oversized tool outputs before remote v2 compaction", async () => {
         (item) => isRecord(item) && item.type === "function_call_output",
     );
     assert.ok(isRecord(outputItem));
-    assert.equal(outputItem.output, "[truncated]");
+    assert.equal(
+        outputItem.output,
+        "Output exceeded the available model context and was truncated",
+    );
     assert.equal(result?.compaction?.details.requestMeta?.rewrittenToolOutputs, 1);
 });
 
@@ -1175,7 +1202,10 @@ test("rewrites multiple oversized tool outputs before serializing remote v2 comp
     assert.equal(outputItems.length, 2);
     assert.deepEqual(
         outputItems.map((item) => (isRecord(item) ? item.output : undefined)),
-        ["[truncated]", "[truncated]"],
+        [
+            "Output exceeded the available model context and was truncated",
+            "Output exceeded the available model context and was truncated",
+        ],
     );
 });
 

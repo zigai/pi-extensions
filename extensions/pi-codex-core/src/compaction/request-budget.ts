@@ -26,7 +26,8 @@ import type {
 
 const RETAINED_MESSAGE_TOKEN_BUDGET = 64_000;
 const COMPACTION_REQUEST_BUDGET_RATIO = 0.8;
-const TRUNCATED_TOOL_OUTPUT_MESSAGE = "[truncated]";
+const TRUNCATED_TOOL_OUTPUT_MESSAGE =
+    "Output exceeded the available model context and was truncated";
 const TOKEN_ESTIMATE_CHUNK_CHARS = 512 * 1024;
 const TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS = 8 * 1024;
 const INLINE_IMAGE_TOKEN_ESTIMATE_TEXT = "(inline image data omitted for token estimate)";
@@ -48,6 +49,21 @@ export function buildRemoteCompactionV2Request(input: {
     readonly clientMetadata?: Readonly<Record<string, string>> | undefined;
 }): RemoteCompactionV2Request {
     const profile = codexModelRequestProfile(input.model);
+    const reasoning =
+        input.reasoning ??
+        (profile?.useResponsesLite
+            ? {
+                  ...(profile.defaultReasoningEffort
+                      ? { effort: profile.defaultReasoningEffort }
+                      : {}),
+                  context: "all_turns" as const,
+              }
+            : {
+                  ...(profile?.defaultReasoningEffort
+                      ? { effort: profile.defaultReasoningEffort }
+                      : {}),
+                  summary: "auto" as const,
+              });
     const serviceTier =
         input.fast && (profile?.supportsPriorityServiceTier ?? true)
             ? { service_tier: "priority" as const }
@@ -80,11 +96,11 @@ export function buildRemoteCompactionV2Request(input: {
             parallel_tool_calls: false,
             store: false,
             stream: true,
-            include: input.reasoning ? ["reasoning.encrypted_content"] : [],
+            include: ["reasoning.encrypted_content"],
             prompt_cache_key: input.promptCacheKey,
             text: { verbosity: input.verbosity },
             ...serviceTier,
-            ...(input.reasoning ? { reasoning: input.reasoning } : {}),
+            reasoning,
             client_metadata: {
                 ...input.clientMetadata,
                 [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
@@ -99,11 +115,11 @@ export function buildRemoteCompactionV2Request(input: {
         parallel_tool_calls: true,
         store: false,
         stream: true,
-        include: input.reasoning ? ["reasoning.encrypted_content"] : [],
+        include: ["reasoning.encrypted_content"],
         prompt_cache_key: input.promptCacheKey,
         text: { verbosity: input.verbosity },
         ...serviceTier,
-        ...(input.reasoning ? { reasoning: input.reasoning } : {}),
+        reasoning,
         ...(input.tools && input.tools.length > 0 ? { tools: input.tools } : {}),
         ...(input.clientMetadata ? { client_metadata: input.clientMetadata } : {}),
     };
@@ -425,17 +441,16 @@ export function buildCompactionInstructions(
 export function buildReasoning(
     config: CodexCoreConfig,
     modelId: string,
-): { readonly reasoning?: RemoteCompactionReasoning } {
+): { readonly reasoning: RemoteCompactionReasoning } {
     const profile = codexModelRequestProfile(modelId);
     const configuredEffort = config.openai.compactionReasoning;
     const effort =
         configuredEffort === "current"
             ? profile?.defaultReasoningEffort
             : codexReasoningEffortForRequest(configuredEffort);
-    if (!effort) return {};
     return profile?.useResponsesLite
-        ? { reasoning: { effort, context: "all_turns" } }
-        : { reasoning: { effort, summary: "auto" } };
+        ? { reasoning: { ...(effort ? { effort } : {}), context: "all_turns" } }
+        : { reasoning: { ...(effort ? { effort } : {}), summary: "auto" } };
 }
 
 export function resolveCompactionTargetModel(

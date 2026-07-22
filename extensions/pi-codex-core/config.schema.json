@@ -181,7 +181,8 @@
         "compactionReasoning": {
           "type": "string",
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "\\S",
+          "default": "medium"
         },
         "verbosity": {
           "anyOf": [

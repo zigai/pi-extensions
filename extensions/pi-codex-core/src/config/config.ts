@@ -110,7 +110,11 @@ const CodexVerbositySchema = Type.Union([
     Type.Literal("medium"),
     Type.Literal("high"),
 ]);
-const CodexCompactionReasoningSchema = Type.String({ minLength: 1, pattern: "\\S" });
+const CodexCompactionReasoningSchema = Type.String({
+    minLength: 1,
+    pattern: "\\S",
+    default: "medium",
+});
 const CodexCoreConfigJsonSchema = Type.Object(
     {
         scope: Type.Object(
