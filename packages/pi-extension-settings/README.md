@@ -53,6 +53,49 @@ export function loadExampleSettings(ctx: PiSettingsContext) {
 export default settingsDefinition;
 ```
 
+### Optional TUI control hints
+
+TypeBox preserves custom JSON Schema annotations in the generated schema. Extension authors can use
+the optional `x-control` keyword to tell compatible settings editors how a property should be
+presented when its ordinary JSON Schema shape is ambiguous. The annotation does not change runtime
+validation, defaults, or loading behavior.
+
+[Pi Settings UI](https://github.com/zigai/pi-settings-ui) recognizes these values:
+
+| `x-control`   | Compatible schema           | TUI behavior                                                                                                      |
+| ------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `text`        | string                      | Single-line inline input.                                                                                         |
+| `textarea`    | string                      | Pi's multiline editor.                                                                                            |
+| `switch`      | boolean                     | Boolean toggle.                                                                                                   |
+| `segmented`   | primitive choices           | Compact choice changed with Left and Right.                                                                       |
+| `select`      | primitive choices           | Searchable choice picker.                                                                                         |
+| `slider`      | number or integer           | Compact range bar with stepping and exact-number entry. Schema bounds and `multipleOf` refine its range and step. |
+| `numeric`     | number or integer           | Single-line numeric input.                                                                                        |
+| `color`       | string                      | Single-line color input with a live swatch for hexadecimal colors.                                                |
+| `path`        | string                      | Single-line path input with Tab completion.                                                                       |
+| `combobox`    | string or string-only union | Searchable suggestions from string `examples` or finite string branches, plus a custom schema-validated value.    |
+| `json-editor` | any property schema         | Full validated JSON editor instead of a shape-derived control.                                                    |
+
+Pass the annotation as a quoted TypeBox option:
+
+```ts
+const schema = Type.Object({
+  prompt: Type.String({ "x-control": "textarea" }),
+  root: Type.String({ "x-control": "path" }),
+  limit: Type.Integer({ minimum: 1, maximum: 20, "x-control": "slider" }),
+  color: Type.String({
+    "x-control": "combobox",
+    examples: ["accent", "warning"],
+  }),
+});
+```
+
+Hints are optional. Pi Settings UI infers switches from booleans, segmented controls from up to six
+primitive choices, searchable selects from larger choice sets, sliders from numbers with both
+bounds, and text or textarea controls from string defaults, examples, and length constraints.
+`format: "path"` and `format: "color"` also select those string controls. Unknown or
+type-incompatible hints fall back to this inference.
+
 ### Generate the schema and documentation
 
 Add the settings definition and commands to `package.json`:
