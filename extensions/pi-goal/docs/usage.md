@@ -25,13 +25,13 @@ and current-goal context. The model turns that input into a concrete completion 
 ## Expanded form
 
 With an unsubmitted `/goal ...` command in Pi's editor, press **Tab twice** to open the expanded
-form. Use **Up/Down** to move between fields, **Left/Right** or **Space** to change boolean choices,
-and **Enter** to submit.
+form. Use **Tab** to move between fields, **Left/Right** or **Space** to change boolean choices, and
+**Enter** to submit.
 
 | Field               | Effect                                                                                                     |
 | ------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Goal                | Edit the task used for generated or exact goal creation.                                                   |
-| Wording             | Choose `expand` or `exact`.                                                                                |
+| Objective           | Edit the multiline task used for generated or exact goal creation.                                         |
+| Raw goal            | Check to use the entered text exactly, without model expansion.                                            |
 | Minimum active time | Require a positive whole number of active minutes before completion.                                       |
 | Maximum active time | Stop automatic work after a positive whole number of active minutes.                                       |
 | Adjust current goal | Edit a paused, blocked, or active objective without resetting its identity, status, constraints, or usage. |

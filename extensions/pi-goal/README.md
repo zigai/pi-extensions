@@ -52,15 +52,15 @@ interactive UI.
 
 ### Expanded options
 
-Before submitting a completed `/goal ...` command, press **Tab twice** to open its expanded form.
-Use **Up/Down** to move between fields.
+Before submitting a `/goal ...` command, press **Tab twice** to open its expanded form. Use **Tab**
+to move between fields.
 
-| Option              | Default  | Effect                                                                    |
-| ------------------- | -------- | ------------------------------------------------------------------------- |
-| Wording             | `expand` | Choose model-expanded wording or preserve the exact task text.            |
-| Minimum active time | unset    | Prevent completion until the requested active time has accrued.           |
-| Maximum active time | unset    | Stop automatic work when the active-time limit is reached.                |
-| Adjust current goal | `no`     | Replace a mutable goal's objective without resetting its status or usage. |
+| Option              | Default   | Effect                                                              |
+| ------------------- | --------- | ------------------------------------------------------------------- |
+| Raw goal            | unchecked | Check to store the entered text exactly, without model expansion.   |
+| Minimum active time | unset     | Prevent completion until the requested active time has accrued.     |
+| Maximum active time | unset     | Stop automatic work when the active-time limit is reached.          |
+| Adjust current goal | unchecked | Check to edit a mutable goal without resetting its status or usage. |
 
 Time constraints and objective adjustment are available only in the expanded form.
 
