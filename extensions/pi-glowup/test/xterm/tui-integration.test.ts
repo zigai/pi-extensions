@@ -179,7 +179,7 @@ describe("Pi TUI through headless xterm", () => {
         const pendingTerminal = new VirtualTerminal(100, 20);
         const activeTui = new TUI(pendingTerminal);
         const tool = new ToolExecutionComponent(
-            "imagegen",
+            "unknown_tool",
             "call-xterm-controls",
             { prompt: "before\u001b[2Jafter\u001b]2;owned\u0007\tend" },
             undefined,

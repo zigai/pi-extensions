@@ -1,6 +1,5 @@
 import { createApplyPatchRenderer } from "../rendering/apply-patch-rendering.ts";
 import { createAgentBrowserRenderer } from "./extensions/agent-browser/renderer.ts";
-import { createCodexRenderer, isCodexTool } from "./extensions/codex/renderer.ts";
 import {
     createChromeDevtoolsMcpRenderer,
     createMcpGatewayRenderer,
@@ -71,11 +70,6 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
         name: "goal-tools",
         matches: isGoalTool,
         createRenderer: (toolName, options) => createGoalRenderer(toolName, options?.labelMode),
-    },
-    {
-        name: "codex-tools",
-        matches: isCodexTool,
-        createRenderer: (toolName, options) => createCodexRenderer(toolName, options?.labelMode),
     },
     {
         name: "agent-tools",

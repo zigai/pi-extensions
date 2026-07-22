@@ -5,10 +5,11 @@ when `pi-glowup` is not installed. The property is a versioned, declarative prot
 expose Pi's TUI components, themes, ANSI sequences, or Glowup's internal modules.
 
 Tool-specific rendering belongs next to the tool that owns its argument and result contracts. This
-repository provides the protocol, style engine, generic compatibility renderer, and the existing
-compatibility renderers for Agent Browser, Codex, MCP, goals, agents, questions, and `apply_patch`.
-Those existing renderers stay here until each owning package ships and verifies an equivalent
-protocol adapter. They are migrated independently rather than removed in advance.
+repository provides the protocol, style engine, generic compatibility renderer, and the remaining
+transitional renderers for Agent Browser, MCP, goals, agents, questions, and `apply_patch`. The
+Codex `web_run`, `imagegen`, and `view_image` renderers have migrated to `pi-codex-core`. Other
+renderers stay here until each owning package ships and verifies an equivalent protocol adapter;
+they are migrated independently rather than removed in advance.
 
 ## Rendering selection
 

@@ -107,27 +107,6 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         result: result("Agent completed"),
     },
     {
-        family: "web-run",
-        toolName: "web_run",
-        args: { search_query: [{ q: "Pi documentation" }] },
-        callText: "Searched the web",
-        result: result("Search complete"),
-    },
-    {
-        family: "image-generation",
-        toolName: "imagegen",
-        args: { prompt: "A deterministic terminal screenshot" },
-        callText: "Image",
-        result: result("Generated 1 image"),
-    },
-    {
-        family: "image-viewing",
-        toolName: "view_image",
-        args: { path: "/tmp/世界/example.png" },
-        callText: "Viewed Image",
-        result: result("Image Size: 100x100"),
-    },
-    {
         family: "generic-third-party",
         toolName: "unknown_tool",
         args: { nested: { value: "hello 世界" } },
