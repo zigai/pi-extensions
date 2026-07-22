@@ -325,7 +325,6 @@ export class ArgumentFormComponent implements Component, Focusable {
     private readonly completionCapabilities: CompletionCapabilities | undefined;
     private readonly keybindings: KeybindingsManager;
     private readonly validateState: (state: FormState) => readonly ParseIssue[];
-    private readonly previewState: (state: FormState) => string;
     private readonly maxRows: number;
     private readonly done: (result: FormResult | undefined) => void;
 
@@ -350,7 +349,6 @@ export class ArgumentFormComponent implements Component, Focusable {
         completionCapabilities: CompletionCapabilities | undefined,
         keybindings: KeybindingsManager,
         validateState: (state: FormState) => readonly ParseIssue[],
-        previewState: (state: FormState) => string,
         done: (result: FormResult | undefined) => void,
         selectedIndex = 0,
     ) {
@@ -363,7 +361,6 @@ export class ArgumentFormComponent implements Component, Focusable {
         this.completionCapabilities = completionCapabilities;
         this.keybindings = keybindings;
         this.validateState = validateState;
-        this.previewState = previewState;
         this.maxRows = Math.max(8, tui.terminal.rows - 3);
         this.symbols = resolveComponentSymbols(symbols, appearance);
         this.done = done;
@@ -590,45 +587,38 @@ export class ArgumentFormComponent implements Component, Focusable {
 
         const selectedIssue = this.currentIssue();
         if (selectedIssue !== undefined) {
-            lines.push("");
-            lines.push(
-                this.fitLine(this.theme.fg(this.appearance.colors.issue, selectedIssue), width),
-            );
-        }
-
-        lines.push("");
-        lines.push(
-            this.fitLine(
-                this.theme.fg(
-                    this.appearance.colors.description,
-                    `Command: ${this.previewState({ ...this.state }).replace(/\r\n|\r|\n/g, " ↵ ")}`,
-                ),
-                width,
-            ),
-        );
-
-        const instructions = this.instructionsText();
-        if (instructions !== undefined) {
-            lines.push("");
             lines.push(
                 this.fitLine(
-                    this.theme.fg(this.appearance.colors.instructions, instructions),
+                    this.theme.fg(this.appearance.colors.issue, `  ! ${selectedIssue}`),
                     width,
                 ),
             );
         }
-        return this.applyViewport(lines);
+
+        lines.push(this.renderSeparator(width));
+        const instructions = this.instructionsText();
+        if (instructions !== undefined) {
+            lines.push(
+                this.fitLine(
+                    this.theme.fg(this.appearance.colors.instructions, `  ${instructions}`),
+                    width,
+                ),
+            );
+        }
+        const viewport = this.applyViewport(lines, Math.max(1, this.maxRows - 2));
+        const border = this.renderSeparator(width);
+        return [border, ...viewport, border];
     }
 
-    private applyViewport(lines: string[]): string[] {
-        if (lines.length <= this.maxRows) {
+    private applyViewport(lines: string[], maxRows: number): string[] {
+        if (lines.length <= maxRows) {
             return lines;
         }
         const selectedLine = Math.max(
             2,
             lines.findIndex((line) => line.includes(this.symbols.focusedField)),
         );
-        const bodyRows = Math.max(3, this.maxRows - 4);
+        const bodyRows = Math.max(3, maxRows - 4);
         const maxStart = Math.max(2, lines.length - bodyRows - 1);
         const start = Math.min(maxStart, Math.max(2, selectedLine - Math.floor(bodyRows / 2)));
         const end = Math.min(lines.length - 1, start + bodyRows);
@@ -641,7 +631,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             viewport.push(this.theme.fg(this.appearance.colors.instructions, "  ↓ more"));
         }
         viewport.push(lines[lines.length - 1] ?? "");
-        return viewport.slice(0, this.maxRows);
+        return viewport.slice(0, maxRows);
     }
 
     private renderHeader(width: number): string {
@@ -651,15 +641,19 @@ export class ArgumentFormComponent implements Component, Focusable {
         );
     }
 
+    private renderSeparator(width: number): string {
+        return this.theme.fg(this.appearance.colors.editorBorder, "─".repeat(Math.max(0, width)));
+    }
+
     private instructionsText(): string | undefined {
         const submit = this.keybindingText("tui.input.submit");
         const tab = this.keybindingText("tui.input.tab");
         const cancel = this.keybindingText("tui.select.cancel");
         switch (this.appearance.layout.instructions) {
             case "full":
-                return `${submit} submit · ${tab} move · arrows navigate · ${cancel} cancel`;
+                return `${submit} submit · ${tab} next field · ${cancel} cancel`;
             case "short":
-                return `${submit} submit · ${tab} move · ${cancel} cancel`;
+                return `${submit} submit · ${cancel} cancel`;
             case "hidden":
                 return undefined;
             default:
@@ -703,6 +697,29 @@ export class ArgumentFormComponent implements Component, Focusable {
             name = this.theme.fg(this.appearance.colors.issue, rawName);
         }
         const prefix = " ".repeat(this.appearance.layout.leftPadding) + marker + " ";
+        if (selected && isMultilineWidget(field.definition)) {
+            let heading =
+                prefix + this.theme.fg(this.appearance.colors.focusedLabel, fieldTitle(field));
+            if (
+                field.definition.description !== undefined &&
+                this.shouldRenderDescription(selected)
+            ) {
+                heading +=
+                    "  " +
+                    this.theme.fg(this.appearance.colors.description, field.definition.description);
+            }
+            const lines = [this.fitLine(heading, width)];
+            const editorWidth = Math.max(20, width - this.appearance.layout.leftPadding - 2);
+            for (const line of this.renderMultilineEditor(
+                editorWidth,
+                editorRows(field.definition),
+            )) {
+                lines.push(
+                    this.fitLine(" ".repeat(this.appearance.layout.leftPadding + 2) + line, width),
+                );
+            }
+            return lines;
+        }
 
         if (isExpandedOptionsWidget(field.definition)) {
             return this.renderExpandedField(
@@ -731,6 +748,27 @@ export class ArgumentFormComponent implements Component, Focusable {
         }
 
         return lines;
+    }
+
+    private renderMultilineEditor(width: number, preferredRows: number): string[] {
+        const rendered = [...this.editor.render(width)];
+        const topBorder = rendered[0];
+        const bottomBorderIndex = rendered.findIndex(
+            (line, index) => index > 0 && line === topBorder,
+        );
+        if (bottomBorderIndex < 0) {
+            return rendered;
+        }
+
+        const missingRows = Math.max(0, preferredRows - (bottomBorderIndex - 1));
+        if (missingRows > 0) {
+            rendered.splice(
+                bottomBorderIndex,
+                0,
+                ...Array.from({ length: missingRows }, () => " ".repeat(width)),
+            );
+        }
+        return rendered;
     }
 
     private renderInlineFieldLine(
@@ -874,17 +912,16 @@ export class ArgumentFormComponent implements Component, Focusable {
     private renderBooleanValue(field: FormField, selected: boolean, width: number): string {
         const value = this.state[field.name];
         const confirm = widgetFor(field.definition) === "confirm";
-        let falseLabel = "false";
-        let trueLabel = "true";
-        if (confirm) {
-            falseLabel = "not confirmed";
-            trueLabel = "confirmed";
-        }
-        let rendered = `${this.symbols.unselectedCheckbox} ${falseLabel}`;
+        let rendered = this.symbols.unselectedCheckbox;
         if (value === true) {
-            rendered = `${this.symbols.selectedCheckbox} ${trueLabel}`;
-        } else if (value === undefined) {
-            rendered = "– unset";
+            rendered = this.symbols.selectedCheckbox;
+        }
+        if (confirm) {
+            if (value === true) {
+                rendered += " confirmed";
+            } else {
+                rendered += " not confirmed";
+            }
         }
         const rawValue = paddedCell(rendered, width);
         if (selected) {
@@ -1033,10 +1070,11 @@ export class ArgumentFormComponent implements Component, Focusable {
         if (cell.startsWith("> ")) {
             cell = cell.slice(2);
         }
-        const withCursor = cell.includes(CURSOR_MARKER);
-        if (!withCursor) {
+        cell = truncateToWidth(cell, width, "");
+        if (!cell.includes(CURSOR_MARKER)) {
             cell += CURSOR_MARKER;
         }
+        cell = truncateToWidth(cell, width, "");
         const padding = Math.max(0, width - visibleWidth(cell));
         return this.theme.fg(this.appearance.colors.focusedValue, cell + " ".repeat(padding));
     }

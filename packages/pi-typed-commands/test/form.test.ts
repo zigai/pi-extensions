@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { CURSOR_MARKER } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
 import { DEFAULT_PI_TYPED_COMMANDS_APPEARANCE } from "../src/pi/presentation-config.js";
 import type { FlatArgumentDefinitions, ParsedCommandArguments } from "../src/types.js";
@@ -331,10 +331,20 @@ describe("dense argument form", () => {
         ]);
     });
 
-    it("marks and highlights the currently selected field", async () => {
+    it("keeps description columns fixed as focus moves and frames the form", async () => {
         const definitions: FlatArgumentDefinitions = {
-            count: { type: "number", integer: true, default: 1, title: "Count" },
-            panes: { type: "boolean", default: false, title: "Current tab panes" },
+            count: {
+                type: "number",
+                integer: true,
+                title: "Count",
+                description: "How many panes.",
+            },
+            panes: {
+                type: "boolean",
+                default: false,
+                title: "Current tab panes",
+                description: "Reuse current tab.",
+            },
         };
 
         const command: RegisteredTypedCommand = {
@@ -344,7 +354,7 @@ describe("dense argument form", () => {
             formSymbols: symbols,
         };
         const parsed: ParsedCommandArguments = {
-            values: { count: 1, panes: false },
+            values: { panes: false },
             provided: new Set(),
             issues: [],
             mode: "run",
@@ -352,6 +362,7 @@ describe("dense argument form", () => {
 
         let initialLines: string[] = [];
         let afterTabLines: string[] = [];
+        let afterToggleLines: string[] = [];
         const ctx = createTestExtensionCommandContext({
             mode: "tui",
             ui: {
@@ -365,6 +376,8 @@ describe("dense argument form", () => {
                     initialLines = component.render(80);
                     component.handleInput("\t");
                     afterTabLines = component.render(80);
+                    component.handleInput(" ");
+                    afterToggleLines = component.render(80);
                     return undefined;
                 },
             },
@@ -380,6 +393,35 @@ describe("dense argument form", () => {
             afterTabLines.some((line) => line.includes("› Current tab panes")),
             `expected selected marker after tab, got ${JSON.stringify(afterTabLines)}`,
         );
+        const uncheckedBoolean = initialLines.find((line) => line.includes("Current tab panes"));
+        const checkedBoolean = afterToggleLines.find((line) => line.includes("Current tab panes"));
+        assert.match(uncheckedBoolean ?? "", /□/);
+        assert.match(checkedBoolean ?? "", /■/);
+        assert.doesNotMatch(uncheckedBoolean ?? "", /\b(?:yes|no|true|false|unset)\b/i);
+        assert.doesNotMatch(checkedBoolean ?? "", /\b(?:yes|no|true|false|unset)\b/i);
+        const descriptionColumn = (lines: readonly string[], description: string): number => {
+            const line = lines.find((candidate) => candidate.includes(description));
+            if (line === undefined) {
+                assert.fail(`expected ${description} in ${JSON.stringify(lines)}`);
+            }
+            return visibleWidth(line.slice(0, line.indexOf(description)));
+        };
+        const descriptionColumns = [
+            descriptionColumn(initialLines, "How many panes."),
+            descriptionColumn(initialLines, "Reuse current tab."),
+            descriptionColumn(afterTabLines, "How many panes."),
+            descriptionColumn(afterTabLines, "Reuse current tab."),
+        ];
+        assert.deepEqual(descriptionColumns, Array(4).fill(descriptionColumns[0]));
+
+        const border = "─".repeat(80);
+        assert.equal(initialLines[0], border);
+        assert.equal(initialLines.at(-1), border);
+        assert.equal(initialLines.filter((line) => line === border).length, 3);
+        assert.ok(initialLines.some((line) => line.includes("enter submit")));
+        assert.ok(initialLines.some((line) => line.includes("tab next field")));
+        assert.ok(!initialLines.some((line) => line.includes("Command:")));
+        assert.ok(!initialLines.some((line) => line.includes("arrows navigate")));
     });
 
     it("renders multiline textareas without embedding terminal line breaks in form rows", async () => {
@@ -387,6 +429,7 @@ describe("dense argument form", () => {
             task: {
                 type: "string",
                 title: "Goal request",
+                description: "Describe the outcome.",
                 ui: { widget: "textarea", rows: 5 },
             },
             exact: { type: "boolean", title: "Use exact wording" },
@@ -433,9 +476,22 @@ describe("dense argument form", () => {
             1,
             JSON.stringify(selectedLines),
         );
+        assert.ok(
+            selectedLines.some((line) => line.includes("› Goal request  Describe the outcome.")),
+            JSON.stringify(selectedLines),
+        );
         assert.ok(selectedLines.some((line) => line.includes("first")));
         assert.ok(selectedLines.some((line) => line.includes("second")));
         assert.ok(selectedLines.some((line) => line.includes("third")));
+        const editorBorder = `   ${"─".repeat(97)}`;
+        const editorBorderIndexes: number[] = [];
+        for (const [index, line] of selectedLines.entries()) {
+            if (line === editorBorder) {
+                editorBorderIndexes.push(index);
+            }
+        }
+        assert.equal(editorBorderIndexes.length, 2, JSON.stringify(selectedLines));
+        assert.equal(editorBorderIndexes[1]! - editorBorderIndexes[0]! - 1, 5);
         assert.ok(
             collapsedLines.some((line) => line.includes("first ↵ second ↵ third")),
             JSON.stringify(collapsedLines),
@@ -698,7 +754,7 @@ describe("dense argument form", () => {
         const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
 
         assert.ok(renderedLines.some((line) => line.includes("ctrl+s submit")));
-        assert.ok(renderedLines.some((line) => line.includes("ctrl+n move")));
+        assert.ok(renderedLines.some((line) => line.includes("ctrl+n next field")));
         assert.ok(renderedLines.some((line) => line.includes("ctrl+x cancel")));
         assert.equal(result?.enabled, false);
     });
