@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-extension-settings",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "TypeBox-first configuration runtime and artifact tooling for Pi extensions.",
   "keywords": [
     "configuration",
@@ -21,7 +21,7 @@
     "url": "git+https://github.com/zigai/pi-extension-settings.git"
   },
   "bin": {
-    "pi-extension-settings": "./dist/cli-entry.js"
+    "pi-extension-settings": "dist/cli-entry.js"
   },
   "files": [
     "dist",
