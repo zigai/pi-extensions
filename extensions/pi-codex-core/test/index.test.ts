@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+    createEventBus,
     type BuildSystemPromptOptions,
     type ExtensionAPI,
     type ExtensionContext,
@@ -29,6 +30,7 @@ test("registers extension handlers once per Pi API", () => {
     let registeredRenderers = 0;
     let registeredHandlers = 0;
     const api = {
+        events: createEventBus(),
         registerTool() {
             registeredTools += 1;
         },
@@ -90,6 +92,68 @@ test("apply_patch replaces edit when enabled for OpenAI-like models", async () =
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("delegates tool activation defaults to Pi Toggles without mutating active tools", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-toggles-activation-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(dirname(globalConfigPath), { recursive: true });
+        await writeFile(globalConfigPath, JSON.stringify({ tools: { applyPatch: "openai" } }));
+
+        const harness = makeExtensionHarness(["read", "edit", "bash"]);
+        const proposals: unknown[] = [];
+        harness.events.on("pi-toggles:set-activation-proposal", (value) => {
+            proposals.push(value);
+            harness.events.emit("pi-toggles:activation-proposal-accepted", {
+                version: 1,
+                sessionId: "extension-session",
+                owner: packageName,
+            });
+        });
+        extension(harness.api);
+        harness.events.emit("pi-toggles:activation-ready", {
+            version: 1,
+            sessionId: "extension-session",
+        });
+
+        await harness.startSession(makeExtensionContext(cwd, true));
+
+        assert.deepEqual(harness.activeTools, ["read", "edit", "bash"]);
+        assert.equal(proposals.length, 1);
+        const proposal = proposals[0];
+        assert.ok(isRecord(proposal));
+        assert.equal(proposal.owner, packageName);
+        assert.ok(Array.isArray(proposal.decisions));
+        assert.ok(
+            proposal.decisions.some(
+                (decision) =>
+                    JSON.stringify(decision) ===
+                    JSON.stringify({
+                        target: { kind: "tool", name: "apply_patch" },
+                        state: "on",
+                    }),
+            ),
+        );
+        assert.ok(
+            proposal.decisions.some(
+                (decision) =>
+                    JSON.stringify(decision) ===
+                    JSON.stringify({ target: { kind: "tool", name: "edit" }, state: "off" }),
+            ),
+        );
+    } finally {
+        if (previousAgentDir === undefined) {
+            delete process.env.PI_CODING_AGENT_DIR;
+        } else {
+            process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        }
         await rm(root, { recursive: true, force: true });
     }
 });

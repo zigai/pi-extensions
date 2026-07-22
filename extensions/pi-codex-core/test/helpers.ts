@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
+    createEventBus,
     type BuildSystemPromptOptions,
+    type EventBus,
     type ExtensionAPI,
     type ExtensionContext,
     type Theme,
@@ -13,6 +15,7 @@ type ExtensionEventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
 
 type ExtensionHarness = {
     readonly api: ExtensionAPI;
+    readonly events: EventBus;
     readonly activeTools: readonly string[];
     readonly startSession: (ctx: ExtensionContext) => Promise<void>;
     readonly prepareProviderHeaders: (
@@ -31,6 +34,7 @@ type ExtensionHarness = {
 
 export function makeExtensionHarness(initialActiveTools: readonly string[] = []): ExtensionHarness {
     let activeTools: string[] = [...initialActiveTools];
+    const events = createEventBus();
     let sessionStart: ExtensionEventHandler | undefined;
     let beforeProviderHeaders: ExtensionEventHandler | undefined;
     let beforeProviderRequest: ExtensionEventHandler | undefined;
@@ -38,6 +42,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
     let sessionBeforeCompact: ExtensionEventHandler | undefined;
     let sessionCompact: ExtensionEventHandler | undefined;
     const api = {
+        events,
         registerTool() {},
         registerCommand() {},
         registerMessageRenderer() {},
@@ -58,6 +63,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
     return {
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the ExtensionAPI members exercised during extension registration and session_start.
         api: api as unknown as ExtensionAPI,
+        events,
         get activeTools() {
             return activeTools;
         },

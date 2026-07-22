@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { syncCodexCoreTools } from "./activation.ts";
+import { codexCoreActivationDecisions, syncCodexCoreTools } from "./activation.ts";
 import { codexModelRequestProfile } from "./codex/models.ts";
 import {
     CODEX_RESPONSES_LITE_HEADER,
@@ -18,6 +18,7 @@ import { registerApplyPatchTool } from "./tools/apply-patch/tool.ts";
 import { registerImagegenTool } from "./tools/imagegen.ts";
 import { registerViewImageTool } from "./tools/view-image/tool.ts";
 import { registerWebRunTool } from "./tools/web-run/tool.ts";
+import { OptionalTogglesActivation } from "./toggles-activation.ts";
 
 /** Package display name used in user-visible extension messages. */
 export const extensionName = "Pi Codex Core";
@@ -45,8 +46,16 @@ export default function extension(pi: ExtensionAPI): void {
     activatedApis.add(pi);
     const responsesLitePolicy = new ResponsesLiteRequestPolicy();
     const tokenizer = new CodexTokenizer();
+    const togglesActivation = new OptionalTogglesActivation(pi.events, packageName);
 
     const getConfig = (): CodexCoreConfig => config;
+    const syncToolActivation = (ctx: Parameters<typeof syncCodexCoreTools>[1]): void => {
+        const activation = togglesActivation.update(
+            ctx.sessionManager.getSessionId(),
+            codexCoreActivationDecisions(ctx, config),
+        );
+        syncCodexCoreTools(pi, ctx, config, { activation });
+    };
     const applyConfig = (
         nextConfig: CodexCoreConfig,
         ctx: Parameters<typeof syncCodexCoreTools>[1],
@@ -55,7 +64,7 @@ export default function extension(pi: ExtensionAPI): void {
         if (config.compaction.enabled) {
             tokenizer.warm();
         }
-        syncCodexCoreTools(pi, ctx, config);
+        syncToolActivation(ctx);
     };
 
     registerWebRunTool(pi, { getConfig, tokenizer });
@@ -73,14 +82,14 @@ export default function extension(pi: ExtensionAPI): void {
         if (config.compaction.enabled) {
             tokenizer.warm();
         }
-        syncCodexCoreTools(pi, ctx, config);
+        syncToolActivation(ctx);
         if (config.openai.fast && ctx.hasUI) {
             ctx.ui.notify(FAST_MODE_STARTUP_WARNING, "warning");
         }
     });
 
     pi.on("model_select", async (_event, ctx) => {
-        syncCodexCoreTools(pi, ctx, config);
+        syncToolActivation(ctx);
     });
 
     pi.on("before_agent_start", async (event, ctx) => {
@@ -181,6 +190,7 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("session_shutdown", async (event, ctx) => {
+        togglesActivation.dispose();
         responsesLitePolicy.clearSession(ctx.sessionManager.getSessionId());
         if (compactionModulePromise !== undefined) {
             const { cancelScheduledCodexAutoCompaction, clearCodexCompactionSessionState } =

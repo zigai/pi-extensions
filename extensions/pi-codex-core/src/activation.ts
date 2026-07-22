@@ -7,6 +7,7 @@ import { IMAGEGEN_TOOL_NAME } from "./tools/imagegen.ts";
 import { VIEW_IMAGE_TOOL_NAME } from "./tools/view-image/tool.ts";
 import { WEB_RUN_TOOL_NAME } from "./tools/web-run/tool.ts";
 import { modelSupportsImages } from "./images/codex-prompt.ts";
+import type { ToolActivationDecision } from "./toggles-activation.ts";
 
 export const CODEX_CORE_TOOL_NAMES = [
     WEB_RUN_TOOL_NAME,
@@ -23,27 +24,48 @@ export function syncCodexCoreTools(
     pi: ExtensionAPI,
     ctx: ExtensionContext,
     config: CodexCoreConfig,
+    options?: { readonly activation: "standalone" | "delegated" },
 ): void {
     const enabledTools = enabledCodexToolNames(ctx, config);
     const applyPatchEnabled = enabledTools.includes(APPLY_PATCH_TOOL_NAME);
     let activeTools = pi.getActiveTools().filter((toolName) => !isCodexCoreToolName(toolName));
     const editSuppressedByApplyPatch = editSuppressedByApplyPatchByApi.get(pi) ?? false;
 
-    if (applyPatchEnabled) {
-        editSuppressedByApplyPatchByApi.set(
-            pi,
-            editSuppressedByApplyPatch || activeTools.includes("edit"),
-        );
-        activeTools = activeTools.filter((toolName) => toolName !== "edit");
-    } else if (editSuppressedByApplyPatch && !activeTools.includes("edit")) {
-        activeTools = [...activeTools, "edit"];
-        editSuppressedByApplyPatchByApi.set(pi, false);
-    } else if (!applyPatchEnabled) {
-        editSuppressedByApplyPatchByApi.set(pi, false);
-    }
+    if ((options?.activation ?? "standalone") === "standalone") {
+        if (applyPatchEnabled) {
+            editSuppressedByApplyPatchByApi.set(
+                pi,
+                editSuppressedByApplyPatch || activeTools.includes("edit"),
+            );
+            activeTools = activeTools.filter((toolName) => toolName !== "edit");
+        } else if (editSuppressedByApplyPatch && !activeTools.includes("edit")) {
+            activeTools = [...activeTools, "edit"];
+            editSuppressedByApplyPatchByApi.set(pi, false);
+        } else if (!applyPatchEnabled) {
+            editSuppressedByApplyPatchByApi.set(pi, false);
+        }
 
-    pi.setActiveTools([...activeTools, ...enabledTools]);
+        pi.setActiveTools([...activeTools, ...enabledTools]);
+    }
     setCodexStatus(ctx, config);
+}
+
+/** Activation defaults proposed to Pi Toggles when it owns tool policy. */
+export function codexCoreActivationDecisions(
+    ctx: ExtensionContext,
+    config: CodexCoreConfig,
+): readonly ToolActivationDecision[] {
+    const enabled = new Set(enabledCodexToolNames(ctx, config));
+    return [
+        ...CODEX_CORE_TOOL_NAMES.map((name) => ({
+            target: { kind: "tool" as const, name },
+            state: enabled.has(name) ? ("on" as const) : ("off" as const),
+        })),
+        {
+            target: { kind: "tool", name: "edit" },
+            state: enabled.has(APPLY_PATCH_TOOL_NAME) ? "off" : "on",
+        },
+    ];
 }
 
 export function enabledCodexToolNames(

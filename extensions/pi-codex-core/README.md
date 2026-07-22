@@ -15,7 +15,7 @@ pi install npm:@zigai/pi-codex-core
 - `web_run` — Codex-backed web search via the OpenAI Codex search endpoint, with cached, indexed, and live modes.
 - `imagegen` — Codex image generation/editing.
 - `view_image` — native image return for local files.
-- `apply_patch` — optional port of the Codex native `apply_patch` edit tool. If enabled, it replaces Pi's native `edit` tool.
+- `apply_patch` — optional port of the Codex native `apply_patch` edit tool. Standalone, enabling it replaces the active `edit` implementation.
 
 ### System Prompt
 
@@ -43,6 +43,8 @@ The initial version of this extension was based on [Igor Warzocha's `pi-codex-co
 ## Configuration
 
 Use global config at `~/.pi/agent/pi-codex-core/config.json`.
+
+When Pi Toggles is active, Codex Core submits these tool settings as defaults instead of changing Pi's active tools directly. Explicit Pi Toggles policy remains authoritative; without Pi Toggles, the same settings are applied standalone.
 
 | Option                         | Default         | Purpose                                                                                      |
 | ------------------------------ | --------------- | -------------------------------------------------------------------------------------------- |
