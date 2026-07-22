@@ -55,7 +55,8 @@ test("codex prompt mode inherits structured Pi prompt sections", () => {
     });
 
     assert.match(prompt, /^You are Codex, an agent based on GPT-5/);
-    assert.match(prompt, /A substantial ASCII diagram counts as a visualization/);
+    assert.match(prompt, /# Destructive Actions/);
+    assert.match(prompt, /Never repurpose `\$HOME`, `\$home`, or `\$CODEX_HOME`/);
     assert.doesNotMatch(prompt, /You are an expert coding assistant operating inside pi/);
     assert.doesNotMatch(prompt, /Codex CLI/);
     assert.doesNotMatch(prompt, /Codex-style/);
@@ -128,13 +129,15 @@ test("selects Codex prompts by active GPT model and preserves Pi mode", () => {
         modelId: "gpt-5.5",
     });
 
-    assert.notEqual(sol, terra);
+    assert.equal(sol, terra);
     assert.equal(terra, luna);
-    assert.match(sol, /A substantial ASCII diagram counts as a visualization/);
-    assert.doesNotMatch(terra, /A substantial ASCII diagram counts as a visualization/);
+    assert.match(sol, /# Destructive Actions/);
     assert.match(gpt55, /## Engineering judgment/);
     assert.match(gpt55, /You are a deeply pragmatic, effective software engineer/);
-    assert.doesNotMatch(gpt55, /# Using skills/);
+    assert.match(gpt55, /# Using skills/);
+    assert.match(gpt55, /read that skill's `SKILL\.md` completely before acting/);
+    assert.equal(sol.split("# Using skills").length - 1, 1);
+    assert.equal(gpt55.split("# Using skills").length - 1, 1);
     assert.match(sol, /Use `edit` for local file edits/);
     assert.match(gpt55, /Use `edit` for manual code edits/);
     assert.doesNotMatch(
@@ -217,11 +220,11 @@ test("bundled Codex prompts match the pinned upstream content", async () => {
     const prompts = [
         [
             new URL("../src/prompt/codex-gpt-5.6-sol.md", import.meta.url),
-            "e9778714d505f3dd04d44db4394024c5fab5bf6554fc9faa3cdf9cf776b63bb9",
+            "cbefa6b0bede0e332d957fca70ccacf9f12f4c0ecdf81b819e5cbe1a3b16e265",
         ],
         [
             new URL("../src/prompt/codex-gpt-5.6-terra-luna.md", import.meta.url),
-            "78a2fc84e1bffa421d865c1a2ade4185d3d33ef38e6a15157f0ff1a89b7d52ec",
+            "cbefa6b0bede0e332d957fca70ccacf9f12f4c0ecdf81b819e5cbe1a3b16e265",
         ],
         [
             new URL("../src/prompt/codex-gpt-5.5.md", import.meta.url),

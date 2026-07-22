@@ -159,8 +159,8 @@ function adaptCodexPromptForPi(prompt: string, tools: readonly string[]): string
     );
     const skillsHeading = "\n# Using skills";
     const skillsIndex = adaptedPrompt.indexOf(skillsHeading);
-    if (skillsIndex < 0) return adaptedPrompt;
-    const promptWithoutCodexSkills = adaptedPrompt.slice(0, skillsIndex).trimEnd();
+    const promptWithoutCodexSkills =
+        skillsIndex < 0 ? adaptedPrompt.trimEnd() : adaptedPrompt.slice(0, skillsIndex).trimEnd();
     if (!tools.includes("read")) return promptWithoutCodexSkills;
     return [promptWithoutCodexSkills, buildPiSkillUsageGuidance()].join("\n\n");
 }
