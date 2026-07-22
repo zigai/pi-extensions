@@ -486,6 +486,7 @@ test("renders compact web_run results until expanded", () => {
     assert.match(compact, /https:\/\/pi\.dev\/docs\/latest\/extensions/);
     assert.match(compact, /… 1 more/);
     assert.doesNotMatch(compact, /Key lines/);
+    assert.doesNotMatch(compact, /raw:|call\.txt/);
 
     const expanded = renderComponent(
         webRunTool.renderResult(

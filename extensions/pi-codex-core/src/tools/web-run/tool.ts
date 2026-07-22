@@ -221,9 +221,7 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
             const cards = parseWebRunSourceCards(output);
             const sourceCount =
                 result.details.sourceCount > 0 ? result.details.sourceCount : cards.length;
-            const lines = [
-                formatWebRunResultHeader(sourceCount, result.details.fullOutputPath, theme),
-            ];
+            const lines = [formatWebRunResultHeader(sourceCount, theme)];
             for (const [index, card] of cards.slice(0, 2).entries()) {
                 lines.push(theme.fg("dim", `${index + 1}. ${card.title}`));
                 if (card.url) lines.push(theme.fg("muted", `   ${card.url}`));
@@ -527,13 +525,10 @@ function compactQuotedText(value: string, maxCharacters = 72): string {
 
 function formatWebRunResultHeader(
     sourceCount: number,
-    fullOutputPath: string,
-    theme: { fg(color: "success" | "dim", text: string): string },
+    theme: { fg(color: "success", text: string): string },
 ): string {
     const noun = sourceCount === 1 ? "source" : "sources";
-    let text = theme.fg("success", `${sourceCount} ${noun}`);
-    if (fullOutputPath) text += theme.fg("dim", ` • raw: ${fullOutputPath}`);
-    return text;
+    return theme.fg("success", `${sourceCount} ${noun}`);
 }
 
 function parseWebRunSourceCards(output: string | undefined): WebRunSourceCard[] {
