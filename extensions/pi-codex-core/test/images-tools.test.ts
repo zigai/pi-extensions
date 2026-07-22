@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -27,6 +28,52 @@ import {
     makeRenderContext,
     messageEntry,
 } from "./helpers.ts";
+
+test("model-facing Codex tool guidance matches v0.145.0", async () => {
+    const webDescriptionSource = await readFile("src/tools/web-run/web-run-description.md");
+    const imagegenDescriptionSource = await readFile("src/tools/imagegen-description.md");
+    assert.equal(
+        createHash("sha256").update(webDescriptionSource).digest("hex"),
+        "1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e",
+    );
+    assert.equal(
+        createHash("sha256").update(imagegenDescriptionSource).digest("hex"),
+        "77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e",
+    );
+
+    const webRunTool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.match(webRunTool.description, /situations_where_you_must_browse_the_internet/);
+    assert.match(webRunTool.description, /Results from `web_run` include internal reference IDs/);
+    assert.match(webRunTool.description, /Cite sources in the final response using Markdown links/);
+    assert.doesNotMatch(webRunTool.description, /`web\.run`/);
+    assert.equal(
+        webRunTool.promptGuidelines?.some((guideline) => guideline.includes("cite")),
+        false,
+    );
+
+    const imagegenTool = createImagegenTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
+    assert.match(imagegenTool.description, /`imagegen` tool enables image generation/);
+    assert.match(imagegenTool.description, /may take a few minutes to finish/);
+    assert.doesNotMatch(imagegenTool.description, /code-mode|generatedImage/);
+    assert.equal(
+        imagegenTool.promptGuidelines?.some((guideline) =>
+            guideline.includes("do not render them again"),
+        ),
+        true,
+    );
+    assert.equal(
+        imagegenTool.promptGuidelines?.some((guideline) =>
+            guideline.includes("do not mention downloads"),
+        ),
+        false,
+    );
+
+    assert.match(
+        createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG }).description,
+        /^View a local image file from the filesystem when visual inspection is needed\./,
+    );
+    assert.match(createApplyPatchTool().description, /^The `apply_patch` tool can be used/);
+});
 
 test("renders compact invocation summaries for Codex tools", () => {
     const webRunTool = createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });

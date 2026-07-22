@@ -1,0 +1,317 @@
+import {
+    call,
+    defineGlowupRenderer,
+    output,
+    text,
+    type GlowupCallContext,
+} from "../../glowup/protocol.ts";
+import { truncateGraphemeText } from "../../glowup/text.ts";
+
+const MAX_WEB_RUN_HIGHLIGHTS = 3;
+const COLLAPSED_SOURCE_LIMIT = 4;
+const EXPANDED_SOURCE_LIMIT = 100;
+const TITLE_URL_PATTERN = /^(?<title>.+?)\s+\((?<url>https?:\/\/[^)]+)\)$/u;
+const TOTAL_LINES_PATTERN = /Total lines:\s*(?<lines>\d+)/u;
+const CONTENT_TYPE_PATTERN = /Content type:\s*(?<type>[^;]+)/u;
+const SOURCE_PATTERN = /Source:\s*(?<source>[^;]+)/u;
+const LINE_PATTERN = /^L\d+:\s*(?<text>.*)$/u;
+const CITATION_PATTERN = /cite[^]*/gu;
+
+type WebRunGlowupArgs = Readonly<Record<string, unknown>>;
+
+type WebRunGlowupResult = {
+    readonly content?: unknown;
+    readonly details?: unknown;
+};
+
+type SourceCollection = {
+    readonly labels: string[];
+    readonly seenLabels: Set<string>;
+    readonly maximum: number;
+    readonly sourceCountKnown: boolean;
+    count: number;
+};
+
+type HighlightCandidate = {
+    readonly text: string;
+    readonly index: number;
+    readonly score: number;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getArray(
+    record: Readonly<Record<string, unknown>>,
+    key: string,
+): readonly unknown[] | undefined {
+    const value = record[key];
+    return Array.isArray(value) ? value : undefined;
+}
+
+function getString(record: Readonly<Record<string, unknown>>, key: string): string | undefined {
+    const value = record[key];
+    return typeof value === "string" ? value : undefined;
+}
+
+function getNumber(record: Readonly<Record<string, unknown>>, key: string): number | undefined {
+    const value = record[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parseArgs(value: unknown): WebRunGlowupArgs | undefined {
+    return isRecord(value) ? value : undefined;
+}
+
+function parseResult(value: unknown): WebRunGlowupResult | undefined {
+    if (!isRecord(value)) return undefined;
+    return {
+        ...(value.content === undefined ? {} : { content: value.content }),
+        ...(value.details === undefined ? {} : { details: value.details }),
+    };
+}
+
+function compactQuotedText(value: string | undefined, maximum = 96): string | undefined {
+    if (value === undefined || value.trim().length === 0) return undefined;
+    const compact = value.replace(/\s+/gu, " ").trim();
+    return `"${truncateGraphemeText(compact, maximum)}"`;
+}
+
+function countedSummary(label: string, values: readonly unknown[] | undefined): string | undefined {
+    if (values === undefined || values.length === 0) return undefined;
+    const prefix = label.length > 0 ? `${label} ` : "";
+    const first = values[0];
+    if (isRecord(first)) {
+        const query =
+            getString(first, "q") ?? getString(first, "ref_id") ?? getString(first, "url");
+        const quoted = compactQuotedText(query);
+        if (quoted !== undefined) {
+            return values.length === 1
+                ? `${prefix}${quoted}`
+                : `${prefix}${quoted} +${values.length - 1}`;
+        }
+    }
+    return `${prefix}${values.length}`;
+}
+
+function summarizeArgs(args: WebRunGlowupArgs): string | undefined {
+    const actions = [
+        { label: "search", values: getArray(args, "search_query") },
+        { label: "image", values: getArray(args, "image_query") },
+        { label: "open", values: getArray(args, "open") },
+        { label: "click", values: getArray(args, "click") },
+        { label: "find", values: getArray(args, "find") },
+        { label: "screenshot", values: getArray(args, "screenshot") },
+        { label: "finance", values: getArray(args, "finance") },
+        { label: "weather", values: getArray(args, "weather") },
+        { label: "sports", values: getArray(args, "sports") },
+        { label: "time", values: getArray(args, "time") },
+    ].filter((action) => action.values !== undefined && action.values.length > 0);
+    const parts = actions.flatMap((action) => {
+        const part = countedSummary(
+            actions.length === 1 && action.label === "search" ? "" : action.label,
+            action.values,
+        );
+        return part === undefined ? [] : [part];
+    });
+    return parts.length === 0 ? undefined : parts.join(" • ");
+}
+
+function textOutput(result: WebRunGlowupResult): string | undefined {
+    if (!Array.isArray(result.content)) return undefined;
+    const texts: string[] = [];
+    for (const item of result.content) {
+        if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
+        texts.push(item.text);
+    }
+    return texts.length === 0 ? undefined : texts.join("\n");
+}
+
+function normalizeText(value: string): string {
+    return value
+        .replace(CITATION_PATTERN, "")
+        .replace(/[`*_#]+/gu, "")
+        .replace(/\s+/gu, " ")
+        .trim();
+}
+
+function compactUrl(value: string): string {
+    try {
+        const url = new URL(value);
+        const host = url.hostname.replace(/^www\./u, "");
+        const path = url.pathname === "/" ? "" : url.pathname.replace(/\/$/u, "");
+        return truncateGraphemeText(`${host}${path}`, 70);
+    } catch {
+        return truncateGraphemeText(value, 70);
+    }
+}
+
+function sourceLabel(value: string): string | undefined {
+    const groups = TITLE_URL_PATTERN.exec(value.trim())?.groups;
+    if (groups === undefined) return undefined;
+    const title = normalizeText(groups.title ?? "");
+    const url = compactUrl(groups.url ?? "");
+    if (title.length <= 2 || /^\d+[.)]?$/u.test(title)) return url;
+    return `${truncateGraphemeText(title, 72)} — ${url}`;
+}
+
+function collectSource(line: string, collection: SourceCollection): void {
+    const label = sourceLabel(line);
+    if (label === undefined || label.length === 0) return;
+    if (collection.sourceCountKnown && collection.labels.length >= collection.maximum) return;
+    const key = label.toLowerCase();
+    if (collection.seenLabels.has(key)) return;
+    collection.seenLabels.add(key);
+    collection.count += 1;
+    if (collection.labels.length < collection.maximum) collection.labels.push(label);
+}
+
+function metadataFromLine(line: string): string | undefined {
+    if (!CONTENT_TYPE_PATTERN.test(line)) return undefined;
+    const contentType = CONTENT_TYPE_PATTERN.exec(line)?.groups?.type?.trim();
+    const source = SOURCE_PATTERN.exec(line)?.groups?.source?.trim();
+    const totalLines = TOTAL_LINES_PATTERN.exec(line)?.groups?.lines;
+    const parts = [
+        source === undefined || source.length === 0
+            ? undefined
+            : truncateGraphemeText(source.replace(/\s+/gu, " "), 48),
+        contentType,
+        totalLines === undefined || totalLines.length === 0 ? undefined : `${totalLines} lines`,
+    ].filter((part): part is string => part !== undefined && part.length > 0);
+    return parts.length === 0 ? undefined : parts.join(" • ");
+}
+
+function isBoilerplate(value: string): boolean {
+    const lower = value.toLowerCase();
+    return (
+        lower.length < 4 ||
+        [
+            "skip to content",
+            "main navigation",
+            "sidebar navigation",
+            "return to top",
+            "on this page",
+            "appearance",
+            "english",
+            "menu",
+            "references",
+            "guide",
+            "blog",
+        ].includes(lower) ||
+        lower.startsWith("search⌘") ||
+        /^v\d+\.\d+\.\d+/u.test(lower)
+    );
+}
+
+function highlightScore(value: string): number {
+    if (/^#{1,3}\s/u.test(value)) return 8;
+    if (/^\s*[*-]\s/u.test(value)) return 5;
+    return value.length >= 80 ? 4 : 2;
+}
+
+function collectHighlight(line: string, candidates: HighlightCandidate[]): void {
+    const rawText = LINE_PATTERN.exec(line.trim())?.groups?.text;
+    if (rawText === undefined) return;
+    const normalized = normalizeText(rawText);
+    const key = normalized.toLowerCase();
+    if (
+        normalized.length === 0 ||
+        isBoilerplate(normalized) ||
+        candidates.some((candidate) => candidate.text.toLowerCase() === key)
+    ) {
+        return;
+    }
+    candidates.push({
+        text: normalized,
+        index: candidates.length,
+        score: highlightScore(normalized),
+    });
+    candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+    if (candidates.length > MAX_WEB_RUN_HIGHLIGHTS) candidates.pop();
+}
+
+function inlineOutputSummary(
+    rawOutput: string | undefined,
+    sourceCount: number | undefined,
+    context: GlowupCallContext,
+): string | undefined {
+    if (rawOutput === undefined || rawOutput.length === 0) return undefined;
+    const collection: SourceCollection = {
+        labels: [],
+        seenLabels: new Set<string>(),
+        maximum: context.expanded ? EXPANDED_SOURCE_LIMIT : COLLAPSED_SOURCE_LIMIT,
+        sourceCountKnown: sourceCount !== undefined,
+        count: 0,
+    };
+    const highlights: HighlightCandidate[] = [];
+    let metadata: string | undefined;
+    for (const line of rawOutput.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n")) {
+        if (line.trim().length === 0) continue;
+        collectSource(line, collection);
+        metadata ??= metadataFromLine(line);
+        collectHighlight(line, highlights);
+    }
+    const total = sourceCount ?? collection.count;
+    const details = [...collection.labels];
+    const remaining = Math.max(0, total - details.length);
+    if (remaining > 0) details.push(`… +${remaining} sources`);
+    if (context.expanded && metadata !== undefined) details.push(`metadata: ${metadata}`);
+    if (context.expanded && highlights.length > 0) {
+        const preview = [...highlights]
+            .sort((left, right) => left.index - right.index)
+            .map((candidate) => truncateGraphemeText(candidate.text, 115))
+            .join(" · ");
+        details.push(`preview: ${preview}`);
+    }
+    if (total === 0 && details.length === 0) return undefined;
+    return [`${total} source${total === 1 ? "" : "s"}`, ...details].join("\n");
+}
+
+function summarizeResult(
+    result: WebRunGlowupResult,
+    context: GlowupCallContext,
+): string | undefined {
+    if (!isRecord(result.details)) return undefined;
+    const sourceCount = getNumber(result.details, "sourceCount");
+    const fullOutputPath = getString(result.details, "fullOutputPath");
+    if (sourceCount === undefined && fullOutputPath === undefined) return undefined;
+    return (
+        inlineOutputSummary(textOutput(result), sourceCount, context) ??
+        (sourceCount === undefined
+            ? fullOutputPath === undefined
+                ? undefined
+                : "Full output saved"
+            : `${sourceCount} source${sourceCount === 1 ? "" : "s"}`)
+    );
+}
+
+export const webRunGlowupRendering = defineGlowupRenderer<WebRunGlowupArgs, WebRunGlowupResult>({
+    version: 2,
+    parseArgs,
+    parseResult,
+    renderCall(args) {
+        const summary = summarizeArgs(args);
+        return call(
+            {
+                static: "Web Search",
+                running: "Searching the web",
+                completed: "Searched the web",
+            },
+            summary === undefined ? {} : { body: text(summary) },
+        );
+    },
+    renderResult(result, context) {
+        const summary = summarizeResult(result, context);
+        return summary === undefined
+            ? undefined
+            : output(summary, {
+                  preview: {
+                      mode: "head",
+                      collapsedLines: COLLAPSED_SOURCE_LIMIT + 2,
+                      expandedLines: EXPANDED_SOURCE_LIMIT + 4,
+                  },
+                  noOutputLabel: null,
+              });
+    },
+});

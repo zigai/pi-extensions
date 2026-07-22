@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { Type, type Static } from "typebox";
 
 import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
@@ -37,8 +40,18 @@ import {
     saveGeneratedImage,
 } from "../images/file-artifacts.ts";
 import { recentImageContents } from "../images/recent-session.ts";
+import { imagegenGlowupRendering } from "./imagegen-glowup-rendering.ts";
 
 export const IMAGEGEN_TOOL_NAME = "imagegen";
+
+const IMAGEGEN_DESCRIPTION_PATH = fileURLToPath(
+    new URL("./imagegen-description.md", import.meta.url),
+);
+const CODEX_CODE_MODE_IMAGEGEN_GUIDANCE =
+    "- imagegen needs a few minutes to finish. In code-mode, use the first-line @exec directive to give the initial call 120 seconds and the same yield for any waits that follow. Once it finishes, return the image with generatedImage(result).";
+const PI_IMAGEGEN_GUIDANCE =
+    "- imagegen may take a few minutes to finish. Wait for the tool result before continuing.";
+let cachedImagegenDescription: string | undefined;
 
 const IMAGEGEN_PARAMETERS = Type.Object(
     {
@@ -98,14 +111,16 @@ export function registerImagegenTool(pi: ExtensionAPI, options: ImagegenOptions)
     pi.registerTool(createImagegenTool(options));
 }
 
-export function createImagegenTool(
-    options: ImagegenOptions,
-): ToolDefinition<typeof IMAGEGEN_PARAMETERS, ImagegenDetails> {
+export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
+    typeof IMAGEGEN_PARAMETERS,
+    ImagegenDetails
+> & {
+    readonly glowupRendering: typeof imagegenGlowupRendering;
+} {
     return {
         name: IMAGEGEN_TOOL_NAME,
         label: "Image Generation",
-        description:
-            "Generate images from descriptions or edit existing local/recent images using specific instructions.",
+        description: readImagegenDescription(),
         promptSnippet: "Generate or edit images through Codex image generation.",
         promptGuidelines: [
             "Use imagegen for requested images and image edits; omit both image selectors for a new image.",
@@ -113,8 +128,9 @@ export function createImagegenTool(
             "Use num_last_images_to_include only when a target has no local path; choose the smallest count that includes every target, up to 5.",
             "Never provide both image selectors. If neither can include every target, ask the user to attach the missing images again.",
             "Generate directly without reconfirmation unless required images are missing. Always use imagegen for image editing unless the user explicitly requests another method.",
-            "After imagegen succeeds, do not mention downloads, summarize the image, ask a follow-up question, or add any other prose.",
+            "Generated images are already displayed to the user; do not render them again in the final response as Markdown images or file links.",
         ],
+        glowupRendering: imagegenGlowupRendering,
         parameters: IMAGEGEN_PARAMETERS,
         prepareArguments: prepareImagegenArguments,
         renderCall(args, theme, _context) {
@@ -199,6 +215,15 @@ export function createImagegenTool(
             };
         },
     };
+}
+
+function readImagegenDescription(): string {
+    cachedImagegenDescription ??= readFileSync(IMAGEGEN_DESCRIPTION_PATH, "utf8")
+        .trim()
+        .replaceAll("`image_gen.imagegen`", "`imagegen`")
+        .replace(CODEX_CODE_MODE_IMAGEGEN_GUIDANCE, PI_IMAGEGEN_GUIDANCE)
+        .replaceAll("the `python` tool", "Python");
+    return cachedImagegenDescription;
 }
 
 export function prepareImagegenArguments(args: unknown): ImagegenParams {

@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { Type, type Static } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -31,8 +33,14 @@ import { CodexTokenizer } from "../../compaction/tokenizer.ts";
 import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
 import { recentWebSearchInput } from "./history.ts";
 import { formatWebRunToolOutput } from "./output.ts";
+import { webRunGlowupRendering } from "./glowup-rendering.ts";
 
 export const WEB_RUN_TOOL_NAME = "web_run";
+
+const WEB_RUN_DESCRIPTION_PATH = fileURLToPath(
+    new URL("./web-run-description.md", import.meta.url),
+);
+let cachedWebRunDescription: string | undefined;
 
 const SearchQueryParameters = Type.Object({
     q: Type.String({ description: "Search query." }),
@@ -176,20 +184,22 @@ export function registerWebRunTool(pi: ExtensionAPI, options: WebRunOptions): vo
     pi.registerTool(createWebRunTool(options));
 }
 
-export function createWebRunTool(
-    options: WebRunOptions,
-): ToolDefinition<typeof WEB_RUN_PARAMETERS, WebRunDetails> {
+export function createWebRunTool(options: WebRunOptions): ToolDefinition<
+    typeof WEB_RUN_PARAMETERS,
+    WebRunDetails
+> & {
+    readonly glowupRendering: typeof webRunGlowupRendering;
+} {
     return {
         name: WEB_RUN_TOOL_NAME,
         label: "Web Search",
-        description:
-            "Access Codex web search: search, open, click, find, screenshots, finance, weather, sports, and time.",
+        description: readWebRunDescription(),
         promptSnippet: "Search or open the web through Codex-backed web access.",
         promptGuidelines: [
             "Use web_run when the user asks for current, external, or source-backed information; cite sources from returned URLs in the final answer.",
-            "Do not copy Codex hidden citation markers like `cite...` into final answers; cite ordinary URLs or source titles from web_run output instead.",
             "Use web_run open/click/find with returned ref ids instead of repeating broad searches when drilling into a result.",
         ],
+        glowupRendering: webRunGlowupRendering,
         parameters: WEB_RUN_PARAMETERS,
         prepareArguments: prepareWebRunArguments,
         renderCall(args, theme, _context) {
@@ -257,6 +267,13 @@ export function createWebRunTool(
             }
         },
     };
+}
+
+function readWebRunDescription(): string {
+    cachedWebRunDescription ??= readFileSync(WEB_RUN_DESCRIPTION_PATH, "utf8")
+        .trim()
+        .replaceAll("`web.run`", "`web_run`");
+    return cachedWebRunDescription;
 }
 
 function prepareWebRunArguments(args: unknown): WebRunParams {

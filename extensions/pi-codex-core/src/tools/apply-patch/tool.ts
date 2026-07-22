@@ -85,7 +85,7 @@ export function createApplyPatchTool(): ToolDefinition<
         name: APPLY_PATCH_TOOL_NAME,
         label: "Apply Patch",
         description:
-            "Use the `apply_patch` tool to edit files. Provide a complete patch body in the patch argument.",
+            "The `apply_patch` tool can be used to edit files. Provide a complete patch body in the `patch` argument.",
         promptSnippet: "Edit files with apply_patch patches.",
         promptGuidelines: [
             "Use apply_patch to edit files.",

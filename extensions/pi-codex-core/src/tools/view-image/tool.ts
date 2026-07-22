@@ -51,6 +51,7 @@ import {
 import { codexModelRequestProfile } from "../../codex/models.ts";
 import { fetchTextWithRetries } from "../../codex/http-retry.ts";
 import { imageDetailMarker, isImageDetailMarker } from "../../images/detail.ts";
+import { viewImageGlowupRendering } from "./glowup-rendering.ts";
 
 const IMAGE_DESCRIPTION_PROMPT =
     "Describe this image in detail. Output only the image description, no other commentary.";
@@ -86,9 +87,12 @@ const DescriptionResponseSchema = compileSchema(
 
 const VIEW_IMAGE_PARAMETERS = Type.Object(
     {
-        path: Type.String({ description: "Path to a local image file." }),
+        path: Type.String({ description: "Local filesystem path to an image file." }),
         detail: Type.Optional(
-            StringEnum(["high", "original"] as const, { description: "Image detail level." }),
+            StringEnum(["high", "original"] as const, {
+                description:
+                    "Image detail level. Defaults to `high`; use `original` to preserve exact resolution.",
+            }),
         ),
     },
     { additionalProperties: false },
@@ -130,19 +134,24 @@ export function registerViewImageTool(pi: ExtensionAPI, options: ViewImageToolOp
     pi.registerTool(createViewImageTool(options));
 }
 
-export function createViewImageTool(
-    options: ViewImageToolOptions,
-): ToolDefinition<typeof VIEW_IMAGE_PARAMETERS, ViewImageDetails, ViewImageRenderState> {
+export function createViewImageTool(options: ViewImageToolOptions): ToolDefinition<
+    typeof VIEW_IMAGE_PARAMETERS,
+    ViewImageDetails,
+    ViewImageRenderState
+> & {
+    readonly glowupRendering: typeof viewImageGlowupRendering;
+} {
     return {
         name: VIEW_IMAGE_TOOL_NAME,
         label: "View Image",
         description:
-            "View a local image file and return it to the model, or describe it through Codex for text-only models when enabled.",
+            "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk. For text-only models, Codex-generated descriptions can be enabled.",
         promptSnippet: "View a local image file by path.",
         promptGuidelines: [
             "Use view_image when the user asks to inspect a local image file; pass the path exactly and do not use it for text files.",
             "Use read for text files and as a fallback for image files when view_image is unavailable.",
         ],
+        glowupRendering: viewImageGlowupRendering,
         parameters: VIEW_IMAGE_PARAMETERS,
         prepareArguments: prepareViewImageArguments,
         renderCall(args, theme, _context) {

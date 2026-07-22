@@ -1,3 +1,7 @@
 {
-  "ignorePatterns": ["src/prompt/codex-gpt-*.md"]
+  "ignorePatterns": [
+    "src/prompt/codex-gpt-*.md",
+    "src/tools/imagegen-description.md",
+    "src/tools/web-run/web-run-description.md"
+  ]
 }
