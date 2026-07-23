@@ -4,9 +4,9 @@ import { Type, type Static } from "typebox";
 
 const settingsSchema = Type.Object(
     {
-        enabled: Type.Boolean({
+        projectOverrides: Type.Boolean({
             default: true,
-            description: "Enable the extension.",
+            description: "Show and edit extension settings for trusted projects.",
         }),
     },
     { additionalProperties: false },
@@ -16,8 +16,8 @@ export type ExtensionSettings = Static<typeof settingsSchema>;
 
 export const extensionSettingsDefinition = defineExtensionSettings({
     id: "pi-settings-ui",
-    title: "Pi Settings Ui",
-    description: "Settings for Pi Settings Ui.",
+    title: "Pi Settings UI",
+    description: "Settings for Pi Settings UI.",
     schemaId: "https://raw.githubusercontent.com/zigai/pi-settings-ui/HEAD/config.schema.json",
     schema: settingsSchema,
 });

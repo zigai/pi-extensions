@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/zigai/pi-settings-ui/HEAD/config.schema.json",
-  "title": "Pi Settings Ui settings",
-  "description": "Settings for Pi Settings Ui.",
+  "title": "Pi Settings UI settings",
+  "description": "Settings for Pi Settings UI.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -11,10 +11,10 @@
       "default": "./schemas/pi-settings-ui.schema.json",
       "description": "JSON Schema used by editors for this settings file."
     },
-    "enabled": {
+    "projectOverrides": {
       "type": "boolean",
       "default": true,
-      "description": "Enable the extension."
+      "description": "Show and edit extension settings for trusted projects."
     }
   }
 }
