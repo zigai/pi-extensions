@@ -1,7 +1,7 @@
 # Pi Settings UI
 
 Edit extension-owned Pi settings through a schema-driven terminal interface. The editor discovers
-the generated schemas installed by `@zigai/pi-extension-settings` and turns them into validated,
+the generated schemas installed by [`@zigai/pi-extension-settings`](https://github.com/zigai/pi-extension-settings) and turns them into validated,
 reusable controls.
 
 - Pi's regular settings selector as the first tab, followed by one tab per extension.
