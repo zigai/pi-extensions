@@ -38,7 +38,11 @@ export const settingsDefinition = defineExtensionSettings({
   schemaId: "https://raw.githubusercontent.com/zigai/pi-example/main/config.schema.json",
   schema: Type.Object(
     {
-      enabled: Type.Boolean({ default: true, description: "Enable the extension." }),
+      enabled: Type.Boolean({
+        default: true,
+        description: "Enable the extension.",
+        "x-control": "switch",
+      }),
     },
     { additionalProperties: false },
   ),
