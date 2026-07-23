@@ -96,12 +96,6 @@ const schema = Type.Object({
 });
 ```
 
-Hints are optional. Pi Settings UI infers switches from booleans, segmented controls from up to six
-primitive choices, searchable selects from larger choice sets, sliders from numbers with both
-bounds, and text or textarea controls from string defaults, examples, and length constraints.
-`format: "path"` and `format: "color"` also select those string controls. Unknown or
-type-incompatible hints fall back to this inference.
-
 ### Generate the schema and documentation
 
 Add the settings definition and commands to `package.json`:
@@ -127,7 +121,7 @@ npm run config:generate
 npm run config:check
 ```
 
-`generate` writes `config.schema.json` and adds or updates the generated configuration section in the README. Compact defaults stay in the option table; larger exact defaults remain available in a collapsed complete-settings block.
+`generate` writes `config.schema.json` and adds or updates the generated configuration section in the README.
 
 `check` verifies that both artifacts are up to date without changing files, making it suitable for pre-commit and CI.
 
