@@ -20,6 +20,8 @@ If you do not want to use the template, or you want to add settings to an existi
 
 ### Install
 
+Install [@zigai/pi-extension-settings](https://github.com/zigai/pi-extension-settings):
+
 ```sh
 npm install @zigai/pi-extension-settings
 ```
