@@ -67,3 +67,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-settings-ui.jso
 just setup
 just coverage
 ```
+
+## License
+
+[MIT](LICENSE)
