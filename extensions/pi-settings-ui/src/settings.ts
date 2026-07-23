@@ -6,7 +6,7 @@ const settingsSchema = Type.Object(
     {
         projectOverrides: Type.Boolean({
             default: true,
-            description: "Show and edit extension settings for trusted projects.",
+            description: "Let trusted projects have their own extension settings.",
         }),
     },
     { additionalProperties: false },

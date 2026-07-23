@@ -51,7 +51,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-settings-ui.jso
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `projectOverrides` | boolean | `true` | Show and edit extension settings for trusted projects. |
+| `projectOverrides` | boolean | `true` | Let trusted projects have their own extension settings. |
 
 ```json
 {
