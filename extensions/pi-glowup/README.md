@@ -104,3 +104,7 @@ Use global config at `~/.pi/agent/pi-glowup/config.json`.
   }
 }
 ```
+
+## License
+
+[MIT](LICENSE)
