@@ -56,14 +56,14 @@
     "pi-typed-args": "file:../pi-typed-commands"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.80.7",
-    "@earendil-works/pi-coding-agent": "^0.80.7",
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
     "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^4.1.10",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
-    "oxlint-tsgolint": "^0.24.0",
-    "typebox": "1.1.39",
+    "oxlint-tsgolint": "^7.0.2001",
+    "typebox": "^1.3.8",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   },
@@ -94,5 +94,8 @@
     "extensions": [
       "./src/index.ts"
     ]
-  }
+  },
+  "bundleDependencies": [
+    "pi-typed-args"
+  ]
 }

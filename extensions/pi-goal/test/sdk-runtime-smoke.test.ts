@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 
 import {
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -28,8 +28,10 @@ function goalIdFromToolResult(result: unknown): string {
 }
 
 test("SDK runtime emits a continuation after willRetry compaction when no retry agent starts", async () => {
-  const authStorage = AuthStorage.inMemory();
-  const modelRegistry = ModelRegistry.inMemory(authStorage);
+  const modelRuntime = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+  });
   const loader = new DefaultResourceLoader({
     cwd: process.cwd(),
     agentDir: getAgentDir(),
@@ -39,24 +41,29 @@ test("SDK runtime emits a continuation after willRetry compaction when no retry 
   });
   await loader.reload();
 
-  const model = {
-    provider: "sdk-smoke",
-    id: "mini",
-    name: "SDK Smoke",
-    api: "sdk-smoke-api",
+  modelRuntime.registerProvider("sdk-smoke", {
     baseUrl: "http://localhost",
-    reasoning: false,
-    input: ["text" as const],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 1_000,
-    maxTokens: 100,
-  };
+    apiKey: "test-key",
+    api: "openai-completions",
+    models: [
+      {
+        id: "mini",
+        name: "SDK Smoke",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1_000,
+        maxTokens: 100,
+      },
+    ],
+  });
+  const model = modelRuntime.getModel("sdk-smoke", "mini");
+  assert.ok(model);
   const { session } = await createAgentSession({
     cwd: process.cwd(),
     agentDir: getAgentDir(),
-    authStorage,
     model,
-    modelRegistry,
+    modelRuntime,
     noTools: "builtin",
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(process.cwd()),
