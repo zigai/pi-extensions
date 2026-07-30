@@ -28,6 +28,7 @@ type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
 const fgColors = {
     dim: "#777777",
     muted: "#888888",
+    thinkingXhigh: "#777777",
     toolDiffAdded: "#00ff00",
     toolDiffContext: "#cccccc",
     toolDiffRemoved: "#ff0000",

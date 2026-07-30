@@ -63,6 +63,7 @@ const piTheme = new Theme(
         syntaxString: "#ce9178",
         toolOutput: "#d4d4d4",
         success: "#89d185",
+        thinkingXhigh: "#777777",
     } as Record<ThemeColor, string>,
     {
         toolSuccessBg: "#123012",
