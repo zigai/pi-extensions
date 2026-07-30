@@ -42,7 +42,11 @@ import {
     prepareCodexPromptImageContent,
     type ImageDetail,
 } from "../../images/codex-prompt.ts";
-import { loadImageContent, type LoadedImage } from "../../images/file-artifacts.ts";
+import {
+    loadImageContent,
+    normalizeImageReferencePath,
+    type LoadedImage,
+} from "../../images/file-artifacts.ts";
 import { defaultCodexRuntime, type CodexRuntime } from "../../runtime.ts";
 import {
     CODEX_RESPONSES_LITE_HEADER,
@@ -281,7 +285,9 @@ function defaultViewImageComponentFactory(args: {
 export function prepareViewImageArguments(args: unknown): ViewImageParams {
     const input = parseWithSchema(ViewImageArgumentsSchema, args);
     if (!input) throw new Error("Invalid view_image arguments.");
-    const path = input.path ?? input.file_path ?? input.image_path ?? "";
+    const path = normalizeImageReferencePath(
+        input.path ?? input.file_path ?? input.image_path ?? "",
+    );
     if (path.trim().length === 0) throw new Error("view_image requires a path.");
     return input.detail ? { path, detail: input.detail } : { path };
 }

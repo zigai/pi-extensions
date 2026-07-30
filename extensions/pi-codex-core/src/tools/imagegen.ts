@@ -37,6 +37,7 @@ import { imageContentToDataUrl, prepareCodexPromptImageContent } from "../images
 import {
     generatedPngContent,
     loadImageContent,
+    normalizeImageReferencePath,
     saveGeneratedImage,
 } from "../images/file-artifacts.ts";
 import { recentImageContents } from "../images/recent-session.ts";
@@ -234,7 +235,11 @@ export function prepareImagegenArguments(args: unknown): ImagegenParams {
     return {
         prompt,
         ...(input.referenced_image_paths
-            ? { referenced_image_paths: input.referenced_image_paths }
+            ? {
+                  referenced_image_paths: input.referenced_image_paths.map(
+                      normalizeImageReferencePath,
+                  ),
+              }
             : {}),
         ...(input.num_last_images_to_include !== undefined
             ? { num_last_images_to_include: input.num_last_images_to_include }

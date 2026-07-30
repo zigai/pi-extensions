@@ -241,11 +241,27 @@ test("rejects invalid tool arguments before I/O", () => {
         () => imagegenTool.prepareArguments?.({ prompt: "draw", num_last_images_to_include: 1.5 }),
         /Invalid imagegen arguments/,
     );
+    assert.deepEqual(
+        imagegenTool.prepareArguments?.({
+            prompt: "edit",
+            referenced_image_paths: ["@input.png", "@@literal-at.png"],
+        }),
+        {
+            prompt: "edit",
+            referenced_image_paths: ["input.png", "@literal-at.png"],
+        },
+    );
 
     const viewImageTool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
     assert.ok(viewImageTool.prepareArguments);
     assert.throws(() => viewImageTool.prepareArguments?.({ file_path: 123 }), /Invalid view_image/);
     assert.throws(() => viewImageTool.prepareArguments?.({}), /view_image requires a path/);
+    assert.deepEqual(viewImageTool.prepareArguments?.({ path: "@input.png" }), {
+        path: "input.png",
+    });
+    assert.deepEqual(viewImageTool.prepareArguments?.({ image_path: "@@literal-at.png" }), {
+        path: "@literal-at.png",
+    });
 });
 
 test("computes Codex prompt image target dimensions", () => {
@@ -305,6 +321,22 @@ test("rejects oversized and mislabeled image files", async () => {
         ]);
         await writeFile(join(root, "oversized.png"), oversized);
         await assert.rejects(loadImageContent("oversized.png", root), /Image is too large/);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("loads image references with Pi's leading-at path convention", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-image-at-path-"));
+    try {
+        const imagePath = join(root, "input.png");
+        await writeFile(imagePath, solidPngBytes(1, 1, [1, 2, 3, 255]));
+
+        const relative = await loadImageContent("@input.png", root);
+        const absolute = await loadImageContent(`@${imagePath}`, root);
+
+        assert.equal(relative.absolutePath, imagePath);
+        assert.equal(absolute.absolutePath, imagePath);
     } finally {
         await rm(root, { recursive: true, force: true });
     }

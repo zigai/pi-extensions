@@ -24,6 +24,11 @@ export type LoadedImage = {
     readonly mimeType: string;
 };
 
+/** Normalize Pi's model-facing `@path` convention to a filesystem path. */
+export function normalizeImageReferencePath(path: string): string {
+    return path.startsWith("@") ? path.slice(1) : path;
+}
+
 /**
  * Resolves and loads an image file after validating its size and signature.
  */
@@ -36,7 +41,8 @@ export async function loadImageContent(
     } = {},
 ): Promise<LoadedImage> {
     options.signal?.throwIfAborted();
-    const requestedPath = resolve(cwd, path);
+    const normalizedPath = normalizeImageReferencePath(path);
+    const requestedPath = resolve(cwd, normalizedPath);
     const absolutePath = await authorizeImagePath(requestedPath, cwd, options);
     options.signal?.throwIfAborted();
     const file = await open(absolutePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
