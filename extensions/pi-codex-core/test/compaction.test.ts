@@ -19,6 +19,10 @@ import {
 import { executeRemoteCompactionV2 } from "../src/compaction/remote-client.ts";
 import { buildRemoteCompactionV2Request } from "../src/compaction/request-budget.ts";
 import {
+    captureProviderRequestTemplate,
+    clearProviderRequestTemplate,
+} from "../src/compaction/provider-request-template.ts";
+import {
     CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY,
     CODEX_RESPONSES_LITE_HEADER,
 } from "../src/codex/responses-compat.ts";
@@ -225,6 +229,90 @@ test("creates native compaction using remote compaction v2", async () => {
     assert.equal(result?.compaction?.details.worldState.cwd, "/workspace");
     assert.equal(result?.compaction?.details.worldState.model, "openai-codex/gpt-5.5");
     assert.deepEqual(result?.compaction?.details.worldState.activeToolNames, ["read"]);
+});
+
+test("reuses captured provider fields and records compaction cache usage", async () => {
+    const sessionId = "captured-provider-template-session";
+    let requestBody: unknown;
+    const runtime = makeTestRuntime(async (_input, init) => {
+        requestBody = decodeRequestBody(init);
+        return new Response(
+            [
+                "event: response.output_item.done",
+                'data: {"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"sealed-template"}}',
+                "",
+                "event: response.completed",
+                'data: {"type":"response.completed","response":{"id":"resp_template","usage":{"input_tokens":1200,"input_tokens_details":{"cached_tokens":900}}}}',
+                "",
+            ].join("\n"),
+            { status: 200 },
+        );
+    });
+
+    try {
+        captureProviderRequestTemplate(
+            sessionId,
+            {
+                model: "gpt-5.5",
+                instructions: "captured final provider instructions",
+                input: [{ role: "user", content: "previous turn" }],
+                tools: [
+                    {
+                        type: "function",
+                        name: "read",
+                        description: "Captured provider-ready read definition.",
+                        parameters: {
+                            type: "object",
+                            properties: { path: { type: "string", captured: true } },
+                        },
+                        strict: false,
+                    },
+                ],
+                prompt_cache_key: "captured-cache-key",
+                reasoning: { effort: "high", summary: "auto" },
+            },
+            { activeToolNames: ["read"] },
+        );
+
+        const result = await handleCodexNativeCompaction(
+            makeBeforeCompactEvent(),
+            makeNativeCompactionContext({ sessionId }),
+            {
+                ...DEFAULT_CODEX_CORE_CONFIG,
+                compaction: { ...DEFAULT_CODEX_CORE_CONFIG.compaction, enabled: true },
+                openai: {
+                    ...DEFAULT_CODEX_CORE_CONFIG.openai,
+                    compactionReasoning: "current",
+                },
+            },
+            makeCompactionApi(),
+            runtime,
+        );
+
+        assert.ok(isRecord(requestBody));
+        assert.equal(requestBody.instructions, "captured final provider instructions");
+        assert.equal(requestBody.prompt_cache_key, "captured-cache-key");
+        assert.deepEqual(requestBody.reasoning, { effort: "high", summary: "auto" });
+        assert.ok(Array.isArray(requestBody.tools));
+        assert.deepEqual(requestBody.tools, [
+            {
+                type: "function",
+                name: "read",
+                description: "Captured provider-ready read definition.",
+                parameters: {
+                    type: "object",
+                    properties: { path: { type: "string", captured: true } },
+                },
+                strict: false,
+            },
+        ]);
+        assert.equal(result?.compaction?.details.requestMeta?.providerTemplateUsed, true);
+        assert.equal(result?.compaction?.details.requestMeta?.inputTokens, 1200);
+        assert.equal(result?.compaction?.details.requestMeta?.cachedInputTokens, 900);
+        assert.equal(isNativeCompactionDetails(result?.compaction?.details), true);
+    } finally {
+        clearProviderRequestTemplate(sessionId);
+    }
 });
 
 test("cancels an invalid retained-context boundary", async () => {

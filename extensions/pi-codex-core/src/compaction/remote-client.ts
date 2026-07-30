@@ -533,6 +533,7 @@ function createRemoteCompactionV2Collector(): {
     let completed = false;
     let responseId: string | undefined;
     let createdAt: number | string | undefined;
+    let usage: RemoteCompactionV2Response["usage"];
 
     return {
         consume(event: ServerSentEvent): CodexResult<void> {
@@ -552,6 +553,7 @@ function createRemoteCompactionV2Collector(): {
                 completed = true;
                 responseId = typeof response.value?.id === "string" ? response.value.id : undefined;
                 createdAt = parseCreatedAt(response.value);
+                usage = parseCompactionUsage(response.value);
                 return ok(undefined);
             }
             if (event.event === "response.failed" || event.event === "response.incomplete") {
@@ -598,7 +600,7 @@ function createRemoteCompactionV2Collector(): {
                     }),
                 );
             }
-            return ok({ compactionOutput, id: responseId, createdAt });
+            return ok({ compactionOutput, id: responseId, createdAt, usage });
         },
     };
 }
@@ -712,6 +714,23 @@ function isRemoteJsonObject(value: unknown): value is Record<string, unknown> {
 function parseCreatedAt(response: ResponsesInputItem | undefined): number | string | undefined {
     const createdAt = response?.created_at;
     return typeof createdAt === "string" || typeof createdAt === "number" ? createdAt : undefined;
+}
+
+function parseCompactionUsage(
+    response: ResponsesInputItem | undefined,
+): RemoteCompactionV2Response["usage"] {
+    const usage = parseRemoteJsonObject(response?.usage);
+    if (!usage) return undefined;
+    const inputTokens = nonNegativeTokenCount(usage.input_tokens);
+    const inputTokenDetails = parseRemoteJsonObject(usage.input_tokens_details);
+    const cachedInputTokens = nonNegativeTokenCount(inputTokenDetails?.cached_tokens);
+    return inputTokens !== undefined || cachedInputTokens !== undefined
+        ? { inputTokens, cachedInputTokens }
+        : undefined;
+}
+
+function nonNegativeTokenCount(value: JsonValue | undefined): number | undefined {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 function formatResponsesStreamFailure(data: readonly string[], event: string): string {

@@ -30,6 +30,9 @@ const NativeCompactionRequestMetaSchema = Type.Object({
     estimatedTokensBefore: Type.Number(),
     estimatedTokensAfter: Type.Number(),
     budgetTokens: Type.Optional(Type.Number()),
+    providerTemplateUsed: Type.Optional(Type.Boolean()),
+    inputTokens: Type.Optional(Type.Number()),
+    cachedInputTokens: Type.Optional(Type.Number()),
 });
 const NativeCompactionWorldStateSchema = Type.Object({
     cwd: Type.String(),

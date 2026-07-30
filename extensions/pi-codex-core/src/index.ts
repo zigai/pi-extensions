@@ -9,6 +9,10 @@ import {
 } from "./codex/responses-compat.ts";
 import { ResponsesLiteRequestPolicy } from "./codex/responses-lite-policy.ts";
 import { registerNativeCompactionDisplay } from "./compaction/display.ts";
+import {
+    captureProviderRequestTemplate,
+    clearProviderRequestTemplate,
+} from "./compaction/provider-request-template.ts";
 import { CodexTokenizer } from "./compaction/tokenizer.ts";
 import { readCodexCoreStartupConfig, type CodexCoreConfig } from "./config/config.ts";
 import { rewriteProviderImageDetails } from "./images/detail.ts";
@@ -62,6 +66,7 @@ export default function extension(pi: ExtensionAPI): void {
         ctx: Parameters<typeof syncCodexCoreTools>[1],
     ): void => {
         config = nextConfig;
+        clearProviderRequestTemplate(ctx.sessionManager.getSessionId());
         if (config.compaction.enabled) {
             tokenizer.warm();
         }
@@ -78,6 +83,7 @@ export default function extension(pi: ExtensionAPI): void {
     pi.on("session_start", async (_event, ctx) => {
         const sessionId = ctx.sessionManager.getSessionId();
         responsesLitePolicy.clearSession(sessionId);
+        clearProviderRequestTemplate(sessionId);
         warnedPromptConflictSessions.delete(sessionId);
         config = ctx.isProjectTrusted()
             ? readCodexCoreStartupConfig({ cwd: ctx.cwd })
@@ -92,6 +98,7 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("model_select", async (_event, ctx) => {
+        clearProviderRequestTemplate(ctx.sessionManager.getSessionId());
         syncToolActivation(ctx);
     });
 
@@ -177,11 +184,11 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("before_provider_request", async (event, ctx) => {
+        const sessionId = ctx.sessionManager.getSessionId();
+        const isPiCompactionFallback = responsesLitePolicy.isPiCompactionFallback(sessionId);
         const imageDetailPayload = rewriteProviderImageDetails(event.payload);
         const payload = imageDetailPayload ?? event.payload;
-        const allowLitePayload = responsesLitePolicy.shouldRewriteLitePayload(
-            ctx.sessionManager.getSessionId(),
-        );
+        const allowLitePayload = responsesLitePolicy.shouldRewriteLitePayload(sessionId);
         const responsesPayload =
             isActiveCodexResponsesModel(ctx) && allowLitePayload
                 ? rewriteCodexResponsesPayload(payload, ctx.model?.id)
@@ -192,23 +199,30 @@ export default function extension(pi: ExtensionAPI): void {
                 ? omitReasoningSummary(compatiblePayload, ctx.model?.id)
                 : undefined;
         const requestPayload = reasoningTracePayload ?? compatiblePayload;
-        if (!config.compaction.enabled) {
-            return reasoningTracePayload ?? responsesPayload ?? imageDetailPayload;
+        let finalPayload = requestPayload;
+        if (config.compaction.enabled) {
+            const { rewriteProviderRequestWithNativeCompaction } = await loadCompactionModule();
+            const compactionPayload = await rewriteProviderRequestWithNativeCompaction(
+                requestPayload,
+                ctx,
+                config,
+                pi,
+            );
+            finalPayload = compactionPayload ?? requestPayload;
         }
-        const { rewriteProviderRequestWithNativeCompaction } = await loadCompactionModule();
-        const compactionPayload = await rewriteProviderRequestWithNativeCompaction(
-            requestPayload,
-            ctx,
-            config,
-            pi,
-        );
-        return compactionPayload ?? reasoningTracePayload ?? responsesPayload ?? imageDetailPayload;
+        if (!isPiCompactionFallback && isActiveCodexResponsesModel(ctx)) {
+            captureProviderRequestTemplate(sessionId, finalPayload, {
+                activeToolNames: pi.getActiveTools(),
+            });
+        }
+        return finalPayload === event.payload ? undefined : finalPayload;
     });
 
     pi.on("session_shutdown", async (event, ctx) => {
         togglesActivation.dispose();
         const sessionId = ctx.sessionManager.getSessionId();
         responsesLitePolicy.clearSession(sessionId);
+        clearProviderRequestTemplate(sessionId);
         warnedPromptConflictSessions.delete(sessionId);
         if (compactionModulePromise !== undefined) {
             const { cancelScheduledCodexAutoCompaction, clearCodexCompactionSessionState } =

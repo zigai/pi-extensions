@@ -12,6 +12,7 @@ import {
 import extension, { packageName, extensionName } from "../src/index.ts";
 import { DEFAULT_CODEX_CORE_CONFIG_JSON, getCodexCoreConfigPath } from "../src/config/config.ts";
 import { CODEX_RESPONSES_LITE_HEADER } from "../src/codex/responses-compat.ts";
+import { getProviderRequestTemplate } from "../src/compaction/provider-request-template.ts";
 import {
     DEFAULT_TEST_EXTENSION_MODEL,
     TEST_THEME,
@@ -287,6 +288,13 @@ test("applies GPT-5.6 Responses Lite compatibility through extension hooks", asy
         assert.equal(Object.hasOwn(rewritten, "instructions"), false);
         assert.equal(rewritten.parallel_tool_calls, false);
         assert.deepEqual(rewritten.reasoning, { effort: "medium", context: "all_turns" });
+        const template = getProviderRequestTemplate(
+            "extension-session",
+            "gpt-5.6-terra",
+            "responses-lite",
+        );
+        assert.equal(template?.instructions, "Pi system prompt");
+        assert.equal(JSON.stringify(template).includes("hello"), false);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

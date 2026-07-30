@@ -21,6 +21,10 @@ import { cancelAutoCompactionState, clearAutoCompactionSessionState } from "./au
 import { NATIVE_COMPACTION_SHIM_SUMMARY, NATIVE_COMPACTION_STRATEGY } from "./messages.ts";
 import { executeRemoteCompactionV2 } from "./remote-client.ts";
 import {
+    clearProviderRequestTemplate,
+    getProviderRequestTemplate,
+} from "./provider-request-template.ts";
+import {
     buildCompactionInstructions,
     buildCompactionTools,
     buildReasoning,
@@ -134,6 +138,12 @@ export async function handleCodexNativeCompaction(
         return undefined;
     }
     const sessionId = ctx.sessionManager.getSessionId();
+    const requestTemplate = getProviderRequestTemplate(
+        sessionId,
+        compactionModel,
+        requestProfile?.useResponsesLite ? "responses-lite" : "responses",
+        pi.getActiveTools(),
+    );
     const previousWindowId = latestNativeCompaction?.entry.details.windowId;
     const transportMetadata = buildRemoteCompactionTransportMetadata({
         sessionId,
@@ -147,12 +157,16 @@ export async function handleCodexNativeCompaction(
     let promptInput = buildRemoteCompactionPromptInput(event, targetModel, latestNativeCompaction);
     if (promptInput.input.length === 0) return undefined;
     const instructions = buildCompactionInstructions(
-        ctx.getSystemPrompt(),
+        requestTemplate?.instructions ?? ctx.getSystemPrompt(),
         event.customInstructions,
     );
-    const tools = buildCompactionTools(pi);
-    const promptCacheKey = safePromptCacheKey(sessionId);
-    const reasoning = buildReasoning(config, compactionModel).reasoning;
+    const tools = requestTemplate ? requestTemplate.tools : buildCompactionTools(pi);
+    const promptCacheKey = requestTemplate?.promptCacheKey ?? safePromptCacheKey(sessionId);
+    const configuredReasoning = buildReasoning(config, compactionModel).reasoning;
+    const reasoning =
+        config.openai.compactionReasoning === "current" && requestTemplate?.reasoning
+            ? requestTemplate.reasoning
+            : configuredReasoning;
     let tokenCache = createTokenEstimateCache();
     const preflight = await rewriteRemoteCompactionToolOutputsForContextWindow(
         promptInput.input,
@@ -165,6 +179,7 @@ export async function handleCodexNativeCompaction(
             reasoning,
             tools,
             clientMetadata: transportMetadata.clientMetadata,
+            requestTemplate,
         },
         contextWindow,
         tokenCache,
@@ -182,6 +197,7 @@ export async function handleCodexNativeCompaction(
         reasoning,
         tools,
         clientMetadata: transportMetadata.clientMetadata,
+        requestTemplate,
     });
     const shrink = await shrinkRemoteCompactionRequestForContextWindow(
         request,
@@ -258,6 +274,9 @@ export async function handleCodexNativeCompaction(
                         estimatedTokensBefore: shrink.estimatedTokensBefore,
                         estimatedTokensAfter: shrink.estimatedTokensAfter,
                         budgetTokens: shrink.budgetTokens,
+                        providerTemplateUsed: requestTemplate !== undefined,
+                        inputTokens: response.usage?.inputTokens,
+                        cachedInputTokens: response.usage?.cachedInputTokens,
                     },
                 },
             },
@@ -359,6 +378,7 @@ export function cancelScheduledCodexAutoCompaction(): void {
 export function clearCodexCompactionSessionState(sessionId: string): void {
     clearAutoCompactionSessionState(sessionId);
     clearReplayWindowSessionState(sessionId);
+    clearProviderRequestTemplate(sessionId);
 }
 
 function buildFreshReplacementInput(

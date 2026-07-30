@@ -7,6 +7,10 @@ export class ResponsesLiteRequestPolicy {
         this.#piFallbackSessions.add(sessionId);
     }
 
+    isPiCompactionFallback(sessionId: string): boolean {
+        return this.#piFallbackSessions.has(sessionId);
+    }
+
     shouldAttachLiteHeader(sessionId: string): boolean {
         if (!this.#piFallbackSessions.has(sessionId)) {
             this.#suppressedHeaderSessions.delete(sessionId);

@@ -62,12 +62,23 @@ export type CompactionMessage =
           readonly content: readonly CompactionContentBlock[];
       };
 
-export type ResponsesTool = {
-    readonly type: "function";
-    readonly name: string;
-    readonly description: string;
-    readonly parameters: JsonValue;
-    readonly strict: null;
+/** Provider-serialized Responses tool definition, retained without schema rewriting. */
+export type ResponsesTool = JsonObject;
+
+export type ProviderRequestLayout = "responses" | "responses-lite";
+
+/** Static, cache-shaping fields captured from a real provider request. */
+export type ProviderRequestTemplate = {
+    readonly model: string;
+    readonly layout: ProviderRequestLayout;
+    readonly activeToolNames?: readonly string[] | undefined;
+    readonly instructions: string;
+    readonly tools?: readonly ResponsesTool[] | undefined;
+    readonly additionalToolsItem?: ResponsesInputItem | undefined;
+    readonly instructionItems?: readonly ResponsesInputItem[] | undefined;
+    readonly promptCacheKey?: string | undefined;
+    readonly reasoning?: RemoteCompactionReasoning | undefined;
+    readonly serviceTier?: string | undefined;
 };
 
 export type NativeCompactionRequestMeta = {
@@ -77,6 +88,9 @@ export type NativeCompactionRequestMeta = {
     readonly estimatedTokensBefore: number;
     readonly estimatedTokensAfter: number;
     readonly budgetTokens?: number | undefined;
+    readonly providerTemplateUsed?: boolean | undefined;
+    readonly inputTokens?: number | undefined;
+    readonly cachedInputTokens?: number | undefined;
 };
 
 export type NativeCompactionWorldState = {
@@ -115,6 +129,12 @@ export type RemoteCompactionV2Response = {
     readonly compactionOutput: ResponsesInputItem;
     readonly id?: string | undefined;
     readonly createdAt?: number | string | undefined;
+    readonly usage?: RemoteCompactionUsage | undefined;
+};
+
+export type RemoteCompactionUsage = {
+    readonly inputTokens?: number | undefined;
+    readonly cachedInputTokens?: number | undefined;
 };
 
 export type RemoteCompactionV2Request = {
@@ -134,11 +154,7 @@ export type RemoteCompactionV2Request = {
     readonly client_metadata?: Readonly<Record<string, string>> | undefined;
 };
 
-export type RemoteCompactionReasoning = {
-    readonly effort?: string | undefined;
-    readonly summary?: "auto" | undefined;
-    readonly context?: "all_turns" | undefined;
-};
+export type RemoteCompactionReasoning = JsonObject;
 
 export type ResponsesPayload = JsonObject & {
     readonly model: string;
@@ -171,6 +187,7 @@ export type RemoteCompactionRequestParts = {
     readonly reasoning?: RemoteCompactionReasoning | undefined;
     readonly tools?: readonly ResponsesTool[] | undefined;
     readonly clientMetadata?: Readonly<Record<string, string>> | undefined;
+    readonly requestTemplate?: ProviderRequestTemplate | undefined;
 };
 
 export type RemoteCompactionPreflightResult = {

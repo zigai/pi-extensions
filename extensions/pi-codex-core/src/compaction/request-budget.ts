@@ -15,6 +15,7 @@ import type {
     JsonObject,
     JsonValue,
     RemoteCompactionPreflightResult,
+    ProviderRequestTemplate,
     RemoteCompactionReasoning,
     RemoteCompactionRequestParts,
     RemoteCompactionV2Request,
@@ -47,10 +48,13 @@ export function buildRemoteCompactionV2Request(input: {
     readonly reasoning?: RemoteCompactionReasoning | undefined;
     readonly tools?: readonly ResponsesTool[] | undefined;
     readonly clientMetadata?: Readonly<Record<string, string>> | undefined;
+    readonly requestTemplate?: ProviderRequestTemplate | undefined;
 }): RemoteCompactionV2Request {
     const profile = codexModelRequestProfile(input.model);
+    const requestTemplate = input.requestTemplate;
     const reasoning =
         input.reasoning ??
+        requestTemplate?.reasoning ??
         (profile?.useResponsesLite
             ? {
                   ...(profile.defaultReasoningEffort
@@ -64,29 +68,22 @@ export function buildRemoteCompactionV2Request(input: {
                       : {}),
                   summary: "auto" as const,
               });
-    const serviceTier =
-        input.fast && (profile?.supportsPriorityServiceTier ?? true)
-            ? { service_tier: "priority" as const }
-            : {};
+    const usePriorityServiceTier =
+        (input.fast || requestTemplate?.serviceTier === "priority") &&
+        (profile?.supportsPriorityServiceTier ?? true);
+    const serviceTier = usePriorityServiceTier ? { service_tier: "priority" as const } : {};
+    const tools = input.tools ?? requestTemplate?.tools;
+    const promptCacheKey = requestTemplate?.promptCacheKey ?? input.promptCacheKey;
+    const include = ["reasoning.encrypted_content"];
+    const text = { verbosity: input.verbosity };
+    const clientMetadata = { ...input.clientMetadata };
     if (profile?.useResponsesLite) {
         const instructions = sanitizeSurrogates(input.instructions);
         return {
             model: input.model,
             input: [
-                {
-                    type: "additional_tools",
-                    role: "developer",
-                    tools: (input.tools ?? []).map((tool) => ({ ...tool })),
-                },
-                ...(instructions.length > 0
-                    ? [
-                          {
-                              type: "message",
-                              role: "developer",
-                              content: [{ type: "input_text", text: instructions }],
-                          },
-                      ]
-                    : []),
+                buildLiteAdditionalToolsItem(requestTemplate, tools),
+                ...buildLiteInstructionItems(requestTemplate, instructions),
                 ...input.input.map((item) =>
                     stripResponsesLiteImageDetails(stripResponseItemId(item)),
                 ),
@@ -96,13 +93,13 @@ export function buildRemoteCompactionV2Request(input: {
             parallel_tool_calls: false,
             store: false,
             stream: true,
-            include: ["reasoning.encrypted_content"],
-            prompt_cache_key: input.promptCacheKey,
-            text: { verbosity: input.verbosity },
+            include,
+            prompt_cache_key: promptCacheKey,
+            text,
             ...serviceTier,
             reasoning,
             client_metadata: {
-                ...input.clientMetadata,
+                ...clientMetadata,
                 [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
             },
         };
@@ -115,14 +112,49 @@ export function buildRemoteCompactionV2Request(input: {
         parallel_tool_calls: true,
         store: false,
         stream: true,
-        include: ["reasoning.encrypted_content"],
-        prompt_cache_key: input.promptCacheKey,
-        text: { verbosity: input.verbosity },
+        include,
+        prompt_cache_key: promptCacheKey,
+        text,
         ...serviceTier,
         reasoning,
-        ...(input.tools && input.tools.length > 0 ? { tools: input.tools } : {}),
-        ...(input.clientMetadata ? { client_metadata: input.clientMetadata } : {}),
+        ...(tools && tools.length > 0 ? { tools } : {}),
+        ...(Object.keys(clientMetadata).length > 0 ? { client_metadata: clientMetadata } : {}),
     };
+}
+
+function buildLiteAdditionalToolsItem(
+    requestTemplate: ProviderRequestTemplate | undefined,
+    tools: readonly ResponsesTool[] | undefined,
+): ResponsesInputItem {
+    const base =
+        requestTemplate?.layout === "responses-lite"
+            ? requestTemplate.additionalToolsItem
+            : undefined;
+    return {
+        ...(base ?? { type: "additional_tools", role: "developer" }),
+        tools: (tools ?? []).map((tool) => ({ ...tool })),
+    };
+}
+
+function buildLiteInstructionItems(
+    requestTemplate: ProviderRequestTemplate | undefined,
+    instructions: string,
+): readonly ResponsesInputItem[] {
+    if (instructions.length === 0) return [];
+    if (
+        requestTemplate?.layout === "responses-lite" &&
+        requestTemplate.instructions === instructions &&
+        requestTemplate.instructionItems
+    ) {
+        return requestTemplate.instructionItems;
+    }
+    return [
+        {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: instructions }],
+        },
+    ];
 }
 
 export function buildCompactionTools(pi: ExtensionAPI): ResponsesTool[] | undefined {
