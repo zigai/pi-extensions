@@ -195,7 +195,7 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         // SAFETY: the parser has no issues, so the selected compiled grammar established every
         // required/defaulted leaf consumed by the registered handler.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: zero parser issues prove the handler value contract.
-        args: parsed.values as InferArguments<FlatArgumentDefinitions>,
+        args: parsed.values,
     };
 }
 
