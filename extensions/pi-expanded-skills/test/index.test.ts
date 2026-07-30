@@ -107,7 +107,7 @@ describe("OpenAI sidecar metadata", () => {
                 cwd: process.cwd(),
                 skills: [skill],
             },
-        } as BeforeAgentStartEvent);
+        });
 
         expect(result?.systemPrompt).toBe("prefixsuffix");
     });
@@ -139,7 +139,7 @@ describe("OpenAI sidecar metadata", () => {
                 cwd: process.cwd(),
                 skills: [skill],
             },
-        } as BeforeAgentStartEvent);
+        });
 
         expect(result?.systemPrompt).toBe("prefixsuffix");
     });
@@ -368,7 +368,7 @@ describe("skill usage tracking", () => {
                         timestamp: 1,
                     },
                 ],
-            } as ContextEvent,
+            },
             makeContext(vi.fn(), { cwd: dirname(skillPath), sessionId: "session-mention" }),
         );
 

@@ -24,10 +24,10 @@
     "README.md"
   ],
   "type": "module",
+  "main": "src/index.ts",
   "publishConfig": {
     "access": "public"
   },
-  "main": "src/index.ts",
   "scripts": {
     "lint": "oxlint -c ./.oxlintrc.json .",
     "lint:fix": "oxlint -c ./.oxlintrc.json . --fix",
@@ -41,12 +41,12 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^4.1.9",
     "oxfmt": "^0.44.0",
     "oxlint": "^1.59.0",
-    "oxlint-tsgolint": "^0.23.0",
+    "oxlint-tsgolint": "^7.0.2001",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   },
