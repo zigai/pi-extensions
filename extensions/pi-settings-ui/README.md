@@ -53,12 +53,17 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-settings-ui.jso
 | --- | --- | --- | --- |
 | `projectOverrides` | boolean | `true` | Let trusted projects have their own extension settings. |
 
+<details>
+<summary>Complete default settings</summary>
+
 ```json
 {
   "$schema": "./schemas/pi-settings-ui.schema.json",
   "projectOverrides": true
 }
 ```
+
+</details>
 <!-- pi-extension-settings:end -->
 
 ## Development
