@@ -471,3 +471,41 @@ test("extension prompt hook follows the selected GPT model", async () => {
         await rm(root, { recursive: true, force: true });
     }
 });
+
+test("warns once when an earlier extension fully replaces the system prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-prompt-conflict-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const configPath = getCodexCoreConfigPath();
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(
+            configPath,
+            JSON.stringify({
+                ...DEFAULT_CODEX_CORE_CONFIG_JSON,
+                prompt: { ...DEFAULT_CODEX_CORE_CONFIG_JSON.prompt, mode: "codex" },
+            }),
+        );
+        const notifications: Array<{ readonly message: string; readonly type: string }> = [];
+        const ctx = makeStartupWarningContext((message, type) => {
+            notifications.push({ message, type });
+        });
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        await harness.startSession(ctx);
+        const options: BuildSystemPromptOptions = { cwd: "/workspace" };
+        const replacedPrompt =
+            "Earlier extension replacement.\nCurrent working directory: /workspace";
+
+        await harness.prepareSystemPrompt(replacedPrompt, options, ctx);
+        await harness.prepareSystemPrompt(replacedPrompt, options, ctx);
+
+        assert.equal(notifications.length, 1);
+        assert.equal(notifications[0]?.type, "warning");
+        assert.match(notifications[0]?.message ?? "", /could not safely merge/);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});

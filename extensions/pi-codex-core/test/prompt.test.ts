@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { BuildSystemPromptOptions, Skill } from "@earendil-works/pi-coding-agent";
 import { supportsCodexPromptPersonality } from "../src/prompt/personality.ts";
-import { buildCodexCoreSystemPrompt } from "../src/prompt/system-prompt.ts";
+import {
+    buildCodexCoreSystemPrompt,
+    buildCodexCoreSystemPromptResult,
+} from "../src/prompt/system-prompt.ts";
 import { DEFAULT_CODEX_CORE_CONFIG, parseCodexCoreConfig } from "../src/config/config.ts";
 
 test("codex prompt mode inherits structured Pi prompt sections", () => {
@@ -95,6 +98,41 @@ test("codex prompt mode inherits structured Pi prompt sections", () => {
         prompt,
         /# Pi Context[\s\S]*You are an expert coding assistant operating inside pi/,
     );
+});
+
+test("preserves append-style system instructions from earlier extensions", () => {
+    const config = parseCodexCoreConfig({ prompt: { mode: "codex" } });
+    const options: BuildSystemPromptOptions = {
+        cwd: "/workspace",
+        selectedTools: ["read"],
+        toolSnippets: { read: "Read files." },
+    };
+    const sentinel = "Earlier extension sentinel: retain this instruction.";
+    const result = buildCodexCoreSystemPromptResult(
+        `You are an expert coding assistant operating inside pi, a coding agent harness.\nCurrent working directory: /workspace\n\n${sentinel}`,
+        config,
+        options,
+        { modelId: "gpt-5.6-sol" },
+    );
+
+    assert.equal(result.interop, "preserved-append");
+    assert.equal(result.prompt.split(sentinel).length - 1, 1);
+    assert.doesNotMatch(
+        result.prompt,
+        /You are an expert coding assistant operating inside pi, a coding agent harness/,
+    );
+});
+
+test("reports earlier full system-prompt replacements that cannot be merged safely", () => {
+    const result = buildCodexCoreSystemPromptResult(
+        "A completely replaced prompt.\nCurrent working directory: /workspace",
+        parseCodexCoreConfig({ prompt: { mode: "codex" } }),
+        { cwd: "/workspace" },
+        { modelId: "gpt-5.6-sol" },
+    );
+
+    assert.equal(result.interop, "unrecognized-replacement");
+    assert.doesNotMatch(result.prompt, /A completely replaced prompt/);
 });
 
 test("selects Codex prompts by active GPT model and preserves Pi mode", () => {

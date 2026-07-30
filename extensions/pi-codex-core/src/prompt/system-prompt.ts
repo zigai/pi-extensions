@@ -37,6 +37,8 @@ const CODEX_PROMPT_PATHS_BY_MODEL: Readonly<Record<string, string>> = {
 };
 const cachedCodexPromptsByPath = new Map<string, string>();
 const CODEX_PERSONALITY_PLACEHOLDER = "{{ personality }}";
+const PI_DEFAULT_PROMPT_START =
+    "You are an expert coding assistant operating inside pi, a coding agent harness.";
 
 const DEFAULT_PI_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
 
@@ -46,6 +48,15 @@ export type CodexSystemPromptContext = {
     readonly clock?: Clock | undefined;
 };
 
+/** How an earlier extension's direct system-prompt change was handled. */
+export type CodexPromptInterop = "unchanged" | "preserved-append" | "unrecognized-replacement";
+
+/** Codex prompt output plus extension-chain interoperability diagnostics. */
+export type CodexSystemPromptBuildResult = {
+    readonly prompt: string;
+    readonly interop: CodexPromptInterop;
+};
+
 /** Builds either Pi's original prompt or the active GPT model's Pi-adapted Codex prompt. */
 export function buildCodexCoreSystemPrompt(
     basePrompt: string,
@@ -53,19 +64,36 @@ export function buildCodexCoreSystemPrompt(
     options?: BuildSystemPromptOptions,
     context: CodexSystemPromptContext = {},
 ): string {
-    if (config.prompt.mode !== "codex" || !isGptPromptModel(context.modelId)) return basePrompt;
+    return buildCodexCoreSystemPromptResult(basePrompt, config, options, context).prompt;
+}
+
+/** Builds the prompt while reporting whether an earlier prompt extension could be merged. */
+export function buildCodexCoreSystemPromptResult(
+    basePrompt: string,
+    config: CodexCoreConfig,
+    options?: BuildSystemPromptOptions,
+    context: CodexSystemPromptContext = {},
+): CodexSystemPromptBuildResult {
+    if (config.prompt.mode !== "codex" || !isGptPromptModel(context.modelId)) {
+        return { prompt: basePrompt, interop: "unchanged" };
+    }
 
     const tools = options ? selectedTools(options) : DEFAULT_PI_TOOLS;
     const codexPrompt = adaptCodexPromptForPi(
         renderCodexPrompt(context.modelId, config.prompt.personality),
         tools,
     );
+    const earlierPrompt = analyzeEarlierPromptChange(basePrompt, options);
     const piContext = buildPiCodexContext(
         basePrompt,
         options,
         context.clock ?? defaultCodexRuntime.clock,
+        earlierPrompt.appendedInstructions,
     );
-    return [codexPrompt, piContext].filter((section) => section.length > 0).join("\n\n");
+    return {
+        prompt: [codexPrompt, piContext].filter((section) => section.length > 0).join("\n\n"),
+        interop: earlierPrompt.interop,
+    };
 }
 
 function isGptPromptModel(modelId: string | undefined): boolean {
@@ -197,6 +225,7 @@ function buildPiCodexContext(
     basePrompt: string,
     options: BuildSystemPromptOptions | undefined,
     clock: Clock,
+    earlierPromptAppend: string | undefined,
 ): string {
     if (!options) return basePrompt;
 
@@ -209,9 +238,45 @@ function buildPiCodexContext(
         buildPiProjectContextSection(options),
         buildPiSkillsSection(options),
         buildPiRuntimeContextSection(basePrompt, options, clock),
+        earlierPromptAppend ?? "",
     ]
         .filter((section) => section.length > 0)
         .join("\n\n");
+}
+
+function analyzeEarlierPromptChange(
+    basePrompt: string,
+    options: BuildSystemPromptOptions | undefined,
+): {
+    readonly interop: CodexPromptInterop;
+    readonly appendedInstructions?: string | undefined;
+} {
+    if (!options) return { interop: "unchanged" };
+
+    const expectedPromptStart = options.customPrompt ?? PI_DEFAULT_PROMPT_START;
+    if (!basePrompt.startsWith(expectedPromptStart)) {
+        return { interop: "unrecognized-replacement" };
+    }
+
+    const cwdLine = `Current working directory: ${options.cwd.replace(/\\/g, "/")}`;
+    const cwdLineEnd = findLastExactLineEnd(basePrompt, cwdLine);
+    if (cwdLineEnd === undefined) return { interop: "unrecognized-replacement" };
+
+    const appendedInstructions = basePrompt.slice(cwdLineEnd).trim();
+    return appendedInstructions.length > 0
+        ? { interop: "preserved-append", appendedInstructions }
+        : { interop: "unchanged" };
+}
+
+function findLastExactLineEnd(text: string, expectedLine: string): number | undefined {
+    let offset = 0;
+    let matchEnd: number | undefined;
+    for (const line of text.split("\n")) {
+        const lineEnd = offset + line.length;
+        if (line.replace(/\r$/, "") === expectedLine) matchEnd = lineEnd;
+        offset = lineEnd + 1;
+    }
+    return matchEnd;
 }
 
 function buildPiToolsSection(options: BuildSystemPromptOptions): string {

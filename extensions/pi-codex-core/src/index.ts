@@ -12,7 +12,7 @@ import { registerNativeCompactionDisplay } from "./compaction/display.ts";
 import { CodexTokenizer } from "./compaction/tokenizer.ts";
 import { readCodexCoreStartupConfig, type CodexCoreConfig } from "./config/config.ts";
 import { rewriteProviderImageDetails } from "./images/detail.ts";
-import { buildCodexCoreSystemPrompt } from "./prompt/system-prompt.ts";
+import { buildCodexCoreSystemPromptResult } from "./prompt/system-prompt.ts";
 import { registerCodexCommand } from "./settings/command.ts";
 import { registerApplyPatchTool } from "./tools/apply-patch/tool.ts";
 import { registerImagegenTool } from "./tools/imagegen.ts";
@@ -47,6 +47,7 @@ export default function extension(pi: ExtensionAPI): void {
     const responsesLitePolicy = new ResponsesLiteRequestPolicy();
     const tokenizer = new CodexTokenizer();
     const togglesActivation = new OptionalTogglesActivation(pi.events, packageName);
+    const warnedPromptConflictSessions = new Set<string>();
 
     const getConfig = (): CodexCoreConfig => config;
     const syncToolActivation = (ctx: Parameters<typeof syncCodexCoreTools>[1]): void => {
@@ -75,7 +76,9 @@ export default function extension(pi: ExtensionAPI): void {
     registerCodexCommand(pi, { getConfig, applyConfig });
 
     pi.on("session_start", async (_event, ctx) => {
-        responsesLitePolicy.clearSession(ctx.sessionManager.getSessionId());
+        const sessionId = ctx.sessionManager.getSessionId();
+        responsesLitePolicy.clearSession(sessionId);
+        warnedPromptConflictSessions.delete(sessionId);
         config = ctx.isProjectTrusted()
             ? readCodexCoreStartupConfig({ cwd: ctx.cwd })
             : readCodexCoreStartupConfig();
@@ -93,13 +96,26 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("before_agent_start", async (event, ctx) => {
+        const result = buildCodexCoreSystemPromptResult(
+            event.systemPrompt,
+            config,
+            event.systemPromptOptions,
+            { modelId: ctx.model?.id },
+        );
+        const sessionId = ctx.sessionManager.getSessionId();
+        if (
+            result.interop === "unrecognized-replacement" &&
+            ctx.hasUI &&
+            !warnedPromptConflictSessions.has(sessionId)
+        ) {
+            warnedPromptConflictSessions.add(sessionId);
+            ctx.ui.notify(
+                "Pi Codex Core could not safely merge a system-prompt replacement from an earlier extension; Codex prompt mode took precedence. Load Pi Codex Core before that extension or use append-style prompt changes.",
+                "warning",
+            );
+        }
         return {
-            systemPrompt: buildCodexCoreSystemPrompt(
-                event.systemPrompt,
-                config,
-                event.systemPromptOptions,
-                { modelId: ctx.model?.id },
-            ),
+            systemPrompt: result.prompt,
         };
     });
 
@@ -191,7 +207,9 @@ export default function extension(pi: ExtensionAPI): void {
 
     pi.on("session_shutdown", async (event, ctx) => {
         togglesActivation.dispose();
-        responsesLitePolicy.clearSession(ctx.sessionManager.getSessionId());
+        const sessionId = ctx.sessionManager.getSessionId();
+        responsesLitePolicy.clearSession(sessionId);
+        warnedPromptConflictSessions.delete(sessionId);
         if (compactionModulePromise !== undefined) {
             const { cancelScheduledCodexAutoCompaction, clearCodexCompactionSessionState } =
                 await compactionModulePromise;
