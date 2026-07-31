@@ -183,14 +183,22 @@ const promptFragmentContentSchema = Type.Union([
     Type.Object(
         {
             kind: Type.Literal("inline"),
-            text: Type.String({ maxLength: 50_000 }),
+            text: Type.String({
+                maxLength: 50_000,
+                "x-control": "textarea",
+                description: "Inline system-prompt fragment text.",
+            }),
         },
         { additionalProperties: false },
     ),
     Type.Object(
         {
             kind: Type.Literal("file"),
-            path: Type.String({ minLength: 1 }),
+            path: Type.String({
+                minLength: 1,
+                "x-control": "path",
+                description: "Path to a file containing the system-prompt fragment.",
+            }),
         },
         { additionalProperties: false },
     ),
@@ -233,6 +241,7 @@ const defaultsSchema = Type.Object(
             minimum: 1,
             maximum: 20,
             default: 5,
+            "x-control": "slider",
             description: "Maximum tools activated by one lazy capability search.",
         }),
         showStatus: Type.Boolean({

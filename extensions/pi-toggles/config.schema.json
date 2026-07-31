@@ -30,6 +30,7 @@
           "minimum": 1,
           "maximum": 20,
           "default": 5,
+          "x-control": "slider",
           "description": "Maximum tools activated by one lazy capability search."
         },
         "showStatus": {
@@ -220,7 +221,9 @@
                   },
                   "text": {
                     "type": "string",
-                    "maxLength": 50000
+                    "maxLength": 50000,
+                    "x-control": "textarea",
+                    "description": "Inline system-prompt fragment text."
                   }
                 },
                 "additionalProperties": false
@@ -238,7 +241,9 @@
                   },
                   "path": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "x-control": "path",
+                    "description": "Path to a file containing the system-prompt fragment."
                   }
                 },
                 "additionalProperties": false
