@@ -2,7 +2,7 @@
 
 Automatically name Pi sessions from the user's request and repository context.
 
-The extension can name a session after a configurable activity threshold and optionally refresh that name as work continues. The picker model, reasoning effort, prompt, trigger, and name length are all configurable.
+The extension can name a session after a configurable activity threshold and optionally refresh that name as work continues.
 
 ## Install
 
@@ -61,3 +61,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 just setup
 just coverage
 ```
+
+## License
+
+[MIT](LICENSE)
