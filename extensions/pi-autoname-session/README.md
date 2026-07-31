@@ -20,10 +20,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 | `enabled` | boolean | `true` | Enable the extension. |
 | `initialNaming.enabled` | boolean | `true` | Automatically name an otherwise unnamed session once. |
 | `initialNaming.trigger` | `messages` \| `turns` \| `tool_calls` \| `tokens` \| `minutes` | `"messages"` | The session activity that starts a naming attempt. |
-| `initialNaming.threshold` | number | `1` | The initial activity threshold. The default names the session after its first user message has been processed. |
+| `initialNaming.threshold` | number | `1` | The initial activity threshold. Recommended: 1 message, turn, tool call, or minute, or 1,000 tokens. |
 | `refreshNaming.enabled` | boolean | `false` | Periodically refresh the name as the session develops. |
 | `refreshNaming.trigger` | `messages` \| `turns` \| `tool_calls` \| `tokens` \| `minutes` | `"turns"` | The activity that starts a naming refresh. |
-| `refreshNaming.threshold` | number | `10` | The amount of activity between refreshes. |
+| `refreshNaming.threshold` | number | `10` | The amount of activity between refreshes. Recommended: 10 messages, turns, tool calls, or minutes, or 10,000 tokens. |
 | `model` | string | `"current"` | Picker model in provider/model-id form, or current to use the session's active model. |
 | `reasoningEffort` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | `"low"` | Reasoning effort used by the session-name picker. |
 | `prompt` | string | *See JSON below ↓* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}. |

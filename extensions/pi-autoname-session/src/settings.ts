@@ -3,21 +3,17 @@ import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-exten
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
-const initialTriggerSchema = StringEnum(
-    ["messages", "turns", "tool_calls", "tokens", "minutes"] as const,
-    {
-        description: "The session activity that starts a naming attempt.",
-        default: "messages",
-    },
-);
+const NAMING_TRIGGERS = ["messages", "turns", "tool_calls", "tokens", "minutes"] as const;
 
-const refreshTriggerSchema = StringEnum(
-    ["messages", "turns", "tool_calls", "tokens", "minutes"] as const,
-    {
-        description: "The activity that starts a naming refresh.",
-        default: "turns",
-    },
-);
+const initialTriggerSchema = StringEnum(NAMING_TRIGGERS, {
+    description: "The session activity that starts a naming attempt.",
+    default: "messages",
+});
+
+const refreshTriggerSchema = StringEnum(NAMING_TRIGGERS, {
+    description: "The activity that starts a naming refresh.",
+    default: "turns",
+});
 
 const settingsSchema = Type.Object(
     {
@@ -36,7 +32,7 @@ const settingsSchema = Type.Object(
                     default: 1,
                     minimum: 1,
                     description:
-                        "The initial activity threshold. The default names the session after its first user message has been processed.",
+                        "The initial activity threshold. Recommended: 1 message, turn, tool call, or minute, or 1,000 tokens.",
                 }),
             },
             {
@@ -54,7 +50,8 @@ const settingsSchema = Type.Object(
                 threshold: Type.Number({
                     default: 10,
                     minimum: 1,
-                    description: "The amount of activity between refreshes.",
+                    description:
+                        "The amount of activity between refreshes. Recommended: 10 messages, turns, tool calls, or minutes, or 10,000 tokens.",
                 }),
             },
             {
@@ -95,6 +92,7 @@ const settingsSchema = Type.Object(
                 "Current name: {{current_name}}",
             ].join("\n"),
             minLength: 1,
+            "x-control": "textarea",
             description:
                 "Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}.",
         }),
