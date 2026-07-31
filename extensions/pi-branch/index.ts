@@ -12,8 +12,8 @@ import {
     type ExtensionAPI,
     type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands/command";
-import { installTypedCommandUx } from "pi-typed-commands/pi";
+import { defineTypedCommand, registerTypedCommand } from "pi-typed-args/command";
+import { installTypedCommandUx } from "pi-typed-args/pi";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { execFile } from "node:child_process";
@@ -29,6 +29,7 @@ const EXTENSION_ID = "pi-branch";
 const CONFIG_FILE_NAME = "config.json";
 const CONFIG_SCHEMA_FILE_NAME = "config.schema.json";
 const CONFIG_SCHEMA_REFERENCE = "./config.schema.json";
+export const CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-branch/config.schema.json";
 
 function createWorktreeDirSchema() {
     return Type.Optional(
@@ -48,7 +49,7 @@ const BranchConfigSchema = Type.Object(
 );
 type BranchConfig = Static<typeof BranchConfigSchema>;
 
-const BranchConfigFileSchema = Type.Object(
+export const BranchConfigFileSchema = Type.Object(
     {
         $schema: Type.Optional(
             Type.String({
@@ -77,7 +78,7 @@ const GHOSTTY_WINDOW_SCRIPT = `on run argv
 end run`;
 
 type LaunchMode = "windows" | "panes" | "pane-window";
-type ForkLayout = "separate" | "current-tab" | "new-tab";
+export type ForkLayout = "separate" | "current-tab" | "new-tab";
 type LaunchTarget =
     | "tmux-window"
     | "tmux-current-panes"
@@ -86,7 +87,7 @@ type LaunchTarget =
     | "ghostty-new-window-panes"
     | "ghostty-window";
 
-type ParsedArgs = {
+export type ParsedArgs = {
     count: number;
     mode: LaunchMode;
     prompt: string;
@@ -94,7 +95,7 @@ type ParsedArgs = {
     worktree: boolean;
 };
 
-type BranchTypedArgs = {
+export type BranchTypedArgs = {
     count: number;
     layout: ForkLayout;
     keepOpen: boolean;
@@ -724,7 +725,7 @@ async function createForkWorktree(
     return { path: worktreePath, branch, cwd };
 }
 
-function parseTypedArgs(args: BranchTypedArgs): ParsedArgs {
+export function parseTypedArgs(args: BranchTypedArgs): ParsedArgs {
     let mode: LaunchMode = "windows";
     if (args.layout === "current-tab") {
         mode = "panes";
@@ -940,7 +941,7 @@ function parseTmuxWindowAndPaneId(stdout: string | undefined):
     return { windowId, paneId };
 }
 
-function gridColumnCount(totalPanes: number): number {
+export function gridColumnCount(totalPanes: number): number {
     if (totalPanes <= 3) {
         return totalPanes;
     }
@@ -948,11 +949,11 @@ function gridColumnCount(totalPanes: number): number {
     return Math.ceil(Math.sqrt(totalPanes));
 }
 
-function tmuxRemainingRegionPercent(regionCount: number): number {
+export function tmuxRemainingRegionPercent(regionCount: number): number {
     return Math.round(((regionCount - 1) / regionCount) * 100);
 }
 
-function tmuxGridRowPaneCounts(paneCount: number): number[] {
+export function tmuxGridRowPaneCounts(paneCount: number): number[] {
     const columnCount = gridColumnCount(paneCount);
     const rowCount = Math.ceil(paneCount / columnCount);
     const minimumPanesPerRow = Math.floor(paneCount / rowCount);
