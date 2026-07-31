@@ -1,5 +1,13 @@
 # AGENTS.md
 
+## Pi Package Workflow
+
+- Keep the extension entrypoint declared explicitly in `package.json` under `pi.extensions`.
+- Keep Pi-bundled imports in `peerDependencies` with `"*"` and in `devDependencies` for local checks only.
+- Bundle `pi-typed-args` because Pi packages do not share module roots at runtime.
+- Keep the package allowlist and package smoke test current when adding published files.
+- Validate changes with `just check` before handing off.
+
 ## README Configuration Docs
 
 - When documenting extension configuration in `README.md`, show the full scaffolded default `config.json` rather than partial override examples.

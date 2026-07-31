@@ -5,6 +5,12 @@ _:
 help:
     @just --list
 
+# Install dependencies, Git hooks, and verify the project
+setup:
+    npm install
+    pre-commit install
+    just check
+
 # Format code
 fmt:
     npm run format
@@ -15,7 +21,11 @@ lint:
 
 # Run tests
 test:
-    npm test --if-present
+    npm test
+
+# Run tests with coverage
+coverage:
+    npm run coverage
 
 # Run all non-mutating checks
 check:
