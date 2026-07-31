@@ -5,7 +5,7 @@ This Pi extension branches the current session into parallel tmux or Ghostty pan
 ## Install
 
 ```sh
-pi install npm:@zigai/pi-branch
+pi install git:github.com/zigai/pi-branch
 ```
 
 ## Commands
@@ -60,6 +60,17 @@ Configuration is optional. Global config lives at `~/.pi/agent/pi-branch/config.
 }
 ```
 
-## Development note
+## Development
+
+```sh
+just setup
+just coverage
+```
+
+### Session format
 
 This extension intentionally writes new Pi session JSONL files directly so child Pi processes can start from the current committed branch state in separate terminal sessions. That couples the extension to Pi's session file format; review this code when upgrading Pi across session-format changes or when a higher-level session-forking API becomes available.
+
+## License
+
+[MIT](LICENSE)
