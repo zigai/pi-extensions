@@ -223,18 +223,20 @@ export function highlightSyntaxCode(
     language: string | undefined,
     options: SyntaxHighlightOptions = {},
 ): string[] {
-    const plainLines = splitCodeLines(code);
     const state = syntaxState;
     const normalizedLanguage = normalizeSyntaxLanguage(language);
-    const codeByteLength = Buffer.byteLength(code, "utf8");
     if (
         state?.status !== "ready" ||
         normalizedLanguage === undefined ||
         normalizedLanguage === "text" ||
-        exceedsHighlightLimits(codeByteLength, plainLines) ||
         !state.loadedLanguages.has(normalizedLanguage)
     ) {
-        return plainLines;
+        return splitCodeLines(code);
+    }
+
+    const codeByteLength = Buffer.byteLength(code, "utf8");
+    if (codeByteLength > MAX_CODE_BYTES) {
+        return splitCodeLines(code);
     }
 
     const shouldCache = options.cache !== false && codeByteLength <= MAX_CACHEABLE_CODE_BYTES;
@@ -246,6 +248,11 @@ export function highlightSyntaxCode(
         if (cached) {
             return cached.lines;
         }
+    }
+
+    const plainLines = splitCodeLines(code);
+    if (plainLines.some((line) => line.length > MAX_LINE_LENGTH)) {
+        return plainLines;
     }
 
     try {
@@ -576,13 +583,6 @@ function formatConfiguredLanguageForWarning(language: string): string {
 function splitCodeLines(code: string): string[] {
     const normalized = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     return normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
-}
-
-function exceedsHighlightLimits(codeByteLength: number, lines: ReadonlyArray<string>): boolean {
-    if (codeByteLength > MAX_CODE_BYTES) {
-        return true;
-    }
-    return lines.some((line) => line.length > MAX_LINE_LENGTH);
 }
 
 function normalizeHighlightedLineCount(lines: string[], expectedCount: number): string[] {

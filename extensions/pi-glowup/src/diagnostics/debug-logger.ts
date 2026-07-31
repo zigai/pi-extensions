@@ -15,6 +15,8 @@ export type DebugLogFields = {
     readonly [key: string]: DebugLogValue | undefined;
 };
 
+type DebugLogFieldsSupplier = () => DebugLogFields;
+
 type DebugLogConfig = GlowupConfig["debugLog"];
 
 type ResolvedDebugLogConfig = {
@@ -55,18 +57,21 @@ export class DebugFileLogger {
         this.restartMemorySampleTimer();
     }
 
-    record(event: string, fields: DebugLogFields = {}): void {
+    /** Records diagnostics, evaluating field suppliers only while logging is enabled. */
+    record(event: string, fields: DebugLogFields | DebugLogFieldsSupplier = {}): void {
         const config = this.config;
         if (config === undefined) {
             return;
         }
+
+        const resolvedFields = typeof fields === "function" ? fields() : fields;
 
         const line = `${JSON.stringify({
             timestamp: new Date().toISOString(),
             pid: process.pid,
             uptimeMs: Math.round(process.uptime() * 1000),
             event,
-            fields: compactFields(fields),
+            fields: compactFields(resolvedFields),
         })}\n`;
 
         try {

@@ -54,6 +54,55 @@ describe("debug file logger", () => {
         expect(existsSync(join(extensionDirectory, "debug.log"))).toBe(false);
     });
 
+    it("does not evaluate lazy fields when disabled", () => {
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
+        const logger = new DebugFileLogger({
+            extensionDirectory,
+            reportWarning() {},
+        });
+        let evaluations = 0;
+
+        logger.configure({
+            enabled: false,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
+        logger.record("test_event", () => {
+            evaluations += 1;
+            return { value: true };
+        });
+
+        expect(evaluations).toBe(0);
+        expect(existsSync(join(extensionDirectory, "debug.log"))).toBe(false);
+    });
+
+    it("evaluates lazy fields once when enabled", () => {
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
+        const logger = new DebugFileLogger({
+            extensionDirectory,
+            reportWarning() {},
+        });
+        let evaluations = 0;
+
+        logger.configure({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
+        logger.record("test_event", () => {
+            evaluations += 1;
+            return { value: true };
+        });
+
+        expect(evaluations).toBe(1);
+        expect(readJsonLines(join(extensionDirectory, "debug.log"))[0]).toMatchObject({
+            event: "test_event",
+            fields: { value: true },
+        });
+    });
+
     it("rotates the active file when it exceeds the configured byte limit", () => {
         const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
         const logger = new DebugFileLogger({

@@ -2892,18 +2892,22 @@ export function selectSemanticDiffIndices(
         return kinds.map((_kind, index) => index);
     }
 
-    const contentIndices = kinds
-        .map((kind, index) => ({ kind, index }))
-        .filter((entry) => entry.kind !== "meta")
-        .map((entry) => entry.index);
+    const contentIndices: number[] = [];
+    const changed: number[] = [];
+    for (let index = 0; index < kinds.length; index += 1) {
+        const kind = kinds[index];
+        if (kind === undefined || kind === "meta") {
+            continue;
+        }
+        contentIndices.push(index);
+        if (kind === "insert" || kind === "delete") {
+            changed.push(index);
+        }
+    }
     if (contentIndices.length <= lineBudget) {
         return contentIndices;
     }
 
-    const changed = kinds
-        .map((kind, index) => ({ kind, index }))
-        .filter((entry) => entry.kind === "insert" || entry.kind === "delete")
-        .map((entry) => entry.index);
     if (changed.length === 0) {
         const headCount = Math.ceil(lineBudget / 2);
         const tailCount = Math.floor(lineBudget / 2);

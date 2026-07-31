@@ -1311,15 +1311,15 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
                 recordRender: recordBuiltInRender,
             }),
         });
-        debugLogger.record("config_applied", {
+        debugLogger.record("config_applied", () => ({
             ...configDiagnostics(config),
             ...diagnosticSnapshot(),
-        });
+        }));
     };
 
     await startSyntaxHighlighting({ config, cwd: process.cwd(), reportWarning });
     applyConfig(config);
-    debugLogger.record("extension_loaded", diagnosticSnapshot());
+    debugLogger.record("extension_loaded", diagnosticSnapshot);
 
     pi.on("tool_execution_start", (event) => {
         if (!isExplorationToolName(event.toolName)) {
@@ -1349,14 +1349,14 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
                       config.mutations,
                   )
                 : undefined;
-        debugLogger.record("tool_call", {
+        debugLogger.record("tool_call", () => ({
             toolName: event.toolName,
             builtInToolName: diagnosticBuiltInToolName(event.toolName),
             toolCallId: event.toolCallId,
             inputKind: valueKind(event.input),
             commandBytes: textByteLength(command),
             ...diagnosticSnapshot(),
-        });
+        }));
         if (!isExplorationToolName(event.toolName)) {
             registerExplorationBoundary(event.toolCallId);
         }
@@ -1368,11 +1368,11 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         }
         if (command !== undefined) {
             rememberRawScriptPreview(scriptPreviews, event.toolCallId, command);
-            debugLogger.record("script_preview_remembered", {
+            debugLogger.record("script_preview_remembered", () => ({
                 toolCallId: event.toolCallId,
                 commandBytes: textByteLength(command),
                 ...diagnosticSnapshot(),
-            });
+            }));
         }
         return preimageCapture;
     });
@@ -1425,7 +1425,7 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         }
 
         const output = textOutput(event);
-        debugLogger.record("tool_result", {
+        debugLogger.record("tool_result", () => ({
             toolName: event.toolName,
             builtInToolName: diagnosticBuiltInToolName(event.toolName),
             toolCallId: event.toolCallId,
@@ -1435,7 +1435,7 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
             storedEditPreview,
             ...detailsDiagnostics(event.details),
             ...diagnosticSnapshot(),
-        });
+        }));
         if (persistedEditPierrePayload !== undefined) {
             return {
                 details: {
@@ -1455,15 +1455,24 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         );
         debugLogger.configure(nextConfig.debugLog);
         debugLogger.startMemorySampling(diagnosticSnapshot);
-        debugLogger.record("session_start", { phase: "before_reset", ...diagnosticSnapshot() });
+        debugLogger.record("session_start", () => ({
+            phase: "before_reset",
+            ...diagnosticSnapshot(),
+        }));
         clearSessionState();
         restoreApplyPatchResultSummaries(ctx.sessionManager.getBranch(), nextConfig.mutations);
         restoreExplorationGroupStarts(ctx.sessionManager.getBranch());
-        debugLogger.record("session_start", { phase: "after_reset", ...diagnosticSnapshot() });
+        debugLogger.record("session_start", () => ({
+            phase: "after_reset",
+            ...diagnosticSnapshot(),
+        }));
         await restartSyntaxHighlighting({ config: nextConfig, cwd: ctx.cwd, reportWarning });
         applyConfig(nextConfig);
         refreshToolRows(ctx);
-        debugLogger.record("session_start", { phase: "after_syntax", ...diagnosticSnapshot() });
+        debugLogger.record("session_start", () => ({
+            phase: "after_syntax",
+            ...diagnosticSnapshot(),
+        }));
     });
 
     pi.on("agent_start", () => {
@@ -1477,17 +1486,20 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
     });
 
     pi.on("turn_start", () => {
-        debugLogger.record("turn_start", diagnosticSnapshot());
+        debugLogger.record("turn_start", diagnosticSnapshot);
     });
 
     pi.on("turn_end", () => {
-        debugLogger.record("turn_end", diagnosticSnapshot());
+        debugLogger.record("turn_end", diagnosticSnapshot);
     });
 
     pi.on("session_shutdown", async (event) => {
         sessionGeneration += 1;
         debugLogger.stopMemorySampling();
-        debugLogger.record("session_shutdown", { phase: "before_reset", ...diagnosticSnapshot() });
+        debugLogger.record("session_shutdown", () => ({
+            phase: "before_reset",
+            ...diagnosticSnapshot(),
+        }));
         clearSessionState();
         configureAssistantSeparatorPatch(false);
         configureWorkingWidgetSpacingPatch(false);
@@ -1498,7 +1510,10 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         if (event.reason === "quit") {
             await disposeSyntaxHighlighting();
         }
-        debugLogger.record("session_shutdown", { phase: "after_reset", ...diagnosticSnapshot() });
+        debugLogger.record("session_shutdown", () => ({
+            phase: "after_reset",
+            ...diagnosticSnapshot(),
+        }));
         guardedPi[EXTENSION_LOADED_KEY] = false;
     });
 }

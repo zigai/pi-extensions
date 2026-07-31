@@ -84,7 +84,13 @@ function collapsedPierreRows<T>(
         return rows;
     }
     const selected = selectSemanticDiffIndices(kinds, Math.max(1, rowBudget - 1));
-    const visible = selected.map((index) => rows[index]).filter(isDefined);
+    const visible: T[] = [];
+    for (const index of selected) {
+        const row = rows[index];
+        if (row !== undefined) {
+            visible.push(row);
+        }
+    }
     return [...visible, omission(rows.length - selected.length)];
 }
 
@@ -728,8 +734,9 @@ function renderUnifiedRows(
     maxRowsPerDiffRow: number | undefined,
 ): string[] {
     const rendered: string[] = [];
+    const lineNumberWidth = lineNumberWidthFor(metadata);
     for (const row of rows) {
-        const rowLines = renderUnifiedRow(row, metadata, width);
+        const rowLines = renderUnifiedRow(row, width, lineNumberWidth);
         const visibleLines = limitDiffRowLines(rowLines, maxRowsPerDiffRow, width);
         if (appendBudgetedRenderedLines(rendered, visibleLines, maxRenderedLines)) {
             break;
@@ -747,8 +754,24 @@ function renderSplitRows(
     maxRowsPerDiffRow: number | undefined,
 ): string[] {
     const rendered: string[] = [];
+    const lineNumberWidth = lineNumberWidthFor(metadata);
+    const divider = renderFullWidthLine(
+        [{ text: " │ ", fg: palette.dividerFg, bg: palette.dividerBg }],
+        3,
+        baseStyle({ fg: palette.dividerFg, bg: palette.dividerBg }),
+    );
+    const dividerWidth = visibleWidth(divider);
+    const leftWidth = Math.max(24, Math.floor((width - dividerWidth) / 2));
+    const rightWidth = Math.max(24, width - dividerWidth - leftWidth);
     for (const row of rows) {
-        const rowLines = renderSplitRow(row, metadata, width, palette);
+        const rowLines = renderSplitRow(
+            row,
+            width,
+            lineNumberWidth,
+            divider,
+            leftWidth,
+            rightWidth,
+        );
         const visibleLines = limitDiffRowLines(rowLines, maxRowsPerDiffRow, width);
         if (appendBudgetedRenderedLines(rendered, visibleLines, maxRenderedLines)) {
             break;
@@ -795,13 +818,8 @@ function appendBudgetedRenderedLines(
     return true;
 }
 
-function renderUnifiedRow(
-    row: UnifiedDiffRow,
-    metadata: PierreRenderableDiffPayload["metadata"],
-    width: number,
-): string[] {
+function renderUnifiedRow(row: UnifiedDiffRow, width: number, lineNumberWidth: number): string[] {
     if (row.kind !== "line") {
-        const lineNumberWidth = lineNumberWidthFor(metadata);
         const gutterWidth =
             configuredDiffLineNumberStyle() === "dual"
                 ? lineNumberWidth * 2 + 3
@@ -816,11 +834,11 @@ function renderUnifiedRow(
         ];
     }
 
-    const lineNumberWidth = lineNumberWidthFor(metadata);
     const marker = markerForLineType(row.lineType);
     const firstPrefix = unifiedDiffPrefix(row, marker, lineNumberWidth);
-    const restPrefix = " ".repeat(visibleWidth(firstPrefix));
-    const contentWidth = Math.max(8, width - visibleWidth(firstPrefix));
+    const prefixWidth = visibleWidth(firstPrefix);
+    const restPrefix = " ".repeat(prefixWidth);
+    const contentWidth = Math.max(8, width - prefixWidth);
     const content = renderContent(row.spans, baseStyle({ fg: row.rowFg, bg: row.rowBg }));
     if (visibleWidth(content) === 0) {
         const prefix = renderUnifiedDiffPrefix(
@@ -877,12 +895,13 @@ function unifiedDiffPrefix(
 
 function renderSplitRow(
     row: SplitDiffRow,
-    metadata: PierreRenderableDiffPayload["metadata"],
     width: number,
-    palette: PierreTerminalPalette,
+    lineNumberWidth: number,
+    divider: string,
+    leftWidth: number,
+    rightWidth: number,
 ): string[] {
     if (row.kind !== "line") {
-        const lineNumberWidth = lineNumberWidthFor(metadata);
         const text =
             row.kind === "collapsed" ? ` ${" ".repeat(lineNumberWidth)} ${row.text}` : row.text;
         return [
@@ -894,14 +913,6 @@ function renderSplitRow(
         ];
     }
 
-    const divider = renderFullWidthLine(
-        [{ text: " │ ", fg: palette.dividerFg, bg: palette.dividerBg }],
-        3,
-        baseStyle({ fg: palette.dividerFg, bg: palette.dividerBg }),
-    );
-    const leftWidth = Math.max(24, Math.floor((width - visibleWidth(divider)) / 2));
-    const rightWidth = Math.max(24, width - visibleWidth(divider) - leftWidth);
-    const lineNumberWidth = lineNumberWidthFor(metadata);
     const deletionLines = renderSplitCell(row.deletion, leftWidth, lineNumberWidth);
     const additionLines = renderSplitCell(row.addition, rightWidth, lineNumberWidth);
     const rowCount = Math.max(deletionLines.length, additionLines.length);
@@ -922,8 +933,9 @@ function renderSplitCell(cell: SplitDiffCell, width: number, lineNumberWidth: nu
         configuredDiffLineNumberStyle() === "dual"
             ? `${formatLineNumber(cell.lineNumber, lineNumberWidth)} ${marker} `
             : `${marker}${formatLineNumber(cell.lineNumber, lineNumberWidth)} `;
-    const restPrefix = " ".repeat(visibleWidth(firstPrefix));
-    const contentWidth = Math.max(8, width - visibleWidth(firstPrefix));
+    const prefixWidth = visibleWidth(firstPrefix);
+    const restPrefix = " ".repeat(prefixWidth);
+    const contentWidth = Math.max(8, width - prefixWidth);
     const content = renderContent(cell.spans, baseStyle({ fg: cell.rowFg, bg: cell.rowBg }));
     if (visibleWidth(content) === 0) {
         const prefix = renderSplitDiffPrefix(
