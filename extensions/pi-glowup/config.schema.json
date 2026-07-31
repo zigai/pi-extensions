@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/zigai/pi-codex-look/config.schema.json",
+  "$id": "https://github.com/zigai/pi-glowup/config.schema.json",
   "type": "object",
   "properties": {
     "$schema": {
