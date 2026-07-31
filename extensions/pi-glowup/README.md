@@ -1,6 +1,6 @@
 # pi-glowup
 
-Compact, high-signal rendering for Pi tool calls and results. Inspired by Codex CLI.
+High-signal rendering for Pi tool calls and results. Inspired by Codex CLI.
 
 ## Install
 
@@ -21,6 +21,12 @@ Use global config at `~/.pi/agent/pi-glowup/config.json`.
 | Option                                    | Default                                                         | Purpose                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.                 |
+| `mutations.defaultView`                   | `"full"`                                                        | Show every available completed-mutation row or a bounded `preview`.         |
+| `mutations.previewLines`                  | `6`                                                             | Changed/content rows retained per file when using the preview view.         |
+| `mutations.limits.maxDiffBytes`           | `524288`                                                        | Summarize larger diff snapshots; `null` disables the byte limit.            |
+| `mutations.limits.maxDiffLines`           | `5000`                                                          | Summarize diffs with more rows; `null` disables the line limit.             |
+| `mutations.limits.maxWritePreviewBytes`   | `65536`                                                         | Bound retained native-write content; `null` keeps all content.              |
+| `mutations.limits.maxDeletePreimageBytes` | `262144`                                                        | Bound file contents captured before deletion; `null` disables the limit.    |
 | `appearance.diffBackgroundStyle`          | `"two-tone"`                                                    | Use `two-tone`, `changed-spans`, or `full-row` diff backgrounds.            |
 | `appearance.diffLineNumberStyle`          | `"dual"`                                                        | Show aligned `dual` old/new gutters or the previous `single` gutter.        |
 | `appearance.narrowDiffLayout`             | `"paired"`                                                      | Pair similar old/new rows or use `traditional` block ordering.              |
@@ -55,6 +61,16 @@ Use global config at `~/.pi/agent/pi-glowup/config.json`.
 {
   "$schema": "./config.schema.json",
   "preserveTools": [],
+  "mutations": {
+    "defaultView": "full",
+    "previewLines": 6,
+    "limits": {
+      "maxDiffBytes": 524288,
+      "maxDiffLines": 5000,
+      "maxWritePreviewBytes": 65536,
+      "maxDeletePreimageBytes": 262144
+    }
+  },
   "appearance": {
     "diffBackgroundStyle": "two-tone",
     "diffLineNumberStyle": "dual",

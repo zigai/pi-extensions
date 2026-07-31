@@ -5,6 +5,7 @@ import {
     renderSuccessfulWriteResultFallback,
     renderWriteCallPreview,
 } from "../src/rendering/write-rendering.ts";
+import { DEFAULT_MUTATION_SETTINGS, PREVIEW_MUTATION_SETTINGS } from "../src/mutations/settings.ts";
 
 const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
@@ -259,6 +260,68 @@ describe("write rendering", () => {
         expect(rendered).toContain("export const value40 = 40;");
         expect(rendered).not.toContain("export const value20 = 20;");
         expect(rendered).toContain("lines (to expand)");
+    });
+
+    it("renders every completed write row in the default full mutation view", () => {
+        const content = Array.from(
+            { length: 40 },
+            (_value, index) => `export const value${index + 1} = ${index + 1};`,
+        ).join("\n");
+        const rendered = renderWriteCallPreview({ path: "src/generated.ts", content }, plainTheme, {
+            isError: false,
+            isPartial: false,
+            expanded: false,
+            mutationSettings: DEFAULT_MUTATION_SETTINGS,
+        })
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("value1 = 1");
+        expect(rendered).toContain("value20 = 20");
+        expect(rendered).toContain("value40 = 40");
+        expect(rendered).not.toContain("to expand");
+    });
+
+    it("honors the configurable write preview byte limit", () => {
+        const rendered = renderWriteCallPreview(
+            { path: "src/generated.ts", content: "0123456789\n".repeat(20) },
+            plainTheme,
+            {
+                isError: false,
+                isPartial: false,
+                expanded: false,
+                mutationSettings: {
+                    ...DEFAULT_MUTATION_SETTINGS,
+                    limits: {
+                        ...DEFAULT_MUTATION_SETTINGS.limits,
+                        maxWritePreviewBytes: 80,
+                    },
+                },
+            },
+        )
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("write preview truncated");
+        expect(rendered).not.toContain("+20 0123456789");
+    });
+
+    it("honors the configurable completed preview row count", () => {
+        const content = Array.from({ length: 12 }, (_value, index) => `line ${index + 1}`).join(
+            "\n",
+        );
+        const lines = renderWriteCallPreview({ path: "src/generated.ts", content }, plainTheme, {
+            isError: false,
+            isPartial: false,
+            expanded: false,
+            mutationSettings: {
+                ...PREVIEW_MUTATION_SETTINGS,
+                previewLines: 4,
+            },
+        }).render(120);
+
+        expect(lines).toHaveLength(6);
+        expect(lines.join("\n")).toContain("… +8 lines (to expand)");
     });
 
     it("keeps streaming mutation counters compact without internal padding", () => {

@@ -124,8 +124,11 @@ terminal safety.
 expanded state, image preference, and error state. Result rendering receives the original parsed
 arguments through `GlowupResultContext`.
 
-All output remains bounded even when expanded. The renderer enforces width, Unicode, terminal
-control, and preview-size limits after applying style.
+Protocol `output` components remain bounded even when expanded. Completed mutation diffs follow
+the `mutations` configuration: the default full view keeps every available row, while preview mode
+uses its configured row budget. Multi-file patches remain separate top-level mutation blocks. The
+renderer always enforces width, Unicode, terminal-control, and configured safety limits after
+applying style.
 
 ## Preserving an existing renderer
 

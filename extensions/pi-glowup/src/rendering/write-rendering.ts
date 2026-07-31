@@ -14,8 +14,12 @@ import {
     type DiffSection,
 } from "./core.ts";
 import { isActiveToolCall, toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
+import {
+    PREVIEW_MUTATION_SETTINGS,
+    showsFullMutation,
+    type MutationSettings,
+} from "../mutations/settings.ts";
 
-const MAX_WRITE_PREVIEW_BYTES = 64 * 1024;
 const WRITE_PREVIEW_TRUNCATION_SUFFIX = "\n… write preview truncated";
 
 type WriteCallContext = {
@@ -28,6 +32,7 @@ type WriteCallContext = {
     readonly labelMode?: ToolLabelMode;
     readonly mutationLabelColumnWidth?: number;
     readonly movingViewport?: boolean;
+    readonly mutationSettings?: MutationSettings;
     readonly invalidate?: () => void;
 };
 
@@ -46,6 +51,7 @@ type PartialWritePreviewUpdate = {
     readonly mutationLabelColumnWidth: number | undefined;
     readonly movingViewport: boolean;
     readonly expanded: boolean;
+    readonly maxWritePreviewBytes: number | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -336,7 +342,9 @@ class PartialWriteCallPreviewComponent implements Component {
         this.mutationLabelColumnWidth = update.mutationLabelColumnWidth;
         this.movingViewport = update.movingViewport;
         this.expanded = update.expanded;
-        this.expandedContent = update.expanded ? boundedWriteContentPreview(update.content) : "";
+        this.expandedContent = update.expanded
+            ? boundedWriteContentPreview(update.content, update.maxWritePreviewBytes)
+            : "";
         this.preview.update(update.content);
         this.invalidate();
     }
@@ -403,14 +411,14 @@ class PartialWriteCallPreviewComponent implements Component {
     }
 }
 
-function boundedWriteContentPreview(content: string): string {
-    if (Buffer.byteLength(content, "utf8") <= MAX_WRITE_PREVIEW_BYTES) {
+function boundedWriteContentPreview(content: string, maxBytes: number | null): string {
+    if (maxBytes === null || Buffer.byteLength(content, "utf8") <= maxBytes) {
         return content;
     }
 
     const maxContentBytes = Math.max(
         0,
-        MAX_WRITE_PREVIEW_BYTES - Buffer.byteLength(WRITE_PREVIEW_TRUNCATION_SUFFIX, "utf8"),
+        maxBytes - Buffer.byteLength(WRITE_PREVIEW_TRUNCATION_SUFFIX, "utf8"),
     );
     return `${truncateUtf8ByGrapheme(content, maxContentBytes)}${WRITE_PREVIEW_TRUNCATION_SUFFIX}`;
 }
@@ -429,6 +437,7 @@ export function renderWriteCallPreview(
     const path = stringField(args, "path") ?? "";
     const content = writeContentFromArgs(args);
     const labelMode = context.labelMode ?? "static";
+    const mutationSettings = context.mutationSettings ?? PREVIEW_MUTATION_SETTINGS;
     const statusText = toolStatusLabel(labelMode, context, {
         static: "Write",
         active: "Writing",
@@ -456,6 +465,7 @@ export function renderWriteCallPreview(
             mutationLabelColumnWidth: context.mutationLabelColumnWidth,
             movingViewport: context.movingViewport !== false,
             expanded: context.expanded,
+            maxWritePreviewBytes: mutationSettings.limits.maxWritePreviewBytes,
         };
         if (
             context.lastComponent instanceof PartialWriteCallPreviewComponent &&
@@ -468,7 +478,11 @@ export function renderWriteCallPreview(
     }
 
     const added = countContentLines(content);
-    const boundedContent = boundedWriteContentPreview(content);
+    const boundedContent = boundedWriteContentPreview(
+        content,
+        mutationSettings.limits.maxWritePreviewBytes,
+    );
+    const showAllRows = showsFullMutation(mutationSettings, context.expanded);
     const body =
         boundedContent.length === 0
             ? renderGlowupOutput(theme, "", {
@@ -480,10 +494,10 @@ export function renderWriteCallPreview(
             : renderGlowupDiff(
                   theme,
                   [writeDiffSection(path, boundedContent, added)],
-                  context.expanded,
+                  showAllRows,
                   {
-                      collapsedLineBudget: PARTIAL_WRITE_PREVIEW_LINES,
-                      ...(context.expanded ? {} : { maxWrappedRows: 1 }),
+                      collapsedLineBudget: mutationSettings.previewLines,
+                      ...(showAllRows ? {} : { maxWrappedRows: 1 }),
                   },
               );
     return renderMutationCall(

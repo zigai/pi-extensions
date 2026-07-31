@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
@@ -22,6 +22,7 @@ import { getPierreAppearance, getPierrePalette } from "../src/diffs/theme.ts";
 import type { UnifiedDiffRow } from "../src/diffs/types.ts";
 import { configureRenderingAppearance } from "../src/rendering/core.ts";
 import { reinitializeSyntaxHighlighting } from "../src/syntax/highlighter.ts";
+import { DEFAULT_MUTATION_SETTINGS } from "../src/mutations/settings.ts";
 
 type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
 
@@ -107,6 +108,34 @@ describe("Pierre diff rendering", () => {
         expect(payload.metadata.additionLines).toContain("const limit = 4000;\n");
     });
 
+    it("honors configurable edit snapshot capture limits", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-edit-limit-"));
+        const filePath = join(root, "sample.ts");
+        try {
+            writeFileSync(filePath, "const value = 'before';\n");
+
+            const bounded = await createEditSnapshot(root, "sample.ts", {
+                maxBytes: 8,
+                maxLines: null,
+            });
+            const unbounded = await createEditSnapshot(root, "sample.ts", {
+                maxBytes: null,
+                maxLines: null,
+            });
+            writeFileSync(filePath, "const value = 'after';\n");
+
+            expect(buildPierreDiffPayload(await bounded.finish())?.kind).toBe("summary");
+            expect(
+                buildPierreDiffPayload(await unbounded.finish(), {
+                    maxBytes: null,
+                    maxLines: null,
+                })?.kind,
+            ).toBe("renderable");
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it("summarizes Pierre payloads when snapshot capture was not safe", () => {
         const payload = buildPierreDiffPayload({
             path: "large.txt",
@@ -138,6 +167,60 @@ describe("Pierre diff rendering", () => {
         expect(payload?.stats.removed).toBe(1);
         expect(payload?.stats.lineCount).toBe(5_001);
         expect(payload?.stats.sizeBytes).toBe(Buffer.byteLength(diffText, "utf8"));
+    });
+
+    it("renders every available mutation row in the default full view", () => {
+        const newContent = Array.from(
+            { length: 20 },
+            (_value, index) => `export const value${index + 1} = ${index + 1};`,
+        ).join("\n");
+        const payload = buildPierreDiffPayload({
+            path: "src/generated.ts",
+            oldContent: "",
+            newContent,
+            oldSizeBytes: 0,
+            newSizeBytes: Buffer.byteLength(newContent, "utf8"),
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
+        const rendered = stripAnsi(
+            renderPierreDiff(
+                payload,
+                testTheme,
+                { expanded: false, mutationSettings: DEFAULT_MUTATION_SETTINGS },
+                { lastComponent: undefined },
+            )
+                .render(100)
+                .join("\n"),
+        );
+
+        expect(rendered).toContain("value1 = 1");
+        expect(rendered).toContain("value10 = 10");
+        expect(rendered).toContain("value20 = 20");
+        expect(rendered).not.toContain("to expand");
+        expect(rendered).not.toContain("more lines");
+    });
+
+    it("honors configurable diff byte and line limits", () => {
+        const snapshot = {
+            path: "src/generated.ts",
+            oldContent: "",
+            newContent: "one\ntwo\nthree\n",
+            oldSizeBytes: 0,
+            newSizeBytes: 14,
+            canBuildPierreDiff: true,
+        } as const;
+
+        expect(buildPierreDiffPayload(snapshot, { maxBytes: null, maxLines: 2 })?.kind).toBe(
+            "summary",
+        );
+        expect(buildPierreDiffPayload(snapshot, { maxBytes: 4, maxLines: null })?.kind).toBe(
+            "summary",
+        );
+        expect(buildPierreDiffPayload(snapshot, { maxBytes: null, maxLines: null })?.kind).toBe(
+            "renderable",
+        );
     });
 
     it("renders oversized Pierre payloads as compact summaries", () => {

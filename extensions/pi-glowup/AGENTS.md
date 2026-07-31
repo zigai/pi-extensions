@@ -29,7 +29,8 @@
 - Treat every mutation tool call as immutable transcript history. Later `edit`, `write`, and patch calls render below earlier calls and never overwrite or group them.
 - Render every file in a multi-file patch as its own top-level `Patch <path>` block. Do not add a parent file-count summary or tree connectors. Read-only `Explored` grouping is the deliberate exception.
 - Keep static tool labels stable by default. The patch label is `Patch`; lifecycle mode uses `Patching` while active and `Patched` when complete.
-- Keep mutation previews meaningful and bounded: six changed/content rows, change-aware selection, one neutral omission row at the bottom, and no blank completion padding. Expansion hints must use Pi's configured tool-expand keybinding rather than a hardcoded shortcut.
+- Render every available completed-mutation row by default. Keep the selectable preview view meaningful and bounded: six changed/content rows by default, change-aware selection, one neutral omission row at the bottom, and no blank completion padding. Expansion hints must use Pi's configured tool-expand keybinding rather than a hardcoded shortcut.
+- Keep mutation row budgets, diff guardrails, native-write retention, and delete preimage capture user-configurable with explicit byte/line units. Preserve the established bounded values as defaults even when a setting also accepts `null` to disable its limit.
 - Show real, dimmed, right-aligned line numbers on edits. Resolve coordinate-less patch hunks from a bounded pre-execution text snapshot rather than inventing positions.
 - Use full-row semantic backgrounds for additions and deletions, preserve syntax colors within them, and leave context/omission rows neutral. Diff backgrounds and instruction-file path colors must remain user-configurable.
 - Suppress zero-valued mutation statistics. Prefer `(+N)`, `(-N)`, or `(+N -N)` and never duplicate a successful mutation result below the call.
@@ -40,7 +41,7 @@
 - New third-party tool-specific renderers, parsers, and state belong in the tool's parent library or companion extension. Existing compatibility renderers remain in this repository until their owning package ships and verifies an equivalent protocol adapter; migrate and remove them one family at a time, never preemptively.
 - External tool owners must import `pi-glowup/protocol`; they must not import `src/rendering`, `src/third-party-tools`, Pi TUI components, Glowup themes, or ANSI helpers through this repository.
 - Do not add external tool-name registries or family-specific fallback branches to `pi-glowup`. A tool-owned `glowupRendering` adapter is the supported customization seam.
-- Components must react to width changes. Expanded Pierre diffs use side-by-side layout whenever the current width meets the threshold and unified layout otherwise; never freeze the initial-width decision.
+- Components must react to width changes. Pierre-backed native edits and completed `apply_patch` diffs use side-by-side layout whenever the current width meets the threshold and unified layout otherwise; never freeze the initial-width decision.
 - Never perform blocking subprocess or filesystem work from `render()`. Keep replay, syntax, snapshot, and component state bounded so large calls and restored sessions remain responsive.
 - For visual verification, use isolated headless pseudo-TTY/tmux evidence, raw ANSI, resizing, scrollback, and the configured expansion key. Do not open an unsolicited visible terminal window for demonstrations.
 

@@ -2,6 +2,9 @@
   "toolLabels": {
     "mode": "lifecycle"
   },
+  "mutations": {
+    "defaultView": "preview"
+  },
   "appearance": {
     "sideBySideLayout": "content-aware"
   }

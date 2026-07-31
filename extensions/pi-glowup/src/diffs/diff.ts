@@ -2,6 +2,7 @@ import { stat, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
     getFiletypeFromFileName,
+    parsePatchFiles,
     parseDiffFromFile,
     setLanguageOverride,
     type FileContents,
@@ -23,8 +24,15 @@ import type { PierreTerminalPalette } from "./theme.ts";
 export const MAX_DIFF_RENDER_BYTES = 512 * 1024;
 export const MAX_DIFF_RENDER_LINES = 5_000;
 
-const MAX_CAPTURE_BYTES = MAX_DIFF_RENDER_BYTES;
-const MAX_METADATA_BYTES = 750 * 1024;
+export type DiffRenderLimits = {
+    readonly maxBytes: number | null;
+    readonly maxLines: number | null;
+};
+
+export const DEFAULT_DIFF_RENDER_LIMITS: DiffRenderLimits = {
+    maxBytes: MAX_DIFF_RENDER_BYTES,
+    maxLines: MAX_DIFF_RENDER_LINES,
+};
 
 type FileSnapshot = {
     readonly exists: boolean;
@@ -70,13 +78,14 @@ export function resolveToolPath(cwd: string, relativeOrAbsolutePath: string): st
 export async function createEditSnapshot(
     cwd: string,
     relativePath: string,
+    limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
 ): Promise<EditSnapshotState> {
     const absolutePath = resolveToolPath(cwd, relativePath);
-    const before = await readTextSnapshot(absolutePath);
+    const before = await readTextSnapshot(absolutePath, limits.maxBytes);
 
     return {
         async finish() {
-            const after = await readTextSnapshot(absolutePath);
+            const after = await readTextSnapshot(absolutePath, limits.maxBytes);
             const summaryReason = summaryReasonForSnapshots(before, after);
             return {
                 path: relativePath,
@@ -98,13 +107,14 @@ export async function createWriteSnapshot(
     cwd: string,
     relativePath: string,
     newContent: string,
+    limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
 ): Promise<DiffSnapshot> {
     const absolutePath = resolveToolPath(cwd, relativePath);
-    const before = await readTextSnapshot(absolutePath);
+    const before = await readTextSnapshot(absolutePath, limits.maxBytes);
     const newSizeBytes = Buffer.byteLength(newContent, "utf8");
     const newLineCount = countContentLines(newContent);
     const after: FileSnapshot =
-        newSizeBytes <= MAX_CAPTURE_BYTES
+        limits.maxBytes === null || newSizeBytes <= limits.maxBytes
             ? {
                   exists: true,
                   content: newContent,
@@ -134,7 +144,10 @@ export async function createWriteSnapshot(
 }
 
 /** Builds compact, replayable Pierre diff details from bounded snapshots. */
-export function buildPierreDiffPayload(snapshot: DiffSnapshot): PierreDiffPayload | undefined {
+export function buildPierreDiffPayload(
+    snapshot: DiffSnapshot,
+    limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
+): PierreDiffPayload | undefined {
     if (snapshot.oldContent === snapshot.newContent && snapshot.summaryReason === undefined) {
         return undefined;
     }
@@ -145,20 +158,21 @@ export function buildPierreDiffPayload(snapshot: DiffSnapshot): PierreDiffPayloa
             snapshot.path,
             estimatedStats,
             snapshot.summaryReason ?? "too-large",
+            limits,
         );
     }
-    if (exceedsDiffRenderLimits(estimatedStats)) {
-        return buildPierreSummaryPayload(snapshot.path, estimatedStats, "too-large");
+    if (exceedsDiffRenderLimits(estimatedStats, limits)) {
+        return buildPierreSummaryPayload(snapshot.path, estimatedStats, "too-large", limits);
     }
 
     try {
         const metadata = buildDiffMetadata(snapshot);
         const stats = diffStats(metadata, snapshot);
-        if (stats.lineCount > MAX_DIFF_RENDER_LINES) {
-            return buildPierreSummaryPayload(snapshot.path, stats, "too-large");
+        if (exceedsDiffRenderLimits(stats, limits)) {
+            return buildPierreSummaryPayload(snapshot.path, stats, "too-large", limits);
         }
-        if (metadataSizeBytes(metadata) > MAX_METADATA_BYTES) {
-            return buildPierreSummaryPayload(snapshot.path, stats, "metadata-too-large");
+        if (exceedsMetadataRenderLimit(metadata, limits)) {
+            return buildPierreSummaryPayload(snapshot.path, stats, "metadata-too-large", limits);
         }
 
         return {
@@ -169,12 +183,59 @@ export function buildPierreDiffPayload(snapshot: DiffSnapshot): PierreDiffPayloa
             stats,
         };
     } catch {
-        return buildPierreSummaryPayload(snapshot.path, estimatedStats, "metadata-too-large");
+        return buildPierreSummaryPayload(
+            snapshot.path,
+            estimatedStats,
+            "metadata-too-large",
+            limits,
+        );
+    }
+}
+
+/** Builds one replayable Pierre payload per file from a completed unified patch. */
+export function buildPierreDiffPayloadsFromPatch(
+    patch: string,
+    limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
+): readonly PierreDiffPayload[] {
+    try {
+        return parsePatchFiles(patch, undefined, true).flatMap((parsedPatch) =>
+            parsedPatch.files.map((rawMetadata) => {
+                const pathValue =
+                    rawMetadata.prevName === undefined
+                        ? rawMetadata.name
+                        : `${rawMetadata.prevName} → ${rawMetadata.name}`;
+                const metadata = normalizeDiffMetadataLanguage(rawMetadata, rawMetadata.name);
+                const stats = partialMetadataStats(metadata);
+                if (exceedsDiffRenderLimits(stats, limits)) {
+                    return buildPierreSummaryPayload(pathValue, stats, "too-large", limits);
+                }
+                if (exceedsMetadataRenderLimit(metadata, limits)) {
+                    return buildPierreSummaryPayload(
+                        pathValue,
+                        stats,
+                        "metadata-too-large",
+                        limits,
+                    );
+                }
+                return {
+                    version: 1,
+                    kind: "renderable",
+                    path: pathValue,
+                    metadata,
+                    stats,
+                } satisfies PierreDiffPayload;
+            }),
+        );
+    } catch {
+        return [];
     }
 }
 
 /** Normalizes untrusted result details into a renderable Pierre diff payload. */
-export function normalizePierreDiffPayload(payload: unknown): PierreDiffPayload | undefined {
+export function normalizePierreDiffPayload(
+    payload: unknown,
+    limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
+): PierreDiffPayload | undefined {
     if (!isRecord(payload) || payload.version !== 1 || typeof payload.path !== "string") {
         return undefined;
     }
@@ -202,12 +263,14 @@ export function normalizePierreDiffPayload(payload: unknown): PierreDiffPayload 
     }
 
     const metadata = parseFileDiffMetadata(payload.metadata);
-    if (
-        !metadata ||
-        stats.lineCount > MAX_DIFF_RENDER_LINES ||
-        metadataSizeBytes(metadata) > MAX_METADATA_BYTES
-    ) {
-        return buildPierreSummaryPayload(payload.path, stats, "metadata-too-large");
+    if (!metadata) {
+        return buildPierreSummaryPayload(payload.path, stats, "metadata-too-large", limits);
+    }
+    if (exceedsDiffRenderLimits(stats, limits)) {
+        return buildPierreSummaryPayload(payload.path, stats, "too-large", limits);
+    }
+    if (exceedsMetadataRenderLimit(metadata, limits)) {
+        return buildPierreSummaryPayload(payload.path, stats, "metadata-too-large", limits);
     }
 
     return {
@@ -575,7 +638,10 @@ function trimEdgeCollapsedRows<TRow extends { readonly kind: string }>(
     return rows.slice(start, end);
 }
 
-async function readTextSnapshot(absolutePath: string): Promise<FileSnapshot> {
+async function readTextSnapshot(
+    absolutePath: string,
+    maxBytes: number | null,
+): Promise<FileSnapshot> {
     let info: Awaited<ReturnType<typeof stat>>;
     try {
         info = await stat(absolutePath);
@@ -601,7 +667,7 @@ async function readTextSnapshot(absolutePath: string): Promise<FileSnapshot> {
             skippedReason: "not-readable",
         };
     }
-    if (info.size > MAX_CAPTURE_BYTES) {
+    if (maxBytes !== null && info.size > maxBytes) {
         return {
             exists: true,
             content: "",
@@ -666,13 +732,16 @@ function countContentLines(content: string): number {
     return lineCount;
 }
 
-export function buildLargeDiffSummaryPayload(options: {
-    readonly path: string;
-    readonly diffText: string;
-}): PierreDiffPayload | undefined {
+export function buildLargeDiffSummaryPayload(
+    options: {
+        readonly path: string;
+        readonly diffText: string;
+    },
+    limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
+): PierreDiffPayload | undefined {
     const stats = diffTextStats(options.diffText);
-    return exceedsDiffRenderLimits(stats)
-        ? buildPierreSummaryPayload(options.path, stats, "too-large")
+    return exceedsDiffRenderLimits(stats, limits)
+        ? buildPierreSummaryPayload(options.path, stats, "too-large", limits)
         : undefined;
 }
 
@@ -680,6 +749,7 @@ export function buildPierreSummaryPayload(
     pathValue: string,
     stats: PierreDiffStats,
     reason: PierreDiffSummary["reason"],
+    limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
 ): PierreDiffPayload {
     return {
         version: 1,
@@ -688,8 +758,8 @@ export function buildPierreSummaryPayload(
         stats,
         summary: {
             reason,
-            maxLines: MAX_DIFF_RENDER_LINES,
-            maxBytes: MAX_DIFF_RENDER_BYTES,
+            maxLines: limits.maxLines,
+            maxBytes: limits.maxBytes,
         },
     };
 }
@@ -801,8 +871,11 @@ function isWhitespace(charCode: number): boolean {
     );
 }
 
-function exceedsDiffRenderLimits(stats: PierreDiffStats): boolean {
-    return stats.lineCount > MAX_DIFF_RENDER_LINES || stats.sizeBytes > MAX_DIFF_RENDER_BYTES;
+function exceedsDiffRenderLimits(stats: PierreDiffStats, limits: DiffRenderLimits): boolean {
+    return (
+        (limits.maxLines !== null && stats.lineCount > limits.maxLines) ||
+        (limits.maxBytes !== null && stats.sizeBytes > limits.maxBytes)
+    );
 }
 
 function diffStats(metadata: FileDiffMetadata, snapshot: DiffSnapshot): PierreDiffStats {
@@ -816,12 +889,33 @@ function diffStats(metadata: FileDiffMetadata, snapshot: DiffSnapshot): PierreDi
     };
 }
 
+function partialMetadataStats(metadata: FileDiffMetadata): PierreDiffStats {
+    return {
+        added: metadata.hunks.reduce((count, hunk) => count + hunk.additionLines, 0),
+        removed: metadata.hunks.reduce((count, hunk) => count + hunk.deletionLines, 0),
+        lineCount: metadata.unifiedLineCount,
+        sizeBytes:
+            metadata.additionLines.reduce(
+                (bytes, line) => bytes + Buffer.byteLength(line, "utf8"),
+                0,
+            ) +
+            metadata.deletionLines.reduce(
+                (bytes, line) => bytes + Buffer.byteLength(line, "utf8"),
+                0,
+            ),
+    };
+}
+
 function metadataSizeBytes(metadata: FileDiffMetadata): number {
     try {
         return Buffer.byteLength(JSON.stringify(metadata), "utf8");
     } catch {
         return Number.POSITIVE_INFINITY;
     }
+}
+
+function exceedsMetadataRenderLimit(metadata: FileDiffMetadata, limits: DiffRenderLimits): boolean {
+    return limits.maxBytes !== null && metadataSizeBytes(metadata) > limits.maxBytes;
 }
 
 function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
@@ -848,8 +942,8 @@ function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
 
 function normalizeSummary(summary: Record<string, unknown>): PierreDiffSummary | undefined {
     const reason = summary.reason;
-    const maxLines = finiteNonNegativeInteger(summary.maxLines);
-    const maxBytes = finiteNonNegativeInteger(summary.maxBytes);
+    const maxLines = nullableFiniteNonNegativeInteger(summary.maxLines);
+    const maxBytes = nullableFiniteNonNegativeInteger(summary.maxBytes);
     if (
         (reason !== "too-large" && reason !== "not-readable" && reason !== "metadata-too-large") ||
         maxLines === undefined ||
@@ -858,6 +952,10 @@ function normalizeSummary(summary: Record<string, unknown>): PierreDiffSummary |
         return undefined;
     }
     return { reason, maxLines, maxBytes };
+}
+
+function nullableFiniteNonNegativeInteger(value: unknown): number | null | undefined {
+    return value === null ? null : finiteNonNegativeInteger(value);
 }
 
 function normalizeStats(stats: Record<string, unknown>): PierreDiffStats | undefined {

@@ -12,6 +12,100 @@
         "type": "string"
       }
     },
+    "mutations": {
+      "type": "object",
+      "properties": {
+        "defaultView": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "full"
+            },
+            {
+              "type": "string",
+              "const": "preview"
+            }
+          ],
+          "description": "Show every available completed-mutation row or a bounded semantic preview."
+        },
+        "previewLines": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Changed/content rows retained per file in preview view."
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxDiffBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum combined diff snapshot or metadata bytes; null disables this limit."
+            },
+            "maxDiffLines": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum diff rows before rendering a summary; null disables this limit."
+            },
+            "maxWritePreviewBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum native-write content bytes retained for rendering; null disables this limit."
+            },
+            "maxDeletePreimageBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum file bytes captured before deletion; null disables this limit."
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "maxDiffBytes": 524288,
+            "maxDiffLines": 5000,
+            "maxWritePreviewBytes": 65536,
+            "maxDeletePreimageBytes": 262144
+          }
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "defaultView": "full",
+        "previewLines": 6,
+        "limits": {
+          "maxDiffBytes": 524288,
+          "maxDiffLines": 5000,
+          "maxWritePreviewBytes": 65536,
+          "maxDeletePreimageBytes": 262144
+        }
+      }
+    },
     "appearance": {
       "type": "object",
       "properties": {

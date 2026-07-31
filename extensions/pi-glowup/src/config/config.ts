@@ -12,6 +12,7 @@ import type {
     ToolCallIndicator,
 } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
+import { DEFAULT_MUTATION_SETTINGS, type MutationSettings } from "../mutations/settings.ts";
 import {
     parseScriptFormatterCommandsValue,
     type ScriptFormatterCommands,
@@ -24,6 +25,7 @@ const Schema = loadTypeboxSchema();
 
 export type GlowupConfig = {
     readonly preserveTools: readonly string[];
+    readonly mutations: MutationSettings;
     readonly appearance: {
         readonly diffBackgroundStyle: DiffBackgroundStyle;
         readonly diffLineNumberStyle: DiffLineNumberStyle;
@@ -86,6 +88,7 @@ const MIN_SCRIPT_PREVIEW_CODE_LINES = 4;
 export const DEFAULT_GLOWUP_CONFIG_JSON = {
     $schema: GLOWUP_CONFIG_SCHEMA_REFERENCE,
     preserveTools: [],
+    mutations: DEFAULT_MUTATION_SETTINGS,
     appearance: {
         diffBackgroundStyle: "two-tone",
         diffLineNumberStyle: "dual",
@@ -206,6 +209,48 @@ const ToolLabelsConfigSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+function optionalPositiveIntegerSchema(description: string) {
+    return Type.Union([Type.Integer({ minimum: 1 }), Type.Null()], { description });
+}
+const MaxDiffBytesSchema = optionalPositiveIntegerSchema(
+    "Maximum combined diff snapshot or metadata bytes; null disables this limit.",
+);
+const MaxDiffLinesSchema = optionalPositiveIntegerSchema(
+    "Maximum diff rows before rendering a summary; null disables this limit.",
+);
+const MaxWritePreviewBytesSchema = optionalPositiveIntegerSchema(
+    "Maximum native-write content bytes retained for rendering; null disables this limit.",
+);
+const MaxDeletePreimageBytesSchema = optionalPositiveIntegerSchema(
+    "Maximum file bytes captured before deletion; null disables this limit.",
+);
+const MutationLimitsConfigSchema = Type.Object(
+    {
+        maxDiffBytes: Type.Optional(MaxDiffBytesSchema),
+        maxDiffLines: Type.Optional(MaxDiffLinesSchema),
+        maxWritePreviewBytes: Type.Optional(MaxWritePreviewBytesSchema),
+        maxDeletePreimageBytes: Type.Optional(MaxDeletePreimageBytesSchema),
+    },
+    { additionalProperties: false },
+);
+const MutationsConfigSchema = Type.Object(
+    {
+        defaultView: Type.Optional(
+            Type.Union([Type.Literal("full"), Type.Literal("preview")], {
+                description:
+                    "Show every available completed-mutation row or a bounded semantic preview.",
+            }),
+        ),
+        previewLines: Type.Optional(
+            Type.Integer({
+                minimum: 1,
+                description: "Changed/content rows retained per file in preview view.",
+            }),
+        ),
+        limits: Type.Optional(MutationLimitsConfigSchema),
+    },
+    { additionalProperties: false },
+);
 const WritePreviewConfigSchema = Type.Object(
     {
         movingViewport: Type.Optional(Type.Boolean()),
@@ -270,6 +315,7 @@ const GlowupConfigSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
+        mutations: Type.Optional(MutationsConfigSchema),
         appearance: Type.Optional(AppearanceConfigSchema),
         debugLog: Type.Optional(DebugLogConfigSchema),
         toolCallIndicator: Type.Optional(ToolCallIndicatorConfigSchema),
@@ -285,6 +331,42 @@ const GlowupConfigJsonSchema = Type.Object(
     {
         $schema: Type.Optional(SchemaReferenceSchema),
         preserveTools: Type.Optional(StringArraySchema),
+        mutations: Type.Optional(
+            Type.Object(
+                {
+                    defaultView: Type.Optional(
+                        Type.Union([Type.Literal("full"), Type.Literal("preview")], {
+                            description:
+                                "Show every available completed-mutation row or a bounded semantic preview.",
+                        }),
+                    ),
+                    previewLines: Type.Optional(
+                        Type.Integer({
+                            minimum: 1,
+                            description: "Changed/content rows retained per file in preview view.",
+                        }),
+                    ),
+                    limits: Type.Optional(
+                        Type.Object(
+                            {
+                                maxDiffBytes: Type.Optional(MaxDiffBytesSchema),
+                                maxDiffLines: Type.Optional(MaxDiffLinesSchema),
+                                maxWritePreviewBytes: Type.Optional(MaxWritePreviewBytesSchema),
+                                maxDeletePreimageBytes: Type.Optional(MaxDeletePreimageBytesSchema),
+                            },
+                            {
+                                additionalProperties: false,
+                                default: DEFAULT_GLOWUP_CONFIG_JSON.mutations.limits,
+                            },
+                        ),
+                    ),
+                },
+                {
+                    additionalProperties: false,
+                    default: DEFAULT_GLOWUP_CONFIG_JSON.mutations,
+                },
+            ),
+        ),
         appearance: Type.Optional(
             Type.Object(
                 {
@@ -494,6 +576,8 @@ export function parseGlowupConfig(
     } = {},
 ): GlowupConfig {
     const config = parseGlowupConfigInput(input, options);
+    const mutations = config.mutations ?? {};
+    const mutationLimits = mutations.limits ?? {};
     const appearance = config.appearance ?? {};
     const scriptPreview = config.scriptPreview ?? {};
     const debugLog = config.debugLog ?? {};
@@ -510,6 +594,29 @@ export function parseGlowupConfig(
                   (value) => value.trim().length > 0,
               )
             : [],
+        mutations: {
+            defaultView: mutations.defaultView ?? DEFAULT_GLOWUP_CONFIG_JSON.mutations.defaultView,
+            previewLines:
+                mutations.previewLines ?? DEFAULT_GLOWUP_CONFIG_JSON.mutations.previewLines,
+            limits: {
+                maxDiffBytes:
+                    mutationLimits.maxDiffBytes === undefined
+                        ? DEFAULT_GLOWUP_CONFIG_JSON.mutations.limits.maxDiffBytes
+                        : mutationLimits.maxDiffBytes,
+                maxDiffLines:
+                    mutationLimits.maxDiffLines === undefined
+                        ? DEFAULT_GLOWUP_CONFIG_JSON.mutations.limits.maxDiffLines
+                        : mutationLimits.maxDiffLines,
+                maxWritePreviewBytes:
+                    mutationLimits.maxWritePreviewBytes === undefined
+                        ? DEFAULT_GLOWUP_CONFIG_JSON.mutations.limits.maxWritePreviewBytes
+                        : mutationLimits.maxWritePreviewBytes,
+                maxDeletePreimageBytes:
+                    mutationLimits.maxDeletePreimageBytes === undefined
+                        ? DEFAULT_GLOWUP_CONFIG_JSON.mutations.limits.maxDeletePreimageBytes
+                        : mutationLimits.maxDeletePreimageBytes,
+            },
+        },
         appearance: {
             diffBackgroundStyle:
                 appearance.diffBackgroundStyle ??
@@ -693,8 +800,7 @@ function readConfigInput(configPath: string, reportWarning: ConfigWarningReporte
 }
 
 function mergeConfigInputs(base: unknown, override: unknown): unknown {
-    if (!isRecord(base)) return override ?? base;
-    if (!isRecord(override)) return base;
+    if (!isRecord(base) || !isRecord(override)) return override;
 
     const merged: Record<string, unknown> = { ...base };
     for (const [key, value] of Object.entries(override)) {

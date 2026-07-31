@@ -41,7 +41,6 @@ import {
     renderGlowupOutput,
     renderMutationCall,
     renderScriptCall,
-    MUTATION_DIFF_PREVIEW_ROWS,
     type GlowupRenderTheme,
     type FindActionArgs,
     type GrepActionArgs,
@@ -71,6 +70,7 @@ import {
     buildLargeDiffSummaryPayload,
     buildPierreDiffPayload,
     createEditSnapshot,
+    type DiffRenderLimits,
     type EditSnapshotState,
 } from "./diffs/diff.ts";
 import type { PierreDiffPayload } from "./diffs/types.ts";
@@ -113,6 +113,7 @@ import {
     scheduleFormattedScriptPreview,
 } from "./script-preview/events.ts";
 import { StreamingScriptIdentityStore } from "./script-preview/streaming-identity.ts";
+import type { MutationSettings } from "./mutations/settings.ts";
 
 type TextResult = {
     readonly content?: unknown;
@@ -212,6 +213,11 @@ function configDiagnostics(config: GlowupConfig): DebugLogFields {
             customContentBackgrounds:
                 config.appearance.addedContentBackground !== null ||
                 config.appearance.deletedContentBackground !== null,
+        },
+        mutations: {
+            defaultView: config.mutations.defaultView,
+            previewLines: config.mutations.previewLines,
+            ...config.mutations.limits,
         },
         debugLog: {
             enabled: config.debugLog.enabled,
@@ -393,10 +399,18 @@ function thirdPartyToolRenderingOptions(config: GlowupConfig): ThirdPartyToolRen
     const preservedFromEnv = process.env[PRESERVE_TOOLS_ENV];
     return {
         labelMode: config.toolLabels.mode,
+        mutationSettings: config.mutations,
         preserveTools:
             preservedFromEnv === undefined
                 ? config.preserveTools
                 : parsePreservedThirdPartyToolNames(preservedFromEnv),
+    };
+}
+
+function diffRenderLimits(settings: MutationSettings): DiffRenderLimits {
+    return {
+        maxBytes: settings.limits.maxDiffBytes,
+        maxLines: settings.limits.maxDiffLines,
     };
 }
 
@@ -558,6 +572,7 @@ function renderBuiltInToolCall(options: {
     readonly maxCodePreviewLines: () => number;
     readonly labelMode: ToolLabelMode;
     readonly movingWriteViewport: boolean;
+    readonly mutationSettings: MutationSettings;
     readonly recordRender: (kind: "call", toolName: BuiltInToolName) => void;
 }): BuiltInToolRendererOptions["renderCall"] {
     return (toolName, args, theme, context) => {
@@ -607,11 +622,18 @@ function renderBuiltInToolCall(options: {
                 return renderWriteCall(args, theme, context, {
                     labelMode: options.labelMode,
                     movingViewport: options.movingWriteViewport,
+                    mutationSettings: options.mutationSettings,
                 });
             case "edit":
                 return renderEditCall(args, theme, context, options.labelMode);
             case "delete":
-                return renderDeleteCall(args, theme, context, options.labelMode);
+                return renderDeleteCall(
+                    args,
+                    theme,
+                    context,
+                    options.labelMode,
+                    options.mutationSettings,
+                );
             case "webSearch":
                 return renderWebSearchCall(args, theme, context, options.labelMode);
         }
@@ -620,6 +642,7 @@ function renderBuiltInToolCall(options: {
 
 function renderBuiltInToolResult(settings: {
     readonly headerLayout: () => ScriptPreviewHeaderLayout;
+    readonly mutationSettings: MutationSettings;
     readonly recordRender: (kind: "result", toolName: BuiltInToolName) => void;
 }): BuiltInToolRendererOptions["renderResult"] {
     return (toolName, result, options, theme, context) => {
@@ -638,9 +661,15 @@ function renderBuiltInToolResult(settings: {
             case "bash":
                 return renderBashResult(result, options, theme, context, settings.headerLayout);
             case "write":
-                return renderWriteResult(result, options, theme, context);
+                return renderWriteResult(
+                    result,
+                    options,
+                    theme,
+                    context,
+                    settings.mutationSettings,
+                );
             case "edit":
-                return renderEditResult(result, options, theme, context);
+                return renderEditResult(result, options, theme, context, settings.mutationSettings);
             case "delete":
                 return context.isError
                     ? renderGlowupOutput(theme, textOutput(result), {
@@ -675,11 +704,12 @@ async function captureNativeEditSnapshot(
     toolCallId: string,
     cwd: string,
     filePath: string | undefined,
+    mutationSettings: MutationSettings,
 ): Promise<void> {
     if (nativeEditSnapshots.has(toolCallId) || filePath === undefined || filePath.length === 0) {
         return;
     }
-    const snapshot = await createEditSnapshot(cwd, filePath);
+    const snapshot = await createEditSnapshot(cwd, filePath, diffRenderLimits(mutationSettings));
     nativeEditSnapshots.set(toolCallId, snapshot);
     trimOldestMapEntries(nativeEditSnapshots, 300);
 }
@@ -687,13 +717,17 @@ async function captureNativeEditSnapshot(
 async function finishNativeEditSnapshot(
     toolCallId: string,
     isError: boolean,
+    mutationSettings: MutationSettings,
 ): Promise<PierreDiffPayload | undefined> {
     const snapshot = nativeEditSnapshots.get(toolCallId);
     nativeEditSnapshots.delete(toolCallId);
     if (snapshot === undefined || isError) {
         return undefined;
     }
-    const payload = buildPierreDiffPayload(await snapshot.finish());
+    const payload = buildPierreDiffPayload(
+        await snapshot.finish(),
+        diffRenderLimits(mutationSettings),
+    );
     if (payload !== undefined) {
         nativeEditPierrePayloads.set(toolCallId, payload);
         trimOldestMapEntries(nativeEditPierrePayloads, 300);
@@ -736,11 +770,16 @@ async function captureNativeDeletePreview(
     toolCallId: string,
     cwd: string,
     filePath: string | undefined,
+    mutationSettings: MutationSettings,
 ): Promise<void> {
     if (nativeDeletePreviews.has(toolCallId) || filePath === undefined || filePath.length === 0) {
         return;
     }
-    const preview = await captureDeletedTextPreview(cwd, filePath);
+    const preview = await captureDeletedTextPreview(
+        cwd,
+        filePath,
+        mutationSettings.limits.maxDeletePreimageBytes,
+    );
     if (preview !== undefined) {
         nativeDeletePreviews.set(toolCallId, preview);
         while (nativeDeletePreviews.size > 300) {
@@ -758,6 +797,7 @@ function renderDeleteCall(
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings,
 ) {
     registerExplorationBoundary(context.toolCallId);
     const filePath = pathField(args);
@@ -775,9 +815,10 @@ function renderDeleteCall(
     if (preview === undefined || preview.section.lines.length === 0) {
         return header;
     }
-    const body = renderGlowupDiff(theme, [preview.section], context.expanded, {
-        collapsedLineBudget: MUTATION_DIFF_PREVIEW_ROWS,
-        maxWrappedRows: 1,
+    const showAllRows = context.expanded || mutationSettings.defaultView === "full";
+    const body = renderGlowupDiff(theme, [preview.section], showAllRows, {
+        collapsedLineBudget: mutationSettings.previewLines,
+        ...(showAllRows ? {} : { maxWrappedRows: 1 }),
     });
     return makeComponent((width) => [...header.render(width), ...body.render(width)]);
 }
@@ -888,7 +929,11 @@ function renderWriteCall(
     args: unknown,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
-    options: { readonly labelMode: ToolLabelMode; readonly movingViewport: boolean },
+    options: {
+        readonly labelMode: ToolLabelMode;
+        readonly movingViewport: boolean;
+        readonly mutationSettings: MutationSettings;
+    },
 ) {
     registerExplorationBoundary(context.toolCallId);
     const labelColumnWidth = mutationLabelColumnWidth(context, options.labelMode);
@@ -896,6 +941,7 @@ function renderWriteCall(
         ...context,
         labelMode: options.labelMode,
         movingViewport: options.movingViewport,
+        mutationSettings: options.mutationSettings,
         ...(labelColumnWidth === undefined ? {} : { mutationLabelColumnWidth: labelColumnWidth }),
     });
 }
@@ -905,16 +951,22 @@ function renderWriteResult(
     options: BuiltInResultOptions,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
+    mutationSettings: MutationSettings,
 ) {
     if (!options.isPartial) {
         markMutationResultRendered(context);
     }
 
     const pierrePayload = !context.isError
-        ? getPierreDiffPayloadFromDetails(result.details)
+        ? getPierreDiffPayloadFromDetails(result.details, diffRenderLimits(mutationSettings))
         : undefined;
     if (pierrePayload) {
-        return renderPierreDiff(pierrePayload, theme, { expanded: options.expanded }, context);
+        return renderPierreDiff(
+            pierrePayload,
+            theme,
+            { expanded: options.expanded, mutationSettings },
+            context,
+        );
     }
     if (!context.isError) {
         const fallback = renderSuccessfulWriteResultFallback(normalizedWriteArgs(context.args));
@@ -923,7 +975,7 @@ function renderWriteResult(
         }
     }
     return renderGlowupOutput(theme, textOutput(result), {
-        expanded: options.expanded,
+        expanded: options.expanded || (!context.isError && mutationSettings.defaultView === "full"),
         mode: "head",
         maxPreviewLines: 5,
     });
@@ -999,6 +1051,7 @@ function renderEditResult(
     options: BuiltInResultOptions,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
+    mutationSettings: MutationSettings,
 ) {
     if (!options.isPartial) {
         markMutationResultRendered(context);
@@ -1006,10 +1059,15 @@ function renderEditResult(
 
     const pierrePayload = !context.isError
         ? (nativeEditPierrePayload(context.toolCallId) ??
-          getPierreDiffPayloadFromDetails(result.details))
+          getPierreDiffPayloadFromDetails(result.details, diffRenderLimits(mutationSettings)))
         : undefined;
     if (pierrePayload) {
-        return renderPierreDiff(pierrePayload, theme, { expanded: options.expanded }, context);
+        return renderPierreDiff(
+            pierrePayload,
+            theme,
+            { expanded: options.expanded, mutationSettings },
+            context,
+        );
     }
 
     if (
@@ -1019,21 +1077,30 @@ function renderEditResult(
         hasNonWhitespaceText(result.details.diff)
     ) {
         const path = pathField(context.args);
-        const summaryPayload = buildLargeDiffSummaryPayload({
-            path: path ?? "",
-            diffText: result.details.diff,
-        });
+        const summaryPayload = buildLargeDiffSummaryPayload(
+            {
+                path: path ?? "",
+                diffText: result.details.diff,
+            },
+            diffRenderLimits(mutationSettings),
+        );
         if (summaryPayload !== undefined) {
-            return renderPierreDiff(summaryPayload, theme, { expanded: options.expanded }, context);
+            return renderPierreDiff(
+                summaryPayload,
+                theme,
+                { expanded: options.expanded, mutationSettings },
+                context,
+            );
         }
         const sections = parseDiffSections(result.details.diff, path);
-        return renderGlowupDiff(theme, sections, options.expanded, {
-            collapsedLineBudget: MUTATION_DIFF_PREVIEW_ROWS,
-            maxWrappedRows: 1,
+        const showAllRows = options.expanded || mutationSettings.defaultView === "full";
+        return renderGlowupDiff(theme, sections, showAllRows, {
+            collapsedLineBudget: mutationSettings.previewLines,
+            ...(showAllRows ? {} : { maxWrappedRows: 1 }),
         });
     }
     return renderGlowupOutput(theme, textOutput(result), {
-        expanded: options.expanded,
+        expanded: options.expanded || (!context.isError && mutationSettings.defaultView === "full"),
         mode: "head",
         maxPreviewLines: 5,
     });
@@ -1235,10 +1302,12 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
                 maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
                 labelMode: config.toolLabels.mode,
                 movingWriteViewport: config.writePreview.movingViewport,
+                mutationSettings: config.mutations,
                 recordRender: recordBuiltInRender,
             }),
             renderResult: renderBuiltInToolResult({
                 headerLayout: () => headerLayout,
+                mutationSettings: config.mutations,
                 recordRender: recordBuiltInRender,
             }),
         });
@@ -1262,11 +1331,23 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         const command = commandField(event.input);
         const builtInToolName = diagnosticBuiltInToolName(event.toolName);
         const preimageCapture = event.toolName.toLowerCase().includes("apply_patch")
-            ? captureApplyPatchPreimages(event.toolCallId, ctx.cwd, event.input)
+            ? captureApplyPatchPreimages(event.toolCallId, ctx.cwd, event.input, {
+                  maxDeletePreimageBytes: config.mutations.limits.maxDeletePreimageBytes,
+              })
             : builtInToolName === "edit"
-              ? captureNativeEditSnapshot(event.toolCallId, ctx.cwd, pathField(event.input))
+              ? captureNativeEditSnapshot(
+                    event.toolCallId,
+                    ctx.cwd,
+                    pathField(event.input),
+                    config.mutations,
+                )
               : builtInToolName === "delete"
-                ? captureNativeDeletePreview(event.toolCallId, ctx.cwd, pathField(event.input))
+                ? captureNativeDeletePreview(
+                      event.toolCallId,
+                      ctx.cwd,
+                      pathField(event.input),
+                      config.mutations,
+                  )
                 : undefined;
         debugLogger.record("tool_call", {
             toolName: event.toolName,
@@ -1324,6 +1405,7 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
             persistedEditPierrePayload = await finishNativeEditSnapshot(
                 event.toolCallId,
                 event.isError === true,
+                config.mutations,
             );
         }
         if (
@@ -1375,7 +1457,7 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         debugLogger.startMemorySampling(diagnosticSnapshot);
         debugLogger.record("session_start", { phase: "before_reset", ...diagnosticSnapshot() });
         clearSessionState();
-        restoreApplyPatchResultSummaries(ctx.sessionManager.getBranch());
+        restoreApplyPatchResultSummaries(ctx.sessionManager.getBranch(), nextConfig.mutations);
         restoreExplorationGroupStarts(ctx.sessionManager.getBranch());
         debugLogger.record("session_start", { phase: "after_reset", ...diagnosticSnapshot() });
         await restartSyntaxHighlighting({ config: nextConfig, cwd: ctx.cwd, reportWarning });

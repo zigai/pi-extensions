@@ -1,4 +1,4 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { PierreAppearance } from "./types.ts";
 import { SYNTAX_THEME_APPEARANCE } from "../syntax/theme-assets.ts";
 import { strongerDiffBackgroundAnsi } from "./ansi-colors.ts";
@@ -7,6 +7,7 @@ import {
     configuredDiffBackgroundStyle,
     configuredDiffContentBackgroundAnsi,
     configuredDimUnchangedDiffText,
+    type GlowupRenderTheme,
 } from "../rendering/core.ts";
 
 /** Terminal color palette derived from Pi's active theme. */
@@ -31,47 +32,54 @@ export type PierreTerminalPalette = {
 };
 
 /** Resolves the closest Pierre syntax-highlighting appearance for the active Pi theme. */
-export function getPierreAppearance(_theme: Theme): PierreAppearance {
+export function getPierreAppearance(_theme: GlowupRenderTheme): PierreAppearance {
     return SYNTAX_THEME_APPEARANCE satisfies PierreAppearance;
 }
 
 /** Resolves diff terminal styling from Pi theme tokens. */
-export function getPierrePalette(theme: Theme): PierreTerminalPalette {
+export function getPierrePalette(theme: GlowupRenderTheme): PierreTerminalPalette {
     const additionBackground =
-        configuredDiffBackgroundAnsi("insert") ?? theme.getBgAnsi("toolSuccessBg");
+        configuredDiffBackgroundAnsi("insert") ?? theme.getBgAnsi?.("toolSuccessBg") ?? "";
     const deletionBackground =
-        configuredDiffBackgroundAnsi("delete") ?? theme.getBgAnsi("toolErrorBg");
+        configuredDiffBackgroundAnsi("delete") ?? theme.getBgAnsi?.("toolErrorBg") ?? "";
     const backgroundStyle = configuredDiffBackgroundStyle();
     const paintChangedRows = backgroundStyle === "full-row" || backgroundStyle === "two-tone";
     const additionSpanBackground =
         backgroundStyle === "two-tone"
             ? (configuredDiffContentBackgroundAnsi("insert") ??
-              strongerDiffBackgroundAnsi(additionBackground, theme.getFgAnsi("toolDiffAdded")) ??
+              strongerDiffBackgroundAnsi(additionBackground, themeFgAnsi(theme, "toolDiffAdded")) ??
               additionBackground)
             : additionBackground;
     const deletionSpanBackground =
         backgroundStyle === "two-tone"
             ? (configuredDiffContentBackgroundAnsi("delete") ??
-              strongerDiffBackgroundAnsi(deletionBackground, theme.getFgAnsi("toolDiffRemoved")) ??
+              strongerDiffBackgroundAnsi(
+                  deletionBackground,
+                  themeFgAnsi(theme, "toolDiffRemoved"),
+              ) ??
               deletionBackground)
             : deletionBackground;
     return {
         appearance: getPierreAppearance(theme),
-        contextFg: theme.getFgAnsi("toolDiffContext"),
+        contextFg: themeFgAnsi(theme, "toolDiffContext"),
         contextRowBg: "",
-        additionFg: theme.getFgAnsi("toolDiffAdded"),
+        additionFg: themeFgAnsi(theme, "toolDiffAdded"),
         additionRowBg: paintChangedRows ? additionBackground : "",
         additionSpanBg: additionSpanBackground,
-        deletionFg: theme.getFgAnsi("toolDiffRemoved"),
+        deletionFg: themeFgAnsi(theme, "toolDiffRemoved"),
         deletionRowBg: paintChangedRows ? deletionBackground : "",
         deletionSpanBg: deletionSpanBackground,
-        emptyFg: theme.getFgAnsi("dim"),
+        emptyFg: themeFgAnsi(theme, "dim"),
         emptyRowBg: "",
-        lineNumberFg: theme.getFgAnsi("dim"),
-        metadataFg: theme.getFgAnsi("muted"),
+        lineNumberFg: themeFgAnsi(theme, "dim"),
+        metadataFg: themeFgAnsi(theme, "muted"),
         metadataBg: "",
-        dividerFg: theme.getFgAnsi("dim"),
+        dividerFg: themeFgAnsi(theme, "dim"),
         dividerBg: "",
         dimUnchangedText: configuredDimUnchangedDiffText() && !paintChangedRows,
     };
+}
+
+function themeFgAnsi(theme: GlowupRenderTheme, token: ThemeColor): string {
+    return theme.getFgAnsi?.(token) ?? "";
 }

@@ -28,4 +28,18 @@ describe("delete rendering", () => {
             rmSync(cwd, { recursive: true, force: true });
         }
     });
+
+    it("honors configurable delete preimage limits", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-native-delete-"));
+        try {
+            writeFileSync(path.join(cwd, "removed.txt"), "one\ntwo\nthree\n");
+
+            expect(await captureDeletedTextPreview(cwd, "removed.txt", 4)).toBeUndefined();
+            expect(await captureDeletedTextPreview(cwd, "removed.txt", null)).toMatchObject({
+                removed: 3,
+            });
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
 });

@@ -10,6 +10,7 @@ import {
     restoreApplyPatchResultSummaries,
 } from "../src/rendering/apply-patch-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
+import { DEFAULT_MUTATION_SETTINGS } from "../src/mutations/settings.ts";
 
 const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
@@ -741,6 +742,41 @@ describe("apply_patch renderer", () => {
         }
     });
 
+    it("honors the configured apply_patch delete preimage limit", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-delete-limit-"));
+        const filePath = path.join(cwd, "removed.ts");
+        writeFileSync(filePath, "one\ntwo\nthree\n");
+        const patch = "*** Begin Patch\n*** Delete File: removed.ts\n*** End Patch";
+        const toolCallId = "bounded-delete-preimage";
+        try {
+            await captureApplyPatchPreimages(
+                toolCallId,
+                cwd,
+                { patch },
+                {
+                    maxDeletePreimageBytes: 4,
+                },
+            );
+            unlinkSync(filePath);
+            const rendered = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            })
+                .renderCall({ patch }, plainTheme, {
+                    ...renderContext,
+                    toolCallId,
+                    cwd,
+                })
+                .render(120)
+                .join("\n");
+
+            expect(rendered).toContain("• Patched removed.ts");
+            expect(rendered).not.toContain("-one");
+            expect(rendered).not.toContain("(-3)");
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
     it("reconstructs restored delete previews from persisted result details", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             labelMode: "lifecycle",
@@ -828,6 +864,106 @@ describe("apply_patch renderer", () => {
             .join("\n");
         expect(expanded).toContain("alpha");
         expect(expanded).toContain("omega");
+    });
+
+    it("renders completed apply_patch details in full and side-by-side by default", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+            mutationSettings: DEFAULT_MUTATION_SETTINGS,
+        });
+        const patch = `*** Begin Patch
+*** Update File: example.ts
+@@
+ alpha
+-old
++new
+ omega
+*** End Patch`;
+        const result = {
+            details: {
+                diff: "example.ts\n  1 alpha\n- 2 old\n+ 2 new\n  3 omega\n",
+                patch: `--- example.ts
++++ example.ts
+@@ -1,3 +1,3 @@
+ alpha
+-old
++new
+ omega
+`,
+                lineSummary: {
+                    files: [
+                        {
+                            action: "M",
+                            path: "example.ts",
+                            addedLines: 1,
+                            removedLines: 1,
+                        },
+                    ],
+                },
+            },
+        };
+        const context = {
+            ...renderContext,
+            toolCallId: "pierre-apply-patch",
+            result,
+        };
+
+        const narrow = renderer.renderCall({ patch }, plainTheme, context).render(80).join("\n");
+        const wide = renderer.renderCall({ patch }, plainTheme, context).render(180).join("\n");
+
+        expect(narrow).toContain("alpha");
+        expect(narrow).toContain("old");
+        expect(narrow).toContain("new");
+        expect(narrow).toContain("omega");
+        expect(narrow).not.toContain(" │ ");
+        expect(wide).toContain(" │ ");
+        expect(wide.match(/Patched example\.ts/gu)).toHaveLength(1);
+        expect(wide).not.toContain("files");
+        expect(wide).not.toMatch(/[├└]/u);
+    });
+
+    it("applies configurable diff limits to compatible apply_patch results", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            mutationSettings: {
+                ...DEFAULT_MUTATION_SETTINGS,
+                limits: {
+                    ...DEFAULT_MUTATION_SETTINGS.limits,
+                    maxDiffLines: 2,
+                },
+            },
+        });
+        const patch = `*** Begin Patch
+*** Add File: generated.ts
++one
++two
++three
+*** End Patch`;
+        const rendered = renderer
+            .renderCall({ patch }, plainTheme, {
+                ...renderContext,
+                toolCallId: "bounded-compatible-patch",
+                result: {
+                    details: {
+                        diff: "generated.ts\n+1 one\n+2 two\n+3 three\n",
+                        lineSummary: {
+                            files: [
+                                {
+                                    action: "A",
+                                    path: "generated.ts",
+                                    addedLines: 3,
+                                    removedLines: 0,
+                                },
+                            ],
+                        },
+                    },
+                },
+            })
+            .render(120)
+            .join("\n");
+
+        expect(rendered).toContain("Large diff omitted");
+        expect(rendered).toContain("3 lines");
+        expect(rendered).not.toContain("+three");
     });
 
     it("rehydrates a restored call after its persisted result renderer runs", async () => {

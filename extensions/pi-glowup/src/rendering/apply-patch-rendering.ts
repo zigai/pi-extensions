@@ -34,12 +34,21 @@ import {
     type TextFilePreimage,
 } from "./delete-preview.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
+import { buildPierreDiffPayloadsFromPatch, buildPierreSummaryPayload } from "../diffs/diff.ts";
+import { renderPierreDiff } from "../diffs/renderer.ts";
+import type { PierreDiffPayload } from "../diffs/types.ts";
+import {
+    PREVIEW_MUTATION_SETTINGS,
+    showsFullMutation,
+    type MutationSettings,
+} from "../mutations/settings.ts";
 
 type ApplyPatchKind = "add" | "delete" | "update";
 
 type ApplyPatchSection = DiffSection & {
     readonly kind: ApplyPatchKind;
     readonly countsKnown: boolean;
+    readonly pierreDiff?: PierreDiffPayload;
 };
 
 type ApplyPatchSummary = {
@@ -74,6 +83,9 @@ const unavailableUpdatePreimages = new Map<string, Map<string, true>>();
 const pendingUpdatePreimages = new Map<string, Map<string, Promise<void>>>();
 const persistedSummaries = new Map<string, ApplyPatchSummary>();
 const persistedSummaryDiffs = new Map<string, string>();
+const persistedUnifiedPatches = new Map<string, string>();
+const persistedSummaryLimitKeys = new Map<string, string>();
+const persistedInputPatches = new Map<string, string>();
 
 /** Drops session-scoped mutation snapshots and pending preimage references. */
 export function clearApplyPatchRenderingState(): void {
@@ -83,6 +95,9 @@ export function clearApplyPatchRenderingState(): void {
     pendingUpdatePreimages.clear();
     persistedSummaries.clear();
     persistedSummaryDiffs.clear();
+    persistedUnifiedPatches.clear();
+    persistedSummaryLimitKeys.clear();
+    persistedInputPatches.clear();
 }
 
 function rememberBounded<T>(store: Map<string, T>, key: string, value: T): void {
@@ -140,6 +155,7 @@ export async function captureApplyPatchPreimages(
     toolCallId: string,
     cwd: string,
     args: unknown,
+    options: { readonly maxDeletePreimageBytes?: number | null } = {},
 ): Promise<void> {
     const patch = patchTextFromArgs(args);
     if (patch === undefined) {
@@ -166,7 +182,11 @@ export async function captureApplyPatchPreimages(
     for (const filePath of deletePaths) {
         if (deletePreviews.has(filePath)) continue;
         tasks.push(async () => {
-            const preview = await captureDeletedTextPreview(cwd, filePath);
+            const preview = await captureDeletedTextPreview(
+                cwd,
+                filePath,
+                options.maxDeletePreimageBytes,
+            );
             if (preview !== undefined) deletePreviews.set(filePath, preview);
         });
     }
@@ -244,6 +264,7 @@ function hydrateDeletePreimages(summary: ApplyPatchSummary, toolCallId: string):
 
 function persistedApplyPatchSummary(
     result: ThirdPartyToolResult | undefined,
+    mutationSettings: MutationSettings = PREVIEW_MUTATION_SETTINGS,
 ): ApplyPatchSummary | undefined {
     if (!isRecord(result?.details)) return undefined;
     const diff = stringField(result.details, "diff");
@@ -264,13 +285,171 @@ function persistedApplyPatchSummary(
         ? result.details.lineSummary
         : undefined;
     const files = Array.isArray(lineSummary?.files) ? lineSummary.files : [];
+    const unifiedPatch = stringField(result.details, "patch");
+    const pierreDiffs =
+        unifiedPatch === undefined
+            ? []
+            : buildPierreDiffPayloadsFromPatch(unifiedPatch, {
+                  maxBytes: mutationSettings.limits.maxDiffBytes,
+                  maxLines: mutationSettings.limits.maxDiffLines,
+              });
+    return applyMutationLimits(
+        {
+            sections: sections.map((section, index): ApplyPatchSection => {
+                const file = isRecord(files[index]) ? files[index] : undefined;
+                const action = file === undefined ? undefined : stringField(file, "action");
+                const kind: ApplyPatchKind =
+                    action === "A" ? "add" : action === "D" ? "delete" : "update";
+                const pierreDiff = pierreDiffs[index];
+                return {
+                    ...section,
+                    kind,
+                    countsKnown: true,
+                    ...(pierreDiff === undefined ? {} : { pierreDiff }),
+                };
+            }),
+        },
+        mutationSettings,
+    );
+}
+
+function attachPersistedPierreDiffs(
+    summary: ApplyPatchSummary,
+    unifiedPatch: string | undefined,
+    mutationSettings: MutationSettings,
+): ApplyPatchSummary {
+    if (unifiedPatch === undefined) return applyMutationLimits(summary, mutationSettings);
+    const pierreDiffs = buildPierreDiffPayloadsFromPatch(unifiedPatch, {
+        maxBytes: mutationSettings.limits.maxDiffBytes,
+        maxLines: mutationSettings.limits.maxDiffLines,
+    });
+    return applyMutationLimits(
+        {
+            sections: summary.sections.map((section, index) => {
+                const pierreDiff = pierreDiffs[index];
+                return pierreDiff === undefined ? section : { ...section, pierreDiff };
+            }),
+        },
+        mutationSettings,
+    );
+}
+
+function mutationLimitKey(mutationSettings: MutationSettings): string {
+    const { maxDiffBytes, maxDiffLines } = mutationSettings.limits;
+    return `${maxDiffBytes ?? "none"}:${maxDiffLines ?? "none"}`;
+}
+
+function rememberPersistedSummary(options: {
+    readonly toolCallId: string;
+    readonly summary: ApplyPatchSummary;
+    readonly diff: string;
+    readonly unifiedPatch: string | undefined;
+    readonly inputPatch: string | undefined;
+    readonly mutationSettings: MutationSettings;
+}): void {
+    rememberBounded(persistedSummaries, options.toolCallId, options.summary);
+    rememberBounded(persistedSummaryDiffs, options.toolCallId, options.diff);
+    rememberBounded(
+        persistedSummaryLimitKeys,
+        options.toolCallId,
+        mutationLimitKey(options.mutationSettings),
+    );
+    if (options.unifiedPatch === undefined) {
+        persistedUnifiedPatches.delete(options.toolCallId);
+    } else {
+        rememberBounded(persistedUnifiedPatches, options.toolCallId, options.unifiedPatch);
+    }
+    if (options.inputPatch === undefined) {
+        persistedInputPatches.delete(options.toolCallId);
+    } else {
+        rememberBounded(persistedInputPatches, options.toolCallId, options.inputPatch);
+    }
+}
+
+function persistedSummaryForRender(
+    toolCallId: string,
+    result: ThirdPartyToolResult | undefined,
+    inputPatch: string | undefined,
+    mutationSettings: MutationSettings,
+): ApplyPatchSummary | undefined {
+    const details = isRecord(result?.details) ? result.details : undefined;
+    const diff = details === undefined ? undefined : stringField(details, "diff");
+    const unifiedPatch = details === undefined ? undefined : stringField(details, "patch");
+    const limitKey = mutationLimitKey(mutationSettings);
+    const storedSummary = persistedSummaries.get(toolCallId);
+    const storedInputPatch = persistedInputPatches.get(toolCallId);
+    const inputMatches = storedInputPatch === undefined || storedInputPatch === inputPatch;
+    if (!inputMatches && diff === undefined) {
+        return undefined;
+    }
+    if (
+        diff === undefined &&
+        storedSummary !== undefined &&
+        inputMatches &&
+        persistedSummaryLimitKeys.get(toolCallId) === limitKey
+    ) {
+        return storedSummary;
+    }
+    if (
+        storedSummary !== undefined &&
+        inputMatches &&
+        persistedSummaryDiffs.get(toolCallId) === diff &&
+        persistedUnifiedPatches.get(toolCallId) === unifiedPatch &&
+        persistedSummaryLimitKeys.get(toolCallId) === limitKey
+    ) {
+        return storedSummary;
+    }
+    if (diff !== undefined) {
+        const summary = persistedApplyPatchSummary(result, mutationSettings);
+        if (summary !== undefined) {
+            rememberPersistedSummary({
+                toolCallId,
+                summary,
+                diff,
+                unifiedPatch,
+                inputPatch,
+                mutationSettings,
+            });
+        }
+        return summary;
+    }
+    if (storedSummary === undefined) return undefined;
+    const refreshed = attachPersistedPierreDiffs(
+        storedSummary,
+        persistedUnifiedPatches.get(toolCallId),
+        mutationSettings,
+    );
+    rememberBounded(persistedSummaries, toolCallId, refreshed);
+    rememberBounded(persistedSummaryLimitKeys, toolCallId, limitKey);
+    return refreshed;
+}
+
+function applyMutationLimits(
+    summary: ApplyPatchSummary,
+    mutationSettings: MutationSettings,
+): ApplyPatchSummary {
+    const { maxDiffBytes, maxDiffLines } = mutationSettings.limits;
     return {
-        sections: sections.map((section, index): ApplyPatchSection => {
-            const file = isRecord(files[index]) ? files[index] : undefined;
-            const action = file === undefined ? undefined : stringField(file, "action");
-            const kind: ApplyPatchKind =
-                action === "A" ? "add" : action === "D" ? "delete" : "update";
-            return { ...section, kind, countsKnown: true };
+        sections: summary.sections.map((section) => {
+            if (section.pierreDiff !== undefined) return section;
+            const sizeBytes = Buffer.byteLength(section.lines.join("\n"), "utf8");
+            const exceedsLines = maxDiffLines !== null && section.lines.length > maxDiffLines;
+            const exceedsBytes = maxDiffBytes !== null && sizeBytes > maxDiffBytes;
+            if (!exceedsLines && !exceedsBytes) return section;
+            return {
+                ...section,
+                pierreDiff: buildPierreSummaryPayload(
+                    section.path ?? "file",
+                    {
+                        added: section.added,
+                        removed: section.removed,
+                        lineCount: section.lines.length,
+                        sizeBytes,
+                    },
+                    "too-large",
+                    { maxBytes: maxDiffBytes, maxLines: maxDiffLines },
+                ),
+            };
         }),
     };
 }
@@ -287,7 +466,10 @@ function changedOnlyApplyPatchSummary(summary: ApplyPatchSummary): ApplyPatchSum
 }
 
 /** Rehydrates immutable apply_patch history from persisted session tool results. */
-export function restoreApplyPatchResultSummaries(entries: readonly unknown[]): void {
+export function restoreApplyPatchResultSummaries(
+    entries: readonly unknown[],
+    mutationSettings: MutationSettings = PREVIEW_MUTATION_SETTINGS,
+): void {
     for (const entry of entries) {
         if (!isRecord(entry) || entry.type !== "message" || !isRecord(entry.message)) continue;
         const message = entry.message;
@@ -302,11 +484,20 @@ export function restoreApplyPatchResultSummaries(entries: readonly unknown[]): v
             continue;
         }
         const result = { details: message.details };
-        const summary = persistedApplyPatchSummary(result);
+        const summary = persistedApplyPatchSummary(result, mutationSettings);
         const diff = isRecord(message.details) ? stringField(message.details, "diff") : undefined;
         if (summary === undefined || diff === undefined) continue;
-        rememberBounded(persistedSummaries, toolCallId, summary);
-        rememberBounded(persistedSummaryDiffs, toolCallId, diff);
+        const unifiedPatch = isRecord(message.details)
+            ? stringField(message.details, "patch")
+            : undefined;
+        rememberPersistedSummary({
+            toolCallId,
+            summary,
+            diff,
+            unifiedPatch,
+            inputPatch: undefined,
+            mutationSettings,
+        });
     }
 }
 
@@ -1109,23 +1300,41 @@ function firstBoundedComponentLine(component: Component, width: number): string 
     return lines.length <= 1 ? firstLine : truncateToWidth(`${firstLine}…`, width, "…");
 }
 
-function completedDiffLineBudget(lineCount: number, maxRenderedRows: number): number {
-    return Math.min(Math.max(1, lineCount), maxRenderedRows);
-}
-
 function completedSectionDiff(
     section: ApplyPatchSection,
     theme: GlowupRenderTheme,
+    expanded: boolean,
+    mutationSettings: MutationSettings,
+    context: { readonly toolCallId?: string; readonly invalidate?: () => void },
 ): Component | undefined {
     if (section.lines.length === 0) {
         return undefined;
     }
-    return renderGlowupDiff(theme, [section], false, {
-        collapsedLineBudget: completedDiffLineBudget(
-            section.lines.length,
-            MAX_PARTIAL_PATCH_PREVIEW_LINES,
-        ),
-        maxWrappedRows: 1,
+    if (
+        section.pierreDiff !== undefined &&
+        (section.pierreDiff.kind === "summary" ||
+            expanded ||
+            mutationSettings.defaultView === "full")
+    ) {
+        return renderPierreDiff(
+            section.pierreDiff,
+            theme,
+            {
+                expanded,
+                expandedRows: "full",
+                mutationSettings,
+            },
+            {
+                lastComponent: undefined,
+                ...(context.toolCallId === undefined ? {} : { toolCallId: context.toolCallId }),
+                ...(context.invalidate === undefined ? {} : { invalidate: context.invalidate }),
+            },
+        );
+    }
+    const showAllRows = showsFullMutation(mutationSettings, expanded);
+    return renderGlowupDiff(theme, [section], showAllRows, {
+        collapsedLineBudget: mutationSettings.previewLines,
+        ...(showAllRows ? {} : { maxWrappedRows: 1 }),
     });
 }
 
@@ -1149,13 +1358,23 @@ function renderCompletedPatchViewport(
     theme: GlowupRenderTheme,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings,
+    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void },
 ): Component {
     const firstSection = summary.sections[0];
     if (firstSection === undefined) {
         return renderGlowupBody(theme, "");
     }
 
-    return renderStandalonePatchSections(summary.sections, theme, false, context, labelMode);
+    return renderStandalonePatchSections(
+        summary.sections,
+        theme,
+        false,
+        context,
+        labelMode,
+        mutationSettings,
+        diffContext,
+    );
 }
 
 function deleteStats(theme: GlowupRenderTheme, section: ApplyPatchSection): string {
@@ -1170,13 +1389,11 @@ function completedPatchSection(
     expanded: boolean,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings,
+    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void },
 ): Component {
     const label = patchCallLabel(labelMode, context);
-    const diff = expanded
-        ? section.lines.length === 0
-            ? undefined
-            : renderGlowupDiff(theme, [section], true)
-        : completedSectionDiff(section, theme);
+    const diff = completedSectionDiff(section, theme, expanded, mutationSettings, diffContext);
     const header =
         section.kind === "delete" && !section.countsKnown
             ? renderGlowupCall(theme, {
@@ -1209,9 +1426,19 @@ function renderStandalonePatchSections(
     expanded: boolean,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings,
+    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void },
 ): Component {
     const components = sections.map((section) =>
-        completedPatchSection(section, theme, expanded, context, labelMode),
+        completedPatchSection(
+            section,
+            theme,
+            expanded,
+            context,
+            labelMode,
+            mutationSettings,
+            diffContext,
+        ),
     );
     return makeComponent((width) =>
         components.flatMap((component, index) => [
@@ -1227,6 +1454,8 @@ function renderSinglePatchSection(
     expanded: boolean,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings,
+    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void },
 ): Component {
     const label = patchCallLabel(labelMode, context);
     if (isActiveToolCall(context)) {
@@ -1256,24 +1485,14 @@ function renderSinglePatchSection(
                   });
         return renderPartialPatchViewport(header, body);
     }
-    if (section.kind === "delete") {
-        const header = renderGlowupCall(theme, {
-            state: "muted",
-            statusText: label,
-            body: formatPathTarget(theme, section.path ?? "file"),
-        });
-        return header;
-    }
-    const body = renderGlowupDiff(theme, [section], expanded);
-    return renderMutationCall(
+    return completedPatchSection(
+        section,
         theme,
-        {
-            label,
-            path: section.path ?? "file",
-            added: section.added,
-            removed: section.removed,
-        },
-        { body, state: context.isError === true ? "muted" : "success" },
+        expanded,
+        context,
+        labelMode,
+        mutationSettings,
+        diffContext,
     );
 }
 
@@ -1283,19 +1502,44 @@ function renderApplyPatchSummary(
     expanded: boolean,
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings = PREVIEW_MUTATION_SETTINGS,
+    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void } = {},
 ): Component {
     if (!expanded && !isActiveToolCall(context)) {
-        return renderCompletedPatchViewport(summary, theme, context, labelMode);
+        return renderCompletedPatchViewport(
+            summary,
+            theme,
+            context,
+            labelMode,
+            mutationSettings,
+            diffContext,
+        );
     }
 
     if (summary.sections.length === 1) {
         const section = summary.sections[0];
         return section === undefined
             ? renderGlowupBody(theme, "")
-            : renderSinglePatchSection(section, theme, expanded, context, labelMode);
+            : renderSinglePatchSection(
+                  section,
+                  theme,
+                  expanded,
+                  context,
+                  labelMode,
+                  mutationSettings,
+                  diffContext,
+              );
     }
 
-    return renderStandalonePatchSections(summary.sections, theme, expanded, context, labelMode);
+    return renderStandalonePatchSections(
+        summary.sections,
+        theme,
+        expanded,
+        context,
+        labelMode,
+        mutationSettings,
+        diffContext,
+    );
 }
 
 function renderApplyPatchFallbackCall(
@@ -1378,6 +1622,7 @@ function renderApplyPatchFailure(
 export function createApplyPatchRenderer(
     _toolName?: string,
     labelMode: ToolLabelMode = "static",
+    mutationSettings: MutationSettings = PREVIEW_MUTATION_SETTINGS,
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
@@ -1385,9 +1630,12 @@ export function createApplyPatchRenderer(
             if (patch !== undefined) {
                 scheduleApplyPatchSyntaxLoads(patch, context.invalidate);
             }
-            const persistedSummary =
-                persistedApplyPatchSummary(context.result) ??
-                persistedSummaries.get(context.toolCallId);
+            const persistedSummary = persistedSummaryForRender(
+                context.toolCallId,
+                context.result,
+                patch,
+                mutationSettings,
+            );
             if (
                 patch !== undefined &&
                 persistedSummary === undefined &&
@@ -1403,17 +1651,23 @@ export function createApplyPatchRenderer(
                 persistedSummary ??
                 (parsedSummary === undefined
                     ? undefined
-                    : hydrateUpdateLineNumbers(
-                          hydrateDeletePreimages(parsedSummary, context.toolCallId),
-                          patch ?? "",
-                          context.toolCallId,
+                    : applyMutationLimits(
+                          hydrateUpdateLineNumbers(
+                              hydrateDeletePreimages(parsedSummary, context.toolCallId),
+                              patch ?? "",
+                              context.toolCallId,
+                          ),
+                          mutationSettings,
                       ));
             const summaryContext =
                 persistedSummary === undefined
                     ? context
                     : { ...context, argsComplete: true, isPartial: false };
             const renderedSummary =
-                summary === undefined || context.expanded || persistedSummary === undefined
+                summary === undefined ||
+                context.expanded ||
+                mutationSettings.defaultView === "full" ||
+                persistedSummary === undefined
                     ? summary
                     : changedOnlyApplyPatchSummary(summary);
             return renderedSummary === undefined
@@ -1424,20 +1678,24 @@ export function createApplyPatchRenderer(
                       context.expanded,
                       summaryContext,
                       labelMode,
+                      mutationSettings,
+                      {
+                          toolCallId: context.toolCallId,
+                          ...(context.invalidate === undefined
+                              ? {}
+                              : { invalidate: context.invalidate }),
+                      },
                   );
         },
         renderResult(result, options, theme, context) {
-            const persistedSummary = persistedApplyPatchSummary(result);
-            const persistedDiff = isRecord(result.details)
-                ? stringField(result.details, "diff")
-                : undefined;
-            if (
-                persistedSummary !== undefined &&
-                persistedDiff !== undefined &&
-                persistedSummaryDiffs.get(context.toolCallId) !== persistedDiff
-            ) {
-                rememberBounded(persistedSummaries, context.toolCallId, persistedSummary);
-                rememberBounded(persistedSummaryDiffs, context.toolCallId, persistedDiff);
+            const previousSummary = persistedSummaries.get(context.toolCallId);
+            const persistedSummary = persistedSummaryForRender(
+                context.toolCallId,
+                result,
+                patchTextFromArgs(context.args),
+                mutationSettings,
+            );
+            if (persistedSummary !== undefined && persistedSummary !== previousSummary) {
                 queueMicrotask(() => context.invalidate?.());
             }
             if (context.isError) {

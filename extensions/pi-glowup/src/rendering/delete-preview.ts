@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { DiffSection } from "./core.ts";
 
-const MAX_DELETE_PREIMAGE_BYTES = 256 * 1024;
+export const DEFAULT_DELETE_PREIMAGE_BYTES = 256 * 1024;
 
 export type TextFilePreimage = {
     readonly lines: readonly string[];
@@ -22,7 +22,7 @@ type TextFilePreimageOptions = {
 export async function captureTextFilePreimage(
     cwd: string,
     filePath: string,
-    maxBytes = MAX_DELETE_PREIMAGE_BYTES,
+    maxBytes: number | null = DEFAULT_DELETE_PREIMAGE_BYTES,
     options: TextFilePreimageOptions = {},
 ): Promise<TextFilePreimage | undefined> {
     const resolvedCwd = path.resolve(cwd);
@@ -38,7 +38,7 @@ export async function captureTextFilePreimage(
     }
     try {
         const stats = await stat(resolvedPath);
-        if (!stats.isFile() || stats.size > maxBytes) {
+        if (!stats.isFile() || (maxBytes !== null && stats.size > maxBytes)) {
             return undefined;
         }
         const data = await readFile(resolvedPath);
@@ -63,8 +63,9 @@ export async function captureTextFilePreimage(
 export async function captureDeletedTextPreview(
     cwd: string,
     filePath: string,
+    maxBytes: number | null = DEFAULT_DELETE_PREIMAGE_BYTES,
 ): Promise<DeletedTextPreview | undefined> {
-    const preimage = await captureTextFilePreimage(cwd, filePath);
+    const preimage = await captureTextFilePreimage(cwd, filePath, maxBytes);
     if (preimage === undefined) {
         return undefined;
     }

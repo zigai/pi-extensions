@@ -17,6 +17,16 @@ describe("glowup config", () => {
         const config = parseGlowupConfig({});
 
         expect(config.preserveTools).toEqual([]);
+        expect(config.mutations).toEqual({
+            defaultView: "full",
+            previewLines: 6,
+            limits: {
+                maxDiffBytes: 512 * 1024,
+                maxDiffLines: 5_000,
+                maxWritePreviewBytes: 64 * 1024,
+                maxDeletePreimageBytes: 256 * 1024,
+            },
+        });
         expect(config.appearance).toEqual({
             diffBackgroundStyle: "two-tone",
             diffLineNumberStyle: "dual",
@@ -95,6 +105,32 @@ describe("glowup config", () => {
 
         expect(config.appearance.diffBackgroundStyle).toBe("changed-spans");
         expect(config.appearance.diffLineNumberStyle).toBe("single");
+    });
+
+    it("keeps the previous bounded mutation view selectable", () => {
+        const config = parseGlowupConfig({
+            mutations: {
+                defaultView: "preview",
+                previewLines: 12,
+                limits: {
+                    maxDiffBytes: null,
+                    maxDiffLines: 20_000,
+                    maxWritePreviewBytes: null,
+                    maxDeletePreimageBytes: 1024,
+                },
+            },
+        });
+
+        expect(config.mutations).toEqual({
+            defaultView: "preview",
+            previewLines: 12,
+            limits: {
+                maxDiffBytes: null,
+                maxDiffLines: 20_000,
+                maxWritePreviewBytes: null,
+                maxDeletePreimageBytes: 1024,
+            },
+        });
     });
 
     it("allows diff backgrounds to inherit Pi explicitly", () => {
@@ -292,6 +328,10 @@ describe("glowup config", () => {
             JSON.stringify({
                 $schema: "./config.schema.json",
                 preserveTools: ["mcp"],
+                mutations: {
+                    defaultView: "preview",
+                    limits: { maxDiffLines: 1_000 },
+                },
                 debugLog: { enabled: false, memorySampleIntervalMs: 0 },
                 toolCallIndicator: { symbol: "·", bold: false },
                 toolLabels: { mode: "lifecycle" },
@@ -307,6 +347,10 @@ describe("glowup config", () => {
         writeFileSync(
             projectConfigPath,
             JSON.stringify({
+                mutations: {
+                    defaultView: "full",
+                    limits: { maxDiffBytes: null },
+                },
                 toolLabels: { mode: "static" },
                 toolCallIndicator: { symbol: "▸", bold: true },
                 writePreview: { movingViewport: true },
@@ -323,6 +367,10 @@ describe("glowup config", () => {
         const config = readGlowupConfig({ agentDir, cwd });
 
         expect(config.preserveTools).toEqual(["mcp"]);
+        expect(config.mutations).toMatchObject({
+            defaultView: "preview",
+            limits: { maxDiffBytes: 512 * 1024, maxDiffLines: 1_000 },
+        });
         expect(config.debugLog).toEqual({
             enabled: false,
             path: "debug.log",
@@ -355,6 +403,10 @@ describe("glowup config", () => {
             JSON.stringify({
                 $schema: "./config.schema.json",
                 preserveTools: ["mcp"],
+                mutations: {
+                    defaultView: "preview",
+                    limits: { maxDiffLines: 1_000 },
+                },
                 debugLog: { enabled: false, memorySampleIntervalMs: 0 },
                 toolCallIndicator: { symbol: "·", bold: false },
                 toolLabels: { mode: "lifecycle" },
@@ -370,6 +422,10 @@ describe("glowup config", () => {
         writeFileSync(
             projectConfigPath,
             JSON.stringify({
+                mutations: {
+                    defaultView: "full",
+                    limits: { maxDiffBytes: null },
+                },
                 toolLabels: { mode: "static" },
                 toolCallIndicator: { bold: true },
                 writePreview: { movingViewport: true },
@@ -386,6 +442,10 @@ describe("glowup config", () => {
         const config = readGlowupConfig({ agentDir, cwd }, { includeProjectConfig: true });
 
         expect(config.preserveTools).toEqual(["mcp"]);
+        expect(config.mutations).toMatchObject({
+            defaultView: "full",
+            limits: { maxDiffBytes: null, maxDiffLines: 1_000 },
+        });
         expect(config.debugLog).toEqual({
             enabled: true,
             path: "project-debug.log",

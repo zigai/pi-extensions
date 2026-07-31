@@ -233,6 +233,56 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 60_000);
 
+    it("shows every restored mutation row by default and reflows apply_patch layout", async () => {
+        const fixture = createFixtureWorkspace();
+        fixtures.push(fixture);
+        writeFileSync(
+            getGlowupGlobalConfigPath(fixture.agentDir),
+            JSON.stringify({
+                toolLabels: { mode: "lifecycle" },
+                appearance: { sideBySideLayout: "fixed" },
+            }),
+        );
+        const pi = new PiPtyProcess(launchOptions(fixture, { sessionPath: fixture.sessionPath }));
+        try {
+            const wide = await pi.waitForFrame(
+                (frame) =>
+                    frame.text.includes("Patched restored.ts") &&
+                    frame.text.includes("restored9") &&
+                    frame.text.includes("SESSION_SENTINEL"),
+                PTY_TIMEOUT_MS,
+            );
+            const wideBlock = mutationBlock(wide, "restored.ts", "SESSION_SENTINEL");
+            expect(wideBlock).toContain("restored1");
+            expect(wideBlock).toContain("restored5");
+            expect(wideBlock).toContain("restored9");
+            expect(wideBlock).toContain(" │ ");
+            expect(wideBlock).not.toContain("to expand");
+            expectTerminalInvariants(wide, [resolve("test/pty/fixtures/offline-provider.ts")]);
+
+            const nextSequence = pi.frames().length;
+            pi.resize(70, 42);
+            const narrow = await pi.waitForFrame(
+                (frame) =>
+                    frame.columns === 70 &&
+                    frame.text.includes("restored9") &&
+                    frame.text.includes("SESSION_SENTINEL"),
+                PTY_TIMEOUT_MS,
+                nextSequence,
+            );
+            const narrowBlock = mutationBlock(narrow, "restored.ts", "SESSION_SENTINEL");
+            expect(narrowBlock).toContain("restored1");
+            expect(narrowBlock).toContain("restored9");
+            expect(narrowBlock).not.toContain(" │ ");
+            expectTerminalInvariants(narrow, [resolve("test/pty/fixtures/offline-provider.ts")]);
+        } catch (cause: unknown) {
+            await pi.writeFailureArtifacts("full-default-apply-patch", cause);
+            throw cause;
+        } finally {
+            await pi.stop();
+        }
+    }, 45_000);
+
     it("captures every deterministic streaming apply_patch lifecycle without stale or duplicate rows", async () => {
         const fixture = createFixtureWorkspace();
         fixtures.push(fixture);

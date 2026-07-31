@@ -40,8 +40,8 @@ export type PierreDiffStats = {
 /** Reason a diff is summarized rather than rendered inline. */
 export type PierreDiffSummary = {
     readonly reason: "too-large" | "not-readable" | "metadata-too-large";
-    readonly maxLines: number;
-    readonly maxBytes: number;
+    readonly maxLines: number | null;
+    readonly maxBytes: number | null;
 };
 
 /** Highlighted line trees returned by Pierre/Shiki, kept only in renderer state. */

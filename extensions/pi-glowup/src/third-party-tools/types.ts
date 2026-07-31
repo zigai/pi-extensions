@@ -1,6 +1,7 @@
 import type { Component } from "@earendil-works/pi-tui";
 import type { GlowupRenderTheme } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
+import type { MutationSettings } from "../mutations/settings.ts";
 import type {
     GlowupCallContext,
     GlowupExecutionPhase,
@@ -56,6 +57,7 @@ export type ThirdPartyToolRenderingOptions = {
     readonly preserveTools?: ReadonlyArray<ToolNameMatcher>;
     readonly renderers?: ReadonlyArray<ThirdPartyToolRendererPlugin>;
     readonly labelMode?: ToolLabelMode;
+    readonly mutationSettings?: MutationSettings;
 };
 
 /** Builds a public-compatible execution context for internal renderers. */

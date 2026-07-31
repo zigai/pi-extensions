@@ -262,6 +262,123 @@ describe("Pi TUI through headless xterm", () => {
         expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[2J\u001b[H\u001b[3J");
     });
 
+    it("renders completed apply_patch details side-by-side and preserves every row", async () => {
+        const pendingTerminal = new VirtualTerminal(180, 30);
+        const activeTui = new TUI(pendingTerminal);
+        const patch = `*** Begin Patch
+*** Update File: src/example.ts
+@@
+ alpha
+-old
++new
+ omega
+*** End Patch`;
+        const tool = new ToolExecutionComponent(
+            "apply_patch",
+            "call-xterm-apply-split",
+            { patch },
+            undefined,
+            undefined,
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        tool.updateResult({
+            content: [],
+            details: {
+                diff: "src/example.ts\n  1 alpha\n- 2 old\n+ 2 new\n  3 omega\n",
+                patch: `--- src/example.ts
++++ src/example.ts
+@@ -1,3 +1,3 @@
+ alpha
+-old
++new
+ omega
+`,
+                lineSummary: {
+                    files: [
+                        {
+                            action: "M",
+                            path: "src/example.ts",
+                            addedLines: 1,
+                            removedLines: 1,
+                        },
+                    ],
+                },
+            },
+            isError: false,
+        });
+        activeTui.addChild(tool);
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+
+        const wide = pendingTerminal.screenText();
+        expect(wide).toContain("Patched src/example.ts (+1 -1)");
+        expect(wide).toContain("alpha");
+        expect(wide).toContain("old");
+        expect(wide).toContain("new");
+        expect(wide).toContain("omega");
+        expect(wide).toContain(" │ ");
+        expect(wide).not.toContain("to expand");
+
+        pendingTerminal.resize(80, 30);
+        await pendingTerminal.settle();
+        expect(pendingTerminal.screenText()).not.toContain(" │ ");
+
+        pendingTerminal.resize(180, 30);
+        await pendingTerminal.settle();
+        expect(pendingTerminal.screenText()).toBe(wide);
+    });
+
+    it("keeps every available row from compatible edit result previews", async () => {
+        const pendingTerminal = new VirtualTerminal(100, 30);
+        const activeTui = new TUI(pendingTerminal);
+        const tool = new ToolExecutionComponent(
+            "edit",
+            "call-xterm-compatible-edit",
+            { input: "*** Begin Patch\n*** Update File: example.ts#TAG\n*** End Patch" },
+            undefined,
+            undefined,
+            activeTui,
+            cwd,
+        );
+        const preview = Array.from(
+            { length: 12 },
+            (_value, index) => `${index + 1}:export const value${index + 1} = ${index + 1};`,
+        ).join("\n");
+        tool.setArgsComplete();
+        tool.updateResult({
+            content: [{ type: "text", text: `[example.ts#NEXT] (+12)\n${preview}` }],
+            details: {
+                files: [
+                    {
+                        path: "example.ts",
+                        tag: "NEXT",
+                        preview,
+                        addedLines: 12,
+                        removedLines: 0,
+                        removed: false,
+                        warnings: [],
+                    },
+                ],
+            },
+            isError: false,
+        });
+        activeTui.addChild(tool);
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+
+        const rendered = pendingTerminal.screenText();
+        expect(rendered).toContain("value1 = 1");
+        expect(rendered).toContain("value6 = 6");
+        expect(rendered).toContain("value12 = 12");
+        expect(rendered).not.toContain("more lines");
+    });
+
     it("expands and collapses without duplicating or overwriting adjacent transcript blocks", async () => {
         const pendingTerminal = new VirtualTerminal(110, 32);
         const activeTui = new TUI(pendingTerminal);
@@ -296,6 +413,8 @@ describe("Pi TUI through headless xterm", () => {
         activeTui.start();
         await pendingTerminal.settle();
         const collapsed = pendingTerminal.screenText();
+        expect(collapsed).toContain("line9");
+        expect(collapsed).not.toContain("to expand");
 
         tool.setExpanded(true);
         activeTui.requestRender();

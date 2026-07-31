@@ -41,7 +41,7 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
         name: "apply-patch",
         matches: isApplyPatchTool,
         createRenderer: (toolName, options) =>
-            createApplyPatchRenderer(toolName, options?.labelMode),
+            createApplyPatchRenderer(toolName, options?.labelMode, options?.mutationSettings),
     },
     {
         name: "agent-browser",

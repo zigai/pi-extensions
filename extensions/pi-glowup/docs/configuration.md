@@ -28,6 +28,26 @@ show the coordinate belonging to each pane before its change marker, matching Hu
 
 ## Options
 
+### Mutation rendering
+
+Completed writes, edits, deletes, and compatible patch tools use the same mutation policy. The
+default `full` view renders every available diff row. Pierre-backed native edits and completed
+`apply_patch` calls also use the existing width policy to select a unified or side-by-side layout.
+Use `preview` to restore the bounded six-row view with an expansion hint. Active streaming previews
+remain bounded while arguments are still arriving.
+
+Limits apply before rendering and protect session responsiveness. A `null` limit disables that
+specific guardrail.
+
+| Option                                    | Default  | Purpose                                                |
+| ----------------------------------------- | -------- | ------------------------------------------------------ |
+| `mutations.defaultView`                   | `full`   | Use `full` completed diffs or bounded `preview` diffs. |
+| `mutations.previewLines`                  | `6`      | Rows retained per file in the preview view.            |
+| `mutations.limits.maxDiffBytes`           | `524288` | Maximum combined diff snapshot bytes.                  |
+| `mutations.limits.maxDiffLines`           | `5000`   | Maximum rows before a diff becomes a summary.          |
+| `mutations.limits.maxWritePreviewBytes`   | `65536`  | Maximum native-write content retained for rendering.   |
+| `mutations.limits.maxDeletePreimageBytes` | `262144` | Maximum readable file size captured before deletion.   |
+
 ### Diff appearance
 
 | Option                                | Values/default                          | Purpose                                                        |
@@ -78,6 +98,16 @@ For compatibility with the previous appearance, `addedRowBackground` and
 {
   "$schema": "./config.schema.json",
   "preserveTools": [],
+  "mutations": {
+    "defaultView": "full",
+    "previewLines": 6,
+    "limits": {
+      "maxDiffBytes": 524288,
+      "maxDiffLines": 5000,
+      "maxWritePreviewBytes": 65536,
+      "maxDeletePreimageBytes": 262144
+    }
+  },
   "appearance": {
     "diffBackgroundStyle": "two-tone",
     "diffLineNumberStyle": "dual",
