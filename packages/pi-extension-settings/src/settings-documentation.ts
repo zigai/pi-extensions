@@ -91,7 +91,7 @@ function canRenderDefaultInline(value: JsonValue): boolean {
 
 function formatDefault(value: JsonValue | undefined): string {
     if (value === undefined) return "—";
-    if (!canRenderDefaultInline(value)) return "See below";
+    if (!canRenderDefaultInline(value)) return "*JSON below ↓*";
     return `\`${markdownCell(JSON.stringify(value))}\``;
 }
 
