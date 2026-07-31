@@ -126,8 +126,6 @@ export function renderReadmeSettingsSection(
         "| --- | --- | --- | --- |",
         ...tableRows,
         "",
-        "### Complete default settings",
-        "",
         "```json",
         JSON.stringify(defaultDocument, undefined, 2),
         "```",

@@ -51,7 +51,10 @@ describe("README generation", () => {
         expect(rendered).toContain('"$schema": "./schemas/pi-example.schema.json"');
         expect(rendered).toContain('"opacity": 0.8');
         expect(rendered).toContain("| `tools` | string[] | See below | Enabled tool names. |");
-        expect(rendered).toContain("### Complete default settings\n\n```json");
+        expect(rendered).toContain(
+            "| `tools` | string[] | See below | Enabled tool names. |\n\n```json",
+        );
+        expect(rendered).not.toContain("Complete default settings");
         expect(rendered).not.toContain("<details>");
     });
 
