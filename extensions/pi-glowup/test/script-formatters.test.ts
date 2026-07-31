@@ -99,6 +99,62 @@ describe("script formatter settings", () => {
         ).resolves.toEqual({ label: "Python", language: "python", code });
     });
 
+    it("falls back when command formatters fail or return empty output", async () => {
+        const invocation = { label: "Python", language: "python", code: "print(1)" };
+        const failingFormatter = createCommandScriptFormatter(
+            new Map([["python", [process.execPath, "-e", "process.exit(1)"]]]),
+        );
+        const emptyFormatter = createCommandScriptFormatter(
+            new Map([["python", [process.execPath, "-e", "process.stdin.resume()"]]]),
+        );
+
+        await expect(formatScriptInvocation(invocation, failingFormatter)).resolves.toEqual(
+            invocation,
+        );
+        await expect(formatScriptInvocation(invocation, emptyFormatter)).resolves.toEqual(
+            invocation,
+        );
+    });
+
+    it("does not start command formatters after cancellation", async () => {
+        const commands = new Map([
+            ["python", [process.execPath, "-e", "process.stdin.pipe(process.stdout)"]],
+        ]);
+        const formatter = createCommandScriptFormatter(commands);
+        const invocation = { label: "Python", language: "python", code: "print(1)" };
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(
+            formatScriptInvocation(invocation, formatter, { signal: controller.signal }),
+        ).resolves.toEqual(invocation);
+    });
+
+    it("removes cancelled formatter work while it is queued", async () => {
+        const delayedEcho = [
+            "let input = '';",
+            "process.stdin.on('data', (chunk) => { input += chunk; });",
+            "process.stdin.on('end', () => setTimeout(() => process.stdout.write(input), 100));",
+        ].join("");
+        const formatter = createCommandScriptFormatter(
+            new Map([["python", [process.execPath, "-e", delayedEcho]]]),
+        );
+        const first = { label: "Python", language: "python", code: "print(1)" };
+        const second = { label: "Python", language: "python", code: "print(2)" };
+        const cancelled = { label: "Python", language: "python", code: "print(3)" };
+        const controller = new AbortController();
+
+        const firstResult = formatScriptInvocation(first, formatter);
+        const secondResult = formatScriptInvocation(second, formatter);
+        const cancelledResult = formatScriptInvocation(cancelled, formatter, {
+            signal: controller.signal,
+        });
+        controller.abort();
+
+        await expect(cancelledResult).resolves.toEqual(cancelled);
+        await expect(Promise.all([firstResult, secondResult])).resolves.toEqual([first, second]);
+    });
+
     it("falls back to the original script when a formatter throws", async () => {
         await expect(
             formatScriptInvocation(

@@ -13,6 +13,7 @@ import {
 } from "../src/diffs/diff.ts";
 import {
     clearQueuedDiffHighlights,
+    getPierreDiffPayloadFromDetails,
     renderPierreDiff,
     shouldRenderSideBySideDiff,
 } from "../src/diffs/renderer.ts";
@@ -64,6 +65,37 @@ function stripAnsi(text: string): string {
 
 describe("Pierre diff rendering", () => {
     beforeEach(() => configureRenderingAppearance(defaultAppearance));
+
+    it("accepts valid persisted summaries and rejects malformed payload details", () => {
+        const validSummary = {
+            version: 1,
+            kind: "summary",
+            path: "src/large.ts",
+            stats: { added: 4, removed: 2, lineCount: 6, sizeBytes: 4_096 },
+            summary: { reason: "too-large", maxLines: 1_000, maxBytes: null },
+        };
+
+        expect(getPierreDiffPayloadFromDetails({ pierreDiff: validSummary })).toMatchObject(
+            validSummary,
+        );
+        expect(
+            getPierreDiffPayloadFromDetails({
+                pierreDiff: {
+                    ...validSummary,
+                    summary: { reason: "unknown", maxLines: 1_000, maxBytes: null },
+                },
+            }),
+        ).toBeUndefined();
+        expect(
+            getPierreDiffPayloadFromDetails({
+                pierreDiff: {
+                    ...validSummary,
+                    summary: { reason: "too-large", maxLines: -1, maxBytes: null },
+                },
+            }),
+        ).toBeUndefined();
+        expect(getPierreDiffPayloadFromDetails({ pierreDiff: "not-an-object" })).toBeUndefined();
+    });
 
     it("uses the bundled syntax theme appearance instead of the Pi theme name", () => {
         const misleadingTheme = new Theme(fgColors, bgColors, "truecolor", {

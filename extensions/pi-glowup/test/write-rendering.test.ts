@@ -81,6 +81,25 @@ describe("write rendering", () => {
         expect(component.render(100).join("\n")).toContain("Wrote src/example.ts (+1)");
     });
 
+    it("does not render content or success statistics for failed writes", () => {
+        const component = renderWriteCallPreview(
+            { path: "src/example.ts", content: "export const value = 1;\n" },
+            plainTheme,
+            {
+                isError: true,
+                isPartial: false,
+                expanded: false,
+                labelMode: "lifecycle",
+            },
+        );
+        const rendered = component.render(100).join("\n");
+
+        expect(rendered).toContain("Write src/example.ts");
+        expect(rendered).not.toContain("export const value = 1;");
+        expect(rendered).not.toContain("(+1)");
+        expect(rendered).not.toContain("Wrote");
+    });
+
     it("uses the Pi addition background for written content", () => {
         const backgroundTheme: GlowupRenderTheme = {
             ...plainTheme,

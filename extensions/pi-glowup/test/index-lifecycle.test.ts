@@ -36,18 +36,30 @@ type SessionStartHandler = (
 ) => Promise<void> | void;
 
 type ToolCallEvent = {
-    readonly toolName: "bash";
+    readonly toolName: string;
     readonly toolCallId: string;
-    readonly input: {
-        readonly command: string;
-    };
+    readonly input: Readonly<Record<string, unknown>>;
 };
 
 type ToolCallContext = {
+    readonly cwd: string;
     readonly signal?: AbortSignal;
 };
 
-type ToolCallHandler = (event: ToolCallEvent, context: ToolCallContext) => Promise<void> | void;
+type ToolCallHandler = (event: ToolCallEvent, context: ToolCallContext) => unknown;
+
+type ToolResultEvent = {
+    readonly toolName: string;
+    readonly toolCallId: string;
+    readonly input: Readonly<Record<string, unknown>>;
+    readonly content: ReadonlyArray<{ readonly type: "text"; readonly text: string }>;
+    readonly details: unknown;
+    readonly isError: boolean;
+};
+
+type ToolResultHandler = (event: ToolResultEvent, context: ToolCallContext) => unknown;
+
+type TurnHandler = () => Promise<void> | void;
 
 type SessionShutdownEvent = {
     readonly type: "session_shutdown";
@@ -60,6 +72,9 @@ class FakeExtensionApi {
     private readonly sessionStartHandlers: SessionStartHandler[] = [];
     private readonly sessionShutdownHandlers: SessionShutdownHandler[] = [];
     private readonly toolCallHandlers: ToolCallHandler[] = [];
+    private readonly toolResultHandlers: ToolResultHandler[] = [];
+    private readonly turnStartHandlers: TurnHandler[] = [];
+    private readonly turnEndHandlers: TurnHandler[] = [];
     registeredToolCount = 0;
     toolExpansionRefreshes = 0;
 
@@ -77,6 +92,18 @@ class FakeExtensionApi {
         }
         if (eventName === "tool_call") {
             this.toolCallHandlers.push(handler as ToolCallHandler);
+            return;
+        }
+        if (eventName === "tool_result") {
+            this.toolResultHandlers.push(handler as ToolResultHandler);
+            return;
+        }
+        if (eventName === "turn_start") {
+            this.turnStartHandlers.push(handler as TurnHandler);
+            return;
+        }
+        if (eventName === "turn_end") {
+            this.turnEndHandlers.push(handler as TurnHandler);
             return;
         }
         if (eventName === "session_shutdown") {
@@ -116,17 +143,54 @@ class FakeExtensionApi {
         }
     }
 
-    runBashToolCall(command: string): ReadonlyArray<Promise<void> | void> {
+    runToolCall(event: ToolCallEvent, cwd: string): ReadonlyArray<unknown> {
         return this.toolCallHandlers.map((handler) =>
-            handler(
-                {
-                    toolName: "bash",
-                    toolCallId: "call-1",
-                    input: { command },
-                },
-                {},
-            ),
+            handler(event, {
+                cwd,
+            }),
         );
+    }
+
+    runBashToolCall(command: string): ReadonlyArray<unknown> {
+        return this.runToolCall(
+            {
+                toolName: "bash",
+                toolCallId: "call-1",
+                input: { command },
+            },
+            process.cwd(),
+        );
+    }
+
+    async runToolResult(event: ToolResultEvent, cwd: string): Promise<unknown[]> {
+        const results: unknown[] = [];
+        for (const handler of this.toolResultHandlers) {
+            results.push(await handler(event, { cwd }));
+        }
+        return results;
+    }
+
+    async runBashToolResult(command: string, output: string): Promise<void> {
+        await this.runToolResult(
+            {
+                toolName: "bash",
+                toolCallId: "call-1",
+                input: { command },
+                content: [{ type: "text", text: output }],
+                details: {},
+                isError: false,
+            },
+            process.cwd(),
+        );
+    }
+
+    async runTurn(): Promise<void> {
+        for (const handler of this.turnStartHandlers) {
+            await handler();
+        }
+        for (const handler of this.turnEndHandlers) {
+            await handler();
+        }
     }
 
     async shutdownSession(reason: SessionShutdownEvent["reason"] = "quit"): Promise<void> {
@@ -199,6 +263,116 @@ describe("extension lifecycle", () => {
         expect(readLogEvents(join(agentDir, "pi-glowup", "debug.log"))).toEqual(
             expect.arrayContaining(["config_applied", "extension_loaded", "session_start"]),
         );
+
+        await pi.shutdownSession();
+    });
+
+    it("records tool and turn diagnostics and disposes syntax on quit", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
+        const agentDir = join(root, "agent");
+        process.env[AGENT_DIR_ENV] = agentDir;
+        const configPath = getGlowupGlobalConfigPath(agentDir);
+        mkdirSync(join(agentDir, "pi-glowup"), { recursive: true });
+        writeFileSync(
+            configPath,
+            JSON.stringify({ debugLog: { enabled: true, memorySampleIntervalMs: 0 } }),
+        );
+        const pi = new FakeExtensionApi();
+
+        await glowupExtension(pi as unknown as ExtensionAPI);
+        await pi.startSession(join(root, "project"), false);
+        pi.runBashToolCall("printf hello");
+        await pi.runBashToolResult("printf hello", "hello");
+        await pi.runTurn();
+        await pi.shutdownSession("quit");
+
+        const entries = readLogEntries(join(agentDir, "pi-glowup", "debug.log"));
+        expect(entries.map((entry) => entry.event)).toEqual(
+            expect.arrayContaining([
+                "tool_call",
+                "script_preview_remembered",
+                "tool_result",
+                "turn_start",
+                "turn_end",
+                "session_shutdown",
+            ]),
+        );
+        expect(entries.find((entry) => entry.event === "tool_result")).toMatchObject({
+            fields: {
+                toolName: "bash",
+                toolCallId: "call-1",
+                outputTextBytes: 5,
+                scheduledFormattedPreview: false,
+            },
+        });
+        expect(isSyntaxHighlightingReady()).toBe(false);
+    });
+
+    it("captures edit preimages and persists a renderable result diff", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
+        const agentDir = join(root, "agent");
+        const project = join(root, "project");
+        const filePath = join(project, "example.ts");
+        process.env[AGENT_DIR_ENV] = agentDir;
+        mkdirSync(project, { recursive: true });
+        writeFileSync(filePath, "export const value = 1;\n");
+        const pi = new FakeExtensionApi();
+
+        await glowupExtension(pi as unknown as ExtensionAPI);
+        await pi.startSession(project, false);
+        await Promise.all(
+            pi.runToolCall(
+                {
+                    toolName: "edit",
+                    toolCallId: "edit-call-1",
+                    input: {
+                        path: "example.ts",
+                        edits: [
+                            {
+                                oldText: "export const value = 1;",
+                                newText: "export const value = 2;",
+                            },
+                        ],
+                    },
+                },
+                project,
+            ),
+        );
+        writeFileSync(filePath, "export const value = 2;\n");
+
+        const results = await pi.runToolResult(
+            {
+                toolName: "edit",
+                toolCallId: "edit-call-1",
+                input: {
+                    path: "example.ts",
+                    edits: [
+                        {
+                            oldText: "export const value = 1;",
+                            newText: "export const value = 2;",
+                        },
+                    ],
+                },
+                content: [{ type: "text", text: "Updated example.ts" }],
+                details: {
+                    diff: "example.ts\n-1 export const value = 1;\n+1 export const value = 2;\n",
+                },
+                isError: false,
+            },
+            project,
+        );
+
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({
+            details: {
+                diff: expect.stringContaining("-1 export const value = 1;"),
+                pierreDiff: {
+                    kind: "renderable",
+                    path: "example.ts",
+                    stats: { added: 1, removed: 1 },
+                },
+            },
+        });
 
         await pi.shutdownSession();
     });
@@ -287,15 +461,18 @@ describe("extension lifecycle", () => {
 });
 
 function readLogEvents(filePath: string): string[] {
+    return readLogEntries(filePath).flatMap((entry) =>
+        typeof entry.event === "string" ? [entry.event] : [],
+    );
+}
+
+function readLogEntries(filePath: string): Record<string, unknown>[] {
     return readFileSync(filePath, "utf8")
         .trim()
         .split("\n")
         .flatMap((line) => {
             const entry: unknown = JSON.parse(line);
-            if (!isRecord(entry) || typeof entry.event !== "string") {
-                return [];
-            }
-            return [entry.event];
+            return isRecord(entry) ? [entry] : [];
         });
 }
 

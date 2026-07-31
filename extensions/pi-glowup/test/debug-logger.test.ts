@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -172,6 +172,58 @@ describe("debug file logger", () => {
             event: "memory_sample",
             fields: { memory: { heapUsedBytes: 456 } },
         });
+    });
+
+    it("records a bounded failure marker when a memory snapshot throws", () => {
+        vi.useFakeTimers();
+        const extensionDirectory = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
+        const logger = new DebugFileLogger({
+            extensionDirectory,
+            reportWarning() {},
+        });
+        logger.configure({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 1_000,
+        });
+        logger.startMemorySampling(() => {
+            throw new Error("snapshot failed");
+        });
+
+        vi.advanceTimersByTime(1_000);
+        logger.stopMemorySampling();
+
+        expect(readJsonLines(join(extensionDirectory, "debug.log"))[0]).toMatchObject({
+            event: "memory_sample",
+            fields: { snapshotFailed: true },
+        });
+    });
+
+    it("reports repeated write failures only once", () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-debug-log-"));
+        const blockedDirectory = join(root, "not-a-directory");
+        writeFileSync(blockedDirectory, "file blocks directory creation");
+        const warnings: string[] = [];
+        const logger = new DebugFileLogger({
+            extensionDirectory: blockedDirectory,
+            reportWarning(message) {
+                warnings.push(message);
+            },
+        });
+        logger.configure({
+            enabled: true,
+            path: "debug.log",
+            maxBytes: null,
+            memorySampleIntervalMs: 0,
+        });
+
+        logger.record("first_event");
+        logger.record("second_event");
+
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("Failed to write debug log");
+        expect(warnings[0]).toContain("debug.log");
     });
 });
 

@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { GlowupRenderTheme } from "../src/rendering/core.ts";
-import { call, output, text, type GlowupRenderer } from "../src/tool-rendering/protocol.ts";
+import {
+    call,
+    code,
+    empty,
+    list,
+    output,
+    stack,
+    summary,
+    text,
+    type GlowupRenderer,
+} from "../src/tool-rendering/protocol.ts";
 import {
     GLOWUP_RENDERING_PROPERTY,
     createThirdPartyToolRenderer,
@@ -138,6 +148,193 @@ describe("third-party tool renderers", () => {
                 .render(120)
                 .join("\n"),
         ).toContain("3 rows");
+    });
+
+    it("renders the complete public protocol composition through an owner adapter", () => {
+        const rendering = {
+            version: 2,
+            renderCall() {
+                return call(
+                    {
+                        static: "Protocol Tool",
+                        running: "Running Protocol Tool",
+                        completed: "Ran Protocol Tool",
+                    },
+                    {
+                        body: stack([
+                            summary([
+                                {
+                                    label: { kind: "text", text: "Rows", tone: "muted" },
+                                    value: {
+                                        kind: "text",
+                                        text: "3",
+                                        tone: "success",
+                                        bold: true,
+                                    },
+                                },
+                            ]),
+                            code("const value = 3;", {
+                                title: { kind: "text", text: "query.ts", tone: "path" },
+                                syntax: { language: "typescript", path: "query.ts" },
+                                preview: { mode: "head", collapsedLines: 2, expandedLines: 20 },
+                            }),
+                            list(
+                                [
+                                    "first row",
+                                    text({ kind: "text", text: "second row", tone: "accent" }),
+                                ],
+                                { collapsedLines: 2, expandable: false },
+                            ),
+                            empty(),
+                        ]),
+                    },
+                );
+            },
+            renderResult() {
+                return output(undefined, { noOutputLabel: "No additional output" });
+            },
+        } satisfies GlowupRenderer;
+        const renderer = createThirdPartyToolRenderer(
+            "protocol_tool",
+            { labelMode: "lifecycle" },
+            { [GLOWUP_RENDERING_PROPERTY]: rendering },
+        );
+
+        const callLines = renderer.renderCall({}, plainTheme, renderContext).render(100);
+        const callText = compactRenderedText(callLines.join("\n"));
+        const resultText = renderer
+            .renderResult(
+                { content: [] },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(100)
+            .join("\n");
+
+        expect(callText).toContain("Ran Protocol Tool");
+        expect(callText).toContain("Rows → 3");
+        expect(callText).toContain("query.ts");
+        expect(callText).toContain("const value = 3;");
+        expect(callText).toContain("first row");
+        expect(callText).toContain("second row");
+        expect(resultText).toContain("No additional output");
+        for (const width of [1, 20, 100]) {
+            const lines = renderer.renderCall({}, plainTheme, renderContext).render(width);
+            for (const line of lines) {
+                expect(visibleWidth(stripAccentStyle(line))).toBeLessThanOrEqual(width);
+            }
+        }
+    });
+
+    it("falls back when an owner adapter returns a malformed node", () => {
+        const renderer = createThirdPartyToolRenderer("custom_tool", undefined, {
+            [GLOWUP_RENDERING_PROPERTY]: {
+                version: 2,
+                renderCall() {
+                    return { kind: "text", text: 42 };
+                },
+            },
+        });
+
+        const rendered = renderer
+            .renderCall({ action: "fallback" }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("custom_tool");
+        expect(rendered).toContain('"action": "fallback"');
+    });
+
+    it("falls back when owner argument and result parsers fail", () => {
+        const callRenderer = createThirdPartyToolRenderer("call_parser_tool", undefined, {
+            [GLOWUP_RENDERING_PROPERTY]: {
+                version: 2,
+                parseArgs() {
+                    throw new Error("invalid arguments");
+                },
+                renderCall() {
+                    return call({ static: "Owner Call" });
+                },
+            },
+        });
+        const resultRenderer = createThirdPartyToolRenderer("result_parser_tool", undefined, {
+            [GLOWUP_RENDERING_PROPERTY]: {
+                version: 2,
+                parseResult() {
+                    throw new Error("invalid result");
+                },
+                renderResult() {
+                    return output("owner output");
+                },
+            },
+        });
+
+        const callText = callRenderer
+            .renderCall({ action: "fallback" }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+        const resultText = resultRenderer
+            .renderResult(
+                { content: [{ type: "text", text: "fallback output" }] },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(100)
+            .join("\n");
+
+        expect(callText).toContain("call_parser_tool");
+        expect(callText).not.toContain("Owner Call");
+        expect(resultText).toContain("fallback output");
+        expect(resultText).not.toContain("owner output");
+    });
+
+    it("falls back for owner node graphs beyond the protocol depth limit", () => {
+        let nestedNode: unknown = text("leaf");
+        for (let depth = 0; depth < 10; depth += 1) {
+            nestedNode = { kind: "stack", children: [nestedNode] };
+        }
+        const renderer = createThirdPartyToolRenderer("deep_tool", undefined, {
+            [GLOWUP_RENDERING_PROPERTY]: {
+                version: 2,
+                renderCall() {
+                    return nestedNode;
+                },
+            },
+        });
+
+        const rendered = renderer
+            .renderCall({ action: "bounded" }, plainTheme, renderContext)
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("deep_tool");
+        expect(rendered).toContain('"action": "bounded"');
+        expect(rendered).not.toContain("leaf");
+    });
+
+    it("treats throwing rendering properties as absent", () => {
+        const toolDefinition: Record<string, unknown> = {};
+        Object.defineProperty(toolDefinition, GLOWUP_RENDERING_PROPERTY, {
+            get() {
+                throw new Error("property access failed");
+            },
+        });
+
+        expect(hasGlowupRenderingAdapter(toolDefinition)).toBe(false);
+        expect(
+            shouldPreserveThirdPartyToolRenderer({
+                toolName: "custom_tool",
+                toolDefinition,
+            }),
+        ).toBe(false);
+        expect(
+            createThirdPartyToolRenderer("custom_tool", undefined, toolDefinition)
+                .renderCall({}, plainTheme, renderContext)
+                .render(100)
+                .join("\n"),
+        ).toContain("custom_tool");
     });
 
     it("uses adapter-specific lifecycle labels when configured", () => {
