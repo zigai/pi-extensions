@@ -111,7 +111,11 @@ function hasPreservePreference(toolDefinition: unknown): boolean {
     if (!isRecord(toolDefinition)) {
         return false;
     }
-    return toolDefinition[GLOWUP_RENDERING_PROPERTY] === "preserve";
+    try {
+        return Reflect.get(toolDefinition, GLOWUP_RENDERING_PROPERTY) === "preserve";
+    } catch {
+        return false;
+    }
 }
 
 function toolDefinitionLabel(toolDefinition: unknown): string | undefined {

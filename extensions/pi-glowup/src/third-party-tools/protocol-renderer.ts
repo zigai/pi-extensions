@@ -400,14 +400,20 @@ function renderNode(
             return renderGlowupBody(theme, toneText(theme, node.text));
         case "summary":
             return renderSummary(node, theme);
-        case "code":
-            return renderGlowupOutput(theme, node.text, {
+        case "code": {
+            const content = renderGlowupOutput(theme, node.text, {
                 expanded: context.expanded,
                 mode: previewMode(node.preview),
                 maxPreviewLines: previewLines(node.preview, context.expanded),
                 noOutputLabel: null,
                 ...(node.syntax === undefined ? {} : { syntax: node.syntax }),
             });
+            if (node.title === undefined) {
+                return content;
+            }
+            const title = renderGlowupBody(theme, toneText(theme, node.title));
+            return makeComponent((width) => [...title.render(width), ...content.render(width)]);
+        }
         case "list":
             return renderGlowupOutput(theme, nodeText(node, theme), {
                 expanded: context.expanded,
