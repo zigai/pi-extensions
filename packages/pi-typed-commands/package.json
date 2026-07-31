@@ -12,15 +12,15 @@
     "typed-args",
     "typed-input"
   ],
-  "homepage": "https://github.com/zigai/pi-typed-args#readme",
+  "homepage": "https://github.com/zigai/pi-typed-commands#readme",
   "bugs": {
-    "url": "https://github.com/zigai/pi-typed-args/issues"
+    "url": "https://github.com/zigai/pi-typed-commands/issues"
   },
   "license": "MIT",
   "author": "zigai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zigai/pi-typed-args.git"
+    "url": "git+https://github.com/zigai/pi-typed-commands.git"
   },
   "files": [
     "src",

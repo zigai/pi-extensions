@@ -223,7 +223,7 @@ export const SkillArgumentsYamlSchema = Type.Object(
     {},
     {
         $schema: "https://json-schema.org/draft/2020-12/schema",
-        $id: "https://github.com/zigai/pi-typed-args/schemas/skill-arguments.schema.json",
+        $id: "https://github.com/zigai/pi-typed-commands/schemas/skill-arguments.schema.json",
         title: "Pi Typed Args Skill Arguments",
         description:
             "Schema for the top-level `arguments` field in SKILL.md frontmatter used by pi-typed-args.",
