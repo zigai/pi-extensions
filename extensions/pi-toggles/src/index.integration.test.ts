@@ -4,10 +4,21 @@ import { join } from "node:path";
 import {
     createAgentSession,
     DefaultResourceLoader,
+    type ExtensionAPI,
+    type ExtensionFactory,
     SessionManager,
     SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+    ACTIVATION_PROPOSAL_ACCEPTED_EVENT,
+    ACTIVATION_READY_EVENT,
+    CLEAR_ACTIVATION_PROPOSAL_EVENT,
+    parseActivationProposalOwner,
+    parseActivationReady,
+    SET_ACTIVATION_PROPOSAL_EVENT,
+    type ExtensionActivationProposal,
+} from "./activation-coordination.ts";
 import extension from "./index.ts";
 
 const temporaryDirectories: string[] = [];
@@ -22,13 +33,16 @@ async function createLoader(
     cwd: string,
     agentDir: string,
     noSkills = true,
+    extensionFactories: Array<{ readonly name: string; readonly factory: ExtensionFactory }> = [
+        { name: "pi-toggles-test", factory: extension },
+    ],
 ): Promise<DefaultResourceLoader> {
     const settingsManager = SettingsManager.inMemory();
     const loader = new DefaultResourceLoader({
         cwd,
         agentDir,
         settingsManager,
-        extensionFactories: [{ name: "pi-toggles-test", factory: extension }],
+        extensionFactories,
         noSkills,
         noPromptTemplates: true,
         noThemes: true,
@@ -38,7 +52,209 @@ async function createLoader(
     return loader;
 }
 
+function createProposalExtension(decisions: ExtensionActivationProposal["decisions"]): {
+    readonly factory: (pi: ExtensionAPI) => void;
+    readonly acceptedSessions: string[];
+    readonly clearProposal: (sessionId: string) => void;
+} {
+    const acceptedSessions: string[] = [];
+    let extensionApi: ExtensionAPI | undefined;
+    return {
+        acceptedSessions,
+        clearProposal(sessionId) {
+            if (extensionApi === undefined) throw new Error("Companion extension is not loaded.");
+            extensionApi.events.emit(CLEAR_ACTIVATION_PROPOSAL_EVENT, {
+                version: 1,
+                sessionId,
+                owner: "test-companion",
+            });
+        },
+        factory(pi) {
+            extensionApi = pi;
+            pi.events.on(ACTIVATION_READY_EVENT, (value) => {
+                const ready = parseActivationReady(value);
+                if (ready.status === "invalid") return;
+                pi.events.emit(SET_ACTIVATION_PROPOSAL_EVENT, {
+                    version: 1,
+                    sessionId: ready.value.sessionId,
+                    owner: "test-companion",
+                    decisions,
+                });
+            });
+            pi.events.on(ACTIVATION_PROPOSAL_ACCEPTED_EVENT, (value) => {
+                const accepted = parseActivationProposalOwner(value);
+                if (accepted.status === "ok" && accepted.value.owner === "test-companion") {
+                    acceptedSessions.push(accepted.value.sessionId);
+                }
+            });
+        },
+    };
+}
+
 describe("Pi Toggles extension runtime", () => {
+    it.each(["toggles-first", "companion-first"] as const)(
+        "accepts extension activation defaults with %s load order",
+        async (loadOrder) => {
+            const root = await mkdtemp(join(tmpdir(), "pi-toggles-coordination-"));
+            temporaryDirectories.push(root);
+            const cwd = join(root, "project");
+            const agentDir = join(root, "agent");
+            const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+            process.env.PI_CODING_AGENT_DIR = agentDir;
+            const companion = createProposalExtension([
+                { target: { kind: "tool", name: "write" }, state: "off" },
+            ]);
+            const togglesFactory = { name: "pi-toggles-test", factory: extension };
+            const companionFactory = {
+                name: "activation-companion-test",
+                factory: companion.factory,
+            };
+            const extensionFactories =
+                loadOrder === "toggles-first"
+                    ? [togglesFactory, companionFactory]
+                    : [companionFactory, togglesFactory];
+
+            try {
+                await mkdir(cwd, { recursive: true });
+                const loader = await createLoader(cwd, agentDir, true, extensionFactories);
+                const created = await createAgentSession({
+                    cwd,
+                    agentDir,
+                    resourceLoader: loader,
+                    sessionManager: SessionManager.inMemory(cwd),
+                    settingsManager: SettingsManager.inMemory(),
+                });
+                await created.session.bindExtensions({ mode: "print" });
+                try {
+                    expect(
+                        created.session.agent.state.tools.map((tool) => tool.name),
+                    ).not.toContain("write");
+                    expect(companion.acceptedSessions).toEqual([
+                        created.session.sessionManager.getSessionId(),
+                    ]);
+                    companion.clearProposal(created.session.sessionManager.getSessionId());
+                    await created.session.prompt("/toggles list tool");
+                    expect(created.session.agent.state.tools.map((tool) => tool.name)).toContain(
+                        "write",
+                    );
+                } finally {
+                    created.session.dispose();
+                }
+            } finally {
+                if (previousAgentDir === undefined) {
+                    delete process.env.PI_CODING_AGENT_DIR;
+                } else {
+                    process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+                }
+            }
+        },
+    );
+
+    it("lets explicit user policy override an extension activation default", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-toggles-coordination-override-"));
+        temporaryDirectories.push(root);
+        const cwd = join(root, "project");
+        const agentDir = join(root, "agent");
+        const settingsDir = join(agentDir, "extension-settings");
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        await mkdir(settingsDir, { recursive: true });
+        await writeFile(
+            join(settingsDir, "pi-toggles.json"),
+            `${JSON.stringify({
+                enabled: true,
+                overrides: [
+                    {
+                        target: { kind: "tool", source: "builtin", name: "write" },
+                        state: "on",
+                    },
+                ],
+            })}\n`,
+            "utf8",
+        );
+        const companion = createProposalExtension([
+            { target: { kind: "tool", name: "write" }, state: "off" },
+        ]);
+
+        try {
+            await mkdir(cwd, { recursive: true });
+            const loader = await createLoader(cwd, agentDir, true, [
+                { name: "activation-companion-test", factory: companion.factory },
+                { name: "pi-toggles-test", factory: extension },
+            ]);
+            const created = await createAgentSession({
+                cwd,
+                agentDir,
+                resourceLoader: loader,
+                sessionManager: SessionManager.inMemory(cwd),
+                settingsManager: SettingsManager.inMemory(),
+            });
+            await created.session.bindExtensions({ mode: "print" });
+            try {
+                expect(created.session.agent.state.tools.map((tool) => tool.name)).toContain(
+                    "write",
+                );
+            } finally {
+                created.session.dispose();
+            }
+        } finally {
+            if (previousAgentDir === undefined) {
+                delete process.env.PI_CODING_AGENT_DIR;
+            } else {
+                process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+            }
+        }
+    });
+
+    it("does not claim activation ownership when Pi Toggles is disabled", async () => {
+        const root = await mkdtemp(join(tmpdir(), "pi-toggles-coordination-disabled-"));
+        temporaryDirectories.push(root);
+        const cwd = join(root, "project");
+        const agentDir = join(root, "agent");
+        const settingsDir = join(agentDir, "extension-settings");
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        await mkdir(settingsDir, { recursive: true });
+        await writeFile(
+            join(settingsDir, "pi-toggles.json"),
+            `${JSON.stringify({ enabled: false })}\n`,
+            "utf8",
+        );
+        const companion = createProposalExtension([
+            { target: { kind: "tool", name: "write" }, state: "off" },
+        ]);
+
+        try {
+            await mkdir(cwd, { recursive: true });
+            const loader = await createLoader(cwd, agentDir, true, [
+                { name: "pi-toggles-test", factory: extension },
+                { name: "activation-companion-test", factory: companion.factory },
+            ]);
+            const created = await createAgentSession({
+                cwd,
+                agentDir,
+                resourceLoader: loader,
+                sessionManager: SessionManager.inMemory(cwd),
+                settingsManager: SettingsManager.inMemory(),
+            });
+            await created.session.bindExtensions({ mode: "print" });
+            try {
+                expect(created.session.agent.state.tools.map((tool) => tool.name)).toContain(
+                    "write",
+                );
+                expect(companion.acceptedSessions).toEqual([]);
+            } finally {
+                created.session.dispose();
+            }
+        } finally {
+            if (previousAgentDir === undefined) {
+                delete process.env.PI_CODING_AGENT_DIR;
+            } else {
+                process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+            }
+        }
+    });
+
     it("removes a session-disabled tool and restores the decision when the saved session is reopened", async () => {
         const root = await mkdtemp(join(tmpdir(), "pi-toggles-integration-"));
         temporaryDirectories.push(root);

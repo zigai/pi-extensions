@@ -11,13 +11,21 @@ import {
     type PolicyScope,
     type ScopedPromptFragment,
 } from "./capability-policy.ts";
+import type { ExtensionActivationProposal } from "./activation-coordination.ts";
 import { evaluateCondition, type ConditionEvaluation, type FactResolver } from "./condition.ts";
 import type { DesiredState, PolicyDecision, PolicyRule, Profile } from "./settings.ts";
 
-export type DecisionOrigin = "override" | "profile" | "rule" | "rule-profile";
+export type DecisionOrigin =
+    | "override"
+    | "profile"
+    | "rule"
+    | "rule-profile"
+    | "extension-proposal";
+
+export type DecisionScope = PolicyScope | "extension";
 
 export type DecisionTrace = {
-    readonly scope: PolicyScope;
+    readonly scope: DecisionScope;
     readonly origin: DecisionOrigin;
     readonly source: string;
     readonly state: DesiredState;
@@ -46,7 +54,7 @@ export type PolicyPlan = {
 
 type DecisionCandidate = {
     readonly decision: PolicyDecision;
-    readonly scope: PolicyScope;
+    readonly scope: DecisionScope;
     readonly origin: DecisionOrigin;
     readonly source: string;
     readonly precedence: number;
@@ -68,6 +76,7 @@ const precedence = {
     globalProfile: 650,
     projectRule: 500,
     globalRule: 300,
+    extensionProposal: 100,
 } as const;
 
 function matchingRules(
@@ -106,6 +115,7 @@ function pushProfileCandidates(
 function buildCandidates(
     configuration: PolicyConfiguration,
     ruleMatches: readonly RuleMatch[],
+    extensionProposals: readonly ExtensionActivationProposal[],
     diagnostics: string[],
 ): {
     readonly candidates: readonly DecisionCandidate[];
@@ -206,6 +216,19 @@ function buildCandidates(
                 },
                 diagnostics,
             );
+        }
+    }
+
+    for (const proposal of extensionProposals) {
+        for (const decision of proposal.decisions) {
+            candidates.push({
+                decision,
+                scope: "extension",
+                origin: "extension-proposal",
+                source: proposal.owner,
+                precedence: precedence.extensionProposal,
+                priority: 0,
+            });
         }
     }
 
@@ -436,6 +459,7 @@ export function resolveCapabilityPolicy(
     catalog: readonly Capability[],
     configuration: PolicyConfiguration,
     resolveFact: FactResolver,
+    extensionProposals: readonly ExtensionActivationProposal[] = [],
 ): PolicyPlan {
     if (!configuration.enabled) {
         return {
@@ -453,7 +477,12 @@ export function resolveCapabilityPolicy(
 
     const diagnostics: string[] = [...configuration.diagnostics];
     const ruleMatches = matchingRules(configuration, resolveFact);
-    const { candidates, activeProfiles } = buildCandidates(configuration, ruleMatches, diagnostics);
+    const { candidates, activeProfiles } = buildCandidates(
+        configuration,
+        ruleMatches,
+        extensionProposals,
+        diagnostics,
+    );
     const capabilities = catalog.map((capability) =>
         resolveCapability(capability, candidates, diagnostics),
     );

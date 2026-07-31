@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, Skill } from "@earendil-works/pi-coding-agent";
+import type { ExtensionActivationProposal } from "./activation-coordination.ts";
 import { buildCapabilityCatalog, LAZY_SEARCH_TOOL_NAME } from "./capability-catalog.ts";
 import {
     createCapabilityId,
@@ -28,6 +29,7 @@ import { appendActivePromptFragments } from "./prompt-fragments.ts";
 import { applySkillPolicyToPrompt, decideSkillInvocation } from "./skill-policy.ts";
 import {
     resolveCapabilityPolicy,
+    type DecisionTrace,
     type EffectiveCapability,
     type PolicyPlan,
 } from "./resolve-capability-policy.ts";
@@ -59,11 +61,20 @@ function writeResultToMutation(result: SettingsWriteResult): MutationResult {
         : { status: result.status, message: result.message };
 }
 
+function formatDecisionTraceSource(trace: DecisionTrace): string {
+    if (trace.origin === "extension-proposal") return `extension proposal ${trace.source}`;
+    if (trace.origin === "override") return `${trace.scope} override`;
+    if (trace.origin === "profile") return `${trace.scope} profile ${trace.source}`;
+    if (trace.origin === "rule-profile") return `${trace.scope} rule profile ${trace.source}`;
+    return `${trace.scope} rule ${trace.source}`;
+}
+
 export class TogglesService {
     readonly #settingsStore: SettingsStore;
     readonly #facts: ContextFacts;
     readonly #inheritedToolState = new Map<string, boolean>();
     readonly #lazyActivated = new Set<string>();
+    readonly #extensionActivationProposals = new Map<string, ExtensionActivationProposal>();
     readonly #runtimeDiagnostics: string[] = [];
     #diagnosticsTruncated = false;
     #sessionPolicy: SessionPolicy;
@@ -112,6 +123,10 @@ export class TogglesService {
         return this.#configuration.defaults.lazyToolLimit;
     }
 
+    get activationCoordinationEnabled(): boolean {
+        return this.#configuration.enabled;
+    }
+
     getProfileNames(scope: PolicyScope): readonly string[] {
         const profiles =
             scope === "global"
@@ -151,6 +166,42 @@ export class TogglesService {
         await this.reconcile();
     }
 
+    acceptExtensionActivationProposal(proposal: ExtensionActivationProposal): boolean {
+        if (
+            this.#disposed ||
+            proposal.sessionId !== this.ctx.sessionManager.getSessionId() ||
+            !this.activationCoordinationEnabled
+        ) {
+            return false;
+        }
+        this.#extensionActivationProposals.set(proposal.owner, proposal);
+        this.refreshCatalogAndPlan();
+        // Reconciliation owns its rejection path and is retained by #reconcileTail.
+        void this.reconcile();
+        return true;
+    }
+
+    clearExtensionActivationProposal(owner: string, sessionId: string): boolean {
+        if (
+            this.#disposed ||
+            sessionId !== this.ctx.sessionManager.getSessionId() ||
+            !this.#extensionActivationProposals.delete(owner)
+        ) {
+            return false;
+        }
+        this.refreshCatalogAndPlan();
+        // Reconciliation owns its rejection path and is retained by #reconcileTail.
+        void this.reconcile();
+        return true;
+    }
+
+    async settleActivation(): Promise<void> {
+        await this.#reconcileTail;
+        if (this.#reconcilePending !== undefined) {
+            await this.#reconcilePending;
+        }
+    }
+
     dispose(): void {
         if (this.#disposed) {
             return;
@@ -174,6 +225,7 @@ export class TogglesService {
         }
         this.#inheritedToolState.clear();
         this.#lazyActivated.clear();
+        this.#extensionActivationProposals.clear();
         if (this.ctx.mode === "tui") {
             this.ctx.ui.setStatus("pi-toggles", undefined);
         }
@@ -431,7 +483,12 @@ export class TogglesService {
                         ...this.#configuration,
                         global,
                     };
-        const plan = resolveCapabilityPolicy(this.#catalog, configuration, this.#facts.resolve);
+        const plan = resolveCapabilityPolicy(
+            this.#catalog,
+            configuration,
+            this.#facts.resolve,
+            this.extensionActivationProposals(),
+        );
         const active = new Set(this.pi.getActiveTools());
         for (const entry of plan.capabilities) {
             if (entry.capability.kind !== "tool") {
@@ -578,7 +635,7 @@ export class TogglesService {
         } else {
             for (const trace of entry.trace.slice(0, 100)) {
                 lines.push(
-                    `  ${trace.scope} ${trace.origin} ${trace.source}: ${trace.state}${trace.selected ? " <- winner" : ` (${trace.reason ?? "shadowed"})`}`,
+                    `  ${formatDecisionTraceSource(trace)}: ${trace.state}${trace.selected ? " <- winner" : ` (${trace.reason ?? "shadowed"})`}`,
                 );
             }
             if (entry.trace.length > 100) {
@@ -748,12 +805,19 @@ export class TogglesService {
             this.#catalog,
             this.#configuration,
             this.#facts.resolve,
+            this.extensionActivationProposals(),
         );
         this.updateStatus();
     }
 
     private addUnavailableOverrides(discovered: readonly Capability[]): readonly Capability[] {
         const scopedDecisions = [
+            ...this.extensionActivationProposals().flatMap((proposal) =>
+                proposal.decisions.map((decision) => ({
+                    decision,
+                    scope: "temporary" as const,
+                })),
+            ),
             ...this.#configuration.session.overrides.map((decision) => ({
                 decision,
                 scope: "temporary" as const,
@@ -801,6 +865,12 @@ export class TogglesService {
             `${left.kind}:${left.name}:${left.source.source}`.localeCompare(
                 `${right.kind}:${right.name}:${right.source.source}`,
             ),
+        );
+    }
+
+    private extensionActivationProposals(): readonly ExtensionActivationProposal[] {
+        return [...this.#extensionActivationProposals.values()].sort((left, right) =>
+            left.owner.localeCompare(right.owner),
         );
     }
 

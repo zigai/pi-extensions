@@ -1,6 +1,15 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import {
+    ACTIVATION_COORDINATION_VERSION,
+    ACTIVATION_PROPOSAL_ACCEPTED_EVENT,
+    ACTIVATION_READY_EVENT,
+    CLEAR_ACTIVATION_PROPOSAL_EVENT,
+    parseActivationProposalOwner,
+    parseExtensionActivationProposal,
+    SET_ACTIVATION_PROPOSAL_EVENT,
+} from "./activation-coordination.ts";
 import { parseClearContext, parseRegisterContextKey, parseSetContext } from "./context-facts.ts";
 import { handleTogglesCommand } from "./toggles-command.ts";
 import { TogglesService } from "./toggles-service.ts";
@@ -53,6 +62,33 @@ export default function extension(pi: ExtensionAPI): void {
             } else {
                 service?.addDiagnostic(`Invalid ${CONTEXT_CLEAR_EVENT} payload: ${parsed.message}`);
             }
+        }),
+        pi.events.on(SET_ACTIVATION_PROPOSAL_EVENT, (value) => {
+            const parsed = parseExtensionActivationProposal(value);
+            if (parsed.status === "invalid") {
+                service?.addDiagnostic(
+                    `Invalid ${SET_ACTIVATION_PROPOSAL_EVENT} payload: ${parsed.message}`,
+                );
+                return;
+            }
+            if (service?.acceptExtensionActivationProposal(parsed.value) !== true) {
+                return;
+            }
+            pi.events.emit(ACTIVATION_PROPOSAL_ACCEPTED_EVENT, {
+                version: ACTIVATION_COORDINATION_VERSION,
+                sessionId: parsed.value.sessionId,
+                owner: parsed.value.owner,
+            });
+        }),
+        pi.events.on(CLEAR_ACTIVATION_PROPOSAL_EVENT, (value) => {
+            const parsed = parseActivationProposalOwner(value);
+            if (parsed.status === "invalid") {
+                service?.addDiagnostic(
+                    `Invalid ${CLEAR_ACTIVATION_PROPOSAL_EVENT} payload: ${parsed.message}`,
+                );
+                return;
+            }
+            service?.clearExtensionActivationProposal(parsed.value.owner, parsed.value.sessionId);
         }),
     );
 
@@ -123,6 +159,13 @@ export default function extension(pi: ExtensionAPI): void {
             sessionId: ctx.sessionManager.getSessionId(),
         });
         notifyDiagnostics(service, ctx);
+        if (service.activationCoordinationEnabled) {
+            pi.events.emit(ACTIVATION_READY_EVENT, {
+                version: ACTIVATION_COORDINATION_VERSION,
+                sessionId: ctx.sessionManager.getSessionId(),
+            });
+            await service.settleActivation();
+        }
     });
 
     pi.on("input", async (event, ctx) => {
@@ -143,6 +186,7 @@ export default function extension(pi: ExtensionAPI): void {
         if (service === undefined) {
             return;
         }
+        await service.settleActivation();
         return {
             systemPrompt: await service.buildSystemPrompt(
                 event.systemPrompt,

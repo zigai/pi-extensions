@@ -50,6 +50,77 @@ function resolveFact(name: string, _args: FactArguments | undefined): FactResolu
 }
 
 describe("resolveCapabilityPolicy", () => {
+    it("uses extension activation proposals as attributed defaults", () => {
+        const plan = resolveCapabilityPolicy([writeTool], emptyConfiguration(), resolveFact, [
+            {
+                version: 1,
+                sessionId: "session-1",
+                owner: "extension-a",
+                decisions: [{ target: { kind: "tool", name: "write" }, state: "off" }],
+            },
+        ]);
+
+        expect(plan.capabilities[0]?.effectiveState).toBe("inactive");
+        expect(plan.capabilities[0]?.winner).toMatchObject({
+            scope: "extension",
+            origin: "extension-proposal",
+            source: "extension-a",
+        });
+    });
+
+    it("lets user policy override extension activation proposals", () => {
+        const base = emptyConfiguration();
+        const configuration: PolicyConfiguration = {
+            ...base,
+            global: {
+                ...base.global,
+                overrides: [
+                    { target: { kind: "tool", name: "write", source: "builtin" }, state: "on" },
+                ],
+            },
+        };
+        const plan = resolveCapabilityPolicy([writeTool], configuration, resolveFact, [
+            {
+                version: 1,
+                sessionId: "session-1",
+                owner: "extension-a",
+                decisions: [{ target: { kind: "tool", name: "write" }, state: "off" }],
+            },
+        ]);
+
+        expect(plan.capabilities[0]?.effectiveState).toBe("active");
+        expect(plan.capabilities[0]?.winner?.origin).toBe("override");
+        expect(plan.capabilities[0]?.trace).toContainEqual(
+            expect.objectContaining({
+                origin: "extension-proposal",
+                source: "extension-a",
+                reason: "shadowed",
+            }),
+        );
+    });
+
+    it("reports conflicting extension defaults and preserves inherited state", () => {
+        const plan = resolveCapabilityPolicy([writeTool], emptyConfiguration(), resolveFact, [
+            {
+                version: 1,
+                sessionId: "session-1",
+                owner: "extension-a",
+                decisions: [{ target: { kind: "tool", name: "write" }, state: "off" }],
+            },
+            {
+                version: 1,
+                sessionId: "session-1",
+                owner: "extension-b",
+                decisions: [{ target: { kind: "tool", name: "write" }, state: "on" }],
+            },
+        ]);
+
+        expect(plan.capabilities[0]?.desiredState).toBe("inherit");
+        expect(plan.capabilities[0]?.effectiveState).toBe("active");
+        expect(plan.diagnostics).toContainEqual(expect.stringContaining("extension-a=off"));
+        expect(plan.diagnostics).toContainEqual(expect.stringContaining("extension-b=on"));
+    });
+
     it("lets explicit session policy beat project and global policy", () => {
         const base = emptyConfiguration();
         const configuration: PolicyConfiguration = {

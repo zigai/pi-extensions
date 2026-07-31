@@ -307,11 +307,13 @@ export function capabilityPanelColumns(
     const decidedBy =
         winner === undefined
             ? "Pi"
-            : winner.origin === "override"
-              ? winner.scope
-              : winner.origin === "profile"
-                ? `${winner.scope} profile`
-                : `${winner.scope} rule`;
+            : winner.origin === "extension-proposal"
+              ? `extension ${winner.source}`
+              : winner.origin === "override"
+                ? winner.scope
+                : winner.origin === "profile"
+                  ? `${winner.scope} profile`
+                  : `${winner.scope} rule`;
     return {
         effectiveValue: effective?.effectiveState ?? capability.observedState,
         decidedBy,
@@ -509,6 +511,7 @@ function formatList(service: TogglesService, kind?: string): string {
 function doctorText(service: TogglesService): string {
     const diagnostics = service.diagnostics;
     const gaps = [
+        "Pi API gap: only the winning implementation for a duplicated tool name is exposed, so implementation selection cannot be centrally managed.",
         "Pi API gap: extension slash commands run before the interceptable input event and cannot be centrally gated.",
         "Pi API gap: built-in slash commands have no complete public catalog or invocation gate.",
     ];
