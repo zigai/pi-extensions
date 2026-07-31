@@ -449,7 +449,7 @@ export function renderWriteCallPreview(
     if (content === undefined || context.isError) {
         return renderGlowupCall(theme, {
             state: context.isError ? "error" : "success",
-            statusText,
+            statusText: context.isError ? "Write" : statusText,
             body: formatPathTarget(theme, path),
         });
     }
