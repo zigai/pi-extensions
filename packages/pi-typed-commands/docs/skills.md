@@ -34,7 +34,7 @@ Safe fixes enabled: `{args.fix}`.
 Rules: `{args.rules}`.
 ```
 
-`metadata.ghostText` is optional. It renders static, dimmed text on the same editor line as the exact `/skill:name` invocation, remains visible through trailing spaces, and disappears when the user starts an argument. It is visual only and is never included in the skill input. `SKILL.md` is declarative, so dynamic resolver functions are available only to TypeScript command definitions.
+`metadata.ghostText` is optional. It renders static, dimmed text on the same editor line as the exact `/skill:name` invocation, remains visible through one trailing space, and disappears when the user types a second space or starts an argument. It is visual only and is never included in the skill input. `SKILL.md` is declarative, so dynamic resolver functions are available only to TypeScript command definitions.
 
 ## YAML field names
 

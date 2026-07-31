@@ -80,7 +80,7 @@ It respects `--` as an end-of-options marker and keeps repeatable multi-enum fla
 /deploy  choose a target
 ```
 
-Only `/deploy` is editor content. The hint is presentation-only and remains visible while the user types trailing spaces. It disappears for a partial command, a partial subcommand, any non-whitespace argument input, multiline input, or a cursor that is not at the end. An exact subcommand or alias selects that branch's independently configured hint. Static strings and synchronous TypeScript resolvers are supported; commands without `ghostText` retain the normal editor.
+Only `/deploy` is editor content. The hint is presentation-only and remains visible through one trailing space. It disappears when the user types a second trailing space, enters a partial command or subcommand, starts an argument, creates multiline input, or moves the cursor away from the end. An exact subcommand or alias selects that branch's independently configured hint. Static strings and synchronous TypeScript resolvers are supported; commands without `ghostText` retain the normal editor.
 
 The separate live helper continues to follow its existing `inlineHelp` policy. If another extension supplies an editor that cannot be safely decorated, Pi Typed Args leaves that editor intact and continues using the normal helper.
 

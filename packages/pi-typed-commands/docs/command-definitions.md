@@ -193,7 +193,7 @@ const deploy = defineTypedCommand({
 });
 ```
 
-`/deploy` shows the root hint. `/deploy service` and `/deploy svc` show the `service` hint, while `/deploy website` shows the `website` hint. Root and branch definitions are independent and are not inherited. The hint remains visible through trailing whitespace, so `/deploy ` keeps the root hint and `/deploy service ` keeps the branch hint. Partial commands, partial subcommands, arguments containing non-whitespace input, multiline input, empty resolver output, and resolver failures show no ghost text. The resolver receives `ctx`, the root `commandName`, and the canonical `subcommand` when a branch is selected. Keep it synchronous and side-effect free because it runs during editor rendering.
+`/deploy` shows the root hint. `/deploy service` and `/deploy svc` show the `service` hint, while `/deploy website` shows the `website` hint. Root and branch definitions are independent and are not inherited. The hint remains visible through one trailing space, so `/deploy ` keeps the root hint and `/deploy service ` keeps the branch hint; a second trailing space hides it. Partial commands, partial subcommands, arguments containing non-whitespace input, multiline input, empty resolver output, and resolver failures also show no ghost text. The resolver receives `ctx`, the root `commandName`, and the canonical `subcommand` when a branch is selected. Keep it synchronous and side-effect free because it runs during editor rendering.
 
 Ghost text is never inserted into editor content, history, or submitted input. Omitting `ghostText` preserves the normal editor exactly.
 Line breaks and terminal control characters in resolved text are converted to spaces so the hint remains on one editor line.

@@ -81,11 +81,12 @@ describe("inline ghost text resolution", () => {
         });
         assert.equal(resolveGhostText("/deploy svc", registry, ctx)?.text, "service:/workspace");
         assert.equal(resolveGhostText("/deploy ", registry, ctx)?.text, "deploy:root:/workspace");
-        assert.equal(resolveGhostText("/deploy   ", registry, ctx)?.text, "deploy:root:/workspace");
+        assert.equal(resolveGhostText("/deploy  ", registry, ctx), undefined);
         assert.equal(
             resolveGhostText("/deploy service ", registry, ctx)?.text,
             "service:/workspace",
         );
+        assert.equal(resolveGhostText("/deploy service  ", registry, ctx), undefined);
         assert.equal(resolveGhostText("/deploy svc\t", registry, ctx)?.text, "service:/workspace");
         assert.equal(
             resolveGhostText("/deploy website", registry, ctx)?.text,
@@ -167,6 +168,7 @@ describe("inline ghost text resolution", () => {
 
         assert.equal(resolveGhostText("/skill:lint", registry, ctx)?.text, "choose files to lint");
         assert.equal(resolveGhostText("/skill:lint ", registry, ctx)?.text, "choose files to lint");
+        assert.equal(resolveGhostText("/skill:lint  ", registry, ctx), undefined);
     });
 });
 
@@ -366,6 +368,10 @@ describe("inline ghost text editor", () => {
         requireFocusableComponent(component).focused = true;
         component.setText(editorText);
         assert.match(component.render(50).join("\n"), /deploy:root:\/workspace/);
+        component.setText("/deploy ");
+        assert.match(component.render(50).join("\n"), /deploy:root:\/workspace/);
+        component.setText("/deploy  ");
+        assert.doesNotMatch(component.render(50).join("\n"), /deploy:root:\/workspace/);
         assert.equal(widgetContent.length, 1);
 
         await session.stop();

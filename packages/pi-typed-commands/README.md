@@ -73,7 +73,7 @@ Users of your extension can then run:
 
 While users type a command, Pi shows a compact live helper above the editor by default with parsed values, defaults, and remaining arguments. `Tab` completes unambiguous partial flags and fixed choices—for example, `/deploy --r<Tab>` becomes `/deploy --ref ` and `/branch --layout sepa<Tab>` becomes `/branch --layout separate `—or opens the form when there is nothing to complete. Inline validation waits until the user moves past an argument or submits the command, so value-taking flags do not error while their value is still being typed.
 
-Commands can opt into visual-only ghost text on the same editor line. It appears after an exact command or subcommand invocation, remains while the user types only trailing spaces, and disappears when they start an argument or other input:
+Commands can opt into visual-only ghost text on the same editor line. It appears after an exact command or subcommand invocation, remains through one trailing space, and disappears when the user types a second space or starts an argument:
 
 ```ts
 const deploy = defineTypedCommand({

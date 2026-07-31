@@ -16,7 +16,7 @@ import type {
 } from "./command-types.js";
 import { commandDisplayName } from "./editor-invocation.js";
 
-const EXACT_INVOCATION_PATTERN = /^\/(\S+)(?:\s+(\S+))?\s*$/;
+const EXACT_INVOCATION_PATTERN = /^\/(\S+)(?:\s+(\S+))?\s?$/;
 const END_CURSOR = `${CURSOR_MARKER}\x1b[7m \x1b[0m`;
 
 type ResolvedGhostText = {
