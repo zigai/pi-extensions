@@ -33,7 +33,7 @@ Keep the declared `piExtensionSettings` artifacts and generated README region sy
 
 - Put the generated settings region after installation and the normal first-use guidance.
 - Put `<!-- pi-extension-settings:start -->` and `<!-- pi-extension-settings:end -->` in the README exactly once.
-- Do not hand-edit content between those markers. The shared generator owns the settings path, compact option table, and complete default JSON document in its collapsed disclosure.
+- Do not hand-edit content between those markers. The shared generator owns the settings path, compact option table, and complete default JSON document shown directly after the table.
 - Put user-facing descriptions on TypeBox properties in `src/settings.ts`; wording changes flow into README documentation through generation.
 - Do not document alternate paths, layering, TypeBox mechanics, schema refresh, trust, user-owned terminology, or malformed-file policy in the generated region.
 
