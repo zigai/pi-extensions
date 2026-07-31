@@ -20,27 +20,26 @@ Typed named-argument examples:
 /branch
 /branch 3
 /branch --count 3
-/branch --panes --count 3
-/branch --pane-window --count 4
+/branch --layout current-tab --count 3
+/branch --layout new-tab --count 4
 /branch --prompt "investigate the failing tests"
 /branch --keep-open
 /branch --worktree
-/branch --panes --count 3 --prompt "investigate separate approaches"
+/branch --layout current-tab --count 3 --prompt "investigate separate approaches"
 /branch --help
 ```
 
 Press Tab after `/branch` to open the typed-argument form. `/branch --help` shows generated command help. The typed args are:
 
 - `[count]` / `--count <1-100>` — number of forks to create; default `1`.
-- `--panes` — split the current tab/window into panes.
-- `--pane-window` — open one new tab/window split into panes.
+- `--layout <separate|current-tab|new-tab>` — where forks open; default `separate`. `separate` opens each fork in its own tab/window, `current-tab` adds forks beside the current Pi session, and `new-tab` puts all forks together in one new tab/window.
 - `--keep-open` / `--no-keep-open` — keep the terminal shell open after Pi exits.
 - `--worktree` — open forks in git worktrees.
 - `--prompt <text>` — optional initial prompt sent to each fork.
 
-When running inside tmux, each fork opens in a new tmux window/tab immediately after the current tmux window by default. Pass `--panes` to split the current tmux window into panes, or `--pane-window` to create one new tmux window containing all fork panes. Pane layouts are balanced automatically: two or three panes use an even horizontal layout, and four or more panes use a tiled grid. By default, the tmux window or pane closes when the forked Pi process exits. Pass `--keep-open` to run Pi without `exec` and drop back to a shell after Pi exits. New tmux windows reuse the current Pi session name when available and append a concise index, such as `My task 1`. Forked Pi processes preserve the current model when Pi exposes it to the extension context.
+When running inside tmux, the default `separate` layout opens each fork in a new tmux window/tab immediately after the current one. `current-tab` splits the current tmux window, leaving the current Pi session in place and adding one pane per fork. `new-tab` creates one new tmux window containing all fork panes. New-tab grids use a predictable row-first layout; for example, six forks open as three columns by two rows. By default, the tmux window or pane closes when the forked Pi process exits. Pass `--keep-open` to run Pi without `exec` and drop back to a shell after Pi exits. New tmux windows reuse the current Pi session name when available and append a concise index, such as `My task 1`. Forked Pi processes preserve the current model when Pi exposes it to the extension context.
 
-On macOS Ghostty, forks open in Ghostty windows by default, split the current window with `--panes`, or open one new split window with `--pane-window`. On Linux Ghostty, forks open in new Ghostty windows; pane modes require tmux.
+On macOS Ghostty, `separate` opens a Ghostty window for each fork, `current-tab` splits the current window, and `new-tab` opens one new split window. On Linux Ghostty, only `separate` is available; the split layouts require tmux.
 
 ## Worktrees
 

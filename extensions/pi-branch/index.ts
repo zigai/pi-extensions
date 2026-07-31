@@ -13,6 +13,7 @@ import {
     type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { defineTypedCommand, registerTypedCommand } from "pi-typed-commands/command";
+import { installTypedCommandUx } from "pi-typed-commands/pi";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { execFile } from "node:child_process";
@@ -76,6 +77,7 @@ const GHOSTTY_WINDOW_SCRIPT = `on run argv
 end run`;
 
 type LaunchMode = "windows" | "panes" | "pane-window";
+type ForkLayout = "separate" | "current-tab" | "new-tab";
 type LaunchTarget =
     | "tmux-window"
     | "tmux-current-panes"
@@ -94,8 +96,7 @@ type ParsedArgs = {
 
 type BranchTypedArgs = {
     count: number;
-    panes: boolean;
-    paneWindow: boolean;
+    layout: ForkLayout;
     keepOpen: boolean;
     worktree: boolean;
     prompt?: string;
@@ -561,7 +562,7 @@ async function readBranchConfigFile(input: {
 async function loadBranchConfig(ctx: ExtensionCommandContext): Promise<BranchConfigResult> {
     await scaffoldGlobalBranchConfigFiles();
 
-    let config: BranchConfig = DEFAULT_BRANCH_CONFIG;
+    const config: BranchConfig = { ...DEFAULT_BRANCH_CONFIG };
     let worktreeDirBaseDir: string | undefined = getAgentDir();
 
     for (const configPath of getBranchConfigPaths(ctx)) {
@@ -574,7 +575,7 @@ async function loadBranchConfig(ctx: ExtensionCommandContext): Promise<BranchCon
             return { error: result.error };
         }
 
-        config = { ...config, ...projectBranchConfig(result.config) };
+        Object.assign(config, projectBranchConfig(result.config));
         if (result.hasWorktreeDir) {
             worktreeDirBaseDir = result.baseDir;
         }
@@ -725,10 +726,10 @@ async function createForkWorktree(
 
 function parseTypedArgs(args: BranchTypedArgs): ParsedArgs {
     let mode: LaunchMode = "windows";
-    if (args.paneWindow) {
-        mode = "pane-window";
-    } else if (args.panes) {
+    if (args.layout === "current-tab") {
         mode = "panes";
+    } else if (args.layout === "new-tab") {
+        mode = "pane-window";
     }
 
     return {
@@ -939,6 +940,31 @@ function parseTmuxWindowAndPaneId(stdout: string | undefined):
     return { windowId, paneId };
 }
 
+function gridColumnCount(totalPanes: number): number {
+    if (totalPanes <= 3) {
+        return totalPanes;
+    }
+
+    return Math.ceil(Math.sqrt(totalPanes));
+}
+
+function tmuxRemainingRegionPercent(regionCount: number): number {
+    return Math.round(((regionCount - 1) / regionCount) * 100);
+}
+
+function tmuxGridRowPaneCounts(paneCount: number): number[] {
+    const columnCount = gridColumnCount(paneCount);
+    const rowCount = Math.ceil(paneCount / columnCount);
+    const minimumPanesPerRow = Math.floor(paneCount / rowCount);
+    const rowsWithExtraPane = paneCount % rowCount;
+    return Array.from({ length: rowCount }, (_, rowIndex) => {
+        if (rowIndex < rowsWithExtraPane) {
+            return minimumPanesPerRow + 1;
+        }
+        return minimumPanesPerRow;
+    });
+}
+
 async function launchTmuxCurrentPaneGroup(
     forks: PreparedFork[],
     prompt: string,
@@ -985,7 +1011,7 @@ async function launchTmuxNewWindowPaneGroup(
     launchName: string,
     tmuxWindowTarget: string | undefined,
 ): Promise<CommandResult> {
-    const [firstFork, ...remainingForks] = forks;
+    const [firstFork] = forks;
     if (firstFork === undefined) {
         return { code: 1, stderr: "No forks to launch." };
     }
@@ -1012,16 +1038,37 @@ async function launchTmuxNewWindowPaneGroup(
         return { code: 1, stderr: "tmux did not report the created window and pane ids." };
     }
 
-    for (const fork of remainingForks) {
+    const rowPaneCounts = tmuxGridRowPaneCounts(forks.length);
+    const rowStartIndexes: number[] = [];
+    let nextRowStartIndex = 0;
+    for (const rowPaneCount of rowPaneCounts) {
+        rowStartIndexes.push(nextRowStartIndex);
+        nextRowStartIndex += rowPaneCount;
+    }
+
+    const rowAnchorPaneIds = [ids.paneId];
+    let remainingRowsPaneId = ids.paneId;
+    for (let rowIndex = 1; rowIndex < rowPaneCounts.length; rowIndex += 1) {
+        const forkIndex = rowStartIndexes[rowIndex];
+        if (forkIndex === undefined) {
+            return { code: 1, stderr: "Could not assign a fork to a tmux grid row." };
+        }
+        const fork = forks[forkIndex];
+        if (fork === undefined) {
+            return { code: 1, stderr: "Could not find the fork assigned to a tmux grid row." };
+        }
+        const remainingRowCount = rowPaneCounts.length - rowIndex + 1;
         const result = await runCommand("tmux", [
             "split-window",
-            "-h",
+            "-v",
             "-d",
             "-P",
             "-F",
             "#{pane_id}",
+            "-l",
+            `${tmuxRemainingRegionPercent(remainingRowCount)}%`,
             "-t",
-            ids.paneId,
+            remainingRowsPaneId,
             "-c",
             fork.cwd,
             buildPiShellCommand(fork.sessionFile, prompt, modelArg, keepOpen),
@@ -1029,9 +1076,61 @@ async function launchTmuxNewWindowPaneGroup(
         if (result.code !== 0) {
             return result;
         }
+        const paneId = result.stdout?.trim();
+        if (paneId === undefined || paneId.length === 0) {
+            return { code: 1, stderr: "tmux did not report the created row pane id." };
+        }
+        rowAnchorPaneIds.push(paneId);
+        remainingRowsPaneId = paneId;
     }
 
-    await applySmartTmuxLayout(ids.windowId, forks.length);
+    for (let rowIndex = 0; rowIndex < rowPaneCounts.length; rowIndex += 1) {
+        const rowPaneCount = rowPaneCounts[rowIndex];
+        const rowStartIndex = rowStartIndexes[rowIndex];
+        const rowAnchorPaneId = rowAnchorPaneIds[rowIndex];
+        if (
+            rowPaneCount === undefined ||
+            rowStartIndex === undefined ||
+            rowAnchorPaneId === undefined
+        ) {
+            return { code: 1, stderr: "Could not construct the tmux grid row." };
+        }
+
+        let remainingColumnsPaneId = rowAnchorPaneId;
+        for (let columnIndex = 1; columnIndex < rowPaneCount; columnIndex += 1) {
+            const fork = forks[rowStartIndex + columnIndex];
+            if (fork === undefined) {
+                return {
+                    code: 1,
+                    stderr: "Could not find the fork assigned to a tmux grid column.",
+                };
+            }
+            const remainingColumnCount = rowPaneCount - columnIndex + 1;
+            const result = await runCommand("tmux", [
+                "split-window",
+                "-h",
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-l",
+                `${tmuxRemainingRegionPercent(remainingColumnCount)}%`,
+                "-t",
+                remainingColumnsPaneId,
+                "-c",
+                fork.cwd,
+                buildPiShellCommand(fork.sessionFile, prompt, modelArg, keepOpen),
+            ]);
+            if (result.code !== 0) {
+                return result;
+            }
+            const paneId = result.stdout?.trim();
+            if (paneId === undefined || paneId.length === 0) {
+                return { code: 1, stderr: "tmux did not report the created column pane id." };
+            }
+            remainingColumnsPaneId = paneId;
+        }
+    }
 
     return { code: 0, stdout: ids.windowId };
 }
@@ -1049,14 +1148,6 @@ function buildGhosttyConfigScript(configCount: number): string {
     }
 
     return lines.map((line) => `\t\t${line}`).join("\n");
-}
-
-function gridColumnCount(totalPanes: number): number {
-    if (totalPanes <= 3) {
-        return totalPanes;
-    }
-
-    return Math.ceil(Math.sqrt(totalPanes));
 }
 
 function buildGhosttySplitScript(options: {
@@ -1531,18 +1622,19 @@ function createBranchCommand() {
                 title: "Count",
                 description: "Number of forks to create",
             },
-            panes: {
-                type: "boolean",
-                default: false,
-                title: "Current tab panes",
-                description: "Split the current tab/window into panes",
-            },
-            paneWindow: {
-                type: "boolean",
-                flag: "pane-window",
-                default: false,
-                title: "New tab panes",
-                description: "Open one new tab/window split into panes",
+            layout: {
+                type: "enum",
+                values: ["separate", "current-tab", "new-tab"],
+                default: "separate",
+                title: "Where to open forks",
+                optionDescriptions: {
+                    separate: "One tab/window per fork",
+                    "current-tab": "Add panes beside this Pi",
+                    "new-tab": "Put all forks in one split tab/window",
+                },
+                ui: {
+                    widget: "radio",
+                },
             },
             keepOpen: {
                 type: "boolean",
@@ -1567,20 +1659,6 @@ function createBranchCommand() {
                 },
             },
         },
-        refine: (args) => {
-            if (args.panes === true && args.paneWindow === true) {
-                return [
-                    {
-                        code: "conflicting-pane-modes",
-                        message: "Choose either current tab panes or new tab panes, not both.",
-                        path: ["panes"],
-                        relatedPaths: [["paneWindow"]],
-                    },
-                ];
-            }
-
-            return [];
-        },
         run: async (args, ctx) => {
             await handleParsedBranch(parseTypedArgs(args), ctx);
         },
@@ -1588,5 +1666,6 @@ function createBranchCommand() {
 }
 
 export default function (pi: ExtensionAPI): void {
+    installTypedCommandUx(pi);
     registerTypedCommand(pi, createBranchCommand());
 }
