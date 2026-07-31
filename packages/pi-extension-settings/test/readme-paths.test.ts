@@ -51,10 +51,8 @@ describe("README generation", () => {
         expect(rendered).toContain('"$schema": "./schemas/pi-example.schema.json"');
         expect(rendered).toContain('"opacity": 0.8');
         expect(rendered).toContain("| `tools` | string[] | See below | Enabled tool names. |");
-        expect(rendered).toContain(
-            "<details>\n<summary>Complete default settings</summary>\n\n```json",
-        );
-        expect(rendered).toContain("```\n\n</details>");
+        expect(rendered).toContain("### Complete default settings\n\n```json");
+        expect(rendered).not.toContain("<details>");
     });
 
     it("keeps long defaults out of the option table without losing their exact values", () => {

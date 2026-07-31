@@ -126,14 +126,11 @@ export function renderReadmeSettingsSection(
         "| --- | --- | --- | --- |",
         ...tableRows,
         "",
-        "<details>",
-        "<summary>Complete default settings</summary>",
+        "### Complete default settings",
         "",
         "```json",
         JSON.stringify(defaultDocument, undefined, 2),
         "```",
-        "",
-        "</details>",
     ].join("\n");
 }
 
