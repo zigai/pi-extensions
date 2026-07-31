@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          path: pi-branch
+
+      - name: Checkout bundled dependency
+        uses: actions/checkout@v7
+        with:
+          repository: zigai/pi-typed-commands
+          ref: 929a17011888d8b4420f18699bd2a55d8127287d
+          path: pi-typed-commands
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: pi-branch/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: pi-branch
+
+      - name: Check
+        run: npm run check
+        working-directory: pi-branch
