@@ -119,6 +119,159 @@ describe("normalizeSkillArguments", () => {
         assert.equal(result.args["config.output_path"]?.required, true);
     });
 
+    it("normalizes every supported argument type constraint and form field", () => {
+        const result = normalizeSkillArguments({
+            text: {
+                type: "string",
+                description: "A URL",
+                examples: ["https://example.com"],
+                title: "Endpoint",
+                required: true,
+                placeholder: "https://...",
+                occurrence: "last",
+                position: 0,
+                rest: true,
+                min_length: 8,
+                max_length: 100,
+                pattern: "^https://",
+                format: "url",
+                sensitive: true,
+                ui: {
+                    widget: "textarea",
+                    rows: 3,
+                    title: "Endpoint URL",
+                    disabled: true,
+                    visible_when: true,
+                    enabled_when: false,
+                    required_when: true,
+                    section: "Connection",
+                    advanced: true,
+                    copy_from: "fallback",
+                },
+            },
+            number: {
+                type: "number",
+                description: "Retries",
+                required: false,
+                occurrence: "first",
+                rest: false,
+                integer: true,
+                min: 0,
+                max: 5,
+                step: 1,
+                unit: "attempts",
+                default: 2,
+            },
+            enabled: {
+                type: "boolean",
+                occurrence: "error",
+                rest: false,
+                default: true,
+            },
+            environment: {
+                type: "enum",
+                values: ["dev", "prod"],
+                option_descriptions: { dev: "Development", prod: "Production" },
+                default: "dev",
+            },
+            tags: {
+                type: "multi_enum",
+                values: ["api", "web", "worker"],
+                min_items: 1,
+                max_items: 2,
+                default: ["api"],
+            },
+            labels: {
+                type: "string_list",
+                min_items: 1,
+                max_items: 3,
+                default: ["primary"],
+            },
+            variables: {
+                type: "key_value",
+                min_items: 1,
+                max_items: 2,
+                rest: false,
+                default: { MODE: "safe" },
+            },
+        });
+
+        assert.deepEqual(result.diagnostics, []);
+        assert.deepEqual(result.args.text, {
+            type: "string",
+            description: "A URL",
+            examples: ["https://example.com"],
+            title: "Endpoint",
+            required: true,
+            placeholder: "https://...",
+            occurrence: "last",
+            position: 0,
+            rest: true,
+            minLength: 8,
+            maxLength: 100,
+            pattern: "^https://",
+            format: "url",
+            sensitive: true,
+            ui: {
+                widget: "textarea",
+                rows: 3,
+                title: "Endpoint URL",
+                disabled: true,
+                visibleWhen: true,
+                enabledWhen: false,
+                requiredWhen: true,
+                section: "Connection",
+                advanced: true,
+                copyFrom: "fallback",
+            },
+        });
+        assert.deepEqual(result.args.number, {
+            type: "number",
+            description: "Retries",
+            required: false,
+            occurrence: "first",
+            rest: false,
+            integer: true,
+            min: 0,
+            max: 5,
+            step: 1,
+            unit: "attempts",
+            default: 2,
+        });
+        assert.deepEqual(result.args.enabled, {
+            type: "boolean",
+            occurrence: "error",
+            rest: false,
+            default: true,
+        });
+        assert.deepEqual(result.args.environment, {
+            type: "enum",
+            values: ["dev", "prod"],
+            optionDescriptions: { dev: "Development", prod: "Production" },
+            default: "dev",
+        });
+        assert.deepEqual(result.args.tags, {
+            type: "multi-enum",
+            values: ["api", "web", "worker"],
+            minItems: 1,
+            maxItems: 2,
+            default: ["api"],
+        });
+        assert.deepEqual(result.args.labels, {
+            type: "string-list",
+            minItems: 1,
+            maxItems: 3,
+            default: ["primary"],
+        });
+        assert.deepEqual(result.args.variables, {
+            type: "key-value",
+            minItems: 1,
+            maxItems: 2,
+            rest: false,
+            default: { MODE: "safe" },
+        });
+    });
+
     it("parses skill frontmatter metadata", () => {
         const parsed = parseSkillMarkdown(`---
 name: demo
