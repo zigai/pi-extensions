@@ -21,7 +21,13 @@ test:
 check:
     npm run check
 
+# Run tests with coverage
+coverage:
+    npm run coverage
+
 # Apply automatic fixes
 fix:
     npm run lint:fix
     npm run format
+
+alias cov := coverage
