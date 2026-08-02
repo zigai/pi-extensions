@@ -1542,6 +1542,157 @@ function renderApplyPatchSummary(
     );
 }
 
+type CompletedApplyPatchUpdate = {
+    readonly summary: ApplyPatchSummary;
+    readonly changedOnly: boolean;
+    readonly theme: GlowupRenderTheme;
+    readonly expanded: boolean;
+    readonly context: PatchCallLifecycleContext;
+    readonly labelMode: ToolLabelMode;
+    readonly mutationSettings: MutationSettings;
+    readonly invalidate: (() => void) | undefined;
+};
+
+class CompletedApplyPatchCallComponent implements Component {
+    private summary: ApplyPatchSummary;
+    private changedOnly: boolean;
+    private theme: GlowupRenderTheme;
+    private expanded: boolean;
+    private lifecycleKey: number;
+    private labelMode: ToolLabelMode;
+    private mutationSettings: MutationSettings;
+    private requestRender: (() => void) | undefined;
+    private renderGeneration = 0;
+    private rendered: Component;
+    private cachedWidth: number | undefined;
+    private cachedLines: string[] | undefined;
+
+    constructor(
+        private readonly toolCallId: string,
+        update: CompletedApplyPatchUpdate,
+    ) {
+        this.summary = update.summary;
+        this.changedOnly = update.changedOnly;
+        this.theme = update.theme;
+        this.expanded = update.expanded;
+        this.lifecycleKey = patchLifecycleRenderKey(update.context);
+        this.labelMode = update.labelMode;
+        this.mutationSettings = update.mutationSettings;
+        this.requestRender = update.invalidate;
+        this.rendered = this.buildRenderedComponent(update.context);
+    }
+
+    belongsTo(toolCallId: string): boolean {
+        return this.toolCallId === toolCallId;
+    }
+
+    update(update: CompletedApplyPatchUpdate): void {
+        const nextLifecycleKey = patchLifecycleRenderKey(update.context);
+        const canReuseRenderedComponent =
+            this.summary === update.summary &&
+            this.changedOnly === update.changedOnly &&
+            this.theme === update.theme &&
+            this.expanded === update.expanded &&
+            this.lifecycleKey === nextLifecycleKey &&
+            this.labelMode === update.labelMode &&
+            this.mutationSettings === update.mutationSettings;
+
+        this.requestRender = update.invalidate;
+        if (canReuseRenderedComponent) {
+            return;
+        }
+
+        this.summary = update.summary;
+        this.changedOnly = update.changedOnly;
+        this.theme = update.theme;
+        this.expanded = update.expanded;
+        this.lifecycleKey = nextLifecycleKey;
+        this.labelMode = update.labelMode;
+        this.mutationSettings = update.mutationSettings;
+        this.rendered = this.buildRenderedComponent(update.context);
+        this.cachedWidth = undefined;
+        this.cachedLines = undefined;
+    }
+
+    render(width: number): string[] {
+        if (this.cachedWidth === width && this.cachedLines !== undefined) {
+            return this.cachedLines;
+        }
+        this.cachedWidth = width;
+        this.cachedLines = this.rendered.render(width);
+        return this.cachedLines;
+    }
+
+    invalidate(): void {
+        this.cachedWidth = undefined;
+        this.cachedLines = undefined;
+        this.rendered.invalidate();
+    }
+
+    private buildRenderedComponent(context: PatchCallLifecycleContext): Component {
+        this.renderGeneration += 1;
+        const renderGeneration = this.renderGeneration;
+        const summary = this.changedOnly
+            ? changedOnlyApplyPatchSummary(this.summary)
+            : this.summary;
+        return renderApplyPatchSummary(
+            summary,
+            this.theme,
+            this.expanded,
+            context,
+            this.labelMode,
+            this.mutationSettings,
+            {
+                toolCallId: this.toolCallId,
+                invalidate: () => {
+                    if (this.renderGeneration === renderGeneration) {
+                        this.requestRender?.();
+                    }
+                },
+            },
+        );
+    }
+}
+
+function patchLifecycleRenderKey(context: PatchCallLifecycleContext): number {
+    return (
+        (context.isPartial ? 1 : 0) |
+        (context.argsComplete === false ? 2 : 0) |
+        (context.executionStarted === true ? 4 : 0) |
+        (context.result === undefined ? 0 : 8) |
+        (context.isError === true ? 16 : 0)
+    );
+}
+
+function renderCompletedApplyPatchCall(
+    summary: ApplyPatchSummary,
+    changedOnly: boolean,
+    theme: GlowupRenderTheme,
+    context: ThirdPartyToolRenderContext,
+    summaryContext: PatchCallLifecycleContext,
+    labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings,
+): Component {
+    const update: CompletedApplyPatchUpdate = {
+        summary,
+        changedOnly,
+        theme,
+        expanded: context.expanded,
+        context: summaryContext,
+        labelMode,
+        mutationSettings,
+        invalidate: context.invalidate,
+    };
+    if (
+        context.lastComponent instanceof CompletedApplyPatchCallComponent &&
+        context.lastComponent.belongsTo(context.toolCallId)
+    ) {
+        context.lastComponent.update(update);
+        return context.lastComponent;
+    }
+    return new CompletedApplyPatchCallComponent(context.toolCallId, update);
+}
+
 function renderApplyPatchFallbackCall(
     args: unknown,
     theme: GlowupRenderTheme,
@@ -1663,28 +1814,20 @@ export function createApplyPatchRenderer(
                 persistedSummary === undefined
                     ? context
                     : { ...context, argsComplete: true, isPartial: false };
-            const renderedSummary =
-                summary === undefined ||
-                context.expanded ||
-                mutationSettings.defaultView === "full" ||
-                persistedSummary === undefined
-                    ? summary
-                    : changedOnlyApplyPatchSummary(summary);
-            return renderedSummary === undefined
+            const changedOnly =
+                !context.expanded &&
+                mutationSettings.defaultView !== "full" &&
+                persistedSummary !== undefined;
+            return summary === undefined
                 ? renderApplyPatchFallbackCall(args, theme, context, labelMode)
-                : renderApplyPatchSummary(
-                      renderedSummary,
+                : renderCompletedApplyPatchCall(
+                      summary,
+                      changedOnly,
                       theme,
-                      context.expanded,
+                      context,
                       summaryContext,
                       labelMode,
                       mutationSettings,
-                      {
-                          toolCallId: context.toolCallId,
-                          ...(context.invalidate === undefined
-                              ? {}
-                              : { invalidate: context.invalidate }),
-                      },
                   );
         },
         renderResult(result, options, theme, context) {

@@ -922,6 +922,60 @@ describe("apply_patch renderer", () => {
         expect(wide).not.toMatch(/[├└]/u);
     });
 
+    it("reuses completed full-diff components across syntax invalidations", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+            mutationSettings: DEFAULT_MUTATION_SETTINGS,
+        });
+        const patch = `*** Begin Patch
+*** Update File: example.ts
+@@
+-const value = 1;
++const value = 2;
+*** End Patch`;
+        const result = {
+            details: {
+                diff: "example.ts\n-1 const value = 1;\n+1 const value = 2;\n",
+                patch: `--- example.ts
++++ example.ts
+@@ -1 +1 @@
+-const value = 1;
++const value = 2;
+`,
+                lineSummary: {
+                    files: [
+                        {
+                            action: "M",
+                            path: "example.ts",
+                            addedLines: 1,
+                            removedLines: 1,
+                        },
+                    ],
+                },
+            },
+        };
+        let component = renderer.renderCall({ patch }, plainTheme, {
+            ...renderContext,
+            toolCallId: "stable-completed-patch",
+            result,
+            invalidate() {},
+        });
+        const firstComponent = component;
+        const firstRendered = component.render(120);
+
+        for (let refresh = 0; refresh < 25; refresh += 1) {
+            component = renderer.renderCall({ patch }, plainTheme, {
+                ...renderContext,
+                toolCallId: "stable-completed-patch",
+                result,
+                lastComponent: component,
+                invalidate() {},
+            });
+            expect(component).toBe(firstComponent);
+            expect(component.render(120)).toBe(firstRendered);
+        }
+    });
+
     it("applies configurable diff limits to compatible apply_patch results", () => {
         const renderer = createThirdPartyToolRenderer("apply_patch", {
             mutationSettings: {
