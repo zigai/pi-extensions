@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { formatCodexModelSelection, type CodexCoreConfig } from "./config/config.ts";
-import { supportsCodexPromptPersonality } from "./prompt/personality.ts";
+import type { CodexCoreConfig } from "./config/config.ts";
 import { APPLY_PATCH_TOOL_NAME } from "./tools/apply-patch/tool.ts";
 import { IMAGEGEN_TOOL_NAME } from "./tools/imagegen.ts";
 import { VIEW_IMAGE_TOOL_NAME } from "./tools/view-image/tool.ts";
@@ -47,7 +46,6 @@ export function syncCodexCoreTools(
 
         pi.setActiveTools([...activeTools, ...enabledTools]);
     }
-    setCodexStatus(ctx, config);
 }
 
 /** Activation defaults proposed to Pi Toggles when it owns tool policy. */
@@ -105,31 +103,6 @@ export function isCodexLikeModel(model: ExtensionContext["model"]): boolean {
     if (api.includes("codex")) return true;
     if (id.includes("codex")) return true;
     return provider.includes("openai") && id.includes("gpt");
-}
-
-function setCodexStatus(ctx: ExtensionContext, config: CodexCoreConfig): void {
-    if (!ctx.hasUI) return;
-    const tools = enabledCodexToolNames(ctx, config);
-    if (tools.length === 0 && !config.compaction.enabled && config.prompt.mode === "pi") {
-        ctx.ui.setStatus("pi-codex-core", undefined);
-        return;
-    }
-    const suffixes = [
-        tools.length > 0 ? tools.join(", ") : undefined,
-        config.scope.tools === "all" ? "all models" : undefined,
-        config.prompt.mode === "codex" ? "codex prompt" : undefined,
-        config.prompt.mode === "codex" && supportsCodexPromptPersonality(ctx.model?.id)
-            ? config.prompt.personality
-            : undefined,
-        config.compaction.enabled
-            ? `compact ${formatCodexModelSelection(config.openai.compactionModel)}`
-            : undefined,
-        config.openai.fast ? "fast" : undefined,
-    ].filter((item): item is string => Boolean(item));
-    ctx.ui.setStatus(
-        "pi-codex-core",
-        `${ctx.ui.theme.fg("accent", "Codex core")}${suffixes.length > 0 ? ctx.ui.theme.fg("dim", ` • ${suffixes.join(" • ")}`) : ""}`,
-    );
 }
 
 function isCodexCoreToolName(toolName: string): toolName is CodexCoreToolName {
