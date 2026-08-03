@@ -1,5 +1,5 @@
 import type { ExtensionSettingsDefinition } from "./definition.ts";
-import { isJsonObject, type JsonObject, type JsonValue } from "./json-value.ts";
+import { isJsonObject, isJsonValue, type JsonObject, type JsonValue } from "./json-value.ts";
 import { defaultGlobalSettingsDisplayPath } from "./paths.ts";
 import { createDefaultSettingsDocument, createSettingsFileSchema } from "./schema-document.ts";
 
@@ -26,16 +26,23 @@ function valueAtPath(root: JsonObject, path: readonly string[]): JsonValue | und
     return current;
 }
 
+function literalType(value: JsonValue): string {
+    if (typeof value === "string") return `\`${value}\``;
+    return `\`${JSON.stringify(value)}\``;
+}
+
 function schemaType(schema: JsonObject): string {
-    if (typeof schema.const === "string") return `\`${schema.const}\``;
+    if (schema.const !== undefined && isJsonValue(schema.const)) return literalType(schema.const);
     if (Array.isArray(schema.enum)) {
-        return schema.enum.map((value) => `\`${String(value)}\``).join(" | ");
+        return schema.enum.filter(isJsonValue).map(literalType).join(" | ");
     }
 
     const alternatives = schema.anyOf ?? schema.oneOf;
     if (Array.isArray(alternatives)) {
         return alternatives
-            .map((alternative) => (isJsonObject(alternative) ? schemaType(alternative) : "unknown"))
+            .map((alternative) =>
+                isJsonObject(alternative) ? schemaType(alternative) : "JSON value",
+            )
             .filter((value, index, values) => values.indexOf(value) === index)
             .join(" | ");
     }
@@ -43,12 +50,50 @@ function schemaType(schema: JsonObject): string {
     if (schema.type === "array") {
         if (!isJsonObject(schema.items)) return "array";
         const itemType = schemaType(schema.items);
-        if (itemType.includes(" | ")) return `(${itemType})[]`;
+        if (
+            Array.isArray(schema.items.anyOf) ||
+            Array.isArray(schema.items.oneOf) ||
+            Array.isArray(schema.items.enum) ||
+            Array.isArray(schema.items.type)
+        ) {
+            return `(${itemType})[]`;
+        }
         return `${itemType}[]`;
     }
+    if (schema.type === "object") {
+        if (isJsonObject(schema.properties)) {
+            const required = new Set(
+                Array.isArray(schema.required)
+                    ? schema.required.filter((value): value is string => typeof value === "string")
+                    : [],
+            );
+            const fields = Object.entries(schema.properties).map(([key, value]) => {
+                const optional = required.has(key) ? "" : "?";
+                const type = isJsonObject(value) ? schemaType(value) : "JSON value";
+                return `${key}${optional}: ${type}`;
+            });
+            return `{ ${fields.join("; ")} }`;
+        }
+        if (isJsonObject(schema.patternProperties)) {
+            const valueTypes = Object.values(schema.patternProperties)
+                .map((value) => (isJsonObject(value) ? schemaType(value) : "JSON value"))
+                .filter((value, index, values) => values.indexOf(value) === index);
+            if (valueTypes.length > 0) return `Record<string, ${valueTypes.join(" | ")}>`;
+        }
+        return "object";
+    }
+    if (Array.isArray(schema.type)) {
+        return schema.type
+            .filter((value): value is string => typeof value === "string")
+            .filter((value, index, values) => values.indexOf(value) === index)
+            .join(" | ");
+    }
     if (typeof schema.type === "string") return schema.type;
-    if (typeof schema.$ref === "string") return "reference";
-    return "unknown";
+    if (typeof schema.$ref === "string") {
+        const segments = schema.$ref.split(/[/#]/).filter((segment) => segment !== "");
+        return segments.at(-1) ?? "referenced value";
+    }
+    return "JSON value";
 }
 
 function collectRows(
