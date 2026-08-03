@@ -1,12 +1,18 @@
 import type { ExtensionSettingsDefinition } from "./definition.ts";
 import { isJsonObject, isJsonValue, type JsonObject, type JsonValue } from "./json-value.ts";
 import { defaultGlobalSettingsDisplayPath } from "./paths.ts";
-import { createDefaultSettingsDocument, createSettingsFileSchema } from "./schema-document.ts";
+import {
+    createDefaultSettingsDocument,
+    createSettingsDocument,
+    createSettingsFileSchema,
+} from "./schema-document.ts";
 
 export const README_GENERATED_START = "<!-- pi-extension-settings:start -->";
 export const README_GENERATED_END = "<!-- pi-extension-settings:end -->";
 
 const MAX_INLINE_DEFAULT_CHARACTERS = 48;
+const MAX_INLINE_TYPE_CHARACTERS = 120;
+const TYPE_NAME_PATTERN = /^[A-Z][A-Za-z0-9]{0,39}$/;
 
 type SettingsRow = {
     readonly path: string;
@@ -26,9 +32,68 @@ function valueAtPath(root: JsonObject, path: readonly string[]): JsonValue | und
     return current;
 }
 
+function markdownCode(value: string): string {
+    if (value === "") return "<code></code>";
+
+    let longestBacktickRun = 0;
+    for (const match of value.matchAll(/`+/g)) {
+        longestBacktickRun = Math.max(longestBacktickRun, match[0].length);
+    }
+    const fence = "`".repeat(longestBacktickRun + 1);
+    const needsPadding =
+        value.startsWith("`") ||
+        value.endsWith("`") ||
+        value.startsWith(" ") ||
+        value.endsWith(" ");
+    const content = needsPadding ? ` ${value} ` : value;
+    return `${fence}${content}${fence}`;
+}
+
 function literalType(value: JsonValue): string {
-    if (typeof value === "string") return `\`${value}\``;
-    return `\`${JSON.stringify(value)}\``;
+    if (typeof value === "string") return markdownCode(value === "" ? '""' : value);
+    return markdownCode(JSON.stringify(value));
+}
+
+function directPrimitiveType(schema: JsonObject): string | undefined {
+    if (schema.const !== undefined || Array.isArray(schema.enum)) return undefined;
+    if (typeof schema.type !== "string") return undefined;
+    if (["boolean", "integer", "null", "number", "string"].includes(schema.type)) {
+        return schema.type;
+    }
+    return undefined;
+}
+
+function valueCoveredByPrimitiveTypes(value: JsonValue, types: ReadonlySet<string>): boolean {
+    if (value === null) return types.has("null");
+    if (typeof value === "number") {
+        if (types.has("number")) return true;
+        return Number.isInteger(value) && types.has("integer");
+    }
+    return types.has(typeof value);
+}
+
+function schemaCoveredByPrimitiveTypes(schema: JsonObject, types: ReadonlySet<string>): boolean {
+    if (schema.const !== undefined && isJsonValue(schema.const)) {
+        return valueCoveredByPrimitiveTypes(schema.const, types);
+    }
+    if (Array.isArray(schema.enum)) {
+        const values = schema.enum.filter(isJsonValue);
+        return (
+            values.length > 0 && values.every((value) => valueCoveredByPrimitiveTypes(value, types))
+        );
+    }
+    const alternatives = schema.anyOf ?? schema.oneOf;
+    if (!Array.isArray(alternatives) || alternatives.length === 0) return false;
+    return alternatives.every(
+        (alternative) =>
+            isJsonObject(alternative) && schemaCoveredByPrimitiveTypes(alternative, types),
+    );
+}
+
+function schemaTypeTitle(schema: JsonObject): string | undefined {
+    if (typeof schema.title !== "string") return undefined;
+    const title = schema.title.trim();
+    return TYPE_NAME_PATTERN.test(title) ? title : undefined;
 }
 
 function schemaType(schema: JsonObject): string {
@@ -39,10 +104,23 @@ function schemaType(schema: JsonObject): string {
 
     const alternatives = schema.anyOf ?? schema.oneOf;
     if (Array.isArray(alternatives)) {
-        return alternatives
-            .map((alternative) =>
-                isJsonObject(alternative) ? schemaType(alternative) : "JSON value",
-            )
+        const schemas = alternatives.filter(isJsonObject);
+        const primitiveTypes = new Set(
+            schemas
+                .map(directPrimitiveType)
+                .filter((value): value is string => value !== undefined),
+        );
+        const numberSubsumesInteger = primitiveTypes.has("number");
+
+        return schemas
+            .filter((alternative) => {
+                const directType = directPrimitiveType(alternative);
+                if (directType !== undefined) {
+                    return !(directType === "integer" && numberSubsumesInteger);
+                }
+                return !schemaCoveredByPrimitiveTypes(alternative, primitiveTypes);
+            })
+            .map(schemaType)
             .filter((value, index, values) => values.indexOf(value) === index)
             .join(" | ");
     }
@@ -50,17 +128,12 @@ function schemaType(schema: JsonObject): string {
     if (schema.type === "array") {
         if (!isJsonObject(schema.items)) return "array";
         const itemType = schemaType(schema.items);
-        if (
-            Array.isArray(schema.items.anyOf) ||
-            Array.isArray(schema.items.oneOf) ||
-            Array.isArray(schema.items.enum) ||
-            Array.isArray(schema.items.type)
-        ) {
-            return `(${itemType})[]`;
-        }
+        if (itemType.includes(" | ")) return `(${itemType})[]`;
         return `${itemType}[]`;
     }
     if (schema.type === "object") {
+        const title = schemaTypeTitle(schema);
+        if (title !== undefined) return title;
         if (isJsonObject(schema.properties)) {
             const required = new Set(
                 Array.isArray(schema.required)
@@ -109,9 +182,15 @@ function collectRows(
             rows.push(...collectRows(value.properties, defaults, path));
             continue;
         }
+        const type = schemaType(value);
+        if (type.length > MAX_INLINE_TYPE_CHARACTERS) {
+            throw new TypeError(
+                `Generated README type for "${path.join(".")}" is too long; add a concise PascalCase title to the complex item or record-value schema.`,
+            );
+        }
         rows.push({
             path: path.join("."),
-            type: schemaType(value),
+            type,
             defaultValue: valueAtPath(defaults, path),
             description: typeof value.description === "string" ? value.description : "",
         });
@@ -137,7 +216,7 @@ function canRenderDefaultInline(value: JsonValue): boolean {
 function formatDefault(value: JsonValue | undefined): string {
     if (value === undefined) return "—";
     if (!canRenderDefaultInline(value)) return "*See JSON below ↓*";
-    return `\`${markdownCell(JSON.stringify(value))}\``;
+    return markdownCode(markdownCell(JSON.stringify(value)));
 }
 
 export type RenderReadmeOptions = {
@@ -157,24 +236,39 @@ export function renderReadmeSettingsSection(
     const rows = collectRows(fileSchema.properties, definition.defaultSettings);
     const tableRows = rows.map(
         (row) =>
-            `| \`${row.path}\` | ${markdownCell(row.type)} | ${formatDefault(row.defaultValue)} | ${markdownCell(row.description)} |`,
+            `| ${markdownCell(markdownCode(row.path))} | ${markdownCell(row.type)} | ${formatDefault(row.defaultValue)} | ${markdownCell(row.description)} |`,
     );
     const globalPath = options.globalPath ?? defaultGlobalSettingsDisplayPath(definition.id);
     const defaultDocument = createDefaultSettingsDocument(definition);
-
-    return [
+    const documentation = [
         "## Configuration",
         "",
-        `Global settings are stored in \`${globalPath}\`.`,
+        `Global settings are stored in ${markdownCode(globalPath)}.`,
         "",
         "| Option | Type | Default | Description |",
         "| --- | --- | --- | --- |",
         ...tableRows,
         "",
-        "```json",
-        JSON.stringify(defaultDocument, undefined, 2),
-        "```",
-    ].join("\n");
+    ];
+
+    if (definition.exampleSettings !== undefined) {
+        documentation.push("### Defaults", "");
+    }
+    documentation.push("```json", JSON.stringify(defaultDocument, undefined, 2), "```");
+
+    if (definition.exampleSettings !== undefined) {
+        const exampleDocument = createSettingsDocument(definition.id, definition.exampleSettings);
+        documentation.push(
+            "",
+            "### Advanced example",
+            "",
+            "```json",
+            JSON.stringify(exampleDocument, undefined, 2),
+            "```",
+        );
+    }
+
+    return documentation.join("\n");
 }
 
 export function replaceGeneratedReadmeSection(

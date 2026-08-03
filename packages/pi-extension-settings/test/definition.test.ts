@@ -34,12 +34,18 @@ describe("defineExtensionSettings", () => {
             appearance: { color: "blue", opacity: 0.8 },
             tools: ["read"],
         });
+        expect(definition.exampleSettings).toEqual({
+            mode: "expanded",
+            appearance: { color: "amber" },
+            tools: ["read", "bash"],
+        });
         expect(isExtensionSettingsDefinition(definition)).toBe(true);
         expect(isExtensionSettingsDefinition({ id: "pi-example" })).toBe(false);
         expect(Object.isFrozen(definition)).toBe(true);
         expect(Object.isFrozen(definition.schema)).toBe(true);
         expect(Object.isFrozen(definition.schema.properties.appearance)).toBe(true);
         expect(Object.isFrozen(definition.defaultSettings.appearance)).toBe(true);
+        expect(Object.isFrozen(definition.exampleSettings)).toBe(true);
     });
 
     it("rejects structurally invalid marked definition values", () => {
@@ -59,6 +65,31 @@ describe("defineExtensionSettings", () => {
         expect(
             isExtensionSettingsDefinition(
                 marked({ id: "pi-fake", title: "Fake", description: "Fake settings." }),
+            ),
+        ).toBe(false);
+        expect(
+            isExtensionSettingsDefinition(
+                marked({
+                    id: valid.id,
+                    title: valid.title,
+                    description: valid.description,
+                    schemaId: valid.schemaId,
+                    schema: valid.schema,
+                    defaultSettings: valid.defaultSettings,
+                }),
+            ),
+        ).toBe(true);
+        expect(
+            isExtensionSettingsDefinition(
+                marked({
+                    id: valid.id,
+                    title: valid.title,
+                    description: valid.description,
+                    schemaId: valid.schemaId,
+                    schema: valid.schema,
+                    defaultSettings: valid.defaultSettings,
+                    exampleSettings: "invalid",
+                }),
             ),
         ).toBe(false);
         expect(
@@ -222,6 +253,120 @@ describe("defineExtensionSettings", () => {
                 ),
             }),
         ).toThrowError(/could not be decoded/);
+    });
+
+    it("rejects example settings that do not match the settings-file schema", () => {
+        expect(() =>
+            defineExtensionSettings({
+                id: "pi-invalid",
+                title: "Invalid",
+                description: "Invalid settings.",
+                schema: Type.Object(
+                    {
+                        label: Type.String({
+                            default: "valid",
+                            pattern: "^valid$",
+                            description: "Display label.",
+                        }),
+                    },
+                    { additionalProperties: false },
+                ),
+                exampleSettings: { label: "invalid" },
+            }),
+        ).toThrowError(/exampleSettings must match/);
+    });
+
+    it("rejects non-JSON example settings", () => {
+        expect(() =>
+            defineExtensionSettings({
+                id: "pi-invalid",
+                title: "Invalid",
+                description: "Invalid settings.",
+                schema: Type.Object(
+                    {
+                        value: Type.Any({ default: null, description: "A value." }),
+                    },
+                    { additionalProperties: false },
+                ),
+                exampleSettings: { value: new Date("2026-01-01T00:00:00Z") },
+            }),
+        ).toThrowError(/exampleSettings must be a JSON object/);
+    });
+
+    it("rejects example settings that reproduce the defaults", () => {
+        expect(() =>
+            defineExtensionSettings({
+                id: "pi-invalid",
+                title: "Invalid",
+                description: "Invalid settings.",
+                schema: Type.Object(
+                    {
+                        enabled: Type.Boolean({
+                            default: true,
+                            description: "Enable it.",
+                        }),
+                    },
+                    { additionalProperties: false },
+                ),
+                exampleSettings: { enabled: true },
+            }),
+        ).toThrowError(/differs from the defaults/);
+    });
+
+    it("rejects example settings that conflict with defaults after merging", () => {
+        expect(() =>
+            defineExtensionSettings({
+                id: "pi-invalid",
+                title: "Invalid",
+                description: "Invalid settings.",
+                schema: Type.Object(
+                    {
+                        enabled: Type.Boolean({
+                            default: true,
+                            description: "Enable it.",
+                        }),
+                        visible: Type.Boolean({
+                            default: true,
+                            description: "Show it.",
+                        }),
+                    },
+                    {
+                        additionalProperties: false,
+                        not: Type.Object(
+                            {
+                                enabled: Type.Literal(false),
+                                visible: Type.Literal(true),
+                            },
+                            { additionalProperties: false },
+                        ),
+                    },
+                ),
+                exampleSettings: { enabled: false },
+            }),
+        ).toThrowError(/resolve to valid settings/);
+    });
+
+    it("rejects example settings that a codec cannot decode", () => {
+        expect(() =>
+            defineExtensionSettings({
+                id: "pi-invalid",
+                title: "Invalid",
+                description: "Invalid settings.",
+                schema: Type.Object(
+                    {
+                        value: Decode(
+                            Type.String({ default: "default", description: "A decoded value." }),
+                            (value) => {
+                                if (value === "example") throw new Error("decode failed");
+                                return value;
+                            },
+                        ),
+                    },
+                    { additionalProperties: false },
+                ),
+                exampleSettings: { value: "example" },
+            }),
+        ).toThrowError(/exampleSettings could not be decoded/);
     });
 });
 

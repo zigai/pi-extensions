@@ -45,6 +45,9 @@ describe("settings artifacts", () => {
             '"$id": "https://example.test/pi-example/config.schema.json"',
         );
         expect(rendered.readmeSection).toContain("| `appearance.opacity` | number | `0.8`");
+        expect(rendered.readmeSection).toContain("### Defaults");
+        expect(rendered.readmeSection).toContain("### Advanced example");
+        expect(rendered.readmeSection).toContain('"mode": "expanded"');
     });
 
     it("generates, checks, and then remains idempotent", async () => {

@@ -54,7 +54,7 @@ describe("README generation", () => {
             "| `tools` | string[] | *See JSON below ↓* | Enabled tool names. |",
         );
         expect(rendered).toContain(
-            "| `tools` | string[] | *See JSON below ↓* | Enabled tool names. |\n\n```json",
+            "| `tools` | string[] | *See JSON below ↓* | Enabled tool names. |\n\n### Defaults\n\n```json",
         );
         expect(rendered).not.toContain("Complete default settings");
         expect(rendered).not.toContain("<details>");

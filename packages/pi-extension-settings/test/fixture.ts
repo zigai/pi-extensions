@@ -40,5 +40,10 @@ export function testDefinition() {
             },
             { additionalProperties: false },
         ),
+        exampleSettings: {
+            mode: "expanded",
+            appearance: { color: "amber" },
+            tools: ["read", "bash"],
+        },
     });
 }

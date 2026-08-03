@@ -1,4 +1,6 @@
-import { IsSchema, type StaticDecode, type TObject } from "typebox";
+import { isDeepStrictEqual } from "node:util";
+
+import { IsSchema, type StaticDecode, type StaticEncode, type TObject } from "typebox";
 import { Value } from "typebox/value";
 
 import { cloneJson, isJsonObject, type JsonObject, parseJson } from "./json-value.ts";
@@ -9,6 +11,7 @@ import {
     hasReservedSchemaProperty,
     isJsonSettingsDefault,
 } from "./schema-document.ts";
+import { mergeSettings } from "./settings-merge.ts";
 
 const definitionMarker = Symbol.for("@zigai/pi-extension-settings/definition");
 const SETTINGS_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
@@ -73,7 +76,18 @@ export type ExtensionSettingsDefinition<Schema extends TObject = TObject> = {
     readonly schema: Schema;
     /** The schema defaults as recursively frozen JSON data, before TypeBox decoding. */
     readonly defaultSettings: JsonObject;
+    /** An optional validated example settings layer rendered in generated documentation. */
+    readonly exampleSettings: JsonObject | undefined;
 };
+
+/** Deeply optional object properties with replacement arrays, matching settings-layer merging. */
+type ExampleSettingsLayer<Value> = Value extends readonly unknown[]
+    ? Value
+    : Value extends object
+      ? string extends keyof Value
+          ? Value
+          : { readonly [Key in keyof Value]?: ExampleSettingsLayer<Value[Key]> }
+      : Value;
 
 /**
  * Input accepted by {@link defineExtensionSettings}.
@@ -107,6 +121,16 @@ export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
      * `$schema` is reserved for editor metadata and cannot be declared as a setting.
      */
     readonly schema: Schema;
+    /**
+     * A realistic, non-default settings layer rendered after the default configuration.
+     *
+     * Use this only when complex settings—such as structured arrays, nested objects, maps, or
+     * unions—benefit from a realistic advanced setup. The value must be valid JSON, must match the
+     * generated settings-file schema, and must resolve to valid settings when merged over the
+     * defaults. Nested object properties may be partial; arrays remain complete replacement values.
+     * Omit it for simple or self-explanatory settings.
+     */
+    readonly exampleSettings?: ExampleSettingsLayer<StaticEncode<Schema>>;
 };
 
 /**
@@ -203,8 +227,50 @@ export function defineExtensionSettings<const Schema extends TObject>(
     }
 
     const defaultSettings = cloneJson(rawDefaults);
+    let exampleSettings: JsonObject | undefined;
+    if (input.exampleSettings !== undefined) {
+        if (!isJsonSettingsDefault(input.exampleSettings)) {
+            throw new InvalidSettingsDefinition("exampleSettings must be a JSON object");
+        }
+
+        const fileSchema = createSettingsFileSchema({
+            id: input.id,
+            title: input.title,
+            description: input.description,
+            schemaId,
+            schema,
+        });
+        if (!Value.Check(fileSchema, input.exampleSettings)) {
+            const issues = [...Value.Errors(fileSchema, input.exampleSettings)]
+                .map((issue) => `${issue.instancePath || "/"}: ${issue.message}`)
+                .join("; ");
+            throw new InvalidSettingsDefinition(
+                `exampleSettings must match the settings-file schema${issues === "" ? "" : `: ${issues}`}`,
+            );
+        }
+
+        const mergedExample = mergeSettings(defaultSettings, input.exampleSettings);
+        if (!Value.Check(schema, mergedExample)) {
+            throw new InvalidSettingsDefinition(
+                "exampleSettings must resolve to valid settings when merged with defaults",
+            );
+        }
+        try {
+            Value.Decode(schema, mergedExample);
+        } catch {
+            throw new InvalidSettingsDefinition("exampleSettings could not be decoded");
+        }
+        if (isDeepStrictEqual(mergedExample, defaultSettings)) {
+            throw new InvalidSettingsDefinition(
+                "exampleSettings must demonstrate configuration that differs from the defaults",
+            );
+        }
+        exampleSettings = cloneJson(input.exampleSettings);
+    }
+
     freezeRecursively(schema);
     freezeRecursively(defaultSettings);
+    freezeRecursively(exampleSettings);
 
     const definition: ExtensionSettingsDefinition<Schema> = Object.freeze({
         [definitionMarker]: true as const,
@@ -214,6 +280,7 @@ export function defineExtensionSettings<const Schema extends TObject>(
         schemaId,
         schema,
         defaultSettings,
+        exampleSettings,
     });
 
     // Build once during definition so malformed schema structures fail at startup.
@@ -233,7 +300,16 @@ export function isExtensionSettingsDefinition(
     if (!("description" in value) || typeof value.description !== "string") return false;
     if (!("schemaId" in value) || typeof value.schemaId !== "string") return false;
     if (!("schema" in value) || !isSettingsSchema(value.schema)) return false;
-    return "defaultSettings" in value && isJsonObject(value.defaultSettings);
+    if (!("defaultSettings" in value) || !isJsonSettingsDefault(value.defaultSettings))
+        return false;
+    if (
+        "exampleSettings" in value &&
+        value.exampleSettings !== undefined &&
+        !isJsonSettingsDefault(value.exampleSettings)
+    ) {
+        return false;
+    }
+    return true;
 }
 
 /**

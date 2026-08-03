@@ -10,7 +10,10 @@
 
 ## Configuration Invariants
 
-- TypeBox definitions are the source of truth for runtime types, persisted input schemas, defaults, checked-in JSON Schema, README option tables, and README default JSON.
+- TypeBox definitions are the source of truth for runtime types, persisted input schemas, defaults, checked-in JSON Schema, README option tables, README default JSON, and optional example settings.
+- `exampleSettings` is optional. Define it only when complex settings—such as structured arrays, nested objects, maps, unions, or meaningful interactions between options—need a realistic advanced example. Omit it for simple scalars or settings already obvious from the type table and defaults.
+- Treat a defined `exampleSettings` value as a validated partial settings layer. It must be JSON, merge to a valid configuration, differ from the defaults, stay focused, and demonstrate realistic non-secret usage rather than duplicate the scaffold.
+- Give complex array-item and record-value object schemas a concise PascalCase `title`, such as `ModelMode`. Generated tables use that title as the type name; generation rejects unnamed types that would make a table row unreadably long.
 - Parse persisted JSON to `unknown`, validate and decode at the boundary, then pass decoded settings inward. Never cast serialized input to a settings type.
 - Apply defaults once, then layer global settings and trusted project settings. Deep-merge objects and replace arrays/scalars.
 - Store global config under `getAgentDir()/extension-settings/<id>.json` and global schemas under `getAgentDir()/extension-settings/schemas/<id>.schema.json`.
@@ -21,7 +24,7 @@
 
 ## Generated Artifacts
 
-- Never hand-edit generated `config.schema.json` content or README text between `<!-- pi-extension-settings:start -->` and `<!-- pi-extension-settings:end -->`.
+- Never hand-edit generated `config.schema.json` content or README text between `<!-- pi-extension-settings:start -->` and `<!-- pi-extension-settings:end -->`. Generated README content includes the exact type table, complete defaults, and the optional advanced example.
 - Run `pi-extension-settings generate` after changing a definition.
 - `pi-extension-settings check` must remain non-mutating and deterministic for pre-commit and CI.
 - Standalone packages and npm workspace packages use the same package-level `piExtensionSettings` manifest.

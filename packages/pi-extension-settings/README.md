@@ -2,7 +2,7 @@
 
 Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions.
 
-Define one TypeBox schema and this package uses it for defaults, runtime validation, `config.schema.json`, and generated documentation.
+Define one TypeBox schema and this package uses it for defaults, runtime validation, `config.schema.json`, and generated documentation. An optional example settings layer can demonstrate a realistic non-default setup in the README.
 
 The runtime API consists of:
 
@@ -45,9 +45,16 @@ export const settingsDefinition = defineExtensionSettings({
         description: "Enable the extension.",
         "x-control": "switch",
       }),
+      excludedTools: Type.Array(Type.String(), {
+        default: [],
+        description: "Tool names the extension should ignore.",
+      }),
     },
     { additionalProperties: false },
   ),
+  exampleSettings: {
+    excludedTools: ["bash", "write"],
+  },
 });
 
 export function loadExampleSettings(ctx: PiSettingsContext) {
@@ -58,6 +65,8 @@ export function loadExampleSettings(ctx: PiSettingsContext) {
 
 export default settingsDefinition;
 ```
+
+`exampleSettings` is optional. Add it only when complex settings need an **Advanced example** alongside the generated **Defaults**.
 
 ### Optional TUI control hints
 
