@@ -35,6 +35,7 @@ Optional Codex remote compaction v2 replay supports OpenAI Codex responses model
 
 - GPT-5.6 Responses Lite compatibility for ordinary Pi turns, image descriptions, and native compaction.
 - Optional GPT-only reasoning trace suppression without disabling hidden model reasoning.
+- Fast mode.
 
 ## Acknowledgements
 

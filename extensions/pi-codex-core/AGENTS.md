@@ -8,6 +8,7 @@
 - Keep `web_run`, `imagegen`, and `view_image` Glowup protocol adapters with their owning tools in this repository. The adapter wire types must remain dependency-free so this extension loads when Glowup is absent.
 - Glowup adapters return semantic protocol nodes only; do not import Pi TUI components, Glowup themes, ANSI helpers, or pi-glowup internal modules.
 - Preserve each tool's native Pi renderer alongside its optional `glowupRendering` adapter, and test both paths.
+- Keep `src/settings/integration.ts` wire-compatible with Pi Codex Voice's `src/codex-integration-registry.ts`; this versioned global registry is what lets independently installed Codex extensions share one `/codex` command and settings tabs without package dependencies.
 
 ## Codex Parity Policy
 
