@@ -7,6 +7,7 @@ import {
     type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { registerCodexCommand } from "../src/settings/command.ts";
+import { registerCodexIntegration } from "../src/settings/integration.ts";
 import { openCodexSettingsScreen, type CodexSettingsTab } from "../src/settings/screen.ts";
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
 import { DEFAULT_TEST_EXTENSION_MODEL, TEST_THEME, makeExtensionContext } from "./helpers.ts";
@@ -37,6 +38,60 @@ test("codex command only opens settings UI for the bare command", async () => {
     assert.deepEqual(notifications, [{ message: "Usage: /codex", type: "warning" }]);
 });
 
+test("codex command merges contributed settings tabs and routes subcommands", async () => {
+    initTheme(undefined, false);
+    let rendered = "";
+    let starts = 0;
+    const unregister = registerCodexIntegration({
+        id: "test-voice",
+        settingsTab: {
+            id: "voice",
+            label: "Voice",
+            aliases: ["voice", "settings"],
+            create: () => ({
+                getItems: () => [
+                    {
+                        id: "voice.enabled",
+                        label: "Realtime voice",
+                        description: "Enable realtime voice.",
+                        currentValue: "on",
+                        values: ["off", "on"],
+                    },
+                ],
+                onChange() {},
+            }),
+        },
+        command: {
+            commands: ["start"],
+            handle() {
+                starts += 1;
+            },
+        },
+    });
+    try {
+        const command = makeCodexCommandHarness();
+        registerCodexCommand(command.api, {
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            applyConfig() {},
+        });
+        const ctx = makeSettingsContext({
+            run(factory) {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                rendered = component.render(120).join("\n");
+            },
+        });
+
+        await command.run("voice", ctx);
+        await command.run("start", ctx);
+
+        assert.match(rendered, /General.*Tools.*OpenAI.*Voice.*Usage/);
+        assert.match(rendered, /Realtime voice/);
+        assert.equal(starts, 1);
+    } finally {
+        unregister();
+    }
+});
+
 test("settings screen refreshes draft from effective config after save", async () => {
     const initialConfig = {
         ...DEFAULT_CODEX_CORE_CONFIG,
@@ -65,6 +120,58 @@ test("settings screen refreshes draft from effective config after save", async (
     assert.ok(webSearchLine);
     assert.ok(webSearchLine.includes("off"));
     assert.equal(webSearchLine.includes("on"), false);
+});
+
+test("contributed settings keep the changed item selected after save", async () => {
+    initTheme(undefined, false);
+    let secondValue = "off";
+    let rendered = "";
+    const ctx = makeSettingsContext({
+        async run(factory) {
+            const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+            component.handleInput?.("\x1b[B");
+            component.handleInput?.(" ");
+            await new Promise((resolve) => setImmediate(resolve));
+            rendered = component.render(120).join("\n");
+        },
+    });
+
+    await openCodexSettingsScreen(ctx, {
+        initialConfig: DEFAULT_CODEX_CORE_CONFIG,
+        initialTab: "voice",
+        additionalTabs: [
+            {
+                id: "voice",
+                label: "Voice",
+                create: () => ({
+                    getItems: () => [
+                        {
+                            id: "first",
+                            label: "First",
+                            description: "First contributed description.",
+                            currentValue: "off",
+                            values: ["off", "on"],
+                        },
+                        {
+                            id: "second",
+                            label: "Second",
+                            description: "Second contributed description.",
+                            currentValue: secondValue,
+                            values: ["off", "on"],
+                        },
+                    ],
+                    onChange(_id, value) {
+                        secondValue = value;
+                    },
+                }),
+            },
+        ],
+        onChange: () => ({ ok: false }),
+    });
+
+    assert.equal(secondValue, "on");
+    assert.match(rendered, /Second contributed description/);
+    assert.doesNotMatch(rendered, /First contributed description/);
 });
 
 test("settings screen saves standalone web search mode", async () => {

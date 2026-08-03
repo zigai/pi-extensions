@@ -1,4 +1,8 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+    ExtensionAPI,
+    ExtensionCommandContext,
+    ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 import {
     readCodexCoreConfig,
@@ -8,6 +12,7 @@ import {
 } from "../config/config.ts";
 import { openCodexSettingsScreen, type CodexSettingsSaveResult } from "./screen.ts";
 import { consumeCodexRateLimitResetCredit } from "../codex/usage.ts";
+import { getCodexCommandContributions, getCodexSettingsTabs } from "./integration.ts";
 
 type CodexCommandOptions = {
     readonly getConfig: () => CodexCoreConfig;
@@ -16,18 +21,49 @@ type CodexCommandOptions = {
 
 export function registerCodexCommand(pi: ExtensionAPI, options: CodexCommandOptions): void {
     pi.registerCommand("codex", {
-        description: "Configure Pi Codex Core tools, prompt, compaction, usage, and resets",
+        description: "Configure Pi Codex Core and installed Codex integrations",
         handler: async (args, ctx) => {
-            if (args.trim().length > 0) {
-                notify(ctx, "Usage: /codex", "warning");
+            const action = args.trim().toLowerCase();
+            const tabs = getCodexSettingsTabs();
+            if (action.length === 0) {
+                await openCodexMenu(ctx, options, tabs);
                 return;
             }
-            await openCodexMenu(ctx, options);
+            const requestedTab = tabs.find(
+                (tab) => tab.id === action || tab.aliases?.includes(action) === true,
+            );
+            if (requestedTab !== undefined) {
+                await openCodexMenu(ctx, options, tabs, requestedTab.id);
+                return;
+            }
+            const command = getCodexCommandContributions().find((contribution) =>
+                contribution.commands.includes(action),
+            );
+            if (command !== undefined) {
+                await command.handle(action, ctx);
+                return;
+            }
+            const actions = [
+                ...tabs.flatMap((tab) => tab.aliases ?? [tab.id]),
+                ...getCodexCommandContributions().flatMap((contribution) => contribution.commands),
+            ];
+            notify(
+                ctx,
+                actions.length === 0
+                    ? "Usage: /codex"
+                    : `Usage: /codex [${[...new Set(actions)].join("|")}]`,
+                "warning",
+            );
         },
     });
 }
 
-async function openCodexMenu(ctx: ExtensionContext, options: CodexCommandOptions): Promise<void> {
+async function openCodexMenu(
+    ctx: ExtensionCommandContext,
+    options: CodexCommandOptions,
+    additionalTabs: ReturnType<typeof getCodexSettingsTabs>,
+    initialTab?: string,
+): Promise<void> {
     if (!ctx.hasUI) {
         notify(ctx, "/codex requires an interactive UI.", "warning");
         return;
@@ -35,6 +71,8 @@ async function openCodexMenu(ctx: ExtensionContext, options: CodexCommandOptions
 
     await openCodexSettingsScreen(ctx, {
         initialConfig: options.getConfig(),
+        additionalTabs,
+        ...(initialTab === undefined ? {} : { initialTab }),
         onChange: (config) => saveAndApply(config, ctx, options),
         onConsumeResetCredit: (redeemRequestId) =>
             consumeCodexRateLimitResetCredit(ctx, redeemRequestId),

@@ -18,6 +18,7 @@ import { readCodexCoreStartupConfig, type CodexCoreConfig } from "./config/confi
 import { rewriteProviderImageDetails } from "./images/detail.ts";
 import { buildCodexCoreSystemPromptResult } from "./prompt/system-prompt.ts";
 import { registerCodexCommand } from "./settings/command.ts";
+import { registerCodexSettingsHost } from "./settings/integration.ts";
 import { registerApplyPatchTool } from "./tools/apply-patch/tool.ts";
 import { registerImagegenTool } from "./tools/imagegen.ts";
 import { registerViewImageTool } from "./tools/view-image/tool.ts";
@@ -52,6 +53,7 @@ export default function extension(pi: ExtensionAPI): void {
     const tokenizer = new CodexTokenizer();
     const togglesActivation = new OptionalTogglesActivation(pi.events, packageName);
     const warnedPromptConflictSessions = new Set<string>();
+    const unregisterCodexSettingsHost = registerCodexSettingsHost(packageName);
 
     const getConfig = (): CodexCoreConfig => config;
     const syncToolActivation = (ctx: Parameters<typeof syncCodexCoreTools>[1]): void => {
@@ -219,6 +221,7 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("session_shutdown", async (event, ctx) => {
+        unregisterCodexSettingsHost();
         togglesActivation.dispose();
         const sessionId = ctx.sessionManager.getSessionId();
         responsesLitePolicy.clearSession(sessionId);

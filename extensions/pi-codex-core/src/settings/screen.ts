@@ -27,6 +27,7 @@ import {
     type CodexRateLimitResetConsumeResult,
     type CodexUsageSnapshot,
 } from "../codex/usage.ts";
+import type { SharedCodexSettingsTab, SharedCodexSettingsTabSession } from "./integration.ts";
 
 export type CodexSettingsTab = "general" | "tools" | "openai" | "usage";
 
@@ -36,7 +37,8 @@ export type CodexSettingsSaveResult =
 
 export type CodexSettingsScreenOptions = {
     readonly initialConfig: CodexCoreConfig;
-    readonly initialTab?: CodexSettingsTab | undefined;
+    readonly initialTab?: string | undefined;
+    readonly additionalTabs?: readonly SharedCodexSettingsTab[] | undefined;
     readonly initialUsage?: CodexUsageSnapshot | { readonly error: string } | undefined;
     readonly onChange: (config: CodexCoreConfig) => CodexSettingsSaveResult;
     readonly onConsumeResetCredit?: (
@@ -45,25 +47,69 @@ export type CodexSettingsScreenOptions = {
     ) => Promise<ResultType<CodexRateLimitResetConsumeResult, CodexFailure>>;
 };
 
-const TAB_ORDER: readonly CodexSettingsTab[] = ["general", "tools", "openai", "usage"];
+const BUILT_IN_TAB_ORDER: readonly CodexSettingsTab[] = ["general", "tools", "openai", "usage"];
 type DescribedSettingItem = SettingItem & { readonly description: string };
+
+type ActiveSharedTab = {
+    readonly definition: SharedCodexSettingsTab;
+    readonly session: SharedCodexSettingsTabSession;
+};
 
 export async function openCodexSettingsScreen(
     ctx: ExtensionContext,
     options: CodexSettingsScreenOptions,
 ): Promise<void> {
     const tasks = new SettingsScreenTaskOwner();
+    const sharedTabs = createSharedTabs(ctx, options.additionalTabs ?? []);
+    const tabOrder = [
+        "general",
+        "tools",
+        "openai",
+        ...sharedTabs.map(({ definition }) => definition.id),
+        "usage",
+    ];
     let draft = options.initialConfig;
-    let activeTab: CodexSettingsTab = options.initialTab ?? "general";
+    let activeTab =
+        options.initialTab !== undefined && tabOrder.includes(options.initialTab)
+            ? options.initialTab
+            : "general";
     let usageState = options.initialUsage;
     let usageLoading = false;
     let resetLoading = false;
     let pendingResetConfirm = false;
+    let sharedChangePending = false;
+    let afterClose: (() => Promise<void> | void) | undefined;
     let resetMessage: { readonly kind: "info" | "error"; readonly text: string } | undefined;
     const personalitySupported = supportsCodexPromptPersonality(ctx.model?.id);
 
     try {
         await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+            const getActiveSharedTab = (): ActiveSharedTab | undefined =>
+                sharedTabs.find(({ definition }) => definition.id === activeTab);
+            const buildCurrentItems = (): DescribedSettingItem[] => {
+                const sharedTab = getActiveSharedTab();
+                if (sharedTab !== undefined) {
+                    return sharedTab.session.getItems().map((item) => ({
+                        ...item,
+                        values: [...item.values],
+                    }));
+                }
+                return buildItems(
+                    builtInTab(activeTab),
+                    draft,
+                    usageState,
+                    usageLoading,
+                    resetLoading,
+                    personalitySupported,
+                );
+            };
+            const formatCurrentHeader = (): string[] => {
+                const sharedTab = getActiveSharedTab();
+                if (sharedTab !== undefined) {
+                    return [...(sharedTab.session.getHeaderLines?.(theme) ?? []), ""];
+                }
+                return formatHeaderLines(builtInTab(activeTab), draft, theme, personalitySupported);
+            };
             const loadUsage = (): void => {
                 if (usageLoading || tasks.signal.aborted) return;
                 usageLoading = true;
@@ -150,22 +196,50 @@ export async function openCodexSettingsScreen(
 
             const createSettingsList = (): SettingsList =>
                 new SettingsList(
-                    buildItems(
-                        activeTab,
-                        draft,
-                        usageState,
-                        usageLoading,
-                        resetLoading,
-                        personalitySupported,
-                    ),
+                    buildCurrentItems(),
                     10,
                     getSettingsListTheme(),
                     (id, value) => {
-                        if (id === "refreshUsage") {
+                        const sharedTab = getActiveSharedTab();
+                        if (sharedTab !== undefined) {
+                            if (sharedChangePending) return;
+                            sharedChangePending = true;
+                            tui.requestRender();
+                            tasks.start(async (signal) => {
+                                try {
+                                    const action = await sharedTab.session.onChange(id, value);
+                                    if (signal.aborted) return;
+                                    if (action?.afterClose !== undefined) {
+                                        afterClose = action.afterClose;
+                                        done(undefined);
+                                        return;
+                                    }
+                                    for (const item of buildCurrentItems()) {
+                                        settingsList.updateValue(item.id, item.currentValue);
+                                    }
+                                } catch (cause: unknown) {
+                                    if (!signal.aborted) {
+                                        ctx.ui.notify(
+                                            cause instanceof Error
+                                                ? cause.message
+                                                : "The Codex integration setting could not be saved.",
+                                            "error",
+                                        );
+                                    }
+                                } finally {
+                                    if (!signal.aborted) {
+                                        sharedChangePending = false;
+                                        tui.requestRender();
+                                    }
+                                }
+                            });
+                            return;
+                        }
+                        if (activeTab === "usage" && id === "refreshUsage") {
                             loadUsage();
                             return;
                         }
-                        if (id === "useReset") {
+                        if (activeTab === "usage" && id === "useReset") {
                             if (!canConsumeResetCredit(usageState)) {
                                 resetMessage = {
                                     kind: "info",
@@ -182,14 +256,7 @@ export async function openCodexSettingsScreen(
                         if (nextDraft === draft) return;
                         const saveResult = options.onChange(nextDraft);
                         if (saveResult.ok) draft = saveResult.effectiveConfig;
-                        for (const item of buildItems(
-                            activeTab,
-                            draft,
-                            usageState,
-                            usageLoading,
-                            resetLoading,
-                            personalitySupported,
-                        )) {
+                        for (const item of buildCurrentItems()) {
                             settingsList.updateValue(item.id, item.currentValue);
                         }
                         tui.requestRender();
@@ -201,8 +268,8 @@ export async function openCodexSettingsScreen(
             if (activeTab === "usage" && !usageState) loadUsage();
 
             const switchTab = (): void => {
-                const currentIndex = TAB_ORDER.indexOf(activeTab);
-                activeTab = TAB_ORDER[(currentIndex + 1) % TAB_ORDER.length] ?? "general";
+                const currentIndex = tabOrder.indexOf(activeTab);
+                activeTab = tabOrder[(currentIndex + 1) % tabOrder.length] ?? "general";
                 pendingResetConfirm = false;
                 settingsList = createSettingsList();
                 if (activeTab === "usage" && !usageState) loadUsage();
@@ -213,9 +280,12 @@ export async function openCodexSettingsScreen(
                 render(width: number): string[] {
                     const body = [
                         rule(width, theme, "accent"),
-                        formatTabs(activeTab, theme),
+                        formatTabs(activeTab, theme, sharedTabs),
                         rule(width, theme, "borderMuted"),
-                        ...formatHeaderLines(activeTab, draft, theme, personalitySupported),
+                        ...formatCurrentHeader(),
+                        ...(sharedChangePending
+                            ? [theme.fg("dim", "  Saving integration setting..."), ""]
+                            : []),
                         ...(activeTab === "usage"
                             ? formatUsageLines(
                                   theme,
@@ -259,7 +329,43 @@ export async function openCodexSettingsScreen(
         });
     } finally {
         await tasks.dispose();
+        await Promise.allSettled(
+            sharedTabs.map(async ({ session }) => {
+                await session.dispose?.();
+            }),
+        );
     }
+    await afterClose?.();
+}
+
+function createSharedTabs(
+    ctx: ExtensionContext,
+    definitions: readonly SharedCodexSettingsTab[],
+): ActiveSharedTab[] {
+    const reservedIds = new Set<string>(BUILT_IN_TAB_ORDER);
+    const tabs: ActiveSharedTab[] = [];
+    for (const definition of definitions) {
+        if (reservedIds.has(definition.id)) {
+            ctx.ui.notify(`Codex integration tab id is already in use: ${definition.id}`, "error");
+            continue;
+        }
+        reservedIds.add(definition.id);
+        try {
+            tabs.push({ definition, session: definition.create(ctx) });
+        } catch (cause: unknown) {
+            ctx.ui.notify(
+                cause instanceof Error
+                    ? cause.message
+                    : `Unable to initialize the ${definition.label} Codex settings tab.`,
+                "error",
+            );
+        }
+    }
+    return tabs;
+}
+
+function builtInTab(value: string): CodexSettingsTab {
+    return BUILT_IN_TAB_ORDER.find((tab) => tab === value) ?? "general";
 }
 
 class SettingsScreenTaskOwner {
@@ -634,10 +740,26 @@ function canConsumeResetCredit(
     );
 }
 
-function formatTabs(activeTab: CodexSettingsTab, theme: Theme): string {
-    const renderTab = (tab: CodexSettingsTab, label: string): string =>
+function formatTabs(
+    activeTab: string,
+    theme: Theme,
+    sharedTabs: readonly ActiveSharedTab[],
+): string {
+    const renderTab = (tab: string, label: string): string =>
         activeTab === tab ? theme.bold(label) : theme.fg("dim", label);
-    return `  ${renderTab("general", "General")}  ${theme.fg("dim", "/")}  ${renderTab("tools", "Tools")}  ${theme.fg("dim", "/")}  ${renderTab("openai", "OpenAI")}  ${theme.fg("dim", "/")}  ${renderTab("usage", "Usage")}`;
+    const tabs = [
+        { id: "general", label: "General" },
+        { id: "tools", label: "Tools" },
+        { id: "openai", label: "OpenAI" },
+        ...sharedTabs.map(({ definition }) => ({
+            id: definition.id,
+            label: definition.label,
+        })),
+        { id: "usage", label: "Usage" },
+    ];
+    return `  ${tabs
+        .map(({ id, label }) => renderTab(id, label))
+        .join(`  ${theme.fg("dim", "/")}  `)}`;
 }
 
 function rule(width: number, theme: Theme, color: "accent" | "borderMuted"): string {
