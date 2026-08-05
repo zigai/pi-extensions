@@ -8,6 +8,7 @@ The runtime API consists of:
 
 - `defineExtensionSettings()` for defining settings.
 - `loadPiExtensionSettings()` for loading defaults, global settings, and trusted project overrides.
+- `updatePiExtensionSettings()` for validated, conflict-aware global or project updates.
 - `getPiGlobalSettingsPath()` and `getPiProjectSettingsPath()` for locating settings files.
 
 ## Recommended: use the template
@@ -67,6 +68,30 @@ export default settingsDefinition;
 ```
 
 `exampleSettings` is optional. Add it only when complex settings need an **Advanced example** alongside the generated **Defaults**.
+
+### Update settings transactionally
+
+Use `updatePiExtensionSettings()` to change the latest global or project settings layer. It handles
+locking, validation, and atomic writes. Load settings first to install and verify the schema.
+
+```ts
+import { updatePiExtensionSettings } from "@zigai/pi-extension-settings/pi";
+
+const result = await updatePiExtensionSettings(settingsDefinition, ctx, {
+  scope: "global",
+  update: (current) => ({ ...current, enabled: false }),
+});
+
+if (result.status !== "updated" && result.status !== "unchanged") {
+  ctx.ui.notify(result.message, "error");
+}
+```
+
+The callback receives the latest encoded layer. Invalid files or updates are left untouched, and
+project updates require a trusted project.
+
+To detect stale editor snapshots, pass the loaded `globalRevision` or `projectRevision` as
+`expectedRevision`; a mismatch returns `conflict`. Omit it to always update the latest valid layer.
 
 ### Optional TUI control hints
 
