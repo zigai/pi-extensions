@@ -7,11 +7,7 @@ import type { ExtensionSettingsDefinition } from "./definition.ts";
 import { readTextIfPresent, writeTextAtomically, writeTextIfMissing } from "./file-system.ts";
 import { formatJson, type JsonObject } from "./json-value.ts";
 import { resolveGlobalSettingsPaths, resolveProjectSettingsPaths } from "./paths.ts";
-import {
-    createDefaultSettingsDocument,
-    createSettingsFileSchema,
-    createSettingsLayerSchema,
-} from "./schema-document.ts";
+import { createDefaultSettingsDocument, createSettingsFileSchema } from "./schema-document.ts";
 import {
     applySettingsLayer,
     parseSettingsLayer,
@@ -20,6 +16,7 @@ import {
     type SettingsDiagnosticCode,
     type SettingsScope,
 } from "./settings-layer.ts";
+import { createSettingsRevision, type PiSettingsRevision } from "./settings-revision.ts";
 
 /**
  * Source for the generated `config.schema.json` shipped with an extension.
@@ -65,9 +62,9 @@ export type LoadSettingsOptions = {
 export type LoadedSettings<Schema extends TObject> = {
     /** Fully resolved and TypeBox-decoded settings safe for extension code to consume. */
     readonly settings: StaticDecode<Schema>;
-    /** Accepted global file contents after decoding and removal of editor-only metadata. */
+    /** Accepted encoded global layer after removal of editor-only metadata. */
     readonly globalSettingsLayer: JsonObject | undefined;
-    /** Accepted trusted-project file contents after decoding and removal of editor metadata. */
+    /** Accepted encoded trusted-project layer after removal of editor metadata. */
     readonly projectSettingsLayer: JsonObject | undefined;
     /** Non-fatal problems encountered while installing, reading, validating, or decoding settings. */
     readonly diagnostics: readonly SettingsDiagnostic[];
@@ -75,6 +72,15 @@ export type LoadedSettings<Schema extends TObject> = {
     readonly globalConfigPath: string;
     /** Absolute project settings path, even when the project is untrusted; absent without a project. */
     readonly projectConfigPath: string | undefined;
+    /** Revision of the exact global settings source read during this load; absent after a read failure. */
+    readonly globalRevision: PiSettingsRevision | undefined;
+    /**
+     * Combined revision of the global and trusted-project sources read during this load.
+     *
+     * Absent when no project was supplied, the project is untrusted, or either source could not be
+     * read. A missing settings file still has a revision and is distinct from an unreadable file.
+     */
+    readonly projectRevision: PiSettingsRevision | undefined;
     /** Whether a valid global layer contributed to {@link LoadedSettings.settings}. */
     readonly usedGlobalConfig: boolean;
     /** Whether a valid trusted-project layer contributed to {@link LoadedSettings.settings}. */
@@ -102,12 +108,20 @@ function bundledSchemaContent(source: BundledSchemaSource): string | undefined {
     }
 }
 
-function readLayer(path: string, scope: SettingsScope, layerSchema: TSchema): ParsedSettingsLayer {
+type LayerSource =
+    | { readonly status: "available"; readonly content: string | undefined }
+    | { readonly status: "unavailable" };
+
+type ReadSettingsLayer = ParsedSettingsLayer & { readonly source: LayerSource };
+
+function readLayer(path: string, scope: SettingsScope, layerSchema: TSchema): ReadSettingsLayer {
     try {
         const content = readTextIfPresent(path);
-        return content === undefined
-            ? { settings: undefined, diagnostics: [] }
-            : parseSettingsLayer(path, scope, content, layerSchema);
+        const parsed =
+            content === undefined
+                ? { settings: undefined, schemaReference: undefined, diagnostics: [] }
+                : parseSettingsLayer(path, scope, content, layerSchema);
+        return { ...parsed, source: { status: "available", content } };
     } catch {
         return {
             settings: undefined,
@@ -120,6 +134,8 @@ function readLayer(path: string, scope: SettingsScope, layerSchema: TSchema): Pa
                     message: `${scope} settings could not be read and were ignored`,
                 },
             ],
+            schemaReference: undefined,
+            source: { status: "unavailable" },
         };
     }
 }
@@ -139,7 +155,8 @@ export function loadSettings<const Schema extends TObject>(
                   definition.id,
               );
 
-    const expectedSchema = formatJson(createSettingsFileSchema(definition));
+    const layerSchema = createSettingsFileSchema(definition);
+    const expectedSchema = formatJson(layerSchema);
     const sourceSchema = bundledSchemaContent(options.bundledSchema);
 
     let schemaStatus: LoadedSettings<Schema>["schemaStatus"] = "unavailable";
@@ -192,7 +209,6 @@ export function loadSettings<const Schema extends TObject>(
         }
     }
 
-    const layerSchema = createSettingsLayerSchema(definition);
     const globalLayer = readLayer(globalPaths.configPath, "global", layerSchema);
     diagnostics.push(...globalLayer.diagnostics);
     const globalApplied = applySettingsLayer(
@@ -207,6 +223,7 @@ export function loadSettings<const Schema extends TObject>(
     let resolved = globalApplied.settings;
     let projectSettingsLayer: JsonObject | undefined;
     let usedProjectConfig = false;
+    let projectRevision: PiSettingsRevision | undefined;
     if (projectPaths !== undefined && options.project?.trusted === true) {
         const projectLayer = readLayer(projectPaths.configPath, "project", layerSchema);
         diagnostics.push(...projectLayer.diagnostics);
@@ -223,6 +240,15 @@ export function loadSettings<const Schema extends TObject>(
             projectSettingsLayer = projectLayer.settings;
             usedProjectConfig = true;
         }
+        if (
+            globalLayer.source.status === "available" &&
+            projectLayer.source.status === "available"
+        ) {
+            projectRevision = createSettingsRevision(
+                globalLayer.source.content,
+                projectLayer.source.content,
+            );
+        }
     }
 
     return {
@@ -233,6 +259,11 @@ export function loadSettings<const Schema extends TObject>(
         diagnostics,
         globalConfigPath: globalPaths.configPath,
         projectConfigPath: projectPaths?.configPath,
+        globalRevision:
+            globalLayer.source.status === "available"
+                ? createSettingsRevision(globalLayer.source.content)
+                : undefined,
+        projectRevision,
         usedGlobalConfig:
             globalLayer.settings !== undefined && globalApplied.diagnostic === undefined,
         usedProjectConfig,

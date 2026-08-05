@@ -81,13 +81,26 @@ export type ExtensionSettingsDefinition<Schema extends TObject = TObject> = {
 };
 
 /** Deeply optional object properties with replacement arrays, matching settings-layer merging. */
-type ExampleSettingsLayer<Value> = Value extends readonly unknown[]
+type SettingsLayerValue<Value> = Value extends readonly unknown[]
     ? Value
     : Value extends object
       ? string extends keyof Value
           ? Value
-          : { readonly [Key in keyof Value]?: ExampleSettingsLayer<Value[Key]> }
+          : { [Key in keyof Value]?: SettingsLayerValue<Value[Key]> }
       : Value;
+
+/**
+ * Encoded JSON layer persisted for an extension's global or project settings.
+ *
+ * Object properties are recursively optional because layers merge over schema defaults. Arrays and
+ * scalar values remain complete replacements. Values use the schema's encoded representation, not
+ * the decoded runtime representation returned by `loadPiExtensionSettings`.
+ *
+ * @template Schema The TypeBox object schema from an extension settings definition.
+ */
+export type ExtensionSettingsLayer<Schema extends TObject> = SettingsLayerValue<
+    StaticEncode<Schema>
+>;
 
 /**
  * Input accepted by {@link defineExtensionSettings}.
@@ -130,7 +143,7 @@ export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
      * defaults. Nested object properties may be partial; arrays remain complete replacement values.
      * Omit it for simple or self-explanatory settings.
      */
-    readonly exampleSettings?: ExampleSettingsLayer<StaticEncode<Schema>>;
+    readonly exampleSettings?: ExtensionSettingsLayer<Schema>;
 };
 
 /**

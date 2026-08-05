@@ -30,6 +30,13 @@ export type SettingsDiagnosticCode =
     | "config-scaffold-failed"
     | "schema-install-failed";
 
+export type SettingsValidationIssue = {
+    /** JSON Pointer to the invalid setting, or `/` for the document root. */
+    readonly path: string;
+    /** TypeBox validation message for this issue. */
+    readonly message: string;
+};
+
 /**
  * A non-fatal problem encountered while loading settings.
  *
@@ -48,26 +55,21 @@ export type SettingsDiagnostic = {
     /** User-facing summary that does not include settings values. */
     readonly message: string;
     /** JSON Pointer paths and validator messages when schema validation failed. */
-    readonly issues?: readonly {
-        /** JSON Pointer to the invalid setting, or `/` for the document root. */
-        readonly path: string;
-        /** TypeBox validation message for this issue. */
-        readonly message: string;
-    }[];
+    readonly issues?: readonly SettingsValidationIssue[];
 };
 
 export type ParsedSettingsLayer = {
+    /** Encoded JSON settings after editor-only metadata is removed. */
     readonly settings: JsonObject | undefined;
+    /** Editor schema reference from the file, when present and valid. */
+    readonly schemaReference: string | undefined;
     readonly diagnostics: readonly SettingsDiagnostic[];
 };
 
-function validationIssues(
+export function settingsValidationIssues(
     schema: TSchema,
     value: unknown,
-): readonly {
-    readonly path: string;
-    readonly message: string;
-}[] {
+): readonly SettingsValidationIssue[] {
     return [...Value.Errors(schema, value)].map((issue) => ({
         path: issue.instancePath === "" ? "/" : issue.instancePath,
         message: issue.message,
@@ -84,6 +86,7 @@ export function parseSettingsLayer(
     if (parsed === undefined) {
         return {
             settings: undefined,
+            schemaReference: undefined,
             diagnostics: [
                 {
                     code: "config-malformed",
@@ -99,6 +102,7 @@ export function parseSettingsLayer(
     if (!Value.Check(layerSchema, parsed)) {
         return {
             settings: undefined,
+            schemaReference: undefined,
             diagnostics: [
                 {
                     code: "config-invalid",
@@ -106,17 +110,20 @@ export function parseSettingsLayer(
                     scope,
                     path,
                     message: `${scope} settings do not match the extension schema and were ignored`,
-                    issues: validationIssues(layerSchema, parsed),
+                    issues: settingsValidationIssues(layerSchema, parsed),
                 },
             ],
         };
     }
 
+    const schemaReference =
+        isJsonObject(parsed) && typeof parsed.$schema === "string" ? parsed.$schema : undefined;
     try {
         const decoded: unknown = Value.Decode(layerSchema, parsed);
         if (!isJsonObject(decoded)) {
             return {
                 settings: undefined,
+                schemaReference,
                 diagnostics: [
                     {
                         code: "config-decode-failed",
@@ -128,10 +135,11 @@ export function parseSettingsLayer(
                 ],
             };
         }
-        return { settings: settingsLayerFromFile(decoded), diagnostics: [] };
+        return { settings: settingsLayerFromFile(decoded), schemaReference, diagnostics: [] };
     } catch {
         return {
             settings: undefined,
+            schemaReference,
             diagnostics: [
                 {
                     code: "config-decode-failed",
@@ -148,7 +156,7 @@ export function parseSettingsLayer(
 export function applySettingsLayer<Schema extends TObject>(
     schema: Schema,
     current: JsonObject,
-    layer: ParsedSettingsLayer,
+    layer: Pick<ParsedSettingsLayer, "settings">,
     path: string,
     scope: SettingsScope,
 ): { readonly settings: JsonObject; readonly diagnostic?: SettingsDiagnostic } {
@@ -165,7 +173,7 @@ export function applySettingsLayer<Schema extends TObject>(
             scope,
             path,
             message: `${scope} settings conflict with the resolved configuration and were ignored`,
-            issues: validationIssues(schema, merged),
+            issues: settingsValidationIssues(schema, merged),
         },
     };
 }

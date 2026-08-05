@@ -194,9 +194,13 @@ export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject
     return document;
 }
 
-export function createSettingsDocument(id: string, settings: JsonObject): JsonObject {
+export function createSettingsDocument(
+    id: string,
+    settings: JsonObject,
+    schemaReference = `./schemas/${id}.schema.json`,
+): JsonObject {
     const document: Record<string, JsonValue> = {
-        $schema: `./schemas/${id}.schema.json`,
+        $schema: schemaReference,
     };
     for (const [key, value] of Object.entries(settings)) {
         document[key] = cloneJson(value);
@@ -208,10 +212,6 @@ export function createDefaultSettingsDocument(
     input: SchemaDocumentInput & { readonly defaultSettings: JsonObject },
 ): JsonObject {
     return createSettingsDocument(input.id, input.defaultSettings);
-}
-
-export function createSettingsLayerSchema(input: SchemaDocumentInput): TSchema {
-    return createSettingsFileSchema(input);
 }
 
 export function isJsonSettingsDefault(value: unknown): value is JsonObject {

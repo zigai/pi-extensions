@@ -1,15 +1,31 @@
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 type WriteStatus = "created" | "unchanged" | "updated";
+
+function errorCode(cause: unknown): string | undefined {
+    if (!(cause instanceof Error) || !("code" in cause) || typeof cause.code !== "string") {
+        return undefined;
+    }
+    return cause.code;
+}
 
 export function readTextIfPresent(path: string): string | undefined {
     try {
         return readFileSync(path, "utf8");
     } catch (cause: unknown) {
-        const error: NodeJS.ErrnoException | undefined = cause instanceof Error ? cause : undefined;
-        if (error?.code === "ENOENT") return undefined;
+        if (errorCode(cause) === "ENOENT") return undefined;
+        throw cause;
+    }
+}
+
+export async function readTextIfPresentAsync(path: string): Promise<string | undefined> {
+    try {
+        return await readFile(path, "utf8");
+    } catch (cause: unknown) {
+        if (errorCode(cause) === "ENOENT") return undefined;
         throw cause;
     }
 }
@@ -26,9 +42,7 @@ export function writeTextIfMissing(path: string, content: string, mode = 0o600):
             linkSync(temporaryPath, path);
             return "created";
         } catch (cause: unknown) {
-            const error: NodeJS.ErrnoException | undefined =
-                cause instanceof Error ? cause : undefined;
-            if (error?.code === "EEXIST") return "unchanged";
+            if (errorCode(cause) === "EEXIST") return "unchanged";
             throw cause;
         }
     } finally {
@@ -54,6 +68,41 @@ export function writeTextAtomically(path: string, content: string, mode = 0o644)
     } finally {
         try {
             rmSync(temporaryPath, { force: true });
+        } catch {
+            // Cleanup must not mask the write result.
+        }
+    }
+}
+
+/** Atomically replace complete content while preserving an existing file's permission mode. */
+export async function writeTextAtomicallyAsync(
+    path: string,
+    content: string,
+    defaultMode = 0o600,
+): Promise<void> {
+    let mode = defaultMode;
+    try {
+        mode = (await stat(path)).mode & 0o777;
+    } catch (cause: unknown) {
+        if (errorCode(cause) !== "ENOENT") throw cause;
+    }
+
+    const directory = dirname(path);
+    const temporaryPath = join(directory, `.${basename(path)}.${randomUUID()}.tmp`);
+    await mkdir(directory, { recursive: true });
+    try {
+        const handle = await open(temporaryPath, "wx", mode);
+        try {
+            await handle.writeFile(content, { encoding: "utf8" });
+            await handle.sync();
+        } finally {
+            await handle.close();
+        }
+        await chmod(temporaryPath, mode);
+        await rename(temporaryPath, path);
+    } finally {
+        try {
+            await rm(temporaryPath, { force: true });
         } catch {
             // Cleanup must not mask the write result.
         }
