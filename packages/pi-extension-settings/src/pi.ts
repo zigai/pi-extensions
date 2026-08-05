@@ -16,12 +16,11 @@ import {
     type SettingsDiagnosticCode,
 } from "./settings-loader.ts";
 import type { PiSettingsRevision } from "./settings-revision.ts";
-import {
-    updateSettingsTransaction,
-    type PiSettingsUpdateIssue,
-    type PiSettingsUpdateScope,
-    type UpdatePiExtensionSettingsOptions,
-    type UpdatePiExtensionSettingsResult,
+import type {
+    PiSettingsUpdateIssue,
+    PiSettingsUpdateScope,
+    UpdatePiExtensionSettingsOptions,
+    UpdatePiExtensionSettingsResult,
 } from "./settings-transaction.ts";
 
 /**
@@ -166,6 +165,8 @@ export async function updatePiExtensionSettings<const Schema extends TObject>(
     context: PiSettingsContext,
     options: UpdatePiExtensionSettingsOptions<Schema>,
 ): Promise<UpdatePiExtensionSettingsResult> {
+    // Read-only consumers should not initialize the lock library or its process signal handlers.
+    const { updateSettingsTransaction } = await import("./settings-transaction.ts");
     const global = resolveGlobalSettingsPaths(getAgentDir(), definition.id);
     const project = resolveProjectSettingsPaths(context.cwd, CONFIG_DIR_NAME, definition.id);
     const projectTrusted = context.isProjectTrusted();
