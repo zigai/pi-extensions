@@ -162,7 +162,7 @@ export const policyDecisionSchema = Type.Object(
         target: capabilitySelectorSchema,
         state: desiredStateSchema,
     },
-    { additionalProperties: false },
+    { additionalProperties: false, title: "PolicyDecision" },
 );
 
 const profileSchema = Type.Object(
@@ -176,7 +176,7 @@ const profileSchema = Type.Object(
             description: "System-prompt fragment IDs activated by this profile.",
         }),
     },
-    { additionalProperties: false },
+    { additionalProperties: false, title: "CapabilityProfile" },
 );
 
 const promptFragmentContentSchema = Type.Union([
@@ -211,7 +211,7 @@ export const promptFragmentSchema = Type.Object(
         priority: Type.Integer({ default: 0 }),
         when: Type.Optional(conditionSchema),
     },
-    { additionalProperties: false },
+    { additionalProperties: false, title: "PromptFragment" },
 );
 
 export const ruleSchema = Type.Object(
@@ -228,7 +228,7 @@ export const ruleSchema = Type.Object(
             description: "Profiles contributed while this rule matches.",
         }),
     },
-    { additionalProperties: false },
+    { additionalProperties: false, title: "PolicyRule" },
 );
 
 const defaultsSchema = Type.Object(
@@ -329,6 +329,30 @@ export const extensionSettingsDefinition = defineExtensionSettings({
     description: "Central capability policy, profiles, conditions, and session overrides for Pi.",
     schemaId: "https://raw.githubusercontent.com/zigai/pi-toggles/HEAD/config.schema.json",
     schema: settingsSchema,
+    exampleSettings: {
+        activeProfile: "focused",
+        profiles: {
+            focused: {
+                decisions: [
+                    {
+                        target: { kind: "tool", name: "bash" },
+                        state: "off",
+                    },
+                ],
+                promptFragments: ["focus"],
+            },
+        },
+        promptFragments: [
+            {
+                id: "focus",
+                content: {
+                    kind: "inline",
+                    text: "Keep responses focused on the requested change.",
+                },
+                priority: 10,
+            },
+        ],
+    },
 });
 
 export function loadTogglesSettings(ctx: PiSettingsContext) {

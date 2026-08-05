@@ -48,10 +48,12 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-toggles.json`.
 | `defaults.lazyToolLimit` | integer | `5` | Maximum tools activated by one lazy capability search. |
 | `defaults.showStatus` | boolean | `true` | Show a compact footer status when policy changes Pi or has diagnostics. |
 | `activeProfile` | string | — | Persistent profile selected at this settings scope. |
-| `overrides` | object[] | `[]` | Explicit persistent capability decisions. |
-| `profiles` | object | `{}` | Named bundles of capability decisions and prompt fragments. |
-| `promptFragments` | object[] | `[]` | Owned system-prompt fragments available to profiles and conditions. |
-| `rules` | object[] | `[]` | Conditional decisions and profile activations. |
+| `overrides` | PolicyDecision[] | `[]` | Explicit persistent capability decisions. |
+| `profiles` | Record<string, CapabilityProfile> | `{}` | Named bundles of capability decisions and prompt fragments. |
+| `promptFragments` | PromptFragment[] | `[]` | Owned system-prompt fragments available to profiles and conditions. |
+| `rules` | PolicyRule[] | `[]` | Conditional decisions and profile activations. |
+
+### Defaults
 
 ```json
 {
@@ -66,6 +68,41 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-toggles.json`.
   "profiles": {},
   "promptFragments": [],
   "rules": []
+}
+```
+
+### Advanced example
+
+```json
+{
+  "$schema": "./schemas/pi-toggles.schema.json",
+  "activeProfile": "focused",
+  "profiles": {
+    "focused": {
+      "decisions": [
+        {
+          "target": {
+            "kind": "tool",
+            "name": "bash"
+          },
+          "state": "off"
+        }
+      ],
+      "promptFragments": [
+        "focus"
+      ]
+    }
+  },
+  "promptFragments": [
+    {
+      "id": "focus",
+      "content": {
+        "kind": "inline",
+        "text": "Keep responses focused on the requested change."
+      },
+      "priority": 10
+    }
+  ]
 }
 ```
 <!-- pi-extension-settings:end -->

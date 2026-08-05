@@ -46,7 +46,7 @@
     "config:check": "pi-extension-settings check"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.2.4",
+    "@zigai/pi-extension-settings": "0.4.1",
     "glob": "^13.0.6"
   },
   "devDependencies": {
