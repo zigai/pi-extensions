@@ -44,7 +44,7 @@
     "config:check": "pi-extension-settings check"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.2.4"
+    "@zigai/pi-extension-settings": "0.4.1"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.83.0",
