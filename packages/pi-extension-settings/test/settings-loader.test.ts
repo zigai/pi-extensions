@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Type } from "typebox";
+import { Codec, Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { defineExtensionSettings } from "../src/definition.ts";
@@ -45,6 +45,8 @@ describe("loadSettings", () => {
         expect(loaded.diagnostics).toEqual([]);
         expect(loaded.scaffoldedGlobalConfig).toBe(true);
         expect(loaded.schemaStatus).toBe("created");
+        expect(loaded.globalRevision).toMatch(/^sha256:[0-9a-f]{64}$/);
+        expect(loaded.projectRevision).toBeUndefined();
         expect(JSON.parse(await readFile(paths.configPath, "utf8"))).toEqual({
             $schema: "./schemas/pi-example.schema.json",
             ...definition.defaultSettings,
@@ -105,6 +107,7 @@ describe("loadSettings", () => {
             tools: ["bash"],
         });
         expect(loaded.usedProjectConfig).toBe(true);
+        expect(loaded.projectRevision).toMatch(/^sha256:[0-9a-f]{64}$/);
         expect(loaded.projectSettingsLayer).toEqual({
             appearance: { opacity: 0.25 },
             tools: ["bash"],
@@ -129,6 +132,7 @@ describe("loadSettings", () => {
 
         expect(loaded.settings.enabled).toBe(true);
         expect(loaded.usedProjectConfig).toBe(false);
+        expect(loaded.projectRevision).toBeUndefined();
     });
 
     it("preserves and ignores malformed user settings", async () => {
@@ -146,6 +150,7 @@ describe("loadSettings", () => {
         expect(loaded.diagnostics).toContainEqual(
             expect.objectContaining({ code: "config-malformed", scope: "global" }),
         );
+        expect(loaded.globalRevision).toMatch(/^sha256:[0-9a-f]{64}$/);
         expect(await readFile(paths.configPath, "utf8")).toBe("{ malformed");
     });
 
@@ -222,6 +227,37 @@ describe("loadSettings", () => {
         expect(loaded.settings.color).toBe("blue");
     });
 
+    it("keeps accepted layers encoded and decodes only resolved runtime settings", async () => {
+        const definition = defineExtensionSettings({
+            id: "pi-codec",
+            title: "Codec",
+            description: "Codec-backed settings.",
+            schema: Type.Object(
+                {
+                    value: Codec(Type.String({ default: "default", description: "Encoded value." }))
+                        .Decode((value) => `decoded:${value}`)
+                        .Encode((value) => value.replace(/^decoded:/, "")),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const agentDir = await temporaryDirectory();
+        const paths = resolveGlobalSettingsPaths(agentDir, definition.id);
+        await mkdir(join(agentDir, "extension-settings"), { recursive: true });
+        await writeFile(paths.configPath, JSON.stringify({ value: "custom" }));
+
+        const loaded = loadSettings(definition, {
+            agentDir,
+            bundledSchema: {
+                kind: "content",
+                content: formatJson(createSettingsFileSchema(definition)),
+            },
+        });
+
+        expect(loaded.globalSettingsLayer).toEqual({ value: "custom" });
+        expect(loaded.settings.value).toBe("decoded:custom");
+    });
+
     it("falls back safely when the config path cannot be read", async () => {
         const agentDir = await temporaryDirectory();
         const paths = resolveGlobalSettingsPaths(agentDir, "pi-example");
@@ -236,5 +272,6 @@ describe("loadSettings", () => {
         expect(loaded.diagnostics).toContainEqual(
             expect.objectContaining({ code: "config-read-failed" }),
         );
+        expect(loaded.globalRevision).toBeUndefined();
     });
 });

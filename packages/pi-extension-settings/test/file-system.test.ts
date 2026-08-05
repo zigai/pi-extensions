@@ -7,12 +7,19 @@ import {
     rmSync,
     writeFileSync,
 } from "node:fs";
+import { chmod, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { readTextIfPresent, writeTextAtomically, writeTextIfMissing } from "../src/file-system.ts";
+import {
+    readTextIfPresent,
+    readTextIfPresentAsync,
+    writeTextAtomically,
+    writeTextAtomicallyAsync,
+    writeTextIfMissing,
+} from "../src/file-system.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -71,5 +78,35 @@ describe("file operations", () => {
     it("throws when reading a directory", () => {
         const directory = temporaryDirectory();
         expect(() => readTextIfPresent(directory)).toThrow();
+    });
+
+    it("asynchronously reads and atomically replaces content while preserving permissions", async () => {
+        const root = temporaryDirectory();
+        const path = join(root, "nested", "config.json");
+        expect(await readTextIfPresentAsync(path)).toBeUndefined();
+
+        await writeTextAtomicallyAsync(path, "first\n");
+        expect(await readTextIfPresentAsync(path)).toBe("first\n");
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
+
+        await chmod(path, 0o640);
+        await writeTextAtomicallyAsync(path, "second\n");
+        expect(await readFile(path, "utf8")).toBe("second\n");
+        expect((await stat(path)).mode & 0o777).toBe(0o640);
+        expect(await readdir(join(root, "nested"))).toEqual(["config.json"]);
+    });
+
+    it("reports asynchronous read and replacement failures without leaving temporary files", async () => {
+        const root = temporaryDirectory();
+        const directory = join(root, "directory");
+        mkdirSync(directory);
+        await expect(readTextIfPresentAsync(directory)).rejects.toBeDefined();
+
+        const parentFile = join(root, "parent");
+        await writeFile(parentFile, "file");
+        await expect(
+            writeTextAtomicallyAsync(join(parentFile, "config.json"), "content\n"),
+        ).rejects.toBeDefined();
+        expect(await readdir(root)).toEqual(["directory", "parent"]);
     });
 });

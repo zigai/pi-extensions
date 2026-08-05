@@ -10,6 +10,7 @@ describe("public API", () => {
             "getPiGlobalSettingsPath",
             "getPiProjectSettingsPath",
             "loadPiExtensionSettings",
+            "updatePiExtensionSettings",
         ]);
     });
 });
