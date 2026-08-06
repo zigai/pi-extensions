@@ -11,7 +11,7 @@ import {
     type ScriptFormatterCommands,
 } from "./script-preview/formatters.ts";
 import {
-    getGlowupGlobalConfigDirectory,
+    getGlowupDiagnosticsDirectory,
     readGlowupConfig,
     type GlowupConfig,
 } from "./config/config.ts";
@@ -1214,7 +1214,7 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
     const reportWarning = (message: string): void => console.warn(message);
     let config = readGlowupConfig({ reportWarning });
     const debugLogger = new DebugFileLogger({
-        extensionDirectory: getGlowupGlobalConfigDirectory(),
+        extensionDirectory: getGlowupDiagnosticsDirectory(),
         reportWarning,
     });
     debugLogger.configure(config.debugLog);

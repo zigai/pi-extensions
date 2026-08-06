@@ -48,13 +48,16 @@
     "test:pty": "vitest run test/pty/pi-cli.test.ts",
     "test:properties": "vitest run test/streaming-render-properties.test.ts",
     "benchmark:tui": "node --expose-gc --import tsx benchmark/tui-rendering.ts",
+    "config:generate": "pi-extension-settings generate",
+    "config:check": "pi-extension-settings check",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "check": "npm run config:check && npm run format:check && npm run lint && npm run typecheck && npm test",
     "verify": "npm run check"
   },
   "dependencies": {
     "@pierre/diffs": "^1.2.12",
+    "@zigai/pi-extension-settings": "0.4.1",
     "ansi-styles": "^6.2.3",
     "shiki": "^4.3.0"
   },
@@ -92,6 +95,9 @@
       "optional": true
     }
   },
+  "bundleDependencies": [
+    "@zigai/pi-extension-settings"
+  ],
   "engines": {
     "node": ">=22.19.0 <27"
   },
@@ -104,5 +110,10 @@
     "extensions": [
       "./src/index.ts"
     ]
+  },
+  "piExtensionSettings": {
+    "definition": "./src/settings.ts",
+    "schema": "./config.schema.json",
+    "readme": "./README.md"
   }
 }
