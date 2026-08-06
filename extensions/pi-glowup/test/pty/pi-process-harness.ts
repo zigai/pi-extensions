@@ -26,6 +26,7 @@ export type PiProcessOptions = {
     readonly rows: number;
     readonly sessionPath?: string;
     readonly initialPrompt?: string;
+    readonly tuiMode?: "regular" | "fullscreen";
 };
 
 type ProcessExit = {
@@ -112,6 +113,7 @@ export class PiPtyProcess {
             "--no-themes",
             "--no-context-files",
             "--approve",
+            ...(options.tuiMode === undefined ? [] : ["--tui-mode", options.tuiMode]),
             ...(options.sessionPath === undefined ? [] : ["--session", options.sessionPath]),
             ...(options.initialPrompt === undefined ? [] : [options.initialPrompt]),
         ];

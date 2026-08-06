@@ -66,6 +66,10 @@ const piTheme = new Theme(
         thinkingXhigh: "#777777",
     } as Record<ThemeColor, string>,
     {
+        selectedBg: "#333333",
+        userMessageBg: "#1E1E2E",
+        customMessageBg: "#242436",
+        toolPendingBg: "#222222",
         toolSuccessBg: "#123012",
         toolErrorBg: "#301212",
     } as ThemeBackgroundColors,

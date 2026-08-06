@@ -1,5 +1,11 @@
 import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { TUI, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import {
+    TuiAltScreen,
+    TuiMainScreen,
+    visibleWidth,
+    type Component,
+    type TUI,
+} from "@earendil-works/pi-tui";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,7 +64,18 @@ function rowContaining(terminal: VirtualTerminal, text: string) {
     return row;
 }
 
-describe("Pi TUI through headless xterm", () => {
+const tuiVariants = [
+    {
+        mode: "regular",
+        createTui: (terminal: VirtualTerminal): TUI => new TuiMainScreen(terminal),
+    },
+    {
+        mode: "fullscreen",
+        createTui: (terminal: VirtualTerminal): TUI => new TuiAltScreen(terminal),
+    },
+] as const;
+
+describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, createTui }) => {
     let root: string;
     let cwd: string;
     let extension: GlowupExtensionHarness;
@@ -109,7 +126,7 @@ describe("Pi TUI through headless xterm", () => {
         rows = 30,
     ): Promise<{ readonly terminal: VirtualTerminal; readonly tui: TUI }> {
         terminal = new VirtualTerminal(columns, rows);
-        tui = new TUI(terminal);
+        tui = createTui(terminal);
         tui.setClearOnShrink(true);
         for (const component of components) tui.addChild(component);
         tui.start();
@@ -119,7 +136,7 @@ describe("Pi TUI through headless xterm", () => {
 
     it("interprets apply_patch streaming, shrinking, rewriting, and completion without stale cells", async () => {
         const pendingTerminal = new VirtualTerminal(100, 28);
-        const activeTui = new TUI(pendingTerminal);
+        const activeTui = createTui(pendingTerminal);
         activeTui.setClearOnShrink(true);
         const tool = new ToolExecutionComponent(
             "apply_patch",
@@ -177,7 +194,7 @@ describe("Pi TUI through headless xterm", () => {
 
     it("neutralizes tool-supplied terminal controls before they reach the PTY", async () => {
         const pendingTerminal = new VirtualTerminal(100, 20);
-        const activeTui = new TUI(pendingTerminal);
+        const activeTui = createTui(pendingTerminal);
         const tool = new ToolExecutionComponent(
             "unknown_tool",
             "call-xterm-controls",
@@ -208,7 +225,7 @@ describe("Pi TUI through headless xterm", () => {
 
     it("removes and restores the Pierre split divider across wide-narrow-wide redraws", async () => {
         const pendingTerminal = new VirtualTerminal(180, 30);
-        const activeTui = new TUI(pendingTerminal);
+        const activeTui = createTui(pendingTerminal);
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
             oldContent: "export const leftValue = 1;\n",
@@ -259,12 +276,16 @@ describe("Pi TUI through headless xterm", () => {
         pendingTerminal.resize(180, 30);
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).toBe(firstWide);
-        expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[2J\u001b[H\u001b[3J");
+        if (mode === "regular") {
+            expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[2J\u001b[H\u001b[3J");
+        } else {
+            expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[?1049h");
+        }
     });
 
     it("renders completed apply_patch details side-by-side and preserves every row", async () => {
         const pendingTerminal = new VirtualTerminal(180, 30);
-        const activeTui = new TUI(pendingTerminal);
+        const activeTui = createTui(pendingTerminal);
         const patch = `*** Begin Patch
 *** Update File: src/example.ts
 @@
@@ -334,7 +355,7 @@ describe("Pi TUI through headless xterm", () => {
 
     it("keeps every available row from compatible edit result previews", async () => {
         const pendingTerminal = new VirtualTerminal(100, 30);
-        const activeTui = new TUI(pendingTerminal);
+        const activeTui = createTui(pendingTerminal);
         const tool = new ToolExecutionComponent(
             "edit",
             "call-xterm-compatible-edit",
@@ -381,7 +402,7 @@ describe("Pi TUI through headless xterm", () => {
 
     it("expands and collapses without duplicating or overwriting adjacent transcript blocks", async () => {
         const pendingTerminal = new VirtualTerminal(110, 32);
-        const activeTui = new TUI(pendingTerminal);
+        const activeTui = createTui(pendingTerminal);
         const patch = `*** Begin Patch
 *** Add File: src/expanded.ts
 +export const line1 = 1;
@@ -433,7 +454,7 @@ describe("Pi TUI through headless xterm", () => {
 
     it("keeps full-row diff backgrounds and syntax colors scoped away from context and a sentinel", async () => {
         const pendingTerminal = new VirtualTerminal(90, 28);
-        const activeTui = new TUI(pendingTerminal);
+        const activeTui = createTui(pendingTerminal);
         const patch = `*** Begin Patch
 *** Update File: src/colors.ts
 @@
@@ -537,11 +558,14 @@ describe("Pi TUI through headless xterm", () => {
         prototype.clearAutocompleteUi.call(editor);
         await running.terminal.settle();
 
-        expect(running.terminal.screenText()).toBe("EDITOR_PROMPT");
+        expect(running.terminal.screenText().trimEnd()).toBe("EDITOR_PROMPT");
         expect(running.terminal.screenText()).not.toContain("stale completion");
-        expect(running.terminal.rawWrites().slice(writesBeforeCleanup).join("")).toContain(
-            "\u001b[2J\u001b[H\u001b[3J",
-        );
+        const cleanupWrites = running.terminal.rawWrites().slice(writesBeforeCleanup).join("");
+        if (mode === "regular") {
+            expect(cleanupWrites).toContain("\u001b[2J\u001b[H\u001b[3J");
+        } else {
+            expect(cleanupWrites).toContain("\u001b[1;1H\u001b[2K");
+        }
         expect(
             running.terminal.interpretedRows().every((row) => visibleWidth(row.text) <= 80),
         ).toBe(true);

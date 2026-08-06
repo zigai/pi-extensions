@@ -50,7 +50,7 @@ function createFixtureWorkspace(): FixtureWorkspace {
 
 function launchOptions(
     fixture: FixtureWorkspace,
-    options: Partial<Pick<PiProcessOptions, "sessionPath" | "initialPrompt">> = {},
+    options: Partial<Pick<PiProcessOptions, "sessionPath" | "initialPrompt" | "tuiMode">> = {},
 ): PiProcessOptions {
     return {
         cwd: fixture.cwd,
@@ -233,7 +233,7 @@ describe("actual Pi CLI in a real PTY", () => {
         }
     }, 60_000);
 
-    it("shows every restored mutation row by default and reflows apply_patch layout", async () => {
+    it("shows every restored mutation row and reflows apply_patch in fullscreen", async () => {
         const fixture = createFixtureWorkspace();
         fixtures.push(fixture);
         writeFileSync(
@@ -243,7 +243,12 @@ describe("actual Pi CLI in a real PTY", () => {
                 appearance: { sideBySideLayout: "fixed" },
             }),
         );
-        const pi = new PiPtyProcess(launchOptions(fixture, { sessionPath: fixture.sessionPath }));
+        const pi = new PiPtyProcess(
+            launchOptions(fixture, {
+                sessionPath: fixture.sessionPath,
+                tuiMode: "fullscreen",
+            }),
+        );
         try {
             const wide = await pi.waitForFrame(
                 (frame) =>

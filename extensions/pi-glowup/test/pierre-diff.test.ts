@@ -36,6 +36,10 @@ const fgColors = {
     toolDiffRemoved: "#ff0000",
 } as Record<ThemeColor, string>;
 const bgColors = {
+    selectedBg: "#333333",
+    userMessageBg: "#1E1E2E",
+    customMessageBg: "#242436",
+    toolPendingBg: "#222222",
     toolErrorBg: "#220000",
     toolSuccessBg: "#002200",
 } as ThemeBackgroundColors;
@@ -1033,7 +1037,7 @@ describe("Pierre diff rendering", () => {
                 toolDiffAdded: 10,
                 toolDiffRemoved: 9,
             } as Record<ThemeColor, string | number>,
-            { toolErrorBg: 52, toolSuccessBg: 22 } as ThemeBackgroundColors,
+            { ...bgColors, toolErrorBg: 52, toolSuccessBg: 22 } as ThemeBackgroundColors,
             "256color",
         );
 
