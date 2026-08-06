@@ -38,4 +38,10 @@ describe("picker request", () => {
 
         expect(preparePickerPayload(createModel("gpt-5.6-sol"), payload)).toBe(payload);
     });
+
+    it("does not spread non-plain objects returned by a provider", () => {
+        const payload = new Date(0);
+
+        expect(preparePickerPayload(createModel("gpt-5.6-luna"), payload)).toBe(payload);
+    });
 });
