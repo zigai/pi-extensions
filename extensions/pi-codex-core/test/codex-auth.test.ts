@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { codexToolProviderHeaders, resolveCodexToolProvider } from "../src/codex/auth.ts";
 import { Redacted } from "../src/codex/redacted.ts";
@@ -47,7 +48,7 @@ test("Codex web auth supports API keys and preserves provider headers", async ()
 
 test("Codex tool auth preserves header-only provider credentials", async () => {
     const result = await resolveCodexToolProvider(
-        makeToolAuthContext({ headers: { "X-API-Key": "actor-token" } }),
+        makeToolAuthContext({ headers: { "X-API-Key": "actor-token", "X-Removed": null } }),
         { requireAccountId: false, useActiveModel: true },
     );
 
@@ -55,7 +56,18 @@ test("Codex tool auth preserves header-only provider credentials", async () => {
     assert.equal(JSON.stringify(result.value.redactedHeaders), '{"X-API-Key":"[redacted]"}');
     const headers = codexToolProviderHeaders(result.value);
     assert.equal(headers.get("X-API-Key"), "actor-token");
+    assert.equal(headers.has("X-Removed"), false);
     assert.equal(headers.has("Authorization"), false);
+});
+
+test("Codex tool auth does not treat null credential headers as credentials", async () => {
+    const result = await resolveCodexToolProvider(
+        makeToolAuthContext({ headers: { Authorization: null, "X-API-Key": null } }),
+        { requireAccountId: false, useActiveModel: true },
+    );
+
+    assert.ok(result.isErr());
+    assert.match(result.error.message, /Codex-compatible token/);
 });
 
 test("Codex tool auth redacts and forwards authorization credentials", async () => {
@@ -80,7 +92,7 @@ test("Codex tool auth redacts and forwards authorization credentials", async () 
 
 function makeToolAuthContext(auth: {
     readonly apiKey?: string | undefined;
-    readonly headers?: Record<string, string> | undefined;
+    readonly headers?: ProviderHeaders | undefined;
 }): ExtensionContext {
     const ctx = {
         cwd: "/workspace",

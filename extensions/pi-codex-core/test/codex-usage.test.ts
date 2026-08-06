@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
     fetchCodexUsage,
@@ -189,9 +190,50 @@ test("preserves an explicitly selected account over the token claim", async () =
     assert.deepEqual(accountIds, ["selected-account", "selected-account"]);
 });
 
+test("omits provider headers explicitly cleared with null", async () => {
+    const requestHeaders: Headers[] = [];
+    const runtime = makeTestRuntime(async (input, init) => {
+        requestHeaders.push(new Headers(init?.headers));
+        if (String(input).endsWith("/wham/usage")) {
+            return new Response(JSON.stringify({ rate_limit: {} }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ available_count: 0, credits: [] }), {
+            status: 200,
+        });
+    });
+
+    const result = await fetchCodexUsage(
+        makeUsageContext("https://proxy.example/backend-api", {
+            modelHeaders: {
+                "X-Model": "model-value",
+                "X-Removed": "stale-value",
+                "X-Null-Model": null,
+            },
+            providerHeaders: {
+                "chatgpt-account-id": "usage-account",
+                "x-removed": null,
+            },
+        }),
+        { runtime },
+    );
+
+    assert.ok(result.isOk());
+    assert.equal(requestHeaders.length, 2);
+    for (const headers of requestHeaders) {
+        assert.equal(headers.get("x-model"), "model-value");
+        assert.equal(headers.has("x-removed"), false);
+        assert.equal(headers.has("x-null-model"), false);
+    }
+});
+
 function makeUsageContext(
     modelBaseUrl: string,
-    auth: { readonly apiKey?: string; readonly accountId?: string } = {},
+    auth: {
+        readonly apiKey?: string;
+        readonly accountId?: string;
+        readonly modelHeaders?: ProviderHeaders;
+        readonly providerHeaders?: ProviderHeaders;
+    } = {},
 ): ExtensionContext {
     const ctx = {
         model: {
@@ -199,13 +241,15 @@ function makeUsageContext(
             api: "openai-codex-responses",
             id: "gpt-5.5",
             baseUrl: modelBaseUrl,
-            headers: {},
+            headers: auth.modelHeaders ?? {},
         },
         modelRegistry: {
             getApiKeyAndHeaders: async () => ({
                 ok: true,
                 apiKey: auth.apiKey ?? "usage-token",
-                headers: { "chatgpt-account-id": auth.accountId ?? "usage-account" },
+                headers: auth.providerHeaders ?? {
+                    "chatgpt-account-id": auth.accountId ?? "usage-account",
+                },
             }),
         },
     };

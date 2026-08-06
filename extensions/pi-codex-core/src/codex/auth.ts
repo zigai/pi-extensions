@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -227,7 +227,7 @@ async function resolveCodexProviderForModel(
     });
 }
 
-function hasCredentialHeader(headers: Record<string, string> | undefined): boolean {
+function hasCredentialHeader(headers: ProviderHeaders | undefined): boolean {
     return [
         "authorization",
         "api-key",
@@ -282,23 +282,22 @@ export function isModelWithStringApi(
 }
 
 function redactProviderHeaders(
-    headers: Record<string, string> | undefined,
+    headers: ProviderHeaders | undefined,
 ): Record<string, Redacted<string>> {
     const redactedHeaders: Record<string, Redacted<string>> = {};
     for (const [name, value] of Object.entries(headers ?? {})) {
+        if (value === null) continue;
         redactedHeaders[name] = Redacted.of(value);
     }
     return redactedHeaders;
 }
 
-function headerValue(
-    headers: Record<string, string> | undefined,
-    name: string,
-): string | undefined {
+function headerValue(headers: ProviderHeaders | undefined, name: string): string | undefined {
     if (!headers) return undefined;
     const lowerName = name.toLowerCase();
     for (const [key, value] of Object.entries(headers)) {
-        if (key.toLowerCase() === lowerName && value.trim().length > 0) return value;
+        if (key.toLowerCase() === lowerName && value !== null && value.trim().length > 0)
+            return value;
     }
     return undefined;
 }

@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -357,8 +357,9 @@ async function buildCodexUsageHeaders(
             }),
         );
     }
-    const headers = new Headers(model.headers);
-    for (const [key, value] of Object.entries(auth.headers ?? {})) headers.set(key, value);
+    const headers = new Headers();
+    applyProviderHeaders(headers, model.headers);
+    applyProviderHeaders(headers, auth.headers);
     if (auth.apiKey) headers.set("authorization", `Bearer ${auth.apiKey}`);
     const token = auth.apiKey ?? extractBearerToken(headers);
     const accountId = token ? extractAccountId(token) : undefined;
@@ -369,6 +370,16 @@ async function buildCodexUsageHeaders(
     headers.set("OAI-Language", "en");
     headers.set("originator", "pi");
     return ok(headers);
+}
+
+function applyProviderHeaders(
+    headers: Headers,
+    providerHeaders: ProviderHeaders | undefined,
+): void {
+    for (const [name, value] of Object.entries(providerHeaders ?? {})) {
+        if (value === null) headers.delete(name);
+        else headers.set(name, value);
+    }
 }
 
 async function fetchCodexRateLimitResetCreditsWithHeaders(
