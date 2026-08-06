@@ -49,9 +49,9 @@
     "js-tiktoken": "^1.0.21"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.83.0",
-    "@earendil-works/pi-coding-agent": "^0.83.0",
-    "@earendil-works/pi-tui": "^0.83.0",
+    "@earendil-works/pi-ai": "^0.84.0",
+    "@earendil-works/pi-coding-agent": "^0.84.0",
+    "@earendil-works/pi-tui": "^0.84.0",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^4.1.9",
     "oxfmt": "^0.44.0",
