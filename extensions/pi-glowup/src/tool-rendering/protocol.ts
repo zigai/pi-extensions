@@ -2,7 +2,7 @@
 export const GLOWUP_RENDERING_PROPERTY = "glowupRendering" as const;
 
 /** Protocol version implemented by this package. */
-export const GLOWUP_RENDERING_VERSION = 2 as const;
+export const GLOWUP_RENDERING_VERSION = 3 as const;
 
 /** Explicit request to keep a tool's own Pi renderer. Omission means automatic selection. */
 export type GlowupRenderingPreference = "preserve";
@@ -33,6 +33,9 @@ export type GlowupToolResult = {
     readonly content?: unknown;
     readonly details?: unknown;
 };
+
+/** Parses an unknown runtime value into an adapter-owned value. */
+export type GlowupParser<Value> = (value: unknown) => Value | undefined;
 
 /** Semantic tones understood by the Glowup style engine. */
 export type GlowupTone =
@@ -148,17 +151,52 @@ export type GlowupNode =
     | GlowupStackNode
     | GlowupEmptyNode;
 
-/** Public rendering adapter implemented by a tool owner. */
-export type GlowupRenderer<Args = unknown, Result = GlowupToolResult> = {
+type GlowupRendererBase<Args> = {
     readonly version: typeof GLOWUP_RENDERING_VERSION;
-    readonly parseArgs?: (value: unknown) => Args | undefined;
-    readonly parseResult?: (value: unknown) => Result | undefined;
-    readonly renderCall?: (args: Args, context: GlowupCallContext) => GlowupNode | undefined;
-    readonly renderResult?: (
+    readonly parseArgs: GlowupParser<Args>;
+};
+
+type GlowupCallRendering<Args> = {
+    /**
+     * Optional renderer for incomplete streaming arguments. It receives the raw value because the
+     * complete argument parser is not expected to accept an unfinished object.
+     */
+    readonly renderPartialCall?: (
+        value: unknown,
+        context: GlowupCallContext,
+    ) => GlowupNode | undefined;
+    readonly renderCall: (args: Args, context: GlowupCallContext) => GlowupNode | undefined;
+};
+
+type GlowupCallRenderer<Args> = GlowupRendererBase<Args> &
+    GlowupCallRendering<Args> & {
+        readonly parseResult?: never;
+        readonly renderResult?: never;
+    };
+
+type GlowupResultRenderer<Args, Result> = GlowupRendererBase<Args> & {
+    readonly renderCall?: never;
+    readonly parseResult: GlowupParser<Result>;
+    readonly renderResult: (
         result: Result,
         context: GlowupResultContext<Args>,
     ) => GlowupNode | undefined;
 };
+
+type GlowupCallAndResultRenderer<Args, Result> = GlowupRendererBase<Args> &
+    GlowupCallRendering<Args> & {
+        readonly parseResult: GlowupParser<Result>;
+        readonly renderResult: (
+            result: Result,
+            context: GlowupResultContext<Args>,
+        ) => GlowupNode | undefined;
+    };
+
+/** Public rendering adapter implemented by a tool owner. */
+export type GlowupRenderer<Args = unknown, Result = GlowupToolResult> =
+    | GlowupCallRenderer<Args>
+    | GlowupResultRenderer<Args, Result>
+    | GlowupCallAndResultRenderer<Args, Result>;
 
 /** Rendering property accepted on a Pi tool definition. */
 export type GlowupRendering<Args = unknown, Result = GlowupToolResult> =
@@ -170,6 +208,27 @@ export function defineGlowupRenderer<Args = unknown, Result = GlowupToolResult>(
     renderer: GlowupRenderer<Args, Result>,
 ): GlowupRenderer<Args, Result> {
     return renderer;
+}
+
+/** Tool definition carrying passive Glowup rendering metadata. */
+export type ToolWithGlowupRendering<
+    Definition extends object,
+    Args = unknown,
+    Result = GlowupToolResult,
+> = Definition & {
+    readonly glowupRendering: GlowupRendering<Args, Result>;
+};
+
+/** Attaches Glowup rendering metadata while preserving the complete tool-definition type. */
+export function withGlowupRendering<
+    Definition extends object,
+    Args = unknown,
+    Result = GlowupToolResult,
+>(
+    definition: Definition,
+    rendering: GlowupRendering<Args, Result>,
+): ToolWithGlowupRendering<Definition, Args, Result> {
+    return { ...definition, [GLOWUP_RENDERING_PROPERTY]: rendering };
 }
 
 /** Creates a text component with semantic styling. */
@@ -254,3 +313,9 @@ export function stack(children: ReadonlyArray<GlowupNode>): GlowupStackNode {
 export function empty(): GlowupEmptyNode {
     return { kind: "empty" };
 }
+
+export {
+    decodeGlowupNode,
+    DEFAULT_GLOWUP_NODE_DECODE_LIMITS,
+    type GlowupNodeDecodeLimits,
+} from "./decode-node.ts";
