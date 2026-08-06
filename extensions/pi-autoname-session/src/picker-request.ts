@@ -1,7 +1,16 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
-function isPayloadRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+function isPlainPayloadRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return false;
+    }
+
+    try {
+        const prototype = Reflect.getPrototypeOf(value);
+        return prototype === Object.prototype || prototype === null;
+    } catch {
+        return false;
+    }
 }
 
 function requiresLunaPickerPayload(model: Model<Api>): boolean {
@@ -14,11 +23,11 @@ function requiresLunaPickerPayload(model: Model<Api>): boolean {
 
 /** Apply request requirements imposed by picker models with specialized endpoints. */
 export function preparePickerPayload(model: Model<Api>, payload: unknown): unknown {
-    if (!requiresLunaPickerPayload(model) || !isPayloadRecord(payload)) {
+    if (!requiresLunaPickerPayload(model) || !isPlainPayloadRecord(payload)) {
         return payload;
     }
 
-    const reasoning = isPayloadRecord(payload.reasoning) ? payload.reasoning : {};
+    const reasoning = isPlainPayloadRecord(payload.reasoning) ? payload.reasoning : {};
     return {
         ...payload,
         parallel_tool_calls: false,

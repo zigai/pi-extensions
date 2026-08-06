@@ -1,13 +1,23 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ImageContent, TextContent, ThinkingContent, ToolCall } from "@earendil-works/pi-ai";
-import { Type, type Static } from "typebox";
+import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { ExtensionSettings } from "./settings.ts";
 
 const MAX_CONVERSATION_CONTEXT_CHARACTERS = 30_000;
 const MAX_REPOSITORY_CONTEXT_CHARACTERS = 12_000;
+const NAMING_STATE_VERSION = 1;
 
 export const AUTONAME_STATE_ENTRY_TYPE = "pi-autoname-session.state";
+
+/**
+ * How much conversation content is rendered for the picker model.
+ *
+ * Minimized sends user messages, assistant text, tool names, and compaction
+ * or branch summaries; full also sends tool arguments, tool results, and
+ * shell output.
+ */
+export type ConversationScope = "minimized" | "full";
 
 const sessionMetricsSchema = Type.Object(
     {
@@ -21,6 +31,7 @@ const sessionMetricsSchema = Type.Object(
 
 const sessionNamingStateSchema = Type.Object(
     {
+        version: Type.Literal(NAMING_STATE_VERSION),
         initialNameSet: Type.Boolean(),
         baseline: sessionMetricsSchema,
         baselineAtMs: Type.Number({ minimum: 0 }),
@@ -28,8 +39,33 @@ const sessionNamingStateSchema = Type.Object(
     { additionalProperties: false },
 );
 
-export type SessionMetrics = Static<typeof sessionMetricsSchema>;
-export type SessionNamingState = Static<typeof sessionNamingStateSchema>;
+const legacySessionNamingStateSchema = Type.Object(
+    {
+        initialNameSet: Type.Boolean(),
+        baseline: sessionMetricsSchema,
+        baselineAtMs: Type.Number({ minimum: 0 }),
+    },
+    { additionalProperties: false },
+);
+
+export type SessionMetrics = {
+    readonly messages: number;
+    readonly turns: number;
+    readonly toolCalls: number;
+    readonly tokens: number;
+};
+
+export type SessionNamingState = {
+    readonly version: 1;
+    readonly initialNameSet: boolean;
+    readonly baseline: SessionMetrics;
+    readonly baselineAtMs: number;
+};
+
+export type StoredSessionNamingStateResult =
+    | { readonly type: "found"; readonly state: SessionNamingState }
+    | { readonly type: "invalid" }
+    | { readonly type: "unsupportedVersion" };
 export type NamingTrigger = ExtensionSettings["initialNaming"]["trigger"];
 export type NamingPhase = "initial" | "refresh";
 
@@ -46,27 +82,84 @@ export type PromptVariables = {
     readonly reason: NamingPhase;
 };
 
-export function parseSessionNamingState(value: unknown): SessionNamingState | undefined {
-    if (!Value.Check(sessionNamingStateSchema, value)) {
-        return undefined;
-    }
+/** Input for creating a naming state from already trusted, measured pieces. */
+export type SessionNamingStateInput = {
+    readonly initialNameSet: boolean;
+    readonly baseline: SessionMetrics;
+    readonly baselineAtMs: number;
+};
 
-    return Value.Decode(sessionNamingStateSchema, value);
-}
-
-export function createSessionNamingState(
-    initialNameSet: boolean,
-    baseline: SessionMetrics,
-    baselineAtMs: number,
-): SessionNamingState {
+/** Create a naming state from already trusted, measured pieces. */
+export function createSessionNamingState(input: SessionNamingStateInput): SessionNamingState {
     return {
-        initialNameSet,
-        baseline,
-        baselineAtMs,
+        version: NAMING_STATE_VERSION,
+        initialNameSet: input.initialNameSet,
+        baseline: {
+            messages: input.baseline.messages,
+            turns: input.baseline.turns,
+            toolCalls: input.baseline.toolCalls,
+            tokens: input.baseline.tokens,
+        },
+        baselineAtMs: input.baselineAtMs,
     };
 }
 
-function hasReachedTrigger(
+/** Classify and parse one persisted naming-state entry. */
+export function parseStoredSessionNamingState(value: unknown): StoredSessionNamingStateResult {
+    if (!Value.Check(sessionNamingStateSchema, value)) {
+        if (Value.Check(legacySessionNamingStateSchema, value)) {
+            const legacy = Value.Decode(legacySessionNamingStateSchema, value);
+            return {
+                type: "found",
+                state: createSessionNamingState({
+                    initialNameSet: legacy.initialNameSet,
+                    baseline: legacy.baseline,
+                    baselineAtMs: legacy.baselineAtMs,
+                }),
+            };
+        }
+
+        if (
+            typeof value === "object" &&
+            value !== null &&
+            "version" in value &&
+            typeof value.version === "number" &&
+            value.version !== NAMING_STATE_VERSION
+        ) {
+            return { type: "unsupportedVersion" };
+        }
+
+        return { type: "invalid" };
+    }
+
+    const decoded = Value.Decode(sessionNamingStateSchema, value);
+    return {
+        type: "found",
+        state: createSessionNamingState({
+            initialNameSet: decoded.initialNameSet,
+            baseline: decoded.baseline,
+            baselineAtMs: decoded.baselineAtMs,
+        }),
+    };
+}
+
+/**
+ * Parse persisted naming state read from a session entry.
+ *
+ * Unversioned state written by releases before state versioning is migrated
+ * to version 1. Invalid and unsupported future state return undefined.
+ */
+export function parseSessionNamingState(value: unknown): SessionNamingState | undefined {
+    const result = parseStoredSessionNamingState(value);
+    return result.type === "found" ? result.state : undefined;
+}
+
+/**
+ * True when the activity between the baseline and now reaches the trigger
+ * threshold (counts for message/turn/tool-call/token triggers, elapsed
+ * minutes for the minutes trigger).
+ */
+export function hasReachedTrigger(
     trigger: NamingTrigger,
     threshold: number,
     currentMetrics: SessionMetrics,
@@ -83,8 +176,13 @@ function hasReachedTrigger(
     return currentValue - baselineValue >= threshold;
 }
 
+/**
+ * Count session activity from branch entries: user messages, assistant turns,
+ * assistant tool calls, and assistant token usage. Non-message entries are
+ * ignored.
+ */
 export function measureSession(entries: readonly SessionEntry[]): SessionMetrics {
-    const metrics: SessionMetrics = {
+    const metrics = {
         messages: 0,
         turns: 0,
         toolCalls: 0,
@@ -100,13 +198,21 @@ export function measureSession(entries: readonly SessionEntry[]): SessionMetrics
             case "user":
                 metrics.messages += 1;
                 break;
-            case "assistant":
+            case "assistant": {
                 metrics.turns += 1;
-                metrics.tokens += entry.message.usage.totalTokens;
                 metrics.toolCalls += entry.message.content.filter(
                     (block) => block.type === "toolCall",
                 ).length;
+                const usage = entry.message.usage;
+                // Session files are persisted boundary data: the framework
+                // type requires usage on assistant messages, but a message
+                // written by an older or third-party writer may lack it.
+                // Missing usage contributes no tokens instead of NaN.
+                if (usage !== undefined) {
+                    metrics.tokens += usage.totalTokens;
+                }
                 break;
+            }
             case "toolResult":
             case "bashExecution":
             case "branchSummary":
@@ -119,6 +225,10 @@ export function measureSession(entries: readonly SessionEntry[]): SessionMetrics
     return metrics;
 }
 
+/**
+ * Decide whether a naming attempt is due for the given state and metrics.
+ * Returns undefined when no trigger is reached.
+ */
 export function getNamingRequest(
     settings: ExtensionSettings,
     state: SessionNamingState,
@@ -158,13 +268,23 @@ export function getNamingRequest(
     return undefined;
 }
 
+/** Mark the session as named, resetting the baseline to the current metrics. */
 export function markSessionNamingComplete(
     metrics: SessionMetrics,
     nowMs: number,
 ): SessionNamingState {
-    return createSessionNamingState(true, metrics, nowMs);
+    return createSessionNamingState({
+        initialNameSet: true,
+        baseline: metrics,
+        baselineAtMs: nowMs,
+    });
 }
 
+/**
+ * Render the configured prompt with placeholders substituted in a single
+ * pass, then append the name-constraint instructions. Inserted content is
+ * never reprocessed for later placeholders.
+ */
 export function renderNamingPrompt(
     prompt: string,
     variables: PromptVariables,
@@ -179,10 +299,10 @@ export function renderNamingPrompt(
         "{{reason}}": variables.reason,
     };
 
-    let rendered = prompt;
-    for (const [placeholder, value] of Object.entries(replacements)) {
-        rendered = rendered.replaceAll(placeholder, value);
-    }
+    const rendered = prompt.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
+        const value = replacements[`{{${key}}}`];
+        return value ?? match;
+    });
 
     return [
         rendered,
@@ -202,6 +322,34 @@ function truncatePromptContext(text: string, maxCharacters: number): string {
     return `${text.slice(0, headLength)}\n...[context truncated]...\n${text.slice(-tailLength)}`;
 }
 
+function stringifyPromptValue(value: unknown): string {
+    const seen = new WeakSet<object>();
+    try {
+        return (
+            JSON.stringify(value, (_key, nestedValue: unknown) => {
+                if (typeof nestedValue === "bigint") {
+                    return nestedValue.toString();
+                }
+                if (typeof nestedValue === "object" && nestedValue !== null) {
+                    if (seen.has(nestedValue)) {
+                        return "[circular]";
+                    }
+                    seen.add(nestedValue);
+                }
+                return nestedValue;
+            }) ?? "[unserializable value]"
+        );
+    } catch {
+        return "[unserializable value]";
+    }
+}
+
+/**
+ * Normalize picker output into a session name: take the first non-empty
+ * line, strip Markdown heading markers and a leading "session name:" label,
+ * remove surrounding quotes, collapse whitespace, and enforce length
+ * constraints. Returns undefined when no usable name remains.
+ */
 export function normalizeSessionName(
     rawName: string,
     minLength: number,
@@ -238,6 +386,10 @@ export function normalizeSessionName(
     return name.length >= minLength ? name : undefined;
 }
 
+/**
+ * Build the repository context section: the working directory plus loaded
+ * repository guidance files, truncated to MAX_REPOSITORY_CONTEXT_CHARACTERS.
+ */
 export function buildRepositoryContext(
     cwd: string,
     contextFiles: readonly { readonly path: string; readonly content: string }[] | undefined,
@@ -253,6 +405,7 @@ export function buildRepositoryContext(
 
 function renderContent(
     content: string | readonly (TextContent | ImageContent | ThinkingContent | ToolCall)[],
+    scope: ConversationScope,
 ): string {
     if (typeof content === "string") {
         return content.trim();
@@ -265,7 +418,11 @@ function renderContent(
                 parts.push(block.text);
                 break;
             case "toolCall":
-                parts.push(`[tool call: ${block.name} ${JSON.stringify(block.arguments)}]`);
+                parts.push(
+                    scope === "minimized"
+                        ? `[tool call: ${block.name}]`
+                        : `[tool call: ${block.name} ${stringifyPromptValue(block.arguments)}]`,
+                );
                 break;
             case "image":
                 parts.push("[image attached]");
@@ -278,22 +435,35 @@ function renderContent(
     return parts.join("\n").trim();
 }
 
-function renderMessage(message: Extract<SessionEntry, { type: "message" }>["message"]): string {
+function renderMessage(
+    message: Extract<SessionEntry, { type: "message" }>["message"],
+    scope: ConversationScope,
+): string {
     switch (message.role) {
         case "bashExecution":
-            return `Ran: ${message.command}\n${message.output}`.trim();
+            return scope === "minimized" ? "" : `Ran: ${message.command}\n${message.output}`.trim();
         case "branchSummary":
         case "compactionSummary":
             return message.summary.trim();
+        case "toolResult":
         case "custom":
+            return scope === "minimized" ? "" : renderContent(message.content, scope);
         case "user":
         case "assistant":
-        case "toolResult":
-            return renderContent(message.content);
+            return renderContent(message.content, scope);
     }
 }
 
-export function buildConversationContext(entries: readonly SessionEntry[]): string {
+/**
+ * Render conversation entries for the picker model prompt, truncated to
+ * MAX_CONVERSATION_CONTEXT_CHARACTERS. Pass the active, compaction-aware
+ * entry list (SessionManager.buildContextEntries) so compacted-away history
+ * is not resent.
+ */
+export function buildConversationContext(
+    entries: readonly SessionEntry[],
+    scope: ConversationScope,
+): string {
     const sections: string[] = [];
 
     for (const entry of entries) {
@@ -311,7 +481,7 @@ export function buildConversationContext(entries: readonly SessionEntry[]): stri
             continue;
         }
 
-        const text = renderMessage(entry.message);
+        const text = renderMessage(entry.message, scope);
         if (text.length > 0) {
             sections.push(`${entry.message.role}:\n${text}`);
         }

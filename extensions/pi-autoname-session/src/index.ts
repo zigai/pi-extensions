@@ -2,24 +2,72 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { Api, Model, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { preparePickerPayload } from "./picker-request.ts";
-import { loadAutonameSessionSettings, type ExtensionSettings } from "./settings.ts";
+import {
+    formatPickerModelReference,
+    loadAutonameSessionSettings,
+    type ExtensionSettings,
+    type PickerModelReference,
+} from "./settings.ts";
 import {
     AUTONAME_STATE_ENTRY_TYPE,
     buildConversationContext,
     buildRepositoryContext,
     createSessionNamingState,
     getNamingRequest,
-    measureSession,
+    hasReachedTrigger,
     markSessionNamingComplete,
+    measureSession,
     normalizeSessionName,
-    parseSessionNamingState,
+    parseStoredSessionNamingState,
     renderNamingPrompt,
+    type NamingPhase,
     type SessionMetrics,
     type SessionNamingState,
+    type StoredSessionNamingStateResult,
 } from "./session-naming.ts";
 
-function resolvePickerModel(modelReference: string, ctx: ExtensionContext): Model<Api> | undefined {
-    if (modelReference === "current") {
+/** Outcome of a picker attempt, classified so the caller can apply policy. */
+type PickSessionNameOutcome =
+    | { readonly type: "picked"; readonly name: string }
+    | { readonly type: "cancelled" }
+    | { readonly type: "modelUnavailable"; readonly diagnostic: string }
+    | { readonly type: "authenticationUnavailable"; readonly diagnostic: string }
+    | { readonly type: "requestFailed"; readonly diagnostic: string }
+    | { readonly type: "timeout"; readonly diagnostic: string }
+    | { readonly type: "invalidOutput"; readonly diagnostic: string };
+
+type ActiveNamingAttempt = {
+    readonly controller: AbortController;
+    readonly sessionGeneration: number;
+    readonly nameRevision: number;
+    readonly nameAtStart: string | undefined;
+    readonly leafIdAtStart: string | null;
+};
+
+type PickSessionNameOptions = {
+    readonly settings: ExtensionSettings;
+    readonly phase: NamingPhase;
+    readonly entries: readonly SessionEntry[];
+    readonly ctx: ExtensionContext;
+    readonly signal: AbortSignal;
+    readonly repositoryContext: string;
+};
+
+type AuthenticationResolution =
+    | {
+          readonly type: "resolved";
+          readonly auth: Awaited<
+              ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>
+          >;
+      }
+    | { readonly type: "cancelled" }
+    | { readonly type: "failed" };
+
+function resolvePickerModel(
+    reference: PickerModelReference,
+    ctx: ExtensionContext,
+): Model<Api> | undefined {
+    if (reference.type === "current") {
         if (ctx.model === undefined) {
             return undefined;
         }
@@ -27,31 +75,27 @@ function resolvePickerModel(modelReference: string, ctx: ExtensionContext): Mode
         return ctx.modelRegistry.find(ctx.model.provider, ctx.model.id);
     }
 
-    const separatorIndex = modelReference.indexOf("/");
-    if (separatorIndex <= 0 || separatorIndex === modelReference.length - 1) {
-        return undefined;
-    }
-
-    return ctx.modelRegistry.find(
-        modelReference.slice(0, separatorIndex),
-        modelReference.slice(separatorIndex + 1),
-    );
+    return ctx.modelRegistry.find(reference.provider, reference.id);
 }
 
-function findStoredNamingState(entries: readonly SessionEntry[]): SessionNamingState | undefined {
+/**
+ * Inspect the latest stored naming state on the active branch. The newest
+ * matching entry owns recovery: invalid or future-version state is surfaced
+ * instead of silently reviving an older baseline.
+ */
+function maybeFindStoredNamingState(
+    entries: readonly SessionEntry[],
+): StoredSessionNamingStateResult | { readonly type: "notFound" } {
     for (let index = entries.length - 1; index >= 0; index -= 1) {
         const entry = entries[index];
         if (entry?.type !== "custom" || entry.customType !== AUTONAME_STATE_ENTRY_TYPE) {
             continue;
         }
 
-        const state = parseSessionNamingState(entry.data);
-        if (state !== undefined) {
-            return state;
-        }
+        return parseStoredSessionNamingState(entry.data);
     }
 
-    return undefined;
+    return { type: "notFound" };
 }
 
 function createZeroMetrics(): SessionMetrics {
@@ -63,46 +107,150 @@ function createZeroMetrics(): SessionMetrics {
     };
 }
 
-async function pickSessionName(
-    settings: ExtensionSettings,
-    phase: "initial" | "refresh",
+function timeoutDiagnostic(timeoutMs: number): string {
+    const seconds = timeoutMs / 1000;
+    return `Session naming timed out after ${seconds} second${seconds === 1 ? "" : "s"}.`;
+}
+
+function restoreNamingState(
     entries: readonly SessionEntry[],
-    ctx: ExtensionContext,
-    signal: AbortSignal,
-    repositoryContext: string,
-    reportDiagnostic: (message: string) => void,
-): Promise<string | undefined> {
-    const model = resolvePickerModel(settings.model, ctx);
-    if (model === undefined) {
-        reportDiagnostic(
-            `Session naming skipped: picker model "${settings.model}" is not available.`,
-        );
-        return undefined;
+    currentName: string | undefined,
+    missingStateBaseline: "current" | "zero",
+    nowMs: number,
+): {
+    readonly state: SessionNamingState;
+    readonly storedStateIssue: "invalid" | "unsupportedVersion" | undefined;
+} {
+    const currentMetrics = measureSession(entries);
+    const stored = maybeFindStoredNamingState(entries);
+    if (stored.type === "found") {
+        if (stored.state.initialNameSet === (currentName !== undefined)) {
+            return { state: stored.state, storedStateIssue: undefined };
+        }
+
+        return {
+            state: createSessionNamingState({
+                initialNameSet: currentName !== undefined,
+                baseline: currentMetrics,
+                baselineAtMs: nowMs,
+            }),
+            storedStateIssue: undefined,
+        };
     }
 
-    let auth:
-        | Awaited<ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>>
-        | undefined;
-    try {
-        auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    } catch {
-        reportDiagnostic(
-            "Session naming skipped because picker model authentication could not be resolved.",
-        );
-        return undefined;
+    const baseline =
+        currentName !== undefined || missingStateBaseline === "current"
+            ? currentMetrics
+            : createZeroMetrics();
+    return {
+        state: createSessionNamingState({
+            initialNameSet: currentName !== undefined,
+            baseline,
+            baselineAtMs: nowMs,
+        }),
+        storedStateIssue:
+            stored.type === "invalid" || stored.type === "unsupportedVersion"
+                ? stored.type
+                : undefined,
+    };
+}
+
+/**
+ * Wait for Pi's non-cancellable authentication lookup within the caller's
+ * cancellation lifetime. The late dependency promise remains observed so a
+ * post-cancellation rejection cannot become unhandled.
+ */
+async function resolveAuthentication(
+    ctx: ExtensionContext,
+    model: Model<Api>,
+    signal: AbortSignal,
+): Promise<AuthenticationResolution> {
+    if (signal.aborted) {
+        return { type: "cancelled" };
     }
-    if (auth === undefined || !auth.ok || auth.apiKey === undefined) {
-        reportDiagnostic(
-            `Session naming skipped: picker model "${settings.model}" has no available authentication.`,
+
+    return new Promise((resolve) => {
+        let completed = false;
+        const handleAbort = (): void => {
+            if (completed) {
+                return;
+            }
+            completed = true;
+            resolve({ type: "cancelled" });
+        };
+        const finish = (resolution: AuthenticationResolution): void => {
+            if (completed) {
+                return;
+            }
+            completed = true;
+            signal.removeEventListener("abort", handleAbort);
+            resolve(resolution);
+        };
+
+        signal.addEventListener("abort", handleAbort, { once: true });
+        let authenticationPromise: ReturnType<
+            ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]
+        >;
+        try {
+            authenticationPromise = ctx.modelRegistry.getApiKeyAndHeaders(model);
+        } catch {
+            finish({ type: "failed" });
+            return;
+        }
+        void authenticationPromise.then(
+            (auth) => finish({ type: "resolved", auth }),
+            () => finish({ type: "failed" }),
         );
-        return undefined;
+    });
+}
+
+async function pickSessionName(options: PickSessionNameOptions): Promise<PickSessionNameOutcome> {
+    const { settings, phase, entries, ctx, signal, repositoryContext } = options;
+    const timeoutSignal = AbortSignal.timeout(settings.timeoutMs);
+    const operationSignal = AbortSignal.any([signal, timeoutSignal]);
+    const model = resolvePickerModel(settings.model, ctx);
+    if (model === undefined) {
+        return {
+            type: "modelUnavailable",
+            diagnostic: `Session naming skipped: picker model "${formatPickerModelReference(settings.model)}" is not available.`,
+        };
     }
+
+    const authentication = await resolveAuthentication(ctx, model, operationSignal);
+    if (authentication.type === "cancelled") {
+        return timeoutSignal.aborted
+            ? { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) }
+            : { type: "cancelled" };
+    }
+    if (authentication.type === "failed") {
+        return {
+            type: "authenticationUnavailable",
+            diagnostic:
+                "Session naming skipped because picker model authentication could not be resolved.",
+        };
+    }
+
+    const { auth } = authentication;
+    if (operationSignal.aborted) {
+        return timeoutSignal.aborted
+            ? { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) }
+            : { type: "cancelled" };
+    }
+    if (!auth.ok) {
+        return {
+            type: "authenticationUnavailable",
+            diagnostic: `Session naming skipped: picker model "${formatPickerModelReference(settings.model)}" has no available authentication.`,
+        };
+    }
+    // auth.ok may legitimately carry only headers, or no credentials at all
+    // (header-only and credential-free local providers); apiKey is optional
+    // in the model registry contract.
 
     const prompt = renderNamingPrompt(
         settings.prompt,
         {
             repositoryContext,
-            conversation: buildConversationContext(entries),
+            conversation: buildConversationContext(entries, settings.conversationScope),
             currentName: ctx.sessionManager.getSessionName() ?? "(unnamed)",
             cwd: ctx.cwd,
             reason: phase,
@@ -124,45 +272,62 @@ async function pickSessionName(
                 ],
             },
             {
-                apiKey: auth.apiKey,
+                ...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
                 ...(auth.headers === undefined ? {} : { headers: auth.headers }),
                 ...(auth.env === undefined ? {} : { env: auth.env }),
                 ...(settings.reasoningEffort === "off"
                     ? {}
                     : { reasoning: settings.reasoningEffort }),
                 onPayload: (payload) => preparePickerPayload(model, payload),
-                signal,
+                signal: operationSignal,
             },
         );
 
         if (response.stopReason === "aborted") {
-            return undefined;
+            if (timeoutSignal.aborted) {
+                return { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) };
+            }
+            return { type: "cancelled" };
         }
 
         if (response.stopReason === "error") {
-            const providerMessage = response.errorMessage?.replace(/\s+/g, " ").trim();
-            reportDiagnostic(
-                providerMessage === undefined || providerMessage.length === 0
-                    ? "Session naming failed because the picker model could not complete its request."
-                    : `Session naming failed: ${providerMessage.slice(0, 300)}`,
-            );
-            return undefined;
+            return {
+                type: "requestFailed",
+                diagnostic:
+                    "Session naming failed because the picker model could not complete its request.",
+            };
         }
 
         const rawName = response.content
             .filter((block): block is TextContent => block.type === "text")
             .map((block) => block.text)
             .join("\n");
-        return normalizeSessionName(
+        const name = normalizeSessionName(
             rawName,
             settings.nameConstraints.minLength,
             settings.nameConstraints.maxLength,
         );
+        if (name === undefined) {
+            return {
+                type: "invalidOutput",
+                diagnostic:
+                    "Session naming skipped because the picker model returned an unusable name.",
+            };
+        }
+
+        return { type: "picked", name };
     } catch {
-        reportDiagnostic(
-            "Session naming failed because the picker model request could not be completed.",
-        );
-        return undefined;
+        if (timeoutSignal.aborted) {
+            return { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) };
+        }
+        if (signal.aborted) {
+            return { type: "cancelled" };
+        }
+        return {
+            type: "requestFailed",
+            diagnostic:
+                "Session naming failed because the picker model request could not be completed.",
+        };
     }
 }
 
@@ -172,17 +337,31 @@ export default function extension(pi: ExtensionAPI): void {
     let namingState: SessionNamingState | undefined;
     let repositoryContext = "";
     let sessionGeneration = 0;
+    let nameRevision = 0;
     let sessionAbortController: AbortController | undefined;
-    let namingInFlight = false;
+    let activeAttempt: ActiveNamingAttempt | undefined;
     let pickerDiagnosticShown = false;
-    let autoNameBeingApplied: string | undefined;
+    let storedStateDiagnosticShown = false;
+    let pendingAutoName: string | undefined;
+    let namingBlockedReason: "modelUnavailable" | undefined;
+    let lastFailedAttempt: { readonly metrics: SessionMetrics; readonly atMs: number } | undefined;
+
+    const invalidateActiveAttempt = (): void => {
+        activeAttempt?.controller.abort();
+        activeAttempt = undefined;
+    };
 
     pi.on("session_start", (_event, ctx) => {
         sessionAbortController?.abort();
         sessionAbortController = new AbortController();
+        invalidateActiveAttempt();
         sessionGeneration += 1;
-        namingInFlight = false;
+        nameRevision = 0;
         pickerDiagnosticShown = false;
+        storedStateDiagnosticShown = false;
+        pendingAutoName = undefined;
+        namingBlockedReason = undefined;
+        lastFailedAttempt = undefined;
         repositoryContext = buildRepositoryContext(ctx.cwd, undefined);
 
         const loaded = loadAutonameSessionSettings(ctx);
@@ -191,25 +370,20 @@ export default function extension(pi: ExtensionAPI): void {
             ctx.ui.notify(diagnostic.message, diagnostic.severity);
         }
 
-        const currentMetrics = measureSession(ctx.sessionManager.getBranch());
-        const storedState = findStoredNamingState(ctx.sessionManager.getEntries());
-        const currentName = ctx.sessionManager.getSessionName();
-
-        if (storedState !== undefined) {
-            namingState = storedState;
-            if (currentName === undefined && storedState.initialNameSet) {
-                namingState = createSessionNamingState(false, currentMetrics, Date.now());
-            }
-        } else {
-            const initialNameSet = currentName !== undefined;
-            const baseline = initialNameSet ? currentMetrics : createZeroMetrics();
-            namingState = createSessionNamingState(initialNameSet, baseline, Date.now());
-        }
-
-        if (settings.nameConstraints.minLength > settings.nameConstraints.maxLength && ctx.hasUI) {
+        const restored = restoreNamingState(
+            ctx.sessionManager.getBranch(),
+            ctx.sessionManager.getSessionName(),
+            "zero",
+            Date.now(),
+        );
+        namingState = restored.state;
+        if (restored.storedStateIssue !== undefined && ctx.hasUI) {
+            storedStateDiagnosticShown = true;
             ctx.ui.notify(
-                "Session naming is disabled because nameConstraints.minLength is greater than maxLength.",
-                "error",
+                restored.storedStateIssue === "unsupportedVersion"
+                    ? "Session naming state was written by an unsupported version and was ignored."
+                    : "Invalid session naming state was ignored.",
+                "warning",
             );
         }
     });
@@ -222,17 +396,57 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("session_info_changed", (event, ctx) => {
-        if (autoNameBeingApplied !== undefined) {
+        if (pendingAutoName !== undefined && event.name === pendingAutoName) {
+            pendingAutoName = undefined;
             return;
         }
+        pendingAutoName = undefined;
+
+        // A user-initiated rename invalidates any in-flight naming attempt:
+        // the picked name was computed against the previous name state, and
+        // applying it would overwrite the user's change.
+        nameRevision += 1;
+        invalidateActiveAttempt();
 
         const currentMetrics = measureSession(ctx.sessionManager.getBranch());
-        namingState = createSessionNamingState(
-            event.name !== undefined,
-            currentMetrics,
+        namingState = createSessionNamingState({
+            initialNameSet: event.name !== undefined,
+            baseline: currentMetrics,
+            baselineAtMs: Date.now(),
+        });
+        pi.appendEntry(AUTONAME_STATE_ENTRY_TYPE, namingState);
+    });
+
+    pi.on("session_tree", (_event, ctx) => {
+        // Branch navigation moves to a different conversation: invalidate any
+        // in-flight attempt (its name would apply to a branch it never
+        // inspected), then restore state from the newly active branch. A
+        // branch without usable state is rebased onto its current activity.
+        invalidateActiveAttempt();
+        lastFailedAttempt = undefined;
+
+        const restored = restoreNamingState(
+            ctx.sessionManager.getBranch(),
+            ctx.sessionManager.getSessionName(),
+            "current",
             Date.now(),
         );
+        namingState = restored.state;
+        if (restored.storedStateIssue !== undefined && !storedStateDiagnosticShown && ctx.hasUI) {
+            storedStateDiagnosticShown = true;
+            ctx.ui.notify(
+                restored.storedStateIssue === "unsupportedVersion"
+                    ? "Session naming state was written by an unsupported version and was ignored."
+                    : "Invalid session naming state was ignored.",
+                "warning",
+            );
+        }
         pi.appendEntry(AUTONAME_STATE_ENTRY_TYPE, namingState);
+    });
+
+    pi.on("model_select", () => {
+        // A model change may make a previously unavailable picker model usable.
+        namingBlockedReason = undefined;
     });
 
     pi.on("agent_settled", async (_event, ctx) => {
@@ -240,71 +454,132 @@ export default function extension(pi: ExtensionAPI): void {
             settings === undefined ||
             namingState === undefined ||
             !settings.enabled ||
-            namingInFlight
+            activeAttempt !== undefined
         ) {
             return;
         }
 
-        if (settings.nameConstraints.minLength > settings.nameConstraints.maxLength) {
+        if (namingBlockedReason !== undefined) {
             return;
         }
 
+        const nowMs = Date.now();
         const currentMetrics = measureSession(ctx.sessionManager.getBranch());
-        const request = getNamingRequest(settings, namingState, currentMetrics, Date.now());
+        const request = getNamingRequest(settings, namingState, currentMetrics, nowMs);
         if (request === undefined || sessionAbortController === undefined) {
             return;
         }
 
-        const abortController = sessionAbortController;
-        const generation = sessionGeneration;
-        const entries = ctx.sessionManager.getBranch();
-        namingInFlight = true;
-        try {
-            const pickedName = await pickSessionName(
-                settings,
-                request.phase,
-                entries,
-                ctx,
-                abortController.signal,
-                repositoryContext,
-                (message) => {
-                    if (!pickerDiagnosticShown && ctx.hasUI) {
-                        pickerDiagnosticShown = true;
-                        ctx.ui.notify(message, "warning");
-                    }
-                },
-            );
-
+        // After a failed attempt, retry only when the trigger is reached again
+        // relative to the failed attempt (fresh activity or elapsed minutes).
+        // This bounds repeated paid picker requests after persistent failures.
+        if (lastFailedAttempt !== undefined) {
+            const threshold =
+                request.phase === "initial"
+                    ? settings.initialNaming.threshold
+                    : settings.refreshNaming.threshold;
             if (
-                pickedName === undefined ||
-                generation !== sessionGeneration ||
-                abortController.signal.aborted
+                !hasReachedTrigger(
+                    request.trigger,
+                    threshold,
+                    currentMetrics,
+                    lastFailedAttempt.metrics,
+                    lastFailedAttempt.atMs,
+                    nowMs,
+                )
             ) {
                 return;
             }
+        }
 
-            if (pickedName !== pi.getSessionName()) {
-                autoNameBeingApplied = pickedName;
-                try {
-                    pi.setSessionName(pickedName);
-                } finally {
-                    autoNameBeingApplied = undefined;
-                }
+        const sessionAbort = sessionAbortController;
+        const attempt: ActiveNamingAttempt = {
+            controller: new AbortController(),
+            sessionGeneration,
+            nameRevision,
+            nameAtStart: pi.getSessionName(),
+            leafIdAtStart: ctx.sessionManager.getLeafId(),
+        };
+        activeAttempt = attempt;
+        const entries = ctx.sessionManager.buildContextEntries();
+        try {
+            const outcome = await pickSessionName({
+                settings,
+                phase: request.phase,
+                entries,
+                ctx,
+                signal: AbortSignal.any([sessionAbort.signal, attempt.controller.signal]),
+                repositoryContext,
+            });
+
+            const attemptIsCurrent =
+                activeAttempt === attempt &&
+                attempt.sessionGeneration === sessionGeneration &&
+                attempt.nameRevision === nameRevision &&
+                attempt.nameAtStart === pi.getSessionName() &&
+                attempt.leafIdAtStart === ctx.sessionManager.getLeafId() &&
+                !attempt.controller.signal.aborted &&
+                !sessionAbort.signal.aborted;
+            if (!attemptIsCurrent) {
+                return;
             }
 
-            namingState = markSessionNamingComplete(currentMetrics, Date.now());
-            pi.appendEntry(AUTONAME_STATE_ENTRY_TYPE, namingState);
+            if ("diagnostic" in outcome && !pickerDiagnosticShown && ctx.hasUI) {
+                pickerDiagnosticShown = true;
+                ctx.ui.notify(outcome.diagnostic, "warning");
+            }
+
+            if (outcome.type === "picked") {
+                if (outcome.name !== pi.getSessionName()) {
+                    pendingAutoName = outcome.name;
+                    try {
+                        pi.setSessionName(outcome.name);
+                    } catch (cause: unknown) {
+                        pendingAutoName = undefined;
+                        throw cause;
+                    }
+                }
+
+                namingState = markSessionNamingComplete(currentMetrics, Date.now());
+                pi.appendEntry(AUTONAME_STATE_ENTRY_TYPE, namingState);
+                lastFailedAttempt = undefined;
+                return;
+            }
+
+            switch (outcome.type) {
+                case "cancelled":
+                    break;
+                case "modelUnavailable":
+                    // Deterministic within a session: settings and the model
+                    // registry did not change. Suppress further attempts until
+                    // a model or settings change (model_select or session_start).
+                    namingBlockedReason = outcome.type;
+                    lastFailedAttempt = undefined;
+                    break;
+                case "authenticationUnavailable":
+                case "requestFailed":
+                case "timeout":
+                case "invalidOutput":
+                    lastFailedAttempt = { metrics: currentMetrics, atMs: Date.now() };
+                    break;
+            }
         } finally {
-            namingInFlight = false;
+            if (activeAttempt === attempt) {
+                activeAttempt = undefined;
+            }
         }
     });
 
     pi.on("session_shutdown", () => {
         sessionAbortController?.abort();
         sessionAbortController = undefined;
+        invalidateActiveAttempt();
         namingState = undefined;
         settings = undefined;
         repositoryContext = "";
         sessionGeneration += 1;
+        pendingAutoName = undefined;
+        namingBlockedReason = undefined;
+        lastFailedAttempt = undefined;
     });
 }
