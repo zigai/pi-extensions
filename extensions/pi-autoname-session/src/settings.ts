@@ -4,6 +4,7 @@ import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-exten
 import { Type, type Static } from "typebox";
 
 const NAMING_TRIGGERS = ["messages", "turns", "tool_calls", "tokens", "minutes"] as const;
+const CONVERSATION_SCOPES = ["minimized", "full"] as const;
 
 const initialTriggerSchema = StringEnum(NAMING_TRIGGERS, {
     description: "The session activity that starts a naming attempt.",
@@ -15,7 +16,13 @@ const refreshTriggerSchema = StringEnum(NAMING_TRIGGERS, {
     default: "turns",
 });
 
-const settingsSchema = Type.Object(
+const conversationScopeSchema = StringEnum(CONVERSATION_SCOPES, {
+    description:
+        "How much of the session conversation is sent to the picker model. Minimized sends user messages, assistant text, tool names, and compaction or branch summaries; full also sends tool arguments, tool results, and shell output. Use Minimized when the picker model is a different provider from the session model.",
+    default: "minimized",
+});
+
+const settingsObjectSchema = Type.Object(
     {
         enabled: Type.Boolean({
             default: true,
@@ -28,11 +35,10 @@ const settingsSchema = Type.Object(
                     description: "Automatically name an otherwise unnamed session once.",
                 }),
                 trigger: initialTriggerSchema,
-                threshold: Type.Number({
+                threshold: Type.Integer({
                     default: 1,
                     minimum: 1,
-                    description:
-                        "The initial activity threshold. Recommended: 1 message, turn, tool call, or minute, or 1,000 tokens.",
+                    description: "The initial activity threshold.",
                 }),
             },
             {
@@ -47,11 +53,10 @@ const settingsSchema = Type.Object(
                     description: "Periodically refresh the name as the session develops.",
                 }),
                 trigger: refreshTriggerSchema,
-                threshold: Type.Number({
+                threshold: Type.Integer({
                     default: 10,
                     minimum: 1,
-                    description:
-                        "The amount of activity between refreshes. Recommended: 10 messages, turns, tool calls, or minutes, or 10,000 tokens.",
+                    description: "The amount of activity between refreshes.",
                 }),
             },
             {
@@ -62,6 +67,7 @@ const settingsSchema = Type.Object(
         model: Type.String({
             default: "current",
             minLength: 1,
+            pattern: "^(?:current|[^/\\s]+/\\S+)$",
             description:
                 "Picker model in provider/model-id form, or current to use the session's active model.",
         }),
@@ -72,6 +78,13 @@ const settingsSchema = Type.Object(
                 default: "low",
             },
         ),
+        timeoutMs: Type.Integer({
+            default: 30_000,
+            minimum: 1_000,
+            description:
+                "Maximum time in milliseconds for picker authentication and the model response before the naming attempt is treated as failed.",
+        }),
+        conversationScope: conversationScopeSchema,
         prompt: Type.String({
             default: [
                 "Your goal is to pick a coding session name for quick recognition in a session list.",
@@ -98,12 +111,12 @@ const settingsSchema = Type.Object(
         }),
         nameConstraints: Type.Object(
             {
-                minLength: Type.Number({
+                minLength: Type.Integer({
                     default: 6,
                     minimum: 1,
                     description: "Minimum number of characters in a name returned by the picker.",
                 }),
-                maxLength: Type.Number({
+                maxLength: Type.Integer({
                     default: 60,
                     minimum: 1,
                     description: "Maximum number of characters in a name returned by the picker.",
@@ -118,7 +131,77 @@ const settingsSchema = Type.Object(
     { additionalProperties: false },
 );
 
-export type ExtensionSettings = Static<typeof settingsSchema>;
+const settingsSchema = settingsObjectSchema;
+
+export type ExtensionSettingsDocument = Static<typeof settingsObjectSchema>;
+
+/** A resolved picker-model selection, parsed from the model setting. */
+export type PickerModelReference =
+    | { readonly type: "current" }
+    | { readonly type: "specific"; readonly provider: string; readonly id: string };
+
+export type ExtensionSettings = {
+    readonly enabled: boolean;
+    readonly initialNaming: {
+        readonly enabled: boolean;
+        readonly trigger: ExtensionSettingsDocument["initialNaming"]["trigger"];
+        readonly threshold: number;
+    };
+    readonly refreshNaming: {
+        readonly enabled: boolean;
+        readonly trigger: ExtensionSettingsDocument["refreshNaming"]["trigger"];
+        readonly threshold: number;
+    };
+    readonly model: PickerModelReference;
+    readonly reasoningEffort: ExtensionSettingsDocument["reasoningEffort"];
+    readonly timeoutMs: number;
+    readonly conversationScope: ExtensionSettingsDocument["conversationScope"];
+    readonly prompt: string;
+    readonly nameConstraints: {
+        readonly minLength: number;
+        readonly maxLength: number;
+    };
+};
+
+type AutonameSessionSettingsLoadResult = {
+    readonly settings: ExtensionSettings | undefined;
+    readonly diagnostics: readonly {
+        readonly severity: "error" | "warning";
+        readonly message: string;
+    }[];
+};
+
+/**
+ * Parse the picker model setting into a tagged reference.
+ *
+ * "current" selects the session's active model; any other value must be
+ * provider/model-id form. Returns undefined for malformed references so the
+ * caller can report the configured value as unavailable.
+ */
+export function parsePickerModelReference(model: string): PickerModelReference | undefined {
+    if (model.trim() !== model) {
+        return undefined;
+    }
+    if (model === "current") {
+        return { type: "current" };
+    }
+
+    const separatorIndex = model.indexOf("/");
+    if (separatorIndex <= 0 || separatorIndex === model.length - 1 || /\s/.test(model)) {
+        return undefined;
+    }
+
+    return {
+        type: "specific",
+        provider: model.slice(0, separatorIndex),
+        id: model.slice(separatorIndex + 1),
+    };
+}
+
+/** Render a parsed picker-model reference in its persisted setting form. */
+export function formatPickerModelReference(reference: PickerModelReference): string {
+    return reference.type === "current" ? "current" : `${reference.provider}/${reference.id}`;
+}
 
 export const extensionSettingsDefinition = defineExtensionSettings({
     id: "pi-autoname-session",
@@ -128,13 +211,73 @@ export const extensionSettingsDefinition = defineExtensionSettings({
     schema: settingsSchema,
 });
 
-export function loadAutonameSessionSettings(ctx: PiSettingsContext) {
-    return loadPiExtensionSettings(extensionSettingsDefinition, ctx, {
+/**
+ * Load resolved extension settings from Pi's global and trusted-project
+ * settings layers, refreshing missing or stale generated schemas.
+ */
+export function loadAutonameSessionSettings(
+    ctx: PiSettingsContext,
+): AutonameSessionSettingsLoadResult {
+    const loaded = loadPiExtensionSettings(extensionSettingsDefinition, ctx, {
         bundledSchema: {
             kind: "url",
             url: new URL("../config.schema.json", import.meta.url),
         },
     });
+    if (loaded.settings.nameConstraints.minLength > loaded.settings.nameConstraints.maxLength) {
+        return {
+            settings: undefined,
+            diagnostics: [
+                ...loaded.diagnostics,
+                {
+                    severity: "error" as const,
+                    message:
+                        "Session naming is disabled because nameConstraints.minLength is greater than maxLength.",
+                },
+            ],
+        };
+    }
+
+    const model = parsePickerModelReference(loaded.settings.model);
+    if (model === undefined) {
+        return {
+            settings: undefined,
+            diagnostics: [
+                ...loaded.diagnostics,
+                {
+                    severity: "error" as const,
+                    message:
+                        'Session naming is disabled because model must be "current" or provider/model-id.',
+                },
+            ],
+        };
+    }
+
+    return {
+        settings: {
+            enabled: loaded.settings.enabled,
+            initialNaming: {
+                enabled: loaded.settings.initialNaming.enabled,
+                trigger: loaded.settings.initialNaming.trigger,
+                threshold: loaded.settings.initialNaming.threshold,
+            },
+            refreshNaming: {
+                enabled: loaded.settings.refreshNaming.enabled,
+                trigger: loaded.settings.refreshNaming.trigger,
+                threshold: loaded.settings.refreshNaming.threshold,
+            },
+            model,
+            reasoningEffort: loaded.settings.reasoningEffort,
+            timeoutMs: loaded.settings.timeoutMs,
+            conversationScope: loaded.settings.conversationScope,
+            prompt: loaded.settings.prompt,
+            nameConstraints: {
+                minLength: loaded.settings.nameConstraints.minLength,
+                maxLength: loaded.settings.nameConstraints.maxLength,
+            },
+        },
+        diagnostics: loaded.diagnostics,
+    };
 }
 
 export default extensionSettingsDefinition;
