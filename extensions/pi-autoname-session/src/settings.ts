@@ -74,7 +74,7 @@ const settingsSchema = Type.Object(
         ),
         prompt: Type.String({
             default: [
-                "You name coding sessions for quick recognition in a session list.",
+                "Your goal is to pick a coding session name for quick recognition in a session list.",
                 "Use the repository context and conversation to identify the main goal or workstream.",
                 "Prefer a specific, useful phrase over a generic one.",
                 "Return only the name; do not include quotes, Markdown, or an explanation.",
