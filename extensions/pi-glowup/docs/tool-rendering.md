@@ -177,4 +177,4 @@ pi.registerTool({
 ```
 
 Users can also preserve tools through `preserveTools` in
-`~/.pi/agent/pi-glowup/config.json`.
+`~/.pi/agent/extension-settings/pi-glowup.json`.

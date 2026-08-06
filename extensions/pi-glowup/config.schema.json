@@ -1,16 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/zigai/pi-glowup/config.schema.json",
+  "title": "Pi Glowup settings",
+  "description": "High-signal rendering for Pi tool calls and results.",
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "$schema": {
-      "type": "string"
+      "type": "string",
+      "default": "./schemas/pi-glowup.schema.json",
+      "description": "JSON Schema used by editors for this settings file."
     },
     "preserveTools": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": [],
+      "description": "Keep selected third-party tools on their original renderer."
     },
     "mutations": {
       "type": "object",
@@ -226,8 +233,8 @@
           "description": "Instruction-file path foreground; null inherits the active Pi theme."
         },
         "dimUnchangedDiffText": {
-          "description": "Dim unchanged text around changed intraline spans.",
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Dim unchanged text around changed intraline spans."
         }
       },
       "additionalProperties": false,
@@ -248,11 +255,13 @@
       "type": "object",
       "properties": {
         "enabled": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Write bounded renderer and lifecycle diagnostics."
         },
         "path": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Diagnostics path relative to the pi-glowup data directory unless absolute."
         },
         "maxBytes": {
           "anyOf": [
@@ -263,11 +272,13 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Rotate diagnostics after this size; null disables rotation."
         },
         "memorySampleIntervalMs": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Memory sampling interval; 0 disables sampling."
         }
       },
       "additionalProperties": false,
@@ -276,6 +287,27 @@
         "path": "debug.log",
         "maxBytes": null,
         "memorySampleIntervalMs": 10000
+      }
+    },
+    "toolCallIndicator": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "pattern": "\\S",
+          "description": "Prefix shown before compact tool calls."
+        },
+        "bold": {
+          "type": "boolean",
+          "description": "Render the tool-call indicator in bold."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "symbol": "•",
+        "bold": true
       }
     },
     "toolLabels": {
@@ -291,7 +323,8 @@
               "type": "string",
               "const": "lifecycle"
             }
-          ]
+          ],
+          "description": "Use stable or lifecycle-aware tool labels."
         }
       },
       "additionalProperties": false,
@@ -299,30 +332,12 @@
         "mode": "static"
       }
     },
-    "toolCallIndicator": {
-      "type": "object",
-      "properties": {
-        "symbol": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 8,
-          "pattern": "\\S"
-        },
-        "bold": {
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false,
-      "default": {
-        "symbol": "•",
-        "bold": true
-      }
-    },
     "writePreview": {
       "type": "object",
       "properties": {
         "movingViewport": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Follow the newest rows while writes stream."
         }
       },
       "additionalProperties": false,
@@ -337,17 +352,19 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Language ids or aliases to preload for synchronous syntax highlighting."
         },
         "bracketPairColoring": {
-          "description": "Color matching bracket pairs; false preserves the syntax theme foreground.",
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Color matching bracket pairs; false preserves the syntax theme color."
         },
         "projectLanguageDetection": {
           "type": "object",
           "properties": {
             "enabled": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Add languages inferred from project filenames to the preload set."
             }
           },
           "additionalProperties": false,
@@ -358,7 +375,14 @@
       },
       "additionalProperties": false,
       "default": {
-        "preloadLanguages": ["markdown", "bash", "python", "typescript", "javascript", "json"],
+        "preloadLanguages": [
+          "markdown",
+          "bash",
+          "python",
+          "typescript",
+          "javascript",
+          "json"
+        ],
         "bracketPairColoring": true,
         "projectLanguageDetection": {
           "enabled": true
@@ -369,19 +393,24 @@
       "type": "object",
       "properties": {
         "assistantSeparator": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Add spacing and separators around assistant messages."
         },
         "workingWidgetSpacing": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Remove one blank line near the working indicator."
         },
         "autocompleteCleanup": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Redraw after slash autocomplete closes."
         },
         "markdownSyntax": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Highlight Markdown code fences."
         },
         "thirdPartyToolRenderers": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Apply compact renderers to compatible third-party tools."
         }
       },
       "additionalProperties": false,
@@ -410,11 +439,13 @@
               "type": "string",
               "const": "block"
             }
-          ]
+          ],
+          "description": "Choose auto, inline, or block script headers."
         },
         "maxCodePreviewLines": {
           "type": "integer",
-          "minimum": 4
+          "minimum": 4,
+          "description": "Collapsed script content rows before a separate omission row."
         },
         "formatters": {
           "type": "object",
@@ -427,7 +458,8 @@
               },
               "minItems": 1
             }
-          }
+          },
+          "description": "Commands that format script previews through stdin/stdout."
         }
       },
       "additionalProperties": false,
@@ -437,6 +469,5 @@
         "formatters": {}
       }
     }
-  },
-  "additionalProperties": false
+  }
 }

@@ -14,52 +14,53 @@ pi install npm:@zigai/pi-glowup
 - [Configuration guide](docs/configuration.md)
 - [Script previews](docs/script-previews.md)
 
+<!-- pi-extension-settings:start -->
 ## Configuration
 
-Use global config at `~/.pi/agent/pi-glowup/config.json`.
+Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 
-| Option                                    | Default                                                         | Purpose                                                                     |
-| ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.                 |
-| `mutations.defaultView`                   | `"full"`                                                        | Show every available completed-mutation row or a bounded `preview`.         |
-| `mutations.previewLines`                  | `6`                                                             | Changed/content rows retained per file when using the preview view.         |
-| `mutations.limits.maxDiffBytes`           | `524288`                                                        | Summarize larger diff snapshots; `null` disables the byte limit.            |
-| `mutations.limits.maxDiffLines`           | `5000`                                                          | Summarize diffs with more rows; `null` disables the line limit.             |
-| `mutations.limits.maxWritePreviewBytes`   | `65536`                                                         | Bound retained native-write content; `null` keeps all content.              |
-| `mutations.limits.maxDeletePreimageBytes` | `262144`                                                        | Bound file contents captured before deletion; `null` disables the limit.    |
-| `appearance.diffBackgroundStyle`          | `"two-tone"`                                                    | Use `two-tone`, `changed-spans`, or `full-row` diff backgrounds.            |
-| `appearance.diffLineNumberStyle`          | `"dual"`                                                        | Show aligned `dual` old/new gutters or the previous `single` gutter.        |
-| `appearance.narrowDiffLayout`             | `"paired"`                                                      | Pair similar old/new rows or use `traditional` block ordering.              |
-| `appearance.sideBySideLayout`             | `"content-aware"`                                               | Use content-aware split selection or the `fixed` 140-column cutoff.         |
-| `appearance.addedRowBackground`           | `"#213A2B"`                                                     | Set the subtle addition-row shade; `null` derives it from Pi.               |
-| `appearance.deletedRowBackground`         | `"#4A221D"`                                                     | Set the subtle deletion-row shade; `null` derives it from Pi.               |
-| `appearance.addedContentBackground`       | `"#0D5728"`                                                     | Set the stronger added intraline shade; `null` derives it.                  |
-| `appearance.deletedContentBackground`     | `"#762925"`                                                     | Set the stronger deleted intraline shade; `null` derives it.                |
-| `appearance.instructionPathColor`         | `null`                                                          | Override Skill/AGENTS path text with a `#RRGGBB` color; `null` uses Pi.     |
-| `appearance.dimUnchangedDiffText`         | `false`                                                         | Dim unchanged text inside changed diff rows.                                |
-| `debugLog.enabled`                        | `false`                                                         | Write JSONL diagnostics for memory, cache, renderer, and lifecycle state.   |
-| `debugLog.path`                           | `"debug.log"`                                                   | File for diagnostics; relative paths resolve beside the global config.      |
-| `debugLog.maxBytes`                       | `null`                                                          | Rotate the diagnostics file to `.1` after this size; `null` means no cap.   |
-| `debugLog.memorySampleIntervalMs`         | `10000`                                                         | Sample memory while a session is active; use `0` to disable sampling.       |
-| `toolCallIndicator.symbol`                | `"•"`                                                           | Text shown before every compact tool call.                                  |
-| `toolCallIndicator.bold`                  | `true`                                                          | Render the tool-call indicator in bold across all call states.              |
-| `toolLabels.mode`                         | `"static"`                                                      | Use `static` labels or `lifecycle` active/completed verb pairs.             |
-| `writePreview.movingViewport`             | `true`                                                          | Follow the latest lines while a large write streams; disable for head-only. |
-| `syntax.preloadLanguages`                 | `["markdown","bash","python","typescript","javascript","json"]` | Language ids or aliases to preload for synchronous syntax highlighting.     |
-| `syntax.bracketPairColoring`              | `true`                                                          | Color matching brackets; disable to use the syntax theme's normal color.    |
-| `syntax.projectLanguageDetection.enabled` | `true`                                                          | Add languages inferred from project filenames to the preload set.           |
-| `patches.assistantSeparator`              | `true`                                                          | Add separators and spacing around assistant messages.                       |
-| `patches.workingWidgetSpacing`            | `false`                                                         | Remove one blank line near the working indicator with a global TUI patch.   |
-| `patches.autocompleteCleanup`             | `true`                                                          | Force a cleanup redraw after slash autocomplete closes.                     |
-| `patches.markdownSyntax`                  | `true`                                                          | Add syntax highlighting to Markdown code fences.                            |
-| `patches.thirdPartyToolRenderers`         | `true`                                                          | Apply compact renderers to compatible third-party tools.                    |
-| `scriptPreview.headerLayout`              | `"auto"`                                                        | Choose script header placement: `auto`, `inline`, or `block`.               |
-| `scriptPreview.maxCodePreviewLines`       | `8`                                                             | Maximum collapsed script content lines; omission rows are added separately. |
-| `scriptPreview.formatters`                | `{}`                                                            | Format script previews by sending code to the configured command on stdin.  |
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `preserveTools` | string[] | `[]` | Keep selected third-party tools on their original renderer. |
+| `mutations.defaultView` | `full` \| `preview` | `"full"` | Show every available completed-mutation row or a bounded semantic preview. |
+| `mutations.previewLines` | integer | `6` | Changed/content rows retained per file in preview view. |
+| `mutations.limits.maxDiffBytes` | integer \| null | `524288` | Maximum combined diff snapshot or metadata bytes; null disables this limit. |
+| `mutations.limits.maxDiffLines` | integer \| null | `5000` | Maximum diff rows before rendering a summary; null disables this limit. |
+| `mutations.limits.maxWritePreviewBytes` | integer \| null | `65536` | Maximum native-write content bytes retained for rendering; null disables this limit. |
+| `mutations.limits.maxDeletePreimageBytes` | integer \| null | `262144` | Maximum file bytes captured before deletion; null disables this limit. |
+| `appearance.diffBackgroundStyle` | `changed-spans` \| `two-tone` \| `full-row` | `"two-tone"` | Background treatment for changed diff rows and intraline spans. |
+| `appearance.diffLineNumberStyle` | `single` \| `dual` | `"dual"` | Show one relevant line number or aligned old and new line-number columns. |
+| `appearance.narrowDiffLayout` | `paired` \| `traditional` | `"paired"` | Order similar deletion/addition rows together or in traditional blocks. |
+| `appearance.sideBySideLayout` | `content-aware` \| `fixed` | `"content-aware"` | Choose split diffs from content fit or a fixed terminal-width threshold. |
+| `appearance.addedRowBackground` | string \| null | `"#213A2B"` | Subtle addition-row background; null derives it from the active Pi theme. |
+| `appearance.deletedRowBackground` | string \| null | `"#4A221D"` | Subtle deletion-row background; null derives it from the active Pi theme. |
+| `appearance.addedContentBackground` | string \| null | `"#0D5728"` | Stronger added intraline-span background; null derives a contrasting shade. |
+| `appearance.deletedContentBackground` | string \| null | `"#762925"` | Stronger deleted intraline-span background; null derives a contrasting shade. |
+| `appearance.instructionPathColor` | string \| null | `null` | Instruction-file path foreground; null inherits the active Pi theme. |
+| `appearance.dimUnchangedDiffText` | boolean | `false` | Dim unchanged text around changed intraline spans. |
+| `debugLog.enabled` | boolean | `false` | Write bounded renderer and lifecycle diagnostics. |
+| `debugLog.path` | string | `"debug.log"` | Diagnostics path relative to the pi-glowup data directory unless absolute. |
+| `debugLog.maxBytes` | integer \| null | `null` | Rotate diagnostics after this size; null disables rotation. |
+| `debugLog.memorySampleIntervalMs` | integer | `10000` | Memory sampling interval; 0 disables sampling. |
+| `toolCallIndicator.symbol` | string | `"•"` | Prefix shown before compact tool calls. |
+| `toolCallIndicator.bold` | boolean | `true` | Render the tool-call indicator in bold. |
+| `toolLabels.mode` | `static` \| `lifecycle` | `"static"` | Use stable or lifecycle-aware tool labels. |
+| `writePreview.movingViewport` | boolean | `true` | Follow the newest rows while writes stream. |
+| `syntax.preloadLanguages` | string[] | *See JSON below ↓* | Language ids or aliases to preload for synchronous syntax highlighting. |
+| `syntax.bracketPairColoring` | boolean | `true` | Color matching bracket pairs; false preserves the syntax theme color. |
+| `syntax.projectLanguageDetection.enabled` | boolean | `true` | Add languages inferred from project filenames to the preload set. |
+| `patches.assistantSeparator` | boolean | `true` | Add spacing and separators around assistant messages. |
+| `patches.workingWidgetSpacing` | boolean | `false` | Remove one blank line near the working indicator. |
+| `patches.autocompleteCleanup` | boolean | `true` | Redraw after slash autocomplete closes. |
+| `patches.markdownSyntax` | boolean | `true` | Highlight Markdown code fences. |
+| `patches.thirdPartyToolRenderers` | boolean | `true` | Apply compact renderers to compatible third-party tools. |
+| `scriptPreview.headerLayout` | `auto` \| `inline` \| `block` | `"auto"` | Choose auto, inline, or block script headers. |
+| `scriptPreview.maxCodePreviewLines` | integer | `8` | Collapsed script content rows before a separate omission row. |
+| `scriptPreview.formatters` | Record<string, string[]> | `{}` | Commands that format script previews through stdin/stdout. |
 
 ```json
 {
-  "$schema": "./config.schema.json",
+  "$schema": "./schemas/pi-glowup.schema.json",
   "preserveTools": [],
   "mutations": {
     "defaultView": "full",
@@ -100,7 +101,14 @@ Use global config at `~/.pi/agent/pi-glowup/config.json`.
     "movingViewport": true
   },
   "syntax": {
-    "preloadLanguages": ["markdown", "bash", "python", "typescript", "javascript", "json"],
+    "preloadLanguages": [
+      "markdown",
+      "bash",
+      "python",
+      "typescript",
+      "javascript",
+      "json"
+    ],
     "bracketPairColoring": true,
     "projectLanguageDetection": {
       "enabled": true
@@ -120,6 +128,7 @@ Use global config at `~/.pi/agent/pi-glowup/config.json`.
   }
 }
 ```
+<!-- pi-extension-settings:end -->
 
 ## License
 

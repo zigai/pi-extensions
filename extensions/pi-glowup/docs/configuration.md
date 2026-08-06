@@ -1,6 +1,6 @@
 # Configuration
 
-The global configuration file is `~/.pi/agent/pi-glowup/config.json`.
+The global configuration file is `~/.pi/agent/extension-settings/pi-glowup.json`.
 
 ## Choosing a diff look
 
@@ -69,34 +69,34 @@ For compatibility with the previous appearance, `addedRowBackground` and
 
 ### Other settings
 
-| Option                                    | Default                                                         | Purpose                                                         |
-| ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------- |
-| `preserveTools`                           | `[]`                                                            | Keep selected third-party tools on their original renderer.     |
-| `debugLog.enabled`                        | `false`                                                         | Write bounded renderer and lifecycle diagnostics.               |
-| `debugLog.path`                           | `"debug.log"`                                                   | Diagnostics path relative to the global config directory.       |
-| `debugLog.maxBytes`                       | `null`                                                          | Rotate diagnostics after this size; `null` disables rotation.   |
-| `debugLog.memorySampleIntervalMs`         | `10000`                                                         | Memory sampling interval; `0` disables sampling.                |
-| `toolCallIndicator.symbol`                | `"•"`                                                           | Prefix shown before compact tool calls.                         |
-| `toolCallIndicator.bold`                  | `true`                                                          | Render the tool-call indicator in bold.                         |
-| `toolLabels.mode`                         | `"static"`                                                      | Use stable or lifecycle-aware tool labels.                      |
-| `writePreview.movingViewport`             | `true`                                                          | Follow the newest rows while writes stream.                     |
-| `syntax.preloadLanguages`                 | `["markdown","bash","python","typescript","javascript","json"]` | Languages available for synchronous highlighting.               |
-| `syntax.bracketPairColoring`              | `true`                                                          | Color matching brackets; disable to use the syntax theme color. |
-| `syntax.projectLanguageDetection.enabled` | `true`                                                          | Add languages inferred from project files.                      |
-| `patches.assistantSeparator`              | `true`                                                          | Add spacing and separators around assistant messages.           |
-| `patches.workingWidgetSpacing`            | `false`                                                         | Remove one blank line near the working indicator.               |
-| `patches.autocompleteCleanup`             | `true`                                                          | Redraw after slash autocomplete closes.                         |
-| `patches.markdownSyntax`                  | `true`                                                          | Highlight Markdown code fences.                                 |
-| `patches.thirdPartyToolRenderers`         | `true`                                                          | Apply compact renderers to compatible third-party tools.        |
-| `scriptPreview.headerLayout`              | `"auto"`                                                        | Choose `auto`, `inline`, or `block` script headers.             |
-| `scriptPreview.maxCodePreviewLines`       | `8`                                                             | Collapsed script content rows before a separate omission row.   |
-| `scriptPreview.formatters`                | `{}`                                                            | Commands that format script previews through stdin/stdout.      |
+| Option                                    | Default          | Purpose                                                         |
+| ----------------------------------------- | ---------------- | --------------------------------------------------------------- |
+| `preserveTools`                           | `[]`             | Keep selected third-party tools on their original renderer.     |
+| `debugLog.enabled`                        | `false`          | Write bounded renderer and lifecycle diagnostics.               |
+| `debugLog.path`                           | `"debug.log"`    | Diagnostics path relative to the pi-glowup data directory.      |
+| `debugLog.maxBytes`                       | `null`           | Rotate diagnostics after this size; `null` disables rotation.   |
+| `debugLog.memorySampleIntervalMs`         | `10000`          | Memory sampling interval; `0` disables sampling.                |
+| `toolCallIndicator.symbol`                | `"•"`            | Prefix shown before compact tool calls.                         |
+| `toolCallIndicator.bold`                  | `true`           | Render the tool-call indicator in bold.                         |
+| `toolLabels.mode`                         | `"static"`       | Use stable or lifecycle-aware tool labels.                      |
+| `writePreview.movingViewport`             | `true`           | Follow the newest rows while writes stream.                     |
+| `syntax.preloadLanguages`                 | _See JSON below_ | Languages available for synchronous highlighting.               |
+| `syntax.bracketPairColoring`              | `true`           | Color matching brackets; disable to use the syntax theme color. |
+| `syntax.projectLanguageDetection.enabled` | `true`           | Add languages inferred from project files.                      |
+| `patches.assistantSeparator`              | `true`           | Add spacing and separators around assistant messages.           |
+| `patches.workingWidgetSpacing`            | `false`          | Remove one blank line near the working indicator.               |
+| `patches.autocompleteCleanup`             | `true`           | Redraw after slash autocomplete closes.                         |
+| `patches.markdownSyntax`                  | `true`           | Highlight Markdown code fences.                                 |
+| `patches.thirdPartyToolRenderers`         | `true`           | Apply compact renderers to compatible third-party tools.        |
+| `scriptPreview.headerLayout`              | `"auto"`         | Choose `auto`, `inline`, or `block` script headers.             |
+| `scriptPreview.maxCodePreviewLines`       | `8`              | Collapsed script content rows before a separate omission row.   |
+| `scriptPreview.formatters`                | `{}`             | Commands that format script previews through stdin/stdout.      |
 
 ## Full default configuration
 
 ```json
 {
-  "$schema": "./config.schema.json",
+  "$schema": "./schemas/pi-glowup.schema.json",
   "preserveTools": [],
   "mutations": {
     "defaultView": "full",

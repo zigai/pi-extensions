@@ -54,19 +54,18 @@
 - Include `"$schema"` in JSON examples when the scaffolded default config includes it, but do not explain it in prose.
 - Option tables should list actual user-editable setting keys, preferably dot paths like `tools.webSearch`; avoid vague category rows such as `tools`, `openai`, or `appearance` unless that object is edited as a single meaningful value.
 - If a setting has no default, document it in the option table but do not invent a value for it in JSON.
-- In README configuration sections, mention only the global path `~/.pi/agent/pi-glowup/config.json`; do not mention trusted project overrides or project-specific config paths.
+- In README configuration sections, mention only the global path `~/.pi/agent/extension-settings/pi-glowup.json`; do not mention trusted project overrides or project-specific config paths.
 - `docs/configuration.md` may include advanced project override details only in a dedicated Advanced section when they are genuinely useful.
 - Do not mention TypeBox, `getAgentDir()`, `CONFIG_DIR_NAME`, schema refresh mechanics, user-owned/extension-owned terminology, or malformed-config overwrite policy in README/config docs.
 - Keep lifecycle implementation policy in `AGENTS.md`, tests, and source code rather than user docs.
 
 ## Pi Extension Configuration
 
-- If the extension needs user-configurable behavior, store persistent runtime settings as JSON files, not Pi core `settings.json` or YAML/TOML/TypeScript config.
-- Use `getAgentDir()/<extension-id>/config.json` for user-owned global config and trusted `ctx.cwd/CONFIG_DIR_NAME/<extension-id>/config.json` for user-owned project overrides.
-- Import `getAgentDir()` and `CONFIG_DIR_NAME` from `@earendil-works/pi-coding-agent`; do not hardcode Pi agent paths.
-- Parse config at the boundary: read JSON with `JSON.parse` into `unknown`, then decode with TypeBox before passing typed config inward.
-- Keep checked-in `config.schema.json` synchronized with the TypeBox schema and default config values, including top-level JSON Schema metadata.
-- Scaffold default global `config.json` only when missing, include `"$schema": "./config.schema.json"`, and never overwrite existing or malformed user config.
-- Treat `config.schema.json` as extension-owned: write it when missing and refresh it when the installed extension schema content is stale.
-- Never auto-create project config; read trusted project config only when already present.
+- If the extension needs user-configurable behavior, define it in `src/settings.ts` with `@zigai/pi-extension-settings`; do not store it in Pi core `settings.json` or YAML/TOML/TypeScript config.
+- Declare the definition, checked-in schema, and README in `package.json.piExtensionSettings` and keep `@zigai/pi-extension-settings` bundled as a runtime dependency.
+- Use `loadPiExtensionSettings()` at the composition boundary. It owns JSON parsing, defaults, global/project paths, trust gating, schema installation, and safe handling of malformed layers.
+- Keep the resolved settings type as the source for runtime adapters; do not duplicate the persisted schema or hand-roll config scaffolding and schema writes.
+- Run `npm run config:generate` after changing `src/settings.ts`; run `npm run config:check` to verify generated `config.schema.json` and the marked README section.
+- Never hand-edit `config.schema.json` or README text between the `pi-extension-settings` markers.
+- The shared settings runtime uses `~/.pi/agent/extension-settings/<extension-id>.json` globally and trusted `<cwd>/.pi/extension-settings/<extension-id>.json` project overrides.
 - Use environment variables only for secrets, CI/session overrides, or explicit config-path overrides.
