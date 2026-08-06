@@ -116,20 +116,20 @@
       "properties": {
         "minLength": {
           "type": "number",
-          "default": 3,
+          "default": 6,
           "minimum": 1,
-          "description": "Minimum length of a name returned by the picker."
+          "description": "Minimum number of characters in a name returned by the picker."
         },
         "maxLength": {
           "type": "number",
           "default": 60,
           "minimum": 1,
-          "description": "Maximum length of a name returned by the picker."
+          "description": "Maximum number of characters in a name returned by the picker."
         }
       },
       "additionalProperties": false,
       "default": {
-        "minLength": 3,
+        "minLength": 6,
         "maxLength": 60
       }
     }

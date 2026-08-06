@@ -99,19 +99,19 @@ const settingsSchema = Type.Object(
         nameConstraints: Type.Object(
             {
                 minLength: Type.Number({
-                    default: 3,
+                    default: 6,
                     minimum: 1,
-                    description: "Minimum length of a name returned by the picker.",
+                    description: "Minimum number of characters in a name returned by the picker.",
                 }),
                 maxLength: Type.Number({
                     default: 60,
                     minimum: 1,
-                    description: "Maximum length of a name returned by the picker.",
+                    description: "Maximum number of characters in a name returned by the picker.",
                 }),
             },
             {
                 additionalProperties: false,
-                default: { minLength: 3, maxLength: 60 },
+                default: { minLength: 6, maxLength: 60 },
             },
         ),
     },

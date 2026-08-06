@@ -26,9 +26,9 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 | `refreshNaming.threshold` | number | `10` | The amount of activity between refreshes. Recommended: 10 messages, turns, tool calls, or minutes, or 10,000 tokens. |
 | `model` | string | `"current"` | Picker model in provider/model-id form, or current to use the session's active model. |
 | `reasoningEffort` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | `"low"` | Reasoning effort used by the session-name picker. |
-| `prompt` | string | *See JSON below ↓* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}. |
-| `nameConstraints.minLength` | number | `3` | Minimum length of a name returned by the picker. |
-| `nameConstraints.maxLength` | number | `60` | Maximum length of a name returned by the picker. |
+| `prompt` | string | *See JSON below* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}. |
+| `nameConstraints.minLength` | number | `6` | Minimum number of characters in a name returned by the picker. |
+| `nameConstraints.maxLength` | number | `60` | Maximum number of characters in a name returned by the picker. |
 
 ```json
 {
@@ -48,7 +48,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
   "reasoningEffort": "low",
   "prompt": "You name coding sessions for quick recognition in a session list.\nUse the repository context and conversation to identify the main goal or workstream.\nPrefer a specific, useful phrase over a generic one.\nReturn only the name; do not include quotes, Markdown, or an explanation.\n\nRepository context:\n<repository_context>\n{{repository_context}}\n</repository_context>\n\nConversation:\n<conversation>\n{{conversation}}\n</conversation>\n\nCurrent name: {{current_name}}",
   "nameConstraints": {
-    "minLength": 3,
+    "minLength": 6,
     "maxLength": 60
   }
 }
