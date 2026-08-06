@@ -66,16 +66,5 @@
     "unicorn/no-object-as-default-parameter": "error",
     "unicorn/prefer-date-now": "error",
     "unicorn/prefer-math-trunc": "error"
-  },
-  "overrides": [
-    {
-      "files": ["src/**/*.ts", "test/**/*.ts"],
-      "rules": {
-        "typescript/no-base-to-string": "off",
-        "typescript/no-floating-promises": "off",
-        "typescript/prefer-optional-chain": "off",
-        "typescript/strict-boolean-expressions": "off"
-      }
-    }
-  ]
+  }
 }
