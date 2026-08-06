@@ -38,6 +38,7 @@ describe("Pi settings tab", () => {
                 setTheme: () => ({ success: true }),
             },
             runtime: {
+                mode: "regular",
                 setClearOnShrink() {},
                 setShowHardwareCursor() {},
             },
@@ -53,8 +54,8 @@ describe("Pi settings tab", () => {
         expect(rendered).toContain("Auto-compact");
         expect(rendered).toContain("Auto-resize images");
         expect(rendered).toContain("Terminal progress");
-        expect(rendered.split("\n").find((line) => line.includes(">"))).toMatch(/\(1\/25\)$/);
-        expect(rendered.match(/\(1\/25\)/g)).toHaveLength(1);
+        expect(rendered.split("\n").find((line) => line.includes(">"))).toMatch(/\(1\/28\)$/);
+        expect(rendered.match(/\(1\/28\)/g)).toHaveLength(1);
         expect(tab.activeScope).toBe("global");
         expect(tab.selectScope("project")).toBe(false);
 
@@ -85,6 +86,7 @@ describe("Pi settings tab", () => {
                 setTheme: () => ({ success: true }),
             },
             runtime: {
+                mode: "regular",
                 setClearOnShrink() {},
                 setShowHardwareCursor() {},
             },
@@ -97,8 +99,56 @@ describe("Pi settings tab", () => {
         expect(tab.selectScope("project")).toBe(true);
         tab.handleInput(" ");
         await tab.flush();
+        tab.handleInput("mermaid");
+        expect(tab.render(100).join("\n")).toContain("Mermaid diagrams");
+        tab.handleInput("\r");
+        await tab.flush();
         expect(JSON.parse(await readFile(join(cwd, ".pi", "settings.json"), "utf8"))).toEqual({
             compaction: { enabled: false },
+            markdown: { mermaid: "off" },
         });
+    });
+
+    it("renders and persists Pi 0.84 fullscreen settings", async () => {
+        initTheme("dark", false);
+        const settings = SettingsManager.inMemory({ tuiMode: "fullscreen" });
+        const notifications: string[] = [];
+        const tab = new PiSettingsTab({
+            globalSettings: settings,
+            projectSettings: SettingsManager.inMemory(),
+            projectSnapshot: {
+                _tag: "UnavailableProjectSettings",
+                path: "/project/.pi/settings.json",
+                message: "Project is untrusted.",
+            },
+            pi: {
+                getThinkingLevel: () => "high",
+                setThinkingLevel() {},
+            },
+            ui: {
+                getAllThemes: () => [{ name: "dark", path: undefined }],
+                notify: (message) => notifications.push(message),
+                setTheme: () => ({ success: true }),
+            },
+            runtime: {
+                mode: "fullscreen",
+                setClearOnShrink() {},
+                setShowHardwareCursor() {},
+            },
+            model: undefined,
+            terminalTheme: "dark",
+            onCancel() {},
+            requestRender() {},
+        });
+
+        tab.handleInput("tui");
+        const rendered = tab.render(100).join("\n");
+        expect(rendered).toContain("TUI mode");
+        expect(rendered).toContain("fullscreen");
+        tab.handleInput("\r");
+        await tab.flush();
+
+        expect(settings.getTuiMode()).toBe("regular");
+        expect(notifications).toContain("TUI mode will change to regular in the next Pi session.");
     });
 });

@@ -1,5 +1,5 @@
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
-import { TUI, type Terminal } from "@earendil-works/pi-tui";
+import { TuiAltScreen, TuiMainScreen as TUI, type Terminal } from "@earendil-works/pi-tui";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -409,7 +409,7 @@ describe("settings TUI", () => {
             ]),
             false,
         );
-        const tui = new TUI(fakeTerminal());
+        const tui = new TuiAltScreen(fakeTerminal());
         let saveCount = 0;
         const component = new SettingsEditorComponent({
             cwd: "/project",
