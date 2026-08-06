@@ -1,10 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
     DEFAULT_GLOWUP_CONFIG_JSON,
-    glowupConfigJsonSchema,
     getGlowupGlobalConfigPath,
     getGlowupGlobalConfigSchemaPath,
     getGlowupProjectConfigPath,
@@ -13,6 +12,25 @@ import {
 } from "../src/config/config.ts";
 
 describe("glowup config", () => {
+    const agentDirEnvironmentVariable = "PI_CODING_AGENT_DIR";
+    const originalAgentDir = process.env[agentDirEnvironmentVariable];
+
+    afterEach(() => {
+        if (originalAgentDir === undefined) {
+            delete process.env[agentDirEnvironmentVariable];
+        } else {
+            process.env[agentDirEnvironmentVariable] = originalAgentDir;
+        }
+    });
+
+    function useAgentDirectory(agentDir: string): void {
+        process.env[agentDirEnvironmentVariable] = agentDir;
+    }
+
+    function bundledSchema(): unknown {
+        return JSON.parse(readFileSync("config.schema.json", "utf8"));
+    }
+
     it("parses optional config with safe defaults", () => {
         const config = parseGlowupConfig({});
 
@@ -208,8 +226,9 @@ describe("glowup config", () => {
     it("scaffolds missing global config and schema files", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
+        useAgentDirectory(agentDir);
 
-        const config = readGlowupConfig({ agentDir });
+        const config = readGlowupConfig();
 
         expect(config.preserveTools).toEqual([]);
         expect(config.debugLog.path).toBe("debug.log");
@@ -225,20 +244,69 @@ describe("glowup config", () => {
             DEFAULT_GLOWUP_CONFIG_JSON,
         );
         expect(JSON.parse(readFileSync(getGlowupGlobalConfigSchemaPath(agentDir), "utf8"))).toEqual(
-            glowupConfigJsonSchema(),
+            bundledSchema(),
         );
+    });
+
+    it("copies a valid legacy global config into the shared settings location", () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
+        const agentDir = join(root, "agent");
+        useAgentDirectory(agentDir);
+        const legacyPath = join(agentDir, "pi-glowup", "config.json");
+        const legacyContent = JSON.stringify({
+            preserveTools: ["mcp"],
+            syntax: { preloadLanguages: ["go"] },
+        });
+        mkdirSync(join(legacyPath, ".."), { recursive: true });
+        writeFileSync(legacyPath, legacyContent);
+
+        const config = readGlowupConfig();
+
+        expect(config.preserveTools).toEqual(["mcp"]);
+        expect(config.syntax.preloadLanguages).toEqual(["go"]);
+        expect(readFileSync(legacyPath, "utf8")).toBe(legacyContent);
+        expect(JSON.parse(readFileSync(getGlowupGlobalConfigPath(agentDir), "utf8"))).toMatchObject(
+            {
+                $schema: "./schemas/pi-glowup.schema.json",
+                preserveTools: ["mcp"],
+                syntax: { preloadLanguages: ["go"] },
+            },
+        );
+    });
+
+    it("copies a valid legacy project config only for trusted projects", () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        useAgentDirectory(agentDir);
+        const legacyPath = join(cwd, ".pi", "pi-glowup", "config.json");
+        mkdirSync(join(legacyPath, ".."), { recursive: true });
+        writeFileSync(legacyPath, JSON.stringify({ toolLabels: { mode: "lifecycle" } }));
+
+        const untrustedConfig = readGlowupConfig({ cwd });
+
+        expect(untrustedConfig.toolLabels.mode).toBe("static");
+        expect(() => readFileSync(getGlowupProjectConfigPath(cwd), "utf8")).toThrow();
+
+        const trustedConfig = readGlowupConfig({ cwd }, { includeProjectConfig: true });
+
+        expect(trustedConfig.toolLabels.mode).toBe("lifecycle");
+        expect(JSON.parse(readFileSync(getGlowupProjectConfigPath(cwd), "utf8"))).toMatchObject({
+            $schema: "./schemas/pi-glowup.schema.json",
+            toolLabels: { mode: "lifecycle" },
+        });
     });
 
     it("does not overwrite malformed existing global config", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
+        useAgentDirectory(agentDir);
         const configPath = getGlowupGlobalConfigPath(agentDir);
         const reportedWarnings: string[] = [];
         mkdirSync(join(configPath, ".."), { recursive: true });
         writeFileSync(configPath, "{not json");
 
         const config = readGlowupConfig({
-            agentDir,
             reportWarning: (message) => reportedWarnings.push(message),
         });
 
@@ -258,22 +326,23 @@ describe("glowup config", () => {
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
         expect(reportedWarnings).toEqual([
-            expect.stringContaining(`[pi-glowup] Failed to read ${configPath}:`),
+            expect.stringContaining("[pi-glowup] global settings contain malformed JSON"),
         ]);
     });
 
     it("refreshes stale global schema without rewriting user config", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
+        useAgentDirectory(agentDir);
         const configPath = getGlowupGlobalConfigPath(agentDir);
         const schemaPath = getGlowupGlobalConfigSchemaPath(agentDir);
         const reportedWarnings: string[] = [];
         mkdirSync(join(configPath, ".."), { recursive: true });
+        mkdirSync(join(schemaPath, ".."), { recursive: true });
         writeFileSync(configPath, "{not json");
         writeFileSync(schemaPath, "{}\n");
 
         const config = readGlowupConfig({
-            agentDir,
             reportWarning: (message) => reportedWarnings.push(message),
         });
 
@@ -285,16 +354,10 @@ describe("glowup config", () => {
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.thirdPartyToolRenderers).toBe(true);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
-        expect(JSON.parse(readFileSync(schemaPath, "utf8"))).toEqual(glowupConfigJsonSchema());
+        expect(JSON.parse(readFileSync(schemaPath, "utf8"))).toEqual(bundledSchema());
         expect(reportedWarnings).toEqual([
-            expect.stringContaining(`[pi-glowup] Failed to read ${configPath}:`),
+            expect.stringContaining("[pi-glowup] global settings contain malformed JSON"),
         ]);
-    });
-
-    it("keeps checked-in config schema aligned with TypeBox source", () => {
-        expect(JSON.parse(readFileSync("config.schema.json", "utf8"))).toEqual(
-            glowupConfigJsonSchema(),
-        );
     });
 
     it.each(["README.md", "docs/configuration.md"])(
@@ -309,15 +372,19 @@ describe("glowup config", () => {
         },
     );
 
-    it("keeps the checked-in config schema synchronized", () => {
-        expect(JSON.parse(readFileSync("config.schema.json", "utf8"))).toEqual(
-            glowupConfigJsonSchema(),
+    it("keeps the long syntax default out of the generated README table", () => {
+        const markdown = readFileSync("README.md", "utf8");
+
+        expect(markdown).toContain("| `syntax.preloadLanguages` | string[] | *See JSON below");
+        expect(markdown).not.toContain(
+            '| `syntax.preloadLanguages` | string[] | `["markdown","bash","python","typescript","javascript","json"]`',
         );
     });
 
     it("ignores project config unless trusted project config is included", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
+        useAgentDirectory(agentDir);
         const cwd = join(root, "project");
         const globalConfigPath = getGlowupGlobalConfigPath(agentDir);
         const projectConfigPath = getGlowupProjectConfigPath(cwd);
@@ -326,7 +393,7 @@ describe("glowup config", () => {
         writeFileSync(
             globalConfigPath,
             JSON.stringify({
-                $schema: "./config.schema.json",
+                $schema: "./schemas/pi-glowup.schema.json",
                 preserveTools: ["mcp"],
                 mutations: {
                     defaultView: "preview",
@@ -364,7 +431,7 @@ describe("glowup config", () => {
             }),
         );
 
-        const config = readGlowupConfig({ agentDir, cwd });
+        const config = readGlowupConfig({ cwd });
 
         expect(config.preserveTools).toEqual(["mcp"]);
         expect(config.mutations).toMatchObject({
@@ -393,6 +460,7 @@ describe("glowup config", () => {
     it("merges trusted project config over global config", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-config-"));
         const agentDir = join(root, "agent");
+        useAgentDirectory(agentDir);
         const cwd = join(root, "project");
         const globalConfigPath = getGlowupGlobalConfigPath(agentDir);
         const projectConfigPath = getGlowupProjectConfigPath(cwd);
@@ -401,7 +469,7 @@ describe("glowup config", () => {
         writeFileSync(
             globalConfigPath,
             JSON.stringify({
-                $schema: "./config.schema.json",
+                $schema: "./schemas/pi-glowup.schema.json",
                 preserveTools: ["mcp"],
                 mutations: {
                     defaultView: "preview",
@@ -439,7 +507,7 @@ describe("glowup config", () => {
             }),
         );
 
-        const config = readGlowupConfig({ agentDir, cwd }, { includeProjectConfig: true });
+        const config = readGlowupConfig({ cwd }, { includeProjectConfig: true });
 
         expect(config.preserveTools).toEqual(["mcp"]);
         expect(config.mutations).toMatchObject({

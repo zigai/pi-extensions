@@ -21,7 +21,7 @@ function createFixtureWorkspace(): FixtureWorkspace {
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     const extensionDirectory = join(agentDir, "extensions");
-    const configDirectory = join(agentDir, "pi-glowup");
+    const configDirectory = join(agentDir, "extension-settings");
     mkdirSync(cwd, { recursive: true });
     mkdirSync(extensionDirectory, { recursive: true });
     mkdirSync(configDirectory, { recursive: true });

@@ -87,7 +87,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         cwd = join(root, "workspace");
         const agentDir = join(root, "agent");
         mkdirSync(cwd, { recursive: true });
-        mkdirSync(join(agentDir, "pi-glowup"), { recursive: true });
+        mkdirSync(join(agentDir, "extension-settings"), { recursive: true });
         process.env[AGENT_DIR_ENV] = agentDir;
         writeFileSync(
             getGlowupGlobalConfigPath(agentDir),

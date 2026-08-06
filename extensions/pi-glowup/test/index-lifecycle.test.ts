@@ -252,7 +252,7 @@ describe("extension lifecycle", () => {
         const agentDir = join(root, "agent");
         process.env[AGENT_DIR_ENV] = agentDir;
         const configPath = getGlowupGlobalConfigPath(agentDir);
-        mkdirSync(join(agentDir, "pi-glowup"), { recursive: true });
+        mkdirSync(join(agentDir, "extension-settings"), { recursive: true });
         writeFileSync(configPath, JSON.stringify({ debugLog: { enabled: true } }));
         const pi = new FakeExtensionApi();
 
@@ -272,7 +272,7 @@ describe("extension lifecycle", () => {
         const agentDir = join(root, "agent");
         process.env[AGENT_DIR_ENV] = agentDir;
         const configPath = getGlowupGlobalConfigPath(agentDir);
-        mkdirSync(join(agentDir, "pi-glowup"), { recursive: true });
+        mkdirSync(join(agentDir, "extension-settings"), { recursive: true });
         writeFileSync(
             configPath,
             JSON.stringify({ debugLog: { enabled: true, memorySampleIntervalMs: 0 } }),
