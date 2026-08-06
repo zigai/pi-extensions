@@ -12,6 +12,9 @@ reusable controls.
 - Humanized, grouped labels with aligned values, descriptions, constraints, and override state.
 - Atomic, conflict-checked saves that leave malformed settings untouched.
 
+Pi 0.84 renderer mode and fullscreen scrollbar changes are saved from the Pi tab and take effect in
+the next Pi session. Pi does not currently expose live renderer switching to extensions.
+
 ## Install
 
 ```sh
