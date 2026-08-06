@@ -146,11 +146,9 @@ describe("README schema rendering", () => {
         expect(rendered).toContain(
             "| `optional` | string | — | Optional \\| setting. Second line. |",
         );
+        expect(rendered).toContain("| `limits` | number[] | *See JSON below* | Numeric limits. |");
         expect(rendered).toContain(
-            "| `limits` | number[] | *See JSON below ↓* | Numeric limits. |",
-        );
-        expect(rendered).toContain(
-            "| `mixed` | (`one` \\| integer)[] | *See JSON below ↓* | Mixed values. |",
+            "| `mixed` | (`one` \\| integer)[] | *See JSON below* | Mixed values. |",
         );
         expect(rendered).toContain(
             "| `entries` | { id: string; enabled?: boolean }[] | `[]` | Structured entries. |",

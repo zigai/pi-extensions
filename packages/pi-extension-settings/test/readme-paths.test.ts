@@ -51,10 +51,10 @@ describe("README generation", () => {
         expect(rendered).toContain('"$schema": "./schemas/pi-example.schema.json"');
         expect(rendered).toContain('"opacity": 0.8');
         expect(rendered).toContain(
-            "| `tools` | string[] | *See JSON below ↓* | Enabled tool names. |",
+            "| `tools` | string[] | *See JSON below* | Enabled tool names. |",
         );
         expect(rendered).toContain(
-            "| `tools` | string[] | *See JSON below ↓* | Enabled tool names. |\n\n### Defaults\n\n```json",
+            "| `tools` | string[] | *See JSON below* | Enabled tool names. |\n\n### Defaults\n\n```json",
         );
         expect(rendered).not.toContain("Complete default settings");
         expect(rendered).not.toContain("<details>");
@@ -83,8 +83,8 @@ describe("README generation", () => {
 
         const rendered = renderReadmeSettingsSection(definition);
 
-        expect(rendered).toContain("| `prompt` | string | *See JSON below ↓* | Prompt text. |");
-        expect(rendered).toContain("| `label` | string | *See JSON below ↓* | Display label. |");
+        expect(rendered).toContain("| `prompt` | string | *See JSON below* | Prompt text. |");
+        expect(rendered).toContain("| `label` | string | *See JSON below* | Display label. |");
         expect(rendered).toContain('"prompt": "First line.\\nSecond line."');
         expect(rendered).toContain(
             '"label": "A deliberately long single-line default that should not widen the table."',
