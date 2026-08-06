@@ -366,10 +366,6 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
     return true;
 }
 
-export function currentSyntaxThemeName(): string | undefined {
-    return syntaxState?.status === "ready" ? syntaxState.theme.name : undefined;
-}
-
 export function clearSyntaxHighlightCache(): void {
     highlightedCodeCache.clear();
     highlightedCodeCacheBytes = 0;

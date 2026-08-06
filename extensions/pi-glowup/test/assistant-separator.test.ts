@@ -1,9 +1,10 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import {
-    configureAssistantSeparatorPatch,
-    installAssistantSeparatorPatch,
-} from "../src/patches/assistant-separator.ts";
+import { configureAssistantSeparatorPatch } from "../src/patches/assistant-separator.ts";
+
+function installAssistantSeparatorPatch(prototype: object): void {
+    configureAssistantSeparatorPatch(true, prototype);
+}
 
 const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.render");
 

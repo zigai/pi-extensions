@@ -1,12 +1,9 @@
-export type UnknownRecord = {
-    readonly [key: string]: unknown;
-};
+import { getString, type UnknownRecord } from "../unknown-values.ts";
+
+export { getString, isRecord } from "../unknown-values.ts";
+export type { UnknownRecord } from "../unknown-values.ts";
 
 const NAMESPACED_TOOL_PREFIX_PATTERN = /^[A-Za-z0-9_-]+__(?<name>.+)$/;
-
-export function isRecord(value: unknown): value is UnknownRecord {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 export function isDefined<T>(value: T | undefined): value is T {
     return value !== undefined;
@@ -14,11 +11,6 @@ export function isDefined<T>(value: T | undefined): value is T {
 
 export function isNonEmptyString(value: string | undefined): value is string {
     return value !== undefined && value.length > 0;
-}
-
-export function getString(record: UnknownRecord, key: string): string | undefined {
-    const value = record[key];
-    return typeof value === "string" ? value : undefined;
 }
 
 export function getNonEmptyString(record: UnknownRecord, key: string): string | undefined {

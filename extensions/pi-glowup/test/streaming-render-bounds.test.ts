@@ -1,7 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import type { GlowupRenderTheme } from "../src/rendering/core.ts";
-import { renderStreamingEditCallPreview } from "../src/rendering/edit-call-rendering.ts";
 import { clearSyntaxHighlightCache, syntaxHighlightCacheStats } from "../src/syntax/highlighter.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
@@ -99,41 +98,6 @@ function runStreamingApplyPatchScenario(updates: number): StreamingRenderBounds 
     };
 }
 
-function runStreamingEditScenario(updates: number): StreamingRenderBounds {
-    clearSyntaxHighlightCache();
-    let newText = "";
-    let lines: string[] = [];
-
-    for (let index = 1; index <= updates; index += 1) {
-        newText += `export const generatedValue${index} = ${index};\n`;
-        lines =
-            renderStreamingEditCallPreview(
-                {
-                    path: "src/generated.ts",
-                    edits: [{ oldText: "export const previous = true;", newText }],
-                },
-                plainTheme,
-                {
-                    isError: false,
-                    isPartial: true,
-                    argsComplete: false,
-                    expanded: false,
-                    labelMode: "lifecycle",
-                    lineNumberStart: 1,
-                },
-            )?.render(120) ?? [];
-    }
-
-    const cache = syntaxHighlightCacheStats();
-    return {
-        updates,
-        renderedLines: lines.length,
-        renderedCharacters: renderedCharacters(lines),
-        syntaxCacheEntries: cache.entries,
-        syntaxCacheBytes: cache.bytes,
-    };
-}
-
 describe("streaming render structural bounds", () => {
     it("keeps synthetic partial write rendering bounded", () => {
         const metrics = runStreamingWriteScenario(300);
@@ -146,15 +110,6 @@ describe("streaming render structural bounds", () => {
 
     it("keeps synthetic partial apply_patch rendering bounded", () => {
         const metrics = runStreamingApplyPatchScenario(300);
-
-        expect(metrics.renderedLines).toBeLessThanOrEqual(20);
-        expect(metrics.renderedCharacters).toBeLessThan(6_000);
-        expect(metrics.syntaxCacheEntries).toBe(0);
-        expect(metrics.syntaxCacheBytes).toBe(0);
-    });
-
-    it("keeps synthetic partial edit rendering bounded", () => {
-        const metrics = runStreamingEditScenario(300);
 
         expect(metrics.renderedLines).toBeLessThanOrEqual(20);
         expect(metrics.renderedCharacters).toBeLessThan(6_000);

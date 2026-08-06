@@ -4,13 +4,7 @@ import {
     type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import {
-    emptyComponent,
-    formatPathTarget,
-    renderGlowupCall,
-    renderGlowupOutput,
-} from "../rendering/core.ts";
-import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
+import { emptyComponent } from "../rendering/core.ts";
 import {
     createThirdPartyToolRenderer,
     hasGlowupRenderingAdapter,
@@ -29,7 +23,6 @@ const THIRD_PARTY_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-glowup.third-party-r
 const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-glowup.third-party-renderer-state",
 );
-const WRITE_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-glowup.write-renderer");
 const MAX_THIRD_PARTY_RENDERERS = 100;
 
 type RenderShellMode = "default" | "self";
@@ -170,6 +163,19 @@ export function compatBuiltInToolName(toolName: string): BuiltInToolName | undef
     }
 }
 
+/** Returns a canonical built-in renderer family for native and compatible tool names. */
+export function canonicalBuiltInToolName(toolName: string): BuiltInToolName | undefined {
+    const nativeName = nativeBuiltInToolName(toolName);
+    if (nativeName !== undefined) {
+        return nativeName;
+    }
+    const compatibleName = compatBuiltInToolName(toolName);
+    if (compatibleName !== undefined) {
+        return compatibleName;
+    }
+    return toolName === "delete" || toolName === "webSearch" ? toolName : undefined;
+}
+
 type ToolExecutionPrototype = {
     getCallRenderer?: (this: ToolExecutionInstance) => ToolCallRenderer | undefined;
     getResultRenderer?: (this: ToolExecutionInstance) => ToolResultRenderer | undefined;
@@ -179,7 +185,6 @@ type ToolExecutionPrototype = {
     [BUILT_IN_RENDERER_PATCH_STATE_KEY]?: BuiltInRendererPatchState;
     [THIRD_PARTY_RENDERER_PATCH_KEY]?: true;
     [THIRD_PARTY_RENDERER_PATCH_STATE_KEY]?: ThirdPartyRendererPatchState;
-    [WRITE_RENDERER_PATCH_KEY]?: true;
 };
 
 function getStringField(instance: ToolExecutionInstance, fieldName: string): string | undefined {
@@ -362,68 +367,6 @@ function trimRendererCache(
     }
 }
 
-type TextContent = {
-    readonly type?: unknown;
-    readonly text?: unknown;
-};
-
-function resultText(result: { readonly content?: unknown }): string | undefined {
-    const content = result.content;
-    if (!Array.isArray(content)) {
-        return undefined;
-    }
-
-    let firstText: string | undefined;
-    let texts: string[] | undefined;
-    for (const item of content) {
-        if (
-            typeof item !== "object" ||
-            item === null ||
-            !("type" in item) ||
-            item.type !== "text"
-        ) {
-            continue;
-        }
-        const contentItem: TextContent = item;
-        if (typeof contentItem.text !== "string" || contentItem.text.length === 0) {
-            continue;
-        }
-        if (firstText === undefined) {
-            firstText = contentItem.text;
-            continue;
-        }
-        texts ??= [firstText];
-        texts.push(contentItem.text);
-    }
-
-    return texts === undefined ? firstText : texts.join("\n");
-}
-
-function isWriteToolInstance(instance: ToolExecutionInstance): boolean {
-    return getStringField(instance, "toolName") === "write" && hasBuiltInToolDefinition(instance);
-}
-
-const writeCallRenderer: ThirdPartyToolRenderer["renderCall"] = (args, theme, context) => {
-    const record = typeof args === "object" && args !== null ? args : undefined;
-    const path = record === undefined ? undefined : Reflect.get(record, "path");
-    return renderGlowupCall(theme, {
-        state: context.isError ? "error" : context.isPartial ? "muted" : "success",
-        statusText: "Write",
-        body: formatPathTarget(theme, typeof path === "string" ? path : undefined),
-    });
-};
-
-const writeResultRenderer: ThirdPartyToolRenderer["renderResult"] = (result, options, theme) => {
-    const output = resultText(result);
-    const language = detectStructuredOutputLanguage(output);
-    return renderGlowupOutput(theme, output, {
-        expanded: options.expanded,
-        mode: "head",
-        maxPreviewLines: 5,
-        ...(language === undefined ? {} : { syntax: { language } }),
-    });
-};
-
 /** Enables, updates, or disables render-only Glowup renderers for built-in tool names. */
 export function configureBuiltInToolRendererPatch(
     enabled: boolean,
@@ -545,14 +488,6 @@ export function toolRendererPatchStats(
     };
 }
 
-/** Installs render-only Glowup renderers for built-in tool names. */
-export function installBuiltInToolRendererPatch(
-    options: BuiltInToolRendererOptions,
-    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
-): void {
-    configureBuiltInToolRendererPatch(true, options, prototype);
-}
-
 function restoreGetCallRenderer(
     prototype: ToolExecutionPrototype,
     method: ToolExecutionPrototype["getCallRenderer"],
@@ -628,54 +563,6 @@ function restoreBuiltInRendererPatch(
         delete prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
         delete prototype[BUILT_IN_RENDERER_PATCH_KEY];
     }
-}
-
-/** Installs an idempotent compact renderer for Pi's built-in write tool only. */
-export function installBuiltInWriteRendererPatch(
-    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
-): void {
-    if (prototype[WRITE_RENDERER_PATCH_KEY] === true) {
-        return;
-    }
-
-    const originalGetCallRenderer = prototype.getCallRenderer;
-    const originalGetResultRenderer = prototype.getResultRenderer;
-    const originalGetRenderShell = prototype.getRenderShell;
-    const originalHasRendererDefinition = prototype.hasRendererDefinition;
-
-    prototype.getCallRenderer = function getGlowupWriteCallRenderer(this: ToolExecutionInstance) {
-        if (isWriteToolInstance(this)) {
-            return writeCallRenderer;
-        }
-        return originalGetCallRenderer?.call(this);
-    };
-
-    prototype.getResultRenderer = function getGlowupWriteResultRenderer(
-        this: ToolExecutionInstance,
-    ) {
-        if (isWriteToolInstance(this)) {
-            return writeResultRenderer;
-        }
-        return originalGetResultRenderer?.call(this);
-    };
-
-    prototype.getRenderShell = function getGlowupWriteRenderShell(this: ToolExecutionInstance) {
-        if (isWriteToolInstance(this)) {
-            return "self";
-        }
-        return originalGetRenderShell?.call(this) ?? "default";
-    };
-
-    prototype.hasRendererDefinition = function hasGlowupWriteRendererDefinition(
-        this: ToolExecutionInstance,
-    ) {
-        if (isWriteToolInstance(this)) {
-            return true;
-        }
-        return originalHasRendererDefinition?.call(this) ?? false;
-    };
-
-    prototype[WRITE_RENDERER_PATCH_KEY] = true;
 }
 
 /** Enables, updates, or disables Glowup fallback renderers for non-native tools. */
@@ -823,14 +710,6 @@ export function configureThirdPartyToolRendererPatch(
     prototype.getRenderShell = getRenderShell;
     prototype.hasRendererDefinition = hasRendererDefinition;
     prototype[THIRD_PARTY_RENDERER_PATCH_KEY] = true;
-}
-
-/** Installs an idempotent Glowup fallback renderer for non-native tools. */
-export function installThirdPartyToolRendererPatch(
-    options?: ThirdPartyToolRenderingOptions,
-    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
-): void {
-    configureThirdPartyToolRendererPatch(true, options, prototype);
 }
 
 function restoreThirdPartyRendererPatch(

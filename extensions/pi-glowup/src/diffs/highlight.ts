@@ -16,6 +16,7 @@ import {
     getSyntaxHighlighterForLanguage,
     type LoadedSyntaxHighlighter,
 } from "../syntax/highlighter.ts";
+import { isRecord } from "../unknown-values.ts";
 
 const PIERRE_RENDER_OPTIONS = {
     useTokenTransformer: false,
@@ -23,10 +24,6 @@ const PIERRE_RENDER_OPTIONS = {
     lineDiffType: "word-alt" as const,
     maxLineDiffLength: 2_000,
 } as const;
-
-type UnknownRecord = {
-    readonly [key: string]: unknown;
-};
 
 type SpanStyle = {
     readonly fg: string | undefined;
@@ -170,10 +167,6 @@ function renderHighlightedDiffCode(
     } catch {
         return undefined;
     }
-}
-
-function isRecord(value: unknown): value is UnknownRecord {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function tabify(text: string): string {

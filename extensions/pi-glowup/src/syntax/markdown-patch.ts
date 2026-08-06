@@ -60,13 +60,6 @@ export function markdownSyntaxPatchStats(
     };
 }
 
-/** Installs an idempotent Markdown render patch that injects the central syntax highlighter. */
-export function installMarkdownSyntaxPatch(
-    prototype: MarkdownPrototype = Markdown.prototype as unknown as MarkdownPrototype,
-): void {
-    configureMarkdownSyntaxPatch(true, prototype);
-}
-
 /** Enables or disables the Markdown syntax prototype patch. */
 export function configureMarkdownSyntaxPatch(
     enabled: boolean,

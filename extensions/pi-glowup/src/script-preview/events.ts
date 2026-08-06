@@ -30,9 +30,7 @@ export function rememberRawScriptPreview(
 }
 
 /** Formats and stores a script preview after the final bash command is known. */
-export async function formatAndStoreScriptPreview(
-    options: FormatScriptPreviewOptions,
-): Promise<void> {
+async function formatAndStoreScriptPreview(options: FormatScriptPreviewOptions): Promise<void> {
     const script = parseScriptInvocation(options.command);
     if (script === undefined || options.formatter === undefined) {
         return;

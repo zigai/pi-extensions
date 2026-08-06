@@ -118,7 +118,7 @@ export function createProtocolRenderer(
 }
 
 /** Runtime guard for values crossing the tool-definition boundary. */
-export function isGlowupRenderingAdapter(value: unknown): value is UnknownGlowupRenderer {
+function isGlowupRenderingAdapter(value: unknown): value is UnknownGlowupRenderer {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
     try {
         if (Reflect.get(value, "version") !== 3) return false;
@@ -158,11 +158,6 @@ export function glowupRenderingAdapter(
     } catch {
         return undefined;
     }
-}
-
-/** Returns whether an unknown value is the public preserve preference. */
-export function isGlowupPreservePreference(value: unknown): boolean {
-    return value === "preserve";
 }
 
 export type { GlowupRenderer };

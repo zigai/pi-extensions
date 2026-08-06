@@ -35,20 +35,6 @@ function shouldForceCleanupRender(editor: RuntimeEditor): boolean {
     return isSlashAutocompleteClosing(editor) && editor.tui?.getClearOnShrink() === true;
 }
 
-/**
- * Forces a full TUI redraw when Pi's slash autocomplete menu closes while
- * clear-on-shrink is enabled.
- *
- * Pi's slash menu is rendered as extra editor lines. With clear-on-shrink, the
- * post-close render must clear the old menu rows before restoring the footer;
- * a normal differential repaint can leave stale rows in the blank area above it.
- */
-export function installAutocompleteCleanupPatch(
-    prototype: object = Editor.prototype as unknown as object,
-): void {
-    configureAutocompleteCleanupPatch(true, prototype);
-}
-
 /** Enables or disables the autocomplete cleanup prototype patch. */
 export function configureAutocompleteCleanupPatch(
     enabled: boolean,

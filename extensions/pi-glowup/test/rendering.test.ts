@@ -6,7 +6,6 @@ import {
     configureToolCallIndicator,
     formatGrepAction,
     formatReadAction,
-    highlightShell,
     isInstructionFilePath,
     isPartialInstructionFilePath,
     makeComponent,
@@ -610,10 +609,6 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain("first wrapped");
         expect(rendered).toContain("last");
         expect(rendered).not.toContain("rows (hint)");
-    });
-
-    it("strips shell wrappers before command highlighting", () => {
-        expect(highlightShell(plainTheme, "bash -lc 'npm run check'")).toBe("npm run check");
     });
 
     it("renders bash previews with lightweight syntax without red or accent floods", () => {

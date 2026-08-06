@@ -1,9 +1,10 @@
 import { Container, Loader, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import {
-    configureWorkingWidgetSpacingPatch,
-    installWorkingWidgetSpacingPatch,
-} from "../src/patches/working-widget-spacing.ts";
+import { configureWorkingWidgetSpacingPatch } from "../src/patches/working-widget-spacing.ts";
+
+function installWorkingWidgetSpacingPatch(prototype: object = Container.prototype): void {
+    configureWorkingWidgetSpacingPatch(true, prototype);
+}
 
 function createStaticLoader(message = "Working..."): Loader {
     // SAFETY: Loader only uses requestRender from the TUI instance in this test.

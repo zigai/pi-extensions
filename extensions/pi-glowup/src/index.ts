@@ -62,10 +62,7 @@ import {
     type ToolLabelMode,
 } from "./rendering/status-labels.ts";
 import { buildEditPreview, EditPreviewStore } from "./rendering/edit-preview.ts";
-import {
-    clearStreamingEditRenderingState,
-    summarizeEditCall,
-} from "./rendering/edit-call-rendering.ts";
+import { summarizeEditCall } from "./rendering/edit-call-rendering.ts";
 import {
     buildLargeDiffSummaryPayload,
     buildPierreDiffPayload,
@@ -87,6 +84,7 @@ import {
 import { parseScriptPreviewHeaderLayout } from "./script-preview/settings.ts";
 import { boundedScriptPreview, createScriptPreviewStore } from "./script-preview/store.ts";
 import {
+    canonicalBuiltInToolName,
     compatBuiltInToolName,
     configureBuiltInToolRendererPatch,
     configureThirdPartyToolRendererPatch,
@@ -114,6 +112,8 @@ import {
 } from "./script-preview/events.ts";
 import { StreamingScriptIdentityStore } from "./script-preview/streaming-identity.ts";
 import type { MutationSettings } from "./mutations/settings.ts";
+import { hasNonWhitespaceText } from "./text-boundaries.ts";
+import { isRecord, stringField } from "./unknown-values.ts";
 
 type TextResult = {
     readonly content?: unknown;
@@ -261,23 +261,6 @@ function textOutput(result: TextResult): string | undefined {
     return isRecord(content) && typeof content.text === "string" ? content.text : undefined;
 }
 
-function hasNonWhitespaceText(text: string): boolean {
-    for (let index = 0; index < text.length; index += 1) {
-        const charCode = text.charCodeAt(index);
-        if (
-            charCode !== 9 &&
-            charCode !== 10 &&
-            charCode !== 11 &&
-            charCode !== 12 &&
-            charCode !== 13 &&
-            charCode !== 32
-        ) {
-            return true;
-        }
-    }
-    return false;
-}
-
 function syntaxPathFromToolArg(path: string | undefined): string | undefined {
     return path === undefined || path.length === 0 ? undefined : path;
 }
@@ -316,16 +299,12 @@ function makeMutationSummary(options: {
     };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 type MutableRenderState = {
     [key: string]: unknown;
 };
 
 function isMutableRenderState(value: unknown): value is MutableRenderState {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+    return isRecord(value);
 }
 
 function mutationLabelColumnWidth(
@@ -412,14 +391,6 @@ function diffRenderLimits(settings: MutationSettings): DiffRenderLimits {
         maxBytes: settings.limits.maxDiffBytes,
         maxLines: settings.limits.maxDiffLines,
     };
-}
-
-function stringField(args: unknown, key: string): string | undefined {
-    if (!isRecord(args)) {
-        return undefined;
-    }
-    const value = args[key];
-    return typeof value === "string" ? value : undefined;
 }
 
 function stringFieldFrom(args: unknown, keys: readonly string[]): string | undefined {
@@ -1033,12 +1004,7 @@ function renderEditCall(
         ...context,
         labelMode,
     });
-    const state =
-        summary.hasInvalidEdits || context.isError
-            ? "error"
-            : isActiveToolCall(context)
-              ? "running"
-              : "success";
+    const state = summary.hasInvalidEdits || context.isError ? "error" : "success";
     return renderGlowupCall(theme, {
         state,
         statusText: summary.statusText,
@@ -1106,13 +1072,18 @@ function renderEditResult(
     });
 }
 
-async function startSyntaxHighlighting(options: {
+type SyntaxHighlightingLifecycleOptions = {
     readonly config: GlowupConfig;
     readonly cwd: string | undefined;
     readonly reportWarning: (message: string) => void;
-}): Promise<void> {
+};
+
+async function loadSyntaxHighlighting(
+    loader: typeof initializeSyntaxHighlighting,
+    options: SyntaxHighlightingLifecycleOptions,
+): Promise<void> {
     try {
-        await initializeSyntaxHighlighting(process.env, {
+        await loader(process.env, {
             preloadLanguages: options.config.syntax.preloadLanguages,
             projectLanguageDetection: {
                 enabled: options.config.syntax.projectLanguageDetection.enabled,
@@ -1125,23 +1096,14 @@ async function startSyntaxHighlighting(options: {
     }
 }
 
-async function restartSyntaxHighlighting(options: {
-    readonly config: GlowupConfig;
-    readonly cwd: string | undefined;
-    readonly reportWarning: (message: string) => void;
-}): Promise<void> {
-    try {
-        await refreshSyntaxHighlighting(process.env, {
-            preloadLanguages: options.config.syntax.preloadLanguages,
-            projectLanguageDetection: {
-                enabled: options.config.syntax.projectLanguageDetection.enabled,
-                ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-            },
-            reportWarning: options.reportWarning,
-        });
-    } catch (cause: unknown) {
-        options.reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
-    }
+async function startSyntaxHighlighting(options: SyntaxHighlightingLifecycleOptions): Promise<void> {
+    await loadSyntaxHighlighting(initializeSyntaxHighlighting, options);
+}
+
+async function restartSyntaxHighlighting(
+    options: SyntaxHighlightingLifecycleOptions,
+): Promise<void> {
+    await loadSyntaxHighlighting(refreshSyntaxHighlighting, options);
 }
 
 function errorMessage(cause: unknown): string {
@@ -1150,7 +1112,6 @@ function errorMessage(cause: unknown): string {
 
 function clearSessionState(): void {
     clearApplyPatchRenderingState();
-    clearStreamingEditRenderingState();
     nativeDeletePreviews.clear();
     nativeEditSnapshots.clear();
     nativeEditPierrePayloads.clear();
@@ -1190,24 +1151,7 @@ function detailsDiagnostics(details: unknown): DebugLogFields {
 }
 
 function diagnosticBuiltInToolName(toolName: string): BuiltInToolName | undefined {
-    const compatibleName = compatBuiltInToolName(toolName);
-    if (compatibleName !== undefined) {
-        return compatibleName;
-    }
-    switch (toolName) {
-        case "read":
-        case "bash":
-        case "edit":
-        case "write":
-        case "find":
-        case "grep":
-        case "ls":
-        case "delete":
-        case "webSearch":
-            return toolName;
-        default:
-            return undefined;
-    }
+    return canonicalBuiltInToolName(toolName);
 }
 
 function isExplorationToolName(toolName: string): boolean {

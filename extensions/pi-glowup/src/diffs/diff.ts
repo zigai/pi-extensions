@@ -10,6 +10,7 @@ import {
 } from "@pierre/diffs";
 import { cleanDiffLine, flattenHighlightedLine } from "./highlight.ts";
 import { pairReplacementLines, type NarrowDiffLayout } from "./layout.ts";
+import { diffTextStats as countDiffTextStats } from "./statistics.ts";
 import type {
     HighlightedDiffCode,
     PierreDiffPayload,
@@ -20,16 +21,18 @@ import type {
     UnifiedDiffRow,
 } from "./types.ts";
 import type { PierreTerminalPalette } from "./theme.ts";
+import { countContentLines } from "../text-boundaries.ts";
+import { isRecord } from "../unknown-values.ts";
 
-export const MAX_DIFF_RENDER_BYTES = 512 * 1024;
-export const MAX_DIFF_RENDER_LINES = 5_000;
+const MAX_DIFF_RENDER_BYTES = 512 * 1024;
+const MAX_DIFF_RENDER_LINES = 5_000;
 
 export type DiffRenderLimits = {
     readonly maxBytes: number | null;
     readonly maxLines: number | null;
 };
 
-export const DEFAULT_DIFF_RENDER_LIMITS: DiffRenderLimits = {
+const DEFAULT_DIFF_RENDER_LIMITS: DiffRenderLimits = {
     maxBytes: MAX_DIFF_RENDER_BYTES,
     maxLines: MAX_DIFF_RENDER_LINES,
 };
@@ -68,7 +71,7 @@ type DiffSnapshot = {
 };
 
 /** Resolves a tool path against a tool execution working directory. */
-export function resolveToolPath(cwd: string, relativeOrAbsolutePath: string): string {
+function resolveToolPath(cwd: string, relativeOrAbsolutePath: string): string {
     return path.isAbsolute(relativeOrAbsolutePath)
         ? relativeOrAbsolutePath
         : path.resolve(cwd, relativeOrAbsolutePath);
@@ -99,47 +102,6 @@ export async function createEditSnapshot(
                 ...(summaryReason === undefined ? {} : { summaryReason }),
             };
         },
-    };
-}
-
-/** Captures a write tool diff snapshot without reading oversized existing files. */
-export async function createWriteSnapshot(
-    cwd: string,
-    relativePath: string,
-    newContent: string,
-    limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
-): Promise<DiffSnapshot> {
-    const absolutePath = resolveToolPath(cwd, relativePath);
-    const before = await readTextSnapshot(absolutePath, limits.maxBytes);
-    const newSizeBytes = Buffer.byteLength(newContent, "utf8");
-    const newLineCount = countContentLines(newContent);
-    const after: FileSnapshot =
-        limits.maxBytes === null || newSizeBytes <= limits.maxBytes
-            ? {
-                  exists: true,
-                  content: newContent,
-                  sizeBytes: newSizeBytes,
-                  lineCount: newLineCount,
-              }
-            : {
-                  exists: true,
-                  content: "",
-                  sizeBytes: newSizeBytes,
-                  lineCount: newLineCount,
-                  skippedReason: "too-large",
-              };
-
-    const summaryReason = summaryReasonForSnapshots(before, after);
-    return {
-        path: relativePath,
-        oldContent: before.content,
-        newContent: after.content,
-        oldSizeBytes: before.sizeBytes,
-        newSizeBytes: after.sizeBytes,
-        oldLineCount: before.lineCount,
-        newLineCount: after.lineCount,
-        canBuildPierreDiff: canDiffSnapshots(before, after),
-        ...(summaryReason === undefined ? {} : { summaryReason }),
     };
 }
 
@@ -718,20 +680,6 @@ function hasNodeErrorCode(cause: unknown, code: string): boolean {
     return typeof cause === "object" && cause !== null && Reflect.get(cause, "code") === code;
 }
 
-function countContentLines(content: string): number {
-    if (content.length === 0) {
-        return 0;
-    }
-
-    let lineCount = content.endsWith("\n") ? 0 : 1;
-    for (let index = 0; index < content.length; index += 1) {
-        if (content.charCodeAt(index) === 10) {
-            lineCount += 1;
-        }
-    }
-    return lineCount;
-}
-
 export function buildLargeDiffSummaryPayload(
     options: {
         readonly path: string;
@@ -739,7 +687,10 @@ export function buildLargeDiffSummaryPayload(
     },
     limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
 ): PierreDiffPayload | undefined {
-    const stats = diffTextStats(options.diffText);
+    const stats: PierreDiffStats = {
+        ...countDiffTextStats(options.diffText),
+        sizeBytes: Buffer.byteLength(options.diffText, "utf8"),
+    };
     return exceedsDiffRenderLimits(stats, limits)
         ? buildPierreSummaryPayload(options.path, stats, "too-large", limits)
         : undefined;
@@ -799,76 +750,6 @@ function estimatedDiffStats(snapshot: DiffSnapshot): PierreDiffStats {
         lineCount: oldLineCount + newLineCount,
         sizeBytes: snapshot.oldSizeBytes + snapshot.newSizeBytes,
     };
-}
-
-function diffTextStats(diffText: string): PierreDiffStats {
-    if (diffText.length === 0) {
-        return { added: 0, removed: 0, lineCount: 0, sizeBytes: 0 };
-    }
-
-    let added = 0;
-    let removed = 0;
-    let lineCount = 0;
-    let lineStart = 0;
-
-    for (let index = 0; index <= diffText.length; index += 1) {
-        if (index < diffText.length && diffText.charCodeAt(index) !== 10) {
-            continue;
-        }
-
-        lineCount += 1;
-        if (matchesDiffStatLine(diffText, lineStart, index, 43)) {
-            added += 1;
-        } else if (matchesDiffStatLine(diffText, lineStart, index, 45)) {
-            removed += 1;
-        }
-        lineStart = index + 1;
-    }
-
-    return {
-        added,
-        removed,
-        lineCount,
-        sizeBytes: Buffer.byteLength(diffText, "utf8"),
-    };
-}
-
-function matchesDiffStatLine(
-    text: string,
-    start: number,
-    end: number,
-    markerCode: number,
-): boolean {
-    if (start >= end || text.charCodeAt(start) !== markerCode) {
-        return false;
-    }
-
-    let index = start + 1;
-    while (index < end && isWhitespace(text.charCodeAt(index))) {
-        index += 1;
-    }
-
-    const digitStart = index;
-    while (index < end && isDigit(text.charCodeAt(index))) {
-        index += 1;
-    }
-
-    return index > digitStart && index < end && isWhitespace(text.charCodeAt(index));
-}
-
-function isDigit(charCode: number): boolean {
-    return charCode >= 48 && charCode <= 57;
-}
-
-function isWhitespace(charCode: number): boolean {
-    return (
-        charCode === 9 ||
-        charCode === 10 ||
-        charCode === 11 ||
-        charCode === 12 ||
-        charCode === 13 ||
-        charCode === 32
-    );
 }
 
 function exceedsDiffRenderLimits(stats: PierreDiffStats, limits: DiffRenderLimits): boolean {
@@ -1076,8 +957,4 @@ function hasTrailingCollapsedLines(metadata: FileDiffMetadata): boolean {
         metadata.deletionLines.length - (lastHunk.deletionLineIndex + lastHunk.deletionCount);
 
     return additionRemaining === deletionRemaining && Math.max(additionRemaining, 0) > 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

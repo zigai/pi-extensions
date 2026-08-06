@@ -5,7 +5,7 @@ import {
     takeGraphemePrefix,
     truncateGraphemeText,
 } from "../text-boundaries.ts";
-import { getString } from "./tool-values.ts";
+import { isRecord } from "./tool-values.ts";
 
 const MAX_PREVIEW_CHARACTERS = 700;
 const MAX_PREVIEW_ARRAY_ITEMS = 20;
@@ -15,15 +15,11 @@ const MAX_PREVIEW_DEPTH = 5;
 const SENSITIVE_KEY_PATTERN =
     /(?:pass(?:word|phrase)?|secret|token|api[_-]?key|auth(?:orization)?|cookie|credential|private[_-]?key|access[_-]?key)/iu;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function itemCount(count: number): string {
     return `${count} ${count === 1 ? "item" : "items"}`;
 }
 
-export function truncateText(text: string, maxCharacters: number): string {
+function truncateText(text: string, maxCharacters: number): string {
     return truncateGraphemeText(text, maxCharacters);
 }
 
@@ -253,7 +249,7 @@ export function detailsOutput(result: ThirdPartyToolResult): string | undefined 
     return compactObjectPreview(result.details);
 }
 
-export function compactWhitespaceText(text: string, maxCharacters: number): string | undefined {
+function compactWhitespaceText(text: string, maxCharacters: number): string | undefined {
     let output = "";
     let pendingWhitespace = false;
 
@@ -287,28 +283,6 @@ export function compactQuotedText(
     }
     const compact = compactWhitespaceText(value, maxCharacters);
     return compact === undefined ? undefined : `"${compact}"`;
-}
-
-export function countedSummary(
-    label: string,
-    values: ReadonlyArray<unknown> | undefined,
-): string | undefined {
-    if (values === undefined || values.length === 0) {
-        return undefined;
-    }
-    const prefix = label.length > 0 ? `${label} ` : "";
-    const first = values[0];
-    if (isRecord(first)) {
-        const query =
-            getString(first, "q") ?? getString(first, "ref_id") ?? getString(first, "url");
-        const quoted = compactQuotedText(query);
-        if (quoted !== undefined) {
-            return values.length === 1
-                ? `${prefix}${quoted}`
-                : `${prefix}${quoted} +${values.length - 1}`;
-        }
-    }
-    return `${prefix}${values.length}`;
 }
 
 /** Visits non-empty output lines after normalizing CRLF and CR line endings. */

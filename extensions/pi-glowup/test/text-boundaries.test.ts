@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
     appendGraphemeEllipsis,
-    chunkGraphemeText,
     neutralizeTerminalControls,
     takeGraphemePrefix,
     takeGraphemeSuffix,
@@ -22,18 +21,6 @@ describe("text boundaries", () => {
         expect(takeGraphemeSuffix(text, 5)).toBe("z");
         expect(truncateGraphemeText(text, 6)).toBe("aaaa…");
         expect(appendGraphemeEllipsis(text, 6)).toBe("aaaa…");
-    });
-
-    it("chunks without losing or splitting grapheme clusters", () => {
-        const family = "👨‍👩‍👧‍👦";
-        const text = `aaaa${family}z`;
-        const chunks = chunkGraphemeText(text, 5);
-
-        expect(chunks).toEqual(["aaaa", family, "z"]);
-        expect(chunks.join("")).toBe(text);
-        for (const chunk of chunks) {
-            expectWellFormed(chunk);
-        }
     });
 
     it("withholds a trailing incomplete surrogate from streaming prefixes", () => {

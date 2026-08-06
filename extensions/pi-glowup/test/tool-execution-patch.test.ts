@@ -8,10 +8,21 @@ import type {
 import {
     configureBuiltInToolRendererPatch,
     configureThirdPartyToolRendererPatch,
-    installBuiltInToolRendererPatch,
-    installBuiltInWriteRendererPatch,
-    installThirdPartyToolRendererPatch,
 } from "../src/patches/tool-execution-patch.ts";
+
+function installBuiltInToolRendererPatch(
+    options: Parameters<typeof configureBuiltInToolRendererPatch>[1],
+    prototype: Parameters<typeof configureBuiltInToolRendererPatch>[2],
+): void {
+    configureBuiltInToolRendererPatch(true, options, prototype);
+}
+
+function installThirdPartyToolRendererPatch(
+    options: Parameters<typeof configureThirdPartyToolRendererPatch>[1],
+    prototype: Parameters<typeof configureThirdPartyToolRendererPatch>[2],
+): void {
+    configureThirdPartyToolRendererPatch(true, options, prototype);
+}
 
 const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
@@ -287,38 +298,6 @@ describe("tool execution patches", () => {
         expect(Reflect.get(prototype, "getRenderShell")).toBe(originalGetRenderShell);
         expect(Reflect.get(prototype, "hasRendererDefinition")).toBe(originalHasRendererDefinition);
         expect(prototype.getRenderShell.call(readInstance)).toBe("default");
-    });
-
-    it("replaces only the built-in write renderer without registering a write tool override", () => {
-        const prototype = createPrototype();
-        installBuiltInWriteRendererPatch(prototype);
-
-        const writeInstance: FakeToolExecutionInstance = {
-            toolName: "write",
-            builtInToolDefinition: {},
-        };
-        const readInstance: FakeToolExecutionInstance = {
-            toolName: "read",
-            builtInToolDefinition: {},
-        };
-
-        expect(prototype.getRenderShell.call(writeInstance)).toBe("self");
-        expect(prototype.hasRendererDefinition.call(writeInstance)).toBe(true);
-        expect(
-            prototype.getCallRenderer
-                .call(writeInstance)?.(
-                    { path: "large.ts", content: "x".repeat(100_000) },
-                    plainTheme,
-                    renderContext,
-                )
-                .render(80)
-                .join("\n"),
-        ).toContain("Write large.ts");
-        expect(
-            prototype.getCallRenderer
-                .call(readInstance)?.({}, plainTheme, renderContext)
-                .render(80),
-        ).toEqual(["existing renderer"]);
     });
 
     it("leaves built-in tools on their original render path", () => {

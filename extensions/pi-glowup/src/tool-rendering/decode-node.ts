@@ -6,6 +6,7 @@ import type {
     GlowupSyntax,
     GlowupTone,
 } from "./protocol.ts";
+import { isRecord } from "../unknown-values.ts";
 
 export type GlowupNodeDecodeLimits = {
     readonly maxDepth: number;
@@ -26,10 +27,6 @@ type DecodeState = {
     nodes: number;
     textCharacters: number;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function field(record: Record<string, unknown>, key: string): unknown {
     try {

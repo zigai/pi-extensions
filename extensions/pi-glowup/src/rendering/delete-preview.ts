@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { DiffSection } from "./core.ts";
 
-export const DEFAULT_DELETE_PREIMAGE_BYTES = 256 * 1024;
+const DEFAULT_DELETE_PREIMAGE_BYTES = 256 * 1024;
 
 export type TextFilePreimage = {
     readonly lines: readonly string[];

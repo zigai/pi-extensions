@@ -131,7 +131,7 @@ export function renderProtocolNode(
         case "empty":
             return emptyComponent();
         case "text":
-            return renderGlowupBody(theme, toneText(theme, node.text));
+            return renderGlowupBody(toneText(theme, node.text));
         case "summary":
             return renderSummary(node, theme);
         case "code": {
@@ -143,7 +143,7 @@ export function renderProtocolNode(
                 ...(node.syntax === undefined ? {} : { syntax: node.syntax }),
             });
             if (node.title === undefined) return content;
-            const title = renderGlowupBody(theme, toneText(theme, node.title));
+            const title = renderGlowupBody(toneText(theme, node.title));
             return makeComponent((width) => [...title.render(width), ...content.render(width)]);
         }
         case "list":

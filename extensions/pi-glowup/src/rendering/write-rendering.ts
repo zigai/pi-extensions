@@ -1,6 +1,12 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
-import { truncateGraphemeText, truncateUtf8ByGrapheme } from "../text-boundaries.ts";
+import {
+    countContentLines,
+    hasNonWhitespaceText,
+    truncateGraphemeText,
+    truncateUtf8ByGrapheme,
+} from "../text-boundaries.ts";
+import { stringField } from "../unknown-values.ts";
 import {
     emptyComponent,
     formatPathTarget,
@@ -53,41 +59,6 @@ type PartialWritePreviewUpdate = {
     readonly expanded: boolean;
     readonly maxWritePreviewBytes: number | null;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function stringField(args: unknown, key: string): string | undefined {
-    if (!isRecord(args)) {
-        return undefined;
-    }
-    const value = args[key];
-    return typeof value === "string" ? value : undefined;
-}
-
-function countContentLines(content: string): number {
-    if (content.length === 0) {
-        return 0;
-    }
-
-    let lineCount = content.endsWith("\n") ? 0 : 1;
-    for (let index = 0; index < content.length; index += 1) {
-        if (content.charCodeAt(index) === 10) {
-            lineCount += 1;
-        }
-    }
-    return lineCount;
-}
-
-function hasNonWhitespaceText(text: string): boolean {
-    for (let index = 0; index < text.length; index += 1) {
-        if (text.charAt(index).trim().length > 0) {
-            return true;
-        }
-    }
-    return false;
-}
 
 function boundedPartialWriteLine(line: string): string {
     return truncateGraphemeText(line, MAX_PARTIAL_WRITE_LINE_CHARS);
@@ -424,7 +395,7 @@ function boundedWriteContentPreview(content: string, maxBytes: number | null): s
 }
 
 /** Returns the built-in write tool content argument when it is available to render. */
-export function writeContentFromArgs(args: unknown): string | undefined {
+function writeContentFromArgs(args: unknown): string | undefined {
     return stringField(args, "content");
 }
 

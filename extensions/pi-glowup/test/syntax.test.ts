@@ -1,15 +1,12 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
-import { buildPierreDiffPayload, createWriteSnapshot } from "../src/diffs/diff.ts";
+import { buildPierreDiffPayload } from "../src/diffs/diff.ts";
 import { renderPierreDiff } from "../src/diffs/renderer.ts";
 import { loadHighlightedDiff } from "../src/diffs/highlight.ts";
 import {
     configureRenderingAppearance,
-    highlightShell,
     parseDiffSections,
     renderGlowupDiff,
     renderGlowupOutput,
@@ -25,9 +22,13 @@ import {
     initializeSyntaxHighlighting,
 } from "../src/syntax/highlighter.ts";
 import { normalizeSyntaxLanguage, PRELOADED_SYNTAX_LANGUAGES } from "../src/syntax/language.ts";
-import { installMarkdownSyntaxPatch } from "../src/syntax/markdown-patch.ts";
+import { configureMarkdownSyntaxPatch } from "../src/syntax/markdown-patch.ts";
 import { SYNTAX_ACCENT_COLORS } from "../src/syntax/palette.ts";
 import { loadSyntaxConfig } from "../src/syntax/theme-loader.ts";
+
+function installMarkdownSyntaxPatch(): void {
+    configureMarkdownSyntaxPatch(true);
+}
 
 const ANSI_ESCAPE = "\u001b[";
 const TYPESCRIPT_KEYWORD_RGB_CODE = "38;2;86;156;214";
@@ -277,8 +278,6 @@ describe("central syntax highlighting", () => {
     });
 
     it("highlights bash command and executable script previews", () => {
-        expect(highlightShell(plainTheme, "npm run check")).toContain(ANSI_ESCAPE);
-
         const rendered = renderScriptCall(
             plainTheme,
             { label: "Node", language: "javascript", code: "const value = 1;" },
@@ -538,44 +537,38 @@ describe("central syntax highlighting", () => {
     });
 
     it("uses the same VS Code theme for Pierre diff highlighting", async () => {
-        const directory = mkdtempSync(join(tmpdir(), "pi-glowup-syntax-"));
-        const filePath = join(directory, "example.ts");
-        writeFileSync(filePath, "const value = call(1);\n");
-
-        try {
-            const snapshot = await createWriteSnapshot(
-                directory,
-                "example.ts",
-                "const value = call(2);\n",
-            );
-            const payload = buildPierreDiffPayload(snapshot);
-            expect(payload).toBeDefined();
-            if (payload?.kind !== "renderable") {
-                throw new Error("expected renderable Pierre diff payload");
-            }
-
-            const highlighted = await loadHighlightedDiff(payload.metadata);
-            const serialized = JSON.stringify(highlighted.dark.deletionLines);
-
-            expect(serialized).toContain("#569CD6");
-            expect(serialized).toContain("const");
-
-            const component = renderPierreDiff(
-                payload,
-                piTheme,
-                { expanded: true },
-                {
-                    lastComponent: undefined,
-                    invalidate() {},
-                },
-            );
-            const rendered = component.render(100).join("\n");
-
-            expect(rendered).toContain(TYPESCRIPT_KEYWORD_RGB_CODE);
-            expect(rendered).toContain(BRACKET_PAIR_1_RGB_CODE);
-            expect(rendered).not.toContain(" │ ");
-        } finally {
-            rmSync(directory, { recursive: true, force: true });
+        const payload = buildPierreDiffPayload({
+            path: "example.ts",
+            oldContent: "const value = call(1);\n",
+            newContent: "const value = call(2);\n",
+            oldSizeBytes: Buffer.byteLength("const value = call(1);\n", "utf8"),
+            newSizeBytes: Buffer.byteLength("const value = call(2);\n", "utf8"),
+            canBuildPierreDiff: true,
+        });
+        expect(payload).toBeDefined();
+        if (payload?.kind !== "renderable") {
+            throw new Error("expected renderable Pierre diff payload");
         }
+
+        const highlighted = await loadHighlightedDiff(payload.metadata);
+        const serialized = JSON.stringify(highlighted.dark.deletionLines);
+
+        expect(serialized).toContain("#569CD6");
+        expect(serialized).toContain("const");
+
+        const component = renderPierreDiff(
+            payload,
+            piTheme,
+            { expanded: true },
+            {
+                lastComponent: undefined,
+                invalidate() {},
+            },
+        );
+        const rendered = component.render(100).join("\n");
+
+        expect(rendered).toContain(TYPESCRIPT_KEYWORD_RGB_CODE);
+        expect(rendered).toContain(BRACKET_PAIR_1_RGB_CODE);
+        expect(rendered).not.toContain(" │ ");
     });
 });

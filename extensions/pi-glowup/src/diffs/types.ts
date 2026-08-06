@@ -3,11 +3,6 @@ import type { FileDiffMetadata } from "@pierre/diffs";
 /** Terminal appearance used for Pierre-highlighted diffs. */
 export type PierreAppearance = "dark" | "light";
 
-/** Compact details stored on tool results for replayable Pierre diff rendering. */
-export type PierreDiffDetails = {
-    readonly pierreDiff?: PierreDiffPayload;
-};
-
 /** Replayable Pierre diff payload. Does not store original file snapshots or highlighted HAST. */
 export type PierreDiffPayload = PierreRenderableDiffPayload | PierreSummaryDiffPayload;
 

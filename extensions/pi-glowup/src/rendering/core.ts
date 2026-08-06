@@ -19,7 +19,11 @@ import {
 } from "../diffs/intraline.ts";
 import { strongerDiffBackgroundAnsi } from "../diffs/ansi-colors.ts";
 import type { DiffLineNumberStyle, NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
-import { neutralizeTerminalControls, truncateUtf8ByGrapheme } from "../text-boundaries.ts";
+import {
+    hasNonWhitespaceText,
+    neutralizeTerminalControls,
+    truncateUtf8ByGrapheme,
+} from "../text-boundaries.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
@@ -877,7 +881,7 @@ export function renderGlowupCall(
     });
 }
 
-export function renderGlowupBody(theme: GlowupRenderTheme, text: string | undefined): Component {
+export function renderGlowupBody(text: string | undefined): Component {
     return makeComponent((width) => wrapPrefixedLine(text, width, "", ""));
 }
 
@@ -1189,7 +1193,7 @@ function stripShellQuotedValue(value: string): string {
     return inner.replace(/\\(["\\$`])/g, "$1");
 }
 
-export function stripShellWrapper(command: string | undefined): string {
+function stripShellWrapper(command: string | undefined): string {
     const normalized = (command ?? "").trim();
     const wrapperMatch = /^(?:\/(?:usr\/)?bin\/)?(?:bash|zsh|sh|fish)\s+-lc\s+([\s\S]+)$/u.exec(
         normalized,
@@ -1859,15 +1863,6 @@ function collapsedScriptPreview(
     return hasNonWhitespaceText(previewCode) ? { code: previewCode } : { code: invocation.code };
 }
 
-function hasNonWhitespaceText(text: string): boolean {
-    for (let index = 0; index < text.length; index += 1) {
-        if (text.charAt(index).trim().length > 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 function scriptPreviewForRender(
     invocation: ScriptInvocation,
     expanded: boolean,
@@ -2222,40 +2217,6 @@ function styleShellToken(
     }
 
     return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };
-}
-
-export function highlightShell(theme: GlowupRenderTheme, command: string | undefined): string {
-    const stripped = previewShellCommandForHighlight(stripShellWrapper(command));
-    const highlighted = highlightSyntaxCode(stripped, "bash");
-    if (highlighted.join("\n") !== stripped) {
-        return highlighted.join("\n");
-    }
-
-    return stripped
-        .split("\n")
-        .map((line) => {
-            let state = initialShellHighlightState;
-            return tokenizeShellLine(line)
-                .map((token) => {
-                    const result = styleShellToken(theme, token, state);
-                    state = result.state;
-                    return result.styled;
-                })
-                .join("");
-        })
-        .join("\n");
-}
-
-function previewShellCommandForHighlight(command: string): string {
-    const lines = command.split("\n");
-    const maxLines = 8;
-    if (lines.length <= maxLines) {
-        return command;
-    }
-    return [
-        ...lines.slice(0, maxLines - 1),
-        `… +${lines.length - maxLines + 1} lines (truncated)`,
-    ].join("\n");
 }
 
 export function formatReadAction(

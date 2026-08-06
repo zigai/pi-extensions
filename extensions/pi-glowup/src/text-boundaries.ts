@@ -65,6 +65,29 @@ export function neutralizeTerminalControls(text: string): string {
     return runStart === 0 ? text : `${output}${text.slice(runStart)}`;
 }
 
+export function hasNonWhitespaceText(text: string): boolean {
+    for (let index = 0; index < text.length; index += 1) {
+        if (text.charAt(index).trim().length > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+export function countContentLines(content: string): number {
+    if (content.length === 0) {
+        return 0;
+    }
+
+    let lineCount = content.endsWith("\n") ? 0 : 1;
+    for (let index = 0; index < content.length; index += 1) {
+        if (content.charCodeAt(index) === 10) {
+            lineCount += 1;
+        }
+    }
+    return lineCount;
+}
+
 /** Lazily visits complete grapheme clusters and withholds a trailing partial surrogate. */
 export function* graphemes(text: string): Generator<string> {
     for (const { segment } of graphemeSegmenter.segment(completeUnicodePrefix(text))) {
@@ -147,34 +170,4 @@ export function truncateGraphemeText(text: string, maxCharacters: number, ellips
     const budget = normalizedBudget(maxCharacters);
     const source = completeUnicodePrefix(text);
     return source.length <= budget ? source : appendGraphemeEllipsis(source, budget, ellipsis);
-}
-
-/** Splits text near a target size without dividing graphemes that exceed the target. */
-export function chunkGraphemeText(text: string, maxCharacters: number): readonly string[] {
-    const budget = normalizedBudget(maxCharacters);
-    const source = completeUnicodePrefix(text);
-    if (source.length === 0 || budget === 0) {
-        return [];
-    }
-    if (source.length <= budget) {
-        return [source];
-    }
-
-    const chunks: string[] = [];
-    let current = "";
-    for (const segment of graphemes(source)) {
-        if (current.length > 0 && current.length + segment.length > budget) {
-            chunks.push(current);
-            current = "";
-        }
-        if (current.length === 0 && segment.length > budget) {
-            chunks.push(segment);
-        } else {
-            current += segment;
-        }
-    }
-    if (current.length > 0) {
-        chunks.push(current);
-    }
-    return chunks;
 }

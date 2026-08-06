@@ -5,9 +5,8 @@ import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import type TypeboxSchema from "typebox/schema";
-import type { DiffLineNumberStyle, NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
 import type {
-    DiffBackgroundStyle,
+    RenderingAppearance,
     ScriptPreviewHeaderLayout,
     ToolCallIndicator,
 } from "../rendering/core.ts";
@@ -18,6 +17,7 @@ import {
     type ScriptFormatterCommands,
 } from "../script-preview/formatters.ts";
 import { parseScriptPreviewHeaderLayout } from "../script-preview/settings.ts";
+import { isRecord } from "../unknown-values.ts";
 
 // Pi's TypeScript loader can misresolve TypeBox subpath ESM imports as
 // `typebox/build/index.mjs/schema`; Node's require resolver honors package exports.
@@ -26,18 +26,7 @@ const Schema = loadTypeboxSchema();
 export type GlowupConfig = {
     readonly preserveTools: readonly string[];
     readonly mutations: MutationSettings;
-    readonly appearance: {
-        readonly diffBackgroundStyle: DiffBackgroundStyle;
-        readonly diffLineNumberStyle: DiffLineNumberStyle;
-        readonly narrowDiffLayout: NarrowDiffLayout;
-        readonly sideBySideLayout: SideBySideLayout;
-        readonly addedRowBackground: string | null;
-        readonly deletedRowBackground: string | null;
-        readonly addedContentBackground: string | null;
-        readonly deletedContentBackground: string | null;
-        readonly instructionPathColor: string | null;
-        readonly dimUnchangedDiffText: boolean;
-    };
+    readonly appearance: RenderingAppearance;
     readonly debugLog: {
         readonly enabled: boolean;
         readonly path: string;
@@ -76,10 +65,10 @@ export type GlowupConfigLoadPolicy = {
     readonly includeProjectConfig?: boolean;
 };
 
-export const GLOWUP_EXTENSION_ID = "pi-glowup";
-export const GLOWUP_CONFIG_BASENAME = "config.json";
-export const GLOWUP_CONFIG_SCHEMA_BASENAME = "config.schema.json";
-export const GLOWUP_CONFIG_SCHEMA_REFERENCE = `./${GLOWUP_CONFIG_SCHEMA_BASENAME}`;
+const GLOWUP_EXTENSION_ID = "pi-glowup";
+const GLOWUP_CONFIG_BASENAME = "config.json";
+const GLOWUP_CONFIG_SCHEMA_BASENAME = "config.schema.json";
+const GLOWUP_CONFIG_SCHEMA_REFERENCE = `./${GLOWUP_CONFIG_SCHEMA_BASENAME}`;
 
 const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
 const GLOWUP_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-glowup/config.schema.json";
@@ -523,7 +512,7 @@ export function glowupConfigJsonSchema(): unknown {
     };
 }
 
-export function ensureGlowupGlobalConfigFiles(
+function ensureGlowupGlobalConfigFiles(
     agentDir: string = getAgentDir(),
     reportWarning: ConfigWarningReporter = defaultConfigWarningReporter,
 ): void {
@@ -807,10 +796,6 @@ function mergeConfigInputs(base: unknown, override: unknown): unknown {
         merged[key] = mergeConfigInputs(merged[key], value);
     }
     return merged;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function hasNodeErrorCode(cause: unknown, code: string): boolean {

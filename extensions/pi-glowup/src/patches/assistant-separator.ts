@@ -7,6 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, type Component, visibleWidth } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
+import { hasNonWhitespaceText } from "../text-boundaries.ts";
 
 const ASSISTANT_SEPARATOR_PATCH_KEY = Symbol.for("zigai.pi-glowup.assistant-separator");
 const ASSISTANT_SEPARATOR_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.state");
@@ -82,23 +83,6 @@ function startsWithBlankLine(lines: readonly string[]): boolean {
 function linesWithSeparatorSpacing(lines: readonly string[], width: number): string[] {
     const contentLines = startsWithBlankLine(lines) ? [...lines] : ["", ...lines];
     return ["", renderSeparator(width), ...contentLines];
-}
-
-function hasNonWhitespaceText(text: string): boolean {
-    for (let index = 0; index < text.length; index += 1) {
-        const charCode = text.charCodeAt(index);
-        if (
-            charCode !== 9 &&
-            charCode !== 10 &&
-            charCode !== 11 &&
-            charCode !== 12 &&
-            charCode !== 13 &&
-            charCode !== 32
-        ) {
-            return true;
-        }
-    }
-    return false;
 }
 
 function isVisibleTextContent(content: AssistantContent): boolean {
@@ -283,13 +267,6 @@ const assistantMessagePrototype =
     AssistantMessageComponent.prototype as unknown as AssistantRenderPrototype;
 
 const chatContainerPrototype = Container.prototype as unknown as ChatContainerPrototype;
-
-export function installAssistantSeparatorPatch(
-    prototype: object = assistantMessagePrototype,
-    containerPrototype: object = chatContainerPrototype,
-): void {
-    configureAssistantSeparatorPatch(true, prototype, containerPrototype);
-}
 
 /** Enables or disables the assistant separator prototype patches. */
 export function configureAssistantSeparatorPatch(

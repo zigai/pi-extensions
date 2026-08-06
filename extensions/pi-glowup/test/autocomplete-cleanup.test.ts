@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-    configureAutocompleteCleanupPatch,
-    installAutocompleteCleanupPatch,
-} from "../src/patches/autocomplete-cleanup.ts";
+import { configureAutocompleteCleanupPatch } from "../src/patches/autocomplete-cleanup.ts";
+
+function installAutocompleteCleanupPatch(prototype: object): void {
+    configureAutocompleteCleanupPatch(true, prototype);
+}
 
 type FakeTui = {
     readonly getClearOnShrink: () => boolean;

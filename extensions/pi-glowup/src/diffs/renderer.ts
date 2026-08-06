@@ -1,4 +1,5 @@
 import { keyHint } from "@earendil-works/pi-coding-agent";
+import { isRecord } from "../unknown-values.ts";
 import {
     truncateToWidth,
     type Component,
@@ -27,7 +28,7 @@ import type {
     SplitDiffRow,
     UnifiedDiffRow,
 } from "./types.ts";
-import { shouldRenderSideBySide, type SideBySideLayout } from "./layout.ts";
+import { diffLineNumberWidth, shouldRenderSideBySide, type SideBySideLayout } from "./layout.ts";
 import { getPierrePalette, type PierreTerminalPalette } from "./theme.ts";
 import {
     configuredDiffLineNumberStyle,
@@ -734,7 +735,7 @@ function renderUnifiedRows(
     maxRowsPerDiffRow: number | undefined,
 ): string[] {
     const rendered: string[] = [];
-    const lineNumberWidth = lineNumberWidthFor(metadata);
+    const lineNumberWidth = diffLineNumberWidth(metadata);
     for (const row of rows) {
         const rowLines = renderUnifiedRow(row, width, lineNumberWidth);
         const visibleLines = limitDiffRowLines(rowLines, maxRowsPerDiffRow, width);
@@ -754,7 +755,7 @@ function renderSplitRows(
     maxRowsPerDiffRow: number | undefined,
 ): string[] {
     const rendered: string[] = [];
-    const lineNumberWidth = lineNumberWidthFor(metadata);
+    const lineNumberWidth = diffLineNumberWidth(metadata);
     const divider = renderFullWidthLine(
         [{ text: " │ ", fg: palette.dividerFg, bg: palette.dividerBg }],
         3,
@@ -1163,18 +1164,6 @@ function markerForLineType(lineType: SplitDiffCell["lineType"] | UnifiedDiffRowL
 
 type UnifiedDiffRowLineType = Extract<UnifiedDiffRow, { readonly kind: "line" }>["lineType"];
 
-function lineNumberWidthFor(metadata: PierreRenderableDiffPayload["metadata"]): number {
-    let maxLineNumber = 1;
-    for (const hunk of metadata.hunks) {
-        maxLineNumber = Math.max(
-            maxLineNumber,
-            hunk.deletionStart + Math.max(0, hunk.deletionCount - 1),
-            hunk.additionStart + Math.max(0, hunk.additionCount - 1),
-        );
-    }
-    return String(maxLineNumber).length;
-}
-
 function hasHighlightedLines(highlighted: HighlightedDiffSet): boolean {
     return (
         highlighted.dark.deletionLines.length > 0 ||
@@ -1220,8 +1209,4 @@ function maxVisibleDiffLines(expanded: boolean): number {
         return expandedLimit;
     }
     return Math.min(expandedLimit, 18);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

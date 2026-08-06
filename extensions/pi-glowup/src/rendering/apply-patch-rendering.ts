@@ -1,5 +1,6 @@
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { appendGraphemeEllipsis, takeGraphemePrefix } from "../text-boundaries.ts";
+import { isRecord, stringField } from "../unknown-values.ts";
 import {
     changedOnlyDiffSections,
     emptyComponent,
@@ -108,18 +109,6 @@ function rememberBounded<T>(store: Map<string, T>, key: string, value: T): void 
         if (typeof oldest !== "string") break;
         store.delete(oldest);
     }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function stringField(value: unknown, key: string): string | undefined {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-    const field = value[key];
-    return typeof field === "string" ? field : undefined;
 }
 
 function patchTextFromArgs(args: unknown): string | undefined {
@@ -1363,7 +1352,7 @@ function renderCompletedPatchViewport(
 ): Component {
     const firstSection = summary.sections[0];
     if (firstSection === undefined) {
-        return renderGlowupBody(theme, "");
+        return renderGlowupBody("");
     }
 
     return renderStandalonePatchSections(
@@ -1478,7 +1467,7 @@ function renderSinglePatchSection(
                   );
         const body =
             section.lines.length === 0
-                ? renderGlowupBody(theme, theme.fg("dim", "    …"))
+                ? renderGlowupBody(theme.fg("dim", "    …"))
                 : renderGlowupDiff(theme, [section], false, {
                       collapsedLineBudget: MAX_PARTIAL_PATCH_PREVIEW_LINES,
                       maxWrappedRows: 1,
@@ -1519,7 +1508,7 @@ function renderApplyPatchSummary(
     if (summary.sections.length === 1) {
         const section = summary.sections[0];
         return section === undefined
-            ? renderGlowupBody(theme, "")
+            ? renderGlowupBody("")
             : renderSinglePatchSection(
                   section,
                   theme,

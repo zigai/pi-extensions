@@ -1,5 +1,3 @@
-import type { ThemeColor } from "@earendil-works/pi-coding-agent";
-
 /** Named syntax accent colors mirrored from the bundled VS Code-compatible theme. */
 export const SYNTAX_ACCENT_COLORS = {
     bracketPair: ["#FFD700", "#DA70D6", "#179FFF"],
@@ -9,8 +7,3 @@ export const SYNTAX_ACCENT_COLORS = {
     pythonVariableIdentifier: "#9CDCFE",
     pythonFunctionIdentifier: "#DCDCAA",
 } as const;
-
-/** Semantic Pi theme tokens used by custom Glowup renderers. */
-export const RENDER_THEME_TOKENS = {
-    url: "accent",
-} as const satisfies Record<string, ThemeColor>;

@@ -182,7 +182,7 @@ function wrappedLineCount(line: string | undefined, contentWidth: number): numbe
     return Math.max(1, Math.ceil(width / Math.max(1, contentWidth)));
 }
 
-function diffLineNumberWidth(metadata: FileDiffMetadata): number {
+export function diffLineNumberWidth(metadata: FileDiffMetadata): number {
     let maxLineNumber = 1;
     for (const hunk of metadata.hunks) {
         maxLineNumber = Math.max(

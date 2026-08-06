@@ -49,10 +49,6 @@ function isLoaderContainer(component: Component | undefined): boolean {
  * above-editor widget container that contains a single spacer. The combination
  * leaves an extra blank line directly above the input box during streaming.
  */
-export function installWorkingWidgetSpacingPatch(prototype: object = Container.prototype): void {
-    configureWorkingWidgetSpacingPatch(true, prototype);
-}
-
 /** Enables or disables the working-widget spacing prototype patch. */
 export function configureWorkingWidgetSpacingPatch(
     enabled: boolean,

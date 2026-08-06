@@ -1,16 +1,13 @@
 import { readFile } from "node:fs/promises";
 import type { ThemeRegistration } from "shiki";
 import { bundledSyntaxThemePath, SYNTAX_THEME_NAME } from "./theme-assets.ts";
+import { isRecord, type UnknownRecord } from "../unknown-values.ts";
 
 export { SYNTAX_THEME_NAME } from "./theme-assets.ts";
 
 const SYNTAX_OFF_VALUE = "off";
 const SYNTAX_ENV = "PI_GLOWUP_SYNTAX";
 const SYNTAX_THEME_ENV = "PI_GLOWUP_SYNTAX_THEME";
-
-type UnknownRecord = {
-    readonly [key: string]: unknown;
-};
 
 export type SyntaxConfig =
     | {
@@ -96,8 +93,4 @@ function stringRecord(record: UnknownRecord): Record<string, string> {
         }
     }
     return output;
-}
-
-function isRecord(value: unknown): value is UnknownRecord {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

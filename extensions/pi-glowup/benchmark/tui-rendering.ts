@@ -9,7 +9,6 @@ import {
     clearApplyPatchRenderingState,
     restoreApplyPatchResultSummaries,
 } from "../src/rendering/apply-patch-rendering.ts";
-import { renderStreamingEditCallPreview } from "../src/rendering/edit-call-rendering.ts";
 import {
     configureRenderingAppearance,
     renderGlowupDiff,
@@ -266,41 +265,6 @@ function writeStreamTimings(updates: number, rounds: number): readonly number[] 
     return timings;
 }
 
-function editStreamTimings(updates: number, rounds: number): readonly number[] {
-    const timings: number[] = [];
-    for (let round = 0; round < rounds; round += 1) {
-        let newText = "";
-        for (let index = 1; index <= updates; index += 1) {
-            newText += `export const generatedValue${index} = ${index};\n`;
-            timings.push(
-                measure(() => {
-                    renderStreamingEditCallPreview(
-                        {
-                            path: "src/generated.ts",
-                            edits: [
-                                {
-                                    oldText: "export const previous = true;",
-                                    newText,
-                                },
-                            ],
-                        },
-                        plainTheme,
-                        {
-                            isError: false,
-                            isPartial: true,
-                            argsComplete: false,
-                            expanded: false,
-                            labelMode: "lifecycle",
-                            lineNumberStart: 1,
-                        },
-                    )?.render(120);
-                }),
-            );
-        }
-    }
-    return timings;
-}
-
 function patchStreamTimings(updates: number, rounds: number): readonly number[] {
     const timings: number[] = [];
     for (let round = 0; round < rounds; round += 1) {
@@ -446,8 +410,6 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
         "cold-large-diff": renderColdLargeDiff(options.quick ? 3 : 9),
         "write-stream-300": writeStreamTimings(300, rounds),
         "write-stream-1000": writeStreamTimings(1_000, rounds),
-        "edit-stream-300": editStreamTimings(300, rounds),
-        "edit-stream-1000": editStreamTimings(1_000, rounds),
         "apply-patch-stream-300": patchStreamTimings(300, rounds),
         "apply-patch-stream-1000": patchStreamTimings(1_000, rounds),
         "wide-narrow-resize": resizeTimings(options.quick ? 12 : 60),

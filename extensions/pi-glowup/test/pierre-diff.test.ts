@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
@@ -9,7 +9,6 @@ import {
     buildPierreDiffPayload,
     buildUnifiedDiffRows,
     createEditSnapshot,
-    createWriteSnapshot,
 } from "../src/diffs/diff.ts";
 import {
     clearQueuedDiffHighlights,
@@ -352,50 +351,6 @@ describe("Pierre diff rendering", () => {
         expect(rendered).not.toContain("\u001b[2J");
         expect(rendered).not.toContain("\u001b]2;owned");
         expect(rendered).not.toContain("\u0007");
-    });
-
-    it("keeps unreadable existing files out of create-style write diffs", async () => {
-        const root = mkdtempSync(join(tmpdir(), "pi-glowup-diff-"));
-        const filePath = join(root, "secret.txt");
-        writeFileSync(filePath, "secret\n");
-        chmodSync(filePath, 0);
-
-        try {
-            try {
-                readFileSync(filePath, "utf8");
-                return;
-            } catch {
-                // Expected on platforms that enforce the chmod above.
-            }
-
-            const payload = buildPierreDiffPayload(
-                await createWriteSnapshot(root, "secret.txt", "replacement\n"),
-            );
-            const rendered = renderPierreDiff(
-                payload ?? {
-                    version: 1,
-                    kind: "summary",
-                    path: "secret.txt",
-                    stats: { added: 0, removed: 0, lineCount: 0, sizeBytes: 0 },
-                    summary: { reason: "not-readable", maxLines: 1, maxBytes: 1 },
-                },
-                testTheme,
-                { expanded: true },
-                { lastComponent: undefined, invalidate() {} },
-            )
-                .render(120)
-                .map(stripAnsi)
-                .join("\n");
-
-            expect(payload?.kind).toBe("summary");
-            expect(payload?.kind === "summary" ? payload.summary.reason : undefined).toBe(
-                "not-readable",
-            );
-            expect(rendered).toContain("could not be read safely");
-            expect(rendered).not.toContain("Large diff omitted");
-        } finally {
-            chmodSync(filePath, 0o600);
-        }
     });
 
     it("preserves the fixed 140-column side-by-side policy as an option", () => {
