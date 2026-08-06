@@ -18,7 +18,7 @@ const refreshTriggerSchema = StringEnum(NAMING_TRIGGERS, {
 
 const conversationScopeSchema = StringEnum(CONVERSATION_SCOPES, {
     description:
-        "How much of the session conversation is sent to the picker model. Minimized sends user messages, assistant text, tool names, and compaction or branch summaries; full also sends tool arguments, tool results, and shell output. Use Minimized when the picker model is a different provider from the session model.",
+        "How much conversation to send to the picker. Minimized omits tool arguments, results, and shell output; full includes them.",
     default: "minimized",
 });
 
@@ -68,8 +68,7 @@ const settingsObjectSchema = Type.Object(
             default: "current",
             minLength: 1,
             pattern: "^(?:current|[^/\\s]+/\\S+)$",
-            description:
-                "Picker model in provider/model-id form, or current to use the session's active model.",
+            description: "Picker model: provider/model-id, or current for the active model.",
         }),
         reasoningEffort: StringEnum(
             ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const,

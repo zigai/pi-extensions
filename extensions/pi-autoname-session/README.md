@@ -24,10 +24,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 | `refreshNaming.enabled` | boolean | `false` | Periodically refresh the name as the session develops. |
 | `refreshNaming.trigger` | `messages` \| `turns` \| `tool_calls` \| `tokens` \| `minutes` | `"turns"` | The activity that starts a naming refresh. |
 | `refreshNaming.threshold` | integer | `10` | The amount of activity between refreshes. |
-| `model` | string | `"current"` | Picker model in provider/model-id form, or current to use the session's active model. |
+| `model` | string | `"current"` | Picker model: provider/model-id, or current for the active model. |
 | `reasoningEffort` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | `"low"` | Reasoning effort used by the session-name picker. |
 | `timeoutMs` | integer | `30000` | Maximum time in milliseconds for picker authentication and the model response before the naming attempt is treated as failed. |
-| `conversationScope` | `minimized` \| `full` | `"minimized"` | How much of the session conversation is sent to the picker model. Minimized sends user messages, assistant text, tool names, and compaction or branch summaries; full also sends tool arguments, tool results, and shell output. Use Minimized when the picker model is a different provider from the session model. |
+| `conversationScope` | `minimized` \| `full` | `"minimized"` | How much conversation to send to the picker. Minimized omits tool arguments, results, and shell output; full includes them. |
 | `prompt` | string | *See JSON below ↓* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}. |
 | `nameConstraints.minLength` | integer | `6` | Minimum number of characters in a name returned by the picker. |
 | `nameConstraints.maxLength` | integer | `60` | Maximum number of characters in a name returned by the picker. |
@@ -61,16 +61,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 
 ## Data flow and privacy
 
-Each naming attempt sends a rendered prompt to the configured `model` (the picker). The prompt contains:
-
-- the working directory and any loaded repository guidance files;
-- conversation content from the session, in the shape selected by `conversationScope`;
-- the current session name, the working directory, and the naming reason;
-- the rendered `prompt` template with the `{{...}}` placeholders substituted.
-
-With `conversationScope: "minimized"` (the default), only user messages, assistant text, tool names, and compaction or branch summaries are sent; tool arguments, tool results, and shell output are excluded. With `"full"`, tool arguments, tool results, and shell output are also included. Compacted-away history is never resent: the picker receives the active, compaction-aware entry list.
-
-When `model` is `"current"`, the picker is the same model that already sees the session conversation. When a separate picker provider is configured, conversation content is transmitted to that provider; keep `conversationScope: "minimized"` unless you trust the picker provider with tool and shell output.
+The picker receives the working directory, repository guidance, current name, reason, and active conversation. `minimized` excludes tool arguments, results, and shell output; `full` includes them, including for separate providers.
 
 ## Development
 
