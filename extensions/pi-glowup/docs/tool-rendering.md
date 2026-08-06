@@ -26,9 +26,9 @@ available, produces bounded summaries, redacts secret-like fields, and does not 
 from unknown tool names. Known transitional renderers retain their current domain-specific
 summaries until migration is complete.
 
-## Protocol version 2
+## Protocol version 3
 
-Import only from `pi-glowup/protocol`:
+Import only from `@zigai/pi-glowup/protocol`:
 
 ```ts
 import {
@@ -38,8 +38,11 @@ import {
   output,
   stack,
   summary,
+  withGlowupRendering,
   type GlowupRenderer,
-} from "pi-glowup/protocol";
+} from "@zigai/pi-glowup/protocol";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 type DbQueryArgs = {
   readonly database: string;
@@ -53,7 +56,7 @@ type DbQueryResult = {
 };
 
 const glowupRendering = defineGlowupRenderer<DbQueryArgs, DbQueryResult>({
-  version: 2,
+  version: 3,
   parseArgs(value) {
     if (typeof value !== "object" || value === null) return undefined;
     if (!("database" in value) || !("sql" in value)) return undefined;
@@ -70,6 +73,9 @@ const glowupRendering = defineGlowupRenderer<DbQueryArgs, DbQueryResult>({
       return { details: {} };
     }
     return { details: { rowCount: value.details.rowCount } };
+  },
+  renderPartialCall() {
+    return call({ static: "DB Query", running: "Querying DB", completed: "Queried DB" });
   },
   renderCall(args) {
     return call(
@@ -90,18 +96,40 @@ const glowupRendering = defineGlowupRenderer<DbQueryArgs, DbQueryResult>({
 
 const typedCheck: GlowupRenderer<DbQueryArgs, DbQueryResult> = glowupRendering;
 
-pi.registerTool({
-  name: "db_query",
-  label: "DB Query",
-  // parameters, execute, and the tool's own renderer...
-  glowupRendering: typedCheck,
-});
+declare function queryDatabase(database: string, sql: string): Promise<unknown[]>;
+
+export default function dbExtension(pi: ExtensionAPI) {
+  pi.registerTool(
+    withGlowupRendering(
+      defineTool({
+        name: "db_query",
+        label: "DB Query",
+        description: "Run a read-only SQL query.",
+        parameters: Type.Object({
+          database: Type.String(),
+          sql: Type.String(),
+        }),
+        async execute(_toolCallId, params) {
+          const rows = await queryDatabase(params.database, params.sql);
+          return {
+            content: [{ type: "text", text: JSON.stringify(rows) }],
+            details: { rowCount: rows.length },
+          };
+        },
+      }),
+      typedCheck,
+    ),
+  );
+}
 ```
 
-The generic parameters are compile-time guidance only. Restored sessions, serialized tool calls,
-and third-party results still cross a runtime boundary, so adapters should parse values before
-using them. Returning `undefined` from a parser or render method asks Glowup to use the generic
-fallback for that slot. Returning `empty()` intentionally suppresses the slot.
+Restored sessions, serialized tool calls, and third-party results cross a runtime boundary, so an
+adapter must parse complete arguments before `renderCall` and results before `renderResult` can use
+them. Incomplete streaming arguments go to `renderPartialCall` when it is defined; that callback
+receives `unknown` and must inspect values before using them. Omitting it uses the normal fallback
+until the complete arguments parse successfully. Returning `undefined` from a parser or render
+method asks Glowup to use the fallback for that slot. Returning `empty()` intentionally suppresses
+the slot.
 
 ## Components
 
@@ -113,6 +141,11 @@ Protocol components are semantic rather than visual:
 - `code` renders syntax-aware code.
 - `list`, `text`, and `stack` compose structured content.
 - `empty` intentionally renders nothing.
+
+The protocol is intentionally a small composition vocabulary rather than a catalog of Glowup
+features or known tools. Tool-specific previews should compose these nodes. Rich rendering that
+cannot be expressed without embedding terminal layout into strings remains a Glowup-owned
+specialization until a genuinely reusable semantic primitive is identified.
 
 Use semantic tones and syntax metadata instead of applying colors yourself. The active Glowup
 configuration controls label mode, colors, indicators, width wrapping, expansion hints, and

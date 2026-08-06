@@ -39,7 +39,7 @@
 - Preserve rich syntax highlighting for code-bearing tool calls, including streaming mutations. Thinking blocks and user messages remain plain.
 - Render compact semantic layouts for known third-party tools and avoid raw argument JSON, internal artifact paths, redundant attachment rows, and fake expansion affordances.
 - New third-party tool-specific renderers, parsers, and state belong in the tool's parent library or companion extension. Existing compatibility renderers remain in this repository until their owning package ships and verifies an equivalent protocol adapter; migrate and remove them one family at a time, never preemptively.
-- External tool owners must import `pi-glowup/protocol`; they must not import `src/rendering`, `src/third-party-tools`, Pi TUI components, Glowup themes, or ANSI helpers through this repository.
+- External tool owners must import `@zigai/pi-glowup/protocol`; they must not import `src/rendering`, `src/third-party-tools`, Pi TUI components, Glowup themes, or ANSI helpers through this repository.
 - Do not add external tool-name registries or family-specific fallback branches to `pi-glowup`. A tool-owned `glowupRendering` adapter is the supported customization seam.
 - Components must react to width changes. Pierre-backed native edits and completed `apply_patch` diffs use side-by-side layout whenever the current width meets the threshold and unified layout otherwise; never freeze the initial-width decision.
 - Never perform blocking subprocess or filesystem work from `render()`. Keep replay, syntax, snapshot, and component state bounded so large calls and restored sessions remain responsive.
