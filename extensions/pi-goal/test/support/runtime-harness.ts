@@ -178,6 +178,9 @@ export function createRuntimeHarness(
     registerFlag() {
       unsupportedHarnessMethod("pi.registerFlag");
     },
+    registerMarkdownTransformer() {
+      unsupportedHarnessMethod("pi.registerMarkdownTransformer");
+    },
     registerMessageRenderer() {
       unsupportedHarnessMethod("pi.registerMessageRenderer");
     },

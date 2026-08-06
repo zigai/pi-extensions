@@ -56,8 +56,8 @@
     "pi-typed-args": "file:../pi-typed-commands"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.83.0",
-    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@earendil-works/pi-ai": "^0.84.0",
+    "@earendil-works/pi-coding-agent": "^0.84.0",
     "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^4.1.10",
     "oxfmt": "^0.59.0",
