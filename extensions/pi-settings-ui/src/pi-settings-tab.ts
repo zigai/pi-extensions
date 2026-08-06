@@ -34,6 +34,7 @@ type PiSettingsScope = "global" | "project";
 type PiSettingsUi = Pick<ExtensionUIContext, "getAllThemes" | "notify" | "setTheme">;
 
 type PiSettingsRuntime = {
+    readonly mode: "regular" | "fullscreen";
     readonly setClearOnShrink: (enabled: boolean) => void;
     readonly setShowHardwareCursor: (enabled: boolean) => void;
 };
@@ -204,6 +205,7 @@ export class PiSettingsTab implements PiSettingsPane {
             terminalTheme,
             availableThemes: ui.getAllThemes().map(({ name }) => name),
             hideThinkingBlock: settings.getHideThinkingBlock(),
+            mermaidRenderingMode: settings.getMermaidRenderingMode(),
             showCacheMissNotices: settings.getShowCacheMissNotices(),
             collapseChangelog: settings.getCollapseChangelog(),
             enableInstallTelemetry: settings.getEnableInstallTelemetry(),
@@ -217,6 +219,11 @@ export class PiSettingsTab implements PiSettingsPane {
             defaultProjectTrust: settings.getDefaultProjectTrust(),
             clearOnShrink: settings.getClearOnShrink(),
             showTerminalProgress: settings.getShowTerminalProgress(),
+            tuiMode:
+                this.activeScopeValue === "global"
+                    ? this.options.runtime.mode
+                    : settings.getTuiMode(),
+            fullscreenScrollbar: settings.getFullscreenScrollbar(),
             warnings: settings.getWarnings(),
         };
     }
@@ -276,6 +283,10 @@ export class PiSettingsTab implements PiSettingsPane {
                 this.persist(["hideThinkingBlock"], hidden, () =>
                     settings.setHideThinkingBlock(hidden),
                 ),
+            onMermaidRenderingModeChange: (mode) =>
+                this.persist(["markdown", "mermaid"], mode, () =>
+                    settings.setMermaidRenderingMode(mode),
+                ),
             onShowCacheMissNoticesChange: (shown) =>
                 this.persist(["showCacheMissNotices"], shown, () =>
                     settings.setShowCacheMissNotices(shown),
@@ -326,6 +337,24 @@ export class PiSettingsTab implements PiSettingsPane {
                 this.persist(["terminal", "showTerminalProgress"], enabled, () =>
                     settings.setShowTerminalProgress(enabled),
                 ),
+            onTuiModeChange: (mode) => {
+                this.persist(["tuiMode"], mode, () => settings.setTuiMode(mode));
+                if (mode !== runtime.mode) {
+                    this.options.ui.notify(
+                        `TUI mode will change to ${mode} in the next Pi session.`,
+                        "info",
+                    );
+                }
+            },
+            onFullscreenScrollbarChange: (mode) => {
+                this.persist(["fullscreenScrollbar"], mode, () =>
+                    settings.setFullscreenScrollbar(mode),
+                );
+                this.options.ui.notify(
+                    "Fullscreen scrollbar changes apply in the next Pi session.",
+                    "info",
+                );
+            },
             onWarningsChange: (warnings) =>
                 this.persist(["warnings"], warnings, () => settings.setWarnings(warnings)),
             onCancel,
