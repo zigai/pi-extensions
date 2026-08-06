@@ -1,6 +1,6 @@
+import { StringEnum } from "@earendil-works/pi-ai";
 import { defineExtensionSettings } from "@zigai/pi-extension-settings";
 import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-extension-settings/pi";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
 const NAMING_TRIGGERS = ["messages", "turns", "tool_calls", "tokens", "minutes"] as const;
