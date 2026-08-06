@@ -575,7 +575,10 @@ describe("tool execution patches", () => {
             toolDefinition: {
                 renderCall: () => ({ render: () => [], invalidate: noop }),
                 glowupRendering: {
-                    version: 2,
+                    version: 3,
+                    parseArgs(value: unknown) {
+                        return value;
+                    },
                     renderCall: () => call({ static: "DB Query" }, { body: text("select 1") }),
                 },
             },
@@ -598,7 +601,10 @@ describe("tool execution patches", () => {
             toolName: "dynamic_tool",
             toolDefinition: {
                 glowupRendering: {
-                    version: 2,
+                    version: 3,
+                    parseArgs(value: unknown) {
+                        return value;
+                    },
                     renderCall: () => call({ static: label }),
                 },
             },

@@ -82,7 +82,7 @@ describe("package manifest", () => {
     it("keeps the public protocol independent from Pi and internal renderer types", () => {
         const protocol = readFileSync("src/tool-rendering/protocol.ts", "utf8");
 
-        expect(protocol).toContain("GLOWUP_RENDERING_VERSION = 2");
+        expect(protocol).toContain("GLOWUP_RENDERING_VERSION = 3");
         expect(protocol).not.toContain("@earendil-works");
         expect(protocol).not.toContain("Component");
         expect(protocol).not.toContain("GlowupRenderTheme");
