@@ -35,9 +35,15 @@ import {
     type TextFilePreimage,
 } from "./delete-preview.ts";
 import { scheduleCodeOutputSyntaxLoad } from "../syntax/code-component.ts";
-import { buildPierreDiffPayloadsFromPatch, buildPierreSummaryPayload } from "../diffs/diff.ts";
+import {
+    buildPierreDiffPayload,
+    buildPierreDiffPayloadsFromPatch,
+    buildPierreSummaryPayload,
+    normalizePierreDiffPayload,
+} from "../diffs/diff.ts";
 import { renderPierreDiff } from "../diffs/renderer.ts";
 import type { PierreDiffPayload } from "../diffs/types.ts";
+import { diffContentDigest } from "../diffs/identity.ts";
 import {
     PREVIEW_MUTATION_SETTINGS,
     showsFullMutation,
@@ -82,11 +88,26 @@ const deletePreimages = new Map<string, Map<string, DeletedTextPreview>>();
 const updatePreimages = new Map<string, Map<string, TextFilePreimage>>();
 const unavailableUpdatePreimages = new Map<string, Map<string, true>>();
 const pendingUpdatePreimages = new Map<string, Map<string, Promise<void>>>();
+const applyPatchCaptures = new Map<
+    string,
+    {
+        readonly cwd: string;
+        readonly files: readonly {
+            readonly kind: ApplyPatchKind;
+            readonly path: string;
+            readonly outputPath: string;
+        }[];
+    }
+>();
 const persistedSummaries = new Map<string, ApplyPatchSummary>();
 const persistedSummaryDiffs = new Map<string, string>();
 const persistedUnifiedPatches = new Map<string, string>();
 const persistedSummaryLimitKeys = new Map<string, string>();
 const persistedInputPatches = new Map<string, string>();
+const completedPatchSummaries = new Map<
+    string,
+    { readonly patch: string; readonly summary: ApplyPatchSummary | undefined }
+>();
 
 /** Drops session-scoped mutation snapshots and pending preimage references. */
 export function clearApplyPatchRenderingState(): void {
@@ -94,11 +115,13 @@ export function clearApplyPatchRenderingState(): void {
     updatePreimages.clear();
     unavailableUpdatePreimages.clear();
     pendingUpdatePreimages.clear();
+    applyPatchCaptures.clear();
     persistedSummaries.clear();
     persistedSummaryDiffs.clear();
     persistedUnifiedPatches.clear();
     persistedSummaryLimitKeys.clear();
     persistedInputPatches.clear();
+    completedPatchSummaries.clear();
 }
 
 function rememberBounded<T>(store: Map<string, T>, key: string, value: T): void {
@@ -156,16 +179,52 @@ export async function captureApplyPatchPreimages(
     const pendingUpdates = boundedPreimageMap(pendingUpdatePreimages, toolCallId);
     const deletePaths = new Set<string>();
     const updatePaths = new Set<string>();
+    const addPaths = new Set<string>();
+    const movedUpdatePaths = new Map<string, string>();
+    let currentUpdatePath: string | undefined;
     for (const line of patch.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n")) {
+        if (line.startsWith("*** Add File: ")) {
+            const filePath = line.slice("*** Add File: ".length);
+            if (filePath.length > 0) addPaths.add(filePath);
+            currentUpdatePath = undefined;
+        }
         if (line.startsWith("*** Delete File: ")) {
             const filePath = line.slice("*** Delete File: ".length);
             if (filePath.length > 0) deletePaths.add(filePath);
+            currentUpdatePath = undefined;
         }
         if (line.startsWith("*** Update File: ")) {
             const filePath = line.slice("*** Update File: ".length);
-            if (filePath.length > 0) updatePaths.add(filePath);
+            if (filePath.length > 0) {
+                updatePaths.add(filePath);
+                currentUpdatePath = filePath;
+            }
+        }
+        if (line.startsWith("*** Move to: ") && currentUpdatePath !== undefined) {
+            const outputPath = line.slice("*** Move to: ".length);
+            if (outputPath.length > 0) movedUpdatePaths.set(currentUpdatePath, outputPath);
         }
     }
+    rememberBounded(applyPatchCaptures, toolCallId, {
+        cwd,
+        files: [
+            ...Array.from(addPaths, (filePath) => ({
+                kind: "add" as const,
+                path: filePath,
+                outputPath: filePath,
+            })),
+            ...Array.from(deletePaths, (filePath) => ({
+                kind: "delete" as const,
+                path: filePath,
+                outputPath: filePath,
+            })),
+            ...Array.from(updatePaths, (filePath) => ({
+                kind: "update" as const,
+                path: filePath,
+                outputPath: movedUpdatePaths.get(filePath) ?? filePath,
+            })),
+        ],
+    });
 
     const tasks: Array<() => Promise<void>> = [];
     for (const filePath of deletePaths) {
@@ -212,6 +271,68 @@ export async function captureApplyPatchPreimages(
         },
     );
     await Promise.all(workers);
+}
+
+/** Builds source-backed immutable Pierre payloads after an apply_patch call completes. */
+export async function finishApplyPatchPierrePayloads(
+    toolCallId: string,
+    isError: boolean,
+    mutationSettings: MutationSettings,
+): Promise<readonly PierreDiffPayload[]> {
+    const capture = applyPatchCaptures.get(toolCallId);
+    applyPatchCaptures.delete(toolCallId);
+    if (capture === undefined || isError) return [];
+
+    const pending = pendingUpdatePreimages.get(toolCallId);
+    if (pending !== undefined) await Promise.all(pending.values());
+    const updates = updatePreimages.get(toolCallId);
+    const deletes = deletePreimages.get(toolCallId);
+    const snapshotLimit = mutationSettings.limits.maxDiffBytes ?? MAX_UPDATE_PREIMAGE_BYTES;
+    const payloads: PierreDiffPayload[] = [];
+    for (const file of capture.files) {
+        const oldSnapshot =
+            file.kind === "update"
+                ? updates?.get(file.path)
+                : file.kind === "delete"
+                  ? deletes?.get(file.path)?.preimage
+                  : { lines: [], endsWithNewline: false };
+        if (oldSnapshot === undefined) continue;
+        const newSnapshot =
+            file.kind === "delete"
+                ? { lines: [] as readonly string[], endsWithNewline: false }
+                : await captureTextFilePreimage(capture.cwd, file.outputPath, snapshotLimit, {
+                      allowOutsideCwd: true,
+                  });
+        if (newSnapshot === undefined) continue;
+        const oldContent = textFilePreimageContent(oldSnapshot);
+        const newContent = textFilePreimageContent(newSnapshot);
+        const payload = buildPierreDiffPayload(
+            {
+                path:
+                    file.path === file.outputPath ? file.path : `${file.path} → ${file.outputPath}`,
+                oldPath: file.path,
+                newPath: file.outputPath,
+                oldContent,
+                newContent,
+                oldSizeBytes: Buffer.byteLength(oldContent, "utf8"),
+                newSizeBytes: Buffer.byteLength(newContent, "utf8"),
+                oldLineCount: oldSnapshot.lines.length,
+                newLineCount: newSnapshot.lines.length,
+                canBuildPierreDiff: true,
+            },
+            {
+                maxBytes: mutationSettings.limits.maxDiffBytes,
+                maxLines: mutationSettings.limits.maxDiffLines,
+            },
+        );
+        if (payload !== undefined) payloads.push(payload);
+    }
+    return payloads;
+}
+
+function textFilePreimageContent(preimage: TextFilePreimage): string {
+    const content = preimage.lines.join("\n");
+    return preimage.endsWithNewline ? `${content}\n` : content;
 }
 
 function scheduleApplyPatchSyntaxLoads(patch: string, invalidate: (() => void) | undefined): void {
@@ -275,23 +396,57 @@ function persistedApplyPatchSummary(
         : undefined;
     const files = Array.isArray(lineSummary?.files) ? lineSummary.files : [];
     const unifiedPatch = stringField(result.details, "patch");
+    const limits = {
+        maxBytes: mutationSettings.limits.maxDiffBytes,
+        maxLines: mutationSettings.limits.maxDiffLines,
+    };
+    const restoredPierreDiffs = Array.isArray(result.details.pierreDiffs)
+        ? result.details.pierreDiffs.flatMap((payload) => {
+              const normalized = normalizePierreDiffPayload(payload, limits);
+              return normalized === undefined ? [] : [normalized];
+          })
+        : [];
     const pierreDiffs =
-        unifiedPatch === undefined
-            ? []
-            : buildPierreDiffPayloadsFromPatch(unifiedPatch, {
-                  maxBytes: mutationSettings.limits.maxDiffBytes,
-                  maxLines: mutationSettings.limits.maxDiffLines,
-              });
+        restoredPierreDiffs.length > 0
+            ? restoredPierreDiffs
+            : unifiedPatch === undefined
+              ? []
+              : buildPierreDiffPayloadsFromPatch(unifiedPatch, limits);
+    const singleSection = sections.length === 1 ? sections[0] : undefined;
+    const singleKeys = singleSection === undefined ? [] : sectionPathKeys(singleSection);
+    const singlePierre =
+        singleSection === undefined
+            ? undefined
+            : pierreDiffs.find((payload) =>
+                  pathsIntersect(pierrePayloadPaths(payload), singleKeys),
+              );
+    const singleFile =
+        singleSection === undefined
+            ? undefined
+            : files.find(
+                  (file): file is Record<string, unknown> =>
+                      isRecord(file) && pathsIntersect(fileSummaryPaths(file), singleKeys),
+              );
+    const pierreByPath = singleSection === undefined ? pierrePayloadQueues(pierreDiffs) : undefined;
+    const filesByPath = singleSection === undefined ? fileSummaryQueues(files) : undefined;
     return applyMutationLimits(
         {
-            sections: sections.map((section, index): ApplyPatchSection => {
-                const file = isRecord(files[index]) ? files[index] : undefined;
+            sections: sections.map((section): ApplyPatchSection => {
+                const file =
+                    filesByPath === undefined
+                        ? singleFile
+                        : consumePathMatch(filesByPath, sectionPathKeys(section));
                 const action = file === undefined ? undefined : stringField(file, "action");
                 const kind: ApplyPatchKind =
                     action === "A" ? "add" : action === "D" ? "delete" : "update";
-                const pierreDiff = pierreDiffs[index];
+                const pierreDiff =
+                    pierreByPath === undefined
+                        ? singlePierre
+                        : consumePathMatch(pierreByPath, sectionPathKeys(section));
+                const path = completedSectionPath(section, file, pierreDiff);
                 return {
                     ...section,
+                    ...(path === undefined ? {} : { path }),
                     kind,
                     countsKnown: true,
                     ...(pierreDiff === undefined ? {} : { pierreDiff }),
@@ -312,15 +467,117 @@ function attachPersistedPierreDiffs(
         maxBytes: mutationSettings.limits.maxDiffBytes,
         maxLines: mutationSettings.limits.maxDiffLines,
     });
+    const pierreByPath = pierrePayloadQueues(pierreDiffs);
     return applyMutationLimits(
         {
-            sections: summary.sections.map((section, index) => {
-                const pierreDiff = pierreDiffs[index];
+            sections: summary.sections.map((section) => {
+                const pierreDiff = consumePathMatch(pierreByPath, sectionPathKeys(section));
                 return pierreDiff === undefined ? section : { ...section, pierreDiff };
             }),
         },
         mutationSettings,
     );
+}
+
+function normalizedPatchPath(pathValue: string): string {
+    return pathValue
+        .replaceAll("\\", "/")
+        .replace(/^\.\//u, "")
+        .replace(/^(?:a|b)\//u, "")
+        .replace(/\/{2,}/gu, "/");
+}
+
+function sectionPathKeys(section: Pick<ApplyPatchSection, "path">): readonly string[] {
+    return section.path === undefined ? [] : section.path.split(" → ").map(normalizedPatchPath);
+}
+
+function completedSectionPath(
+    section: Pick<DiffSection, "path">,
+    file: Record<string, unknown> | undefined,
+    pierreDiff: PierreDiffPayload | undefined,
+): string | undefined {
+    const currentPath = file === undefined ? undefined : stringField(file, "path");
+    const previousPath = file === undefined ? undefined : stringField(file, "previousPath");
+    if (
+        currentPath !== undefined &&
+        previousPath !== undefined &&
+        normalizedPatchPath(currentPath) !== normalizedPatchPath(previousPath)
+    ) {
+        return `${previousPath} → ${currentPath}`;
+    }
+    if (pierreDiff?.path.includes(" → ") === true) {
+        return pierreDiff.path;
+    }
+    return section.path;
+}
+
+type PathQueues<T extends object> = {
+    readonly queues: Map<string, T[]>;
+    readonly consumed: Set<T>;
+};
+
+function pierrePayloadQueues(
+    payloads: readonly PierreDiffPayload[],
+): PathQueues<PierreDiffPayload> {
+    const queues = new Map<string, PierreDiffPayload[]>();
+    for (const payload of payloads) {
+        for (const pathValue of new Set(pierrePayloadPaths(payload))) {
+            const queue = queues.get(pathValue) ?? [];
+            queue.push(payload);
+            queues.set(pathValue, queue);
+        }
+    }
+    return { queues, consumed: new Set() };
+}
+
+function fileSummaryQueues(files: readonly unknown[]): PathQueues<Record<string, unknown>> {
+    const queues = new Map<string, Record<string, unknown>[]>();
+    for (const file of files) {
+        if (!isRecord(file)) continue;
+        for (const pathValue of new Set(fileSummaryPaths(file))) {
+            const queue = queues.get(pathValue) ?? [];
+            queue.push(file);
+            queues.set(pathValue, queue);
+        }
+    }
+    return { queues, consumed: new Set() };
+}
+
+function pierrePayloadPaths(payload: PierreDiffPayload): readonly string[] {
+    const paths =
+        payload.kind === "renderable"
+            ? [payload.metadata.name, payload.metadata.prevName].filter(
+                  (value): value is string => value !== undefined,
+              )
+            : payload.path.split(" → ");
+    return paths.map(normalizedPatchPath);
+}
+
+function fileSummaryPaths(file: Record<string, unknown>): readonly string[] {
+    return [stringField(file, "path"), stringField(file, "previousPath")]
+        .filter((value): value is string => value !== undefined)
+        .map(normalizedPatchPath);
+}
+
+function pathsIntersect(left: readonly string[], right: readonly string[]): boolean {
+    return left.some((pathValue) => right.includes(pathValue));
+}
+
+function consumePathMatch<T extends object>(
+    index: PathQueues<T>,
+    keys: readonly string[],
+): T | undefined {
+    for (const key of keys) {
+        const queue = index.queues.get(key);
+        while (queue !== undefined && queue.length > 0) {
+            const match = queue.shift();
+            if (match !== undefined && !index.consumed.has(match)) {
+                index.consumed.add(match);
+                return match;
+            }
+        }
+    }
+    return undefined;
 }
 
 function mutationLimitKey(mutationSettings: MutationSettings): string {
@@ -527,6 +784,22 @@ function canParseCompletedPatchCall(patchText: string): boolean {
     return (
         patchText.length <= MAX_COMPLETED_PATCH_PARSE_CHARS && hasCompletePatchEnvelope(patchText)
     );
+}
+
+function parseCompletedPatchCall(patchText: string): ApplyPatchSummary | undefined {
+    if (!canParseCompletedPatchCall(patchText)) return undefined;
+    const key = diffContentDigest(patchText);
+    const cached = completedPatchSummaries.get(key);
+    if (cached?.patch === patchText) return cached.summary;
+    const summary = parseApplyPatchSummary(patchText);
+    completedPatchSummaries.delete(key);
+    completedPatchSummaries.set(key, { patch: patchText, summary });
+    while (completedPatchSummaries.size > MAX_DELETE_PREIMAGE_CALLS) {
+        const oldest = completedPatchSummaries.keys().next().value;
+        if (typeof oldest !== "string") break;
+        completedPatchSummaries.delete(oldest);
+    }
+    return summary;
 }
 
 function makeSection(kind: ApplyPatchKind, path: string): MutableApplyPatchSection {
@@ -1289,23 +1562,28 @@ function firstBoundedComponentLine(component: Component, width: number): string 
     return lines.length <= 1 ? firstLine : truncateToWidth(`${firstLine}…`, width, "…");
 }
 
+type CompletedDiffContext = {
+    readonly toolCallId?: string;
+    readonly invalidate?: () => void;
+    readonly pierreComponents?: Map<string, Component>;
+};
+
 function completedSectionDiff(
     section: ApplyPatchSection,
     theme: GlowupRenderTheme,
     expanded: boolean,
     mutationSettings: MutationSettings,
-    context: { readonly toolCallId?: string; readonly invalidate?: () => void },
+    context: CompletedDiffContext,
 ): Component | undefined {
     if (section.lines.length === 0) {
         return undefined;
     }
-    if (
-        section.pierreDiff !== undefined &&
-        (section.pierreDiff.kind === "summary" ||
-            expanded ||
-            mutationSettings.defaultView === "full")
-    ) {
-        return renderPierreDiff(
+    if (section.pierreDiff !== undefined) {
+        const componentKey =
+            section.pierreDiff.kind === "renderable"
+                ? section.pierreDiff.modelKey
+                : `summary:${section.path ?? section.pierreDiff.path}`;
+        const component = renderPierreDiff(
             section.pierreDiff,
             theme,
             {
@@ -1314,11 +1592,13 @@ function completedSectionDiff(
                 mutationSettings,
             },
             {
-                lastComponent: undefined,
+                lastComponent: context.pierreComponents?.get(componentKey),
                 ...(context.toolCallId === undefined ? {} : { toolCallId: context.toolCallId }),
                 ...(context.invalidate === undefined ? {} : { invalidate: context.invalidate }),
             },
         );
+        context.pierreComponents?.set(componentKey, component);
+        return component;
     }
     const showAllRows = showsFullMutation(mutationSettings, expanded);
     return renderGlowupDiff(theme, [section], showAllRows, {
@@ -1348,7 +1628,7 @@ function renderCompletedPatchViewport(
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
     mutationSettings: MutationSettings,
-    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void },
+    diffContext: CompletedDiffContext,
 ): Component {
     const firstSection = summary.sections[0];
     if (firstSection === undefined) {
@@ -1379,7 +1659,7 @@ function completedPatchSection(
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
     mutationSettings: MutationSettings,
-    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void },
+    diffContext: CompletedDiffContext,
 ): Component {
     const label = patchCallLabel(labelMode, context);
     const diff = completedSectionDiff(section, theme, expanded, mutationSettings, diffContext);
@@ -1416,7 +1696,7 @@ function renderStandalonePatchSections(
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
     mutationSettings: MutationSettings,
-    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void },
+    diffContext: CompletedDiffContext,
 ): Component {
     const components = sections.map((section) =>
         completedPatchSection(
@@ -1492,7 +1772,7 @@ function renderApplyPatchSummary(
     context: PatchCallLifecycleContext,
     labelMode: ToolLabelMode,
     mutationSettings: MutationSettings = PREVIEW_MUTATION_SETTINGS,
-    diffContext: { readonly toolCallId?: string; readonly invalidate?: () => void } = {},
+    diffContext: CompletedDiffContext = {},
 ): Component {
     if (!expanded && !isActiveToolCall(context)) {
         return renderCompletedPatchViewport(
@@ -1543,6 +1823,7 @@ type CompletedApplyPatchUpdate = {
 };
 
 class CompletedApplyPatchCallComponent implements Component {
+    private readonly pierreComponents = new Map<string, Component>();
     private summary: ApplyPatchSummary;
     private changedOnly: boolean;
     private theme: GlowupRenderTheme;
@@ -1633,6 +1914,7 @@ class CompletedApplyPatchCallComponent implements Component {
             this.mutationSettings,
             {
                 toolCallId: this.toolCallId,
+                pierreComponents: this.pierreComponents,
                 invalidate: () => {
                     if (this.renderGeneration === renderGeneration) {
                         this.requestRender?.();
@@ -1784,9 +2066,9 @@ export function createApplyPatchRenderer(
                 return renderPartialApplyPatchCall(patch, theme, context, labelMode);
             }
             const parsedSummary =
-                patch === undefined || !canParseCompletedPatchCall(patch)
+                persistedSummary !== undefined || patch === undefined
                     ? undefined
-                    : parseApplyPatchSummary(patch);
+                    : parseCompletedPatchCall(patch);
             const summary =
                 persistedSummary ??
                 (parsedSummary === undefined
@@ -1834,11 +2116,7 @@ export function createApplyPatchRenderer(
                 return renderApplyPatchFailure(result, options, theme, labelMode);
             }
             const patch = patchTextFromArgs(context.args);
-            if (
-                patch !== undefined &&
-                canParseCompletedPatchCall(patch) &&
-                parseApplyPatchSummary(patch) !== undefined
-            ) {
+            if (patch !== undefined && parseCompletedPatchCall(patch) !== undefined) {
                 return emptyComponent();
             }
             return renderGlowupOutput(theme, textOutput(result), {

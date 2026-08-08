@@ -20,6 +20,7 @@ import {
 import { strongerDiffBackgroundAnsi } from "../diffs/ansi-colors.ts";
 import type { DiffLineNumberStyle, NarrowDiffLayout, SideBySideLayout } from "../diffs/layout.ts";
 import {
+    expandTerminalTabs,
     hasNonWhitespaceText,
     neutralizeTerminalControls,
     truncateUtf8ByGrapheme,
@@ -2617,7 +2618,7 @@ function renderDiffRow(
     }
 
     const wrappedContent = wrapDiffText(
-        expandTerminalTabs(styledContent),
+        expandTerminalTabs(styledContent, 4, 0).text,
         availableWidth,
         options?.maxWrappedRows,
     );
@@ -2631,10 +2632,6 @@ function renderDiffRow(
         const bounded = truncateToWidth(row, rowWidth, "");
         return paintDiffRowBackground(parsed.kind, bounded, rowWidth, theme);
     });
-}
-
-function expandTerminalTabs(text: string): string {
-    return text.replaceAll("\t", "    ");
 }
 
 function paintEmptyDiffRowBackground(

@@ -6,11 +6,13 @@ const DEFAULT_DELETE_PREIMAGE_BYTES = 256 * 1024;
 
 export type TextFilePreimage = {
     readonly lines: readonly string[];
+    readonly endsWithNewline: boolean;
 };
 
 export type DeletedTextPreview = {
     readonly section: DiffSection;
     readonly removed: number;
+    readonly preimage?: TextFilePreimage;
 };
 
 type TextFilePreimageOptions = {
@@ -45,15 +47,13 @@ export async function captureTextFilePreimage(
         if (data.includes(0)) {
             return undefined;
         }
-        const lines = data
-            .toString("utf8")
-            .replace(/\r\n/gu, "\n")
-            .replace(/\r/gu, "\n")
-            .split("\n");
+        const normalized = data.toString("utf8").replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
+        const endsWithNewline = normalized.endsWith("\n");
+        const lines = normalized.split("\n");
         if (lines.at(-1) === "") {
             lines.pop();
         }
-        return { lines };
+        return { lines, endsWithNewline };
     } catch {
         return undefined;
     }
@@ -77,5 +77,6 @@ export async function captureDeletedTextPreview(
             removed: preimage.lines.length,
         },
         removed: preimage.lines.length,
+        preimage,
     };
 }

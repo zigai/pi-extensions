@@ -1,3 +1,5 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
+
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const ESCAPE_CODE = 0x1b;
 const MAX_SGR_SEQUENCE_CHARACTERS = 64;
@@ -59,10 +61,48 @@ export function neutralizeTerminalControls(text: string): string {
         }
 
         output += text.slice(runStart, index);
-        output += codeUnit === 0x09 ? "   " : visibleControl(codeUnit);
+        output += codeUnit === 0x09 ? "\t" : visibleControl(codeUnit);
         runStart = index + 1;
     }
-    return runStart === 0 ? text : `${output}${text.slice(runStart)}`;
+    const neutralized = runStart === 0 ? text : `${output}${text.slice(runStart)}`;
+    return neutralized.includes("\t") ? expandTerminalTabs(neutralized, 4, 0).text : neutralized;
+}
+
+/** Expands tabs to terminal tab stops while preserving ANSI sequences and wide-character columns. */
+export function expandTerminalTabs(
+    text: string,
+    tabWidth = 4,
+    initialDisplayColumn = 0,
+): { readonly text: string; readonly finalDisplayColumn: number } {
+    const width = Math.max(1, Math.floor(tabWidth));
+    let displayColumn = Math.max(0, Math.floor(initialDisplayColumn));
+    let output = "";
+    let runStart = 0;
+    for (let index = 0; index < text.length; index += 1) {
+        const character = text.charAt(index);
+        if (character !== "\t" && character !== "\n" && character !== "\r") {
+            continue;
+        }
+        const run = text.slice(runStart, index);
+        output += run;
+        displayColumn += visibleWidth(run);
+        if (character === "\t") {
+            const spaces = width - (displayColumn % width);
+            output += " ".repeat(spaces);
+            displayColumn += spaces;
+        } else {
+            output += character;
+            displayColumn = 0;
+        }
+        runStart = index + 1;
+    }
+    const tail = text.slice(runStart);
+    output += tail;
+    displayColumn += visibleWidth(tail);
+    return {
+        text: runStart === 0 ? text : output,
+        finalDisplayColumn: displayColumn,
+    };
 }
 
 export function hasNonWhitespaceText(text: string): boolean {

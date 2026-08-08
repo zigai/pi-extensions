@@ -1,3 +1,5 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
+
 export type TextRange = {
     readonly start: number;
     readonly end: number;
@@ -33,6 +35,26 @@ export function changedTextRanges(
         before: unmatchedTokenRanges(beforeTokens, matched.before),
         after: unmatchedTokenRanges(afterTokens, matched.after),
     };
+}
+
+/** Returns display columns for the first differing code point in a replacement. */
+export function replacementFocusColumns(
+    before: string,
+    after: string,
+): { readonly before: number | undefined; readonly after: number | undefined } {
+    if (before === after) {
+        return { before: undefined, after: undefined };
+    }
+    let offset = 0;
+    const limit = Math.min(before.length, after.length);
+    while (offset < limit) {
+        const beforeCodePoint = before.codePointAt(offset);
+        const afterCodePoint = after.codePointAt(offset);
+        if (beforeCodePoint === undefined || beforeCodePoint !== afterCodePoint) break;
+        offset += beforeCodePoint > 0xffff ? 2 : 1;
+    }
+    const column = visibleWidth(before.slice(0, offset));
+    return { before: column, after: column };
 }
 
 /** Adds background open/close sequences around selected source-text ranges. */

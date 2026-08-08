@@ -1,6 +1,7 @@
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "../unknown-values.ts";
 import {
+    sliceByColumn,
     truncateToWidth,
     type Component,
     visibleWidth,
@@ -14,9 +15,11 @@ import {
     type DiffRenderLimits,
 } from "./diff.ts";
 import {
+    cleanDiffLine,
     emptyHighlightedDiffSet,
-    highlightDiffIfLoaded,
-    loadHighlightedDiff,
+    getCachedHighlightedDiff,
+    loadHighlightedDiffResult,
+    type HighlightedDiffLoadResult,
 } from "./highlight.ts";
 import type {
     DiffSpan,
@@ -28,7 +31,13 @@ import type {
     SplitDiffRow,
     UnifiedDiffRow,
 } from "./types.ts";
-import { diffLineNumberWidth, shouldRenderSideBySide, type SideBySideLayout } from "./layout.ts";
+import {
+    diffLineNumberWidth,
+    pairReplacementLines,
+    shouldRenderSideBySide,
+    type NarrowDiffLayout,
+    type SideBySideLayout,
+} from "./layout.ts";
 import { getPierrePalette, type PierreTerminalPalette } from "./theme.ts";
 import {
     configuredDiffLineNumberStyle,
@@ -42,27 +51,119 @@ import {
 import { neutralizeTerminalControls } from "../text-boundaries.ts";
 import { syntaxHighlightingVersion } from "../syntax/highlighter.ts";
 import { PREVIEW_MUTATION_SETTINGS, type MutationSettings } from "../mutations/settings.ts";
+import { replacementFocusColumns } from "./intraline.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const DIFF_STYLE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.color.close}${ansiStyles.bgColor.close}`;
 const INITIAL_TTY_DIFF_HIGHLIGHT_DEFER_MS = 1_500;
-const MAX_QUEUED_DIFF_HIGHLIGHTS = 50;
-const MAX_ACTIVE_DIFF_HIGHLIGHT_TIMERS = 16;
 const MAX_VIEWPORT_DIFF_RENDER_LINES = 5_000;
-const MAX_HIGHLIGHT_DIFF_LINES = 5_000;
-const MAX_HIGHLIGHT_DIFF_BYTES = 512 * 1024;
+const MAX_CACHED_DIFF_HIGHLIGHTS = 100;
 const DISABLE_INITIAL_DEFER_ENV = "PI_GLOWUP_DISABLE_INITIAL_SYNTAX_DEFER";
 const moduleLoadedAtMs = Date.now();
 
-let highlightGeneration = 0;
-let queuedDiffHighlightRunning = false;
-let queuedDiffHighlightTimer: ReturnType<typeof setTimeout> | undefined;
-const activeDiffHighlightTimers = new Set<ReturnType<typeof setTimeout>>();
-const queuedDiffHighlights: Array<{
-    readonly generation: number;
-    readonly run: () => Promise<void>;
-    readonly resolve: () => void;
-}> = [];
+type HighlightState =
+    | { readonly status: "idle" }
+    | { readonly status: "pending"; readonly key: string }
+    | { readonly status: "ready"; readonly key: string; readonly value: HighlightedDiffSet }
+    | { readonly status: "failed"; readonly key: string; readonly fallback: HighlightedDiffSet };
+
+type QueuedHighlight = {
+    readonly key: string;
+    readonly priority: number;
+    readonly run: () => Promise<HighlightedDiffLoadResult>;
+    readonly resolve: (result: HighlightedDiffLoadResult) => void;
+};
+
+class DiffHighlightScheduler {
+    private readonly queued: QueuedHighlight[] = [];
+    private readonly pending = new Map<string, Promise<HighlightedDiffLoadResult>>();
+    private readonly cached = new Map<string, HighlightedDiffLoadResult>();
+    private timer: ReturnType<typeof setTimeout> | undefined;
+    private running = false;
+    private disposed = false;
+
+    schedule(
+        key: string,
+        run: () => Promise<HighlightedDiffLoadResult>,
+        priority = 0,
+    ): Promise<HighlightedDiffLoadResult> {
+        const cached = this.cached.get(key);
+        if (cached !== undefined) return Promise.resolve(cached);
+        const pending = this.pending.get(key);
+        if (pending !== undefined) return pending;
+
+        const promise = new Promise<HighlightedDiffLoadResult>((resolve) => {
+            const task = { key, priority, run, resolve };
+            const insertionIndex = this.queued.findIndex((queued) => queued.priority < priority);
+            if (insertionIndex < 0) this.queued.push(task);
+            else this.queued.splice(insertionIndex, 0, task);
+        });
+        this.pending.set(key, promise);
+        this.scheduleNext(this.running ? 100 : initialDiffHighlightDelayMs());
+        return promise;
+    }
+
+    dispose(): void {
+        this.disposed = true;
+        if (this.timer !== undefined) {
+            clearTimeout(this.timer);
+            this.timer = undefined;
+        }
+        const fallback = { value: emptyHighlightedDiffSet(), failed: true } as const;
+        for (const task of this.queued.splice(0)) {
+            this.pending.delete(task.key);
+            task.resolve(fallback);
+        }
+        this.cached.clear();
+    }
+
+    stats(): { readonly activeTimers: number; readonly queued: number; readonly running: boolean } {
+        return {
+            activeTimers: this.timer === undefined ? 0 : 1,
+            queued: this.queued.length,
+            running: this.running,
+        };
+    }
+
+    private scheduleNext(delayMs: number): void {
+        if (this.disposed || this.running || this.timer !== undefined || this.queued.length === 0) {
+            return;
+        }
+        this.timer = setTimeout(() => {
+            this.timer = undefined;
+            void this.processNext();
+        }, delayMs);
+        this.timer.unref?.();
+    }
+
+    private async processNext(): Promise<void> {
+        if (this.disposed || this.running) return;
+        const task = this.queued.shift();
+        if (task === undefined) return;
+        this.running = true;
+        let result: HighlightedDiffLoadResult;
+        try {
+            result = await task.run();
+        } catch {
+            result = { value: emptyHighlightedDiffSet(), failed: true };
+        }
+        this.pending.delete(task.key);
+        if (!this.disposed) {
+            this.cached.delete(task.key);
+            this.cached.set(task.key, result);
+            while (this.cached.size > MAX_CACHED_DIFF_HIGHLIGHTS) {
+                const oldest = this.cached.keys().next().value;
+                if (typeof oldest !== "string") break;
+                this.cached.delete(oldest);
+            }
+        }
+        task.resolve(result);
+        this.running = false;
+        this.scheduleNext(0);
+    }
+}
+
+let diffHighlightScheduler = new DiffHighlightScheduler();
 
 type AnsiStyle = {
     readonly fg: string | undefined;
@@ -75,24 +176,164 @@ type RenderSegment = DiffSpan & {
     readonly bold?: boolean;
 };
 
-function collapsedPierreRows<T>(
-    rows: readonly T[],
-    kinds: readonly SemanticDiffRowKind[],
-    rowBudget: number,
-    omission: (count: number) => T,
-): readonly T[] {
-    if (rows.length <= rowBudget) {
-        return rows;
-    }
-    const selected = selectSemanticDiffIndices(kinds, Math.max(1, rowBudget - 1));
-    const visible: T[] = [];
-    for (const index of selected) {
-        const row = rows[index];
-        if (row !== undefined) {
-            visible.push(row);
+type SemanticSourceRow = {
+    readonly sourceIndex: number;
+    readonly kind: SemanticDiffRowKind;
+    readonly edgeCollapsed: boolean;
+};
+
+function semanticUnifiedSourceRows(
+    metadata: PierreRenderableDiffPayload["metadata"],
+    layout: NarrowDiffLayout,
+): readonly SemanticSourceRow[] {
+    const rows: SemanticSourceRow[] = [];
+    const push = (kind: SemanticDiffRowKind, edgeCollapsed = false): void => {
+        rows.push({ sourceIndex: rows.length, kind, edgeCollapsed });
+    };
+    for (const hunk of metadata.hunks) {
+        if (hunk.collapsedBefore > 0) push("meta", true);
+        let deletionIndex = hunk.deletionLineIndex;
+        let additionIndex = hunk.additionLineIndex;
+        for (const content of hunk.hunkContent) {
+            if (content.type === "context") {
+                for (let index = 0; index < content.lines; index += 1) push("context");
+                deletionIndex += content.lines;
+                additionIndex += content.lines;
+                continue;
+            }
+            if (layout === "traditional" || content.deletions * content.additions > 256) {
+                for (let index = 0; index < content.deletions; index += 1) push("delete");
+                for (let index = 0; index < content.additions; index += 1) push("insert");
+            } else {
+                const kinds = orderedReplacementKinds(
+                    metadata.deletionLines.slice(deletionIndex, deletionIndex + content.deletions),
+                    metadata.additionLines.slice(additionIndex, additionIndex + content.additions),
+                    layout,
+                );
+                for (const kind of kinds) push(kind);
+            }
+            deletionIndex += content.deletions;
+            additionIndex += content.additions;
         }
+        if (hunk.noEOFCRDeletions || hunk.noEOFCRAdditions) push("meta");
     }
-    return [...visible, omission(rows.length - selected.length)];
+    if (hasSemanticTrailingCollapsedLines(metadata)) push("meta", true);
+    return trimSemanticEdgeCollapsedRows(rows);
+}
+
+function orderedReplacementKinds(
+    deletions: readonly string[],
+    additions: readonly string[],
+    layout: NarrowDiffLayout,
+): readonly SemanticDiffRowKind[] {
+    if (layout === "traditional" || deletions.length * additions.length > 256) {
+        return [
+            ...deletions.map((): SemanticDiffRowKind => "delete"),
+            ...additions.map((): SemanticDiffRowKind => "insert"),
+        ];
+    }
+    const pairs = pairReplacementLines(deletions.map(cleanDiffLine), additions.map(cleanDiffLine));
+    if (pairs === undefined) {
+        return [
+            ...deletions.map((): SemanticDiffRowKind => "delete"),
+            ...additions.map((): SemanticDiffRowKind => "insert"),
+        ];
+    }
+    const kinds: SemanticDiffRowKind[] = [];
+    let deletionIndex = 0;
+    let additionIndex = 0;
+    for (const pair of pairs) {
+        while (deletionIndex < pair.deletionIndex) {
+            kinds.push("delete");
+            deletionIndex += 1;
+        }
+        while (additionIndex < pair.additionIndex) {
+            kinds.push("insert");
+            additionIndex += 1;
+        }
+        kinds.push("delete", "insert");
+        deletionIndex += 1;
+        additionIndex += 1;
+    }
+    while (deletionIndex < deletions.length) {
+        kinds.push("delete");
+        deletionIndex += 1;
+    }
+    while (additionIndex < additions.length) {
+        kinds.push("insert");
+        additionIndex += 1;
+    }
+    return kinds;
+}
+
+function semanticSplitSourceRows(
+    metadata: PierreRenderableDiffPayload["metadata"],
+): readonly SemanticSourceRow[] {
+    const rows: SemanticSourceRow[] = [];
+    const push = (kind: SemanticDiffRowKind, edgeCollapsed = false): void => {
+        rows.push({ sourceIndex: rows.length, kind, edgeCollapsed });
+    };
+    for (const hunk of metadata.hunks) {
+        if (hunk.collapsedBefore > 0) push("meta", true);
+        for (const content of hunk.hunkContent) {
+            if (content.type === "context") {
+                for (let index = 0; index < content.lines; index += 1) push("context");
+                continue;
+            }
+            const kind: SemanticDiffRowKind = content.additions > 0 ? "insert" : "delete";
+            for (
+                let index = 0;
+                index < Math.max(content.deletions, content.additions);
+                index += 1
+            ) {
+                push(kind);
+            }
+        }
+        if (hunk.noEOFCRDeletions || hunk.noEOFCRAdditions) push("meta");
+    }
+    if (hasSemanticTrailingCollapsedLines(metadata)) push("meta", true);
+    return trimSemanticEdgeCollapsedRows(rows);
+}
+
+function hasSemanticTrailingCollapsedLines(
+    metadata: PierreRenderableDiffPayload["metadata"],
+): boolean {
+    const lastHunk = metadata.hunks.at(-1);
+    if (lastHunk === undefined || metadata.isPartial) return false;
+    const additions =
+        metadata.additionLines.length - (lastHunk.additionLineIndex + lastHunk.additionCount);
+    const deletions =
+        metadata.deletionLines.length - (lastHunk.deletionLineIndex + lastHunk.deletionCount);
+    return additions === deletions && additions > 0;
+}
+
+function trimSemanticEdgeCollapsedRows(
+    rows: readonly SemanticSourceRow[],
+): readonly SemanticSourceRow[] {
+    let start = 0;
+    let end = rows.length;
+    while (rows[start]?.edgeCollapsed === true) start += 1;
+    while (end > start && rows[end - 1]?.edgeCollapsed === true) end -= 1;
+    return rows.slice(start, end);
+}
+
+function semanticPreviewSelection(
+    rows: readonly SemanticSourceRow[],
+    rowBudget: number,
+): { readonly sourceIndices: ReadonlySet<number>; readonly omitted: number } {
+    const selected = selectSemanticDiffIndices(
+        rows.map((row) => row.kind),
+        Math.max(1, rowBudget - 1),
+    );
+    return {
+        sourceIndices: new Set(
+            selected.flatMap((index) => {
+                const row = rows[index];
+                return row === undefined ? [] : [row.sourceIndex];
+            }),
+        ),
+        omitted: Math.max(0, rows.length - selected.length),
+    };
 }
 
 function isDefined<T>(value: T | undefined): value is T {
@@ -212,13 +453,16 @@ export function getPierreDiffPayloadFromDetails(
 /** Returns bounded lazy-diff scheduler stats for diagnostics. */
 export function pierreDiffHighlightStats(): {
     readonly activeTimers: number;
+    readonly activeHighlights: number;
     readonly queuedHighlights: number;
     readonly queueRunning: boolean;
 } {
+    const stats = diffHighlightScheduler.stats();
     return {
-        activeTimers: activeDiffHighlightTimers.size,
-        queuedHighlights: queuedDiffHighlights.length,
-        queueRunning: queuedDiffHighlightRunning,
+        activeTimers: stats.activeTimers,
+        activeHighlights: stats.running ? 1 : 0,
+        queuedHighlights: stats.queued,
+        queueRunning: stats.running,
     };
 }
 
@@ -230,11 +474,10 @@ class PierreDiffComponent implements Component {
     private expanded: boolean;
     private appearanceVersion: number;
     private syntaxVersion: number;
-    private refreshPromise: Promise<void> | undefined;
-    private refreshTimer: ReturnType<typeof setTimeout> | undefined;
-    private refreshKey: string | undefined;
-    private cachedWidth: number | undefined;
-    private cachedLines: string[] | undefined;
+    private highlightState: HighlightState = { status: "idle" };
+    private readonly cachedLinesByWidth = new Map<number, string[]>();
+    private cachedUnifiedRows: ReadonlyArray<UnifiedDiffRow> | undefined;
+    private cachedSplitRows: ReadonlyArray<SplitDiffRow> | undefined;
     private readonly toolCallId: string | undefined;
     private requestRender: (() => void) | undefined;
 
@@ -255,9 +498,7 @@ class PierreDiffComponent implements Component {
         this.syntaxVersion = syntaxHighlightingVersion();
         this.toolCallId = toolCallId;
         this.requestRender = requestRender;
-        if (this.shouldHighlight()) {
-            this.maybeRefreshHighlightedDiff();
-        }
+        this.maybeRefreshHighlightedDiff();
     }
 
     belongsTo(toolCallId: string | undefined): boolean {
@@ -279,7 +520,7 @@ class PierreDiffComponent implements Component {
         const nextSyntaxVersion = syntaxHighlightingVersion();
         const syntaxChanged = this.syntaxVersion !== nextSyntaxVersion;
         const canReuseRenderedCache =
-            previousPayload === payload &&
+            previousPayload.modelKey === payload.modelKey &&
             pierreRowPoliciesEqual(this.rowPolicy, rowPolicy) &&
             this.expanded === expanded &&
             this.appearanceVersion === nextAppearanceVersion &&
@@ -293,23 +534,16 @@ class PierreDiffComponent implements Component {
         this.appearanceVersion = nextAppearanceVersion;
         this.syntaxVersion = nextSyntaxVersion;
         this.requestRender = requestRender;
-        if (!this.shouldHighlight()) {
-            this.highlighted = emptyHighlightedDiffSet();
-            this.refreshPromise = undefined;
-            this.clearRefreshTimer();
-        }
         if (!canReuseRenderedCache) {
             this.invalidate();
         }
-        if (previousKey !== nextKey || syntaxChanged) {
+        if (previousKey !== nextKey) {
             this.highlighted = emptyHighlightedDiffSet();
-            this.refreshPromise = undefined;
-            this.clearRefreshTimer();
-            this.refreshKey = undefined;
+            this.highlightState = { status: "idle" };
+        } else if (syntaxChanged) {
+            this.highlightState = { status: "idle" };
         }
-        if (this.shouldHighlight()) {
-            this.maybeRefreshHighlightedDiff();
-        }
+        this.maybeRefreshHighlightedDiff();
     }
 
     render(width: number): string[] {
@@ -317,21 +551,12 @@ class PierreDiffComponent implements Component {
         const nextSyntaxVersion = syntaxHighlightingVersion();
         if (this.syntaxVersion !== nextSyntaxVersion) {
             this.syntaxVersion = nextSyntaxVersion;
-            this.highlighted = emptyHighlightedDiffSet();
-            this.refreshPromise = undefined;
-            this.clearRefreshTimer();
-            this.refreshKey = undefined;
+            this.highlightState = { status: "idle" };
             this.invalidate();
-            if (this.shouldHighlight()) {
-                this.maybeRefreshHighlightedDiff();
-            }
+            this.maybeRefreshHighlightedDiff();
         }
-        if (this.shouldHighlight()) {
-            this.highlightVisibleRenderIfPossible();
-        }
-        if (this.cachedWidth === safeWidth && this.cachedLines !== undefined) {
-            return this.cachedLines;
-        }
+        const cachedLines = this.cachedLinesByWidth.get(safeWidth);
+        if (cachedLines !== undefined) return cachedLines;
 
         const highlighted = this.highlighted[this.palette.appearance];
         const bodyLines = shouldRenderSideBySideDiff(
@@ -347,76 +572,58 @@ class PierreDiffComponent implements Component {
             this.rowPolicy.maxVisibleLines === undefined ||
             lines.length <= this.rowPolicy.maxVisibleLines
         ) {
-            this.cachedWidth = safeWidth;
-            this.cachedLines = lines.map((line) =>
-                truncateToWidth(neutralizeTerminalControls(line), safeWidth, ""),
+            return this.cacheRenderedLines(
+                safeWidth,
+                lines.map((line) =>
+                    truncateToWidth(neutralizeTerminalControls(line), safeWidth, ""),
+                ),
             );
-            return this.cachedLines;
         }
 
         const visible = Math.max(1, this.rowPolicy.maxVisibleLines - 1);
-        this.cachedWidth = safeWidth;
-        this.cachedLines = [
-            ...lines.slice(0, visible),
-            renderFullWidthLine(
-                [
-                    {
-                        text: `… ${omittedDiffLineCount(this.payload, lines.length, visible).toLocaleString("en-US")} more lines`,
-                        fg: this.palette.metadataFg,
-                        bg: this.palette.metadataBg,
-                    },
-                ],
-                safeWidth,
-                baseStyle({ fg: this.palette.metadataFg, bg: this.palette.metadataBg }),
-            ),
-        ].map((line) => truncateToWidth(neutralizeTerminalControls(line), safeWidth, ""));
-        return this.cachedLines;
+        return this.cacheRenderedLines(
+            safeWidth,
+            [
+                ...lines.slice(0, visible),
+                renderFullWidthLine(
+                    [
+                        {
+                            text: `… ${omittedDiffLineCount(this.payload, lines.length, visible).toLocaleString("en-US")} more lines`,
+                            fg: this.palette.metadataFg,
+                            bg: this.palette.metadataBg,
+                        },
+                    ],
+                    safeWidth,
+                    baseStyle({ fg: this.palette.metadataFg, bg: this.palette.metadataBg }),
+                ),
+            ].map((line) => truncateToWidth(neutralizeTerminalControls(line), safeWidth, "")),
+        );
     }
 
     invalidate(): void {
-        this.cachedWidth = undefined;
-        this.cachedLines = undefined;
+        this.cachedLinesByWidth.clear();
+        this.cachedUnifiedRows = undefined;
+        this.cachedSplitRows = undefined;
     }
 
-    private highlightVisibleRenderIfPossible(): void {
-        if (hasHighlightedLines(this.highlighted)) {
-            return;
+    private cacheRenderedLines(width: number, lines: string[]): string[] {
+        this.cachedLinesByWidth.delete(width);
+        this.cachedLinesByWidth.set(width, lines);
+        while (this.cachedLinesByWidth.size > 2) {
+            const oldest = this.cachedLinesByWidth.keys().next().value;
+            if (typeof oldest !== "number") break;
+            this.cachedLinesByWidth.delete(oldest);
         }
-        const highlighted = highlightDiffIfLoaded(this.payload.metadata);
-        if (!highlighted) {
-            return;
-        }
-        this.highlighted = highlighted;
-        this.invalidate();
+        return lines;
     }
 
     private renderUnifiedBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
-        const sourceRows = buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette, {
-            ...(this.rowPolicy.maxSourceRows === undefined
-                ? {}
-                : { maxRows: this.rowPolicy.maxSourceRows }),
-            narrowLayout: configuredNarrowDiffLayout(),
-        });
-        const rows = this.rowPolicy.collapseSemantically
-            ? collapsedPierreRows(
-                  sourceRows,
-                  sourceRows.map((row): SemanticDiffRowKind => {
-                      if (row.kind !== "line") return "meta";
-                      if (row.lineType === "addition") return "insert";
-                      if (row.lineType === "deletion") return "delete";
-                      return "context";
-                  }),
-                  this.rowPolicy.maxVisibleLines ?? 1,
-                  (count): UnifiedDiffRow => ({
-                      kind: "collapsed",
-                      text: `… +${count} lines (${pierreExpandHint()})`,
-                      fg: this.palette.metadataFg,
-                      bg: this.palette.metadataBg,
-                  }),
-              )
-            : sourceRows;
+        const narrowLayout = configuredNarrowDiffLayout();
+        const sourceRows =
+            this.cachedUnifiedRows ?? this.buildUnifiedRows(highlighted, narrowLayout);
+        this.cachedUnifiedRows = sourceRows;
         return renderUnifiedRows(
-            rows,
+            sourceRows,
             this.payload.metadata,
             width,
             addOneWhenDefined(this.rowPolicy.maxVisibleLines),
@@ -425,36 +632,10 @@ class PierreDiffComponent implements Component {
     }
 
     private renderSplitBody(width: number, highlighted: HighlightedDiffSet["dark"]): string[] {
-        const sourceRows = buildSplitDiffRows(
-            this.payload.metadata,
-            highlighted,
-            this.palette,
-            this.rowPolicy.maxSourceRows === undefined
-                ? {}
-                : { maxRows: this.rowPolicy.maxSourceRows },
-        );
-        const rows = this.rowPolicy.collapseSemantically
-            ? collapsedPierreRows(
-                  sourceRows,
-                  sourceRows.map((row): SemanticDiffRowKind => {
-                      if (row.kind !== "line") return "meta";
-                      const hasAddition = row.addition.lineType === "addition";
-                      const hasDeletion = row.deletion.lineType === "deletion";
-                      if (hasAddition && !hasDeletion) return "insert";
-                      if (hasDeletion && !hasAddition) return "delete";
-                      return hasAddition ? "insert" : "context";
-                  }),
-                  this.rowPolicy.maxVisibleLines ?? 1,
-                  (count): SplitDiffRow => ({
-                      kind: "collapsed",
-                      text: `… +${count} lines (${pierreExpandHint()})`,
-                      fg: this.palette.metadataFg,
-                      bg: this.palette.metadataBg,
-                  }),
-              )
-            : sourceRows;
+        const sourceRows = this.cachedSplitRows ?? this.buildSplitRows(highlighted);
+        this.cachedSplitRows = sourceRows;
         return renderSplitRows(
-            rows,
+            sourceRows,
             this.payload.metadata,
             width,
             this.palette,
@@ -463,87 +644,103 @@ class PierreDiffComponent implements Component {
         );
     }
 
+    private buildUnifiedRows(
+        highlighted: HighlightedDiffSet["dark"],
+        narrowLayout: NarrowDiffLayout,
+    ): ReadonlyArray<UnifiedDiffRow> {
+        if (!this.rowPolicy.collapseSemantically) {
+            return buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette, {
+                ...(this.rowPolicy.maxSourceRows === undefined
+                    ? {}
+                    : { maxRows: this.rowPolicy.maxSourceRows }),
+                narrowLayout,
+            });
+        }
+        const selection = semanticPreviewSelection(
+            semanticUnifiedSourceRows(this.payload.metadata, narrowLayout),
+            this.rowPolicy.maxVisibleLines ?? 1,
+        );
+        const visible = buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette, {
+            includedRowIndices: selection.sourceIndices,
+            narrowLayout,
+        });
+        return selection.omitted === 0
+            ? visible
+            : [
+                  ...visible,
+                  {
+                      kind: "collapsed",
+                      text: `… +${selection.omitted} lines (${pierreExpandHint()})`,
+                      fg: this.palette.metadataFg,
+                      bg: this.palette.metadataBg,
+                  },
+              ];
+    }
+
+    private buildSplitRows(highlighted: HighlightedDiffSet["dark"]): ReadonlyArray<SplitDiffRow> {
+        if (!this.rowPolicy.collapseSemantically) {
+            return buildSplitDiffRows(
+                this.payload.metadata,
+                highlighted,
+                this.palette,
+                this.rowPolicy.maxSourceRows === undefined
+                    ? {}
+                    : { maxRows: this.rowPolicy.maxSourceRows },
+            );
+        }
+        const selection = semanticPreviewSelection(
+            semanticSplitSourceRows(this.payload.metadata),
+            this.rowPolicy.maxVisibleLines ?? 1,
+        );
+        const visible = buildSplitDiffRows(this.payload.metadata, highlighted, this.palette, {
+            includedRowIndices: selection.sourceIndices,
+        });
+        return selection.omitted === 0
+            ? visible
+            : [
+                  ...visible,
+                  {
+                      kind: "collapsed",
+                      text: `… +${selection.omitted} lines (${pierreExpandHint()})`,
+                      fg: this.palette.metadataFg,
+                      bg: this.palette.metadataBg,
+                  },
+              ];
+    }
+
     private maybeRefreshHighlightedDiff(): void {
-        if (!this.shouldHighlight()) {
+        const nextKey = `${refreshKeyFor(this.payload)}\u0000syntax:${this.syntaxVersion}`;
+        if (this.highlightState.status !== "idle" && this.highlightState.key === nextKey) {
             return;
         }
-        if (hasHighlightedLines(this.highlighted)) {
+        const cached = getCachedHighlightedDiff(this.payload.metadata);
+        if (cached !== undefined) {
+            this.highlighted = cached.value;
+            this.highlightState = cached.failed
+                ? { status: "failed", key: nextKey, fallback: cached.value }
+                : { status: "ready", key: nextKey, value: cached.value };
             return;
         }
-        if (activeDiffHighlightTimers.size >= MAX_ACTIVE_DIFF_HIGHLIGHT_TIMERS) {
-            return;
-        }
-
-        const nextKey = refreshKeyFor(this.payload);
-        if ((this.refreshPromise || this.refreshTimer) && this.refreshKey === nextKey) {
-            return;
-        }
-
-        this.refreshKey = nextKey;
-        const generation = highlightGeneration;
-        const timer = setTimeout(() => {
-            activeDiffHighlightTimers.delete(timer);
-            if (this.refreshTimer === timer) {
-                this.refreshTimer = undefined;
-            }
-            if (generation !== highlightGeneration || this.refreshKey !== nextKey) {
-                return;
-            }
-            if (hasHighlightedLines(this.highlighted)) {
-                return;
-            }
-            this.refreshPromise = runQueuedDiffHighlight(() =>
-                loadHighlightedDiff(this.payload.metadata).then((highlighted) => {
-                    if (generation !== highlightGeneration || this.refreshKey !== nextKey) {
-                        return;
-                    }
-                    this.highlighted = highlighted;
-                    this.invalidate();
-                    this.requestRender?.();
-                }),
-            )
-                .catch(() => {})
-                .finally(() => {
-                    if (this.refreshKey === nextKey) {
-                        this.refreshPromise = undefined;
-                    }
-                });
-        }, initialDiffHighlightDelayMs());
-        timer.unref?.();
-        this.refreshTimer = timer;
-        activeDiffHighlightTimers.add(timer);
-    }
-
-    private usesChangedSpanBackgrounds(): boolean {
-        return (
-            (this.palette.additionSpanBg.length > 0 &&
-                this.palette.additionSpanBg !== this.palette.additionRowBg) ||
-            (this.palette.deletionSpanBg.length > 0 &&
-                this.palette.deletionSpanBg !== this.palette.deletionRowBg)
-        );
-    }
-
-    private shouldHighlight(): boolean {
-        if (
-            this.payload.stats.lineCount > MAX_HIGHLIGHT_DIFF_LINES ||
-            this.payload.stats.sizeBytes > MAX_HIGHLIGHT_DIFF_BYTES
-        ) {
-            return false;
-        }
-        return (
-            this.expanded ||
-            this.rowPolicy.maxVisibleLines === undefined ||
-            this.usesChangedSpanBackgrounds()
-        );
-    }
-
-    private clearRefreshTimer(): void {
-        if (this.refreshTimer === undefined) {
-            return;
-        }
-        clearTimeout(this.refreshTimer);
-        activeDiffHighlightTimers.delete(this.refreshTimer);
-        this.refreshTimer = undefined;
+        this.highlightState = { status: "pending", key: nextKey };
+        const metadata = this.payload.metadata;
+        const scheduler = diffHighlightScheduler;
+        void scheduler
+            .schedule(nextKey, () => loadHighlightedDiffResult(metadata), this.expanded ? 1 : 0)
+            .then((result) => {
+                if (
+                    scheduler !== diffHighlightScheduler ||
+                    this.highlightState.status !== "pending" ||
+                    this.highlightState.key !== nextKey
+                ) {
+                    return;
+                }
+                this.highlighted = result.value;
+                this.highlightState = result.failed
+                    ? { status: "failed", key: nextKey, fallback: result.value }
+                    : { status: "ready", key: nextKey, value: result.value };
+                this.invalidate();
+                this.requestRender?.();
+            });
     }
 }
 
@@ -602,6 +799,9 @@ function summaryDetail(payload: PierreSummaryDiffPayload): string {
     if (payload.summary.reason === "metadata-too-large") {
         return "Diff omitted: generated diff metadata exceeded the render budget.";
     }
+    if (payload.summary.reason === "metadata-invalid") {
+        return "Diff omitted: generated diff metadata was invalid.";
+    }
     const limits = [
         payload.summary.maxBytes === null
             ? undefined
@@ -624,82 +824,10 @@ function formatDiffSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function runQueuedDiffHighlight(run: () => Promise<void>): Promise<void> {
-    return new Promise((resolve) => {
-        queuedDiffHighlights.push({ generation: highlightGeneration, run, resolve });
-        trimQueuedDiffHighlights();
-        scheduleQueuedDiffHighlight();
-    });
-}
-
 /** Drops pending lazy syntax-highlight work during extension shutdown. */
 export function clearQueuedDiffHighlights(): void {
-    highlightGeneration += 1;
-    for (const timer of activeDiffHighlightTimers) {
-        clearTimeout(timer);
-    }
-    activeDiffHighlightTimers.clear();
-    if (queuedDiffHighlightTimer !== undefined) {
-        clearTimeout(queuedDiffHighlightTimer);
-        queuedDiffHighlightTimer = undefined;
-    }
-
-    const pendingTasks = queuedDiffHighlights.splice(0);
-    for (const task of pendingTasks) {
-        task.resolve();
-    }
-    queuedDiffHighlightRunning = false;
-}
-
-function trimQueuedDiffHighlights(): void {
-    while (queuedDiffHighlights.length > MAX_QUEUED_DIFF_HIGHLIGHTS) {
-        queuedDiffHighlights.shift()?.resolve();
-    }
-}
-
-function scheduleDiffHighlightQueueTimer(delayMs: number): void {
-    if (queuedDiffHighlightTimer !== undefined) {
-        clearTimeout(queuedDiffHighlightTimer);
-    }
-    queuedDiffHighlightTimer = setTimeout(() => {
-        queuedDiffHighlightTimer = undefined;
-        processNextQueuedDiffHighlight();
-    }, delayMs);
-    queuedDiffHighlightTimer.unref?.();
-}
-
-function scheduleQueuedDiffHighlight(): void {
-    if (queuedDiffHighlightRunning) {
-        return;
-    }
-    queuedDiffHighlightRunning = true;
-    scheduleDiffHighlightQueueTimer(0);
-}
-
-function processNextQueuedDiffHighlight(): void {
-    const task = queuedDiffHighlights.shift();
-    if (!task) {
-        queuedDiffHighlightRunning = false;
-        return;
-    }
-
-    if (task.generation !== highlightGeneration) {
-        task.resolve();
-        scheduleDiffHighlightQueueTimer(0);
-        return;
-    }
-
-    const taskGeneration = task.generation;
-    task.run()
-        .catch(() => {})
-        .finally(() => {
-            task.resolve();
-            if (taskGeneration !== highlightGeneration) {
-                queuedDiffHighlightRunning = false;
-                return;
-            }
-            scheduleDiffHighlightQueueTimer(100);
-        });
+    diffHighlightScheduler.dispose();
+    diffHighlightScheduler = new DiffHighlightScheduler();
 }
 
 function initialDiffHighlightDelayMs(): number {
@@ -737,7 +865,7 @@ function renderUnifiedRows(
     const rendered: string[] = [];
     const lineNumberWidth = diffLineNumberWidth(metadata);
     for (const row of rows) {
-        const rowLines = renderUnifiedRow(row, width, lineNumberWidth);
+        const rowLines = renderUnifiedRow(row, width, lineNumberWidth, maxRowsPerDiffRow === 1);
         const visibleLines = limitDiffRowLines(rowLines, maxRowsPerDiffRow, width);
         if (appendBudgetedRenderedLines(rendered, visibleLines, maxRenderedLines)) {
             break;
@@ -772,6 +900,7 @@ function renderSplitRows(
             divider,
             leftWidth,
             rightWidth,
+            maxRowsPerDiffRow === 1,
         );
         const visibleLines = limitDiffRowLines(rowLines, maxRowsPerDiffRow, width);
         if (appendBudgetedRenderedLines(rendered, visibleLines, maxRenderedLines)) {
@@ -819,7 +948,12 @@ function appendBudgetedRenderedLines(
     return true;
 }
 
-function renderUnifiedRow(row: UnifiedDiffRow, width: number, lineNumberWidth: number): string[] {
+function renderUnifiedRow(
+    row: UnifiedDiffRow,
+    width: number,
+    lineNumberWidth: number,
+    focusChanged: boolean,
+): string[] {
     if (row.kind !== "line") {
         const gutterWidth =
             configuredDiffLineNumberStyle() === "dual"
@@ -840,7 +974,10 @@ function renderUnifiedRow(row: UnifiedDiffRow, width: number, lineNumberWidth: n
     const prefixWidth = visibleWidth(firstPrefix);
     const restPrefix = " ".repeat(prefixWidth);
     const contentWidth = Math.max(8, width - prefixWidth);
-    const content = renderContent(row.spans, baseStyle({ fg: row.rowFg, bg: row.rowBg }));
+    const spans = focusChanged
+        ? changedPreviewSpans(row.spans, contentWidth, row.focusColumn)
+        : row.spans;
+    const content = renderContent(spans, baseStyle({ fg: row.rowFg, bg: row.rowBg }));
     if (visibleWidth(content) === 0) {
         const prefix = renderUnifiedDiffPrefix(
             firstPrefix,
@@ -901,6 +1038,7 @@ function renderSplitRow(
     divider: string,
     leftWidth: number,
     rightWidth: number,
+    focusChanged: boolean,
 ): string[] {
     if (row.kind !== "line") {
         const text =
@@ -914,8 +1052,24 @@ function renderSplitRow(
         ];
     }
 
-    const deletionLines = renderSplitCell(row.deletion, leftWidth, lineNumberWidth);
-    const additionLines = renderSplitCell(row.addition, rightWidth, lineNumberWidth);
+    const fallbackFocus = replacementFocusColumns(
+        row.deletion.spans.map((span) => span.text).join(""),
+        row.addition.spans.map((span) => span.text).join(""),
+    );
+    const deletionLines = renderSplitCell(
+        row.deletion,
+        leftWidth,
+        lineNumberWidth,
+        focusChanged,
+        fallbackFocus.before,
+    );
+    const additionLines = renderSplitCell(
+        row.addition,
+        rightWidth,
+        lineNumberWidth,
+        focusChanged,
+        fallbackFocus.after,
+    );
     const rowCount = Math.max(deletionLines.length, additionLines.length);
     const rendered: string[] = [];
 
@@ -928,7 +1082,13 @@ function renderSplitRow(
     return rendered;
 }
 
-function renderSplitCell(cell: SplitDiffCell, width: number, lineNumberWidth: number): string[] {
+function renderSplitCell(
+    cell: SplitDiffCell,
+    width: number,
+    lineNumberWidth: number,
+    focusChanged: boolean,
+    fallbackFocus: number | undefined,
+): string[] {
     const marker = markerForLineType(cell.lineType);
     const firstPrefix =
         configuredDiffLineNumberStyle() === "dual"
@@ -937,7 +1097,10 @@ function renderSplitCell(cell: SplitDiffCell, width: number, lineNumberWidth: nu
     const prefixWidth = visibleWidth(firstPrefix);
     const restPrefix = " ".repeat(prefixWidth);
     const contentWidth = Math.max(8, width - prefixWidth);
-    const content = renderContent(cell.spans, baseStyle({ fg: cell.rowFg, bg: cell.rowBg }));
+    const spans = focusChanged
+        ? changedPreviewSpans(cell.spans, contentWidth, fallbackFocus)
+        : cell.spans;
+    const content = renderContent(spans, baseStyle({ fg: cell.rowFg, bg: cell.rowBg }));
     if (visibleWidth(content) === 0) {
         const prefix = renderSplitDiffPrefix(
             firstPrefix,
@@ -1035,6 +1198,58 @@ function renderContent(spans: ReadonlyArray<DiffSpan>, base: AnsiStyle): string 
     return renderSegments(spans, base);
 }
 
+function changedPreviewSpans(
+    spans: ReadonlyArray<DiffSpan>,
+    width: number,
+    fallbackFocus: number | undefined,
+): ReadonlyArray<DiffSpan> {
+    const contentWidth = Math.max(1, width);
+    let totalWidth = 0;
+    let emphasizedStart: number | undefined;
+    for (const span of spans) {
+        if (emphasizedStart === undefined && span.emphasized === true) {
+            emphasizedStart = totalWidth;
+        }
+        totalWidth += visibleWidth(span.text);
+    }
+    const focus = emphasizedStart ?? fallbackFocus;
+    if (focus === undefined || totalWidth <= contentWidth) return spans;
+
+    const sliceWidth = Math.max(1, contentWidth - 2);
+    const start = Math.min(
+        Math.max(0, focus - Math.floor(sliceWidth / 3)),
+        Math.max(0, totalWidth - sliceWidth),
+    );
+    const end = Math.min(totalWidth, start + sliceWidth);
+    return [
+        ...(start === 0 ? [] : [{ text: "…" }]),
+        ...sliceDiffSpans(spans, start, end),
+        ...(end === totalWidth ? [] : [{ text: "…" }]),
+    ];
+}
+
+function sliceDiffSpans(
+    spans: ReadonlyArray<DiffSpan>,
+    start: number,
+    end: number,
+): ReadonlyArray<DiffSpan> {
+    const sliced: DiffSpan[] = [];
+    let column = 0;
+    for (const span of spans) {
+        const spanWidth = visibleWidth(span.text);
+        const spanEnd = column + spanWidth;
+        const visibleStart = Math.max(start, column);
+        const visibleEnd = Math.min(end, spanEnd);
+        if (visibleStart < visibleEnd) {
+            const text = sliceByColumn(span.text, visibleStart - column, visibleEnd - visibleStart);
+            if (text.length > 0) sliced.push({ ...span, text });
+        }
+        column = spanEnd;
+        if (column >= end) break;
+    }
+    return sliced;
+}
+
 function emptyPane(width: number, cell: SplitDiffCell): string {
     return renderFullWidthLine([], width, baseStyle({ fg: cell.rowFg, bg: cell.rowBg }));
 }
@@ -1070,45 +1285,60 @@ function padRenderedLine(
 }
 
 function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle): string {
-    let output = openAnsi(base);
+    let current: AnsiStyle | undefined;
+    let output = ansiTransition(current, base);
+    current = base;
     for (const segment of segments) {
-        output += openAnsi(
-            baseStyle({
-                fg: segment.fg ?? base.fg,
-                bg: segment.bg ?? base.bg,
-                bold: segment.bold ?? base.bold,
-                dim: segment.dim ?? base.dim,
-            }),
-        );
+        const next = baseStyle({
+            fg: segment.fg ?? base.fg,
+            bg: segment.bg ?? base.bg,
+            bold: segment.bold ?? base.bold,
+            dim: segment.dim ?? base.dim,
+        });
+        output += ansiTransition(current, next);
+        current = next;
         output += neutralizeTerminalControls(segment.text.replace(/[\r\n]/gu, ""));
     }
-    output += openAnsi(base);
+    output += ansiTransition(current, base);
     return output;
 }
 
 function openAnsi(style: AnsiStyle): string {
-    const fg = toRgb(style.fg);
-    const bg = toRgb(style.bg);
+    return ansiTransition(undefined, style);
+}
 
-    const intensity =
-        style.bold === true
-            ? ansiStyles.modifier.bold.open
-            : style.dim === true
-              ? ansiStyles.modifier.dim.open
-              : ansiStyles.modifier.bold.close;
-    return [
-        intensity,
-        isAnsiStyle(style.fg)
-            ? style.fg
-            : fg === undefined
-              ? ansiStyles.color.close
-              : ansiStyles.color.ansi16m(fg.red, fg.green, fg.blue),
-        isAnsiStyle(style.bg)
-            ? style.bg
-            : bg === undefined
-              ? ansiStyles.bgColor.close
-              : ansiStyles.bgColor.ansi16m(bg.red, bg.green, bg.blue),
-    ].join("");
+function ansiTransition(previous: AnsiStyle | undefined, next: AnsiStyle): string {
+    const fg = toRgb(next.fg);
+    const bg = toRgb(next.bg);
+    const transitions: string[] = [];
+    if (previous === undefined || previous.bold !== next.bold || previous.dim !== next.dim) {
+        transitions.push(
+            next.bold === true
+                ? ansiStyles.modifier.bold.open
+                : next.dim === true
+                  ? ansiStyles.modifier.dim.open
+                  : ansiStyles.modifier.bold.close,
+        );
+    }
+    if (previous === undefined || previous.fg !== next.fg) {
+        transitions.push(
+            isAnsiStyle(next.fg)
+                ? (next.fg ?? "")
+                : fg === undefined
+                  ? ansiStyles.color.close
+                  : ansiStyles.color.ansi16m(fg.red, fg.green, fg.blue),
+        );
+    }
+    if (previous === undefined || previous.bg !== next.bg) {
+        transitions.push(
+            isAnsiStyle(next.bg)
+                ? (next.bg ?? "")
+                : bg === undefined
+                  ? ansiStyles.bgColor.close
+                  : ansiStyles.bgColor.ansi16m(bg.red, bg.green, bg.blue),
+        );
+    }
+    return transitions.join("");
 }
 
 function isAnsiStyle(value: string | undefined): boolean {
@@ -1164,17 +1394,8 @@ function markerForLineType(lineType: SplitDiffCell["lineType"] | UnifiedDiffRowL
 
 type UnifiedDiffRowLineType = Extract<UnifiedDiffRow, { readonly kind: "line" }>["lineType"];
 
-function hasHighlightedLines(highlighted: HighlightedDiffSet): boolean {
-    return (
-        highlighted.dark.deletionLines.length > 0 ||
-        highlighted.dark.additionLines.length > 0 ||
-        highlighted.light.deletionLines.length > 0 ||
-        highlighted.light.additionLines.length > 0
-    );
-}
-
 function refreshKeyFor(payload: PierreRenderableDiffPayload): string {
-    return `${payload.path}\u0000${payload.metadata.cacheKey ?? ""}\u0000${payload.stats.lineCount}\u0000${payload.stats.added}\u0000${payload.stats.removed}\u0000${payload.metadata.lang ?? ""}`;
+    return `${payload.modelKey}\u0000${payload.metadata.lang ?? "text"}`;
 }
 
 function pierrePalettesEqual(left: PierreTerminalPalette, right: PierreTerminalPalette): boolean {

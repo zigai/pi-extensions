@@ -11,6 +11,8 @@ export type PierreRenderableDiffPayload = {
     readonly version: 1;
     readonly kind: "renderable";
     readonly path: string;
+    /** Stable content-derived identity used by renderer and scheduler caches. */
+    readonly modelKey: string;
     readonly metadata: FileDiffMetadata;
     readonly stats: PierreDiffStats;
 };
@@ -34,7 +36,7 @@ export type PierreDiffStats = {
 
 /** Reason a diff is summarized rather than rendered inline. */
 export type PierreDiffSummary = {
-    readonly reason: "too-large" | "not-readable" | "metadata-too-large";
+    readonly reason: "too-large" | "not-readable" | "metadata-invalid" | "metadata-too-large";
     readonly maxLines: number | null;
     readonly maxBytes: number | null;
 };
@@ -55,6 +57,8 @@ export type DiffSpan = {
     readonly bg?: string;
     readonly bold?: boolean;
     readonly dim?: boolean;
+    /** True when Pierre identified this text as the changed part of a replacement. */
+    readonly emphasized?: boolean;
 };
 
 /** Unified diff row ready for terminal rendering. */
@@ -75,6 +79,8 @@ export type UnifiedDiffRow =
           readonly rowBg: string;
           readonly contentBg: string;
           readonly lineNumberFg: string;
+          /** Display column to keep visible before asynchronous HAST is ready. */
+          readonly focusColumn?: number;
       };
 
 /** One side of a side-by-side diff row. */

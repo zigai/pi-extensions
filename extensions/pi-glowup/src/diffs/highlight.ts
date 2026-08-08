@@ -1,6 +1,7 @@
 import {
     cleanLastNewline,
     renderDiffWithHighlighter,
+    setLanguageOverride,
     type DiffsHighlighter,
     type FileDiffMetadata,
 } from "@pierre/diffs";
@@ -12,18 +13,36 @@ import type {
 } from "./types.ts";
 import { enhanceSyntaxSegments } from "../syntax/brackets.ts";
 import {
-    getLoadedSyntaxHighlighterForLanguage,
     getSyntaxHighlighterForLanguage,
+    syntaxHighlightingVersion,
     type LoadedSyntaxHighlighter,
 } from "../syntax/highlighter.ts";
+import { expandTerminalTabs } from "../text-boundaries.ts";
 import { isRecord } from "../unknown-values.ts";
 
 const PIERRE_RENDER_OPTIONS = {
     useTokenTransformer: false,
-    tokenizeMaxLineLength: 1_000,
+    tokenizeMaxLineLength: Number.MAX_SAFE_INTEGER,
     lineDiffType: "word-alt" as const,
-    maxLineDiffLength: 2_000,
+    maxLineDiffLength: Number.MAX_SAFE_INTEGER,
 } as const;
+
+const MAX_STYLE_CACHE_ENTRIES = 256;
+const flattenedLineCache = new WeakMap<object, Map<string, ReadonlyArray<DiffSpan>>>();
+const parsedStyleCache = new Map<string, ReadonlyMap<string, string>>();
+const highlightedMetadataCache = new WeakMap<
+    FileDiffMetadata,
+    { readonly syntaxVersion: number; readonly result: HighlightedDiffLoadResult }
+>();
+const pendingMetadataHighlights = new WeakMap<
+    FileDiffMetadata,
+    { readonly syntaxVersion: number; readonly promise: Promise<HighlightedDiffLoadResult> }
+>();
+
+export type HighlightedDiffLoadResult = {
+    readonly value: HighlightedDiffSet;
+    readonly failed: boolean;
+};
 
 type SpanStyle = {
     readonly fg: string | undefined;
@@ -41,29 +60,63 @@ export function emptyHighlightedDiffSet(): HighlightedDiffSet {
     };
 }
 
-/** Highlights Pierre diff metadata synchronously when the language is already loaded. */
-export function highlightDiffIfLoaded(metadata: FileDiffMetadata): HighlightedDiffSet | undefined {
-    const syntax = getLoadedSyntaxHighlighterForLanguage(metadata.lang ?? "text");
-    if (!syntax) {
-        return undefined;
-    }
-
-    const highlighted = renderHighlightedDiffCode(metadata, syntax);
-    return highlighted ? { dark: highlighted, light: highlighted } : undefined;
-}
-
 /** Lazily highlights Pierre diff metadata for terminal themes. */
 export async function loadHighlightedDiff(metadata: FileDiffMetadata): Promise<HighlightedDiffSet> {
-    const syntax = await getSyntaxHighlighterForLanguage(metadata.lang ?? "text");
-    if (!syntax) {
-        return emptyHighlightedDiffSet();
+    return (await loadHighlightedDiffResult(metadata)).value;
+}
+
+/** Lazily highlights metadata and reports whether even the stable text fallback failed. */
+export async function loadHighlightedDiffResult(
+    metadata: FileDiffMetadata,
+): Promise<HighlightedDiffLoadResult> {
+    const syntaxVersion = syntaxHighlightingVersion();
+    const cached = highlightedMetadataCache.get(metadata);
+    if (cached?.syntaxVersion === syntaxVersion) {
+        return cached.result;
+    }
+    const pending = pendingMetadataHighlights.get(metadata);
+    if (pending?.syntaxVersion === syntaxVersion) {
+        return pending.promise;
     }
 
-    const highlighted = renderHighlightedDiffCode(metadata, syntax);
-    if (!highlighted) {
-        return emptyHighlightedDiffSet();
+    const promise = loadHighlightedDiffUncached(metadata).then((result) => {
+        if (syntaxHighlightingVersion() === syntaxVersion) {
+            highlightedMetadataCache.set(metadata, { syntaxVersion, result });
+        }
+        return result;
+    });
+    pendingMetadataHighlights.set(metadata, { syntaxVersion, promise });
+    return promise.finally(() => {
+        if (pendingMetadataHighlights.get(metadata)?.promise === promise) {
+            pendingMetadataHighlights.delete(metadata);
+        }
+    });
+}
+
+/** Returns a previously computed highlight without loading grammars or tokenizing source. */
+export function getCachedHighlightedDiff(
+    metadata: FileDiffMetadata,
+): HighlightedDiffLoadResult | undefined {
+    const cached = highlightedMetadataCache.get(metadata);
+    return cached?.syntaxVersion === syntaxHighlightingVersion() ? cached.result : undefined;
+}
+
+async function loadHighlightedDiffUncached(
+    metadata: FileDiffMetadata,
+): Promise<HighlightedDiffLoadResult> {
+    const requestedLanguage = metadata.lang ?? "text";
+    const syntax =
+        (await getSyntaxHighlighterForLanguage(requestedLanguage)) ??
+        (await getSyntaxHighlighterForLanguage("text"));
+    if (!syntax) {
+        return { value: emptyHighlightedDiffSet(), failed: true };
     }
-    return { dark: highlighted, light: highlighted };
+
+    const highlighted = renderHighlightedDiffCodeWithTextFallback(metadata, syntax);
+    if (!highlighted) {
+        return { value: emptyHighlightedDiffSet(), failed: true };
+    }
+    return { value: { dark: highlighted, light: highlighted }, failed: false };
 }
 
 /** Flattens Pierre's HAST-ish highlighted line tree into terminal spans. */
@@ -71,12 +124,21 @@ export function flattenHighlightedLine(
     node: unknown,
     appearance: PierreAppearance,
     emphasisBg: string,
-    fallbackText: string,
+    fallbackText: string | (() => string),
     language?: string,
     options: { readonly boldEmphasized?: boolean; readonly dimUnchanged?: boolean } = {},
 ): ReadonlyArray<DiffSpan> {
+    const cacheKey = `${appearance}\u0000${emphasisBg}\u0000${language ?? ""}\u0000${options.boldEmphasized === true ? 1 : 0}\u0000${options.dimUnchanged === true ? 1 : 0}\u0000${syntaxHighlightingVersion()}`;
+    const cacheTarget = typeof node === "object" && node !== null ? node : undefined;
+    const cached = cacheTarget === undefined ? undefined : flattenedLineCache.get(cacheTarget);
+    const cachedSpans = cached?.get(cacheKey);
+    if (cachedSpans !== undefined) {
+        return cachedSpans;
+    }
+
     const spans: DiffSpan[] = [];
     const colorVariable = appearance === "light" ? "--diffs-token-light" : "--diffs-token-dark";
+    let displayColumn = 0;
 
     function visit(current: unknown, inherited: SpanStyle): void {
         if (!isRecord(current)) {
@@ -85,7 +147,9 @@ export function flattenHighlightedLine(
 
         if (current.type === "text") {
             const value = typeof current.value === "string" ? current.value : "";
-            mergeSpan(spans, makeDiffSpan(tabify(value), inherited));
+            const expanded = expandTerminalTabs(value, 4, displayColumn);
+            displayColumn = expanded.finalDisplayColumn;
+            mergeSpan(spans, makeDiffSpan(expanded.text, inherited));
             return;
         }
 
@@ -120,12 +184,19 @@ export function flattenHighlightedLine(
     });
 
     if (spans.length > 0) {
-        return enhanceSyntaxSegments(spans, language);
+        const enhanced = enhanceSyntaxSegments(spans, language);
+        if (cacheTarget !== undefined) {
+            const nextCache = cached ?? new Map<string, ReadonlyArray<DiffSpan>>();
+            nextCache.set(cacheKey, enhanced);
+            flattenedLineCache.set(cacheTarget, nextCache);
+        }
+        return enhanced;
     }
-    return fallbackText.length > 0
+    const resolvedFallback = typeof fallbackText === "function" ? fallbackText() : fallbackText;
+    return resolvedFallback.length > 0
         ? enhanceSyntaxSegments(
               [
-                  makeDiffSpan(fallbackText, {
+                  makeDiffSpan(resolvedFallback, {
                       fg: undefined,
                       bg: undefined,
                       emphasized: false,
@@ -140,7 +211,18 @@ export function flattenHighlightedLine(
 
 /** Normalizes a Pierre metadata line for terminal display. */
 export function cleanDiffLine(line: string | undefined): string {
-    return tabify(cleanLastNewline(line ?? "").replace(/\r$/, ""));
+    return expandTerminalTabs(cleanLastNewline(line ?? "").replace(/\r$/, ""), 4, 0).text;
+}
+
+function renderHighlightedDiffCodeWithTextFallback(
+    metadata: FileDiffMetadata,
+    syntax: LoadedSyntaxHighlighter,
+): HighlightedDiffCode | undefined {
+    const highlighted = renderHighlightedDiffCode(metadata, syntax);
+    if (highlighted !== undefined || (metadata.lang ?? "text") === "text") {
+        return highlighted;
+    }
+    return renderHighlightedDiffCode(setLanguageOverride(metadata, "text"), syntax);
 }
 
 function renderHighlightedDiffCode(
@@ -169,15 +251,16 @@ function renderHighlightedDiffCode(
     }
 }
 
-function tabify(text: string): string {
-    return text.replace(/\t/g, "    ");
-}
-
-function parseStyleValue(styleValue: unknown): Map<string, string> {
-    const styles = new Map<string, string>();
+function parseStyleValue(styleValue: unknown): ReadonlyMap<string, string> {
     if (typeof styleValue !== "string") {
-        return styles;
+        return new Map();
     }
+    const cached = parsedStyleCache.get(styleValue);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    const styles = new Map<string, string>();
 
     for (const segment of styleValue.split(";")) {
         const separator = segment.indexOf(":");
@@ -192,6 +275,12 @@ function parseStyleValue(styleValue: unknown): Map<string, string> {
         }
     }
 
+    parsedStyleCache.set(styleValue, styles);
+    while (parsedStyleCache.size > MAX_STYLE_CACHE_ENTRIES) {
+        const oldest = parsedStyleCache.keys().next().value;
+        if (typeof oldest !== "string") break;
+        parsedStyleCache.delete(oldest);
+    }
     return styles;
 }
 
@@ -202,6 +291,7 @@ function makeDiffSpan(text: string, style: SpanStyle): DiffSpan {
         ...(style.bg === undefined ? {} : { bg: style.bg }),
         ...(style.emphasized && style.boldEmphasized ? { bold: true } : {}),
         ...(style.dimUnchanged && !style.emphasized ? { dim: true } : {}),
+        ...(style.emphasized ? { emphasized: true } : {}),
     };
 }
 
@@ -216,7 +306,8 @@ function mergeSpan(target: DiffSpan[], next: DiffSpan): void {
         previous.fg === next.fg &&
         previous.bg === next.bg &&
         previous.bold === next.bold &&
-        previous.dim === next.dim
+        previous.dim === next.dim &&
+        previous.emphasized === next.emphasized
     ) {
         target[target.length - 1] = { ...previous, text: `${previous.text}${next.text}` };
         return;

@@ -53,6 +53,7 @@ import { captureDeletedTextPreview, type DeletedTextPreview } from "./rendering/
 import {
     captureApplyPatchPreimages,
     clearApplyPatchRenderingState,
+    finishApplyPatchPierrePayloads,
     restoreApplyPatchResultSummaries,
 } from "./rendering/apply-patch-rendering.ts";
 import {
@@ -960,17 +961,18 @@ function renderEditCall(
 ) {
     registerExplorationBoundary(context.toolCallId);
     const labelColumnWidth = mutationLabelColumnWidth(context, labelMode);
+    const cachedPreview = editPreviews.get(context.toolCallId);
     const resultDetails = context.result?.details;
-    const persistedPreview =
-        isRecord(resultDetails) &&
+    const preview =
+        cachedPreview ??
+        (isRecord(resultDetails) &&
         typeof resultDetails.diff === "string" &&
         hasNonWhitespaceText(resultDetails.diff)
             ? buildEditPreview({
                   path: pathField(args) ?? "",
                   diff: resultDetails.diff,
               })
-            : undefined;
-    const preview = editPreviews.get(context.toolCallId) ?? persistedPreview;
+            : undefined);
     if (!isActiveToolCall(context) && preview) {
         return renderMutationCall(
             theme,
@@ -1325,6 +1327,15 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         let scheduledFormattedPreview = false;
         let storedEditPreview = false;
         let persistedEditPierrePayload: PierreDiffPayload | undefined;
+        const persistedApplyPatchPierrePayloads = event.toolName
+            .toLowerCase()
+            .includes("apply_patch")
+            ? await finishApplyPatchPierrePayloads(
+                  event.toolCallId,
+                  event.isError === true,
+                  config.mutations,
+              )
+            : [];
         if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
             const command = commandField(event.input);
             if (command !== undefined) {
@@ -1380,11 +1391,19 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
             ...detailsDiagnostics(event.details),
             ...diagnosticSnapshot(),
         }));
-        if (persistedEditPierrePayload !== undefined) {
+        if (
+            persistedEditPierrePayload !== undefined ||
+            persistedApplyPatchPierrePayloads.length > 0
+        ) {
             return {
                 details: {
                     ...(isRecord(event.details) ? event.details : {}),
-                    pierreDiff: persistedEditPierrePayload,
+                    ...(persistedEditPierrePayload === undefined
+                        ? {}
+                        : { pierreDiff: persistedEditPierrePayload }),
+                    ...(persistedApplyPatchPierrePayloads.length === 0
+                        ? {}
+                        : { pierreDiffs: persistedApplyPatchPierrePayloads }),
                 },
             };
         }
