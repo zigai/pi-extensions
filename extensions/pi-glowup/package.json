@@ -56,7 +56,7 @@
     "verify": "npm run check"
   },
   "dependencies": {
-    "@pierre/diffs": "^1.2.12",
+    "@pierre/diffs": "1.2.12",
     "@zigai/pi-extension-settings": "0.4.1",
     "ansi-styles": "^6.2.3",
     "shiki": "^4.3.0"
