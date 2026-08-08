@@ -49,7 +49,7 @@ describe("text boundaries", () => {
         const sanitized = neutralizeTerminalControls(text);
 
         expect(sanitized).toContain("\u001b[31mred\u001b[0m");
-        expect(sanitized).toContain("␛[2J␛]2;owned␇   end␡‹9B›");
+        expect(sanitized).toContain("␛[2J␛]2;owned␇ end␡‹9B›");
         expect(sanitized).not.toContain("\u001b[2J");
         expect(sanitized).not.toContain("\u0007");
         expect(sanitized).not.toContain("\t");

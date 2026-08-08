@@ -7,10 +7,12 @@ import { configureRenderingAppearance, type GlowupRenderTheme } from "../src/ren
 import {
     captureApplyPatchPreimages,
     clearApplyPatchRenderingState,
+    finishApplyPatchPierrePayloads,
     restoreApplyPatchResultSummaries,
 } from "../src/rendering/apply-patch-rendering.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import { DEFAULT_MUTATION_SETTINGS } from "../src/mutations/settings.ts";
+import { normalizePierreDiffPayload } from "../src/diffs/diff.ts";
 
 const plainTheme: GlowupRenderTheme = {
     fg(_token: string, text: string): string {
@@ -742,6 +744,151 @@ describe("apply_patch renderer", () => {
         }
     });
 
+    it("builds completed patch metadata from full source snapshots", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-source-backed-"));
+        const filePath = path.join(cwd, "source.ts");
+        const patch = `*** Begin Patch
+*** Update File: source.ts
+@@
+-const value = "old";
++const value = "new";
+*** End Patch`;
+        writeFileSync(
+            filePath,
+            '/* block comment starts\nstill comment */\nconst value = "old";\n',
+        );
+        try {
+            await captureApplyPatchPreimages("source-backed", cwd, { patch });
+            writeFileSync(
+                filePath,
+                '/* block comment starts\nstill comment */\nconst value = "new";\n',
+            );
+            const [payload] = await finishApplyPatchPierrePayloads(
+                "source-backed",
+                false,
+                DEFAULT_MUTATION_SETTINGS,
+            );
+
+            expect(payload).toMatchObject({ kind: "renderable" });
+            if (payload?.kind !== "renderable") throw new Error("expected source payload");
+            expect(payload.metadata.isPartial).toBe(false);
+            expect(payload.metadata.deletionLines.slice(0, 2)).toEqual([
+                "/* block comment starts\n",
+                "still comment */\n",
+            ]);
+            expect(payload.metadata.additionLines.at(-1)).toContain('const value = "new";');
+            expect(
+                payload.metadata.hunks.every(
+                    (hunk) => !hunk.noEOFCRAdditions && !hunk.noEOFCRDeletions,
+                ),
+            ).toBe(true);
+            expect(normalizePierreDiffPayload(structuredClone(payload))).toMatchObject({
+                kind: "renderable",
+            });
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
+    it("round-trips source-backed additions and deletions with trailing newlines", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-source-boundaries-"));
+        const addedPath = path.join(cwd, "added.ts");
+        const deletedPath = path.join(cwd, "deleted.ts");
+        const addPatch =
+            "*** Begin Patch\n*** Add File: added.ts\n+export const added = true;\n*** End Patch";
+        const deletePatch = "*** Begin Patch\n*** Delete File: deleted.ts\n*** End Patch";
+        try {
+            writeFileSync(deletedPath, "export const deleted = true;\n");
+            await captureApplyPatchPreimages("source-add", cwd, { patch: addPatch });
+            await captureApplyPatchPreimages("source-delete", cwd, { patch: deletePatch });
+            writeFileSync(addedPath, "export const added = true;\n");
+            unlinkSync(deletedPath);
+
+            const [added] = await finishApplyPatchPierrePayloads(
+                "source-add",
+                false,
+                DEFAULT_MUTATION_SETTINGS,
+            );
+            const [deleted] = await finishApplyPatchPierrePayloads(
+                "source-delete",
+                false,
+                DEFAULT_MUTATION_SETTINGS,
+            );
+
+            expect(normalizePierreDiffPayload(structuredClone(added))).toMatchObject({
+                kind: "renderable",
+                metadata: { type: "new" },
+            });
+            expect(normalizePierreDiffPayload(structuredClone(deleted))).toMatchObject({
+                kind: "renderable",
+                metadata: { type: "deleted" },
+            });
+            if (added?.kind !== "renderable" || deleted?.kind !== "renderable") {
+                throw new Error("expected source-backed boundary payloads");
+            }
+            expect(added.metadata.hunks.every((hunk) => !hunk.noEOFCRAdditions)).toBe(true);
+            expect(deleted.metadata.hunks.every((hunk) => !hunk.noEOFCRDeletions)).toBe(true);
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
+    it("shows both paths for a completed source-backed move", async () => {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-source-move-"));
+        const oldPath = path.join(cwd, "old-name.ts");
+        const newPath = path.join(cwd, "new-name.ts");
+        const patch = `*** Begin Patch
+*** Update File: old-name.ts
+*** Move to: new-name.ts
+@@
+-export const value = "old";
++export const value = "new";
+*** End Patch`;
+        try {
+            writeFileSync(oldPath, 'export const value = "old";\n');
+            await captureApplyPatchPreimages("source-move", cwd, { patch });
+            writeFileSync(newPath, 'export const value = "new";\n');
+            unlinkSync(oldPath);
+            const [payload] = await finishApplyPatchPierrePayloads(
+                "source-move",
+                false,
+                DEFAULT_MUTATION_SETTINGS,
+            );
+            const rendered = createThirdPartyToolRenderer("apply_patch", {
+                labelMode: "lifecycle",
+            })
+                .renderCall({ patch }, plainTheme, {
+                    ...renderContext,
+                    toolCallId: "source-move",
+                    cwd,
+                    result: {
+                        details: {
+                            diff: 'old-name.ts\n-1 export const value = "old";\n+1 export const value = "new";\n',
+                            pierreDiffs: [payload],
+                            lineSummary: {
+                                files: [
+                                    {
+                                        action: "M",
+                                        path: "new-name.ts",
+                                        previousPath: "old-name.ts",
+                                        addedLines: 1,
+                                        removedLines: 1,
+                                    },
+                                ],
+                            },
+                        },
+                    },
+                })
+                .render(120)
+                .join("\n");
+
+            expect(rendered).toContain("Patched old-name.ts → new-name.ts");
+            expect(rendered).not.toContain("No newline at end of file");
+        } finally {
+            rmSync(cwd, { recursive: true, force: true });
+        }
+    });
+
     it("honors the configured apply_patch delete preimage limit", async () => {
         const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-delete-limit-"));
         const filePath = path.join(cwd, "removed.ts");
@@ -920,6 +1067,63 @@ describe("apply_patch renderer", () => {
         expect(wide.match(/Patched example\.ts/gu)).toHaveLength(1);
         expect(wide).not.toContain("files");
         expect(wide).not.toMatch(/[├└]/u);
+    });
+
+    it("associates completed patch metadata by path when parser orders differ", () => {
+        const renderer = createThirdPartyToolRenderer("apply_patch", {
+            labelMode: "lifecycle",
+            mutationSettings: DEFAULT_MUTATION_SETTINGS,
+        });
+        const inputPatch = `*** Begin Patch
+*** Update File: first.ts
+@@
+-oldFirst
++newFirst
+*** Update File: second.ts
+@@
+-oldSecond
++newSecond
+*** End Patch`;
+        const result = {
+            details: {
+                diff: "first.ts\n-1 oldFirst\n+1 newFirst\n\nsecond.ts\n-1 oldSecond\n+1 newSecond\n",
+                patch: `--- second.ts
++++ second.ts
+@@ -1 +1 @@
+-oldSecond
++newSecond
+--- first.ts
++++ first.ts
+@@ -1 +1 @@
+-oldFirst
++newFirst
+`,
+                lineSummary: {
+                    files: [
+                        { action: "M", path: "second.ts", addedLines: 1, removedLines: 1 },
+                        { action: "M", path: "first.ts", addedLines: 1, removedLines: 1 },
+                    ],
+                },
+            },
+        };
+
+        const rendered = renderer
+            .renderCall({ patch: inputPatch }, plainTheme, {
+                ...renderContext,
+                toolCallId: "path-associated",
+                result,
+            })
+            .render(100)
+            .join("\n");
+        const firstStart = rendered.indexOf("Patched first.ts");
+        const secondStart = rendered.indexOf("Patched second.ts");
+        const firstBlock = rendered.slice(firstStart, secondStart);
+        const secondBlock = rendered.slice(secondStart);
+
+        expect(firstBlock).toContain("oldFirst");
+        expect(firstBlock).not.toContain("oldSecond");
+        expect(secondBlock).toContain("oldSecond");
+        expect(secondBlock).not.toContain("oldFirst");
     });
 
     it("reuses completed full-diff components across syntax invalidations", () => {

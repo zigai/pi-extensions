@@ -7,16 +7,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     buildLargeDiffSummaryPayload,
     buildPierreDiffPayload,
+    buildPierreDiffPayloadsFromPatch,
     buildUnifiedDiffRows,
     createEditSnapshot,
 } from "../src/diffs/diff.ts";
 import {
     clearQueuedDiffHighlights,
     getPierreDiffPayloadFromDetails,
+    pierreDiffHighlightStats,
     renderPierreDiff,
     shouldRenderSideBySideDiff,
 } from "../src/diffs/renderer.ts";
-import { loadHighlightedDiff } from "../src/diffs/highlight.ts";
+import {
+    cleanDiffLine,
+    flattenHighlightedLine,
+    loadHighlightedDiff,
+} from "../src/diffs/highlight.ts";
 import { pairReplacementLines } from "../src/diffs/layout.ts";
 import { getPierreAppearance, getPierrePalette } from "../src/diffs/theme.ts";
 import type { UnifiedDiffRow } from "../src/diffs/types.ts";
@@ -98,6 +104,67 @@ describe("Pierre diff rendering", () => {
             }),
         ).toBeUndefined();
         expect(getPierreDiffPayloadFromDetails({ pierreDiff: "not-an-object" })).toBeUndefined();
+    });
+
+    it("downgrades corrupted restored hunk metadata to a bounded summary", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/restored.ts",
+            oldContent: "old\n",
+            newContent: "new\n",
+            oldSizeBytes: 4,
+            newSizeBytes: 4,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+        const restored = structuredClone(payload);
+        const firstHunk = restored.metadata.hunks[0];
+        if (firstHunk === undefined) throw new Error("expected hunk");
+        Reflect.set(firstHunk, "additionCount", Number.MAX_SAFE_INTEGER);
+
+        expect(getPierreDiffPayloadFromDetails({ pierreDiff: restored })).toMatchObject({
+            kind: "summary",
+            summary: { reason: "metadata-invalid" },
+        });
+        const normalized = getPierreDiffPayloadFromDetails({ pierreDiff: restored });
+        if (normalized === undefined) throw new Error("expected bounded fallback");
+        expect(
+            stripAnsi(
+                renderPierreDiff(
+                    normalized,
+                    testTheme,
+                    { expanded: false },
+                    {
+                        lastComponent: undefined,
+                    },
+                )
+                    .render(100)
+                    .join("\n"),
+            ),
+        ).toContain("generated diff metadata was invalid");
+    });
+
+    it("accepts Pierre's -1 empty-side indexes for new and deleted files", () => {
+        const cases = [
+            { path: "new.ts", oldContent: "", newContent: "one\ntwo\n", type: "new" },
+            { path: "deleted.ts", oldContent: "one\ntwo\n", newContent: "", type: "deleted" },
+        ] as const;
+
+        for (const input of cases) {
+            const payload = buildPierreDiffPayload({
+                ...input,
+                oldSizeBytes: Buffer.byteLength(input.oldContent),
+                newSizeBytes: Buffer.byteLength(input.newContent),
+                canBuildPierreDiff: true,
+            });
+            expect(payload).toMatchObject({ kind: "renderable", metadata: { type: input.type } });
+            const restored = getPierreDiffPayloadFromDetails({
+                pierreDiff: structuredClone(payload),
+            });
+            expect(restored).toMatchObject({
+                kind: "renderable",
+                metadata: { type: input.type },
+            });
+        }
     });
 
     it("uses the bundled syntax theme appearance instead of the Pi theme name", () => {
@@ -477,6 +544,219 @@ describe("Pierre diff rendering", () => {
         expect(secondLines).toEqual(firstLines);
     });
 
+    it("never reuses highlighted source for same-sized replacement content", async () => {
+        const firstPayload = buildPierreDiffPayload({
+            path: "src/identity.ts",
+            oldContent: "return oldValue;\n",
+            newContent: "return newValue;\n",
+            oldSizeBytes: 17,
+            newSizeBytes: 17,
+            canBuildPierreDiff: true,
+        });
+        const secondPayload = buildPierreDiffPayload({
+            path: "src/identity.ts",
+            oldContent: "return fooValue;\n",
+            newContent: "return barValue;\n",
+            oldSizeBytes: 17,
+            newSizeBytes: 17,
+            canBuildPierreDiff: true,
+        });
+        if (firstPayload?.kind !== "renderable" || secondPayload?.kind !== "renderable") {
+            throw new Error("expected renderable Pierre payloads");
+        }
+        await loadHighlightedDiff(firstPayload.metadata);
+        const component = renderPierreDiff(
+            firstPayload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, toolCallId: "identity" },
+        );
+        expect(stripAnsi(component.render(100).join("\n"))).toContain("newValue");
+
+        const updated = renderPierreDiff(
+            secondPayload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: component, toolCallId: "identity" },
+        );
+        const rendered = stripAnsi(updated.render(100).join("\n"));
+
+        expect(secondPayload.modelKey).not.toBe(firstPayload.modelKey);
+        expect(rendered).toContain("barValue");
+        expect(rendered).not.toContain("newValue");
+    });
+
+    it("bounds a 20,000-line replacement before reading hidden source rows", () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/huge.ts",
+            oldContent: "old\n",
+            newContent: "new\n",
+            oldSizeBytes: 4,
+            newSizeBytes: 4,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+        const originalHunk = payload.metadata.hunks[0];
+        if (originalHunk === undefined) throw new Error("expected hunk");
+        const metadata = {
+            ...payload.metadata,
+            deletionLines: Array.from({ length: 20_000 }, (_, index) => `old ${index}`),
+            additionLines: Array.from({ length: 20_000 }, (_, index) => `new ${index}`),
+            splitLineCount: 20_000,
+            unifiedLineCount: 40_000,
+            hunks: [
+                {
+                    ...originalHunk,
+                    additionCount: 20_000,
+                    additionLines: 20_000,
+                    deletionCount: 20_000,
+                    deletionLines: 20_000,
+                    splitLineCount: 20_000,
+                    unifiedLineCount: 40_000,
+                    hunkContent: [
+                        {
+                            type: "change" as const,
+                            additions: 20_000,
+                            deletions: 20_000,
+                            additionLineIndex: 0,
+                            deletionLineIndex: 0,
+                        },
+                    ],
+                },
+            ],
+        };
+        let builtRows = 0;
+
+        const rows = buildUnifiedDiffRows(
+            metadata,
+            { deletionLines: [], additionLines: [] },
+            getPierrePalette(testTheme),
+            {
+                maxRows: 6,
+                narrowLayout: "paired",
+                onRowBuilt() {
+                    builtRows += 1;
+                },
+            },
+        );
+
+        expect(rows).toHaveLength(6);
+        expect(builtRows).toBe(6);
+    });
+
+    it("expands tabs at terminal stops across token and wide-character boundaries", () => {
+        expect(cleanDiffLine("a\tb")).toBe("a   b");
+        expect(cleanDiffLine("abc\tb")).toBe("abc b");
+        const spans = flattenHighlightedLine(
+            {
+                type: "element",
+                properties: {},
+                children: [
+                    { type: "text", value: "界" },
+                    { type: "text", value: "\tb" },
+                ],
+            },
+            "dark",
+            "",
+            "",
+        );
+        expect(spans.map((span) => span.text).join("")).toBe("界  b");
+    });
+
+    it("settles empty highlighted metadata without scheduling retries", async () => {
+        clearQueuedDiffHighlights();
+        const [payload] = buildPierreDiffPayloadsFromPatch(
+            "diff --git a/old.ts b/new.ts\nsimilarity index 100%\nrename from old.ts\nrename to new.ts\n",
+            { maxBytes: null, maxLines: null },
+        );
+        if (payload?.kind !== "renderable") throw new Error("expected rename payload");
+        let invalidations = 0;
+        const component = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            {
+                lastComponent: undefined,
+                toolCallId: "rename",
+                invalidate() {
+                    invalidations += 1;
+                },
+            },
+        );
+        component.render(100);
+        await vi.waitFor(() => expect(invalidations).toBe(1));
+        component.render(100);
+        component.render(100);
+        expect(invalidations).toBe(1);
+    });
+
+    it("uses a stable text-grammar fallback for unsupported languages", async () => {
+        const payload = buildPierreDiffPayload({
+            path: "src/unsupported.custom",
+            oldContent: "before\n",
+            newContent: "after\n",
+            oldSizeBytes: 7,
+            newSizeBytes: 6,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected payload");
+        const metadata = { ...payload.metadata, lang: "not-a-real-grammar" };
+        const highlighted = await loadHighlightedDiff(metadata);
+
+        expect(highlighted.dark.deletionLines).toHaveLength(1);
+        expect(highlighted.dark.additionLines).toHaveLength(1);
+        const component = renderPierreDiff(
+            { ...payload, metadata, modelKey: `${payload.modelKey}:unsupported` },
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, toolCallId: "unsupported" },
+        );
+        expect(stripAnsi(component.render(100).join("\n"))).toContain("after");
+        expect(pierreDiffHighlightStats().queuedHighlights).toBe(0);
+    });
+
+    it("eventually highlights 100 restored diffs with one active highlighter", async () => {
+        clearQueuedDiffHighlights();
+        let invalidations = 0;
+        let maximumActive = 0;
+        for (let index = 0; index < 100; index += 1) {
+            const payload = buildPierreDiffPayload({
+                path: `src/restored-${index}.ts`,
+                oldContent: `const oldValue = ${index};\n`,
+                newContent: `const newValue = ${index + 1};\n`,
+                oldSizeBytes: 24,
+                newSizeBytes: 24,
+                canBuildPierreDiff: true,
+            });
+            if (payload?.kind !== "renderable") throw new Error("expected restored payload");
+            renderPierreDiff(
+                payload,
+                testTheme,
+                { expanded: true },
+                {
+                    lastComponent: undefined,
+                    toolCallId: `restored-${index}`,
+                    invalidate() {
+                        invalidations += 1;
+                    },
+                },
+            );
+            maximumActive = Math.max(maximumActive, pierreDiffHighlightStats().activeHighlights);
+        }
+
+        await vi.waitFor(
+            () => {
+                const stats = pierreDiffHighlightStats();
+                maximumActive = Math.max(maximumActive, stats.activeHighlights);
+                expect(invalidations).toBe(100);
+                expect(stats.queuedHighlights).toBe(0);
+                expect(stats.queueRunning).toBe(false);
+            },
+            { timeout: 10_000 },
+        );
+        expect(maximumActive).toBeLessThanOrEqual(1);
+    });
+
     it("does not reuse a Pierre component across tool calls", () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",
@@ -525,20 +805,23 @@ describe("Pierre diff rendering", () => {
         );
         const narrow = component.render(80);
         const wide = component.render(180);
+        const narrowAgain = component.render(80);
 
         expect(stripAnsi(narrow.join("\n"))).not.toContain(" │ ");
         expect(stripAnsi(wide.join("\n"))).toContain(" │ ");
+        expect(narrowAgain).toBe(narrow);
         expectLinesWithinWidth(narrow, 80);
         expectLinesWithinWidth(wide, 180);
     });
 
     it("clears deferred diff highlight timers during shutdown cleanup", () => {
+        clearQueuedDiffHighlights();
         vi.useFakeTimers();
         try {
             const payload = buildPierreDiffPayload({
-                path: "src/example.ts",
-                oldContent: "alpha\nold\nomega\n",
-                newContent: "alpha\nnew\nomega\n",
+                path: "src/timer-cleanup.ts",
+                oldContent: "alpha\ntimer-old\nomega\n",
+                newContent: "alpha\ntimer-new\nomega\n",
                 oldSizeBytes: 16,
                 newSizeBytes: 16,
                 canBuildPierreDiff: true,
@@ -746,6 +1029,48 @@ describe("Pierre diff rendering", () => {
 
         expect(lines.some((line) => stripAnsi(line).trimEnd().endsWith("…"))).toBe(true);
         expectLinesWithinWidth(lines, width);
+    });
+
+    it("keeps the changed token visible before syntax highlighting is ready", () => {
+        const prefix = 'export const value = "';
+        const payload = buildPierreDiffPayload(
+            {
+                path: "pathological.ts",
+                oldContent: `${prefix}${"a".repeat(12_000)}";\n`,
+                newContent: `${prefix}${"b".repeat(12_000)}";\n`,
+                oldSizeBytes: 12_025,
+                newSizeBytes: 12_025,
+                canBuildPierreDiff: true,
+            },
+            { maxBytes: null, maxLines: null },
+        );
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+        const lines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined },
+        )
+            .render(120)
+            .map(stripAnsi);
+
+        expect(lines.some((line) => line.includes("aaaa"))).toBe(true);
+        expect(lines.some((line) => line.includes("bbbb"))).toBe(true);
+        expectLinesWithinWidth(lines, 120);
+
+        configureRenderingAppearance({ ...defaultAppearance, sideBySideLayout: "fixed" });
+        const splitLines = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: false },
+            { lastComponent: undefined },
+        )
+            .render(140)
+            .map(stripAnsi);
+        expect(splitLines.some((line) => line.includes("aaaa") && line.includes("bbbb"))).toBe(
+            true,
+        );
+        expectLinesWithinWidth(splitLines, 140);
     });
 
     it("renders collapsed omission metadata only after all visible diff rows", () => {
