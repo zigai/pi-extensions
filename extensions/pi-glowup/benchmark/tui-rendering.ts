@@ -3,8 +3,14 @@ import type { Component } from "@earendil-works/pi-tui";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { buildPierreDiffPayload } from "../src/diffs/diff.ts";
-import { clearQueuedDiffHighlights, renderPierreDiff } from "../src/diffs/renderer.ts";
+import { buildPierreDiffPayload, buildUnifiedDiffRows } from "../src/diffs/diff.ts";
+import {
+    clearQueuedDiffHighlights,
+    getPierreDiffPayloadFromDetails,
+    renderPierreDiff,
+} from "../src/diffs/renderer.ts";
+import { emptyHighlightedDiffSet, loadHighlightedDiff } from "../src/diffs/highlight.ts";
+import { getPierrePalette } from "../src/diffs/theme.ts";
 import {
     clearApplyPatchRenderingState,
     restoreApplyPatchResultSummaries,
@@ -401,6 +407,162 @@ async function syntaxAdoptionTimings(): Promise<Readonly<Record<string, readonly
     };
 }
 
+async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly number[]>>> {
+    const restoredPayload = buildPierreDiffPayload(
+        {
+            path: "src/restored-large.ts",
+            oldContent: Array.from(
+                { length: 600 },
+                (_value, index) => `export const old${index} = ${index};`,
+            ).join("\n"),
+            newContent: Array.from(
+                { length: 600 },
+                (_value, index) => `export const next${index} = ${index + 1};`,
+            ).join("\n"),
+            oldSizeBytes: 16_000,
+            newSizeBytes: 17_000,
+            canBuildPierreDiff: true,
+        },
+        { maxBytes: null, maxLines: null },
+    );
+    if (restoredPayload?.kind !== "renderable") throw new Error("expected restored payload");
+    let restoredComponent: Component | undefined;
+    const restoredRenders: number[] = [];
+    for (let sample = 0; sample < 200; sample += 1) {
+        restoredRenders.push(
+            measure(() => {
+                const normalized = getPierreDiffPayloadFromDetails(
+                    { pierreDiff: restoredPayload },
+                    { maxBytes: null, maxLines: null },
+                );
+                if (normalized === undefined) throw new Error("expected normalized payload");
+                restoredComponent = renderPierreDiff(
+                    normalized,
+                    benchmarkTheme,
+                    { expanded: false },
+                    {
+                        lastComponent: restoredComponent,
+                        toolCallId: "benchmark-restored-large",
+                    },
+                );
+                restoredComponent.render(120);
+            }),
+        );
+    }
+    clearQueuedDiffHighlights();
+
+    const basePayload = buildPierreDiffPayload({
+        path: "src/huge-replacement.ts",
+        oldContent: "old\n",
+        newContent: "new\n",
+        oldSizeBytes: 4,
+        newSizeBytes: 4,
+        canBuildPierreDiff: true,
+    });
+    if (basePayload?.kind !== "renderable") throw new Error("expected replacement payload");
+    const baseHunk = basePayload.metadata.hunks[0];
+    if (baseHunk === undefined) throw new Error("expected replacement hunk");
+    const replacementMetadata = {
+        ...basePayload.metadata,
+        deletionLines: Array.from({ length: 20_000 }, (_value, index) => `old ${index}`),
+        additionLines: Array.from({ length: 20_000 }, (_value, index) => `new ${index}`),
+        splitLineCount: 20_000,
+        unifiedLineCount: 40_000,
+        hunks: [
+            {
+                ...baseHunk,
+                additionCount: 20_000,
+                additionLines: 20_000,
+                deletionCount: 20_000,
+                deletionLines: 20_000,
+                splitLineCount: 20_000,
+                unifiedLineCount: 40_000,
+                hunkContent: [
+                    {
+                        type: "change" as const,
+                        additions: 20_000,
+                        deletions: 20_000,
+                        additionLineIndex: 0,
+                        deletionLineIndex: 0,
+                    },
+                ],
+            },
+        ],
+    };
+    const palette = getPierrePalette(benchmarkTheme);
+    const emptyHighlight = emptyHighlightedDiffSet().dark;
+    const replacementRows = Array.from({ length: 15 }, () =>
+        measure(() => {
+            buildUnifiedDiffRows(replacementMetadata, emptyHighlight, palette, {
+                maxRows: 6,
+                narrowLayout: "paired",
+            });
+        }),
+    );
+
+    const highlightedPayload = buildPierreDiffPayload(
+        {
+            path: "src/highlighted-preview.ts",
+            oldContent: Array.from(
+                { length: 600 },
+                (_value, index) => `export const old${index}: number = ${index};`,
+            ).join("\n"),
+            newContent: Array.from(
+                { length: 600 },
+                (_value, index) => `export const next${index}: number = ${index + 1};`,
+            ).join("\n"),
+            oldSizeBytes: 24_000,
+            newSizeBytes: 25_000,
+            canBuildPierreDiff: true,
+        },
+        { maxBytes: null, maxLines: null },
+    );
+    if (highlightedPayload?.kind !== "renderable") throw new Error("expected highlight payload");
+    const highlighted = (await loadHighlightedDiff(highlightedPayload.metadata)).dark;
+    const highlightedRows = Array.from({ length: 100 }, () =>
+        measure(() => {
+            buildUnifiedDiffRows(highlightedPayload.metadata, highlighted, palette, {
+                maxRows: 6,
+                narrowLayout: "paired",
+            });
+        }),
+    );
+
+    const renderPayload = buildPierreDiffPayload(
+        {
+            path: "src/loaded-first-render.ts",
+            oldContent: Array.from(
+                { length: 1_200 },
+                (_value, index) => `export const old${index}: number = ${index};`,
+            ).join("\n"),
+            newContent: Array.from(
+                { length: 1_200 },
+                (_value, index) => `export const next${index}: number = ${index + 1};`,
+            ).join("\n"),
+            oldSizeBytes: 40_000,
+            newSizeBytes: 42_000,
+            canBuildPierreDiff: true,
+        },
+        { maxBytes: null, maxLines: null },
+    );
+    if (renderPayload?.kind !== "renderable") throw new Error("expected render payload");
+    const firstRenderComponent = renderPierreDiff(
+        renderPayload,
+        benchmarkTheme,
+        { expanded: false },
+        { lastComponent: undefined, toolCallId: "benchmark-loaded-first-render" },
+    );
+    const firstRender = measure(() => firstRenderComponent.render(120));
+    clearQueuedDiffHighlights();
+
+    return {
+        "restored-normalize-same-width": restoredRenders,
+        "replacement-20000-preview-6": replacementRows,
+        "highlighted-hast-600-preview-6": highlightedRows,
+        "loaded-grammar-first-diff-render": [firstRender],
+    };
+}
+
 async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport> {
     configureRenderingAppearance(defaultAppearance);
     globalThis.gc?.();
@@ -414,10 +576,12 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
         "apply-patch-stream-1000": patchStreamTimings(1_000, rounds),
         "wide-narrow-resize": resizeTimings(options.quick ? 12 : 60),
         "restored-session-render": restoredSessionTimings(options.quick ? 12 : 80),
-        ...(await syntaxAdoptionTimings()),
     };
+    Object.assign(timings, await syntaxAdoptionTimings());
     globalThis.gc?.();
+    const retainedHeapBytes = Math.max(0, process.memoryUsage().heapUsed - startingHeap);
     const cache = syntaxHighlightCacheStats();
+    Object.assign(timings, await reviewFindingTimings());
     const summaries: Record<string, TimingSummary> = {};
     for (const [name, samples] of Object.entries(timings)) {
         summaries[name] = timingSummary(samples);
@@ -440,7 +604,7 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
         },
         timings: summaries,
         retained: {
-            heapBytes: Math.max(0, process.memoryUsage().heapUsed - startingHeap),
+            heapBytes: retainedHeapBytes,
             syntaxCacheEntries: cache.entries,
             syntaxCacheBytes: cache.bytes,
         },
