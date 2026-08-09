@@ -1,6 +1,6 @@
 # Upstream Codex Tools
 
-The model-facing Codex tool assets and behavior in this directory are pinned against OpenAI Codex tag `rust-v0.145.0`, commit `25af12f7e61572b0bc18ddb1008be543b91519b0` (2026-07-21).
+The model-facing Codex tool assets and behavior in this directory are pinned against OpenAI Codex tag `rust-v0.147.0`, commit `be6e8eac029b183056b7e4402879f15d2c85f61b` (2026-08-06).
 
 - `web-run/web-run-description.md`: `codex-rs/ext/web-search/web_run_description.md`, source SHA-256 `1f3879b44690eb7aad9ba97351acda16c4d0c26847bcb4af2964d5989404407e`. Runtime adaptation changes `web.run` to Pi's flat `web_run` name.
 - `imagegen-description.md`: `codex-rs/ext/image-generation/imagegen_description.md`, source SHA-256 `77a992a7c90e45fcd11623a1efa34bfd4c7870697e0aa54ce9b28f690877170e`. Runtime adaptation changes `image_gen.imagegen` to `imagegen` and replaces Codex code-mode-only waiting instructions with Pi guidance.
@@ -9,4 +9,4 @@ The model-facing Codex tool assets and behavior in this directory are pinned aga
 
 Pi projects Codex namespace/code-mode tools as flat direct Pi tools because Pi does not expose Codex's nested code-mode runtime. It keeps native renderers and optional Glowup protocol adapters alongside the model-facing contracts.
 
-Standalone `web_run` deliberately defaults to `live`. Codex v0.145.0 stores `cached` as its base preference but resolves eligible turns with `PermissionProfile::Disabled` (no outer sandbox) to `live`; Pi has no equivalent per-turn permission-profile resolver. Search result formatting removes internal citation markers while retaining explicit URLs, matching the upstream instruction that internal reference IDs stay inside tool calls and final answers cite Markdown links.
+Standalone `web_run` deliberately defaults to `live`. Codex v0.147.0 stores `cached` as its base preference but resolves eligible turns with `PermissionProfile::Disabled` (no outer sandbox) to `live`; Pi has no equivalent per-turn permission-profile resolver. Search result formatting removes internal citation markers while retaining explicit URLs, matching the upstream instruction that internal reference IDs stay inside tool calls and final answers cite Markdown links.
