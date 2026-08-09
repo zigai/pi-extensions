@@ -2,17 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
-import type {
-    GlowupCallContext,
-    GlowupInline,
-    GlowupNode,
-    GlowupRenderer,
-} from "../src/glowup/protocol.ts";
+import { isGlowupWireRecord } from "../src/glowup/wire.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createViewImageTool } from "../src/tools/view-image/tool.ts";
 import { createWebRunTool } from "../src/tools/web-run/tool.ts";
 
-const completeContext: GlowupCallContext = {
+const completeContext = {
     toolName: "tool",
     toolCallId: "glowup-test",
     phase: "complete",
@@ -21,43 +16,50 @@ const completeContext: GlowupCallContext = {
     expanded: false,
     showImages: true,
     isError: false,
-};
+} as const;
 
-function inlineText(value: GlowupInline): string {
-    return typeof value === "string" ? value : value.text;
+function inlineText(value: unknown): string {
+    if (typeof value === "string") return value;
+    return isGlowupWireRecord(value) && typeof value.text === "string" ? value.text : "";
 }
 
-function nodeText(node: GlowupNode | undefined): string {
-    if (node === undefined) return "";
+function nodeText(node: unknown): string {
+    if (!isGlowupWireRecord(node)) return "";
     switch (node.kind) {
         case "text":
             return inlineText(node.text);
         case "call":
             return nodeText(node.body);
         case "output":
-            return node.text ?? "";
+            return typeof node.text === "string" ? node.text : "";
         case "stack":
-            return node.children.map(nodeText).join("\n");
+            return Array.isArray(node.children) ? node.children.map(nodeText).join("\n") : "";
         case "empty":
+            return "";
+        default:
             return "";
     }
 }
 
-function parseArgs<Args, Result>(renderer: GlowupRenderer<Args, Result>, value: unknown): Args {
-    assert.ok(renderer.parseArgs);
+function parseArgs<Args>(
+    renderer: { readonly parseArgs: (value: unknown) => Args | undefined },
+    value: unknown,
+): Args {
     const parsed = renderer.parseArgs(value);
     assert.ok(parsed);
     return parsed;
 }
 
-function parseResult<Args, Result>(renderer: GlowupRenderer<Args, Result>, value: unknown): Result {
-    assert.ok(renderer.parseResult);
+function parseResult<Result>(
+    renderer: { readonly parseResult: (value: unknown) => Result | undefined },
+    value: unknown,
+): Result {
     const parsed = renderer.parseResult(value);
     assert.ok(parsed);
     return parsed;
 }
 
-test("Codex tools expose dependency-free Glowup protocol v2 adapters", () => {
+test("Codex tools expose dependency-free Glowup protocol v3 adapters", () => {
     const tools = [
         createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG }),
         createImagegenTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG }),
@@ -65,7 +67,7 @@ test("Codex tools expose dependency-free Glowup protocol v2 adapters", () => {
     ];
 
     for (const tool of tools) {
-        assert.equal(tool.glowupRendering.version, 2);
+        assert.equal(tool.glowupRendering.version, 3);
         assert.ok(tool.renderCall, `${tool.name} keeps its native renderer without Glowup`);
     }
 });
@@ -164,12 +166,16 @@ test("imagegen adapter preserves streaming, multiline, Unicode, and private-path
         100,
     )}latest lighting direction`;
     const longArgs = parseArgs(renderer, { prompt: longPrompt });
-    const active = renderer.renderCall?.(longArgs, {
-        ...completeContext,
-        phase: "running",
-        argsComplete: false,
-        isPartial: true,
-    });
+    assert.ok("renderPartialCall" in renderer);
+    const active = renderer.renderPartialCall?.(
+        { prompt: longPrompt },
+        {
+            ...completeContext,
+            phase: "running",
+            argsComplete: false,
+            isPartial: true,
+        },
+    );
     const completed = renderer.renderCall?.(longArgs, completeContext);
     const compactActive = nodeText(active).replace(/\s+/gu, " ");
     const compactCompleted = nodeText(completed).replace(/\s+/gu, " ");

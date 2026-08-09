@@ -1,37 +1,22 @@
-import { call, defineGlowupRenderer, empty, text } from "../../glowup/protocol.ts";
+import {
+    glowupWireString,
+    parseGlowupWireArgs,
+    parseGlowupWireResult,
+    type GlowupWireCallContext,
+    type GlowupWireRecord,
+    type GlowupWireResultContext,
+    type GlowupWireToolResult,
+} from "../../glowup/wire.ts";
 
-type ViewImageGlowupArgs = Readonly<Record<string, unknown>>;
-
-type ViewImageGlowupResult = {
-    readonly content?: unknown;
-    readonly details?: unknown;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function getString(record: Readonly<Record<string, unknown>>, key: string): string | undefined {
-    const value = record[key];
-    return typeof value === "string" ? value : undefined;
-}
-
-function parseArgs(value: unknown): ViewImageGlowupArgs | undefined {
-    return isRecord(value) ? value : undefined;
-}
-
-function parseResult(value: unknown): ViewImageGlowupResult | undefined {
-    if (!isRecord(value)) return undefined;
-    return {
-        ...(value.content === undefined ? {} : { content: value.content }),
-        ...(value.details === undefined ? {} : { details: value.details }),
-    };
-}
+type ViewImageGlowupArgs = GlowupWireRecord;
+type ViewImageGlowupResult = GlowupWireToolResult;
 
 function summarizeArgs(args: ViewImageGlowupArgs): string | undefined {
     const path =
-        getString(args, "path") ?? getString(args, "file_path") ?? getString(args, "image_path");
-    const detail = getString(args, "detail");
+        glowupWireString(args, "path") ??
+        glowupWireString(args, "file_path") ??
+        glowupWireString(args, "image_path");
+    const detail = glowupWireString(args, "detail");
     const parts = [
         path === undefined || path.length === 0 ? undefined : path,
         detail === undefined || detail.length === 0 ? undefined : `detail: ${detail}`,
@@ -39,33 +24,50 @@ function summarizeArgs(args: ViewImageGlowupArgs): string | undefined {
     return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
-export const viewImageGlowupRendering = defineGlowupRenderer<
-    ViewImageGlowupArgs,
-    ViewImageGlowupResult
->({
-    version: 2,
-    parseArgs,
-    parseResult,
-    renderCall(args) {
-        const summary = summarizeArgs(args);
-        return call(
-            {
-                static: "View Image",
-                running: "Viewing Image",
-                completed: "Viewed Image",
-            },
-            summary === undefined
-                ? {}
-                : {
-                      body: text({
+function renderViewImageCall(args: ViewImageGlowupArgs) {
+    const summary = summarizeArgs(args);
+    return {
+        kind: "call" as const,
+        labels: {
+            static: "View Image",
+            running: "Viewing Image",
+            completed: "Viewed Image",
+        },
+        ...(summary === undefined
+            ? {}
+            : {
+                  body: {
+                      kind: "text",
+                      text: {
                           kind: "text",
                           text: summary,
                           tone: "path",
-                      }),
+                      },
                   },
-        );
+              }),
+    };
+}
+
+export const viewImageGlowupRendering = {
+    version: 3,
+    parseArgs: parseGlowupWireArgs,
+    parseResult: parseGlowupWireResult,
+    renderPartialCall(value: unknown, _context: GlowupWireCallContext) {
+        const args = parseGlowupWireArgs(value);
+        return args === undefined
+            ? {
+                  kind: "call" as const,
+                  labels: { static: "View Image", running: "Viewing Image" },
+              }
+            : renderViewImageCall(args);
     },
-    renderResult(_result, context) {
-        return !context.isError && !context.isPartial ? empty() : undefined;
+    renderCall(args: ViewImageGlowupArgs, _context: GlowupWireCallContext) {
+        return renderViewImageCall(args);
     },
-});
+    renderResult(
+        _result: ViewImageGlowupResult,
+        context: GlowupWireResultContext<ViewImageGlowupArgs>,
+    ) {
+        return !context.isError && !context.isPartial ? ({ kind: "empty" } as const) : undefined;
+    },
+} as const;

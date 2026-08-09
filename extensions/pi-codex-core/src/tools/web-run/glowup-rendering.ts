@@ -1,11 +1,17 @@
-import {
-    call,
-    defineGlowupRenderer,
-    output,
-    text,
-    type GlowupCallContext,
-} from "../../glowup/protocol.ts";
 import { truncateGraphemeText } from "../../glowup/text.ts";
+import {
+    glowupWireArray as getArray,
+    glowupWireNumber as getNumber,
+    glowupWireString as getString,
+    glowupWireTextOutput as textOutput,
+    isGlowupWireRecord as isRecord,
+    parseGlowupWireArgs,
+    parseGlowupWireResult,
+    type GlowupWireCallContext,
+    type GlowupWireRecord,
+    type GlowupWireResultContext,
+    type GlowupWireToolResult,
+} from "../../glowup/wire.ts";
 
 const MAX_WEB_RUN_HIGHLIGHTS = 3;
 const COLLAPSED_SOURCE_LIMIT = 4;
@@ -17,12 +23,8 @@ const SOURCE_PATTERN = /Source:\s*(?<source>[^;]+)/u;
 const LINE_PATTERN = /^L\d+:\s*(?<text>.*)$/u;
 const CITATION_PATTERN = /cite[^]*/gu;
 
-type WebRunGlowupArgs = Readonly<Record<string, unknown>>;
-
-type WebRunGlowupResult = {
-    readonly content?: unknown;
-    readonly details?: unknown;
-};
+type WebRunGlowupArgs = GlowupWireRecord;
+type WebRunGlowupResult = GlowupWireToolResult;
 
 type SourceCollection = {
     readonly labels: string[];
@@ -37,40 +39,6 @@ type HighlightCandidate = {
     readonly index: number;
     readonly score: number;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function getArray(
-    record: Readonly<Record<string, unknown>>,
-    key: string,
-): readonly unknown[] | undefined {
-    const value = record[key];
-    return Array.isArray(value) ? value : undefined;
-}
-
-function getString(record: Readonly<Record<string, unknown>>, key: string): string | undefined {
-    const value = record[key];
-    return typeof value === "string" ? value : undefined;
-}
-
-function getNumber(record: Readonly<Record<string, unknown>>, key: string): number | undefined {
-    const value = record[key];
-    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function parseArgs(value: unknown): WebRunGlowupArgs | undefined {
-    return isRecord(value) ? value : undefined;
-}
-
-function parseResult(value: unknown): WebRunGlowupResult | undefined {
-    if (!isRecord(value)) return undefined;
-    return {
-        ...(value.content === undefined ? {} : { content: value.content }),
-        ...(value.details === undefined ? {} : { details: value.details }),
-    };
-}
 
 function compactQuotedText(value: string | undefined, maximum = 96): string | undefined {
     if (value === undefined || value.trim().length === 0) return undefined;
@@ -116,16 +84,6 @@ function summarizeArgs(args: WebRunGlowupArgs): string | undefined {
         return part === undefined ? [] : [part];
     });
     return parts.length === 0 ? undefined : parts.join(" • ");
-}
-
-function textOutput(result: WebRunGlowupResult): string | undefined {
-    if (!Array.isArray(result.content)) return undefined;
-    const texts: string[] = [];
-    for (const item of result.content) {
-        if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
-        texts.push(item.text);
-    }
-    return texts.length === 0 ? undefined : texts.join("\n");
 }
 
 function normalizeText(value: string): string {
@@ -234,7 +192,7 @@ function collectHighlight(line: string, candidates: HighlightCandidate[]): void 
 function inlineOutputSummary(
     rawOutput: string | undefined,
     sourceCount: number | undefined,
-    context: GlowupCallContext,
+    context: Pick<GlowupWireCallContext, "expanded">,
 ): string | undefined {
     if (rawOutput === undefined || rawOutput.length === 0) return undefined;
     const collection: SourceCollection = {
@@ -270,7 +228,7 @@ function inlineOutputSummary(
 
 function summarizeResult(
     result: WebRunGlowupResult,
-    context: GlowupCallContext,
+    context: Pick<GlowupWireCallContext, "expanded">,
 ): string | undefined {
     if (!isRecord(result.details)) return undefined;
     const sourceCount = getNumber(result.details, "sourceCount");
@@ -286,32 +244,48 @@ function summarizeResult(
     );
 }
 
-export const webRunGlowupRendering = defineGlowupRenderer<WebRunGlowupArgs, WebRunGlowupResult>({
-    version: 2,
-    parseArgs,
-    parseResult,
-    renderCall(args) {
-        const summary = summarizeArgs(args);
-        return call(
-            {
-                static: "Web Search",
-                running: "Searching the web",
-                completed: "Searched the web",
-            },
-            summary === undefined ? {} : { body: text(summary) },
-        );
+function renderWebRunCall(args: WebRunGlowupArgs) {
+    const summary = summarizeArgs(args);
+    return {
+        kind: "call" as const,
+        labels: {
+            static: "Web Search",
+            running: "Searching the web",
+            completed: "Searched the web",
+        },
+        ...(summary === undefined ? {} : { body: { kind: "text" as const, text: summary } }),
+    };
+}
+
+export const webRunGlowupRendering = {
+    version: 3,
+    parseArgs: parseGlowupWireArgs,
+    parseResult: parseGlowupWireResult,
+    renderPartialCall(value: unknown, _context: GlowupWireCallContext) {
+        const args = parseGlowupWireArgs(value);
+        return args === undefined
+            ? {
+                  kind: "call" as const,
+                  labels: { static: "Web Search", running: "Searching the web" },
+              }
+            : renderWebRunCall(args);
     },
-    renderResult(result, context) {
+    renderCall(args: WebRunGlowupArgs, _context: GlowupWireCallContext) {
+        return renderWebRunCall(args);
+    },
+    renderResult(result: WebRunGlowupResult, context: GlowupWireResultContext<WebRunGlowupArgs>) {
         const summary = summarizeResult(result, context);
         return summary === undefined
             ? undefined
-            : output(summary, {
+            : {
+                  kind: "output" as const,
+                  text: summary,
                   preview: {
-                      mode: "head",
+                      mode: "head" as const,
                       collapsedLines: COLLAPSED_SOURCE_LIMIT + 2,
                       expandedLines: EXPANDED_SOURCE_LIMIT + 4,
                   },
                   noOutputLabel: null,
-              });
+              };
     },
-});
+} as const;
