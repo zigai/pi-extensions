@@ -990,7 +990,7 @@ function renderUnifiedRow(
             return [`${prefix}${DIFF_STYLE_RESET}`];
         }
         const rowStyle = baseStyle({ fg: row.rowFg, bg: row.rowBg });
-        return [padRenderedLine(prefix, width, rowStyle, blankContentStyle(row, rowStyle))];
+        return [padRenderedLine(prefix, width, rowStyle)];
     }
 
     const wrapped = wrapTextWithAnsi(content, contentWidth);
@@ -1110,7 +1110,7 @@ function renderSplitCell(
             cell.rowBg,
         );
         const rowStyle = baseStyle({ fg: cell.rowFg, bg: cell.rowBg });
-        return [padRenderedLine(prefix, width, rowStyle, blankContentStyle(cell, rowStyle))];
+        return [padRenderedLine(prefix, width, rowStyle)];
     }
 
     const wrapped = wrapTextWithAnsi(content, contentWidth);
@@ -1263,25 +1263,11 @@ function renderFullWidthLine(
     return padRenderedLine(truncateToWidth(rendered, width, ""), width, base);
 }
 
-function blankContentStyle(
-    line: Pick<SplitDiffCell, "contentBg" | "rowBg">,
-    rowStyle: AnsiStyle,
-): AnsiStyle {
-    return line.rowBg.length > 0 && line.contentBg !== line.rowBg
-        ? baseStyle({ ...rowStyle, bg: line.contentBg })
-        : rowStyle;
-}
-
-function padRenderedLine(
-    line: string,
-    width: number,
-    base: AnsiStyle,
-    paddingBase: AnsiStyle = base,
-): string {
+function padRenderedLine(line: string, width: number, base: AnsiStyle): string {
     const targetWidth = Math.max(1, width);
     const truncated = truncateToWidth(line, targetWidth, "");
     const padding = Math.max(0, targetWidth - visibleWidth(truncated));
-    return `${truncated}${openAnsi(paddingBase)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;
+    return `${truncated}${openAnsi(base)}${" ".repeat(padding)}${DIFF_STYLE_RESET}`;
 }
 
 function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle): string {

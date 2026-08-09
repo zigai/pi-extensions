@@ -77,7 +77,6 @@ export type UnifiedDiffRow =
           readonly spans: ReadonlyArray<DiffSpan>;
           readonly rowFg: string;
           readonly rowBg: string;
-          readonly contentBg: string;
           readonly lineNumberFg: string;
           /** Display column to keep visible before asynchronous HAST is ready. */
           readonly focusColumn?: number;
@@ -90,7 +89,6 @@ export type SplitDiffCell = {
     readonly spans: ReadonlyArray<DiffSpan>;
     readonly rowFg: string;
     readonly rowBg: string;
-    readonly contentBg: string;
     readonly lineNumberFg: string;
 };
 

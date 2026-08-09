@@ -455,11 +455,26 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
     it("keeps full-row diff backgrounds and syntax colors scoped away from context and a sentinel", async () => {
         const pendingTerminal = new VirtualTerminal(90, 28);
         const activeTui = createTui(pendingTerminal);
+        const oldContent =
+            "const removedOnly = true;\nconst unchangedA = true;\nconst unchangedB = true;\nconst previousValue = 1;\n";
+        const newContent =
+            "const unchangedA = true;\n\nconst unchangedB = true;\nexport const nextValue = 2;\n\treturn tabIndentedValue;\n";
+        const payload = buildPierreDiffPayload({
+            path: "src/colors.ts",
+            oldContent,
+            newContent,
+            oldSizeBytes: Buffer.byteLength(oldContent),
+            newSizeBytes: Buffer.byteLength(newContent),
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
         const patch = `*** Begin Patch
 *** Update File: src/colors.ts
 @@
 -const removedOnly = true;
- const unchanged = true;
+ const unchangedA = true;
++
+ const unchangedB = true;
 -const previousValue = 1;
 +export const nextValue = 2;
 +\treturn tabIndentedValue;
@@ -474,7 +489,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             cwd,
         );
         tool.setArgsComplete();
-        tool.updateResult({ content: [], isError: false });
+        tool.updateResult({ content: [], details: { pierreDiff: payload }, isError: false });
         activeTui.addChild(tool);
         activeTui.addChild(new LinesComponent(["PLAIN_SENTINEL"]));
         terminal = pendingTerminal;
@@ -483,20 +498,27 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         await pendingTerminal.settle();
 
         const standaloneDeletion = rowContaining(pendingTerminal, "removedOnly");
+        const blankAddition = pendingTerminal
+            .interpretedRows()
+            .find((candidate) => candidate.text.trimEnd().endsWith("+"));
+        if (blankAddition === undefined) throw new Error("missing blank addition row");
         const deletion = rowContaining(pendingTerminal, "previousValue");
         const addition = rowContaining(pendingTerminal, "nextValue");
         const tabAddition = rowContaining(pendingTerminal, "tabIndentedValue");
         const context = rowContaining(pendingTerminal, "unchanged");
         const sentinel = rowContaining(pendingTerminal, "PLAIN_SENTINEL");
         expect(standaloneDeletion.cells).toHaveLength(90);
+        expect(blankAddition.cells).toHaveLength(90);
         expect(deletion.cells).toHaveLength(90);
         expect(addition.cells).toHaveLength(90);
         expect(tabAddition.cells).toHaveLength(90);
         expect(standaloneDeletion.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
+        expect(blankAddition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(deletion.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(addition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(tabAddition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
         expect(new Set(standaloneDeletion.cells.map((cell) => cell.background)).size).toBe(1);
+        expect(new Set(blankAddition.cells.map((cell) => cell.background)).size).toBe(1);
         expect(new Set(tabAddition.cells.map((cell) => cell.background)).size).toBe(1);
         expect(new Set(deletion.cells.map((cell) => cell.background)).size).toBeGreaterThan(1);
         expect(new Set(addition.cells.map((cell) => cell.background)).size).toBeGreaterThan(1);

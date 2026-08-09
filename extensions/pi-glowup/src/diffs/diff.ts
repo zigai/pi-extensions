@@ -1234,7 +1234,6 @@ function makeUnifiedLine(options: {
         spans: options.spans,
         rowFg: colors.fg,
         rowBg: colors.bg,
-        contentBg: contentBackgroundForLineType(options.lineType, options.palette),
         lineNumberFg: options.lineType === "context" ? options.palette.lineNumberFg : colors.fg,
     };
 }
@@ -1256,7 +1255,6 @@ function makeSplitCell(options: {
         spans: options.spans,
         rowFg: colors.fg,
         rowBg: colors.bg,
-        contentBg: contentBackgroundForLineType(options.lineType, options.palette),
         lineNumberFg: options.lineType === "context" ? options.palette.lineNumberFg : colors.fg,
     };
 }
@@ -1267,7 +1265,6 @@ function makeEmptySplitCell(palette: PierreTerminalPalette): SplitDiffCell {
         spans: [],
         rowFg: palette.emptyFg,
         rowBg: palette.emptyRowBg,
-        contentBg: palette.emptyRowBg,
         lineNumberFg: palette.lineNumberFg,
     };
 }
@@ -1283,19 +1280,6 @@ function colorsForLineType(
         return { fg: palette.deletionFg, bg: palette.deletionRowBg };
     }
     return { fg: palette.contextFg, bg: palette.contextRowBg };
-}
-
-function contentBackgroundForLineType(
-    lineType: "context" | "addition" | "deletion",
-    palette: PierreTerminalPalette,
-): string {
-    if (lineType === "addition") {
-        return palette.additionSpanBg;
-    }
-    if (lineType === "deletion") {
-        return palette.deletionSpanBg;
-    }
-    return palette.contextRowBg;
 }
 
 function hasTrailingCollapsedLines(metadata: FileDiffMetadata): boolean {

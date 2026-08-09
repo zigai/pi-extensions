@@ -1183,6 +1183,35 @@ describe("Glowup rendering helpers", () => {
         expect(visibleWidth(deletion)).toBe(width);
     });
 
+    it("uses only the row shade when a fallback replacement line is blank", () => {
+        configureRenderingAppearance({
+            ...classicAppearance,
+            diffBackgroundStyle: "two-tone",
+            addedRowBackground: "#002200",
+            deletedRowBackground: "#220000",
+            addedContentBackground: "#004400",
+            deletedContentBackground: "#440000",
+        });
+        const width = 80;
+        const lines = renderGlowupDiff(
+            plainTheme,
+            parseDiffSections(
+                " 1 alpha\n-2 old value\n+2 \n 3 middle\n-4 \n+4 new value\n 5 omega",
+                "blank-replacements.txt",
+            ),
+            true,
+        ).render(width);
+        const addition = lines.find((line) => line.includes("2 +")) ?? "";
+        const deletion = lines.find((line) => line.includes("4 -")) ?? "";
+
+        expect(addition).toContain("\u001b[48;2;0;34;0m");
+        expect(addition).not.toContain("\u001b[48;2;0;68;0m");
+        expect(deletion).toContain("\u001b[48;2;34;0;0m");
+        expect(deletion).not.toContain("\u001b[48;2;68;0;0m");
+        expect(visibleWidth(addition)).toBe(width);
+        expect(visibleWidth(deletion)).toBe(width);
+    });
+
     it("reserves intraline shades for replacements, not fully added or deleted lines", () => {
         configureRenderingAppearance({
             ...classicAppearance,

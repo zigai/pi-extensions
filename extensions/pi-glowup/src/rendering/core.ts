@@ -2527,7 +2527,11 @@ function isUnchangedReplacementSide(
     changedRanges: readonly TextRange[] | undefined,
 ): boolean {
     const parsed = parseDiffLine(line);
-    return (parsed?.kind === "insert" || parsed?.kind === "delete") && changedRanges?.length === 0;
+    return (
+        (parsed?.kind === "insert" || parsed?.kind === "delete") &&
+        parsed.content.length > 0 &&
+        changedRanges?.length === 0
+    );
 }
 
 function wrapDiffText(text: string, width: number, maxWrappedRows: number | undefined): string[] {
@@ -2606,15 +2610,7 @@ function renderDiffRow(
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);
         const row = truncateToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
-        return [
-            paintEmptyDiffRowBackground(
-                parsed.kind,
-                row,
-                rowWidth,
-                theme,
-                options?.changedRanges !== undefined,
-            ),
-        ];
+        return [paintDiffRowBackground(parsed.kind, row, rowWidth, theme)];
     }
 
     const wrappedContent = wrapDiffText(
@@ -2632,26 +2628,6 @@ function renderDiffRow(
         const bounded = truncateToWidth(row, rowWidth, "");
         return paintDiffRowBackground(parsed.kind, bounded, rowWidth, theme);
     });
-}
-
-function paintEmptyDiffRowBackground(
-    kind: "insert" | "delete" | "context",
-    row: string,
-    rowWidth: number,
-    theme: GlowupRenderTheme,
-    isReplacement: boolean,
-): string {
-    if (kind === "context" || configuredDiffBackgroundStyle() !== "two-tone" || !isReplacement) {
-        return paintDiffRowBackground(kind, row, rowWidth, theme);
-    }
-
-    const padding = " ".repeat(Math.max(0, rowWidth - visibleWidth(row)));
-    const spanBackground = diffSpanBackground(kind, theme);
-    const contentRow =
-        spanBackground === undefined || padding.length === 0
-            ? row
-            : `${row}${spanBackground.open}${padding}${spanBackground.close}`;
-    return paintDiffRowBackground(kind, contentRow, rowWidth, theme);
 }
 
 function diffSpanBackground(

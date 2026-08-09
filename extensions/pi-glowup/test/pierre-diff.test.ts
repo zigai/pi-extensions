@@ -1451,10 +1451,10 @@ describe("Pierre diff rendering", () => {
         expect(visibleWidth(blankAddition ?? "")).toBe(width);
     });
 
-    it("uses the intraline shade for blank additions and deletions in two-tone mode", () => {
+    it("uses only the row shade for blank additions and deletions in unified and split layouts", () => {
         const cases = [
-            { oldContent: "alpha\nomega\n", newContent: "alpha\n\nomega\n", marker: "+2" },
-            { oldContent: "alpha\n\nomega\n", newContent: "alpha\nomega\n", marker: "-2" },
+            { oldContent: "alpha\nomega\n", newContent: "alpha\n\nomega\n", isAddition: true },
+            { oldContent: "alpha\n\nomega\n", newContent: "alpha\nomega\n", isAddition: false },
         ] as const;
         const palette = getPierrePalette(testTheme);
 
@@ -1471,8 +1471,53 @@ describe("Pierre diff rendering", () => {
                 throw new Error("expected Pierre payload");
             }
 
-            const isAddition = testCase.marker.startsWith("+");
-            const blankChangeMarker = isAddition ? "+" : "-";
+            const rowBackground = testCase.isAddition
+                ? palette.additionRowBg
+                : palette.deletionRowBg;
+            const contentBackground = testCase.isAddition
+                ? palette.additionSpanBg
+                : palette.deletionSpanBg;
+
+            for (const width of [80, 180]) {
+                const blankChange = renderPierreDiff(
+                    payload,
+                    testTheme,
+                    { expanded: true },
+                    { lastComponent: undefined, invalidate() {} },
+                )
+                    .render(width)
+                    .find((line) => line.includes(rowBackground));
+
+                expect(blankChange).toBeDefined();
+                expect(blankChange).not.toContain(contentBackground);
+                expect(visibleWidth(blankChange ?? "")).toBe(width);
+            }
+        }
+    });
+
+    it("uses only the row shade when one side of a replacement is blank", () => {
+        const cases = [
+            { oldContent: "alpha\nold\nomega\n", newContent: "alpha\n\nomega\n", marker: "+" },
+            { oldContent: "alpha\n\nomega\n", newContent: "alpha\nnew\nomega\n", marker: "-" },
+        ] as const;
+        const palette = getPierrePalette(testTheme);
+
+        for (const testCase of cases) {
+            const payload = buildPierreDiffPayload({
+                path: "src/example.py",
+                oldContent: testCase.oldContent,
+                newContent: testCase.newContent,
+                oldSizeBytes: testCase.oldContent.length,
+                newSizeBytes: testCase.newContent.length,
+                canBuildPierreDiff: true,
+            });
+            if (!payload) {
+                throw new Error("expected Pierre payload");
+            }
+
+            const isAddition = testCase.marker === "+";
+            const rowBackground = isAddition ? palette.additionRowBg : palette.deletionRowBg;
+            const contentBackground = isAddition ? palette.additionSpanBg : palette.deletionSpanBg;
             const blankChange = renderPierreDiff(
                 payload,
                 testTheme,
@@ -1480,11 +1525,11 @@ describe("Pierre diff rendering", () => {
                 { lastComponent: undefined, invalidate() {} },
             )
                 .render(80)
-                .find((line) => stripAnsi(line).trimEnd().endsWith(blankChangeMarker));
-            const contentBackground = isAddition ? palette.additionSpanBg : palette.deletionSpanBg;
+                .find((line) => stripAnsi(line).trimEnd().endsWith(testCase.marker));
 
             expect(blankChange).toBeDefined();
-            expect(blankChange).toContain(contentBackground);
+            expect(blankChange).toContain(rowBackground);
+            expect(blankChange).not.toContain(contentBackground);
             expect(visibleWidth(blankChange ?? "")).toBe(80);
         }
     });
