@@ -83,5 +83,9 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
         return undefined;
     }
 
+    if (result.submitInput !== undefined) {
+        options.onTuiSubmitInput?.(result.submitInput);
+    }
+
     return result.state;
 }

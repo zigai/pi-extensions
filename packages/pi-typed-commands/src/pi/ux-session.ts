@@ -45,10 +45,11 @@ import { completeTypedCommandOnTab } from "./tab-completion.js";
 
 type PiEditorFactory = NonNullable<ReturnType<ExtensionContext["ui"]["getEditorComponent"]>>;
 
-type GhostTextEditorInstallation = {
+type EditorUxInstallation = {
     readonly ctx: ExtensionContext;
     readonly previous: PiEditorFactory | undefined;
     readonly installed: PiEditorFactory;
+    readonly getActiveEditor: () => ReturnType<PiEditorFactory> | undefined;
 };
 
 async function openEditorCommandForm(
@@ -58,6 +59,7 @@ async function openEditorCommandForm(
     registry: TypedCommandRegistry,
     signal: AbortSignal,
     isCurrent: () => boolean,
+    submitEditorInput: (data: string) => boolean,
 ): Promise<void> {
     const invocation = commandInvocationForEditorText(ctx.ui.getEditorText(), registry);
     if (invocation === undefined) {
@@ -186,11 +188,15 @@ async function openEditorCommandForm(
         return;
     }
 
+    let submitInput: string | undefined;
     const args = await openArgumentForm(selectedCommand, parsed, "all", ctx, {
         appearance: options.appearance,
         signal,
         title: resolveTypedCommandFormTitle(selectedCommand, ctx),
         completionCapabilities: createPiCompletionCapabilities(ctx.cwd, registry, signal),
+        onTuiSubmitInput(data) {
+            submitInput = data;
+        },
     });
     if (args === undefined || !isCurrent()) {
         return;
@@ -247,6 +253,9 @@ async function openEditorCommandForm(
         return;
     }
     ctx.ui.setEditorText(editorText);
+    if (submitInput !== undefined) {
+        submitEditorInput(submitInput);
+    }
 }
 
 function thrownValueKind(error: unknown): string {
@@ -286,7 +295,7 @@ export class TypedCommandUxSession {
     private submittedInvalidEditorText: string | undefined;
     private armedDoubleTabEditorText: string | undefined;
     private helperWidgetSignature: string | undefined;
-    private ghostTextEditorInstallation: GhostTextEditorInstallation | undefined;
+    private editorUxInstallation: EditorUxInstallation | undefined;
     private configSnapshot: ResolvedPiTypedCommandsConfigSnapshot | undefined;
     private options: ResolvedTypedCommandUxOptions;
 
@@ -320,7 +329,7 @@ export class TypedCommandUxSession {
             ctx.ui.notify(diagnostic.message, "warning");
         }
         const refresh = (): void => {
-            this.syncGhostTextEditor(ctx);
+            this.syncEditorUx(ctx);
             this.refresh(ctx);
         };
 
@@ -342,7 +351,7 @@ export class TypedCommandUxSession {
 
     async stop(): Promise<void> {
         this.clearRefreshTimer();
-        this.uninstallGhostTextEditor();
+        this.uninstallEditorUx();
         for (const callback of this.cleanup) {
             callback();
         }
@@ -392,26 +401,34 @@ export class TypedCommandUxSession {
         });
     }
 
-    private hasConfiguredGhostText(): boolean {
+    private needsEditorUx(): boolean {
         return this.registry.list().some((command) => {
-            if (command.ghostText !== undefined) {
+            if (
+                command.ghostText !== undefined ||
+                (command.target?.kind === "extension" && Object.keys(command.args).length > 0)
+            ) {
                 return true;
             }
-            return Object.values(command.subcommands ?? {}).some(
-                (subcommand) => subcommand.ghostText !== undefined,
-            );
+            return Object.values(command.subcommands ?? {}).some((subcommand) => {
+                return (
+                    subcommand.ghostText !== undefined ||
+                    (subcommand.target?.kind === "extension" &&
+                        Object.keys(subcommand.args).length > 0)
+                );
+            });
         });
     }
 
-    private syncGhostTextEditor(ctx: ExtensionContext): void {
-        if (ctx.mode !== "tui" || !this.hasConfiguredGhostText()) {
-            this.uninstallGhostTextEditor();
+    private syncEditorUx(ctx: ExtensionContext): void {
+        if (ctx.mode !== "tui" || !this.needsEditorUx()) {
+            this.uninstallEditorUx();
             return;
         }
-        if (this.ghostTextEditorInstallation !== undefined) {
+        if (this.editorUxInstallation !== undefined) {
             return;
         }
         const previous = ctx.ui.getEditorComponent();
+        let activeEditor: ReturnType<PiEditorFactory> | undefined;
         const installed: PiEditorFactory = (tui, theme, keybindings) => {
             const base =
                 previous?.(tui, theme, keybindings) ?? new CustomEditor(tui, theme, keybindings);
@@ -420,21 +437,44 @@ export class TypedCommandUxSession {
                 () => resolveGhostText(base.getText(), this.registry, ctx)?.text,
                 (text) => ctx.ui.theme.fg("dim", text),
             );
+            activeEditor = decorated;
             return decorated;
         };
-        this.ghostTextEditorInstallation = { ctx, previous, installed };
+        this.editorUxInstallation = {
+            ctx,
+            previous,
+            installed,
+            getActiveEditor: () => activeEditor,
+        };
         ctx.ui.setEditorComponent(installed);
     }
 
-    private uninstallGhostTextEditor(): void {
-        const installation = this.ghostTextEditorInstallation;
+    private uninstallEditorUx(): void {
+        const installation = this.editorUxInstallation;
         if (installation === undefined) {
             return;
         }
-        this.ghostTextEditorInstallation = undefined;
+        this.editorUxInstallation = undefined;
         if (installation.ctx.ui.getEditorComponent() === installation.installed) {
             installation.ctx.ui.setEditorComponent(installation.previous);
         }
+    }
+
+    private submitEditorInput(ctx: ExtensionContext, data: string): boolean {
+        const installation = this.editorUxInstallation;
+        if (
+            installation === undefined ||
+            installation.ctx !== ctx ||
+            ctx.ui.getEditorComponent() !== installation.installed
+        ) {
+            return false;
+        }
+        const editor = installation.getActiveEditor();
+        if (editor === undefined) {
+            return false;
+        }
+        editor.handleInput(data);
+        return true;
     }
 
     private showSubmittedInvalidCommand(ctx: ExtensionContext, editorText: string): void {
@@ -534,6 +574,7 @@ export class TypedCommandUxSession {
                 this.registry,
                 controller.signal,
                 isCurrent,
+                (data) => this.submitEditorInput(ctx, data),
             );
         } catch (error) {
             if (isCurrent()) reportDetachedError(ctx, error);

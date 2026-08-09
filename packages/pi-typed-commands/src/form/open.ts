@@ -21,6 +21,8 @@ export type OpenArgumentFormOptions = {
     readonly title?: string;
     /** Runtime capabilities used by completion-backed form controls. */
     readonly completionCapabilities?: CompletionCapabilities;
+    /** Receives the exact submit input after a dense TUI form closes successfully. */
+    readonly onTuiSubmitInput?: (data: string) => void;
 };
 
 /**

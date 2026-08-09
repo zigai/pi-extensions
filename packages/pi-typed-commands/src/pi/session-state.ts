@@ -94,7 +94,7 @@ function cloneArgumentValues(
     return cloned;
 }
 
-/** Stage validated expanded-form values for the exact editor command written by the UX bridge. */
+/** Stage validated expanded-form values for the exact command submitted by the UX bridge. */
 export function stageExpandedFormArguments(
     ctx: ExtensionContext,
     invocationName: string,

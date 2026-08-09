@@ -48,7 +48,7 @@ Most arguments can use:
 - `ui` - form presentation metadata.
 - `examples` - example values shown in detailed help.
 
-Strings can use semantic `format` validation for `email`, `url`, `date`, `time`, `datetime`, `duration`, and `json`. Set `sensitive: true` for masked form input and redacted helper/default output. Sensitive values are omitted from serialization and staged privately when a form writes the rest of a command back to the editor.
+Strings can use semantic `format` validation for `email`, `url`, `date`, `time`, `datetime`, `duration`, and `json`. Set `sensitive: true` for masked form input and redacted helper/default output. Sensitive values are omitted from serialization and staged privately when a form submits the rest of a command.
 
 Numbers support `step` and `unit`; a stepped number uses the `stepper` form control by default.
 

@@ -52,6 +52,8 @@ type TextEditorTheme = {
 export type FormResult = {
     confirmed: boolean;
     state: FormState;
+    /** Exact semantic input that submitted the form, when submission came from the TUI. */
+    submitInput?: string;
 };
 
 function widgetFor(definition: ArgumentDefinition): string {
@@ -412,7 +414,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             } else if (this.matches(data, "tui.select.down")) {
                 this.moveSelection(1);
             } else if (this.matches(data, "tui.input.submit")) {
-                this.submit();
+                this.submit(data);
             }
             return;
         }
@@ -426,7 +428,7 @@ export class ArgumentFormComponent implements Component, Focusable {
 
         if (isTextareaWidget(field.definition)) {
             if (this.matches(data, "tui.input.submit")) {
-                this.submit();
+                this.submit(data);
                 return;
             }
             if (!isMultilineWidget(field.definition) && this.matches(data, "tui.select.up")) {
@@ -451,7 +453,7 @@ export class ArgumentFormComponent implements Component, Focusable {
             return;
         }
         if (this.matches(data, "tui.input.submit")) {
-            this.submit();
+            this.submit(data);
             return;
         }
 
@@ -1354,7 +1356,7 @@ export class ArgumentFormComponent implements Component, Focusable {
         this.editor.setAutocompleteProvider(provider);
     }
 
-    private submit(): void {
+    private submit(submitInput?: string): void {
         this.applyComputedValues();
         if (!this.commitInput(true)) {
             return;
@@ -1407,6 +1409,10 @@ export class ArgumentFormComponent implements Component, Focusable {
             return;
         }
 
-        this.done({ confirmed: true, state: this.state });
+        const result: FormResult = { confirmed: true, state: this.state };
+        if (submitInput !== undefined) {
+            result.submitInput = submitInput;
+        }
+        this.done(result);
     }
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "vitest";
 import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { EditorComponent, EditorTheme } from "@earendil-works/pi-tui";
 import { defineTypedCommand } from "../src/command/definition.js";
 import { installTypedCommandUx } from "../src/pi/extension.js";
 import { registerTypedCommand } from "../src/pi/register.js";
@@ -24,7 +25,20 @@ import {
     createTestSignal,
     createTestTheme,
     createTestTui,
+    requireInteractiveComponent,
 } from "./pi-test-adapter.js";
+
+const identity = (text: string): string => text;
+const editorTheme: EditorTheme = {
+    borderColor: identity,
+    selectList: {
+        selectedPrefix: identity,
+        selectedText: identity,
+        description: identity,
+        scrollInfo: identity,
+        noMatch: identity,
+    },
+};
 
 describe("Pi form-only arguments", () => {
     it("delivers staged expanded-form values exactly once to the registered handler", async () => {
@@ -92,6 +106,121 @@ describe("Pi form-only arguments", () => {
             ]);
         } finally {
             cleanup();
+            handle.dispose();
+        }
+    });
+
+    it("submits an expanded extension command when the form submit key is pressed", async () => {
+        let commandHandler:
+            | ((rawArgs: string, ctx: ExtensionCommandContext) => Promise<void>)
+            | undefined;
+        const pi = createTestExtensionApi({
+            registerCommand(
+                _name: string,
+                options: {
+                    handler: (rawArgs: string, ctx: ExtensionCommandContext) => Promise<void>;
+                },
+            ) {
+                commandHandler = options.handler;
+            },
+        });
+        const received: Array<Record<string, unknown>> = [];
+        const command = defineTypedCommand({
+            name: "expanded-submit-test",
+            description: "Test expanded-form submission",
+            args: {
+                task: { type: "string", position: 0, rest: true, ui: { widget: "textarea" } },
+                maximumTimeMinutes: {
+                    type: "number",
+                    integer: true,
+                    min: 1,
+                    formOnly: true,
+                },
+            },
+            run(args) {
+                received.push(args);
+            },
+        });
+        const handle = registerTypedCommand(pi, command);
+        const commandContext = createTestExtensionCommandContext();
+        const formReady = createTestSignal<void>();
+        let formComponent: ReturnType<typeof requireInteractiveComponent> | undefined;
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        let currentEditorFactory: ReturnType<ExtensionContext["ui"]["getEditorComponent"]>;
+        let activeEditor: EditorComponent | undefined;
+        let editorText = `/${handle.invocationName} Build`;
+        let submittedCommand: Promise<void> | undefined;
+        const ctx = createTestExtensionContext({
+            ui: {
+                async custom(factory) {
+                    let finishForm: (result: unknown) => void = () => {};
+                    const formResult = new Promise<unknown>((resolve) => {
+                        finishForm = resolve;
+                    });
+                    const component = await factory(
+                        createTestTui(),
+                        createTestTheme(),
+                        createTestKeybindings(),
+                        finishForm,
+                    );
+                    formComponent = requireInteractiveComponent(component);
+                    formReady.resolve();
+                    return formResult;
+                },
+                getEditorComponent: () => currentEditorFactory,
+                getEditorText: () => editorText,
+                onTerminalInput(handler) {
+                    terminalInput = handler;
+                    return () => {
+                        terminalInput = undefined;
+                    };
+                },
+                setEditorComponent(factory) {
+                    currentEditorFactory = factory;
+                    if (factory === undefined) {
+                        activeEditor = undefined;
+                        return;
+                    }
+                    const editor = factory(createTestTui(), editorTheme, createTestKeybindings());
+                    editor.onChange = (text) => {
+                        editorText = text;
+                    };
+                    editor.onSubmit = (text) => {
+                        const prefix = `/${handle.invocationName}`;
+                        assert.ok(text.startsWith(prefix));
+                        assert.ok(commandHandler);
+                        submittedCommand = commandHandler(
+                            text.slice(prefix.length).trimStart(),
+                            commandContext,
+                        );
+                    };
+                    activeEditor = editor;
+                },
+                setEditorText(text) {
+                    editorText = text;
+                    activeEditor?.setText(text);
+                },
+                setWidget() {},
+            },
+        });
+        const session = new TypedCommandUxSession(pi, {}, getPiTypedCommandRegistry());
+
+        try {
+            await session.start(ctx);
+            assert.ok(terminalInput);
+            assert.deepEqual(terminalInput("\t"), { consume: true });
+            await formReady.promise;
+
+            assert.ok(formComponent);
+            formComponent.handleInput("\r");
+            await session.waitForFormCompletion();
+
+            assert.ok(submittedCommand);
+            await submittedCommand;
+            assert.deepEqual(received, [{ task: "Build" }]);
+            assert.equal(editorText, "");
+        } finally {
+            await session.stop();
             handle.dispose();
         }
     });

@@ -4,9 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-typed-args.svg)](https://www.npmjs.com/package/pi-typed-args)
 [![license](https://img.shields.io/npm/l/pi-typed-args.svg)](LICENSE)
 
-Pi Typed Args is a TypeScript library for adding typed inputs to Pi slash commands and Agent Skills. Define arguments once, then use them for parsing, validation, completion hints, generated help, live usage hints, and TUI input forms.
-
-Use it inside your own Pi extension when commands or skills need structured input instead of hand-parsed raw strings.
+Pi Typed Args is a TypeScript library for adding typed inputs to Pi slash commands and Agent Skills. A single argument definition drives parsing, validation, completion hints, generated help, live usage hints, and TUI input forms instead of hand-parsed raw strings.
 
 ## Install
 

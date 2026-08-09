@@ -185,8 +185,8 @@ args: {
 Form-only arguments have no flag or positional spelling and are omitted from usage, help,
 completion, helper, and serialization output. They cannot be required or define a default,
 `flag`, `aliases`, `position`, or `rest`. After the user submits the expanded form, the validated
-values are staged for the exact command text written back to the editor and consumed once when
-that command runs.
+values are staged for the exact command submitted by the form and consumed once when that command
+runs.
 
 ## Form configuration
 
