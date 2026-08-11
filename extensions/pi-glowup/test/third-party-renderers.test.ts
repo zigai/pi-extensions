@@ -6,6 +6,7 @@ import {
     code,
     empty,
     list,
+    mutation,
     output,
     stack,
     summary,
@@ -102,6 +103,75 @@ describe("third-party tool renderers", () => {
                     ).toBeLessThanOrEqual(width);
                 }
                 expectWellFormedLines(lines);
+            }
+        }
+    });
+
+    it("renders owner-provided semantic mutations as separate responsive file blocks", () => {
+        const glowupRendering = {
+            version: 3,
+            parseArgs(value: unknown) {
+                return typeof value === "object" && value !== null ? {} : undefined;
+            },
+            renderCall() {
+                return mutation(
+                    { static: "Patch", running: "Patching", completed: "Patched" },
+                    [
+                        {
+                            path: "src/a.ts",
+                            lines: [
+                                {
+                                    kind: "addition" as const,
+                                    text: "export const a = 1;",
+                                    newLine: 1,
+                                },
+                            ],
+                            added: 1,
+                            removed: 0,
+                        },
+                        {
+                            path: "src/b.ts",
+                            lines: [
+                                {
+                                    kind: "deletion" as const,
+                                    text: "export const b = 1;",
+                                    oldLine: 1,
+                                },
+                                {
+                                    kind: "addition" as const,
+                                    text: "export const b = 2;",
+                                    newLine: 1,
+                                },
+                            ],
+                            added: 1,
+                            removed: 1,
+                        },
+                    ],
+                    {
+                        patch:
+                            "--- /dev/null\n+++ b/src/a.ts\n@@ -0,0 +1 @@\n+export const a = 1;\n" +
+                            "--- a/src/b.ts\n+++ b/src/b.ts\n@@ -1 +1 @@\n-export const b = 1;\n+export const b = 2;\n",
+                    },
+                );
+            },
+        } as const;
+        const renderer = createThirdPartyToolRenderer(
+            "apply_patch",
+            { labelMode: "lifecycle" },
+            { glowupRendering },
+        );
+
+        for (const width of [24, 80, 180]) {
+            const lines = renderer.renderCall({}, plainTheme, renderContext).render(width);
+            const rendered = stripAccentStyle(lines.join("\n"));
+            expect(rendered.match(/Patch(?:ing|ed)/gu)).toHaveLength(2);
+            if (width >= 80) {
+                expect(rendered).toContain("src/a.ts");
+                expect(rendered).toContain("src/b.ts");
+            }
+            expect(rendered).not.toContain('{"files"');
+            for (const line of lines) {
+                expect(visibleWidth(stripAccentStyle(line))).toBeLessThanOrEqual(width);
             }
         }
     });
@@ -596,6 +666,33 @@ describe("third-party tool renderers", () => {
         expect(rendered).not.toContain("also-do-not-show");
     });
 
+    it("suppresses internal artifact paths from generic detail summaries", () => {
+        const renderer = createThirdPartyToolRenderer("custom_tool");
+        const rendered = renderer
+            .renderResult(
+                {
+                    content: [],
+                    details: {
+                        status: "complete",
+                        artifactPath: "/tmp/private/artifact.json",
+                        workspacePath: "/tmp/private/worktree",
+                        transcriptFilePath: "/tmp/private/transcript.jsonl",
+                    },
+                },
+                { expanded: false, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(100)
+            .join("\n");
+
+        expect(rendered).toContain("status: complete");
+        expect(rendered).not.toContain("/tmp/private");
+        expect(rendered).not.toContain("artifactPath");
+        expect(rendered).not.toContain("workspacePath");
+        expect(rendered).not.toContain("transcriptFilePath");
+    });
+
     it("defers generic calls until their arguments are complete", () => {
         const renderer = createThirdPartyToolRenderer("custom_tool");
         const args = {
@@ -645,7 +742,8 @@ describe("third-party tool renderers", () => {
             .render(80);
 
         expect(lines[0]).toContain("Browser Snapshot");
-        expect(lines.join("\n")).toContain('"-i"');
+        expect(lines.join("\n")).toContain("-i");
+        expect(lines.join("\n")).not.toContain('"args"');
     });
 
     it("updates browser-specific verbs in lifecycle mode", () => {
@@ -689,9 +787,67 @@ describe("third-party tool renderers", () => {
             .render(120)
             .join("\n");
 
-        expect(rendered).toContain("Browser");
-        expect(rendered).toContain("steps: 5000 items");
+        expect(rendered).toContain("Browser Job");
+        expect(rendered).toContain("5000 steps");
+        expect(rendered).toContain("fill → fill");
         expect(rendered).not.toContain("secretly large");
+        expect(rendered).not.toContain('"steps"');
+    });
+
+    it("summarizes every structured Agent Browser mode without raw argument JSON", () => {
+        const renderer = createThirdPartyToolRenderer("agent_browser");
+        const cases = [
+            {
+                args: { script: "async () => {\n  await browser({ args: ['open'] });\n}" },
+                label: "Browser Script",
+                body: "3 lines",
+            },
+            {
+                args: {
+                    semanticAction: {
+                        action: "fill",
+                        locator: "label",
+                        value: "Email",
+                        text: "secret@example.com",
+                    },
+                },
+                label: "Browser Action",
+                body: "18 characters",
+                hidden: "secret@example.com",
+            },
+            {
+                args: { qa: { url: "https://example.com", checkConsole: true } },
+                label: "Browser QA",
+                body: "check console",
+            },
+            {
+                args: { electron: { action: "launch", appName: "Visual Studio Code" } },
+                label: "Electron",
+                body: "launch · Visual Studio Code",
+            },
+            {
+                args: { sourceLookup: { componentName: "SettingsPanel" } },
+                label: "Browser Source Lookup",
+                body: "SettingsPanel",
+            },
+            {
+                args: { networkSourceLookup: { requestId: "request-17" } },
+                label: "Browser Network Lookup",
+                body: "request-17",
+            },
+        ] as const;
+
+        for (const testCase of cases) {
+            const rendered = renderer
+                .renderCall(testCase.args, plainTheme, renderContext)
+                .render(100)
+                .join("\n");
+            expect(rendered).toContain(testCase.label);
+            expect(rendered).toContain(testCase.body);
+            expect(rendered).not.toContain('"semanticAction"');
+            expect(rendered).not.toContain('"sourceLookup"');
+            if ("hidden" in testCase) expect(rendered).not.toContain(testCase.hidden);
+        }
     });
 
     it("uses singular item counts in partial argument previews", () => {
@@ -733,6 +889,108 @@ describe("third-party tool renderers", () => {
         expect(lines[0]).toContain("Browser Snapshot");
     });
 
+    it("provides semantic labels for the complete Chrome DevTools tool surface", () => {
+        const labels = new Map([
+            ["click", "Browser Click"],
+            ["close_page", "Browser Close Page"],
+            ["drag", "Browser Drag"],
+            ["emulate", "Browser Emulate"],
+            ["evaluate_script", "Browser Evaluate"],
+            ["fill", "Browser Fill"],
+            ["fill_form", "Browser Fill Form"],
+            ["get_console_message", "Browser Console Message"],
+            ["get_network_request", "Browser Network Request"],
+            ["handle_dialog", "Browser Dialog"],
+            ["hover", "Browser Hover"],
+            ["lighthouse_audit", "Browser Lighthouse"],
+            ["list_console_messages", "Browser Console"],
+            ["list_network_requests", "Browser Network"],
+            ["list_pages", "Browser Pages"],
+            ["navigate_page", "Browser Navigate"],
+            ["new_page", "Browser Open"],
+            ["performance_analyze_insight", "Browser Performance Insight"],
+            ["performance_start_trace", "Browser Start Trace"],
+            ["performance_stop_trace", "Browser Stop Trace"],
+            ["press_key", "Browser Key"],
+            ["resize_page", "Browser Resize"],
+            ["select_page", "Browser Select Page"],
+            ["take_heapsnapshot", "Browser Heap Snapshot"],
+            ["take_screenshot", "Browser Screenshot"],
+            ["take_snapshot", "Browser Snapshot"],
+            ["type_text", "Browser Type"],
+            ["upload_file", "Browser Upload"],
+            ["wait_for", "Browser Wait"],
+        ]);
+
+        for (const [command, label] of labels) {
+            const renderer = createThirdPartyToolRenderer(`mcp__chrome-devtools__${command}`);
+            const lines = renderer.renderCall({}, plainTheme, renderContext).render(100);
+            expect(lines[0], command).toContain(label);
+            for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(100);
+        }
+    });
+
+    it("summarizes MCP discovery, auth, status, and namespaced gateway calls", () => {
+        const renderer = createThirdPartyToolRenderer("mcp");
+        const cases = [
+            [{ search: "browser" }, "MCP Search", "browser"],
+            [{ describe: "chrome_devtools_click" }, "MCP Describe", "chrome_devtools_click"],
+            [{ instructions: "chrome-devtools" }, "MCP Instructions", "chrome-devtools"],
+            [{ connect: "chrome-devtools" }, "MCP Connect", "chrome-devtools"],
+            [
+                { action: "auth-start", server: "private-server" },
+                "MCP Authenticate",
+                "private-server",
+            ],
+            [{ server: "chrome-devtools" }, "MCP Status", "chrome-devtools"],
+            [
+                {
+                    tool: "chrome_devtools_navigate_page",
+                    args: { type: "url", url: "https://example.com" },
+                },
+                "Browser Navigate",
+                "https://example.com",
+            ],
+        ] as const;
+
+        for (const [args, label, body] of cases) {
+            const rendered = renderer
+                .renderCall(args, plainTheme, renderContext)
+                .render(100)
+                .join("\n");
+            expect(rendered).toContain(label);
+            expect(rendered).toContain(body);
+            expect(rendered).not.toContain('"tool"');
+        }
+    });
+
+    it("bounds expanded generic results while preserving useful head and tail evidence", () => {
+        const renderer = createThirdPartyToolRenderer("custom_exec");
+        const lines = renderer
+            .renderResult(
+                {
+                    content: [
+                        {
+                            type: "text",
+                            text: Array.from(
+                                { length: 1_000 },
+                                (_, index) => `record ${index + 1}`,
+                            ).join("\n"),
+                        },
+                    ],
+                },
+                { expanded: true, isPartial: false },
+                plainTheme,
+                renderContext,
+            )
+            .render(100);
+
+        expect(lines.length).toBeLessThanOrEqual(401);
+        expect(lines.join("\n")).toContain("record 1");
+        expect(lines.join("\n")).toContain("record 1000");
+        expect(lines.join("\n")).toContain("expanded output bounded");
+    });
+
     it("keeps partial result output compact unless expanded", () => {
         const renderer = createThirdPartyToolRenderer("custom_exec");
 
@@ -757,200 +1015,6 @@ describe("third-party tool renderers", () => {
 
         expect(lines).toHaveLength(5);
         expect(lines.join("\n")).toContain("… +26 lines");
-    });
-
-    it("summarizes agent launch calls without dumping JSON", () => {
-        const renderer = createLifecycleRenderer("Agent");
-
-        const lines = renderer
-            .renderCall(
-                {
-                    description: "Update Pi template",
-                    subagent_type: ".",
-                    run_in_background: true,
-                    prompt: "Do not duplicate this agent's work.",
-                },
-                plainTheme,
-                renderContext,
-            )
-            .render(100);
-
-        const rendered = lines.join("\n");
-        expect(rendered).toContain("Launched Agent");
-        expect(rendered).toContain("Update Pi template");
-        expect(rendered).toContain("running in background");
-        expect(rendered).not.toContain("type: .");
-        expect(rendered).not.toContain("subagent_type");
-        expect(rendered).not.toContain("prompt");
-    });
-
-    it("uses the active agent verb in lifecycle mode", () => {
-        const renderer = createLifecycleRenderer("Agent");
-        const rendered = renderer
-            .renderCall({ description: "Inspect labels" }, plainTheme, {
-                ...renderContext,
-                argsComplete: false,
-                isPartial: true,
-            })
-            .render(100)
-            .join("\n");
-
-        expect(rendered).toContain("Launching Agent");
-        expect(rendered).not.toContain("Launched Agent");
-    });
-
-    it("bounds huge subagent steering messages", () => {
-        const renderer = createLifecycleRenderer("steer_subagent");
-        const message = `  ${Array.from({ length: 10_000 }, (_value, index) => `word${index}`).join(
-            "\n",
-        )}  `;
-
-        const rendered = renderer
-            .renderCall({ agent_id: "0811c123-dcbe-4d3", message }, plainTheme, renderContext)
-            .render(120)
-            .join("\n");
-
-        expect(rendered).toContain("Steered Agent");
-        expect(rendered).toContain("0811c123-dcbe-4d3");
-        expect(rendered).toContain("word0 word1");
-        expect(rendered).toContain("…");
-        expect(rendered).not.toContain("word9999");
-        expect(rendered).not.toContain("message");
-    });
-
-    it("summarizes subagent result checks without dumping JSON", () => {
-        const renderer = createLifecycleRenderer("get_subagent_result");
-
-        const lines = renderer
-            .renderCall(
-                { agent_id: "0811c123-dcbe-4d3", wait: true, verbose: false },
-                plainTheme,
-                renderContext,
-            )
-            .render(100);
-
-        const rendered = lines.join("\n");
-        expect(rendered).toContain("Checked Agent");
-        expect(rendered).toContain("0811c123-dcbe-4d3 · wait");
-        expect(rendered).not.toContain("agent_id");
-        expect(rendered).not.toContain("verbose");
-    });
-
-    it("summarizes completed subagent results", () => {
-        const renderer = createThirdPartyToolRenderer("get_subagent_result");
-
-        const lines = renderer
-            .renderResult(
-                {
-                    content: [
-                        {
-                            type: "text",
-                            text: [
-                                "Agent: 0811c123-dcbe-4d3",
-                                "Type: Agent | Status: completed | Tool uses: 20 | 63.1k token | Context: 11% | Duration: 57.0s",
-                                "… +10 lines (ctrl+u to expand)",
-                                "- Confirmed `/home/zigai/Projects/config` has no modifications.",
-                            ].join("\n"),
-                        },
-                    ],
-                },
-                { expanded: false, isPartial: false },
-                plainTheme,
-                renderContext,
-            )
-            .render(120);
-
-        const rendered = lines.join("\n");
-        expect(rendered).toContain("completed · Agent · 0811c123-dcbe-4d3");
-        expect(rendered).toContain("20 tools · 63.1k tok · context 11% · 57.0s");
-        expect(rendered).toContain("Confirmed `/home/zigai/Projects/config` has no modifications.");
-        expect(rendered).not.toContain("Type: Agent | Status");
-    });
-
-    it("summarizes completed subagent results from large output", () => {
-        const renderer = createThirdPartyToolRenderer("get_subagent_result");
-        const output = [
-            ...Array.from({ length: 2_000 }, (_value, index) => `noise ${index}`),
-            "Agent: 0811c123-dcbe-4d3",
-            "Type: Agent | Status: completed | Tool uses: 20 | 63.1k token | Context: 11% | Duration: 57.0s",
-            "- First useful note",
-            "- Second useful note",
-            "- Third useful note",
-            "- Fourth useful note",
-            "- Fifth hidden note",
-        ].join("\n");
-
-        const rendered = renderer
-            .renderResult(
-                { content: [{ type: "text", text: output }] },
-                { expanded: false, isPartial: false },
-                plainTheme,
-                renderContext,
-            )
-            .render(120)
-            .join("\n");
-
-        expect(rendered).toContain("completed · Agent · 0811c123-dcbe-4d3");
-        expect(rendered).toContain("First useful note");
-        expect(rendered).toContain("Fourth useful note");
-        expect(rendered).not.toContain("Fifth hidden note");
-        expect(rendered).not.toContain("noise 1999");
-    });
-
-    it("summarizes background subagent launch results", () => {
-        const renderer = createThirdPartyToolRenderer("Agent");
-
-        const lines = renderer
-            .renderResult(
-                {
-                    content: [
-                        {
-                            type: "text",
-                            text: [
-                                "Agent started in background.",
-                                "Agent ID: 0811c123-dcbe-4d3",
-                                "Do not duplicate this agent's work.",
-                            ].join("\n"),
-                        },
-                    ],
-                },
-                { expanded: false, isPartial: false },
-                plainTheme,
-                renderContext,
-            )
-            .render(100);
-
-        const rendered = lines.join("\n");
-        expect(rendered).toContain("started in background · 0811c123-dcbe-4d3");
-        expect(rendered).toContain("Do not duplicate this agent's work.");
-        expect(rendered).not.toContain("Agent ID:");
-    });
-
-    it("summarizes goal results from structured details", () => {
-        const renderer = createThirdPartyToolRenderer("pi__get_goal");
-
-        const lines = renderer
-            .renderResult(
-                {
-                    content: [{ type: "text", text: "noisy json" }],
-                    details: {
-                        goal: {
-                            objective: "Ship the renderer patch",
-                            status: "active",
-                            tokensUsed: 1200,
-                            timeUsedSeconds: 90,
-                        },
-                    },
-                },
-                { expanded: false, isPartial: false },
-                plainTheme,
-                renderContext,
-            )
-            .render(100);
-
-        expect(lines.join("\n")).toContain("active: Ship the renderer patch");
-        expect(lines.join("\n")).toContain("1,200 tok");
-        expect(lines.join("\n")).not.toContain("noisy json");
     });
 
     it("renders finalized plans without duplicating markdown arguments", () => {

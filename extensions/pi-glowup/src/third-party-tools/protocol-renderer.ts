@@ -1,3 +1,6 @@
+import type { Component } from "@earendil-works/pi-tui";
+import type { MutationSettings } from "../mutations/settings.ts";
+import type { GlowupRenderTheme } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import {
     decodeGlowupNode,
@@ -9,6 +12,78 @@ import {
 } from "../tool-rendering/protocol.ts";
 import { renderProtocolNode } from "./protocol-node-renderer.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "./types.ts";
+
+const MAX_MUTATION_CALL_SLOTS = 500;
+const mutationCallSlots = new Map<string, ProtocolMutationCallSlot>();
+
+class ProtocolMutationCallSlot implements Component {
+    private hidden = false;
+
+    constructor(
+        private readonly toolCallId: string,
+        private component: Component,
+    ) {}
+
+    belongsTo(toolCallId: string): boolean {
+        return this.toolCallId === toolCallId;
+    }
+
+    innerComponent(): Component {
+        return this.component;
+    }
+
+    update(component: Component): void {
+        this.component = component;
+        this.hidden = false;
+    }
+
+    hide(): void {
+        this.hidden = true;
+    }
+
+    render(width: number): string[] {
+        return this.hidden ? [] : this.component.render(width);
+    }
+
+    invalidate(): void {
+        this.component.invalidate();
+    }
+}
+
+function renderProtocolCallNode(
+    node: GlowupNode,
+    theme: GlowupRenderTheme,
+    context: ThirdPartyToolRenderContext,
+    labelMode: ToolLabelMode,
+    mutationSettings: MutationSettings | undefined,
+): Component {
+    const previousSlot =
+        context.lastComponent instanceof ProtocolMutationCallSlot &&
+        context.lastComponent.belongsTo(context.toolCallId)
+            ? context.lastComponent
+            : undefined;
+    const nodeContext =
+        previousSlot === undefined
+            ? context
+            : { ...context, lastComponent: previousSlot.innerComponent() };
+    const component = renderProtocolNode(node, theme, nodeContext, labelMode, mutationSettings);
+    if (node.kind !== "mutation") return component;
+
+    const slot = previousSlot ?? new ProtocolMutationCallSlot(context.toolCallId, component);
+    slot.update(component);
+    mutationCallSlots.delete(context.toolCallId);
+    mutationCallSlots.set(context.toolCallId, slot);
+    while (mutationCallSlots.size > MAX_MUTATION_CALL_SLOTS) {
+        const oldest = mutationCallSlots.keys().next().value;
+        if (typeof oldest !== "string") break;
+        mutationCallSlots.delete(oldest);
+    }
+    return slot;
+}
+
+function hideMutationCallSlot(toolCallId: string): void {
+    mutationCallSlots.get(toolCallId)?.hide();
+}
 
 type UnknownGlowupRenderer = {
     readonly version: 3;
@@ -42,6 +117,7 @@ function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallCont
         expanded: context.expanded,
         showImages: context.showImages,
         isError: context.isError,
+        hasResult: context.result !== undefined,
     };
 }
 
@@ -73,6 +149,7 @@ export function createProtocolRenderer(
     adapter: UnknownGlowupRenderer,
     fallback: ThirdPartyToolRenderer,
     labelMode: ToolLabelMode = "static",
+    mutationSettings?: MutationSettings,
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
@@ -82,7 +159,13 @@ export function createProtocolRenderer(
                 );
                 return partialNode === undefined
                     ? fallback.renderCall(args, theme, context)
-                    : renderProtocolNode(partialNode, theme, context, labelMode);
+                    : renderProtocolCallNode(
+                          partialNode,
+                          theme,
+                          context,
+                          labelMode,
+                          mutationSettings,
+                      );
             }
             if (adapter.renderCall === undefined) {
                 return fallback.renderCall(args, theme, context);
@@ -96,7 +179,7 @@ export function createProtocolRenderer(
             );
             return node === undefined
                 ? fallback.renderCall(args, theme, context)
-                : renderProtocolNode(node, theme, context, labelMode);
+                : renderProtocolCallNode(node, theme, context, labelMode, mutationSettings);
         },
         renderResult(result, options, theme, context) {
             if (adapter.renderResult === undefined || adapter.parseResult === undefined) {
@@ -107,12 +190,18 @@ export function createProtocolRenderer(
             if (parsedArgs === undefined || parsedResult === undefined) {
                 return fallback.renderResult(result, options, theme, context);
             }
+            const resultContext = { ...context, args: parsedArgs, result };
             const node = safelyRender(() =>
-                adapter.renderResult?.(parsedResult, publicResultContext(context, parsedArgs)),
+                adapter.renderResult?.(
+                    parsedResult,
+                    publicResultContext(resultContext, parsedArgs),
+                ),
             );
-            return node === undefined
-                ? fallback.renderResult(result, options, theme, context)
-                : renderProtocolNode(node, theme, { ...context, args: parsedArgs }, labelMode);
+            if (node === undefined) {
+                return fallback.renderResult(result, options, theme, context);
+            }
+            if (node.kind === "mutation") hideMutationCallSlot(context.toolCallId);
+            return renderProtocolNode(node, theme, resultContext, labelMode, mutationSettings);
         },
     };
 }

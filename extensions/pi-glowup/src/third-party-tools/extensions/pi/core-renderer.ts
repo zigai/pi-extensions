@@ -1,5 +1,9 @@
 import { emptyComponent } from "../../../rendering/core.ts";
-import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
+import {
+    shouldDeferSimpleToolCall,
+    type ToolLabelMode,
+    type ToolLifecycleLabels,
+} from "../../../rendering/status-labels.ts";
 import type { ThirdPartyToolRenderer } from "../../types.ts";
 import {
     callState,
@@ -41,6 +45,7 @@ function createFinalizePlanRenderer(
 ): ThirdPartyToolRenderer {
     return {
         renderCall(_args, theme, context) {
+            if (shouldDeferSimpleToolCall(context)) return emptyComponent();
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, piCoreCallLabels(toolName)),

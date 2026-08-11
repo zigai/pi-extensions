@@ -126,6 +126,138 @@ const BROWSER_LIFECYCLE_LABELS = new Map<string, ToolLifecycleLabels>([
             completed: "Analyzed Browser Performance",
         },
     ],
+    [
+        "Browser Performance Insight",
+        {
+            static: "Browser Performance Insight",
+            active: "Analyzing Browser Performance",
+            completed: "Analyzed Browser Performance",
+        },
+    ],
+    [
+        "Browser Job",
+        { static: "Browser Job", active: "Running Browser Job", completed: "Ran Browser Job" },
+    ],
+    [
+        "Browser Script",
+        {
+            static: "Browser Script",
+            active: "Running Browser Script",
+            completed: "Ran Browser Script",
+        },
+    ],
+    [
+        "Browser Action",
+        {
+            static: "Browser Action",
+            active: "Acting in Browser",
+            completed: "Acted in Browser",
+        },
+    ],
+    [
+        "Browser Drag",
+        { static: "Browser Drag", active: "Dragging in Browser", completed: "Dragged in Browser" },
+    ],
+    [
+        "Browser Emulate",
+        {
+            static: "Browser Emulate",
+            active: "Emulating Browser",
+            completed: "Emulated Browser",
+        },
+    ],
+    [
+        "Browser Fill Form",
+        {
+            static: "Browser Fill Form",
+            active: "Filling Browser Form",
+            completed: "Filled Browser Form",
+        },
+    ],
+    [
+        "Browser Console Message",
+        {
+            static: "Browser Console Message",
+            active: "Reading Browser Console",
+            completed: "Read Browser Console",
+        },
+    ],
+    [
+        "Browser Console",
+        {
+            static: "Browser Console",
+            active: "Listing Browser Console",
+            completed: "Listed Browser Console",
+        },
+    ],
+    [
+        "Browser Network Request",
+        {
+            static: "Browser Network Request",
+            active: "Reading Browser Request",
+            completed: "Read Browser Request",
+        },
+    ],
+    [
+        "Browser Network",
+        {
+            static: "Browser Network",
+            active: "Listing Browser Network",
+            completed: "Listed Browser Network",
+        },
+    ],
+    [
+        "Browser Dialog",
+        {
+            static: "Browser Dialog",
+            active: "Handling Browser Dialog",
+            completed: "Handled Browser Dialog",
+        },
+    ],
+    [
+        "Browser Lighthouse",
+        {
+            static: "Browser Lighthouse",
+            active: "Running Browser Lighthouse",
+            completed: "Ran Browser Lighthouse",
+        },
+    ],
+    [
+        "Browser Start Trace",
+        {
+            static: "Browser Start Trace",
+            active: "Starting Browser Trace",
+            completed: "Started Browser Trace",
+        },
+    ],
+    [
+        "Browser Stop Trace",
+        {
+            static: "Browser Stop Trace",
+            active: "Stopping Browser Trace",
+            completed: "Stopped Browser Trace",
+        },
+    ],
+    [
+        "Browser Key",
+        { static: "Browser Key", active: "Pressing Browser Key", completed: "Pressed Browser Key" },
+    ],
+    [
+        "Browser Heap Snapshot",
+        {
+            static: "Browser Heap Snapshot",
+            active: "Taking Browser Heap Snapshot",
+            completed: "Took Browser Heap Snapshot",
+        },
+    ],
+    [
+        "Browser Upload",
+        {
+            static: "Browser Upload",
+            active: "Uploading in Browser",
+            completed: "Uploaded in Browser",
+        },
+    ],
     ["Electron", { static: "Electron", active: "Using Electron", completed: "Used Electron" }],
 ]);
 

@@ -14,6 +14,7 @@ import {
     type ToolLifecycleLabels,
 } from "../rendering/status-labels.ts";
 import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
+import { takeGraphemePrefix, takeGraphemeSuffix } from "../text-boundaries.ts";
 import type {
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
@@ -23,6 +24,8 @@ import { displayToolName } from "./tool-values.ts";
 import { detailsOutput, previewArgsForContext, textOutput } from "./previews.ts";
 
 export const DEFAULT_TOOL_CALL_PREVIEW_LINES = 6;
+const MAX_EXPANDED_RESULT_CHARACTERS = 200_000;
+const MAX_EXPANDED_RESULT_LINES = 400;
 
 export type CallSummary = {
     readonly label: string;
@@ -56,12 +59,31 @@ export function thirdPartyStatusLabel(
     return toolStatusLabel(mode, context, labels);
 }
 
+function boundedExpandedResult(output: string | undefined): string | undefined {
+    if (output === undefined) return undefined;
+    const halfCharacterBudget = Math.floor(MAX_EXPANDED_RESULT_CHARACTERS / 2);
+    const characterBounded =
+        output.length <= MAX_EXPANDED_RESULT_CHARACTERS
+            ? output
+            : `${takeGraphemePrefix(output, halfCharacterBudget)}\n… output truncated …\n${takeGraphemeSuffix(output, halfCharacterBudget)}`;
+    const lines = characterBounded.replace(/\r\n?/gu, "\n").split("\n");
+    if (lines.length <= MAX_EXPANDED_RESULT_LINES) return characterBounded;
+    const headCount = Math.ceil(MAX_EXPANDED_RESULT_LINES / 2);
+    const tailCount = Math.floor(MAX_EXPANDED_RESULT_LINES / 2);
+    return [
+        ...lines.slice(0, headCount),
+        `… +${lines.length - MAX_EXPANDED_RESULT_LINES} lines (expanded output bounded)`,
+        ...lines.slice(-tailCount),
+    ].join("\n");
+}
+
 export function renderSimpleResult(
     theme: GlowupRenderTheme,
     result: ThirdPartyToolResult,
     options: { readonly expanded: boolean; readonly isPartial: boolean },
 ): Component {
-    const output = textOutput(result) ?? detailsOutput(result);
+    const rawOutput = textOutput(result) ?? detailsOutput(result);
+    const output = options.expanded ? boundedExpandedResult(rawOutput) : rawOutput;
     const language = detectStructuredOutputLanguage(output);
     return renderGlowupOutput(theme, output, {
         expanded: options.expanded,

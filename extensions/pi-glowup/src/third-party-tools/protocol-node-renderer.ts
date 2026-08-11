@@ -5,6 +5,7 @@ import {
     renderGlowupOutput,
     type GlowupRenderTheme,
 } from "../rendering/core.ts";
+import type { MutationSettings } from "../mutations/settings.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import type {
     GlowupCallLabels,
@@ -19,6 +20,7 @@ import {
     renderThirdPartyCall,
     thirdPartyStatusLabel,
 } from "./call-rendering.ts";
+import { renderProtocolMutation } from "./protocol-mutation-renderer.ts";
 import type { ThirdPartyToolRenderContext } from "./types.ts";
 
 const DEFAULT_EXPANDED_PREVIEW_LINES = 500;
@@ -99,6 +101,14 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                 .join("\n");
         case "output":
             return node.text ?? "";
+        case "mutation":
+            return node.files
+                .map((file) =>
+                    file.previousPath === undefined
+                        ? file.path
+                        : `${file.previousPath} → ${file.path}`,
+                )
+                .join("\n");
         case "stack":
             return node.children
                 .map((child) => nodeText(child, theme))
@@ -126,6 +136,7 @@ export function renderProtocolNode(
     theme: GlowupRenderTheme,
     context: ThirdPartyToolRenderContext,
     labelMode: ToolLabelMode,
+    mutationSettings?: MutationSettings,
 ): ReturnType<typeof emptyComponent> {
     switch (node.kind) {
         case "empty":
@@ -161,6 +172,12 @@ export function renderProtocolNode(
                 noOutputLabel: node.noOutputLabel ?? null,
                 ...(node.syntax === undefined ? {} : { syntax: node.syntax }),
             });
+        case "mutation":
+            return renderProtocolMutation(node, theme, context, {
+                label: statusLabel(labelMode, context, node.labels),
+                state: callState(context),
+                ...(mutationSettings === undefined ? {} : { mutationSettings }),
+            });
         case "call": {
             const headerOptions = {
                 state: callState(context),
@@ -181,13 +198,15 @@ export function renderProtocolNode(
                 });
             }
             const header = renderThirdPartyCall(theme, headerOptions);
-            const body = renderProtocolNode(node.body, theme, context, labelMode);
+            const body = renderProtocolNode(node.body, theme, context, labelMode, mutationSettings);
             return makeComponent((width) => [...header.render(width), ...body.render(width)]);
         }
         case "stack":
             return makeComponent((width) =>
                 node.children.flatMap((child) =>
-                    renderProtocolNode(child, theme, context, labelMode).render(width),
+                    renderProtocolNode(child, theme, context, labelMode, mutationSettings).render(
+                        width,
+                    ),
                 ),
             );
     }

@@ -1,12 +1,14 @@
 import type {
     GlowupCallLabels,
     GlowupInline,
+    GlowupMutationFile,
+    GlowupMutationLine,
     GlowupNode,
     GlowupPreview,
     GlowupSyntax,
     GlowupTone,
-} from "./protocol.ts";
-import { isRecord } from "../unknown-values.ts";
+} from "./protocol.js";
+import { isRecord } from "../unknown-values.js";
 
 export type GlowupNodeDecodeLimits = {
     readonly maxDepth: number;
@@ -158,6 +160,88 @@ function parseLabels(value: unknown, state: DecodeState): GlowupCallLabels | und
     };
 }
 
+function parseNonNegativeInteger(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+        ? value
+        : undefined;
+}
+
+function parsePositiveInteger(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 1
+        ? value
+        : undefined;
+}
+
+function parseMutationLine(value: unknown, state: DecodeState): GlowupMutationLine | undefined {
+    if (!isRecord(value)) return undefined;
+    const kind = field(value, "kind");
+    if (
+        kind !== "context" &&
+        kind !== "addition" &&
+        kind !== "deletion" &&
+        kind !== "metadata" &&
+        kind !== "omission"
+    ) {
+        return undefined;
+    }
+    const text = field(value, "text");
+    if (typeof text !== "string" || !countText(state, text)) return undefined;
+    const rawOldLine = field(value, "oldLine");
+    const rawNewLine = field(value, "newLine");
+    const oldLine = rawOldLine === undefined ? undefined : parsePositiveInteger(rawOldLine);
+    const newLine = rawNewLine === undefined ? undefined : parsePositiveInteger(rawNewLine);
+    if (
+        (rawOldLine !== undefined && oldLine === undefined) ||
+        (rawNewLine !== undefined && newLine === undefined)
+    ) {
+        return undefined;
+    }
+    return {
+        kind,
+        text,
+        ...(oldLine === undefined ? {} : { oldLine }),
+        ...(newLine === undefined ? {} : { newLine }),
+    };
+}
+
+function parseMutationFile(value: unknown, state: DecodeState): GlowupMutationFile | undefined {
+    if (!isRecord(value)) return undefined;
+    const path = field(value, "path");
+    if (typeof path !== "string" || path.length === 0 || !countText(state, path)) return undefined;
+    const rawPreviousPath = field(value, "previousPath");
+    if (
+        rawPreviousPath !== undefined &&
+        (typeof rawPreviousPath !== "string" ||
+            rawPreviousPath.length === 0 ||
+            !countText(state, rawPreviousPath))
+    ) {
+        return undefined;
+    }
+    const rawLines = field(value, "lines");
+    if (!Array.isArray(rawLines) || rawLines.length > state.limits.maxCollectionItems) {
+        return undefined;
+    }
+    const lines: GlowupMutationLine[] = [];
+    for (const rawLine of rawLines) {
+        const line = parseMutationLine(rawLine, state);
+        if (line === undefined) return undefined;
+        lines.push(line);
+    }
+    const added = parseNonNegativeInteger(field(value, "added"));
+    const removed = parseNonNegativeInteger(field(value, "removed"));
+    if (added === undefined || removed === undefined) return undefined;
+    const countsKnown = field(value, "countsKnown");
+    if (countsKnown !== undefined && typeof countsKnown !== "boolean") return undefined;
+    return {
+        path,
+        ...(rawPreviousPath === undefined ? {} : { previousPath: rawPreviousPath }),
+        lines,
+        added,
+        removed,
+        ...(countsKnown === undefined ? {} : { countsKnown }),
+    };
+}
+
 function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNode | undefined {
     if (!isRecord(value) || depth > state.limits.maxDepth) return undefined;
     state.nodes += 1;
@@ -277,6 +361,40 @@ function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNod
                 ...(syntax === undefined ? {} : { syntax }),
                 ...(preview === undefined ? {} : { preview }),
                 ...(rawNoOutputLabel === undefined ? {} : { noOutputLabel: rawNoOutputLabel }),
+            };
+        }
+        case "mutation": {
+            const labels = parseLabels(field(value, "labels"), state);
+            const rawFiles = field(value, "files");
+            if (
+                labels === undefined ||
+                !Array.isArray(rawFiles) ||
+                rawFiles.length === 0 ||
+                rawFiles.length > state.limits.maxCollectionItems
+            ) {
+                return undefined;
+            }
+            const files: GlowupMutationFile[] = [];
+            let collectionItems = rawFiles.length;
+            for (const rawFile of rawFiles) {
+                const file = parseMutationFile(rawFile, state);
+                if (file === undefined) return undefined;
+                collectionItems += file.lines.length;
+                if (collectionItems > state.limits.maxCollectionItems) return undefined;
+                files.push(file);
+            }
+            const rawPatch = field(value, "patch");
+            if (
+                rawPatch !== undefined &&
+                (typeof rawPatch !== "string" || !countText(state, rawPatch))
+            ) {
+                return undefined;
+            }
+            return {
+                kind: "mutation",
+                labels,
+                files,
+                ...(rawPatch === undefined ? {} : { patch: rawPatch }),
             };
         }
         case "stack": {

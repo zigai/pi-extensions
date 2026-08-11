@@ -6,9 +6,10 @@ expose Pi's TUI components, themes, ANSI sequences, or Glowup's internal modules
 
 Tool-specific rendering belongs next to the tool that owns its argument and result contracts. This
 repository provides the protocol, style engine, generic compatibility renderer, and the remaining
-transitional renderers for Agent Browser, MCP, goals, agents, questions, and `apply_patch`. The
-Codex `web_run`, `imagegen`, and `view_image` renderers have migrated to `pi-codex-core`. Other
-renderers stay here until each owning package ships and verifies an equivalent protocol adapter;
+transitional renderers for Agent Browser, MCP, and Pi UI questions. Goal rendering has migrated to
+`pi-codex-goal`; current subagent rendering has migrated to `@zigai/pi-subagents`; and Codex
+`apply_patch`, `web_run`, `imagegen`, and `view_image` rendering has migrated to
+`pi-codex-core`. Other renderers stay here until each owning package ships and verifies an equivalent protocol adapter;
 they are migrated independently rather than removed in advance.
 
 ## Rendering selection
@@ -139,6 +140,7 @@ Protocol components are semantic rather than visual:
 - `output` renders bounded text output.
 - `summary` renders label/value rows.
 - `code` renders syntax-aware code.
+- `mutation` renders responsive, syntax-aware per-file changes from semantic rows and an optional completed unified patch.
 - `list`, `text`, and `stack` compose structured content.
 - `empty` intentionally renders nothing.
 
@@ -154,8 +156,8 @@ terminal safety.
 ## Partial and expanded rendering
 
 `GlowupCallContext` reports the tool call id, lifecycle phase, argument completeness, partial state,
-expanded state, image preference, and error state. Result rendering receives the original parsed
-arguments through `GlowupResultContext`.
+expanded state, image preference, error state, and whether a settled or restored result is attached.
+Result rendering receives the original parsed arguments through `GlowupResultContext`.
 
 Protocol `output` components remain bounded even when expanded. Completed mutation diffs follow
 the `mutations` configuration: the default full view keeps every available row, while preview mode

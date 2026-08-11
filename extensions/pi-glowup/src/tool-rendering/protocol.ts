@@ -20,6 +20,8 @@ export type GlowupCallContext = {
     readonly expanded: boolean;
     readonly showImages: boolean;
     readonly isError: boolean;
+    /** True when the settled or restored call has an associated tool result. */
+    readonly hasResult?: boolean;
 };
 
 /** Context available while rendering a tool result. */
@@ -129,6 +131,35 @@ export type GlowupOutputNode = {
     readonly noOutputLabel?: string | null;
 };
 
+/** One semantic source row in a mutation preview. */
+export type GlowupMutationLine = {
+    readonly kind: "context" | "addition" | "deletion" | "metadata" | "omission";
+    readonly text: string;
+    readonly oldLine?: number;
+    readonly newLine?: number;
+};
+
+/** One file changed by a mutation. */
+export type GlowupMutationFile = {
+    readonly path: string;
+    readonly previousPath?: string;
+    readonly lines: ReadonlyArray<GlowupMutationLine>;
+    /** Complete mutation statistics, which may exceed the bounded preview rows. */
+    readonly added: number;
+    readonly removed: number;
+    /** False when a producer cannot determine a deletion's removed-line count. */
+    readonly countsKnown?: boolean;
+};
+
+/** Responsive, syntax-aware file mutation component. */
+export type GlowupMutationNode = {
+    readonly kind: "mutation";
+    readonly labels: GlowupCallLabels;
+    readonly files: ReadonlyArray<GlowupMutationFile>;
+    /** Optional complete unified diff used for high-fidelity replay after execution. */
+    readonly patch?: string;
+};
+
 /** Ordered component composition. */
 export type GlowupStackNode = {
     readonly kind: "stack";
@@ -148,6 +179,7 @@ export type GlowupNode =
     | GlowupCodeNode
     | GlowupListNode
     | GlowupTextNode
+    | GlowupMutationNode
     | GlowupStackNode
     | GlowupEmptyNode;
 
@@ -204,9 +236,11 @@ export type GlowupRendering<Args = unknown, Result = GlowupToolResult> =
     | GlowupRenderer<Args, Result>;
 
 /** Defines an immutable, versioned rendering adapter for a tool owner. */
-export function defineGlowupRenderer<Args = unknown, Result = GlowupToolResult>(
-    renderer: GlowupRenderer<Args, Result>,
-): GlowupRenderer<Args, Result> {
+export function defineGlowupRenderer<
+    Args = unknown,
+    Result = GlowupToolResult,
+    const Renderer extends GlowupRenderer<Args, Result> = GlowupRenderer<Args, Result>,
+>(renderer: Renderer): Renderer {
     return renderer;
 }
 
@@ -304,6 +338,20 @@ export function output(
     };
 }
 
+/** Creates a responsive, syntax-aware file mutation component. */
+export function mutation(
+    labels: GlowupCallLabels,
+    files: ReadonlyArray<GlowupMutationFile>,
+    options: { readonly patch?: string } = {},
+): GlowupMutationNode {
+    return {
+        kind: "mutation",
+        labels,
+        files,
+        ...(options.patch === undefined ? {} : { patch: options.patch }),
+    };
+}
+
 /** Creates an ordered component composition. */
 export function stack(children: ReadonlyArray<GlowupNode>): GlowupStackNode {
     return { kind: "stack", children };
@@ -318,4 +366,4 @@ export {
     decodeGlowupNode,
     DEFAULT_GLOWUP_NODE_DECODE_LIMITS,
     type GlowupNodeDecodeLimits,
-} from "./decode-node.ts";
+} from "./decode-node.js";

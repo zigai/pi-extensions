@@ -1,12 +1,9 @@
-import { createApplyPatchRenderer } from "../rendering/apply-patch-rendering.ts";
 import { createAgentBrowserRenderer } from "./extensions/agent-browser/renderer.ts";
 import {
     createChromeDevtoolsMcpRenderer,
     createMcpGatewayRenderer,
     hasChromeDevtoolsName,
 } from "./extensions/mcp-gateway/renderer.ts";
-import { createAgentRenderer, isAgentTool } from "./extensions/pi/agent-renderer.ts";
-import { createGoalRenderer, isGoalTool } from "./extensions/pi/goal-renderer.ts";
 import { createPiCoreRenderer, isPiCoreTool } from "./extensions/pi/core-renderer.ts";
 import { createGenericRenderer } from "./call-rendering.ts";
 import { glowupRenderingAdapter, createProtocolRenderer } from "./protocol-renderer.ts";
@@ -30,19 +27,9 @@ export type {
     ToolNameMatcher,
 } from "./types.ts";
 
-function isApplyPatchTool(toolName: string): boolean {
-    return baseToolName(toolName) === "apply_patch";
-}
-
 // Transitional compatibility renderers remain here until each owning package ships a protocol
 // adapter. Tool-owned adapters take precedence, so families can migrate independently.
 const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
-    {
-        name: "apply-patch",
-        matches: isApplyPatchTool,
-        createRenderer: (toolName, options) =>
-            createApplyPatchRenderer(toolName, options?.labelMode, options?.mutationSettings),
-    },
     {
         name: "agent-browser",
         matches: (toolName) => toolName === "agent_browser",
@@ -65,16 +52,6 @@ const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin>
         name: "pi-core-tools",
         matches: isPiCoreTool,
         createRenderer: (toolName, options) => createPiCoreRenderer(toolName, options?.labelMode),
-    },
-    {
-        name: "goal-tools",
-        matches: isGoalTool,
-        createRenderer: (toolName, options) => createGoalRenderer(toolName, options?.labelMode),
-    },
-    {
-        name: "agent-tools",
-        matches: isAgentTool,
-        createRenderer: (toolName, options) => createAgentRenderer(toolName, options?.labelMode),
     },
 ];
 
@@ -168,5 +145,5 @@ export function createThirdPartyToolRenderer(
     const adapter = glowupRenderingAdapter(toolDefinition);
     return adapter === undefined
         ? fallback
-        : createProtocolRenderer(adapter, fallback, options?.labelMode);
+        : createProtocolRenderer(adapter, fallback, options?.labelMode, options?.mutationSettings);
 }

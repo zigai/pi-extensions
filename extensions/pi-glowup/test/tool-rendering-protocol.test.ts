@@ -3,6 +3,7 @@ import {
     call,
     decodeGlowupNode,
     list,
+    mutation,
     stack,
     text,
     withGlowupRendering,
@@ -35,6 +36,56 @@ describe("Glowup tool-rendering protocol", () => {
         children.push(list(["second"]));
 
         expect(decoded).toEqual(stack([text("first")]));
+    });
+
+    it("decodes bounded semantic mutation files and line coordinates", () => {
+        const node = mutation(
+            { static: "Patch", running: "Patching", completed: "Patched" },
+            [
+                {
+                    path: "src/new.ts",
+                    previousPath: "src/old.ts",
+                    lines: [
+                        { kind: "deletion", text: "old", oldLine: 4 },
+                        { kind: "addition", text: "new", newLine: 4 },
+                    ],
+                    added: 1,
+                    removed: 1,
+                },
+            ],
+            { patch: "--- a/src/old.ts\n+++ b/src/new.ts\n@@ -4 +4 @@\n-old\n+new\n" },
+        );
+
+        expect(decodeGlowupNode(node)).toEqual(node);
+        expect(
+            decodeGlowupNode({
+                ...node,
+                files: [{ ...node.files[0], lines: [{ kind: "addition", text: "x", newLine: 0 }] }],
+            }),
+        ).toBeUndefined();
+    });
+
+    it("bounds mutation files and rows as one collection", () => {
+        const node = mutation({ static: "Patch" }, [
+            {
+                path: "a.ts",
+                lines: [
+                    { kind: "addition", text: "a" },
+                    { kind: "addition", text: "b" },
+                ],
+                added: 2,
+                removed: 0,
+            },
+        ]);
+
+        expect(
+            decodeGlowupNode(node, {
+                maxDepth: 8,
+                maxNodes: 100,
+                maxCollectionItems: 2,
+                maxTextCharacters: 100,
+            }),
+        ).toBeUndefined();
     });
 
     it("rejects node graphs beyond depth, breadth, node, and text limits", () => {

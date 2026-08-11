@@ -1,5 +1,13 @@
-import { renderGlowupOutput, type GlowupRenderTheme } from "../../../rendering/core.ts";
-import type { ToolLabelMode, ToolLifecycleLabels } from "../../../rendering/status-labels.ts";
+import {
+    emptyComponent,
+    renderGlowupOutput,
+    type GlowupRenderTheme,
+} from "../../../rendering/core.ts";
+import {
+    shouldDeferSimpleToolCall,
+    type ToolLabelMode,
+    type ToolLifecycleLabels,
+} from "../../../rendering/status-labels.ts";
 import type {
     ThirdPartyToolRenderContext,
     ThirdPartyToolRenderer,
@@ -233,6 +241,7 @@ export function createAskUserQuestionRenderer(
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
+            if (shouldDeferSimpleToolCall(context)) return emptyComponent();
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, labels),

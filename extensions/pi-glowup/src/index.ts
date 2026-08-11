@@ -51,12 +51,6 @@ import {
 } from "./rendering/core.ts";
 import { captureDeletedTextPreview, type DeletedTextPreview } from "./rendering/delete-preview.ts";
 import {
-    captureApplyPatchPreimages,
-    clearApplyPatchRenderingState,
-    finishApplyPatchPierrePayloads,
-    restoreApplyPatchResultSummaries,
-} from "./rendering/apply-patch-rendering.ts";
-import {
     isActiveToolCall,
     shouldDeferSimpleToolCall,
     toolStatusLabel,
@@ -1113,7 +1107,6 @@ function errorMessage(cause: unknown): string {
 }
 
 function clearSessionState(): void {
-    clearApplyPatchRenderingState();
     nativeDeletePreviews.clear();
     nativeEditSnapshots.clear();
     nativeEditPierrePayloads.clear();
@@ -1276,25 +1269,22 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
     pi.on("tool_call", (event, ctx) => {
         const command = commandField(event.input);
         const builtInToolName = diagnosticBuiltInToolName(event.toolName);
-        const preimageCapture = event.toolName.toLowerCase().includes("apply_patch")
-            ? captureApplyPatchPreimages(event.toolCallId, ctx.cwd, event.input, {
-                  maxDeletePreimageBytes: config.mutations.limits.maxDeletePreimageBytes,
-              })
-            : builtInToolName === "edit"
-              ? captureNativeEditSnapshot(
-                    event.toolCallId,
-                    ctx.cwd,
-                    pathField(event.input),
-                    config.mutations,
-                )
-              : builtInToolName === "delete"
-                ? captureNativeDeletePreview(
+        const preimageCapture =
+            builtInToolName === "edit"
+                ? captureNativeEditSnapshot(
                       event.toolCallId,
                       ctx.cwd,
                       pathField(event.input),
                       config.mutations,
                   )
-                : undefined;
+                : builtInToolName === "delete"
+                  ? captureNativeDeletePreview(
+                        event.toolCallId,
+                        ctx.cwd,
+                        pathField(event.input),
+                        config.mutations,
+                    )
+                  : undefined;
         debugLogger.record("tool_call", () => ({
             toolName: event.toolName,
             builtInToolName: diagnosticBuiltInToolName(event.toolName),
@@ -1327,15 +1317,6 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         let scheduledFormattedPreview = false;
         let storedEditPreview = false;
         let persistedEditPierrePayload: PierreDiffPayload | undefined;
-        const persistedApplyPatchPierrePayloads = event.toolName
-            .toLowerCase()
-            .includes("apply_patch")
-            ? await finishApplyPatchPierrePayloads(
-                  event.toolCallId,
-                  event.isError === true,
-                  config.mutations,
-              )
-            : [];
         if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
             const command = commandField(event.input);
             if (command !== undefined) {
@@ -1391,19 +1372,11 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
             ...detailsDiagnostics(event.details),
             ...diagnosticSnapshot(),
         }));
-        if (
-            persistedEditPierrePayload !== undefined ||
-            persistedApplyPatchPierrePayloads.length > 0
-        ) {
+        if (persistedEditPierrePayload !== undefined) {
             return {
                 details: {
                     ...(isRecord(event.details) ? event.details : {}),
-                    ...(persistedEditPierrePayload === undefined
-                        ? {}
-                        : { pierreDiff: persistedEditPierrePayload }),
-                    ...(persistedApplyPatchPierrePayloads.length === 0
-                        ? {}
-                        : { pierreDiffs: persistedApplyPatchPierrePayloads }),
+                    pierreDiff: persistedEditPierrePayload,
                 },
             };
         }
@@ -1423,7 +1396,6 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
             ...diagnosticSnapshot(),
         }));
         clearSessionState();
-        restoreApplyPatchResultSummaries(ctx.sessionManager.getBranch(), nextConfig.mutations);
         restoreExplorationGroupStarts(ctx.sessionManager.getBranch());
         debugLogger.record("session_start", () => ({
             phase: "after_reset",

@@ -14,6 +14,8 @@ const MAX_PARTIAL_PREVIEW_PROPERTIES = 8;
 const MAX_PREVIEW_DEPTH = 5;
 const SENSITIVE_KEY_PATTERN =
     /(?:pass(?:word|phrase)?|secret|token|api[_-]?key|auth(?:orization)?|cookie|credential|private[_-]?key|access[_-]?key)/iu;
+const INTERNAL_DETAIL_PATH_KEY_PATTERN =
+    /(?:artifact|transcript|workspace|report|patch|output|attachment|session)(?:[_-]?(?:file|dir(?:ectory)?))?[_-]?paths?$/iu;
 
 function itemCount(count: number): string {
     return `${count} ${count === 1 ? "item" : "items"}`;
@@ -241,12 +243,26 @@ export function textOutput(result: ThirdPartyToolResult): string | undefined {
     return texts.length === 0 ? undefined : texts.join("\n");
 }
 
+function compactDetailsPreview(value: Record<string, unknown>): string | undefined {
+    const parts: string[] = [];
+    for (const key of Object.keys(value)) {
+        if (INTERNAL_DETAIL_PATH_KEY_PATTERN.test(key)) continue;
+        if (parts.length >= MAX_PARTIAL_PREVIEW_PROPERTIES) {
+            parts.push("more fields");
+            break;
+        }
+        const part = compactValue(safeRead(value, key), key);
+        if (part !== undefined) parts.push(part);
+    }
+    return parts.length === 0 ? undefined : truncateText(parts.join(" • "), MAX_PREVIEW_CHARACTERS);
+}
+
 /** Extracts a small, redacted summary when a result has no text content. */
 export function detailsOutput(result: ThirdPartyToolResult): string | undefined {
     if (!isRecord(result.details)) {
         return undefined;
     }
-    return compactObjectPreview(result.details);
+    return compactDetailsPreview(result.details);
 }
 
 function compactWhitespaceText(text: string, maxCharacters: number): string | undefined {
