@@ -463,6 +463,49 @@ describe("Pierre diff rendering", () => {
         expect(shouldRenderSideBySideDiff(180, longPayload.metadata, "content-aware")).toBe(false);
     });
 
+    it("falls back to unified when the dual-number split gutter would wrap a changed row", () => {
+        const before = `${"a".repeat(54)}x\n`;
+        const after = `${"a".repeat(54)}y\n`;
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent: before,
+            newContent: after,
+            oldSizeBytes: before.length,
+            newSizeBytes: after.length,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
+        expect(shouldRenderSideBySideDiff(120, payload.metadata, "content-aware")).toBe(false);
+        const rendered = renderPierreDiff(
+            payload,
+            testTheme,
+            { expanded: true },
+            { lastComponent: undefined, invalidate() {} },
+        )
+            .render(120)
+            .map(stripAnsi);
+        expect(rendered.join("\n")).not.toContain(" │ ");
+        expect(rendered.every((line) => visibleWidth(line) <= 120)).toBe(true);
+    });
+
+    it("falls back to unified when an unchanged context row would wrap in either pane", () => {
+        const context = "context-".repeat(8);
+        const oldContent = `${context}\nold\nomega\n`;
+        const newContent = `${context}\nnew\nomega\n`;
+        const payload = buildPierreDiffPayload({
+            path: "src/example.ts",
+            oldContent,
+            newContent,
+            oldSizeBytes: oldContent.length,
+            newSizeBytes: newContent.length,
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
+        expect(shouldRenderSideBySideDiff(120, payload.metadata, "content-aware")).toBe(false);
+    });
+
     it("pairs confidently similar replacement rows in narrow diffs", () => {
         const payload = buildPierreDiffPayload({
             path: "src/example.ts",

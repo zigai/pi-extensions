@@ -14,7 +14,6 @@ export type ReplacementLinePair = {
 const FIXED_SIDE_BY_SIDE_MIN_WIDTH = 140;
 const CONTENT_AWARE_SIDE_BY_SIDE_MIN_WIDTH = 120;
 const MIN_SIDE_BY_SIDE_CONTENT_WIDTH = 48;
-const MAX_CHANGED_LINE_WRAPS = 2;
 const MAX_LINE_PAIR_CELLS = 256;
 const MAX_LINE_TOKENS = 128;
 const MIN_LINE_PAIR_SIMILARITY = 0.55;
@@ -36,10 +35,11 @@ export function shouldRenderSideBySide(
     }
 
     const lineNumberWidth = diffLineNumberWidth(metadata);
-    const paneContentWidth =
-        Math.floor((width - 3) / 2) -
-        // One marker, the line-number field, and one separating space.
-        (lineNumberWidth + 2);
+    const splitGutterWidth =
+        lineNumberWidth +
+        // Split rows use `-12 ` in single-number mode and `12 - ` in dual-number mode.
+        (lineNumberStyle === "dual" ? 3 : 2);
+    const paneContentWidth = Math.floor((width - 3) / 2) - splitGutterWidth;
     if (paneContentWidth < MIN_SIDE_BY_SIDE_CONTENT_WIDTH) {
         return false;
     }
@@ -57,6 +57,22 @@ export function shouldRenderSideBySide(
 
         for (const content of hunk.hunkContent) {
             if (content.type === "context") {
+                for (let offset = 0; offset < content.lines; offset += 1) {
+                    if (
+                        wrappedLineCount(
+                            metadata.deletionLines[deletionLineIndex + offset],
+                            paneContentWidth,
+                        ) > 1 ||
+                        wrappedLineCount(
+                            metadata.additionLines[additionLineIndex + offset],
+                            paneContentWidth,
+                        ) > 1
+                    ) {
+                        return false;
+                    }
+                }
+                splitRows += content.lines;
+                unifiedRows += content.lines;
                 deletionLineIndex += content.lines;
                 additionLineIndex += content.lines;
                 continue;
@@ -79,8 +95,8 @@ export function shouldRenderSideBySide(
                 comparableRuns += 1;
             }
             if (
-                deletionWraps.some((count) => count > MAX_CHANGED_LINE_WRAPS) ||
-                additionWraps.some((count) => count > MAX_CHANGED_LINE_WRAPS)
+                deletionWraps.some((count) => count > 1) ||
+                additionWraps.some((count) => count > 1)
             ) {
                 return false;
             }
