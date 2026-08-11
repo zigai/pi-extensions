@@ -2,6 +2,8 @@
 
 Pi extension: Codex-style `/goal` command and `get_goal` / `create_goal` / `update_goal` tools. State lives in pi session custom entries.
 
+Keep the passive Glowup protocol adapters for all three goal tools beside their owning contracts in this repository. Preserve native behavior when Glowup is not active, parse restored arguments/results at the adapter boundary, and never import Glowup internals or TUI implementation modules.
+
 ## Local pi install policy
 
 On this machine, the canonical active install is the global/user package pointing at this local checkout:

@@ -53,6 +53,7 @@
     "smoke:platform:all": "node scripts/platform-smoke.mjs doctor --skip-windows-disposable-probe && node scripts/platform-smoke.mjs run --target macos,ubuntu,windows-native"
   },
   "dependencies": {
+    "@zigai/pi-glowup": "file:../pi-glowup",
     "pi-typed-args": "file:../pi-typed-commands"
   },
   "devDependencies": {
@@ -86,6 +87,10 @@
   "bundledDependencies": [
     "pi-typed-args"
   ],
+  "bundleDependencies": [
+    "@zigai/pi-glowup",
+    "pi-typed-args"
+  ],
   "engines": {
     "node": ">=24.0.0"
   },
@@ -94,8 +99,5 @@
     "extensions": [
       "./src/index.ts"
     ]
-  },
-  "bundleDependencies": [
-    "pi-typed-args"
-  ]
+  }
 }

@@ -72,6 +72,13 @@ test("SDK runtime emits a continuation after willRetry compaction when no retry 
 
   try {
     const runner = session.extensionRunner;
+    for (const toolName of ["get_goal", "create_goal", "update_goal"]) {
+      const definition = runner.getToolDefinition(toolName);
+      assert.ok(definition);
+      const rendering: unknown = Reflect.get(definition, "glowupRendering");
+      assert.ok(rendering && typeof rendering === "object");
+      assert.equal(Reflect.get(rendering, "version"), 3);
+    }
     const createGoal = runner.getToolDefinition("create_goal");
     assert.ok(createGoal);
     const result = await createGoal.execute(
