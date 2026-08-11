@@ -45,6 +45,7 @@
     "verify": "npm run check"
   },
   "dependencies": {
+    "@zigai/pi-glowup": "file:../pi-glowup",
     "better-result": "^2.9.2",
     "js-tiktoken": "^1.0.21"
   },
@@ -81,6 +82,9 @@
       "optional": true
     }
   },
+  "bundleDependencies": [
+    "@zigai/pi-glowup"
+  ],
   "engines": {
     "node": ">=22.19.0 <27"
   },

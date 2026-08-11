@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 
 import { Text } from "@earendil-works/pi-tui";
 import {
+    defineTool,
     generateDiffString,
     generateUnifiedPatch,
     withFileMutationQueue,
@@ -10,8 +11,10 @@ import {
     type Theme,
     type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { withGlowupRendering } from "@zigai/pi-glowup/protocol";
 import { Type, type Static } from "typebox";
 
+import { applyPatchGlowupRendering } from "./glowup-rendering.js";
 import {
     ApplyPatchError,
     applyPatchHunks,
@@ -81,96 +84,102 @@ export function createApplyPatchTool(): ToolDefinition<
     typeof APPLY_PATCH_PARAMETERS,
     ApplyPatchToolDetails
 > {
-    return {
-        name: APPLY_PATCH_TOOL_NAME,
-        label: "Apply Patch",
-        description:
-            "The `apply_patch` tool can be used to edit files. Provide a complete patch body in the `patch` argument.",
-        promptSnippet: "Edit files with apply_patch patches.",
-        promptGuidelines: [
-            "Use apply_patch to edit files.",
-            "The patch must start with *** Begin Patch and end with *** End Patch.",
-            "Use *** Add File, *** Delete File, and *** Update File sections. Relative paths resolve from the working directory; absolute paths are accepted. Added lines start with +.",
-        ],
-        parameters: APPLY_PATCH_PARAMETERS,
-        prepareArguments: prepareApplyPatchArguments,
-        async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-            const cwd = resolve(ctx.cwd);
-            try {
-                const parsedResult = parseApplyPatch(params.patch);
-                if (parsedResult.isErr()) {
-                    throw new Error(formatApplyPatchError(parsedResult.error));
-                }
-                const parsed = parsedResult.value;
-                const mutationPaths = await resolvePatchMutationQueuePaths(parsed.hunks, cwd);
-                return await withFileMutationQueues(mutationPaths, async () => {
-                    const applied = await applyPatchHunks(parsed.hunks, cwd, {
-                        signal,
-                        environmentId: parsed.environmentId,
+    return withGlowupRendering(
+        defineTool({
+            name: APPLY_PATCH_TOOL_NAME,
+            label: "Apply Patch",
+            description:
+                "The `apply_patch` tool can be used to edit files. Provide a complete patch body in the `patch` argument.",
+            promptSnippet: "Edit files with apply_patch patches.",
+            promptGuidelines: [
+                "Use apply_patch to edit files.",
+                "The patch must start with *** Begin Patch and end with *** End Patch.",
+                "Use *** Add File, *** Delete File, and *** Update File sections. Relative paths resolve from the working directory; absolute paths are accepted. Added lines start with +.",
+            ],
+            parameters: APPLY_PATCH_PARAMETERS,
+            prepareArguments: prepareApplyPatchArguments,
+            async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+                const cwd = resolve(ctx.cwd);
+                try {
+                    const parsedResult = parseApplyPatch(params.patch);
+                    if (parsedResult.isErr()) {
+                        throw new Error(formatApplyPatchError(parsedResult.error));
+                    }
+                    const parsed = parsedResult.value;
+                    const mutationPaths = await resolvePatchMutationQueuePaths(parsed.hunks, cwd);
+                    return await withFileMutationQueues(mutationPaths, async () => {
+                        const applied = await applyPatchHunks(parsed.hunks, cwd, {
+                            signal,
+                            environmentId: parsed.environmentId,
+                        });
+                        if (applied.isErr()) throw new Error(formatApplyPatchError(applied.error));
+                        const result = applied.value;
+                        const diffSummary = summarizeAppliedPatchDiff(result.changes, parsed.hunks);
+                        return {
+                            content: [{ type: "text", text: result.summary }],
+                            details: {
+                                affectedPaths: result.affectedPaths,
+                                changedFileCount: result.changes.length,
+                                lineSummary: summarizeAppliedPatchLines(
+                                    result.changes,
+                                    parsed.hunks,
+                                ),
+                                diff: diffSummary.diff,
+                                patch: diffSummary.patch,
+                                firstChangedLine: diffSummary.firstChangedLine,
+                            },
+                        };
                     });
-                    if (applied.isErr()) throw new Error(formatApplyPatchError(applied.error));
-                    const result = applied.value;
-                    const diffSummary = summarizeAppliedPatchDiff(result.changes, parsed.hunks);
-                    return {
-                        content: [{ type: "text", text: result.summary }],
-                        details: {
-                            affectedPaths: result.affectedPaths,
-                            changedFileCount: result.changes.length,
-                            lineSummary: summarizeAppliedPatchLines(result.changes, parsed.hunks),
-                            diff: diffSummary.diff,
-                            patch: diffSummary.patch,
-                            firstChangedLine: diffSummary.firstChangedLine,
-                        },
-                    };
-                });
-            } catch (cause: unknown) {
-                if (cause instanceof ApplyPatchError) {
-                    throw new Error(formatApplyPatchError(cause));
+                } catch (cause: unknown) {
+                    if (cause instanceof ApplyPatchError) {
+                        throw new Error(formatApplyPatchError(cause));
+                    }
+                    if (cause instanceof Error) throw cause;
+                    throw new Error(String(cause));
                 }
-                if (cause instanceof Error) throw cause;
-                throw new Error(String(cause));
-            }
-        },
-        renderCall(args, theme, _context) {
-            const summary = summarizeApplyPatchCall(args.patch);
-            let text =
-                theme.fg("toolTitle", theme.bold("apply_patch ")) +
-                theme.fg(
-                    summary.length > 0 ? "accent" : "dim",
-                    summary.length > 0 ? summary : "...",
-                );
-            const diff = summarizePlannedPatchDiffPreview(args.patch);
-            if (diff.length > 0) {
-                text += `\n\n${renderApplyPatchDiff(truncateDiffLines(diff, COMPACT_DIFF_LINE_LIMIT), theme)}`;
-            }
-            return new Text(text, 0, 0);
-        },
-        renderResult(result, { expanded, isPartial }, theme, _context) {
-            if (isPartial) return new Text(theme.fg("warning", "Applying patch..."), 0, 0);
-            const output = result.content
-                .filter((item) => item.type === "text")
-                .map((item) => item.text)
-                .join("\n");
-            if (expanded) {
+            },
+            renderCall(args, theme, _context) {
+                const summary = summarizeApplyPatchCall(args.patch);
+                let text =
+                    theme.fg("toolTitle", theme.bold("apply_patch ")) +
+                    theme.fg(
+                        summary.length > 0 ? "accent" : "dim",
+                        summary.length > 0 ? summary : "...",
+                    );
+                const diff = summarizePlannedPatchDiffPreview(args.patch);
+                if (diff.length > 0) {
+                    text += `\n\n${renderApplyPatchDiff(truncateDiffLines(diff, COMPACT_DIFF_LINE_LIMIT), theme)}`;
+                }
+                return new Text(text, 0, 0);
+            },
+            renderResult(result, { expanded, isPartial }, theme, _context) {
+                if (isPartial) return new Text(theme.fg("warning", "Applying patch..."), 0, 0);
+                const output = result.content
+                    .filter((item) => item.type === "text")
+                    .map((item) => item.text)
+                    .join("\n");
+                if (expanded) {
+                    return new Text(
+                        expandedApplyPatchSummary(output, result.details.diff, theme),
+                        0,
+                        0,
+                    );
+                }
                 return new Text(
-                    expandedApplyPatchSummary(output, result.details.diff, theme),
+                    compactApplyPatchResult(
+                        output,
+                        result.details.affectedPaths,
+                        result.details.lineSummary,
+                        result.details.diff,
+                        theme,
+                    ),
                     0,
                     0,
                 );
-            }
-            return new Text(
-                compactApplyPatchResult(
-                    output,
-                    result.details.affectedPaths,
-                    result.details.lineSummary,
-                    result.details.diff,
-                    theme,
-                ),
-                0,
-                0,
-            );
-        },
-    };
+            },
+        }),
+        applyPatchGlowupRendering,
+    );
 }
 
 async function resolvePatchMutationQueuePaths(

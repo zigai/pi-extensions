@@ -3,6 +3,8 @@ import { test } from "vitest";
 
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
 import { isGlowupWireRecord } from "../src/glowup/wire.ts";
+import { applyPatchGlowupRendering } from "../src/tools/apply-patch/glowup-rendering.ts";
+import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createViewImageTool } from "../src/tools/view-image/tool.ts";
 import { createWebRunTool } from "../src/tools/web-run/tool.ts";
@@ -59,7 +61,7 @@ function parseResult<Result>(
     return parsed;
 }
 
-test("Codex tools expose dependency-free Glowup protocol v3 adapters", () => {
+test("Codex tools expose passive Glowup protocol v3 adapters", () => {
     const tools = [
         createWebRunTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG }),
         createImagegenTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG }),
@@ -70,6 +72,70 @@ test("Codex tools expose dependency-free Glowup protocol v3 adapters", () => {
         assert.equal(tool.glowupRendering.version, 3);
         assert.ok(tool.renderCall, `${tool.name} keeps its native renderer without Glowup`);
     }
+
+    const applyPatch = createApplyPatchTool();
+    const rendering: unknown = Reflect.get(applyPatch, "glowupRendering");
+    assert.ok(rendering && typeof rendering === "object");
+    assert.equal(Reflect.get(rendering, "version"), 3);
+    assert.ok(applyPatch.renderCall, "apply_patch keeps its native renderer without Glowup");
+});
+
+test("apply_patch adapter owns partial, planned, settled, and restored mutation rendering", () => {
+    const rendering = applyPatchGlowupRendering;
+
+    const patch = [
+        "*** Begin Patch",
+        "*** Add File: src/a.ts",
+        "+export const a = 1;",
+        "*** Update File: src/b.ts",
+        "@@",
+        "-export const b = 1;",
+        "+export const b = 2;",
+        "*** End Patch",
+    ].join("\n");
+    const args = rendering.parseArgs({ patch });
+    assert.ok(args);
+    const planned: unknown = rendering.renderCall(args, completeContext);
+    assert.ok(isGlowupWireRecord(planned));
+    assert.equal(planned.kind, "mutation");
+    assert.ok(Array.isArray(planned.files));
+    assert.equal(planned.files.length, 2);
+
+    const partial: unknown = rendering.renderPartialCall({
+        patch: "*** Begin Patch\n*** Add File: src/live.ts\n+export const live =",
+    });
+    assert.ok(isGlowupWireRecord(partial));
+    assert.equal(partial.kind, "mutation");
+    const splitEmoji: unknown = rendering.renderPartialCall({
+        patch: `*** Begin Patch\n*** Add File: src/live.ts\n+${"🧪".slice(0, 1)}`,
+    });
+    assert.doesNotMatch(JSON.stringify(splitEmoji), /�/u);
+
+    const settled: unknown = rendering.renderCall(args, {
+        ...completeContext,
+        hasResult: true,
+    });
+    assert.deepEqual(settled, { kind: "empty" });
+
+    const result = rendering.parseResult({
+        details: {
+            patch:
+                "--- /dev/null\n+++ b/src/a.ts\n@@ -0,0 +1 @@\n+export const a = 1;\n" +
+                "--- a/src/b.ts\n+++ b/src/b.ts\n@@ -1 +1 @@\n-export const b = 1;\n+export const b = 2;\n",
+            lineSummary: {
+                files: [
+                    { action: "A", path: "src/a.ts", addedLines: 1, removedLines: 0 },
+                    { action: "M", path: "src/b.ts", addedLines: 1, removedLines: 1 },
+                ],
+            },
+        },
+    });
+    assert.ok(result);
+    const restored: unknown = rendering.renderResult(result);
+    assert.ok(isGlowupWireRecord(restored));
+    assert.equal(restored.kind, "mutation");
+    assert.equal(typeof restored.patch === "string" && restored.patch.includes("src/b.ts"), true);
+    assert.equal(rendering.parseResult({ details: { patch: "invalid" } }), undefined);
 });
 
 test("web_run adapter summarizes calls and bounded source results", () => {
@@ -78,6 +144,7 @@ test("web_run adapter summarizes calls and bounded source results", () => {
     }).glowupRendering;
     const args = parseArgs(renderer, { search_query: [{ q: "latest pi docs" }] });
     assert.equal(renderer.parseArgs?.(null), undefined);
+    assert.equal("renderPartialCall" in renderer, false);
 
     const call = renderer.renderCall?.(args, completeContext);
     assert.equal(call?.kind, "call");
@@ -85,6 +152,25 @@ test("web_run adapter summarizes calls and bounded source results", () => {
     assert.equal(call.labels.static, "Web Search");
     assert.equal(nodeText(call), '"latest pi docs"');
     assert.doesNotMatch(nodeText(call), /search search/u);
+
+    const operationLabels = [
+        [{ image_query: [{ q: "terminal UI" }] }, "Image Search"],
+        [{ open: [{ ref_id: "source-1" }] }, "Open Web"],
+        [{ click: [{ ref_id: "source-1", id: 2 }] }, "Web Click"],
+        [{ find: [{ ref_id: "source-1", pattern: "Renderer" }] }, "Web Find"],
+        [{ screenshot: [{ ref_id: "source-1", pageno: 0 }] }, "Web Screenshot"],
+        [{ finance: [{ ticker: "OPENAI", type: "equity" }] }, "Market Data"],
+        [{ weather: [{ location: "London" }] }, "Weather"],
+        [{ sports: [{ fn: "standings", league: "epl" }] }, "Sports"],
+        [{ time: [{ utc_offset: "+00:00" }] }, "Time"],
+        [{ search_query: [{ q: "Pi" }], open: [{ ref_id: "source-1" }] }, "Web Research"],
+    ] as const;
+    for (const [rawArgs, label] of operationLabels) {
+        const parsedArgs = parseArgs(renderer, rawArgs);
+        const node = renderer.renderCall?.(parsedArgs, completeContext);
+        assert.ok(isGlowupWireRecord(node) && isGlowupWireRecord(node.labels));
+        assert.equal(node.labels.static, label);
+    }
 
     const output = [
         "Ripgrep Benchmarks (https://ripgrep.dev/benchmarks)",
@@ -225,9 +311,10 @@ test("view_image adapter owns call labels and suppresses only successful attachm
         path: "~/Projects/theme/preview.png",
         detail: "high",
     });
+    assert.equal("renderPartialCall" in renderer, false);
     const call = renderer.renderCall?.(args, completeContext);
     assert.equal(call?.kind, "call");
-    assert.match(nodeText(call), /~\/Projects\/theme\/preview\.png · detail: high/u);
+    assert.equal(nodeText(call), "~/Projects/theme/preview.png");
 
     const result = parseResult(renderer, {
         content: [{ type: "text", text: "[view_image image attached: /tmp/preview.png]" }],

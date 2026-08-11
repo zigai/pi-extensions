@@ -11,21 +11,16 @@ import {
 type ViewImageGlowupArgs = GlowupWireRecord;
 type ViewImageGlowupResult = GlowupWireToolResult;
 
-function summarizeArgs(args: ViewImageGlowupArgs): string | undefined {
-    const path =
+function imagePath(args: ViewImageGlowupArgs): string | undefined {
+    return (
         glowupWireString(args, "path") ??
         glowupWireString(args, "file_path") ??
-        glowupWireString(args, "image_path");
-    const detail = glowupWireString(args, "detail");
-    const parts = [
-        path === undefined || path.length === 0 ? undefined : path,
-        detail === undefined || detail.length === 0 ? undefined : `detail: ${detail}`,
-    ].filter((value): value is string => value !== undefined);
-    return parts.length === 0 ? undefined : parts.join(" · ");
+        glowupWireString(args, "image_path")
+    );
 }
 
 function renderViewImageCall(args: ViewImageGlowupArgs) {
-    const summary = summarizeArgs(args);
+    const path = imagePath(args);
     return {
         kind: "call" as const,
         labels: {
@@ -33,16 +28,12 @@ function renderViewImageCall(args: ViewImageGlowupArgs) {
             running: "Viewing Image",
             completed: "Viewed Image",
         },
-        ...(summary === undefined
+        ...(path === undefined || path.length === 0
             ? {}
             : {
                   body: {
-                      kind: "text",
-                      text: {
-                          kind: "text",
-                          text: summary,
-                          tone: "path",
-                      },
+                      kind: "text" as const,
+                      text: { kind: "text" as const, text: path, tone: "path" as const },
                   },
               }),
     };
@@ -52,15 +43,6 @@ export const viewImageGlowupRendering = {
     version: 3,
     parseArgs: parseGlowupWireArgs,
     parseResult: parseGlowupWireResult,
-    renderPartialCall(value: unknown, _context: GlowupWireCallContext) {
-        const args = parseGlowupWireArgs(value);
-        return args === undefined
-            ? {
-                  kind: "call" as const,
-                  labels: { static: "View Image", running: "Viewing Image" },
-              }
-            : renderViewImageCall(args);
-    },
     renderCall(args: ViewImageGlowupArgs, _context: GlowupWireCallContext) {
         return renderViewImageCall(args);
     },

@@ -123,7 +123,7 @@ function summarizeArgs(
     const summary = [prompt, metadata.join(" • ")]
         .filter((value): value is string => value !== undefined && value.length > 0)
         .join("\n");
-    return summary.length === 0 ? undefined : `\n${summary}`;
+    return summary.length === 0 ? undefined : summary;
 }
 
 function generatedImageCount(result: ImagegenGlowupResult): number | undefined {

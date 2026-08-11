@@ -244,15 +244,95 @@ function summarizeResult(
     );
 }
 
+type WebRunOperation =
+    | "search"
+    | "image"
+    | "open"
+    | "click"
+    | "find"
+    | "screenshot"
+    | "finance"
+    | "weather"
+    | "sports"
+    | "time";
+
+function webResearchLabels() {
+    return {
+        static: "Web Research",
+        running: "Researching the web",
+        completed: "Researched the web",
+    };
+}
+
+function webRunLabels(args: WebRunGlowupArgs) {
+    const operations = [
+        getArray(args, "search_query") !== undefined ? "search" : undefined,
+        getArray(args, "image_query") !== undefined ? "image" : undefined,
+        getArray(args, "open") !== undefined ? "open" : undefined,
+        getArray(args, "click") !== undefined ? "click" : undefined,
+        getArray(args, "find") !== undefined ? "find" : undefined,
+        getArray(args, "screenshot") !== undefined ? "screenshot" : undefined,
+        getArray(args, "finance") !== undefined ? "finance" : undefined,
+        getArray(args, "weather") !== undefined ? "weather" : undefined,
+        getArray(args, "sports") !== undefined ? "sports" : undefined,
+        getArray(args, "time") !== undefined ? "time" : undefined,
+    ].filter((value): value is WebRunOperation => value !== undefined);
+    if (operations.length !== 1) return webResearchLabels();
+    const operation = operations[0];
+    if (operation === undefined) return webResearchLabels();
+    switch (operation) {
+        case "search":
+            return {
+                static: "Web Search",
+                running: "Searching the web",
+                completed: "Searched the web",
+            };
+        case "image":
+            return {
+                static: "Image Search",
+                running: "Searching images",
+                completed: "Searched images",
+            };
+        case "open":
+            return {
+                static: "Open Web",
+                running: "Opening web page",
+                completed: "Opened web page",
+            };
+        case "click":
+            return {
+                static: "Web Click",
+                running: "Opening web link",
+                completed: "Opened web link",
+            };
+        case "find":
+            return { static: "Web Find", running: "Finding on page", completed: "Found on page" };
+        case "screenshot":
+            return {
+                static: "Web Screenshot",
+                running: "Capturing web page",
+                completed: "Captured web page",
+            };
+        case "finance":
+            return {
+                static: "Market Data",
+                running: "Fetching market data",
+                completed: "Fetched market data",
+            };
+        case "weather":
+            return { static: "Weather", running: "Checking weather", completed: "Checked weather" };
+        case "sports":
+            return { static: "Sports", running: "Checking sports", completed: "Checked sports" };
+        case "time":
+            return { static: "Time", running: "Checking time", completed: "Checked time" };
+    }
+}
+
 function renderWebRunCall(args: WebRunGlowupArgs) {
     const summary = summarizeArgs(args);
     return {
         kind: "call" as const,
-        labels: {
-            static: "Web Search",
-            running: "Searching the web",
-            completed: "Searched the web",
-        },
+        labels: webRunLabels(args),
         ...(summary === undefined ? {} : { body: { kind: "text" as const, text: summary } }),
     };
 }
@@ -261,15 +341,6 @@ export const webRunGlowupRendering = {
     version: 3,
     parseArgs: parseGlowupWireArgs,
     parseResult: parseGlowupWireResult,
-    renderPartialCall(value: unknown, _context: GlowupWireCallContext) {
-        const args = parseGlowupWireArgs(value);
-        return args === undefined
-            ? {
-                  kind: "call" as const,
-                  labels: { static: "Web Search", running: "Searching the web" },
-              }
-            : renderWebRunCall(args);
-    },
     renderCall(args: WebRunGlowupArgs, _context: GlowupWireCallContext) {
         return renderWebRunCall(args);
     },
