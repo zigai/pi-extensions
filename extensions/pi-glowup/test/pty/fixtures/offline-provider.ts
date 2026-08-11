@@ -7,8 +7,10 @@ import {
     type SimpleStreamOptions,
     type ToolCall,
 } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { withGlowupRendering } from "../../../src/tool-rendering/protocol.ts";
 import { Type } from "typebox";
+import { applyPatchOwnerRendering } from "../../support/apply-patch-owner-fixture.ts";
 
 const PROVIDER_NAME = "pty-offline";
 const MODEL_ID = "deterministic";
@@ -194,31 +196,38 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
         streamSimple: streamOfflineProvider,
     });
 
-    pi.registerTool({
-        name: "apply_patch",
-        label: "apply_patch",
-        description: "Deterministic no-op patch tool for PTY renderer verification.",
-        parameters: Type.Object({ patch: Type.String() }),
-        execute(_toolCallId, params) {
-            const addedLineCount = params.patch
-                .split(/\r?\n/gu)
-                .filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
-            return Promise.resolve({
-                content: [{ type: "text" as const, text: "Done!" }],
-                details: {
-                    diff: "src/current.ts\n+1 export const current = 'CURRENT_STREAM_MARKER_🧪';\n",
-                    lineSummary: {
-                        files: [
-                            {
-                                action: "A",
-                                path: "src/current.ts",
-                                addedLines: addedLineCount,
-                                removedLines: 0,
+    pi.registerTool(
+        withGlowupRendering(
+            defineTool({
+                name: "apply_patch",
+                label: "apply_patch",
+                description: "Deterministic no-op patch tool for PTY renderer verification.",
+                parameters: Type.Object({ patch: Type.String() }),
+                execute(_toolCallId, params) {
+                    const addedLineCount = params.patch
+                        .split(/\r?\n/gu)
+                        .filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
+                    return Promise.resolve({
+                        content: [{ type: "text" as const, text: "Done!" }],
+                        details: {
+                            diff: "src/current.ts\n+1 export const current = 'CURRENT_STREAM_MARKER_🧪';\n",
+                            inputPatch: params.patch,
+                            patch: "--- /dev/null\n+++ b/src/current.ts\n@@ -0,0 +1 @@\n+export const current = 'CURRENT_STREAM_MARKER_🧪';\n",
+                            lineSummary: {
+                                files: [
+                                    {
+                                        action: "A",
+                                        path: "src/current.ts",
+                                        addedLines: addedLineCount,
+                                        removedLines: 0,
+                                    },
+                                ],
                             },
-                        ],
-                    },
+                        },
+                    });
                 },
-            });
-        },
-    });
+            }),
+            applyPatchOwnerRendering,
+        ),
+    );
 }
