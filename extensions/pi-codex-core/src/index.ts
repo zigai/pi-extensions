@@ -17,6 +17,7 @@ import { CodexTokenizer } from "./compaction/tokenizer.ts";
 import { readCodexCoreStartupConfig, type CodexCoreConfig } from "./config/config.ts";
 import { rewriteProviderImageDetails } from "./images/detail.ts";
 import { buildCodexCoreSystemPromptResult } from "./prompt/system-prompt.ts";
+import { CodexRecoveryCoordinator, supportsInteractiveRecovery } from "./recovery/coordinator.ts";
 import { registerCodexCommand } from "./settings/command.ts";
 import { registerCodexSettingsHost } from "./settings/integration.ts";
 import { registerApplyPatchTool } from "./tools/apply-patch/tool.ts";
@@ -51,6 +52,7 @@ export default function extension(pi: ExtensionAPI): void {
     activatedApis.add(pi);
     const responsesLitePolicy = new ResponsesLiteRequestPolicy();
     const tokenizer = new CodexTokenizer();
+    const recovery = new CodexRecoveryCoordinator({ getConfig: () => config });
     const togglesActivation = new OptionalTogglesActivation(pi.events, packageName);
     const warnedPromptConflictSessions = new Set<string>();
     const unregisterCodexSettingsHost = registerCodexSettingsHost(packageName);
@@ -68,6 +70,7 @@ export default function extension(pi: ExtensionAPI): void {
         ctx: Parameters<typeof syncCodexCoreTools>[1],
     ): void => {
         config = nextConfig;
+        recovery.applyConfig(pi);
         clearProviderRequestTemplate(ctx.sessionManager.getSessionId());
         if (config.compaction.enabled) {
             tokenizer.warm();
@@ -93,6 +96,7 @@ export default function extension(pi: ExtensionAPI): void {
         if (config.compaction.enabled) {
             tokenizer.warm();
         }
+        recovery.start(pi, ctx);
         syncToolActivation(ctx);
         if (config.openai.fast && ctx.hasUI) {
             ctx.ui.notify(FAST_MODE_STARTUP_WARNING, "warning");
@@ -102,6 +106,35 @@ export default function extension(pi: ExtensionAPI): void {
     pi.on("model_select", async (_event, ctx) => {
         clearProviderRequestTemplate(ctx.sessionManager.getSessionId());
         syncToolActivation(ctx);
+    });
+
+    pi.on("input", (event, ctx) => {
+        if (
+            !supportsInteractiveRecovery(ctx) ||
+            event.source === "extension" ||
+            !config.recovery.enabled ||
+            !isActiveCodexResponsesModel(ctx)
+        ) {
+            return { action: "continue" };
+        }
+        const hasImages = (event.images?.length ?? 0) > 0;
+        if (
+            config.recovery.batchFollowUps &&
+            event.streamingBehavior === "followUp" &&
+            !hasImages
+        ) {
+            recovery.queueFollowUp(pi, ctx, event.text);
+            return { action: "handled" };
+        }
+        if (event.streamingBehavior === undefined) {
+            const text = recovery.mergePendingIntoManualInput(pi, event.text);
+            if (text !== undefined) return { action: "transform", text };
+        }
+        return { action: "continue" };
+    });
+
+    pi.on("message_end", (event) => {
+        if (event.message.role === "assistant") recovery.observeAssistant(event.message);
     });
 
     pi.on("before_agent_start", async (event, ctx) => {
@@ -180,6 +213,9 @@ export default function extension(pi: ExtensionAPI): void {
     });
 
     pi.on("agent_settled", async (_event, ctx) => {
+        if (supportsInteractiveRecovery(ctx) && isActiveCodexResponsesModel(ctx)) {
+            recovery.settle(pi, ctx);
+        }
         if (!config.compaction.enabled || !config.compaction.auto) return;
         const { scheduleCodexAutoCompaction } = await loadCompactionModule();
         scheduleCodexAutoCompaction(ctx, config);
@@ -222,6 +258,7 @@ export default function extension(pi: ExtensionAPI): void {
 
     pi.on("session_shutdown", async (event, ctx) => {
         unregisterCodexSettingsHost();
+        recovery.stop();
         togglesActivation.dispose();
         const sessionId = ctx.sessionManager.getSessionId();
         responsesLitePolicy.clearSession(sessionId);

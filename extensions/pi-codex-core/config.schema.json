@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/zigai/pi-codex-core/config.schema.json",
   "type": "object",
-  "required": ["scope", "tools", "prompt", "compaction", "openai"],
+  "required": ["scope", "tools", "prompt", "compaction", "recovery", "openai"],
   "properties": {
     "scope": {
       "type": "object",
@@ -145,6 +145,39 @@
           "minimum": 1,
           "maximum": 99,
           "default": 80
+        }
+      },
+      "additionalProperties": false
+    },
+    "recovery": {
+      "type": "object",
+      "required": ["enabled", "batchFollowUps", "maxAttempts", "baseDelayMs", "maxDelayMs"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "batchFollowUps": {
+          "type": "boolean",
+          "default": true
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 3
+        },
+        "baseDelayMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000
+        },
+        "maxDelayMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 900000,
+          "default": 120000
         }
       },
       "additionalProperties": false

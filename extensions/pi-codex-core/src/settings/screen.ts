@@ -452,6 +452,40 @@ function buildItems(
                 currentValue: String(config.compaction.thresholdPercent),
                 values: ["80", "85", "90", "95"],
             },
+            toggleItem(
+                "outageRecovery",
+                "Outage recovery",
+                "Resume transiently failed Codex turns after Pi exhausts its own retries.",
+                config.recovery.enabled,
+            ),
+            toggleItem(
+                "batchFollowUps",
+                "Batch follow-ups",
+                "Hold text follow-ups during a Codex turn and deliver them together after it settles.",
+                config.recovery.batchFollowUps,
+            ),
+            {
+                id: "recoveryAttempts",
+                label: "Recovery attempts",
+                description: "Additional delayed resume attempts after Pi's provider retries fail.",
+                currentValue: String(config.recovery.maxAttempts),
+                values: ["0", "1", "2", "3", "5"],
+            },
+            {
+                id: "recoveryBaseDelay",
+                label: "Recovery base delay",
+                description:
+                    "Initial outage cooldown; later recovery attempts back off exponentially.",
+                currentValue: String(config.recovery.baseDelayMs),
+                values: ["5000", "15000", "30000", "60000"],
+            },
+            {
+                id: "recoveryMaxDelay",
+                label: "Recovery maximum delay",
+                description: "Maximum cooldown between automatic recovery attempts.",
+                currentValue: String(config.recovery.maxDelayMs),
+                values: ["30000", "60000", "120000", "300000"],
+            },
         ];
     }
 
@@ -613,6 +647,21 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
             ? { ...config, compaction: { ...config.compaction, thresholdPercent } }
             : config;
     }
+    if (id === "outageRecovery") {
+        return { ...config, recovery: { ...config.recovery, enabled: value === "on" } };
+    }
+    if (id === "batchFollowUps") {
+        return { ...config, recovery: { ...config.recovery, batchFollowUps: value === "on" } };
+    }
+    if (id === "recoveryAttempts") {
+        return updateRecoveryInteger(config, "maxAttempts", value);
+    }
+    if (id === "recoveryBaseDelay") {
+        return updateRecoveryInteger(config, "baseDelayMs", value);
+    }
+    if (id === "recoveryMaxDelay") {
+        return updateRecoveryInteger(config, "maxDelayMs", value);
+    }
     if (id === "webSearch")
         return { ...config, tools: { ...config.tools, webSearch: value === "on" } };
     if (id === "webSearchMode") {
@@ -649,6 +698,17 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
         return { ...config, openai: { ...config.openai, compactionReasoning: value } };
     }
     return config;
+}
+
+function updateRecoveryInteger(
+    config: CodexCoreConfig,
+    key: "maxAttempts" | "baseDelayMs" | "maxDelayMs",
+    value: string,
+): CodexCoreConfig {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed)
+        ? { ...config, recovery: { ...config.recovery, [key]: parsed } }
+        : config;
 }
 
 function toggleItem(

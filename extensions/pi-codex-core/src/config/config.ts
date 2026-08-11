@@ -69,6 +69,13 @@ export type CodexCoreConfig = {
         readonly auto: boolean;
         readonly thresholdPercent: number;
     };
+    readonly recovery: {
+        readonly enabled: boolean;
+        readonly batchFollowUps: boolean;
+        readonly maxAttempts: number;
+        readonly baseDelayMs: number;
+        readonly maxDelayMs: number;
+    };
     readonly openai: {
         readonly webSearchModel: string;
         readonly imageModel: string;
@@ -144,6 +151,16 @@ const CodexCoreConfigJsonSchema = Type.Object(
             },
             { additionalProperties: false },
         ),
+        recovery: Type.Object(
+            {
+                enabled: Type.Boolean({ default: true }),
+                batchFollowUps: Type.Boolean({ default: true }),
+                maxAttempts: Type.Integer({ minimum: 0, maximum: 10, default: 3 }),
+                baseDelayMs: Type.Integer({ minimum: 1000, maximum: 300000, default: 30000 }),
+                maxDelayMs: Type.Integer({ minimum: 1000, maximum: 900000, default: 120000 }),
+            },
+            { additionalProperties: false },
+        ),
         openai: Type.Object(
             {
                 webSearchModel: Type.String({ default: CODEX_CURRENT_MODEL_SELECTION }),
@@ -178,6 +195,13 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
     },
     prompt: { mode: "codex", personality: "pragmatic" },
     compaction: { enabled: true, auto: true, thresholdPercent: 80 },
+    recovery: {
+        enabled: true,
+        batchFollowUps: true,
+        maxAttempts: 3,
+        baseDelayMs: 30_000,
+        maxDelayMs: 120_000,
+    },
     openai: {
         webSearchModel: CODEX_CURRENT_MODEL_SELECTION,
         imageModel: "gpt-image-2",
@@ -243,6 +267,7 @@ export function parseCodexCoreConfigWithDiagnostics(
     const tools = parseRecord(root.tools, "$.tools", diagnostics);
     const prompt = parseRecord(root.prompt, "$.prompt", diagnostics);
     const compaction = parseRecord(root.compaction, "$.compaction", diagnostics);
+    const recovery = parseRecord(root.recovery, "$.recovery", diagnostics);
     const openai = parseRecord(root.openai, "$.openai", diagnostics);
 
     return {
@@ -329,6 +354,44 @@ export function parseCodexCoreConfigWithDiagnostics(
                     compaction.thresholdPercent,
                     DEFAULT_CODEX_CORE_CONFIG.compaction.thresholdPercent,
                     "$.compaction.thresholdPercent",
+                    diagnostics,
+                ),
+            },
+            recovery: {
+                enabled: parseBoolean(
+                    recovery.enabled,
+                    DEFAULT_CODEX_CORE_CONFIG.recovery.enabled,
+                    "$.recovery.enabled",
+                    diagnostics,
+                ),
+                batchFollowUps: parseBoolean(
+                    recovery.batchFollowUps,
+                    DEFAULT_CODEX_CORE_CONFIG.recovery.batchFollowUps,
+                    "$.recovery.batchFollowUps",
+                    diagnostics,
+                ),
+                maxAttempts: parseIntegerInRange(
+                    recovery.maxAttempts,
+                    DEFAULT_CODEX_CORE_CONFIG.recovery.maxAttempts,
+                    0,
+                    10,
+                    "$.recovery.maxAttempts",
+                    diagnostics,
+                ),
+                baseDelayMs: parseIntegerInRange(
+                    recovery.baseDelayMs,
+                    DEFAULT_CODEX_CORE_CONFIG.recovery.baseDelayMs,
+                    1_000,
+                    300_000,
+                    "$.recovery.baseDelayMs",
+                    diagnostics,
+                ),
+                maxDelayMs: parseIntegerInRange(
+                    recovery.maxDelayMs,
+                    DEFAULT_CODEX_CORE_CONFIG.recovery.maxDelayMs,
+                    1_000,
+                    900_000,
+                    "$.recovery.maxDelayMs",
                     diagnostics,
                 ),
             },
@@ -659,6 +722,29 @@ function parsePercent(
     if (parsed === undefined || !Number.isInteger(parsed) || parsed < 1 || parsed > 99) {
         diagnostics.push(
             makeConfigDiagnostic(path, "invalid", "Expected an integer from 1 to 99."),
+        );
+        return fallback;
+    }
+    return parsed;
+}
+
+function parseIntegerInRange(
+    value: unknown,
+    fallback: number,
+    minimum: number,
+    maximum: number,
+    path: string,
+    diagnostics: CodexConfigDiagnostic[],
+): number {
+    if (value === undefined) return fallback;
+    const parsed = parseWithSchema(NumberSchema, value);
+    if (parsed === undefined || !Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+        diagnostics.push(
+            makeConfigDiagnostic(
+                path,
+                "invalid",
+                `Expected an integer from ${minimum} to ${maximum}.`,
+            ),
         );
         return fallback;
     }

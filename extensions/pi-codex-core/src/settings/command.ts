@@ -186,6 +186,33 @@ function applyChangedConfigValues(
                 nextEffectiveConfig.compaction.thresholdPercent,
             ),
         },
+        recovery: {
+            enabled: changedValue(
+                globalConfig.recovery.enabled,
+                previousEffectiveConfig.recovery.enabled,
+                nextEffectiveConfig.recovery.enabled,
+            ),
+            batchFollowUps: changedValue(
+                globalConfig.recovery.batchFollowUps,
+                previousEffectiveConfig.recovery.batchFollowUps,
+                nextEffectiveConfig.recovery.batchFollowUps,
+            ),
+            maxAttempts: changedValue(
+                globalConfig.recovery.maxAttempts,
+                previousEffectiveConfig.recovery.maxAttempts,
+                nextEffectiveConfig.recovery.maxAttempts,
+            ),
+            baseDelayMs: changedValue(
+                globalConfig.recovery.baseDelayMs,
+                previousEffectiveConfig.recovery.baseDelayMs,
+                nextEffectiveConfig.recovery.baseDelayMs,
+            ),
+            maxDelayMs: changedValue(
+                globalConfig.recovery.maxDelayMs,
+                previousEffectiveConfig.recovery.maxDelayMs,
+                nextEffectiveConfig.recovery.maxDelayMs,
+            ),
+        },
         openai: {
             webSearchModel: changedValue(
                 globalConfig.openai.webSearchModel,
