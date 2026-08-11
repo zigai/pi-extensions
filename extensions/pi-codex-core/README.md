@@ -25,6 +25,10 @@ Model-aware Codex prompt mode uses the matching bundled GPT-5.6 Sol/Terra/Luna o
 
 Optional Codex remote compaction v2 replay supports OpenAI Codex responses models, with chaining, metadata, fallbacks, world-state injection, auto-compaction, and token-aware shrinking.
 
+### Outage Recovery
+
+In TUI and RPC sessions, transient Codex failures can resume after a bounded cooldown. Text follow-ups entered during an active Codex turn are delivered together after it settles, preventing each queued line from creating its own retry cycle.
+
 ### `/codex` Slash Command
 
 - Configure extension settings through a dedicated settings UI.
@@ -61,6 +65,11 @@ When Pi Toggles is active, Codex Core submits these tool settings as defaults in
 | `compaction.enabled`           | `true`          | Enable Codex-style conversation compaction.                                                  |
 | `compaction.auto`              | `true`          | Automatically compact when token usage reaches the threshold.                                |
 | `compaction.thresholdPercent`  | `80`            | Token usage percentage that triggers auto-compaction.                                        |
+| `recovery.enabled`             | `true`          | Resume transiently failed Codex turns after Pi exhausts its retries.                         |
+| `recovery.batchFollowUps`      | `true`          | Deliver text follow-ups entered during a Codex turn together after it settles.               |
+| `recovery.maxAttempts`         | `3`             | Maximum additional delayed resume attempts.                                                  |
+| `recovery.baseDelayMs`         | `30000`         | Initial recovery cooldown in milliseconds.                                                   |
+| `recovery.maxDelayMs`          | `120000`        | Maximum cooldown between recovery attempts.                                                  |
 | `openai.webSearchModel`        | `"current"`     | Model for `web_run`; `"current"` uses the active Codex model.                                |
 | `openai.imageModel`            | `"gpt-image-2"` | Model for `imagegen`.                                                                        |
 | `openai.imageDescriptionModel` | `"current"`     | Model for image descriptions; `"current"` uses the active Codex model.                       |
@@ -92,6 +101,13 @@ When Pi Toggles is active, Codex Core submits these tool settings as defaults in
     "enabled": true,
     "auto": true,
     "thresholdPercent": 80
+  },
+  "recovery": {
+    "enabled": true,
+    "batchFollowUps": true,
+    "maxAttempts": 3,
+    "baseDelayMs": 30000,
+    "maxDelayMs": 120000
   },
   "openai": {
     "webSearchModel": "current",
