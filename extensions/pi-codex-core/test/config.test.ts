@@ -26,6 +26,7 @@ test("parses codex config with safe defaults", () => {
         tools: { webSearch: false, webSearchMode: "indexed", viewImageDescriptions: true },
         prompt: { mode: "codex", personality: "friendly" },
         compaction: { enabled: true, auto: false, thresholdPercent: 90 },
+        recovery: { enabled: true, maxAttempts: 5, baseDelayMs: 15_000 },
         openai: { verbosity: "high", compactionReasoning: "low" },
     });
 
@@ -40,6 +41,11 @@ test("parses codex config with safe defaults", () => {
     assert.equal(config.compaction.enabled, true);
     assert.equal(config.compaction.auto, false);
     assert.equal(config.compaction.thresholdPercent, 90);
+    assert.equal(config.recovery.enabled, true);
+    assert.equal(config.recovery.batchFollowUps, true);
+    assert.equal(config.recovery.maxAttempts, 5);
+    assert.equal(config.recovery.baseDelayMs, 15_000);
+    assert.equal(config.recovery.maxDelayMs, 120_000);
     assert.equal(parseCodexCoreConfig({}).tools.webSearchMode, "live");
     assert.equal(
         parseCodexCoreConfig({ tools: { webSearchMode: "offline" } }).tools.webSearchMode,
@@ -97,6 +103,18 @@ test("rejects fractional compaction threshold percentages", () => {
             message: "Expected an integer from 1 to 99.",
         },
     ]);
+});
+
+test("rejects invalid recovery bounds", () => {
+    const result = parseCodexCoreConfigWithDiagnostics({
+        recovery: { maxAttempts: 11, baseDelayMs: 999, maxDelayMs: 900_001 },
+    });
+
+    assert.deepEqual(result.config.recovery, DEFAULT_CODEX_CORE_CONFIG.recovery);
+    assert.deepEqual(
+        result.diagnostics.map(({ path }) => path),
+        ["$.recovery.maxAttempts", "$.recovery.baseDelayMs", "$.recovery.maxDelayMs"],
+    );
 });
 
 test("reads codex config as optional defaults and scaffolds global files", async () => {
