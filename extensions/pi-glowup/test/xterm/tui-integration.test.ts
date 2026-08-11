@@ -14,6 +14,7 @@ import { getGlowupGlobalConfigPath } from "../../src/config/config.ts";
 import { buildPierreDiffPayload } from "../../src/diffs/diff.ts";
 import { configureAutocompleteCleanupPatch } from "../../src/patches/autocomplete-cleanup.ts";
 import { GlowupExtensionHarness } from "../support/extension-harness.ts";
+import { applyPatchOwnerToolDefinition } from "../support/apply-patch-owner-fixture.ts";
 import { VirtualTerminal } from "../support/virtual-terminal.ts";
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
@@ -143,7 +144,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             "call-xterm-stream",
             {},
             undefined,
-            undefined,
+            applyPatchOwnerToolDefinition,
             activeTui,
             cwd,
         );
@@ -181,7 +182,24 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         expect(pendingTerminal.screenText()).not.toContain("obsolete = 2");
 
         tool.setArgsComplete();
-        tool.updateResult({ content: [{ type: "text", text: "Done!" }], isError: false });
+        tool.updateResult({
+            content: [{ type: "text", text: "Done!" }],
+            details: {
+                inputPatch: currentPatch,
+                patch: "--- /dev/null\n+++ b/src/current.ts\n@@ -0,0 +1 @@\n+export const currentValue = 2;\n",
+                lineSummary: {
+                    files: [
+                        {
+                            action: "A",
+                            path: "src/current.ts",
+                            addedLines: 1,
+                            removedLines: 0,
+                        },
+                    ],
+                },
+            },
+            isError: false,
+        });
         activeTui.requestRender();
         await pendingTerminal.settle();
         const completed = pendingTerminal.screenText();
@@ -299,7 +317,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             "call-xterm-apply-split",
             { patch },
             undefined,
-            undefined,
+            applyPatchOwnerToolDefinition,
             activeTui,
             cwd,
         );
@@ -420,12 +438,41 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             "call-xterm-expand",
             { patch },
             undefined,
-            undefined,
+            applyPatchOwnerToolDefinition,
             activeTui,
             cwd,
         );
         tool.setArgsComplete();
-        tool.updateResult({ content: [], isError: false });
+        tool.updateResult({
+            content: [],
+            details: {
+                inputPatch: patch,
+                patch: `--- /dev/null
++++ b/src/expanded.ts
+@@ -0,0 +1,9 @@
++export const line1 = 1;
++export const line2 = 2;
++export const line3 = 3;
++export const line4 = 4;
++export const line5 = 5;
++export const line6 = 6;
++export const line7 = 7;
++export const line8 = 8;
++export const line9 = 9;
+`,
+                lineSummary: {
+                    files: [
+                        {
+                            action: "A",
+                            path: "src/expanded.ts",
+                            addedLines: 9,
+                            removedLines: 0,
+                        },
+                    ],
+                },
+            },
+            isError: false,
+        });
         activeTui.addChild(new LinesComponent(["BEFORE_TRANSCRIPT"]));
         activeTui.addChild(tool);
         activeTui.addChild(new LinesComponent(["AFTER_TRANSCRIPT"]));
@@ -484,12 +531,40 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             "call-xterm-style",
             { patch },
             undefined,
-            undefined,
+            applyPatchOwnerToolDefinition,
             activeTui,
             cwd,
         );
         tool.setArgsComplete();
-        tool.updateResult({ content: [], details: { pierreDiff: payload }, isError: false });
+        tool.updateResult({
+            content: [],
+            details: {
+                pierreDiff: payload,
+                inputPatch: patch,
+                patch: `--- a/src/colors.ts
++++ b/src/colors.ts
+@@ -1,4 +1,5 @@
+-const removedOnly = true;
+ const unchangedA = true;
++
+ const unchangedB = true;
+-const previousValue = 1;
++export const nextValue = 2;
++\treturn tabIndentedValue;
+`,
+                lineSummary: {
+                    files: [
+                        {
+                            action: "M",
+                            path: "src/colors.ts",
+                            addedLines: 3,
+                            removedLines: 2,
+                        },
+                    ],
+                },
+            },
+            isError: false,
+        });
         activeTui.addChild(tool);
         activeTui.addChild(new LinesComponent(["PLAIN_SENTINEL"]));
         terminal = pendingTerminal;
