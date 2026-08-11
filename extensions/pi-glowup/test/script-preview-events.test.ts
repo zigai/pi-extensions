@@ -77,4 +77,24 @@ describe("script preview events", () => {
 
         expect(sink.previews.has("stale-call")).toBe(false);
     });
+
+    it("does not format interpreter source inside composed Bash calls", async () => {
+        const sink = new RecordingPreviewSink();
+        let formatterCalls = 0;
+        const formatter: ScriptBlockFormatter = async () => {
+            formatterCalls += 1;
+            return "print('formatted')";
+        };
+
+        scheduleFormattedScriptPreview({
+            sink,
+            toolCallId: "mixed-call",
+            command: `cd app && python -c "print('raw')" && just test`,
+            formatter,
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(sink.previews.size).toBe(0);
+        expect(formatterCalls).toBe(0);
+    });
 });

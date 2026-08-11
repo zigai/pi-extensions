@@ -241,6 +241,48 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         expect(rawWrites).not.toContain("\t");
     });
 
+    it("keeps multi-step Bash chains separated across wide-narrow-wide redraws", async () => {
+        const pendingTerminal = new VirtualTerminal(110, 20);
+        const activeTui = createTui(pendingTerminal);
+        const tool = new ToolExecutionComponent(
+            "bash",
+            "call-xterm-bash-chain",
+            {
+                command: "uv run pytest feature/tests && just test feature && git status --short",
+            },
+            undefined,
+            undefined,
+            activeTui,
+            cwd,
+        );
+        tool.setArgsComplete();
+        activeTui.addChild(new LinesComponent(["BEFORE_BASH_CHAIN"]));
+        activeTui.addChild(tool);
+        activeTui.addChild(new LinesComponent(["AFTER_BASH_CHAIN"]));
+        terminal = pendingTerminal;
+        tui = activeTui;
+        activeTui.start();
+        await pendingTerminal.settle();
+
+        expect(rowContaining(pendingTerminal, "uv run pytest").text).not.toContain("&& just test");
+        expect(rowContaining(pendingTerminal, "&& just test feature").isWrapped).toBe(false);
+        expect(rowContaining(pendingTerminal, "&& git status --short").isWrapped).toBe(false);
+
+        pendingTerminal.resize(42, 20);
+        await pendingTerminal.settle();
+        expect(rowContaining(pendingTerminal, "&& just test feature").isWrapped).toBe(false);
+        expect(rowContaining(pendingTerminal, "&& git status --short").isWrapped).toBe(false);
+        expect(pendingTerminal.interpretedRows().some((row) => row.isWrapped)).toBe(false);
+
+        pendingTerminal.resize(110, 20);
+        await pendingTerminal.settle();
+        expect(rowContaining(pendingTerminal, "uv run pytest").text).not.toContain("&& just test");
+        expect(rowContaining(pendingTerminal, "&& just test feature").isWrapped).toBe(false);
+        expect(rowContaining(pendingTerminal, "&& git status --short").isWrapped).toBe(false);
+        expect(countOccurrences(pendingTerminal.screenText(), "BEFORE_BASH_CHAIN")).toBe(1);
+        expect(countOccurrences(pendingTerminal.screenText(), "AFTER_BASH_CHAIN")).toBe(1);
+    });
+
     it("removes and restores the Pierre split divider across wide-narrow-wide redraws", async () => {
         const pendingTerminal = new VirtualTerminal(180, 30);
         const activeTui = createTui(pendingTerminal);
@@ -550,7 +592,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
  const unchangedB = true;
 -const previousValue = 1;
 +export const nextValue = 2;
-+\treturn tabIndentedValue;
++	return tabIndentedValue;
 `,
                 lineSummary: {
                     files: [

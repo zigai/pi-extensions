@@ -388,6 +388,56 @@ describe("central syntax highlighting", () => {
         expect(rendered).not.toContain(`${STRING_RGB_CODE}mimport json, sys`);
     });
 
+    it("highlights single-quoted inline Python inside a composed Bash pipeline", () => {
+        const command = [
+            "printf '%s\\n' '8 read' '13 patch' | python3 -c 'import sys",
+            "for line in sys.stdin:",
+            "    value, name = line.split()",
+            '    print(f"{int(value):04d} {name}")',
+            "' | sort -nr | head -n 2",
+        ].join("\n");
+
+        const rendered = renderScriptCall(
+            plainTheme,
+            { label: "Bash", language: "bash", code: command },
+            { state: "success", expanded: true },
+        )
+            .render(180)
+            .join("\n");
+
+        expect(rendered).toContain("• Bash");
+        expect(rendered).toContain(`${TYPE_RGB_CODE}msys`);
+        expect(rendered).not.toContain(`${STRING_RGB_CODE}mimport sys`);
+        expect(rendered).toContain("| sort -nr | head -n 2");
+    });
+
+    it("places truncated JSON omission at the cut without invalid-syntax red", () => {
+        const output = JSON.stringify(
+            {
+                argv: ["--", "demo", "--verbose"],
+                count: 5,
+                kinds: { patch: 2, read: 2, write: 1 },
+                median_ms: 23,
+                slowest_ms: 41,
+            },
+            null,
+            2,
+        );
+        const rendered = renderGlowupOutput(piTheme, output, {
+            expanded: false,
+            maxPreviewLines: 5,
+            syntax: { language: "json" },
+        }).render(160);
+        const markerIndex = rendered.findIndex((line) => line.includes("lines ("));
+        const argvIndex = rendered.findIndex((line) => line.includes('"argv"'));
+        const slowestIndex = rendered.findIndex((line) => line.includes('"slowest_ms"'));
+
+        expect(argvIndex).toBeGreaterThanOrEqual(0);
+        expect(markerIndex).toBeGreaterThan(argvIndex);
+        expect(slowestIndex).toBeGreaterThan(markerIndex);
+        expect(rendered.join("\n")).not.toContain(`\u001b[${TOML_INVALID_RGB_CODE}m`);
+    });
+
     it("highlights code output previews when a path is known", () => {
         const rendered = renderGlowupOutput(plainTheme, "const value = 1;", {
             expanded: false,

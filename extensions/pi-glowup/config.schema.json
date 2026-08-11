@@ -447,6 +447,27 @@
           "minimum": 4,
           "description": "Collapsed script content rows before a separate omission row."
         },
+        "showPrologueOmission": {
+          "type": "boolean",
+          "description": "Show a count row when collapsed previews omit leading setup imports."
+        },
+        "shellLayout": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "preserve"
+            },
+            {
+              "type": "string",
+              "const": "auto"
+            },
+            {
+              "type": "string",
+              "const": "always"
+            }
+          ],
+          "description": "Choose when composed Bash commands are reflowed at safe syntax boundaries."
+        },
         "formatters": {
           "type": "object",
           "patternProperties": {
@@ -466,6 +487,8 @@
       "default": {
         "headerLayout": "auto",
         "maxCodePreviewLines": 8,
+        "showPrologueOmission": false,
+        "shellLayout": "auto",
         "formatters": {}
       }
     }

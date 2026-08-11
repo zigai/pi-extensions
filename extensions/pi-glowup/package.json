@@ -59,7 +59,8 @@
     "@pierre/diffs": "1.2.12",
     "@zigai/pi-extension-settings": "0.4.1",
     "ansi-styles": "^6.2.3",
-    "shiki": "^4.3.0"
+    "shiki": "^4.3.0",
+    "unbash": "4.0.10"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.84.0",

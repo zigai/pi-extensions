@@ -365,9 +365,9 @@ describe("Glowup rendering helpers", () => {
             "  └ one",
             "    two",
             "    three",
+            "    … +5 lines (hint)",
             "    nine",
             "    ten",
-            "    … +5 lines (hint)",
         ]);
     });
 
@@ -446,9 +446,9 @@ describe("Glowup rendering helpers", () => {
             "  └ start",
             "    line 1",
             "    line 2",
+            "    … +17 lines (hint)",
             "    line 20",
             "    Command exited with code 2",
-            "    … +17 lines (hint)",
         ]);
     });
 
@@ -671,6 +671,35 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).not.toContain("<toolDiffRemoved>os</toolDiffRemoved>");
     });
 
+    it("styles compound-shell reserved words consistently as keywords", () => {
+        const command =
+            `for item in alpha beta; do if test "${"${#item}"}" -gt 4; then echo long; ` +
+            `else echo short; fi; done | sort && case "$(uname -s)" in Linux) echo linux;; esac`;
+        const rendered = renderScriptCall(
+            tokenTheme,
+            { label: "Bash", language: "bash", code: command },
+            { state: "success", expanded: true },
+        )
+            .render(320)
+            .join("\n");
+
+        for (const keyword of [
+            "for",
+            "in",
+            "do",
+            "if",
+            "then",
+            "else",
+            "fi",
+            "done",
+            "case",
+            "esac",
+        ]) {
+            expect(rendered).toContain(`<syntaxKeyword>${keyword}</syntaxKeyword>`);
+            expect(rendered).not.toContain(`<syntaxFunction>${keyword}</syntaxFunction>`);
+        }
+    });
+
     it("parses partial heredoc scripts before the closing marker arrives", () => {
         expect(parseScriptInvocation("python - <<'PY'\nprint('hi')")).toEqual({
             label: "Python",
@@ -749,6 +778,74 @@ describe("Glowup rendering helpers", () => {
         });
     });
 
+    it("parses node print scripts as executable language blocks", () => {
+        expect(parseScriptInvocation(`node --print="require.resolve('tsx')"`)).toEqual({
+            label: "Node",
+            language: "javascript",
+            code: "require.resolve('tsx')",
+        });
+    });
+
+    it("parses TypeScript-family eval scripts as executable language blocks", () => {
+        expect(parseScriptInvocation(`npx tsx -e "console.log('typed')"`)).toEqual({
+            label: "TypeScript",
+            language: "typescript",
+            code: "console.log('typed')",
+        });
+        expect(parseScriptInvocation(`bun --eval "console.log('bun')"`)).toEqual({
+            label: "Bun",
+            language: "typescript",
+            code: "console.log('bun')",
+        });
+        expect(parseScriptInvocation(`deno eval "console.log('deno')"`)).toEqual({
+            label: "Deno",
+            language: "typescript",
+            code: "console.log('deno')",
+        });
+        expect(parseScriptInvocation(`deno eval --ext=ts "const value: number = 1"`)).toEqual({
+            label: "Deno",
+            language: "typescript",
+            code: "const value: number = 1",
+        });
+    });
+
+    it("parses direct interpreter wrappers but not nested command arguments", () => {
+        expect(
+            parseScriptInvocation(`MODE=test uv run --with rich python -c "print('ok')"`),
+        ).toEqual({
+            label: "Python",
+            language: "python",
+            code: "print('ok')",
+        });
+        expect(parseScriptInvocation(`pnpm exec tsx -e "console.log('ok')"`)).toEqual({
+            label: "TypeScript",
+            language: "typescript",
+            code: "console.log('ok')",
+        });
+        expect(
+            parseScriptInvocation(
+                `uv run env NODE_PATH=./node_modules node --input-type=module -e "console.log('ok')"`,
+            ),
+        ).toEqual({
+            label: "Node",
+            language: "javascript",
+            code: "console.log('ok')",
+        });
+        expect(
+            parseScriptInvocation(
+                `uv run --offline --no-project python -c 'import sys\nprint(sys.argv)' -- demo --verbose`,
+            ),
+        ).toEqual({
+            label: "Python",
+            language: "python",
+            code: "import sys\nprint(sys.argv)",
+        });
+        expect(parseScriptInvocation(`xargs node -e "console.log('nested')"`)).toBeUndefined();
+        expect(
+            parseScriptInvocation(`find . -exec node -e "console.log('nested')"`),
+        ).toBeUndefined();
+    });
+
     it("parses shell-wrapped node eval scripts as executable language blocks", () => {
         expect(parseScriptInvocation(`bash -lc 'node --eval="console.log(1)"'`)).toEqual({
             label: "Node",
@@ -774,6 +871,11 @@ describe("Glowup rendering helpers", () => {
     it("does not parse inline scripts with trailing shell commands as executable blocks", () => {
         expect(
             parseScriptInvocation(`python -c "print('hi')" && rm -f tmp/demo.py`),
+        ).toBeUndefined();
+        expect(
+            parseScriptInvocation(
+                `node -e 'process.stderr.write("diagnostic")' 2>/dev/null || true`,
+            ),
         ).toBeUndefined();
     });
 
@@ -975,7 +1077,7 @@ describe("Glowup rendering helpers", () => {
         ]);
     });
 
-    it("hides leading import blocks in collapsed previews", () => {
+    it("silently hides leading import blocks by default and restores them when expanded", () => {
         const invocation = parseScriptInvocation(
             "python - <<'PY'\nfrom __future__ import annotations\nimport ast\nfrom pathlib import Path\n\nroot = Path('.')\nprint(root)\nprint(ast)\nprint('done')\nPY",
         );
@@ -999,8 +1101,28 @@ describe("Glowup rendering helpers", () => {
             .join("\n");
 
         expect(collapsed).toContain("root");
+        expect(collapsed).not.toContain("import/setup lines omitted");
         expect(collapsed).not.toContain("pathlib");
         expect(expanded).toContain("pathlib");
+    });
+
+    it("optionally shows the leading import omission count", () => {
+        const invocation = parseScriptInvocation(
+            "python - <<'PY'\nimport ast\nfrom pathlib import Path\n\nroot = Path('.')\nprint(root)\nprint(ast)\nprint('done')\nPY",
+        );
+        if (!invocation) throw new Error("expected script invocation");
+
+        const collapsed = renderScriptCall(plainTheme, invocation, {
+            state: "success",
+            expanded: false,
+            maxCodePreviewLines: 4,
+            showPrologueOmission: true,
+        })
+            .render(120)
+            .join("\n");
+
+        expect(collapsed).toContain("… 3 import/setup lines omitted");
+        expect(collapsed).not.toContain("pathlib");
     });
 
     it("keeps huge collapsed script previews compact", () => {
@@ -1020,11 +1142,29 @@ describe("Glowup rendering helpers", () => {
 
         expect(rendered).toContain("print(1)");
         expect(rendered).toContain("print(5)");
-        expect(rendered).toContain("… +1995 lines (truncated)");
+        expect(rendered).toContain("… +1995 lines (to expand)");
         expect(rendered).not.toContain("print(1000)");
     });
 
-    it("marks collapsed script call previews as truncated instead of expandable", () => {
+    it("bounds soft-wrapped single-line script previews by rendered rows", () => {
+        const component = renderScriptCall(
+            plainTheme,
+            {
+                label: "Python",
+                language: "python",
+                code: `print(${JSON.stringify("minified ".repeat(300))})`,
+            },
+            { state: "success", expanded: false, maxCodePreviewLines: 5 },
+        );
+
+        const rendered = component.render(44);
+
+        expect(rendered).toHaveLength(6);
+        expect(rendered.at(-1)).toContain("… preview truncated");
+        expect(rendered.every((line) => visibleWidth(line) <= 44)).toBe(true);
+    });
+
+    it("marks collapsed script call previews with the configured expansion hint", () => {
         const component = renderScriptCall(
             plainTheme,
             {
@@ -1039,8 +1179,7 @@ describe("Glowup rendering helpers", () => {
 
         const rendered = component.render(100).join("\n");
 
-        expect(rendered).toContain("… +7 lines (truncated)");
-        expect(rendered).not.toContain("to expand");
+        expect(rendered).toContain("… +7 lines (to expand)");
     });
 
     it("keeps Python imports when the complete short script fits", () => {

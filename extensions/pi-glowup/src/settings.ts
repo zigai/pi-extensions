@@ -55,6 +55,8 @@ const DEFAULT_PATCHES = {
 const DEFAULT_SCRIPT_PREVIEW = {
     headerLayout: "auto",
     maxCodePreviewLines: 8,
+    showPrologueOmission: false,
+    shellLayout: "auto",
     formatters: {},
 } as const;
 
@@ -283,6 +285,16 @@ const scriptPreviewSchema = Type.Object(
             minimum: 4,
             description: "Collapsed script content rows before a separate omission row.",
         }),
+        showPrologueOmission: Type.Boolean({
+            description: "Show a count row when collapsed previews omit leading setup imports.",
+        }),
+        shellLayout: Type.Union(
+            [Type.Literal("preserve"), Type.Literal("auto"), Type.Literal("always")],
+            {
+                description:
+                    "Choose when composed Bash commands are reflowed at safe syntax boundaries.",
+            },
+        ),
         formatters: Type.Record(Type.String(), formatterCommandSchema, {
             description: "Commands that format script previews through stdin/stdout.",
         }),

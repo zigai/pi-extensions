@@ -3,6 +3,7 @@ import { visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { expect } from "vitest";
 import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
+import { reflowBashCommand } from "../src/script-preview/bash-analysis.ts";
 
 const PROPERTY_SEED = 0x5eed_2026;
 const PROPERTY_RUNS = 60;
@@ -34,6 +35,22 @@ const writeScenarioArbitrary = fc.record({
     }),
     truncateAt: fc.integer({ min: 0, max: atomicLines.length - 1 }),
     rewrittenSuffix: fc.constantFrom("REWRITTEN_ONE", "REWRITTEN_TWO", "REWRITTEN_🧪"),
+});
+
+const shellChainArbitrary = fc.record({
+    commands: fc.array(
+        fc
+            .array(fc.constantFrom("alpha", "beta", "gamma", "--flag", "value", "path/file"), {
+                minLength: 1,
+                maxLength: 5,
+            })
+            .map((words) => words.join(" ")),
+        { minLength: 2, maxLength: 12 },
+    ),
+    operators: fc.array(fc.constantFrom("&&" as const, "||" as const), {
+        minLength: 1,
+        maxLength: 11,
+    }),
 });
 
 function rotatedAtomicLines(rotation: number): readonly string[] {
@@ -124,3 +141,27 @@ test.prop([writeScenarioArbitrary], {
         }
     },
 );
+
+test.prop([shellChainArbitrary], {
+    seed: PROPERTY_SEED + 3,
+    numRuns: PROPERTY_RUNS,
+})("preserves every generated top-level shell-chain segment and operator", (scenario) => {
+    const command = scenario.commands
+        .map((part, index) => {
+            if (index === 0) return part;
+            const operator = scenario.operators[(index - 1) % scenario.operators.length] ?? "&&";
+            return `${operator} ${part}`;
+        })
+        .join(" ");
+    const expectedLines = [scenario.commands[0] ?? ""];
+    for (const [index, part] of scenario.commands.slice(1).entries()) {
+        const operator = scenario.operators[index % scenario.operators.length] ?? "&&";
+        if (operator === "&&") {
+            expectedLines.push(`${operator} ${part}`);
+        } else {
+            expectedLines[expectedLines.length - 1] += ` ${operator} ${part}`;
+        }
+    }
+    const expected = expectedLines.length > 1 ? expectedLines.join("\n") : undefined;
+    expect(reflowBashCommand(command)).toBe(expected);
+});

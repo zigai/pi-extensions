@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import type { ScriptInvocation } from "../rendering/core.ts";
 
@@ -31,6 +32,8 @@ const FORMATTER_MAX_BUFFER = 1024 * 1024;
 const FORMATTER_MAX_INPUT_BYTES = 64 * 1024;
 const MAX_CONCURRENT_FORMATTERS = 2;
 const MAX_QUEUED_FORMATTERS = 20;
+const MAX_FORMATTER_CACHE_ENTRIES = 300;
+const MAX_FORMATTER_CACHE_BYTES = 4 * 1024 * 1024;
 
 type FormatterQueueEntry = {
     readonly signal: AbortSignal | undefined;
@@ -251,7 +254,25 @@ export function createCommandScriptFormatter(
         return undefined;
     }
 
+    const cache = new Map<string, { readonly output: string; readonly bytes: number }>();
+    let cacheBytes = 0;
+
+    const remember = (key: string, output: string): void => {
+        const bytes = Buffer.byteLength(output, "utf8");
+        if (bytes > MAX_FORMATTER_CACHE_BYTES) return;
+        cache.set(key, { output, bytes });
+        cacheBytes += bytes;
+        while (cache.size > MAX_FORMATTER_CACHE_ENTRIES || cacheBytes > MAX_FORMATTER_CACHE_BYTES) {
+            const oldest = cache.keys().next().value;
+            if (typeof oldest !== "string") break;
+            const removed = cache.get(oldest);
+            cache.delete(oldest);
+            cacheBytes = Math.max(0, cacheBytes - (removed?.bytes ?? 0));
+        }
+    };
+
     return async (input, options = {}) => {
+        if (options.signal?.aborted === true) return undefined;
         const command = commands.get(input.language);
         if (command === undefined) {
             return undefined;
@@ -264,6 +285,14 @@ export function createCommandScriptFormatter(
         if (executable === undefined) {
             return undefined;
         }
+
+        const cacheKey = createHash("sha256")
+            .update(input.language)
+            .update("\0")
+            .update(input.code)
+            .digest("hex");
+        const cached = cache.get(cacheKey);
+        if (cached !== undefined) return cached.output;
 
         const release = await acquireFormatterSlot(options);
         if (release === undefined) {
@@ -281,7 +310,9 @@ export function createCommandScriptFormatter(
         }
 
         const formatted = normalizeCode(output);
-        return formatted.trim().length > 0 ? formatted : undefined;
+        if (formatted.trim().length === 0) return undefined;
+        remember(cacheKey, formatted);
+        return formatted;
     };
 }
 

@@ -33,6 +33,9 @@ show the coordinate belonging to each pane before its change marker, matching Hu
 Completed writes, edits, deletes, and compatible patch tools use the same mutation policy. The
 default `full` view renders every available diff row. Pierre-backed native edits and completed
 `apply_patch` calls also use the existing width policy to select a unified or side-by-side layout.
+The default `content-aware` policy uses split layout only when every source row fits one physical
+row in both panes; otherwise it falls back to unified. The explicit `fixed` policy keeps the legacy
+width threshold and may wrap pane content.
 Use `preview` to restore the bounded six-row view with an expansion hint. Active streaming previews
 remain bounded while arguments are still arriving.
 
@@ -90,6 +93,8 @@ For compatibility with the previous appearance, `addedRowBackground` and
 | `patches.thirdPartyToolRenderers`         | `true`           | Apply compact renderers to compatible third-party tools.        |
 | `scriptPreview.headerLayout`              | `"auto"`         | Choose `auto`, `inline`, or `block` script headers.             |
 | `scriptPreview.maxCodePreviewLines`       | `8`              | Collapsed script content rows before a separate omission row.   |
+| `scriptPreview.showPrologueOmission`      | `false`          | Show a count row for omitted leading setup imports.             |
+| `scriptPreview.shellLayout`               | `"auto"`         | Choose when composed Bash commands are safely reflowed.         |
 | `scriptPreview.formatters`                | `{}`             | Commands that format script previews through stdin/stdout.      |
 
 ## Full default configuration
@@ -153,6 +158,8 @@ For compatibility with the previous appearance, `addedRowBackground` and
   "scriptPreview": {
     "headerLayout": "auto",
     "maxCodePreviewLines": 8,
+    "showPrologueOmission": false,
+    "shellLayout": "auto",
     "formatters": {}
   }
 }

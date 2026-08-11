@@ -32,14 +32,12 @@ export function rememberRawScriptPreview(
 /** Formats and stores a script preview after the final bash command is known. */
 async function formatAndStoreScriptPreview(options: FormatScriptPreviewOptions): Promise<void> {
     const script = parseScriptInvocation(options.command);
-    if (script === undefined || options.formatter === undefined) {
-        return;
-    }
-
+    if (options.formatter === undefined || script === undefined) return;
+    const formatterOptions = options.signal === undefined ? {} : { signal: options.signal };
     const formattedScript = await formatScriptInvocation(
         script,
         options.formatter,
-        options.signal === undefined ? {} : { signal: options.signal },
+        formatterOptions,
     );
     if (formattedScript.code !== script.code && (options.isCurrent?.() ?? true)) {
         options.sink.set(options.toolCallId, boundedScriptPreview(formattedScript));

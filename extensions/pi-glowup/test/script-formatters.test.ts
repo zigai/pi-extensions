@@ -99,6 +99,28 @@ describe("script formatter settings", () => {
         ).resolves.toEqual({ label: "Python", language: "python", code });
     });
 
+    it("reuses successful formatting for identical language source", async () => {
+        const formatter = createCommandScriptFormatter(
+            new Map([
+                [
+                    "python",
+                    [
+                        process.execPath,
+                        "-e",
+                        "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(process.pid+':'+s))",
+                    ],
+                ],
+            ]),
+        );
+        const invocation = { label: "Python", language: "python", code: "print(1)" };
+
+        const first = await formatScriptInvocation(invocation, formatter);
+        const second = await formatScriptInvocation(invocation, formatter);
+
+        expect(second.code).toBe(first.code);
+        expect(first.code).toMatch(/^\d+:print\(1\)$/u);
+    });
+
     it("falls back when command formatters fail or return empty output", async () => {
         const invocation = { label: "Python", language: "python", code: "print(1)" };
         const failingFormatter = createCommandScriptFormatter(

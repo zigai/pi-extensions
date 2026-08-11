@@ -66,6 +66,8 @@ describe("glowup config", () => {
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
+        expect(config.scriptShowPrologueOmission).toBe(false);
+        expect(config.shellLayout).toBe("auto");
         expect(config.toolCallIndicator).toEqual({ symbol: "•", bold: true });
         expect(config.toolLabels.mode).toBe("static");
         expect(config.writePreview).toEqual({ movingViewport: true });
@@ -175,6 +177,18 @@ describe("glowup config", () => {
         });
 
         expect(config.toolCallIndicator).toEqual({ symbol: "▸", bold: false });
+    });
+
+    it("parses script preview display options", () => {
+        const config = parseGlowupConfig({
+            scriptPreview: {
+                showPrologueOmission: true,
+                shellLayout: "always",
+            },
+        });
+
+        expect(config.scriptShowPrologueOmission).toBe(true);
+        expect(config.shellLayout).toBe("always");
     });
 
     it("allows bracket pair coloring to be disabled", () => {

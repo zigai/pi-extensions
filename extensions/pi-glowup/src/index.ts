@@ -49,6 +49,7 @@ import {
     type ReadActionArgs,
     type ScriptPreviewHeaderLayout,
 } from "./rendering/core.ts";
+import { renderBashCommandCall } from "./rendering/bash-call.ts";
 import { captureDeletedTextPreview, type DeletedTextPreview } from "./rendering/delete-preview.ts";
 import {
     isActiveToolCall,
@@ -133,6 +134,22 @@ const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-glowup.extension-loaded");
 const builtInRenderCallCounts: Record<string, number> = {};
 const builtInRenderResultCounts: Record<string, number> = {};
 const streamingScriptIdentities = new StreamingScriptIdentityStore();
+const bashRenderInvalidations = new Map<string, () => void>();
+const MAX_BASH_RENDER_INVALIDATIONS = 300;
+
+function rememberBashRenderInvalidation(
+    toolCallId: string,
+    invalidate: (() => void) | undefined,
+): void {
+    if (invalidate === undefined) return;
+    bashRenderInvalidations.delete(toolCallId);
+    bashRenderInvalidations.set(toolCallId, invalidate);
+    while (bashRenderInvalidations.size > MAX_BASH_RENDER_INVALIDATIONS) {
+        const oldest = bashRenderInvalidations.keys().next().value;
+        if (typeof oldest !== "string") return;
+        bashRenderInvalidations.delete(oldest);
+    }
+}
 
 function recordBuiltInRender(kind: "call" | "result", toolName: BuiltInToolName): void {
     const counts = kind === "call" ? builtInRenderCallCounts : builtInRenderResultCounts;
@@ -222,6 +239,8 @@ function configDiagnostics(config: GlowupConfig): DebugLogFields {
         scriptPreview: {
             headerLayout: config.scriptHeaderLayout,
             maxCodePreviewLines: config.scriptMaxCodePreviewLines,
+            showPrologueOmission: config.scriptShowPrologueOmission,
+            shellLayout: config.shellLayout,
             formatterCount: config.scriptFormatters.size,
         },
         toolLabels: {
@@ -536,6 +555,8 @@ function scriptPreviewHeaderLayout(config: GlowupConfig): ScriptPreviewHeaderLay
 function renderBuiltInToolCall(options: {
     readonly headerLayout: () => ScriptPreviewHeaderLayout;
     readonly maxCodePreviewLines: () => number;
+    readonly showPrologueOmission: () => boolean;
+    readonly shellLayout: () => GlowupConfig["shellLayout"];
     readonly labelMode: ToolLabelMode;
     readonly movingWriteViewport: boolean;
     readonly mutationSettings: MutationSettings;
@@ -583,6 +604,8 @@ function renderBuiltInToolCall(options: {
                     context,
                     options.headerLayout,
                     options.maxCodePreviewLines,
+                    options.showPrologueOmission,
+                    options.shellLayout,
                 );
             case "write":
                 return renderWriteCall(args, theme, context, {
@@ -817,8 +840,11 @@ function renderBashCall(
     context: BuiltInRenderContext,
     headerLayout: () => ScriptPreviewHeaderLayout,
     maxCodePreviewLines: () => number,
+    showPrologueOmission: () => boolean,
+    shellLayout: () => GlowupConfig["shellLayout"],
 ) {
     registerExplorationBoundary(context.toolCallId);
+    rememberBashRenderInvalidation(context.toolCallId, context.invalidate);
     const state = context.isError ? "error" : context.isPartial ? "running" : "success";
     const command = commandField(args) ?? "";
     if (
@@ -836,37 +862,28 @@ function renderBashCall(
             state,
             expanded: false,
             maxCodePreviewLines: maxCodePreviewLines(),
+            showPrologueOmission: showPrologueOmission(),
             headerLayout: headerLayout(),
             invalidate: context.invalidate,
         });
     }
-    const parsedScript = parseScriptInvocation(
-        context.expanded ? command : partialBashCommandPreview(command),
-    );
+    const displayCommand = context.argsComplete ? command : partialBashCommandPreview(command);
+    const parsedScript = parseScriptInvocation(displayCommand);
     const script =
         scriptPreviews.get(context.toolCallId) ??
-        (context.expanded
-            ? (parsedScript ?? {
-                  label: "Bash",
-                  language: "bash",
-                  code: command,
-              })
-            : boundedScriptPreview(
-                  parsedScript ?? {
-                      label: "Bash",
-                      language: "bash",
-                      code: partialBashCommandPreview(command),
-                  },
-              ));
-    const stableScript = streamingScriptIdentities.has(context.toolCallId)
-        ? streamingScriptIdentities.lock(context.toolCallId, script)
+        (parsedScript === undefined ? undefined : boundedScriptPreview(parsedScript));
+    const stableScript = context.argsComplete
+        ? streamingScriptIdentities.finalize(context.toolCallId, script)
         : script;
-    return renderScriptCall(theme, stableScript, {
+    return renderBashCommandCall(theme, displayCommand, {
         state,
         expanded: context.expanded,
         maxCodePreviewLines: maxCodePreviewLines(),
+        showPrologueOmission: showPrologueOmission(),
         headerLayout: headerLayout(),
-        invalidate: context.invalidate,
+        shellLayout: shellLayout(),
+        ...(stableScript === undefined ? {} : { pureScriptOverride: stableScript }),
+        ...(context.invalidate === undefined ? {} : { invalidate: context.invalidate }),
     });
 }
 
@@ -1112,6 +1129,7 @@ function clearSessionState(): void {
     nativeEditPierrePayloads.clear();
     editPreviews.clear();
     scriptPreviews.clear();
+    bashRenderInvalidations.clear();
     streamingScriptIdentities.clear();
     explorationGroups.clear();
     clearQueuedDiffHighlights();
@@ -1239,6 +1257,8 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
             renderCall: renderBuiltInToolCall({
                 headerLayout: () => headerLayout,
                 maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
+                showPrologueOmission: () => config.scriptShowPrologueOmission,
+                shellLayout: () => config.shellLayout,
                 labelMode: config.toolLabels.mode,
                 movingWriteViewport: config.writePreview.movingViewport,
                 mutationSettings: config.mutations,
@@ -1329,7 +1349,10 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
                     formatter,
                     ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
                     isCurrent: () => sessionGeneration === formatterGeneration,
-                    invalidate: () => refreshToolRows(ctx),
+                    invalidate: () => {
+                        bashRenderInvalidations.get(event.toolCallId)?.();
+                        refreshToolRows(ctx);
+                    },
                 });
                 scheduledFormattedPreview = formatter !== undefined;
             }

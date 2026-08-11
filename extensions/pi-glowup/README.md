@@ -56,6 +56,8 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `patches.thirdPartyToolRenderers` | boolean | `true` | Apply compact renderers to compatible third-party tools. |
 | `scriptPreview.headerLayout` | `auto` \| `inline` \| `block` | `"auto"` | Choose auto, inline, or block script headers. |
 | `scriptPreview.maxCodePreviewLines` | integer | `8` | Collapsed script content rows before a separate omission row. |
+| `scriptPreview.showPrologueOmission` | boolean | `false` | Show a count row when collapsed previews omit leading setup imports. |
+| `scriptPreview.shellLayout` | `preserve` \| `auto` \| `always` | `"auto"` | Choose when composed Bash commands are reflowed at safe syntax boundaries. |
 | `scriptPreview.formatters` | Record<string, string[]> | `{}` | Commands that format script previews through stdin/stdout. |
 
 ```json
@@ -124,6 +126,8 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
   "scriptPreview": {
     "headerLayout": "auto",
     "maxCodePreviewLines": 8,
+    "showPrologueOmission": false,
+    "shellLayout": "auto",
     "formatters": {}
   }
 }

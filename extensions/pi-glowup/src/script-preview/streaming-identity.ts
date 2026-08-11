@@ -14,6 +14,18 @@ export class StreamingScriptIdentityStore {
         return this.lock(toolCallId, parsed);
     }
 
+    /** Replaces any speculative streaming identity with the completed command's identity. */
+    finalize(
+        toolCallId: string,
+        script: ScriptInvocation | undefined,
+    ): ScriptInvocation | undefined {
+        this.identities.delete(toolCallId);
+        if (script === undefined || script.label === "Bash") return undefined;
+        this.identities.set(toolCallId, { label: script.label, language: script.language });
+        this.evictOldest();
+        return script;
+    }
+
     lock(toolCallId: string, script: ScriptInvocation): ScriptInvocation {
         let identity = this.identities.get(toolCallId);
         if (identity === undefined) {

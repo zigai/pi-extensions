@@ -25,6 +25,7 @@ import {
     neutralizeTerminalControls,
     truncateUtf8ByGrapheme,
 } from "../text-boundaries.ts";
+import { omitLeadingImportPrologue } from "../script-preview/prologue.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
@@ -256,6 +257,10 @@ function shellFlag(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "syntaxKeyword", text);
 }
 
+function shellKeyword(theme: GlowupRenderTheme, text: string): string {
+    return fg(theme, "syntaxKeyword", text);
+}
+
 function shellString(theme: GlowupRenderTheme, text: string): string {
     return fg(theme, "syntaxString", text);
 }
@@ -299,6 +304,39 @@ const INTERPRETER_SHELL_COMMANDS = new Set([
 ]);
 
 const WRAPPER_SHELL_COMMANDS = new Set(["command", "doas", "env", "exec", "sudo", "time"]);
+
+const SHELL_RESERVED_WORDS = new Set([
+    "case",
+    "coproc",
+    "do",
+    "done",
+    "elif",
+    "else",
+    "esac",
+    "fi",
+    "for",
+    "function",
+    "if",
+    "in",
+    "select",
+    "then",
+    "time",
+    "until",
+    "while",
+]);
+
+const SHELL_KEYWORDS_EXPECTING_COMMAND = new Set([
+    "coproc",
+    "do",
+    "elif",
+    "else",
+    "function",
+    "if",
+    "then",
+    "time",
+    "until",
+    "while",
+]);
 
 const BOOLEAN_LONG_FLAGS = new Set([
     "all",
@@ -579,7 +617,7 @@ function collapsedPreviewLines(
     const tailCount = Math.floor(lineBudget / 2);
     const tailLines = tailCount === 0 ? [] : lines.slice(lines.length - tailCount);
     const omitted = lines.length - headCount - tailLines.length;
-    return [...lines.slice(0, headCount), ...tailLines, `… +${omitted} lines (${omittedHint})`];
+    return [...lines.slice(0, headCount), `… +${omitted} lines (${omittedHint})`, ...tailLines];
 }
 
 type CollapsedTextPreview =
@@ -700,8 +738,8 @@ function collapsedPreviewLinesFromText(
         isEmpty: false,
         lines: [
             ...headLines,
-            ...tailLines,
             `… +${lineCount - headLines.length - tailLines.length} lines (${omittedHint})`,
+            ...tailLines,
         ],
     };
 }
@@ -743,6 +781,7 @@ function detachedPreviewLine(line: string, maxBytes: number): string {
 function isPreviewMetaLine(line: string): boolean {
     return (
         line.startsWith("… +") ||
+        /^… \d+ import\/setup lines omitted$/u.test(line) ||
         line === "… command preview truncated while streaming" ||
         line === "… preview truncated" ||
         line === "… script preview truncated" ||
@@ -999,8 +1038,8 @@ function renderCollapsedWrappedPreview(
     if (allContent.length <= options.rowBudget) {
         return [
             ...before,
+            marker(before.length === 0 ? options.prefixFirst : options.prefixRest),
             ...after,
-            marker(allContent.length === 0 ? options.prefixFirst : options.prefixRest),
         ];
     }
 
@@ -1011,9 +1050,10 @@ function renderCollapsedWrappedPreview(
 
     const headCount = Math.ceil(options.rowBudget / 2);
     const tailCount = Math.floor(options.rowBudget / 2);
-    const head = allContent.slice(0, headCount);
-    const tail = tailCount === 0 ? [] : allContent.slice(allContent.length - tailCount);
-    return [...head, ...tail, marker(options.prefixRest)];
+    const head = (metaIndex === -1 ? allContent : before).slice(0, headCount);
+    const tailSource = metaIndex === -1 ? allContent : after;
+    const tail = tailCount === 0 ? [] : tailSource.slice(tailSource.length - tailCount);
+    return [...head, marker(head.length === 0 ? options.prefixFirst : options.prefixRest), ...tail];
 }
 
 export function renderGlowupOutput(
@@ -1077,8 +1117,12 @@ export function renderGlowupOutput(
             retained.kind === "expanded"
                 ? previewLines(rawLines, true, maxPreviewLines, mode, omittedHint)
                 : [...rawLines];
+        const suppressTruncatedJsonHighlighting =
+            retained.kind === "collapsed" &&
+            visible.some(isPreviewMetaLine) &&
+            (syntax?.language?.toLowerCase() === "json" || /\.jsonc?$/iu.test(syntax?.path ?? ""));
         const displayLines =
-            syntax === undefined
+            syntax === undefined || suppressTruncatedJsonHighlighting
                 ? visible
                 : retained.kind === "expanded"
                   ? previewLines(
@@ -1302,13 +1346,7 @@ function scriptInterpreterForWord(word: string): ScriptInterpreter | undefined {
 }
 
 function detectScriptInterpreter(prefix: string): ScriptInterpreter | undefined {
-    for (const word of prefix.split(/\s+/).filter((item) => item.length > 0)) {
-        const interpreter = scriptInterpreterForWord(word);
-        if (interpreter) {
-            return interpreter;
-        }
-    }
-    return undefined;
+    return directScriptInterpreter(tokenizeShellWords(prefix))?.interpreter;
 }
 
 function normalizeCodeForDisplay(code: string): string {
@@ -1524,22 +1562,34 @@ function buildScriptInvocation(prefix: string, code: string): ScriptInvocation |
     return buildScriptInvocationForInterpreter(interpreter, code);
 }
 
-function tokenizeShellWords(command: string): string[] {
-    const words: string[] = [];
-    let current = "";
+type ShellLexeme = {
+    readonly kind: "word" | "separator" | "redirection";
+    readonly source: string;
+    readonly start: number;
+    readonly end: number;
+};
+
+function tokenizeShellLexemes(command: string): ShellLexeme[] {
+    const lexemes: ShellLexeme[] = [];
+    let wordStart: number | undefined;
     let quote: "'" | '"' | undefined;
     let escaped = false;
 
-    const pushCurrent = (): void => {
-        if (current.length > 0) {
-            words.push(current);
-            current = "";
+    const pushWord = (end: number): void => {
+        if (wordStart !== undefined) {
+            lexemes.push({
+                kind: "word",
+                source: command.slice(wordStart, end),
+                start: wordStart,
+                end,
+            });
+            wordStart = undefined;
         }
     };
 
-    for (const char of command) {
+    for (let index = 0; index < command.length; index += 1) {
+        const char = command[index] ?? "";
         if (quote !== undefined) {
-            current += char;
             if (quote === '"' && escaped) {
                 escaped = false;
                 continue;
@@ -1555,44 +1605,181 @@ function tokenizeShellWords(command: string): string[] {
         }
 
         if (escaped) {
-            current += char;
             escaped = false;
             continue;
         }
         if (char === "\\") {
-            current += char;
+            wordStart ??= index;
             escaped = true;
             continue;
         }
         if (char === "'" || char === '"') {
-            current += char;
+            wordStart ??= index;
             quote = char;
             continue;
         }
         if (/\s/u.test(char)) {
-            pushCurrent();
+            pushWord(index);
+            if (char === "\n" || char === "\r") {
+                lexemes.push({ kind: "separator", source: char, start: index, end: index + 1 });
+            }
             continue;
         }
-        if (["|", ";", "&", "<", ">"].includes(char)) {
-            pushCurrent();
+        if (["|", ";", "&", "<", ">", "(", ")"].includes(char)) {
+            pushWord(index);
+            lexemes.push({
+                kind: char === "<" || char === ">" ? "redirection" : "separator",
+                source: char,
+                start: index,
+                end: index + 1,
+            });
             continue;
         }
-        current += char;
+        wordStart ??= index;
     }
 
-    pushCurrent();
-    return words;
+    pushWord(command.length);
+    return lexemes;
 }
 
-type InlineScriptFlag = "-c" | "-e" | "--eval";
+function tokenizeShellWords(command: string): string[] {
+    return tokenizeShellLexemes(command)
+        .filter((lexeme) => lexeme.kind === "word")
+        .map((lexeme) => lexeme.source);
+}
 
-function inlineScriptFlagsForInterpreter(
-    interpreter: ScriptInterpreter,
-): ReadonlySet<InlineScriptFlag> {
+function hasDynamicShellExpansion(command: string): boolean {
+    let quote: "'" | '"' | undefined;
+    let escaped = false;
+
+    for (const char of command) {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === "\\" && quote !== "'") {
+            escaped = true;
+            continue;
+        }
+        if (char === "'" || char === '"') {
+            if (quote === undefined) quote = char;
+            else if (quote === char) quote = undefined;
+            continue;
+        }
+        if (quote !== "'" && (char === "$" || char === "`")) return true;
+    }
+
+    return false;
+}
+
+function hasComposedShellSyntax(command: string): boolean {
+    return (
+        tokenizeShellLexemes(command).some((lexeme) => lexeme.kind !== "word") ||
+        hasDynamicShellExpansion(command)
+    );
+}
+
+type DirectScriptInterpreter = {
+    readonly interpreter: ScriptInterpreter;
+    readonly index: number;
+};
+
+const wrapperOptionsWithValues = new Set([
+    "--directory",
+    "--env-file",
+    "--exclude-newer",
+    "--extra",
+    "--extra-index",
+    "--find-links",
+    "--group",
+    "--index",
+    "--only-group",
+    "--package",
+    "--project",
+    "--python",
+    "--python-platform",
+    "--resolution",
+    "--with",
+    "--with-editable",
+    "--with-requirements",
+    "-C",
+    "-p",
+    "-u",
+]);
+
+function commandBasename(word: string): string {
+    const cleanWord = unquoteCommandWord(word);
+    const parts = cleanWord.split(/[\\/]/u);
+    return (parts[parts.length - 1] ?? cleanWord).toLowerCase().replace(/\.exe$/u, "");
+}
+
+function isEnvironmentAssignment(word: string): boolean {
+    return /^[A-Za-z_][A-Za-z0-9_]*=/u.test(decodeShellWord(word));
+}
+
+function commandIndexAfterOptions(words: readonly string[], start: number): number | undefined {
+    let index = start;
+    while (index < words.length) {
+        const value = decodeShellWord(words[index] ?? "");
+        if (isEnvironmentAssignment(words[index] ?? "")) {
+            index += 1;
+            continue;
+        }
+        if (value === "--") return words[index + 1] === undefined ? undefined : index + 1;
+        if (!value.startsWith("-") || value === "-") return index;
+        if (!value.includes("=") && wrapperOptionsWithValues.has(value)) index += 2;
+        else index += 1;
+    }
+    return undefined;
+}
+
+function directScriptInterpreterFrom(
+    words: readonly string[],
+    initialStart: number,
+    depth: number,
+): DirectScriptInterpreter | undefined {
+    if (depth > 4) return undefined;
+    let start = initialStart;
+    while (isEnvironmentAssignment(words[start] ?? "")) start += 1;
+    const executable = commandBasename(words[start] ?? "");
+    const direct = scriptInterpreterForWord(words[start] ?? "");
+    if (direct !== undefined) return { interpreter: direct, index: start };
+
+    let commandIndex: number | undefined;
+    if (executable === "env" || executable === "command" || executable === "exec") {
+        commandIndex = commandIndexAfterOptions(words, start + 1);
+    } else if (executable === "uv") {
+        const runIndex = words.findIndex(
+            (word, index) => index > start && decodeShellWord(word) === "run",
+        );
+        if (runIndex >= 0) commandIndex = commandIndexAfterOptions(words, runIndex + 1);
+    } else if (executable === "uvx" || executable === "npx") {
+        commandIndex = commandIndexAfterOptions(words, start + 1);
+    } else if (["npm", "pnpm", "yarn"].includes(executable)) {
+        const execIndex = words.findIndex(
+            (word, index) => index > start && ["dlx", "exec", "x"].includes(decodeShellWord(word)),
+        );
+        if (execIndex >= 0) commandIndex = commandIndexAfterOptions(words, execIndex + 1);
+    }
+    if (commandIndex === undefined) return undefined;
+    return directScriptInterpreterFrom(words, commandIndex, depth + 1);
+}
+
+function directScriptInterpreter(words: readonly string[]): DirectScriptInterpreter | undefined {
+    return directScriptInterpreterFrom(words, 0, 0);
+}
+
+function inlineScriptFlagsForInterpreter(interpreter: ScriptInterpreter): ReadonlySet<string> {
     if (interpreter.language === "python") {
         return new Set(["-c"]);
     }
     if (interpreter.displayName === "Node") {
+        return new Set(["-e", "--eval", "-p", "--print"]);
+    }
+    if (interpreter.displayName === "Deno") {
+        return new Set(["eval"]);
+    }
+    if (interpreter.displayName === "Bun" || interpreter.displayName === "TypeScript") {
         return new Set(["-e", "--eval"]);
     }
     return new Set();
@@ -1612,11 +1799,36 @@ function isUnquotedFlagLikeScriptCode(word: string, code: string): boolean {
     return !isQuotedShellWord(word) && /^-[A-Za-z-]/u.test(code);
 }
 
+type InlineScriptCode = {
+    readonly code: string;
+    readonly wordIndex: number;
+};
+
 function inlineScriptCodeForInterpreter(
     interpreter: ScriptInterpreter,
     words: ReadonlyArray<string>,
     startIndex: number,
-): string | undefined {
+): InlineScriptCode | undefined {
+    if (interpreter.displayName === "Deno") {
+        const evalIndex = words.findIndex(
+            (word, index) => index >= startIndex && decodeShellWord(word) === "eval",
+        );
+        if (evalIndex < 0) return undefined;
+        let index = evalIndex + 1;
+        while (index < words.length) {
+            const value = decodeShellWord(words[index] ?? "");
+            if (value === "--ext") {
+                index += 2;
+                continue;
+            }
+            if (value.startsWith("-") && !isQuotedShellWord(words[index] ?? "")) {
+                index += 1;
+                continue;
+            }
+            return { code: value, wordIndex: index };
+        }
+        return undefined;
+    }
     const flags = inlineScriptFlagsForInterpreter(interpreter);
     if (flags.size === 0) {
         return undefined;
@@ -1631,18 +1843,14 @@ function inlineScriptCodeForInterpreter(
                     return undefined;
                 }
                 const code = decodeShellWord(codeWord);
-                if (words[index + 2] !== undefined) {
-                    return undefined;
-                }
-                return isUnquotedFlagLikeScriptCode(codeWord, code) ? undefined : code;
+                return isUnquotedFlagLikeScriptCode(codeWord, code)
+                    ? undefined
+                    : { code, wordIndex: index + 1 };
             }
             const assignmentPrefix = `${flag}=`;
             if (value.startsWith(assignmentPrefix)) {
                 const code = value.slice(assignmentPrefix.length);
-                if (words[index + 1] !== undefined) {
-                    return undefined;
-                }
-                return /^-[A-Za-z-]/u.test(code) ? undefined : code;
+                return /^-[A-Za-z-]/u.test(code) ? undefined : { code, wordIndex: index };
             }
         }
     }
@@ -1651,20 +1859,65 @@ function inlineScriptCodeForInterpreter(
 }
 
 function parseInlineScriptInvocation(displayCommand: string): ScriptInvocation | undefined {
+    if (hasComposedShellSyntax(displayCommand)) return undefined;
     const words = tokenizeShellWords(displayCommand);
-    for (const [index, word] of words.entries()) {
-        const interpreter = scriptInterpreterForWord(word);
-        if (!interpreter) {
-            continue;
-        }
+    const direct = directScriptInterpreter(words);
+    if (direct === undefined) return undefined;
+    const inlineScript = inlineScriptCodeForInterpreter(
+        direct.interpreter,
+        words,
+        direct.index + 1,
+    );
+    return inlineScript === undefined
+        ? undefined
+        : buildScriptInvocationForInterpreter(direct.interpreter, inlineScript.code);
+}
 
-        const code = inlineScriptCodeForInterpreter(interpreter, words, index + 1);
-        if (code !== undefined) {
-            return buildScriptInvocationForInterpreter(interpreter, code);
+type EmbeddedInlineScript = {
+    readonly start: number;
+    readonly end: number;
+    readonly language: string;
+};
+
+function embeddedInlineScripts(command: string): EmbeddedInlineScript[] {
+    if (heredocOpenPattern.test(command)) return [];
+    const lexemes = tokenizeShellLexemes(command);
+    const scripts: EmbeddedInlineScript[] = [];
+    let segment: ShellLexeme[] = [];
+
+    const collectSegment = (): void => {
+        const words = segment.filter((lexeme) => lexeme.kind === "word");
+        const direct = directScriptInterpreter(words.map((word) => word.source));
+        if (direct === undefined) {
+            segment = [];
+            return;
         }
+        const inlineScript = inlineScriptCodeForInterpreter(
+            direct.interpreter,
+            words.map((word) => word.source),
+            direct.index + 1,
+        );
+        const codeWord = inlineScript === undefined ? undefined : words[inlineScript.wordIndex];
+        if (
+            codeWord?.source.startsWith("'") === true &&
+            codeWord.source.endsWith("'") &&
+            codeWord.source.length >= 2
+        ) {
+            scripts.push({
+                start: codeWord.start + 1,
+                end: codeWord.end - 1,
+                language: direct.interpreter.language,
+            });
+        }
+        segment = [];
+    };
+
+    for (const lexeme of lexemes) {
+        if (lexeme.kind === "separator") collectSegment();
+        else segment.push(lexeme);
     }
-
-    return undefined;
+    collectSegment();
+    return scripts;
 }
 
 type BashHeredocHighlight = {
@@ -1719,11 +1972,78 @@ function highlightShellLine(theme: GlowupRenderTheme, line: string): string {
     return `${highlightedShell}${commentPart.length === 0 ? "" : dim(theme, commentPart)}`;
 }
 
+type EmbeddedInlineHighlightRow = {
+    readonly start: number;
+    readonly end: number;
+    readonly highlighted: string;
+};
+
+function embeddedInlineHighlightRows(
+    lines: ReadonlyArray<string>,
+): ReadonlyMap<number, ReadonlyArray<EmbeddedInlineHighlightRow>> {
+    const source = lines.join("\n");
+    const scripts = embeddedInlineScripts(source);
+    if (scripts.length === 0) return new Map();
+
+    const lineStarts: number[] = [0];
+    for (let index = 0; index < source.length; index += 1) {
+        if (source[index] === "\n") lineStarts.push(index + 1);
+    }
+    const rows = new Map<number, EmbeddedInlineHighlightRow[]>();
+
+    for (const script of scripts) {
+        const code = source.slice(script.start, script.end);
+        const highlightedLines = highlightSyntaxCode(code, script.language);
+        let absoluteStart = script.start;
+        for (const highlighted of highlightedLines) {
+            let lineIndex = 0;
+            while (
+                lineIndex + 1 < lineStarts.length &&
+                (lineStarts[lineIndex + 1] ?? Number.POSITIVE_INFINITY) <= absoluteStart
+            ) {
+                lineIndex += 1;
+            }
+            const lineStart = lineStarts[lineIndex];
+            if (lineStart === undefined) break;
+            const newline = source.indexOf("\n", absoluteStart);
+            const absoluteEnd = newline < 0 || newline > script.end ? script.end : newline;
+            const lineRows = rows.get(lineIndex) ?? [];
+            lineRows.push({
+                start: absoluteStart - lineStart,
+                end: absoluteEnd - lineStart,
+                highlighted,
+            });
+            rows.set(lineIndex, lineRows);
+            absoluteStart = absoluteEnd + 1;
+        }
+    }
+
+    return rows;
+}
+
+function highlightShellLineWithEmbeddedCode(
+    theme: GlowupRenderTheme,
+    line: string,
+    rows: ReadonlyArray<EmbeddedInlineHighlightRow> | undefined,
+): string {
+    if (rows === undefined || rows.length === 0) return highlightShellLine(theme, line);
+    const highlighted: string[] = [];
+    let cursor = 0;
+    for (const row of rows) {
+        highlighted.push(highlightShellLine(theme, line.slice(cursor, row.start)));
+        highlighted.push(row.highlighted);
+        cursor = row.end;
+    }
+    highlighted.push(highlightShellLine(theme, line.slice(cursor)));
+    return highlighted.join("");
+}
+
 function highlightBashScriptPreviewLines(
     lines: ReadonlyArray<string>,
     theme: GlowupRenderTheme,
 ): string[] {
     const highlighted: string[] = [];
+    const embeddedRows = embeddedInlineHighlightRows(lines);
     let heredoc: BashHeredocHighlight | undefined;
     let heredocBody: string[] = [];
 
@@ -1735,7 +2055,7 @@ function highlightBashScriptPreviewLines(
         heredocBody = [];
     }
 
-    for (const line of lines) {
+    for (const [lineIndex, line] of lines.entries()) {
         if (isPreviewMetaLine(line)) {
             flushHeredocBody();
             highlighted.push(line);
@@ -1754,7 +2074,9 @@ function highlightBashScriptPreviewLines(
             continue;
         }
 
-        highlighted.push(highlightShellLine(theme, line));
+        highlighted.push(
+            highlightShellLineWithEmbeddedCode(theme, line, embeddedRows.get(lineIndex)),
+        );
         heredoc = bashHeredocHighlightFromLine(line);
     }
 
@@ -1787,6 +2109,9 @@ function scriptPreviewSyntaxLanguages(invocation: ScriptInvocation): readonly st
             languages.add(heredoc.language);
         }
     }
+    for (const script of embeddedInlineScripts(invocation.code)) {
+        languages.add(script.language);
+    }
 
     return [...languages];
 }
@@ -1807,78 +2132,44 @@ export function parseScriptInvocation(command: string | undefined): ScriptInvoca
     );
 }
 
-function isLeadingImportLine(language: string, line: string): boolean {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) {
-        return false;
-    }
-
-    if (language === "python") {
-        return /^(?:from\s+\S+\s+import\s+|import\s+\S+)/u.test(trimmed);
-    }
-    if (language === "javascript" || language === "typescript") {
-        return /^(?:import\s+|export\s+\{[^}]*\}\s+from\s+|(?:const|let|var)\s+\w+\s*=\s*require\()/u.test(
-            trimmed,
-        );
-    }
-
-    return false;
-}
-
 function collapsedScriptPreview(
     invocation: ScriptInvocation,
     maxCodePreviewLines: number,
+    showPrologueOmission: boolean,
 ): ScriptPreview {
     if (trimEdgeBlankLines(invocation.code.split("\n")).length <= maxCodePreviewLines) {
         return { code: invocation.code };
     }
-    let lineStart = 0;
-    let previewStart = 0;
-    let sawImport = false;
-
-    while (lineStart <= invocation.code.length) {
-        const nextLineBreak = invocation.code.indexOf("\n", lineStart);
-        const lineEnd = nextLineBreak === -1 ? invocation.code.length : nextLineBreak;
-        const line = invocation.code.slice(lineStart, lineEnd);
-        const nextLineStart = nextLineBreak === -1 ? invocation.code.length + 1 : lineEnd + 1;
-
-        if (!hasNonWhitespaceText(line) && (!sawImport || nextLineBreak !== -1)) {
-            lineStart = nextLineStart;
-            continue;
-        }
-        if (isLeadingImportLine(invocation.language, line)) {
-            sawImport = true;
-            lineStart = nextLineStart;
-            continue;
-        }
-
-        previewStart = lineStart;
-        break;
-    }
-
-    if (!sawImport) {
-        return { code: invocation.code };
-    }
-
-    const previewCode = invocation.code.slice(previewStart);
-    return hasNonWhitespaceText(previewCode) ? { code: previewCode } : { code: invocation.code };
+    const omission = omitLeadingImportPrologue(
+        invocation.code,
+        invocation.language,
+        maxCodePreviewLines,
+    );
+    if (omission === undefined) return { code: invocation.code };
+    return {
+        code: showPrologueOmission
+            ? `… ${omission.omittedLines} import/setup lines omitted\n${omission.code}`
+            : omission.code,
+    };
 }
 
 function scriptPreviewForRender(
     invocation: ScriptInvocation,
     expanded: boolean,
     maxCodePreviewLines: number,
+    showPrologueOmission: boolean,
 ): ScriptPreview {
     if (expanded) {
         return { code: invocation.code };
     }
-    return collapsedScriptPreview(invocation, maxCodePreviewLines);
+    return collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission);
 }
 
 function retainedScriptInvocation(
     invocation: ScriptInvocation,
     expanded: boolean,
     maxCodePreviewLines: number,
+    showPrologueOmission: boolean,
 ): ScriptInvocation {
     if (expanded) {
         return invocation;
@@ -1888,7 +2179,7 @@ function retainedScriptInvocation(
         label: invocation.label,
         language: invocation.language,
         code: detachedScriptPreviewCode(
-            collapsedScriptPreview(invocation, maxCodePreviewLines).code,
+            collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission).code,
         ),
     };
 }
@@ -1954,6 +2245,7 @@ export function renderScriptCall(
         readonly state: GlowupCallState;
         readonly expanded: boolean;
         readonly maxCodePreviewLines?: number;
+        readonly showPrologueOmission?: boolean;
         readonly omittedHint?: string;
         readonly headerLayout?: ScriptPreviewHeaderLayout;
         readonly invalidate?: () => void;
@@ -1962,14 +2254,25 @@ export function renderScriptCall(
     const expanded = options.expanded;
     const state = options.state;
     const maxCodePreviewLines = options.maxCodePreviewLines ?? 8;
-    const retained = retainedScriptInvocation(invocation, expanded, maxCodePreviewLines);
-    const omittedHint = options.omittedHint ?? "truncated";
+    const showPrologueOmission = options.showPrologueOmission ?? false;
+    const retained = retainedScriptInvocation(
+        invocation,
+        expanded,
+        maxCodePreviewLines,
+        showPrologueOmission,
+    );
+    const omittedHint = options.omittedHint ?? toolExpandHint();
     const headerLayoutOption = options.headerLayout ?? "auto";
     scheduleScriptPreviewSyntaxLoads(retained, options.invalidate);
 
     return makeComponent((width) => {
         const header = renderScriptHeader(theme, state, retained.label);
-        const preview = scriptPreviewForRender(retained, expanded, maxCodePreviewLines);
+        const preview = scriptPreviewForRender(
+            retained,
+            expanded,
+            maxCodePreviewLines,
+            showPrologueOmission,
+        );
 
         if (preview.code.length === 0) {
             return wrapPrefixedLine("", width, header, "  ");
@@ -1996,11 +2299,38 @@ export function renderScriptCall(
             rendered.push(...wrapPrefixedLine("", width, header, "  "));
         }
 
+        let contentRows = 0;
+        let softWrapTruncated = false;
         for (const [index, line] of highlighted.entries()) {
-            const styled = isPreviewMetaLine(line) ? muted(theme, line) : line;
+            const meta = isPreviewMetaLine(line);
+            const styled = meta ? muted(theme, line) : line;
             const firstPrefix =
                 headerLayout === "inline" && index === 0 ? `${header} ` : dim(theme, "  │ ");
-            rendered.push(...wrapScriptLine(theme, styled, width, firstPrefix));
+            const wrapped = wrapScriptLine(theme, styled, width, firstPrefix);
+            if (expanded || meta) {
+                rendered.push(...wrapped);
+                continue;
+            }
+            const remainingRows = Math.max(0, maxCodePreviewLines - contentRows);
+            if (wrapped.length <= remainingRows) {
+                rendered.push(...wrapped);
+                contentRows += wrapped.length;
+                continue;
+            }
+            rendered.push(...wrapped.slice(0, remainingRows));
+            softWrapTruncated = true;
+            break;
+        }
+
+        if (softWrapTruncated) {
+            rendered.push(
+                ...wrapScriptLine(
+                    theme,
+                    muted(theme, "… preview truncated"),
+                    width,
+                    dim(theme, "  │ "),
+                ),
+            );
         }
 
         return rendered;
@@ -2013,7 +2343,7 @@ function tokenizeShellLine(line: string): string[] {
     }
     return (
         line.match(
-            /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|&&|\|\||2>>|2>|>>|[|;&<>]|\s+|[^\s|;&<>]+/g,
+            /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|&&|\|\||2>>|2>|>>|\[\[|\]\]|[|;&<>{}!]|\s+|[^\s|;&<>{}!]+/g,
         ) ?? [line]
     );
 }
@@ -2161,8 +2491,35 @@ function styleShellToken(
         return { styled: token, state };
     }
 
-    if (["|", "||", "&&", "&", ";", ">", ">>", "<", "2>", "2>>"].includes(token)) {
+    if (
+        [
+            "|",
+            "||",
+            "&&",
+            "&",
+            ";",
+            ">",
+            ">>",
+            "<",
+            "2>",
+            "2>>",
+            "{",
+            "}",
+            "!",
+            "[[",
+            "]]",
+        ].includes(token)
+    ) {
         return { styled: shellOperator(theme, token), state: initialShellHighlightState };
+    }
+
+    if (SHELL_RESERVED_WORDS.has(token)) {
+        return {
+            styled: shellKeyword(theme, token),
+            state: SHELL_KEYWORDS_EXPECTING_COMMAND.has(token)
+                ? initialShellHighlightState
+                : { ...initialShellHighlightState, expectsCommand: false },
+        };
     }
 
     if (isShellFlagToken(token)) {
