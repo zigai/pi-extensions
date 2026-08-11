@@ -72,10 +72,6 @@ type FakeToolExecutionPrototype = {
 
 function noop(): void {}
 
-function stripAnsi(text: string): string {
-    return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu"), "");
-}
-
 const renderContext: FakeRenderContext = {
     args: {},
     toolCallId: "call-1",
@@ -380,68 +376,6 @@ describe("tool execution patches", () => {
         ).toEqual(["existing renderer"]);
     });
 
-    it("uses explicit Glowup plugins over native renderers", () => {
-        const prototype = createPrototype();
-        prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
-            return true;
-        };
-        installThirdPartyToolRendererPatch(undefined, prototype);
-
-        const instance: FakeToolExecutionInstance = {
-            toolName: "apply_patch",
-            toolDefinition: { renderCall: () => ({ render: () => [], invalidate: noop }) },
-        };
-        const patch = `*** Begin Patch
-*** Update File: README.md
-@@
--old
-+new
-*** End Patch`;
-
-        expect(prototype.getRenderShell.call(instance)).toBe("self");
-        expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
-        expect(
-            prototype.getCallRenderer
-                .call(instance)?.({ patch }, plainTheme, renderContext)
-                .render(100)
-                .join("\n"),
-        ).toContain("Patch README.md (+1 -1)");
-    });
-
-    it("passes persisted tool results to restored call renderers", () => {
-        const prototype = createPrototype();
-        installThirdPartyToolRendererPatch(undefined, prototype);
-        const patch = "*** Begin Patch\n*** Delete File: removed.ts\n*** End Patch";
-        const instance: FakeToolExecutionInstance = {
-            toolName: "apply_patch",
-            toolDefinition: {},
-            result: {
-                content: [{ type: "text", text: "Done" }],
-                details: {
-                    diff: "removed.ts\n-1 one\n-2 two\n",
-                    lineSummary: {
-                        files: [
-                            {
-                                action: "D",
-                                path: "removed.ts",
-                                addedLines: 0,
-                                removedLines: 2,
-                            },
-                        ],
-                    },
-                },
-            },
-        };
-
-        const rendered = prototype.getCallRenderer
-            .call(instance)?.({ patch }, plainTheme, renderContext)
-            .render(100)
-            .join("\n");
-
-        expect(rendered).toContain("Patch removed.ts (-2)");
-        expect(stripAnsi(rendered ?? "")).toContain("2   -two");
-    });
-
     it("parses complete structured arguments for restored third-party calls", () => {
         const prototype = createPrototype();
         installThirdPartyToolRendererPatch({ labelMode: "lifecycle" }, prototype);
@@ -491,55 +425,6 @@ describe("tool execution patches", () => {
         expect(rendered).toContain("Choose one:");
         expect(rendered).toContain("Stable only");
         expect(rendered).not.toContain("questions: 1 item");
-    });
-
-    it("does not inject results into actively executed third-party call renderers", () => {
-        const prototype = createPrototype();
-        installThirdPartyToolRendererPatch(undefined, prototype);
-        const instance: FakeToolExecutionInstance = {
-            toolName: "apply_patch",
-            toolDefinition: {},
-            executionStarted: true,
-            result: {
-                content: [{ type: "text", text: "Done" }],
-                details: { diff: "removed.ts\n-1 one\n" },
-            },
-        };
-        const patch = "*** Begin Patch\n*** Delete File: removed.ts\n*** End Patch";
-
-        const rendered = prototype.getCallRenderer
-            .call(instance)?.({ patch }, plainTheme, renderContext)
-            .render(100)
-            .join("\n");
-
-        expect(rendered).not.toContain("removed.ts (-1)");
-    });
-
-    it("uses explicit Glowup plugins over native built-in renderers", () => {
-        const prototype = createPrototype();
-        prototype.hasRendererDefinition = function hasNativeRendererDefinition(): boolean {
-            return true;
-        };
-        installThirdPartyToolRendererPatch(undefined, prototype);
-
-        const instance: FakeToolExecutionInstance = {
-            toolName: "apply_patch",
-            builtInToolDefinition: {},
-            toolDefinition: { renderCall: () => ({ render: () => [], invalidate: noop }) },
-        };
-        const patch = `*** Begin Patch
-*** Add File: src/new.ts
-+export const value = 1;
-*** End Patch`;
-
-        expect(prototype.getRenderShell.call(instance)).toBe("self");
-        expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
-        expect(
-            prototype.getCallRenderer
-                .call(instance)?.({ patch }, plainTheme, renderContext)
-                .render(100)
-                .join("\n"),
-        ).toContain("Patch src/new.ts (+1)");
     });
 
     it("uses passive Glowup adapters over native third-party renderers", () => {

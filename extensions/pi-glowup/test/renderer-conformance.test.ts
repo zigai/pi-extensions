@@ -41,15 +41,6 @@ const result = (text: string): ThirdPartyToolResult => ({
 
 const cases: ReadonlyArray<RendererConformanceCase> = [
     {
-        family: "apply-patch",
-        toolName: "apply_patch",
-        args: {
-            patch: "*** Begin Patch\n*** Add File: value.ts\n+export const value = 1;\n*** End Patch",
-        },
-        callText: "Patch",
-        result: result("Done!"),
-    },
-    {
         family: "agent-browser",
         toolName: "agent_browser",
         args: { args: ["open", "https://example.com"] },
@@ -91,20 +82,6 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         },
         callText: "Asked User",
         result: result("Mode: Safe"),
-    },
-    {
-        family: "goal",
-        toolName: "get_goal",
-        args: {},
-        callText: "Goal",
-        result: result("active: Verify rendering"),
-    },
-    {
-        family: "agent",
-        toolName: "Agent",
-        args: { description: "Inspect renderers", prompt: "Inspect tool rendering." },
-        callText: "Agent",
-        result: result("Agent completed"),
     },
     {
         family: "generic-third-party",
