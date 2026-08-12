@@ -1234,7 +1234,7 @@ function makeUnifiedLine(options: {
         spans: options.spans,
         rowFg: colors.fg,
         rowBg: colors.bg,
-        lineNumberFg: options.lineType === "context" ? options.palette.lineNumberFg : colors.fg,
+        lineNumberFg: options.palette.lineNumberFg,
     };
 }
 
@@ -1255,7 +1255,7 @@ function makeSplitCell(options: {
         spans: options.spans,
         rowFg: colors.fg,
         rowBg: colors.bg,
-        lineNumberFg: options.lineType === "context" ? options.palette.lineNumberFg : colors.fg,
+        lineNumberFg: options.palette.lineNumberFg,
     };
 }
 

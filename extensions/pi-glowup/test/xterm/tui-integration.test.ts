@@ -240,6 +240,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                 } finally {
                     configureAutocompleteCleanupPatch(false, cleanupPrototype);
                     try {
+                        setCapabilities(originalTerminalCapabilities);
                         initTheme("dark");
                     } finally {
                         rmSync(root, { recursive: true, force: true });
@@ -810,6 +811,11 @@ export const grownWriteTwelve = 12;
         for (const rawKey of ['"path"', '"edits"', '"oldText"', '"newText"']) {
             expect(screen).not.toContain(rawKey);
         }
+        pendingTerminal.assertUniqueTranscriptMarkers(
+            "Editing src/final-edit.ts",
+            beforeSentinel,
+            afterSentinel,
+        );
 
         const oldContent =
             "export const stableContext = true;\nconst obsoleteValue = 1;\nexport const trailingContext = true;\n";
@@ -895,13 +901,13 @@ export const grownWriteTwelve = 12;
         expect(deletion.text.slice(0, deletionCodeColumn)).toBe("2   - ");
         expect(addition.text.slice(0, additionCodeColumn)).toBe("  2 + ");
         expect(deletion.cells[0]?.chars).toBe("2");
-        expect(deletion.cells[0]?.foreground).toBe(DARK_THEME_DELETED_FOREGROUND);
+        expect(deletion.cells[0]?.foreground).toBe(DARK_THEME_DIM_FOREGROUND);
         expect(deletion.cells[2]?.chars).toBe(" ");
         expect(deletion.cells[4]?.chars).toBe("-");
         expect(deletion.cells[4]?.foreground).toBe(DARK_THEME_DELETED_FOREGROUND);
         expect(addition.cells[0]?.chars).toBe(" ");
         expect(addition.cells[2]?.chars).toBe("2");
-        expect(addition.cells[2]?.foreground).toBe(DARK_THEME_ADDED_FOREGROUND);
+        expect(addition.cells[2]?.foreground).toBe(DARK_THEME_DIM_FOREGROUND);
         expect(addition.cells[4]?.chars).toBe("+");
         expect(addition.cells[4]?.foreground).toBe(DARK_THEME_ADDED_FOREGROUND);
         const beforeSentinelRow = pendingTerminal.requireRowContaining(beforeSentinel);
