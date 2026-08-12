@@ -76,6 +76,16 @@ describe("VirtualTerminal query and invariant support", () => {
         }
     });
 
+    it("rejects italic ANSI attributes in a neutral range", async () => {
+        const terminal = createTerminal();
+        await writeAndSettle(terminal, "\u001b[3mX");
+
+        const row = terminal.requireRowContaining("X");
+        expect(() => terminal.assertNeutralRange(row, 0, 1)).toThrowError(
+            /attributesDefault=false/,
+        );
+    });
+
     it("reports the offending wrapped row and screen", async () => {
         const terminal = createTerminal(5, 3);
         await writeAndSettle(terminal, "123456");

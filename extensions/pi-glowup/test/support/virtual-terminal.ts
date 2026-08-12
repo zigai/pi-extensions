@@ -34,7 +34,9 @@ function validateRgbValue(rgb: number): void {
 
 export function rgbFromHex(color: string): number {
     if (!/^#[\dA-Fa-f]{6}$/.test(color)) {
-        throw new TypeError(`expected a six-digit #RRGGBB color, received ${JSON.stringify(color)}`);
+        throw new TypeError(
+            `expected a six-digit #RRGGBB color, received ${JSON.stringify(color)}`,
+        );
     }
     return Number.parseInt(color.slice(1), 16);
 }
@@ -211,7 +213,10 @@ export class VirtualTerminal implements Terminal {
     }
 
     requireRowContaining(text: string): InterpretedRow {
-        return this.requireSingleRow(this.rowsContaining(text), `containing ${JSON.stringify(text)}`);
+        return this.requireSingleRow(
+            this.rowsContaining(text),
+            `containing ${JSON.stringify(text)}`,
+        );
     }
 
     requireRowMatching(pattern: RegExp): InterpretedRow {
@@ -278,18 +283,21 @@ export class VirtualTerminal implements Terminal {
         ) {
             throw new RangeError(`cell range [${start}, ${end}) is outside row ${row.index}`);
         }
-        const offset = row.cells.slice(start, end).findIndex(
-            (cell) =>
-                !cell.isForegroundDefault ||
-                !cell.isBackgroundDefault ||
-                cell.isBold ||
-                cell.isDim,
-        );
+        const offset = row.cells
+            .slice(start, end)
+            .findIndex(
+                (cell) =>
+                    !cell.isAttributeDefault ||
+                    !cell.isForegroundDefault ||
+                    !cell.isBackgroundDefault ||
+                    cell.isBold ||
+                    cell.isDim,
+            );
         if (offset === -1) return;
         const column = start + offset;
         throw this.invariantError(
             row.index,
-            `cells [${start}, ${end}) must use default colors without bold or dim`,
+            `cells [${start}, ${end}) must use default attributes and colors without bold or dim`,
             this.cellSummary(column, row.cells[column]),
         );
     }
@@ -321,7 +329,8 @@ export class VirtualTerminal implements Terminal {
     ): InterpretedRow {
         const match = matches[0];
         if (matches.length === 1 && match !== undefined) return match;
-        const matchingRows = matches.length === 0 ? "none" : matches.map((row) => row.index).join(", ");
+        const matchingRows =
+            matches.length === 0 ? "none" : matches.map((row) => row.index).join(", ");
         throw new Error(
             `expected exactly one terminal row ${description}; found ${matches.length} (rows: ${matchingRows})\nScreen:\n${this.screenText()}`,
         );
@@ -335,7 +344,7 @@ export class VirtualTerminal implements Terminal {
         const background = cell.isBackgroundDefault
             ? "default"
             : `${cell.isBackgroundRgb ? "rgb" : "palette"}:${cell.background}`;
-        return `column=${column}, chars=${JSON.stringify(cell.chars)}, fg=${foreground}, bg=${background}, bold=${cell.isBold}, dim=${cell.isDim}`;
+        return `column=${column}, chars=${JSON.stringify(cell.chars)}, fg=${foreground}, bg=${background}, bold=${cell.isBold}, dim=${cell.isDim}, attributesDefault=${cell.isAttributeDefault}`;
     }
 
     private invariantError(row: number, expected: string, actual: string): Error {

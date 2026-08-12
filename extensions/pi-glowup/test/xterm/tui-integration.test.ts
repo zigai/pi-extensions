@@ -1,5 +1,12 @@
 import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { TuiAltScreen, TuiMainScreen, type Component, type TUI } from "@earendil-works/pi-tui";
+import {
+    getCapabilities,
+    setCapabilities,
+    TuiAltScreen,
+    TuiMainScreen,
+    type Component,
+    type TUI,
+} from "@earendil-works/pi-tui";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +16,13 @@ import { buildPierreDiffPayload } from "../../src/diffs/diff.ts";
 import { configureAutocompleteCleanupPatch } from "../../src/patches/autocomplete-cleanup.ts";
 import { GlowupExtensionHarness } from "../support/extension-harness.ts";
 import { applyPatchOwnerToolDefinition } from "../support/apply-patch-owner-fixture.ts";
-import { rgbFromHex, VirtualTerminal } from "../support/virtual-terminal.ts";
+import {
+    rgbFromHex,
+    type InterpretedCell,
+    type InterpretedRow,
+    VirtualTerminal,
+} from "../support/virtual-terminal.ts";
+const originalTerminalCapabilities = getCapabilities();
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 const originalAgentDir = process.env[AGENT_DIR_ENV];
@@ -68,6 +81,109 @@ const DEFAULT_APPEARANCE: Exclude<ExtensionProfile["appearance"], "default" | un
     addedContentBackground: "#0B441F",
     deletedContentBackground: "#5C2321",
 };
+
+const EXTENSION_DEFAULT_APPEARANCE = {
+    diffBackgroundStyle: "two-tone",
+    addedRowBackground: "#213A2B",
+    deletedRowBackground: "#4A221D",
+    addedContentBackground: "#0D5728",
+    deletedContentBackground: "#762925",
+} as const;
+
+const LIGHT_CUSTOM_APPEARANCE = {
+    diffBackgroundStyle: "two-tone",
+    addedRowBackground: "#E6C84A",
+    deletedRowBackground: "#D79AB8",
+    addedContentBackground: "#F4A261",
+    deletedContentBackground: "#B565D9",
+} as const;
+
+type ThemeStyleProfile = {
+    readonly name: string;
+    readonly theme: "dark" | "light";
+    readonly appearance: Exclude<ExtensionProfile["appearance"], undefined>;
+    readonly expectedAppearance: Exclude<ExtensionProfile["appearance"], "default" | undefined>;
+    readonly expectedAddedForeground: string;
+    readonly expectedDeletedForeground: string;
+};
+
+const THEME_STYLE_PROFILES: readonly ThemeStyleProfile[] = [
+    {
+        name: "light theme with resolved extension defaults",
+        theme: "light",
+        appearance: "default",
+        expectedAppearance: EXTENSION_DEFAULT_APPEARANCE,
+        expectedAddedForeground: "#588458",
+        expectedDeletedForeground: "#AA5555",
+    },
+    {
+        name: "light theme with a custom four-color palette",
+        theme: "light",
+        appearance: LIGHT_CUSTOM_APPEARANCE,
+        expectedAppearance: LIGHT_CUSTOM_APPEARANCE,
+        expectedAddedForeground: "#588458",
+        expectedDeletedForeground: "#AA5555",
+    },
+    {
+        name: "dark theme with the existing custom four-color palette",
+        theme: "dark",
+        appearance: DEFAULT_APPEARANCE,
+        expectedAppearance: DEFAULT_APPEARANCE,
+        expectedAddedForeground: "#B5BD68",
+        expectedDeletedForeground: "#CC6666",
+    },
+];
+
+type CellSpan = {
+    readonly start: number;
+    readonly end: number;
+};
+
+function displayCellText(cell: InterpretedCell): string {
+    if (cell.width === 0) return "";
+    return cell.chars === "" ? " " : cell.chars;
+}
+
+function requireDisplayCellSpan(row: InterpretedRow, text: string): CellSpan {
+    for (let start = 0; start < row.cells.length; start += 1) {
+        let candidate = "";
+        for (let end = start; end < row.cells.length; end += 1) {
+            candidate += displayCellText(row.cells[end]!);
+            if (candidate === text) return { start, end: end + 1 };
+            if (!text.startsWith(candidate)) break;
+        }
+    }
+    throw new Error(
+        `expected terminal row ${row.index} to contain display-cell span ${JSON.stringify(text)}; row=${JSON.stringify(row.text)}`,
+    );
+}
+
+function expectRgbBackgrounds(
+    row: InterpretedRow,
+    expectedColors: readonly number[],
+    columns: number,
+): void {
+    expect(row.cells).toHaveLength(columns);
+    expect(new Set(row.cells.map((cell) => cell.background))).toEqual(new Set(expectedColors));
+    expect(row.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
+}
+
+function expectRgbBackgroundSpan(
+    row: InterpretedRow,
+    span: CellSpan,
+    expectedBackground: number,
+): void {
+    expect(
+        row.cells
+            .slice(span.start, span.end)
+            .every((cell) => cell.isBackgroundRgb && cell.background === expectedBackground),
+    ).toBe(true);
+}
+
+function expectDefaultBackgroundWithoutDiffAttributes(row: InterpretedRow): void {
+    expect(row.cells.every((cell) => cell.isBackgroundDefault)).toBe(true);
+    expect(row.cells.every((cell) => !cell.isBold && !cell.isDim)).toBe(true);
+}
 const DARK_THEME_DIM_FOREGROUND = rgbFromHex("#666666");
 const DARK_THEME_ADDED_FOREGROUND = rgbFromHex("#B5BD68");
 const DARK_THEME_DELETED_FOREGROUND = rgbFromHex("#CC6666");
@@ -103,6 +219,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         root = mkdtempSync(join(tmpdir(), "pi-glowup-xterm-"));
         cwd = join(root, "workspace");
         agentDir = join(root, "agent");
+        setCapabilities({ ...originalTerminalCapabilities, trueColor: true });
         mkdirSync(cwd, { recursive: true });
         mkdirSync(join(agentDir, "extension-settings"), { recursive: true });
         process.env[AGENT_DIR_ENV] = agentDir;
@@ -111,24 +228,31 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
 
     afterEach(async () => {
         try {
-            tui?.stop();
-            await terminal?.settle(0);
-        } finally {
-            terminal?.dispose();
-            terminal = undefined;
-            tui = undefined;
             try {
-                await shutdownExtension();
+                tui?.stop();
+                await terminal?.settle(0);
             } finally {
-                configureAutocompleteCleanupPatch(false, cleanupPrototype);
-                initTheme("dark");
-                rmSync(root, { recursive: true, force: true });
-                if (originalAgentDir === undefined) {
-                    delete process.env[AGENT_DIR_ENV];
-                } else {
-                    process.env[AGENT_DIR_ENV] = originalAgentDir;
+                terminal?.dispose();
+                terminal = undefined;
+                tui = undefined;
+                try {
+                    await shutdownExtension();
+                } finally {
+                    configureAutocompleteCleanupPatch(false, cleanupPrototype);
+                    try {
+                        initTheme("dark");
+                    } finally {
+                        rmSync(root, { recursive: true, force: true });
+                        if (originalAgentDir === undefined) {
+                            delete process.env[AGENT_DIR_ENV];
+                        } else {
+                            process.env[AGENT_DIR_ENV] = originalAgentDir;
+                        }
+                    }
                 }
             }
+        } finally {
+            setCapabilities(originalTerminalCapabilities);
         }
     });
 
@@ -303,11 +427,23 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             beforeSentinel,
             afterSentinel,
         );
-        const initialRow = pendingTerminal.requireRowContaining("retainedWrite");
-        pendingTerminal.assertFullRowBackground(
-            initialRow,
-            rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
+        for (const token of ["retainedWrite", "staleWriteOne", "staleWriteTwo"]) {
+            pendingTerminal.assertFullRowBackground(
+                pendingTerminal.requireRowContaining(token),
+                rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
+            );
+        }
+        pendingTerminal.assertNeutralRange(
+            pendingTerminal.requireRowContaining(beforeSentinel),
+            0,
+            pendingTerminal.columns,
         );
+        pendingTerminal.assertNeutralRange(
+            pendingTerminal.requireRowContaining(afterSentinel),
+            0,
+            pendingTerminal.columns,
+        );
+        const initialRow = pendingTerminal.requireRowContaining("retainedWrite");
         const initialCodeColumn = initialRow.text.indexOf("export const retainedWrite");
         expect(initialCodeColumn).toBeGreaterThan(0);
         expect(initialRow.text.slice(0, initialCodeColumn)).toBe("      1 +");
@@ -380,6 +516,17 @@ export const grownWriteTwelve = 12;
             beforeSentinel,
             afterSentinel,
         );
+        for (const token of ["retainedWrite", "replacementWrite"]) {
+            pendingTerminal.assertFullRowBackground(
+                pendingTerminal.requireRowContaining(token),
+                rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
+            );
+        }
+        pendingTerminal.assertNeutralRange(
+            pendingTerminal.requireRowContaining(beforeSentinel),
+            0,
+            pendingTerminal.columns,
+        );
         const shrunkAfterSentinelRow = pendingTerminal.requireRowContaining(afterSentinel);
         pendingTerminal.assertNeutralRange(shrunkAfterSentinelRow);
         for (const vacatedRow of pendingTerminal.rowRange(
@@ -401,17 +548,44 @@ export const grownWriteTwelve = 12;
         expect(screen).toContain("Writing src/final-write.ts (+3)");
         expect(screen).toContain("finalWriteAlpha");
         expect(screen).toContain("finalWriteGamma");
-        expect(screen).not.toContain("src/streaming-write.ts");
-        expect(screen).not.toContain("retainedWrite");
-        expect(screen).not.toContain("replacementWrite");
+        for (const obsoleteToken of [
+            "src/streaming-write.ts",
+            "retainedWrite",
+            "staleWriteOne",
+            "staleWriteTwo",
+            "replacementWrite",
+            "grownWriteFour",
+            "grownWriteFive",
+            "grownWriteSix",
+            "grownWriteSeven",
+            "grownWriteEight",
+            "grownWriteNine",
+            "grownWriteTen",
+            "grownWriteEleven",
+            "grownWriteTwelve",
+        ]) {
+            expect(screen).not.toContain(obsoleteToken);
+        }
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Writing src/final-write.ts",
             beforeSentinel,
             afterSentinel,
         );
+        for (const token of ["finalWriteAlpha", "finalWriteBeta", "finalWriteGamma"]) {
+            pendingTerminal.assertFullRowBackground(
+                pendingTerminal.requireRowContaining(token),
+                rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
+            );
+        }
         pendingTerminal.assertNeutralRange(
-            pendingTerminal.requireRowContaining(afterSentinel),
+            pendingTerminal.requireRowContaining(beforeSentinel),
+            0,
+            pendingTerminal.columns,
         );
+        expectDefaultBackgroundWithoutDiffAttributes(
+            pendingTerminal.requireRowContaining("Writing src/final-write.ts (+3)"),
+        );
+        pendingTerminal.assertNeutralRange(pendingTerminal.requireRowContaining(afterSentinel));
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
 
@@ -432,8 +606,14 @@ export const grownWriteTwelve = 12;
             afterSentinel,
         );
         pendingTerminal.assertNeutralRange(
-            pendingTerminal.requireRowContaining(afterSentinel),
+            pendingTerminal.requireRowContaining(beforeSentinel),
+            0,
+            pendingTerminal.columns,
         );
+        expectDefaultBackgroundWithoutDiffAttributes(
+            pendingTerminal.requireRowContaining("Writing src/final-write.ts (+3)"),
+        );
+        pendingTerminal.assertNeutralRange(pendingTerminal.requireRowContaining(afterSentinel));
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
 
@@ -474,6 +654,11 @@ export const grownWriteTwelve = 12;
             beforeSentinel,
             afterSentinel,
         );
+        pendingTerminal.assertNeutralRange(
+            pendingTerminal.requireRowContaining(beforeSentinel),
+            0,
+            pendingTerminal.columns,
+        );
         for (const token of ["finalWriteAlpha", "finalWriteBeta", "finalWriteGamma"]) {
             pendingTerminal.assertFullRowBackground(
                 pendingTerminal.requireRowContaining(token),
@@ -483,6 +668,7 @@ export const grownWriteTwelve = 12;
         const completedHeaderRow = pendingTerminal.requireRowContaining(
             "Wrote src/final-write.ts (+3)",
         );
+        expectDefaultBackgroundWithoutDiffAttributes(completedHeaderRow);
         const completedAlphaRow = pendingTerminal.requireRowContaining("finalWriteAlpha");
         const completedBetaRow = pendingTerminal.requireRowContaining("finalWriteBeta");
         const completedGammaRow = pendingTerminal.requireRowContaining("finalWriteGamma");
@@ -524,8 +710,20 @@ export const grownWriteTwelve = 12;
         expect(screen).toContain("Editing");
         expect(screen).not.toContain("undefined");
         expect(screen).not.toContain("{}");
-        expect(pendingTerminal.countOccurrences(beforeSentinel)).toBe(1);
-        expect(pendingTerminal.countOccurrences(afterSentinel)).toBe(1);
+        expect(screen).not.toContain(cwd);
+        expect(screen).not.toContain(root);
+        pendingTerminal.assertUniqueTranscriptMarkers("Editing", beforeSentinel, afterSentinel);
+        expect(pendingTerminal.requireRowContaining("Editing").text.trimEnd()).toBe("• Editing");
+        pendingTerminal.assertNeutralRange(
+            pendingTerminal.requireRowContaining(beforeSentinel),
+            0,
+            pendingTerminal.columns,
+        );
+        pendingTerminal.assertNeutralRange(
+            pendingTerminal.requireRowContaining(afterSentinel),
+            0,
+            pendingTerminal.columns,
+        );
 
         tool.updateArgs({
             path: "src/obsolete-edit.ts",
@@ -554,6 +752,8 @@ export const grownWriteTwelve = 12;
         screen = pendingTerminal.screenText();
         expect(screen).toContain("Editing src/obsolete-edit.ts (2 edits)");
         expect(screen).not.toContain("invalid");
+        expect(screen).not.toContain("obsoleteEditOld");
+        expect(screen).not.toContain("obsoleteEditNew");
         for (const rawToken of [
             '"edits"',
             '"oldText"',
@@ -580,10 +780,21 @@ export const grownWriteTwelve = 12;
         await pendingTerminal.settle();
         screen = pendingTerminal.screenText();
         const singleEditHeader = pendingTerminal.requireRowContaining("Editing src/final-edit.ts");
-        expect(singleEditHeader.text.trimEnd()).toMatch(/Editing src\/final-edit\.ts$/);
+        expect(singleEditHeader.text.trimEnd()).toBe("• Editing src/final-edit.ts");
         expect(screen).not.toContain("(2 edits)");
-        expect(screen).not.toContain("src/obsolete-edit.ts");
-        expect(screen).not.toContain("obsoleteSecond");
+        for (const obsoleteToken of [
+            "src/obsolete-edit.ts",
+            "obsoleteEditOld",
+            "obsoleteEditNew",
+            "obsoleteSecondOld",
+            "obsoleteSecondNew",
+            '"path"',
+            '"edits"',
+            '"oldText"',
+            '"newText"',
+        ]) {
+            expect(screen).not.toContain(obsoleteToken);
+        }
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Editing src/final-edit.ts",
             beforeSentinel,
@@ -596,7 +807,9 @@ export const grownWriteTwelve = 12;
         screen = pendingTerminal.screenText();
         expect(screen).toContain("Editing src/final-edit.ts");
         expect(screen).not.toContain("Edited src/final-edit.ts");
-        expect(screen).not.toContain('"edits"');
+        for (const rawKey of ['"path"', '"edits"', '"oldText"', '"newText"']) {
+            expect(screen).not.toContain(rawKey);
+        }
 
         const oldContent =
             "export const stableContext = true;\nconst obsoleteValue = 1;\nexport const trailingContext = true;\n";
@@ -631,8 +844,17 @@ export const grownWriteTwelve = 12;
         expect(screen).toContain("currentValue");
         expect(screen).toContain("trailingContext");
         expect(screen).not.toContain(successText);
-        expect(screen).not.toContain("src/obsolete-edit.ts");
-        expect(screen).not.toContain("obsoleteSecond");
+        expect(screen).not.toContain("+0");
+        expect(screen).not.toContain("-0");
+        for (const obsoleteToken of [
+            "src/obsolete-edit.ts",
+            "obsoleteEditOld",
+            "obsoleteEditNew",
+            "obsoleteSecondOld",
+            "obsoleteSecondNew",
+        ]) {
+            expect(screen).not.toContain(obsoleteToken);
+        }
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Edited src/final-edit.ts",
             beforeSentinel,
@@ -641,7 +863,7 @@ export const grownWriteTwelve = 12;
         const deletion = pendingTerminal.requireRowContaining("obsoleteValue");
         const addition = pendingTerminal.requireRowContaining("currentValue");
         const context = pendingTerminal.requireRowContaining("stableContext");
-        pendingTerminal.requireRowContaining("trailingContext");
+        const trailingContext = pendingTerminal.requireRowContaining("trailingContext");
         expect(new Set(deletion.cells.map((cell) => cell.background))).toEqual(
             new Set([
                 rgbFromHex(DEFAULT_APPEARANCE.deletedRowBackground),
@@ -654,11 +876,20 @@ export const grownWriteTwelve = 12;
                 rgbFromHex(DEFAULT_APPEARANCE.addedContentBackground),
             ]),
         );
-        expect(
-            context.cells
-                .filter((cell) => cell.chars !== "")
-                .every((cell) => cell.isBackgroundDefault),
-        ).toBe(true);
+        expect(context.cells.every((cell) => cell.isBackgroundDefault)).toBe(true);
+        expect(trailingContext.cells.every((cell) => cell.isBackgroundDefault)).toBe(true);
+        const additionCode = requireDisplayCellSpan(addition, "const currentValue = 2;");
+        const settledForegrounds = new Set(
+            addition.cells
+                .slice(additionCode.start, additionCode.end)
+                .filter((cell) => cell.chars.trim().length > 0)
+                .map((cell) =>
+                    cell.isForegroundDefault
+                        ? "default"
+                        : `${cell.isForegroundRgb ? "rgb" : "palette"}:${cell.foreground}`,
+                ),
+        );
+        expect(settledForegrounds.size).toBeGreaterThan(1);
         const deletionCodeColumn = deletion.text.indexOf("const obsoleteValue");
         const additionCodeColumn = addition.text.indexOf("const currentValue");
         expect(deletion.text.slice(0, deletionCodeColumn)).toBe("2   - ");
@@ -673,11 +904,11 @@ export const grownWriteTwelve = 12;
         expect(addition.cells[2]?.foreground).toBe(DARK_THEME_ADDED_FOREGROUND);
         expect(addition.cells[4]?.chars).toBe("+");
         expect(addition.cells[4]?.foreground).toBe(DARK_THEME_ADDED_FOREGROUND);
-        pendingTerminal.assertNeutralRange(
-            pendingTerminal.requireRowContaining(afterSentinel),
-            0,
-            afterSentinel.length,
-        );
+        const beforeSentinelRow = pendingTerminal.requireRowContaining(beforeSentinel);
+        const afterSentinelRow = pendingTerminal.requireRowContaining(afterSentinel);
+        pendingTerminal.assertNeutralRange(beforeSentinelRow, 0, pendingTerminal.columns);
+        pendingTerminal.assertNeutralRange(afterSentinelRow, 0, pendingTerminal.columns);
+        expect(afterSentinelRow.index).toBe(trailingContext.index + 1);
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
     });
@@ -710,21 +941,23 @@ export const grownWriteTwelve = 12;
         expect(screen).toContain("Deleting");
         expect(screen).not.toContain("undefined");
         expect(screen).not.toContain("{}");
-        pendingTerminal.assertUniqueTranscriptMarkers(
-            "Deleting",
-            beforeSentinel,
-            afterSentinel,
-        );
+        pendingTerminal.assertUniqueTranscriptMarkers("Deleting", beforeSentinel, afterSentinel);
 
-        const obsoletePath = "src/obsolete-delete-with-long-tail.ts";
-        const obsoleteSuffix = "elete-with-long-tail.ts";
+        const obsoletePath =
+            "src/obsolete-delete\u001b[2J\u001b]2;delete-path-owned\u0007-with-long-tail.ts";
+        const obsoleteDisplayPath =
+            "src/obsolete-delete␛[2J␛]2;delete-path-owned␇-with-long-tail.ts";
+        const obsoleteSuffix = "delete-path-owned";
         tool.updateArgs({ path: obsoletePath });
         activeTui.requestRender();
         await pendingTerminal.settle();
         screen = pendingTerminal.screenText();
-        expect(screen).toContain(`Deleting ${obsoletePath}`);
+        expect(screen).toContain(`Deleting ${obsoleteDisplayPath}`);
+        const hostilePathWrites = pendingTerminal.rawWrites().join("");
+        expect(hostilePathWrites).not.toContain("\u001b]2;delete-path-owned");
+        expect(hostilePathWrites).not.toContain("delete-path-owned\u0007");
         pendingTerminal.assertUniqueTranscriptMarkers(
-            `Deleting ${obsoletePath}`,
+            `Deleting ${obsoleteDisplayPath}`,
             beforeSentinel,
             afterSentinel,
         );
@@ -740,7 +973,7 @@ export const grownWriteTwelve = 12;
         await pendingTerminal.settle();
         screen = pendingTerminal.screenText();
         expect(screen).toContain(`Deleting ${finalRelativePath}`);
-        expect(screen).not.toContain(obsoletePath);
+        expect(screen).not.toContain(obsoleteDisplayPath);
         expect(screen).not.toContain(obsoleteSuffix);
         expect(screen).not.toContain("deletedAlpha");
 
@@ -792,7 +1025,7 @@ export const grownWriteTwelve = 12;
         expect(screen).toContain("deletedAlpha");
         expect(screen).toContain("deletedBeta");
         expect(screen).toContain("deletedGamma");
-        expect(screen).not.toContain(obsoletePath);
+        expect(screen).not.toContain(obsoleteDisplayPath);
         expect(screen).not.toContain(successText);
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Deleted src/final-delete.ts",
@@ -802,11 +1035,7 @@ export const grownWriteTwelve = 12;
         const completedDeleteHeader = pendingTerminal.requireRowContaining(
             "Deleted src/final-delete.ts (-3)",
         );
-        expect(
-            completedDeleteHeader.cells
-                .slice(0, completedDeleteHeader.text.length)
-                .every((cell) => cell.isBackgroundDefault),
-        ).toBe(true);
+        expectDefaultBackgroundWithoutDiffAttributes(completedDeleteHeader);
         for (const [lineNumber, token] of [
             [1, "deletedAlpha"],
             [2, "deletedBeta"],
@@ -838,9 +1067,14 @@ export const grownWriteTwelve = 12;
             ),
         ).toBe(true);
         pendingTerminal.assertNeutralRange(
+            pendingTerminal.requireRowContaining(beforeSentinel),
+            0,
+            pendingTerminal.columns,
+        );
+        pendingTerminal.assertNeutralRange(
             pendingTerminal.requireRowContaining(afterSentinel),
             0,
-            afterSentinel.length,
+            pendingTerminal.columns,
         );
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
@@ -892,11 +1126,7 @@ export const grownWriteTwelve = 12;
         const restoredHeader = pendingTerminal.requireRowContaining(
             "Deleted src/restored-delete.ts (-2)",
         );
-        expect(
-            restoredHeader.cells
-                .slice(0, restoredHeader.text.length)
-                .every((cell) => cell.isBackgroundDefault),
-        ).toBe(true);
+        expectDefaultBackgroundWithoutDiffAttributes(restoredHeader);
         for (const [lineNumber, token] of [
             [1, "restoredDeletedAlpha"],
             [2, "restoredDeletedBeta"],
@@ -923,7 +1153,14 @@ export const grownWriteTwelve = 12;
             ).toBe(true);
         }
         pendingTerminal.assertNeutralRange(
+            pendingTerminal.requireRowContaining(beforeSentinel),
+            0,
+            pendingTerminal.columns,
+        );
+        pendingTerminal.assertNeutralRange(
             pendingTerminal.requireRowContaining(afterSentinel),
+            0,
+            pendingTerminal.columns,
         );
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
@@ -1268,129 +1505,214 @@ export const grownWriteTwelve = 12;
         expect(pendingTerminal.screenText()).toBe(collapsed);
     });
 
-    it("keeps full-row diff backgrounds and syntax colors scoped away from context and a sentinel", async () => {
-        const pendingTerminal = new VirtualTerminal(90, 28);
-        const activeTui = createTui(pendingTerminal);
-        const oldContent =
-            "const removedOnly = true;\nconst unchangedA = true;\nconst unchangedB = true;\nconst previousValue = 1;\n";
-        const newContent =
-            "const unchangedA = true;\n\nconst unchangedB = true;\nexport const nextValue = 2;\n\treturn tabIndentedValue;\n";
-        const payload = buildPierreDiffPayload({
-            path: "src/colors.ts",
-            oldContent,
-            newContent,
-            oldSizeBytes: Buffer.byteLength(oldContent),
-            newSizeBytes: Buffer.byteLength(newContent),
-            canBuildPierreDiff: true,
-        });
-        if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
-        const patch = `*** Begin Patch
+    it.each(THEME_STYLE_PROFILES)(
+        "isolates complete diff-row styles for $name",
+        async ({
+            theme,
+            appearance,
+            expectedAppearance,
+            expectedAddedForeground,
+            expectedDeletedForeground,
+        }) => {
+            await installExtension({ theme, appearance });
+            const pendingTerminal = new VirtualTerminal(90, 30);
+            const activeTui = createTui(pendingTerminal);
+            const oldContent =
+                "const removedOnly = true;\nconst unchangedA = true;\nconst unchangedB = true;\nconst previousValue = formatValue(oldToken);\nconst unchangedC = true;\n";
+            const newContent =
+                "const unchangedA = true;\nconst insertedOnly = false;\nconst unchangedB = true;\nexport const nextValue = formatValue(newToken);\n\n\t\nconst unchangedC = true;\n\treturn tabIndentedValue;\n";
+            const payload = buildPierreDiffPayload({
+                path: "src/colors.ts",
+                oldContent,
+                newContent,
+                oldSizeBytes: Buffer.byteLength(oldContent),
+                newSizeBytes: Buffer.byteLength(newContent),
+                canBuildPierreDiff: true,
+            });
+            if (payload?.kind !== "renderable")
+                throw new Error("expected renderable Pierre payload");
+            const patch = `*** Begin Patch
 *** Update File: src/colors.ts
 @@
 -const removedOnly = true;
  const unchangedA = true;
-+
++const insertedOnly = false;
  const unchangedB = true;
--const previousValue = 1;
-+export const nextValue = 2;
+-const previousValue = formatValue(oldToken);
++export const nextValue = formatValue(newToken);
++
++\t
+ const unchangedC = true;
 +\treturn tabIndentedValue;
 *** End Patch`;
-        const tool = new ToolExecutionComponent(
-            "apply_patch",
-            "call-xterm-style",
-            { patch },
-            undefined,
-            applyPatchOwnerToolDefinition,
-            activeTui,
-            cwd,
-        );
-        tool.setArgsComplete();
-        tool.updateResult({
-            content: [],
-            details: {
-                pierreDiff: payload,
-                inputPatch: patch,
-                patch: `--- a/src/colors.ts
+            const tool = new ToolExecutionComponent(
+                "apply_patch",
+                `call-xterm-style-${theme}-${expectedAppearance.addedRowBackground}`,
+                { patch },
+                undefined,
+                applyPatchOwnerToolDefinition,
+                activeTui,
+                cwd,
+            );
+            tool.setArgsComplete();
+            tool.updateResult({
+                content: [],
+                details: {
+                    pierreDiff: payload,
+                    inputPatch: patch,
+                    patch: `--- a/src/colors.ts
 +++ b/src/colors.ts
-@@ -1,4 +1,5 @@
+@@ -1,5 +1,8 @@
 -const removedOnly = true;
  const unchangedA = true;
-+
++const insertedOnly = false;
  const unchangedB = true;
--const previousValue = 1;
-+export const nextValue = 2;
+-const previousValue = formatValue(oldToken);
++export const nextValue = formatValue(newToken);
++
++	
+ const unchangedC = true;
 +	return tabIndentedValue;
 `,
-                lineSummary: {
-                    files: [
-                        {
-                            action: "M",
-                            path: "src/colors.ts",
-                            addedLines: 3,
-                            removedLines: 2,
-                        },
-                    ],
+                    lineSummary: {
+                        files: [
+                            {
+                                action: "M",
+                                path: "src/colors.ts",
+                                addedLines: 5,
+                                removedLines: 2,
+                            },
+                        ],
+                    },
                 },
-            },
-            isError: false,
-        });
-        activeTui.addChild(tool);
-        activeTui.addChild(new LinesComponent(["PLAIN_SENTINEL"]));
-        terminal = pendingTerminal;
-        tui = activeTui;
-        activeTui.start();
-        await pendingTerminal.settle();
+                isError: false,
+            });
+            const sentinelText = "PLAIN_STYLE_SENTINEL";
+            activeTui.addChild(tool);
+            activeTui.addChild(new LinesComponent([sentinelText]));
+            terminal = pendingTerminal;
+            tui = activeTui;
+            activeTui.start();
+            await pendingTerminal.settle();
 
-        const standaloneDeletion = pendingTerminal.requireRowContaining("removedOnly");
-        const blankAddition = pendingTerminal.requireRowMatching(/\+\s*$/);
-        const deletion = pendingTerminal.requireRowContaining("previousValue");
-        const addition = pendingTerminal.requireRowContaining("nextValue");
-        const tabAddition = pendingTerminal.requireRowContaining("tabIndentedValue");
-        const context = pendingTerminal.requireRowContaining("unchangedA");
-        const sentinel = pendingTerminal.requireRowContaining("PLAIN_SENTINEL");
-        pendingTerminal.assertNoWrappedRows();
-        pendingTerminal.assertRowsFitWidth();
-        pendingTerminal.assertFullRowBackground(
-            standaloneDeletion,
-            rgbFromHex(DEFAULT_APPEARANCE.deletedRowBackground),
-        );
-        pendingTerminal.assertFullRowBackground(
-            blankAddition,
-            rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
-        );
-        pendingTerminal.assertFullRowBackground(
-            tabAddition,
-            rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
-        );
-        expect(new Set(deletion.cells.map((cell) => cell.background))).toEqual(
-            new Set([
-                rgbFromHex(DEFAULT_APPEARANCE.deletedRowBackground),
-                rgbFromHex(DEFAULT_APPEARANCE.deletedContentBackground),
-            ]),
-        );
-        expect(new Set(addition.cells.map((cell) => cell.background))).toEqual(
-            new Set([
-                rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
-                rgbFromHex(DEFAULT_APPEARANCE.addedContentBackground),
-            ]),
-        );
-        expect(
-            context.cells
-                .filter((cell) => cell.chars !== "")
-                .every((cell) => cell.isBackgroundDefault),
-        ).toBe(true);
+            const standaloneDeletion = pendingTerminal.requireRowContaining("removedOnly");
+            const standaloneAddition = pendingTerminal.requireRowContaining("insertedOnly");
+            const replacementDeletion = pendingTerminal.requireRowContaining("previousValue");
+            const replacementAddition = pendingTerminal.requireRowContaining("nextValue");
+            const weakAdditionRows = pendingTerminal.rowsMatching(/\+\s*$/);
+            expect(weakAdditionRows).toHaveLength(2);
+            const blankAddition = weakAdditionRows[0];
+            const tabOnlyAddition = weakAdditionRows[1];
+            if (blankAddition === undefined || tabOnlyAddition === undefined) {
+                throw new Error("expected blank and tab-only addition rows");
+            }
+            const tabAddition = pendingTerminal.requireRowContaining("tabIndentedValue");
+            const context = pendingTerminal.requireRowContaining("unchangedA");
+            const header = pendingTerminal.requireRowContaining("Patched src/colors.ts");
+            const sentinel = pendingTerminal.requireRowContaining(sentinelText);
+            const addedRow = rgbFromHex(expectedAppearance.addedRowBackground);
+            const deletedRow = rgbFromHex(expectedAppearance.deletedRowBackground);
+            const addedContent = rgbFromHex(expectedAppearance.addedContentBackground);
+            const deletedContent = rgbFromHex(expectedAppearance.deletedContentBackground);
+            const addedForeground = rgbFromHex(expectedAddedForeground);
+            const deletedForeground = rgbFromHex(expectedDeletedForeground);
 
-        const codeStart = addition.text.indexOf("export const nextValue = 2;");
-        expect(codeStart).toBeGreaterThanOrEqual(0);
-        const syntaxForegrounds = new Set(
-            addition.cells
-                .slice(codeStart, codeStart + "export const nextValue = 2;".length)
-                .filter((cell) => cell.chars.trim().length > 0)
-                .map((cell) => cell.foreground),
-        );
-        expect(syntaxForegrounds.size).toBeGreaterThan(1);
-        pendingTerminal.assertNeutralRange(sentinel, 0, "PLAIN_SENTINEL".length);
-    });
+            expect(new Set([addedRow, deletedRow, addedContent, deletedContent]).size).toBe(4);
+            pendingTerminal.assertFullRowBackground(standaloneDeletion, deletedRow);
+            pendingTerminal.assertFullRowBackground(standaloneAddition, addedRow);
+            pendingTerminal.assertFullRowBackground(blankAddition, addedRow);
+            pendingTerminal.assertFullRowBackground(tabOnlyAddition, addedRow);
+            pendingTerminal.assertFullRowBackground(tabAddition, addedRow);
+            expectRgbBackgrounds(
+                replacementDeletion,
+                [deletedRow, deletedContent],
+                pendingTerminal.columns,
+            );
+            expectRgbBackgrounds(
+                replacementAddition,
+                [addedRow, addedContent],
+                pendingTerminal.columns,
+            );
+            expect(standaloneDeletion.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
+            expect(standaloneAddition.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
+            expect(blankAddition.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
+            expect(tabOnlyAddition.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
+            expect(tabAddition.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
+            expect(addedRow).not.toBe(deletedRow);
+
+            const additionCode = requireDisplayCellSpan(
+                replacementAddition,
+                "export const nextValue = formatValue(newToken);",
+            );
+            const deletionMarker = requireDisplayCellSpan(replacementDeletion, "-");
+            const additionMarker = requireDisplayCellSpan(replacementAddition, "+");
+            expect(replacementDeletion.cells[deletionMarker.start]).toMatchObject({
+                foreground: deletedForeground,
+                isForegroundDefault: false,
+                isForegroundRgb: true,
+            });
+            expect(replacementAddition.cells[additionMarker.start]).toMatchObject({
+                foreground: addedForeground,
+                isForegroundDefault: false,
+                isForegroundRgb: true,
+            });
+
+            const unchangedDeletion = requireDisplayCellSpan(replacementDeletion, "formatValue(");
+            const unchangedAddition = requireDisplayCellSpan(replacementAddition, "formatValue(");
+            expectRgbBackgroundSpan(replacementDeletion, unchangedDeletion, deletedRow);
+            expectRgbBackgroundSpan(replacementAddition, unchangedAddition, addedRow);
+
+            const changedDeletion = requireDisplayCellSpan(replacementDeletion, "previousValue");
+            const changedAddition = requireDisplayCellSpan(replacementAddition, "nextValue");
+            expectRgbBackgroundSpan(replacementDeletion, changedDeletion, deletedContent);
+            expectRgbBackgroundSpan(replacementAddition, changedAddition, addedContent);
+            expect(replacementDeletion.cells.at(-1)?.background).toBe(deletedRow);
+            expect(replacementAddition.cells.at(-1)?.background).toBe(addedRow);
+            expect(replacementDeletion.cells.at(-1)?.isBackgroundRgb).toBe(true);
+            expect(replacementAddition.cells.at(-1)?.isBackgroundRgb).toBe(true);
+
+            const syntaxForegrounds = new Set(
+                replacementAddition.cells
+                    .slice(additionCode.start, additionCode.end)
+                    .filter((cell) => cell.chars.trim().length > 0)
+                    .map((cell) =>
+                        cell.isForegroundDefault
+                            ? "default"
+                            : `${cell.isForegroundRgb ? "rgb" : "palette"}:${cell.foreground}`,
+                    ),
+            );
+            expect(syntaxForegrounds.size).toBeGreaterThan(1);
+
+            expectDefaultBackgroundWithoutDiffAttributes(context);
+            expectDefaultBackgroundWithoutDiffAttributes(header);
+            pendingTerminal.assertNeutralRange(
+                context,
+                context.text.length,
+                pendingTerminal.columns,
+            );
+            pendingTerminal.assertNeutralRange(header, header.text.length, pendingTerminal.columns);
+            pendingTerminal.assertNeutralRange(sentinel, 0, pendingTerminal.columns);
+            const paddingRow = pendingTerminal.rowRange(sentinel.index + 1, sentinel.index + 2)[0];
+            expect(paddingRow?.text).toBe("");
+            if (paddingRow === undefined)
+                throw new Error("expected blank padding after style sentinel");
+            pendingTerminal.assertNeutralRange(paddingRow, 0, pendingTerminal.columns);
+
+            for (const neutralRow of [context, header, sentinel, paddingRow]) {
+                expect(
+                    neutralRow.cells.every(
+                        (cell) =>
+                            cell.background !== addedRow &&
+                            cell.background !== deletedRow &&
+                            cell.background !== addedContent &&
+                            cell.background !== deletedContent,
+                    ),
+                ).toBe(true);
+            }
+            pendingTerminal.assertNoWrappedRows();
+            pendingTerminal.assertRowsFitWidth();
+        },
+    );
 
     it("clears stale autocomplete rows by forcing a real Pi full redraw", async () => {
         const content = new LinesComponent([
