@@ -1,11 +1,5 @@
 import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import {
-    TuiAltScreen,
-    TuiMainScreen,
-    visibleWidth,
-    type Component,
-    type TUI,
-} from "@earendil-works/pi-tui";
+import { TuiAltScreen, TuiMainScreen, type Component, type TUI } from "@earendil-works/pi-tui";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +9,7 @@ import { buildPierreDiffPayload } from "../../src/diffs/diff.ts";
 import { configureAutocompleteCleanupPatch } from "../../src/patches/autocomplete-cleanup.ts";
 import { GlowupExtensionHarness } from "../support/extension-harness.ts";
 import { applyPatchOwnerToolDefinition } from "../support/apply-patch-owner-fixture.ts";
-import { VirtualTerminal } from "../support/virtual-terminal.ts";
+import { rgbFromHex, VirtualTerminal } from "../support/virtual-terminal.ts";
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 const originalAgentDir = process.env[AGENT_DIR_ENV];
@@ -54,16 +48,34 @@ type CleanupPrototype = {
     clearAutocompleteUi(this: CleanupEditor): void;
 };
 
-function countOccurrences(text: string, search: string): number {
-    return text.split(search).length - 1;
-}
+type ExtensionProfile = {
+    readonly theme?: "dark" | "light";
+    readonly appearance?:
+        | "default"
+        | {
+              readonly diffBackgroundStyle: "solid" | "two-tone";
+              readonly addedRowBackground: string;
+              readonly deletedRowBackground: string;
+              readonly addedContentBackground: string;
+              readonly deletedContentBackground: string;
+          };
+};
 
-function rowContaining(terminal: VirtualTerminal, text: string) {
-    const row = terminal.interpretedRows().find((candidate) => candidate.text.includes(text));
-    if (row === undefined)
-        throw new Error(`missing terminal row containing ${JSON.stringify(text)}`);
-    return row;
-}
+const DEFAULT_APPEARANCE: Exclude<ExtensionProfile["appearance"], "default" | undefined> = {
+    diffBackgroundStyle: "two-tone",
+    addedRowBackground: "#16351E",
+    deletedRowBackground: "#3B1E1C",
+    addedContentBackground: "#0B441F",
+    deletedContentBackground: "#5C2321",
+};
+
+const cleanupPrototype: CleanupPrototype = {
+    clearAutocompleteUi(this: CleanupEditor): void {
+        this.active = false;
+        this.autocompletePrefix = "";
+        this.content.lines = ["EDITOR_PROMPT"];
+    },
+};
 
 const tuiVariants = [
     {
@@ -79,47 +91,65 @@ const tuiVariants = [
 describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, createTui }) => {
     let root: string;
     let cwd: string;
-    let extension: GlowupExtensionHarness;
+    let agentDir: string;
+    let extension: GlowupExtensionHarness | undefined;
     let terminal: VirtualTerminal | undefined;
     let tui: TUI | undefined;
 
     beforeEach(async () => {
         root = mkdtempSync(join(tmpdir(), "pi-glowup-xterm-"));
         cwd = join(root, "workspace");
-        const agentDir = join(root, "agent");
+        agentDir = join(root, "agent");
         mkdirSync(cwd, { recursive: true });
         mkdirSync(join(agentDir, "extension-settings"), { recursive: true });
         process.env[AGENT_DIR_ENV] = agentDir;
-        writeFileSync(
-            getGlowupGlobalConfigPath(agentDir),
-            JSON.stringify({
-                toolLabels: { mode: "lifecycle" },
-                appearance: {
-                    diffBackgroundStyle: "two-tone",
-                    addedRowBackground: "#16351E",
-                    deletedRowBackground: "#3B1E1C",
-                    addedContentBackground: "#0B441F",
-                    deletedContentBackground: "#5C2321",
-                },
-            }),
-        );
-        initTheme("dark");
-        extension = new GlowupExtensionHarness();
-        await extension.install(cwd);
+        await installExtension();
     });
 
     afterEach(async () => {
-        tui?.stop();
-        await terminal?.settle(0);
-        terminal?.dispose();
-        await extension.shutdown();
-        rmSync(root, { recursive: true, force: true });
-        if (originalAgentDir === undefined) {
-            delete process.env[AGENT_DIR_ENV];
-        } else {
-            process.env[AGENT_DIR_ENV] = originalAgentDir;
+        try {
+            tui?.stop();
+            await terminal?.settle(0);
+        } finally {
+            terminal?.dispose();
+            terminal = undefined;
+            tui = undefined;
+            try {
+                await shutdownExtension();
+            } finally {
+                configureAutocompleteCleanupPatch(false, cleanupPrototype);
+                initTheme("dark");
+                rmSync(root, { recursive: true, force: true });
+                if (originalAgentDir === undefined) {
+                    delete process.env[AGENT_DIR_ENV];
+                } else {
+                    process.env[AGENT_DIR_ENV] = originalAgentDir;
+                }
+            }
         }
     });
+
+    async function shutdownExtension(reason: "quit" | "reload" = "quit"): Promise<void> {
+        const installedExtension = extension;
+        extension = undefined;
+        if (installedExtension !== undefined) await installedExtension.shutdown(reason);
+    }
+
+    async function installExtension(profile: ExtensionProfile = {}): Promise<void> {
+        await shutdownExtension("reload");
+        initTheme(profile.theme ?? "dark");
+        const appearance =
+            profile.appearance === "default"
+                ? {}
+                : { appearance: profile.appearance ?? DEFAULT_APPEARANCE };
+        writeFileSync(
+            getGlowupGlobalConfigPath(agentDir),
+            JSON.stringify({ toolLabels: { mode: "lifecycle" }, ...appearance }),
+        );
+        const installedExtension = new GlowupExtensionHarness();
+        extension = installedExtension;
+        await installedExtension.install(cwd);
+    }
 
     async function start(
         components: readonly Component[],
@@ -204,7 +234,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         await pendingTerminal.settle();
         const completed = pendingTerminal.screenText();
         expect(completed).toContain("Patched src/current.ts (+1)");
-        expect(countOccurrences(completed, "Patched src/current.ts")).toBe(1);
+        expect(pendingTerminal.countOccurrences("Patched src/current.ts")).toBe(1);
         expect(completed).not.toContain("Done!");
         expect(completed).not.toContain("src/obsolete.ts");
         expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[?2026h");
@@ -264,23 +294,29 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         activeTui.start();
         await pendingTerminal.settle();
 
-        expect(rowContaining(pendingTerminal, "uv run pytest").text).not.toContain("&& just test");
-        expect(rowContaining(pendingTerminal, "&& just test feature").isWrapped).toBe(false);
-        expect(rowContaining(pendingTerminal, "&& git status --short").isWrapped).toBe(false);
+        expect(pendingTerminal.requireRowContaining("uv run pytest").text).not.toContain(
+            "&& just test",
+        );
+        pendingTerminal.requireRowContaining("&& just test feature");
+        pendingTerminal.requireRowContaining("&& git status --short");
+        pendingTerminal.assertNoWrappedRows();
 
         pendingTerminal.resize(42, 20);
         await pendingTerminal.settle();
-        expect(rowContaining(pendingTerminal, "&& just test feature").isWrapped).toBe(false);
-        expect(rowContaining(pendingTerminal, "&& git status --short").isWrapped).toBe(false);
-        expect(pendingTerminal.interpretedRows().some((row) => row.isWrapped)).toBe(false);
+        pendingTerminal.requireRowContaining("&& just test feature");
+        pendingTerminal.requireRowContaining("&& git status --short");
+        pendingTerminal.assertNoWrappedRows();
 
         pendingTerminal.resize(110, 20);
         await pendingTerminal.settle();
-        expect(rowContaining(pendingTerminal, "uv run pytest").text).not.toContain("&& just test");
-        expect(rowContaining(pendingTerminal, "&& just test feature").isWrapped).toBe(false);
-        expect(rowContaining(pendingTerminal, "&& git status --short").isWrapped).toBe(false);
-        expect(countOccurrences(pendingTerminal.screenText(), "BEFORE_BASH_CHAIN")).toBe(1);
-        expect(countOccurrences(pendingTerminal.screenText(), "AFTER_BASH_CHAIN")).toBe(1);
+        expect(pendingTerminal.requireRowContaining("uv run pytest").text).not.toContain(
+            "&& just test",
+        );
+        pendingTerminal.requireRowContaining("&& just test feature");
+        pendingTerminal.requireRowContaining("&& git status --short");
+        pendingTerminal.assertNoWrappedRows();
+        expect(pendingTerminal.countOccurrences("BEFORE_BASH_CHAIN")).toBe(1);
+        expect(pendingTerminal.countOccurrences("AFTER_BASH_CHAIN")).toBe(1);
     });
 
     it("removes and restores the Pierre split divider across wide-narrow-wide redraws", async () => {
@@ -325,13 +361,13 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
 
         const firstWide = pendingTerminal.screenText();
         expect(firstWide).toContain(" │ ");
-        expect(countOccurrences(firstWide, "BEFORE_SENTINEL")).toBe(1);
-        expect(countOccurrences(firstWide, "AFTER_SENTINEL")).toBe(1);
+        expect(pendingTerminal.countOccurrences("BEFORE_SENTINEL")).toBe(1);
+        expect(pendingTerminal.countOccurrences("AFTER_SENTINEL")).toBe(1);
 
         pendingTerminal.resize(70, 30);
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).not.toContain(" │ ");
-        expect(pendingTerminal.interpretedRows().some((row) => row.isWrapped)).toBe(false);
+        pendingTerminal.assertNoWrappedRows();
 
         pendingTerminal.resize(180, 30);
         await pendingTerminal.settle();
@@ -531,9 +567,11 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         await pendingTerminal.settle();
         const expanded = pendingTerminal.screenText();
         expect(expanded).toContain("line9");
-        expect(countOccurrences(expanded, "Patched src/expanded.ts")).toBe(1);
-        expect(countOccurrences(expanded, "BEFORE_TRANSCRIPT")).toBe(1);
-        expect(countOccurrences(expanded, "AFTER_TRANSCRIPT")).toBe(1);
+        pendingTerminal.assertUniqueTranscriptMarkers(
+            "Patched src/expanded.ts",
+            "BEFORE_TRANSCRIPT",
+            "AFTER_TRANSCRIPT",
+        );
 
         tool.setExpanded(false);
         activeTui.requestRender();
@@ -614,31 +652,39 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         activeTui.start();
         await pendingTerminal.settle();
 
-        const standaloneDeletion = rowContaining(pendingTerminal, "removedOnly");
-        const blankAddition = pendingTerminal
-            .interpretedRows()
-            .find((candidate) => candidate.text.trimEnd().endsWith("+"));
-        if (blankAddition === undefined) throw new Error("missing blank addition row");
-        const deletion = rowContaining(pendingTerminal, "previousValue");
-        const addition = rowContaining(pendingTerminal, "nextValue");
-        const tabAddition = rowContaining(pendingTerminal, "tabIndentedValue");
-        const context = rowContaining(pendingTerminal, "unchanged");
-        const sentinel = rowContaining(pendingTerminal, "PLAIN_SENTINEL");
-        expect(standaloneDeletion.cells).toHaveLength(90);
-        expect(blankAddition.cells).toHaveLength(90);
-        expect(deletion.cells).toHaveLength(90);
-        expect(addition.cells).toHaveLength(90);
-        expect(tabAddition.cells).toHaveLength(90);
-        expect(standaloneDeletion.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
-        expect(blankAddition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
-        expect(deletion.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
-        expect(addition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
-        expect(tabAddition.cells.every((cell) => !cell.isBackgroundDefault)).toBe(true);
-        expect(new Set(standaloneDeletion.cells.map((cell) => cell.background)).size).toBe(1);
-        expect(new Set(blankAddition.cells.map((cell) => cell.background)).size).toBe(1);
-        expect(new Set(tabAddition.cells.map((cell) => cell.background)).size).toBe(1);
-        expect(new Set(deletion.cells.map((cell) => cell.background)).size).toBeGreaterThan(1);
-        expect(new Set(addition.cells.map((cell) => cell.background)).size).toBeGreaterThan(1);
+        const standaloneDeletion = pendingTerminal.requireRowContaining("removedOnly");
+        const blankAddition = pendingTerminal.requireRowMatching(/\+\s*$/);
+        const deletion = pendingTerminal.requireRowContaining("previousValue");
+        const addition = pendingTerminal.requireRowContaining("nextValue");
+        const tabAddition = pendingTerminal.requireRowContaining("tabIndentedValue");
+        const context = pendingTerminal.requireRowContaining("unchangedA");
+        const sentinel = pendingTerminal.requireRowContaining("PLAIN_SENTINEL");
+        pendingTerminal.assertNoWrappedRows();
+        pendingTerminal.assertRowsFitWidth();
+        pendingTerminal.assertFullRowBackground(
+            standaloneDeletion,
+            rgbFromHex(DEFAULT_APPEARANCE.deletedRowBackground),
+        );
+        pendingTerminal.assertFullRowBackground(
+            blankAddition,
+            rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
+        );
+        pendingTerminal.assertFullRowBackground(
+            tabAddition,
+            rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
+        );
+        expect(new Set(deletion.cells.map((cell) => cell.background))).toEqual(
+            new Set([
+                rgbFromHex(DEFAULT_APPEARANCE.deletedRowBackground),
+                rgbFromHex(DEFAULT_APPEARANCE.deletedContentBackground),
+            ]),
+        );
+        expect(new Set(addition.cells.map((cell) => cell.background))).toEqual(
+            new Set([
+                rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
+                rgbFromHex(DEFAULT_APPEARANCE.addedContentBackground),
+            ]),
+        );
         expect(
             context.cells
                 .filter((cell) => cell.chars !== "")
@@ -654,16 +700,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                 .map((cell) => cell.foreground),
         );
         expect(syntaxForegrounds.size).toBeGreaterThan(1);
-        expect(sentinel.cells.slice(0, "PLAIN_SENTINEL".length)).toSatisfy(
-            (cells: readonly (typeof sentinel.cells)[number][]) =>
-                cells.every(
-                    (cell) =>
-                        cell.isForegroundDefault &&
-                        cell.isBackgroundDefault &&
-                        !cell.isBold &&
-                        !cell.isDim,
-                ),
-        );
+        pendingTerminal.assertNeutralRange(sentinel, 0, "PLAIN_SENTINEL".length);
     });
 
     it("clears stale autocomplete rows by forcing a real Pi full redraw", async () => {
@@ -676,14 +713,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         const running = await start([content], 80, 20);
         expect(running.terminal.screenText()).toContain("third stale completion");
         const writesBeforeCleanup = running.terminal.rawWrites().length;
-        const prototype: CleanupPrototype = {
-            clearAutocompleteUi(this: CleanupEditor): void {
-                this.active = false;
-                this.autocompletePrefix = "";
-                this.content.lines = ["EDITOR_PROMPT"];
-            },
-        };
-        configureAutocompleteCleanupPatch(true, prototype);
+        configureAutocompleteCleanupPatch(true, cleanupPrototype);
         const editor: CleanupEditor = {
             tui: running.tui,
             content,
@@ -694,7 +724,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             },
         };
 
-        prototype.clearAutocompleteUi.call(editor);
+        cleanupPrototype.clearAutocompleteUi.call(editor);
         await running.terminal.settle();
 
         expect(running.terminal.screenText().trimEnd()).toBe("EDITOR_PROMPT");
@@ -705,9 +735,6 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         } else {
             expect(cleanupWrites).toContain("\u001b[1;1H\u001b[2K");
         }
-        expect(
-            running.terminal.interpretedRows().every((row) => visibleWidth(row.text) <= 80),
-        ).toBe(true);
-        configureAutocompleteCleanupPatch(false, prototype);
+        running.terminal.assertRowsFitWidth();
     });
 });

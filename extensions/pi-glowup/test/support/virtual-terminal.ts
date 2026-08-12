@@ -1,5 +1,5 @@
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
-import type { Terminal } from "@earendil-works/pi-tui";
+import { visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 
 export type InterpretedCell = {
     readonly chars: string;
@@ -7,6 +7,8 @@ export type InterpretedCell = {
     readonly foreground: number;
     readonly background: number;
     readonly isForegroundDefault: boolean;
+    readonly isForegroundRgb: boolean;
+    readonly isBackgroundRgb: boolean;
     readonly isBackgroundDefault: boolean;
     readonly isBold: boolean;
     readonly isDim: boolean;
@@ -14,6 +16,7 @@ export type InterpretedCell = {
 };
 
 export type InterpretedRow = {
+    readonly index: number;
     readonly text: string;
     readonly isWrapped: boolean;
     readonly cells: readonly InterpretedCell[];
@@ -21,6 +24,32 @@ export type InterpretedRow = {
 
 function delay(delayMs: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function validateRgbValue(rgb: number): void {
+    if (!Number.isInteger(rgb) || rgb < 0 || rgb > 0xffffff) {
+        throw new RangeError(`RGB value must be an integer from 0x000000 through 0xFFFFFF`);
+    }
+}
+
+export function rgbFromHex(color: string): number {
+    if (!/^#[\dA-Fa-f]{6}$/.test(color)) {
+        throw new TypeError(`expected a six-digit #RRGGBB color, received ${JSON.stringify(color)}`);
+    }
+    return Number.parseInt(color.slice(1), 16);
+}
+
+function countExactOccurrences(text: string, search: string): number {
+    if (search.length === 0) throw new TypeError("occurrence search must not be empty");
+    let count = 0;
+    let offset = 0;
+    while (offset <= text.length - search.length) {
+        const match = text.indexOf(search, offset);
+        if (match === -1) break;
+        count += 1;
+        offset = match + search.length;
+    }
+    return count;
 }
 
 /** Pi terminal adapter backed by xterm's VT parser and interpreted screen buffer. */
@@ -132,7 +161,7 @@ export class VirtualTerminal implements Terminal {
         for (let viewportRow = 0; viewportRow < this.rows; viewportRow += 1) {
             const line = buffer.getLine(buffer.viewportY + viewportRow);
             if (line === undefined) {
-                rows.push({ text: "", isWrapped: false, cells: [] });
+                rows.push({ index: viewportRow, text: "", isWrapped: false, cells: [] });
                 continue;
             }
             const cells: InterpretedCell[] = [];
@@ -146,12 +175,15 @@ export class VirtualTerminal implements Terminal {
                     background: cell.getBgColor(),
                     isForegroundDefault: cell.isFgDefault(),
                     isBackgroundDefault: cell.isBgDefault(),
+                    isForegroundRgb: cell.isFgRGB(),
+                    isBackgroundRgb: cell.isBgRGB(),
                     isBold: cell.isBold() !== 0,
                     isDim: cell.isDim() !== 0,
                     isAttributeDefault: cell.isAttributeDefault(),
                 });
             }
             rows.push({
+                index: viewportRow,
                 text: line.translateToString(true),
                 isWrapped: line.isWrapped,
                 cells,
@@ -164,6 +196,152 @@ export class VirtualTerminal implements Terminal {
         const rows = this.interpretedRows().map((row) => row.text);
         while (rows.at(-1) === "") rows.pop();
         return rows.join("\n");
+    }
+
+    rowsContaining(text: string): readonly InterpretedRow[] {
+        return this.interpretedRows().filter((row) => row.text.includes(text));
+    }
+
+    rowsMatching(pattern: RegExp): readonly InterpretedRow[] {
+        return this.interpretedRows().filter((row) => {
+            const isolatedPattern = new RegExp(pattern.source, pattern.flags);
+            isolatedPattern.lastIndex = 0;
+            return isolatedPattern.test(row.text);
+        });
+    }
+
+    requireRowContaining(text: string): InterpretedRow {
+        return this.requireSingleRow(this.rowsContaining(text), `containing ${JSON.stringify(text)}`);
+    }
+
+    requireRowMatching(pattern: RegExp): InterpretedRow {
+        return this.requireSingleRow(this.rowsMatching(pattern), `matching ${pattern.toString()}`);
+    }
+
+    countOccurrences(search: string): number {
+        return countExactOccurrences(this.screenText(), search);
+    }
+
+    rowRange(start: number, end: number): readonly InterpretedRow[] {
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) {
+            throw new RangeError(`row range must satisfy 0 <= start <= end`);
+        }
+        if (end > this.rows) {
+            throw new RangeError(`row range [${start}, ${end}) exceeds ${this.rows} terminal rows`);
+        }
+        return this.interpretedRows().slice(start, end);
+    }
+
+    assertNoWrappedRows(rows: readonly InterpretedRow[] = this.interpretedRows()): void {
+        const wrapped = rows.find((row) => row.isWrapped);
+        if (wrapped === undefined) return;
+        throw this.invariantError(wrapped.index, "row must not be wrapped", "isWrapped=true");
+    }
+
+    assertRowsFitWidth(rows: readonly InterpretedRow[] = this.interpretedRows()): void {
+        const overflowing = rows.find((row) => visibleWidth(row.text) > this.columns);
+        if (overflowing === undefined) return;
+        throw this.invariantError(
+            overflowing.index,
+            `visible width must not exceed ${this.columns}`,
+            `visibleWidth=${visibleWidth(overflowing.text)}`,
+        );
+    }
+
+    assertFullRowBackground(row: InterpretedRow, expectedRgb: number): void {
+        validateRgbValue(expectedRgb);
+        if (row.cells.length !== this.columns) {
+            throw this.invariantError(
+                row.index,
+                `complete row must contain ${this.columns} cells`,
+                `cells=${row.cells.length}`,
+            );
+        }
+        const failingColumn = row.cells.findIndex(
+            (cell) => !cell.isBackgroundRgb || cell.background !== expectedRgb,
+        );
+        if (failingColumn === -1) return;
+        throw this.invariantError(
+            row.index,
+            `every cell background must be RGB #${expectedRgb.toString(16).padStart(6, "0").toUpperCase()}`,
+            this.cellSummary(failingColumn, row.cells[failingColumn]),
+        );
+    }
+
+    assertNeutralRange(row: InterpretedRow, start = 0, end = row.cells.length): void {
+        if (
+            !Number.isInteger(start) ||
+            !Number.isInteger(end) ||
+            start < 0 ||
+            end < start ||
+            end > row.cells.length
+        ) {
+            throw new RangeError(`cell range [${start}, ${end}) is outside row ${row.index}`);
+        }
+        const offset = row.cells.slice(start, end).findIndex(
+            (cell) =>
+                !cell.isForegroundDefault ||
+                !cell.isBackgroundDefault ||
+                cell.isBold ||
+                cell.isDim,
+        );
+        if (offset === -1) return;
+        const column = start + offset;
+        throw this.invariantError(
+            row.index,
+            `cells [${start}, ${end}) must use default colors without bold or dim`,
+            this.cellSummary(column, row.cells[column]),
+        );
+    }
+
+    assertUniqueTranscriptMarkers(
+        header: string,
+        beforeSentinel: string,
+        afterSentinel: string,
+    ): void {
+        for (const [role, marker] of [
+            ["header", header],
+            ["before sentinel", beforeSentinel],
+            ["after sentinel", afterSentinel],
+        ] as const) {
+            const count = this.countOccurrences(marker);
+            if (count !== 1) {
+                const rows = this.rowsContaining(marker).map((row) => row.index);
+                const matchingRows = rows.length === 0 ? "none" : rows.join(", ");
+                throw new Error(
+                    `${role} ${JSON.stringify(marker)} must occur exactly once; found ${count} (rows: ${matchingRows})\nScreen:\n${this.screenText()}`,
+                );
+            }
+        }
+    }
+
+    private requireSingleRow(
+        matches: readonly InterpretedRow[],
+        description: string,
+    ): InterpretedRow {
+        const match = matches[0];
+        if (matches.length === 1 && match !== undefined) return match;
+        const matchingRows = matches.length === 0 ? "none" : matches.map((row) => row.index).join(", ");
+        throw new Error(
+            `expected exactly one terminal row ${description}; found ${matches.length} (rows: ${matchingRows})\nScreen:\n${this.screenText()}`,
+        );
+    }
+
+    private cellSummary(column: number, cell: InterpretedCell | undefined): string {
+        if (cell === undefined) return `column=${column}, missing cell`;
+        const foreground = cell.isForegroundDefault
+            ? "default"
+            : `${cell.isForegroundRgb ? "rgb" : "palette"}:${cell.foreground}`;
+        const background = cell.isBackgroundDefault
+            ? "default"
+            : `${cell.isBackgroundRgb ? "rgb" : "palette"}:${cell.background}`;
+        return `column=${column}, chars=${JSON.stringify(cell.chars)}, fg=${foreground}, bg=${background}, bold=${cell.isBold}, dim=${cell.isDim}`;
+    }
+
+    private invariantError(row: number, expected: string, actual: string): Error {
+        return new Error(
+            `terminal row ${row}: expected ${expected}; actual ${actual}\nScreen:\n${this.screenText()}`,
+        );
     }
 
     dispose(): void {
