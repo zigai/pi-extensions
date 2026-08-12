@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import glowupExtension from "../../src/index.ts";
 
 type ExtensionHandler = (...args: unknown[]) => unknown;
@@ -47,6 +47,10 @@ export class GlowupExtensionHarness {
 
     async shutdown(reason: "quit" | "reload" = "quit"): Promise<void> {
         await this.emit("session_shutdown", { type: "session_shutdown", reason }, {});
+    }
+
+    async emitToolCall(event: ToolCallEvent, cwd: string): Promise<void> {
+        await this.emit("tool_call", event, { cwd });
     }
 
     private async emit(eventName: string, event: unknown, context: unknown): Promise<void> {

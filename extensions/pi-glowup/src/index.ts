@@ -1001,6 +1001,10 @@ function renderEditCall(
     }
 
     const normalizedArgs = normalizedEditArgs(args);
+    const summary = summarizeEditCall(normalizedArgs, {
+        ...context,
+        labelMode,
+    });
     if (isActiveToolCall(context)) {
         return renderGlowupCall(theme, {
             state: "running",
@@ -1009,14 +1013,10 @@ function renderEditCall(
                 active: "Editing",
                 completed: "Edited",
             }),
-            body: formatPathTarget(theme, pathField(normalizedArgs)),
+            body: `${formatPathTarget(theme, summary.path)}${summary.suffix}`,
         });
     }
 
-    const summary = summarizeEditCall(normalizedArgs, {
-        ...context,
-        labelMode,
-    });
     const state = summary.hasInvalidEdits || context.isError ? "error" : "success";
     return renderGlowupCall(theme, {
         state,
