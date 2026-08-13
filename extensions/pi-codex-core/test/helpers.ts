@@ -12,12 +12,37 @@ import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
 export const TEST_THEME = makeTestTheme();
 
 type ExtensionEventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
+type MessageComponent = {
+    readonly render: (width: number) => string[];
+    readonly invalidate: () => void;
+};
+type MessageRenderer = (
+    message: { content?: unknown },
+    options: unknown,
+    theme: Theme,
+) => MessageComponent;
 
 type ExtensionHarness = {
     readonly api: ExtensionAPI;
     readonly events: EventBus;
     readonly activeTools: readonly string[];
+    readonly appendedEntries: readonly {
+        readonly customType: string;
+        readonly data: unknown;
+    }[];
+    readonly sentUserMessages: readonly unknown[];
     readonly startSession: (ctx: ExtensionContext) => Promise<void>;
+    readonly selectModel: (ctx: ExtensionContext) => Promise<void>;
+    readonly submitInput: (event: unknown, ctx: ExtensionContext) => Promise<unknown>;
+    readonly endMessage: (message: unknown, ctx: ExtensionContext) => Promise<void>;
+    readonly endAgent: (messages: readonly unknown[], ctx: ExtensionContext) => Promise<void>;
+    readonly settleAgent: (ctx: ExtensionContext) => Promise<void>;
+    readonly shutdownSession: (reason: string, ctx: ExtensionContext) => Promise<void>;
+    readonly renderMessage: (
+        type: string,
+        message: { content?: unknown },
+        options?: unknown,
+    ) => MessageComponent;
     readonly prepareProviderHeaders: (
         headers: Record<string, string | null>,
         ctx: ExtensionContext,
@@ -35,6 +60,10 @@ type ExtensionHarness = {
 export function makeExtensionHarness(initialActiveTools: readonly string[] = []): ExtensionHarness {
     let activeTools: string[] = [...initialActiveTools];
     const events = createEventBus();
+    const appendedEntries: Array<{ readonly customType: string; readonly data: unknown }> = [];
+    const sentUserMessages: unknown[] = [];
+    const messageRenderers = new Map<string, MessageRenderer>();
+    const handlers = new Map<string, ExtensionEventHandler>();
     let sessionStart: ExtensionEventHandler | undefined;
     let beforeProviderHeaders: ExtensionEventHandler | undefined;
     let beforeProviderRequest: ExtensionEventHandler | undefined;
@@ -45,14 +74,23 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         events,
         registerTool() {},
         registerCommand() {},
-        registerMessageRenderer() {},
+        registerMessageRenderer(type: string, renderer: MessageRenderer) {
+            messageRenderers.set(type, renderer);
+        },
         on(eventName: string, handler: ExtensionEventHandler) {
+            handlers.set(eventName, handler);
             if (eventName === "session_start") sessionStart = handler;
             if (eventName === "before_provider_headers") beforeProviderHeaders = handler;
             if (eventName === "before_provider_request") beforeProviderRequest = handler;
             if (eventName === "before_agent_start") beforeAgentStart = handler;
             if (eventName === "session_before_compact") sessionBeforeCompact = handler;
             if (eventName === "session_compact") sessionCompact = handler;
+        },
+        appendEntry(customType: string, data: unknown) {
+            appendedEntries.push({ customType, data });
+        },
+        sendUserMessage(message: unknown) {
+            sentUserMessages.push(message);
         },
         getActiveTools: () => activeTools,
         setActiveTools(tools: readonly string[]) {
@@ -67,9 +105,38 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         get activeTools() {
             return activeTools;
         },
+        appendedEntries,
+        sentUserMessages,
         async startSession(ctx: ExtensionContext): Promise<void> {
             assert.ok(sessionStart);
             await sessionStart({ type: "session_start" }, ctx);
+        },
+        async selectModel(ctx: ExtensionContext): Promise<void> {
+            await dispatch("model_select", { type: "model_select" }, ctx);
+        },
+        async submitInput(event: unknown, ctx: ExtensionContext): Promise<unknown> {
+            return dispatch("input", event, ctx);
+        },
+        async endMessage(message: unknown, ctx: ExtensionContext): Promise<void> {
+            await dispatch("message_end", { type: "message_end", message }, ctx);
+        },
+        async endAgent(messages: readonly unknown[], ctx: ExtensionContext): Promise<void> {
+            await dispatch("agent_end", { type: "agent_end", messages }, ctx);
+        },
+        async settleAgent(ctx: ExtensionContext): Promise<void> {
+            await dispatch("agent_settled", { type: "agent_settled" }, ctx);
+        },
+        async shutdownSession(reason: string, ctx: ExtensionContext): Promise<void> {
+            await dispatch("session_shutdown", { type: "session_shutdown", reason }, ctx);
+        },
+        renderMessage(
+            type: string,
+            message: { content?: unknown },
+            options: unknown = {},
+        ): MessageComponent {
+            const renderer = messageRenderers.get(type);
+            assert.ok(renderer);
+            return renderer(message, options, TEST_THEME);
         },
         async prepareProviderHeaders(
             headers: Record<string, string | null>,
@@ -141,6 +208,16 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             return result.systemPrompt;
         },
     };
+
+    async function dispatch(
+        eventName: string,
+        event: unknown,
+        ctx: ExtensionContext,
+    ): Promise<unknown> {
+        const handler = handlers.get(eventName);
+        assert.ok(handler);
+        return handler(event, ctx);
+    }
 }
 
 type TestExtensionModel = {

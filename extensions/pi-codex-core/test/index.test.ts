@@ -67,6 +67,140 @@ test("registers extension handlers once per Pi API", () => {
     );
 });
 
+test("model selection resynchronizes tool activation for the newly selected model", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-model-select-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const configPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(configPath, JSON.stringify({ tools: { applyPatch: "openai" } }));
+        const harness = makeExtensionHarness(["edit"]);
+        extension(harness.api);
+        const ctx = makeExtensionContext("/workspace", false, {
+            ...DEFAULT_TEST_EXTENSION_MODEL,
+            provider: "anthropic",
+            api: "anthropic-messages",
+            id: "claude-sonnet-4",
+        });
+
+        await harness.startSession(ctx);
+        assert.deepEqual(harness.activeTools, ["edit"]);
+
+        Object.defineProperty(ctx, "model", {
+            configurable: true,
+            value: DEFAULT_TEST_EXTENSION_MODEL,
+        });
+        await harness.selectModel(ctx);
+
+        assert.deepEqual(harness.activeTools, ["web_run", "imagegen", "view_image", "apply_patch"]);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("input lifecycle holds follow-ups and merges them into the next manual message", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-input-recovery-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const configPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(
+            configPath,
+            JSON.stringify({
+                compaction: { auto: false },
+                recovery: { batchFollowUps: true },
+            }),
+        );
+        const harness = makeExtensionHarness();
+        extension(harness.api);
+        const ctx = makeExtensionContext("/workspace", false);
+        Object.defineProperty(ctx, "mode", { configurable: true, value: "tui" });
+        await harness.startSession(ctx);
+
+        const held = await harness.submitInput(
+            {
+                type: "input",
+                source: "user",
+                text: "  inspect the logs  ",
+                images: [],
+                streamingBehavior: "followUp",
+            },
+            ctx,
+        );
+        await harness.endMessage(
+            {
+                role: "assistant",
+                content: [],
+                stopReason: "error",
+                errorMessage: "invalid api key",
+                timestamp: 0,
+            },
+            ctx,
+        );
+        await harness.settleAgent(ctx);
+        await harness.endAgent([], ctx);
+        const merged = await harness.submitInput(
+            {
+                type: "input",
+                source: "user",
+                text: "Continue",
+                images: [],
+                streamingBehavior: undefined,
+            },
+            ctx,
+        );
+        assert.deepEqual(held, { action: "handled" });
+        assert.deepEqual(merged, {
+            action: "transform",
+            text: "Apply these previously queued updates together, in order:\n\n1. inspect the logs\n\nLatest user message:\n\nContinue",
+        });
+        assert.equal(harness.appendedEntries.length, 3);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("session shutdown releases Pi Toggles lifecycle subscriptions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-shutdown-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+        const harness = makeExtensionHarness();
+        let proposals = 0;
+        harness.events.on("pi-toggles:set-activation-proposal", () => {
+            proposals += 1;
+        });
+        extension(harness.api);
+        const ctx = makeExtensionContext("/workspace", false);
+        await harness.startSession(ctx);
+        harness.events.emit("pi-toggles:activation-ready", {
+            version: 1,
+            sessionId: "extension-session",
+        });
+        assert.equal(proposals, 1);
+
+        await harness.shutdownSession("quit", ctx);
+        harness.events.emit("pi-toggles:activation-ready", {
+            version: 1,
+            sessionId: "extension-session",
+        });
+
+        assert.equal(proposals, 1);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("apply_patch replaces edit when enabled for OpenAI-like models", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-codex-core-apply-patch-tools-"));
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
