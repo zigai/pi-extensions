@@ -27,7 +27,7 @@ Optional Codex remote compaction v2 replay supports OpenAI Codex responses model
 
 ### Outage Recovery
 
-In TUI and RPC sessions, transient Codex failures can resume after a bounded cooldown. Text follow-ups entered during an active Codex turn are delivered together after it settles, preventing each queued line from creating its own retry cycle.
+In TUI and RPC sessions, transient Codex failures can resume after a bounded cooldown. Optional follow-up batching can deliver text follow-ups entered during an active Codex turn together after it settles, preventing each queued line from creating its own retry cycle.
 
 ### `/codex` Slash Command
 
@@ -66,7 +66,7 @@ When Pi Toggles is active, Codex Core submits these tool settings as defaults in
 | `compaction.auto`              | `true`          | Automatically compact when token usage reaches the threshold.                                |
 | `compaction.thresholdPercent`  | `80`            | Token usage percentage that triggers auto-compaction.                                        |
 | `recovery.enabled`             | `true`          | Resume transiently failed Codex turns after Pi exhausts its retries.                         |
-| `recovery.batchFollowUps`      | `true`          | Deliver text follow-ups entered during a Codex turn together after it settles.               |
+| `recovery.batchFollowUps`      | `false`         | Deliver text follow-ups entered during a Codex turn together after it settles.               |
 | `recovery.maxAttempts`         | `3`             | Maximum additional delayed resume attempts.                                                  |
 | `recovery.baseDelayMs`         | `30000`         | Initial recovery cooldown in milliseconds.                                                   |
 | `recovery.maxDelayMs`          | `120000`        | Maximum cooldown between recovery attempts.                                                  |
@@ -104,7 +104,7 @@ When Pi Toggles is active, Codex Core submits these tool settings as defaults in
   },
   "recovery": {
     "enabled": true,
-    "batchFollowUps": true,
+    "batchFollowUps": false,
     "maxAttempts": 3,
     "baseDelayMs": 30000,
     "maxDelayMs": 120000

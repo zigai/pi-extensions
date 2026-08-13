@@ -159,7 +159,7 @@
         },
         "batchFollowUps": {
           "type": "boolean",
-          "default": true
+          "default": false
         },
         "maxAttempts": {
           "type": "integer",

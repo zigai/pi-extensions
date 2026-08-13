@@ -154,7 +154,7 @@ const CodexCoreConfigJsonSchema = Type.Object(
         recovery: Type.Object(
             {
                 enabled: Type.Boolean({ default: true }),
-                batchFollowUps: Type.Boolean({ default: true }),
+                batchFollowUps: Type.Boolean({ default: false }),
                 maxAttempts: Type.Integer({ minimum: 0, maximum: 10, default: 3 }),
                 baseDelayMs: Type.Integer({ minimum: 1000, maximum: 300000, default: 30000 }),
                 maxDelayMs: Type.Integer({ minimum: 1000, maximum: 900000, default: 120000 }),
@@ -197,7 +197,7 @@ export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
     compaction: { enabled: true, auto: true, thresholdPercent: 80 },
     recovery: {
         enabled: true,
-        batchFollowUps: true,
+        batchFollowUps: false,
         maxAttempts: 3,
         baseDelayMs: 30_000,
         maxDelayMs: 120_000,

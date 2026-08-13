@@ -42,7 +42,7 @@ test("parses codex config with safe defaults", () => {
     assert.equal(config.compaction.auto, false);
     assert.equal(config.compaction.thresholdPercent, 90);
     assert.equal(config.recovery.enabled, true);
-    assert.equal(config.recovery.batchFollowUps, true);
+    assert.equal(config.recovery.batchFollowUps, false);
     assert.equal(config.recovery.maxAttempts, 5);
     assert.equal(config.recovery.baseDelayMs, 15_000);
     assert.equal(config.recovery.maxDelayMs, 120_000);
