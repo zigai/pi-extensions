@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { test } from "vitest";
 import {
     initTheme,
@@ -9,7 +12,12 @@ import {
 import { registerCodexCommand } from "../src/settings/command.ts";
 import { registerCodexIntegration } from "../src/settings/integration.ts";
 import { openCodexSettingsScreen, type CodexSettingsTab } from "../src/settings/screen.ts";
-import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
+import {
+    DEFAULT_CODEX_CORE_CONFIG,
+    type CodexCoreConfig,
+    getCodexCoreConfigPath,
+    getCodexCoreProjectConfigPath,
+} from "../src/config/config.ts";
 import { DEFAULT_TEST_EXTENSION_MODEL, TEST_THEME, makeExtensionContext } from "./helpers.ts";
 
 test("codex command only opens settings UI for the bare command", async () => {
@@ -36,6 +44,161 @@ test("codex command only opens settings UI for the bare command", async () => {
     assert.equal(command.hasArgumentCompletions, false);
     assert.equal(opened, 1);
     assert.deepEqual(notifications, [{ message: "Usage: /codex", type: "warning" }]);
+});
+
+test("codex command persists changed global settings and applies trusted project overrides", async () => {
+    initTheme(undefined, false);
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-command-save-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        const cwd = join(root, "project");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const globalConfigPath = getCodexCoreConfigPath(agentDir);
+        const projectConfigPath = getCodexCoreProjectConfigPath(cwd);
+        await mkdir(dirname(globalConfigPath), { recursive: true });
+        await mkdir(dirname(projectConfigPath), { recursive: true });
+        await writeFile(
+            globalConfigPath,
+            JSON.stringify({ scope: { tools: "codex" }, prompt: { mode: "pi" } }),
+        );
+        await writeFile(projectConfigPath, JSON.stringify({ prompt: { mode: "codex" } }));
+        const appliedConfigs: CodexCoreConfig[] = [];
+        const notifications: Array<{ readonly message: string; readonly type: string }> = [];
+        const command = makeCodexCommandHarness();
+        registerCodexCommand(command.api, {
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            applyConfig(config) {
+                appliedConfigs.push(config);
+            },
+        });
+        const ctx = makeSettingsContext({
+            cwd,
+            trusted: true,
+            run(factory) {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                component.handleInput?.(" ");
+            },
+            notify(message, type) {
+                notifications.push({ message, type });
+            },
+        });
+
+        await command.run("", ctx);
+
+        const persisted: unknown = JSON.parse(await readFile(globalConfigPath, "utf8"));
+        assert.ok(persisted !== null && typeof persisted === "object" && "scope" in persisted);
+        const persistedScope = persisted.scope;
+        assert.ok(
+            persistedScope !== null &&
+                typeof persistedScope === "object" &&
+                "tools" in persistedScope,
+        );
+        assert.equal(persistedScope.tools, "all");
+        assert.ok("prompt" in persisted);
+        const persistedPrompt = persisted.prompt;
+        assert.ok(
+            persistedPrompt !== null &&
+                typeof persistedPrompt === "object" &&
+                "mode" in persistedPrompt,
+        );
+        assert.equal(persistedPrompt.mode, "pi");
+        assert.equal(appliedConfigs.length, 1);
+        assert.equal(appliedConfigs[0]?.prompt.mode, "codex");
+        assert.deepEqual(notifications, [{ message: "Codex settings saved.", type: "info" }]);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("codex command refuses malformed config without applying or overwriting it", async () => {
+    initTheme(undefined, false);
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-command-malformed-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const configPath = getCodexCoreConfigPath(agentDir);
+        await mkdir(dirname(configPath), { recursive: true });
+        await writeFile(configPath, "{not json");
+        let applied = 0;
+        const notifications: Array<{ readonly message: string; readonly type: string }> = [];
+        const command = makeCodexCommandHarness();
+        registerCodexCommand(command.api, {
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            applyConfig() {
+                applied += 1;
+            },
+        });
+        const ctx = makeSettingsContext({
+            run(factory) {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                component.handleInput?.(" ");
+            },
+            notify(message, type) {
+                notifications.push({ message, type });
+            },
+        });
+
+        await command.run("", ctx);
+
+        assert.equal(applied, 0);
+        assert.equal(await readFile(configPath, "utf8"), "{not json");
+        assert.equal(notifications.length, 1);
+        assert.equal(notifications[0]?.type, "error");
+        assert.match(notifications[0]?.message ?? "", /not saved.*malformed/);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("codex command reports write errors without applying settings", async () => {
+    initTheme(undefined, false);
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-command-write-error-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const configPath = getCodexCoreConfigPath(agentDir);
+        const configDirectory = dirname(configPath);
+        const blocker = "not a directory";
+        await mkdir(dirname(configDirectory), { recursive: true });
+        await writeFile(configDirectory, blocker);
+        let applied = 0;
+        const notifications: Array<{ readonly message: string; readonly type: string }> = [];
+        const command = makeCodexCommandHarness();
+        registerCodexCommand(command.api, {
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            applyConfig() {
+                applied += 1;
+            },
+        });
+        const ctx = makeSettingsContext({
+            run(factory) {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                component.handleInput?.(" ");
+            },
+            notify(message, type) {
+                notifications.push({ message, type });
+            },
+        });
+
+        await command.run("", ctx);
+
+        assert.equal(applied, 0);
+        assert.equal(notifications.length, 1);
+        assert.equal(notifications[0]?.type, "error");
+        assert.match(notifications[0]?.message ?? "", /Failed to save Codex settings/);
+        assert.equal(await readFile(configDirectory, "utf8"), blocker);
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 test("codex command merges contributed settings tabs and routes subcommands", async () => {
@@ -361,11 +524,13 @@ type SettingsScreenFactory = (
 ) => SettingsScreenComponent;
 
 function makeSettingsContext(options: {
+    readonly cwd?: string | undefined;
+    readonly trusted?: boolean | undefined;
     readonly model?: typeof DEFAULT_TEST_EXTENSION_MODEL | undefined;
     readonly run: (factory: SettingsScreenFactory) => Promise<void> | void;
     readonly notify?: ((message: string, type: string) => void) | undefined;
 }): ExtensionContext {
-    const ctx = makeExtensionContext("/workspace", true);
+    const ctx = makeExtensionContext(options.cwd ?? "/workspace", options.trusted ?? true);
     if (options.model) {
         Object.defineProperty(ctx, "model", { configurable: true, value: options.model });
     }
