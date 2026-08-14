@@ -503,19 +503,22 @@ function getBranchConfigPaths(ctx: ExtensionCommandContext): Array<{
     label: string;
 }> {
     const agentDir = getAgentDir();
-    const projectConfigDir = path.join(ctx.cwd, CONFIG_DIR_NAME);
-    return [
+    const configPaths = [
         {
             file: path.join(agentDir, EXTENSION_ID, CONFIG_FILE_NAME),
             baseDir: agentDir,
             label: "global",
         },
-        {
+    ];
+    if (ctx.isProjectTrusted()) {
+        const projectConfigDir = path.join(ctx.cwd, CONFIG_DIR_NAME);
+        configPaths.push({
             file: path.join(projectConfigDir, EXTENSION_ID, CONFIG_FILE_NAME),
             baseDir: projectConfigDir,
             label: "project",
-        },
-    ];
+        });
+    }
+    return configPaths;
 }
 
 async function readBranchConfigFile(input: {
