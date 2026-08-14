@@ -33,6 +33,9 @@ function currentValueText(value: ArgumentValue): string {
             .map(([key, entryValue]) => `${key}=${entryValue}`)
             .join(",");
     }
+    if (typeof value === "number" && Object.is(value, -0)) {
+        return "-0";
+    }
     return String(value);
 }
 
@@ -68,6 +71,16 @@ export class SequentialArgumentForm<TDefinitions extends ArgumentDefinitions> {
         this.ctx = ctx;
         this.signal = signal;
         this.state = { ...parsed.values };
+        for (const name of Object.keys(command.args)) {
+            if (!Object.hasOwn(this.state, name) && Object.hasOwn(Object.prototype, name)) {
+                Object.defineProperty(this.state, name, {
+                    configurable: true,
+                    enumerable: true,
+                    value: undefined,
+                    writable: true,
+                });
+            }
+        }
     }
 
     async run(): Promise<Record<string, ArgumentValue> | undefined> {

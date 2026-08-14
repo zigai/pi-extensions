@@ -80,7 +80,7 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         }
         this.#skillDiagnostics.clear();
         for (const command of commands) {
-            this.registerWithoutNotification(command, { invocationName: command.name });
+            this.registerWithoutNotification(command, {});
         }
         for (const diagnostic of diagnostics) {
             this.#skillDiagnostics.set(`skill:${diagnostic.name}`, diagnostic);
@@ -130,8 +130,16 @@ export class TypedCommandRegistry implements TypedCommandLookup, TypedCommandSub
         this.removeExisting(command);
 
         const id = options.id ?? Symbol(command.name);
+        const recordWithId = this.#records.get(id);
+        if (recordWithId !== undefined) {
+            this.deleteRecord(recordWithId);
+        }
         const ownerId = options.ownerId ?? DEFAULT_OWNER_ID;
         const invocationName = options.invocationName ?? this.nextInvocationName(command.name);
+        const recordWithInvocationName = this.#commands.get(invocationName);
+        if (recordWithInvocationName !== undefined) {
+            this.deleteRecord(recordWithInvocationName);
+        }
         const record: RegistrationRecord = {
             id,
             ownerId,

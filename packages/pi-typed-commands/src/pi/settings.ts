@@ -297,11 +297,11 @@ function mergeConfig(base: unknown, override: unknown): unknown {
     if (!isRecord(base)) return override ?? base;
     if (!isRecord(override)) return base;
 
-    const merged: Record<string, unknown> = { ...base };
+    const entries = new Map(Object.entries(base));
     for (const [key, value] of Object.entries(override)) {
-        merged[key] = mergeConfig(merged[key], value);
+        entries.set(key, mergeConfig(entries.get(key), value));
     }
-    return merged;
+    return Object.fromEntries(entries);
 }
 
 function loadedConfig(outcome: PiTypedCommandsConfigSourceOutcome): PiTypedCommandsConfig {

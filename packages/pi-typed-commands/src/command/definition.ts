@@ -61,7 +61,11 @@ export function defineTypedCommand<
             invocation: SerializableSubcommandInvocation<TDefinitions, TSubcommands>,
         ) {
             const name = String(invocation.subcommand);
-            const subcommand = command.subcommands?.[name];
+            const subcommands = command.subcommands;
+            if (subcommands === undefined || !Object.hasOwn(subcommands, name)) {
+                throw new TypeError(`Unknown subcommand ${name}`);
+            }
+            const subcommand = subcommands[name];
             if (subcommand === undefined) {
                 throw new TypeError(`Unknown subcommand ${name}`);
             }

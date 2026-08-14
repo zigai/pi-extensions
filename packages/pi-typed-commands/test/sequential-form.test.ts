@@ -90,6 +90,42 @@ function command<TDefinitions extends FlatArgumentDefinitions>(
 }
 
 describe("sequential argument form", () => {
+    it("preserves negative zero in a number prompt", async () => {
+        const definitions = {
+            amount: { type: "number" },
+        } satisfies FlatArgumentDefinitions;
+        const { ctx, recorder } = createPromptContext(["-0"]);
+
+        const result = await openArgumentForm(
+            command(definitions),
+            parsedValues({ amount: -0 }),
+            "all",
+            ctx,
+            formOptions,
+        );
+
+        assert.equal(recorder.inputs[0]?.placeholder, "-0");
+        assert.equal(Object.is(result?.amount, -0), true);
+    });
+
+    it("keeps absent Object prototype spellings unset in sequential form state", async () => {
+        const definitions = {
+            toString: { type: "string" as const },
+        };
+        const { ctx, recorder } = createPromptContext([""]);
+
+        const result = await openArgumentForm(
+            command(definitions),
+            parsedValues(),
+            "all",
+            ctx,
+            formOptions,
+        );
+
+        assert.equal(recorder.inputs[0]?.placeholder, "");
+        assert.equal(Reflect.get(result ?? {}, "toString"), undefined);
+    });
+
     it("collects string, number, list, key-value, boolean, enum, and multi-enum values", async () => {
         const definitions = {
             text: { type: "string", required: true, description: "A text value" },

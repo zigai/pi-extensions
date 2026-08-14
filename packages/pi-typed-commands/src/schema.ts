@@ -779,12 +779,22 @@ function isValidCalendarDate(value: string): boolean {
     const year = Number(match[1]);
     const month = Number(match[2]);
     const day = Number(match[3]);
-    const date = new Date(Date.UTC(year, month - 1, day));
+    const date = new Date(0);
+    date.setUTCFullYear(year, month - 1, day);
     return (
         date.getUTCFullYear() === year &&
         date.getUTCMonth() === month - 1 &&
         date.getUTCDate() === day
     );
+}
+
+function isValidIsoDateTime(value: string): boolean {
+    const match =
+        /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/.exec(
+            value,
+        );
+    const date = match?.[1];
+    return date !== undefined && isValidCalendarDate(date);
 }
 
 function validateStringFormat(
@@ -816,7 +826,7 @@ function validateStringFormat(
             }
             return undefined;
         case "datetime":
-            if (Number.isNaN(Date.parse(value))) {
+            if (!isValidIsoDateTime(value)) {
                 return "expects an ISO date-time";
             }
             return undefined;
@@ -877,7 +887,7 @@ export function validateArgumentValue(
                     if (typeof definition.pattern === "string") {
                         pattern = new RegExp(definition.pattern);
                     } else {
-                        pattern = definition.pattern;
+                        pattern = new RegExp(definition.pattern.source, definition.pattern.flags);
                     }
                 } catch {
                     return {
@@ -885,7 +895,6 @@ export function validateArgumentValue(
                         message: `${displayName} has an invalid pattern`,
                     };
                 }
-                pattern.lastIndex = 0;
                 if (!pattern.test(value)) {
                     return {
                         ok: false,
@@ -941,6 +950,15 @@ export function validateArgumentValue(
                     message: `${displayName} must use values from: ${definition.values.join(", ")}`,
                 };
             }
+            if (new Set(value).size !== value.length) {
+                return {
+                    ok: false,
+                    message: `${displayName} may not contain duplicate values`,
+                };
+            }
+            if (definition.required === true && value.length === 0) {
+                return { ok: false, message: `${displayName} is required` };
+            }
             if (definition.minItems !== undefined && value.length < definition.minItems) {
                 return {
                     ok: false,
@@ -958,6 +976,21 @@ export function validateArgumentValue(
         case "string-list": {
             if (!isStringArrayValue(value)) {
                 return { ok: false, message: `${displayName} expects a list of text values` };
+            }
+            if (value.some((item) => item.length === 0)) {
+                return { ok: false, message: `${displayName} items must not be empty` };
+            }
+            if (value.some((item) => item.trim() !== item)) {
+                return {
+                    ok: false,
+                    message: `${displayName} items may not start or end with whitespace`,
+                };
+            }
+            if (value.some((item) => item.includes(","))) {
+                return { ok: false, message: `${displayName} items may not contain commas` };
+            }
+            if (definition.required === true && value.length === 0) {
+                return { ok: false, message: `${displayName} is required` };
             }
             if (definition.minItems !== undefined && value.length < definition.minItems) {
                 return {
@@ -981,7 +1014,33 @@ export function validateArgumentValue(
             ) {
                 return { ok: false, message: `${displayName} expects key=value entries` };
             }
-            const size = Object.keys(value).length;
+            const entries = Object.entries(value);
+            if (entries.some(([key]) => key.length === 0)) {
+                return { ok: false, message: `${displayName} keys must not be empty` };
+            }
+            if (entries.some(([key]) => key.trim() !== key)) {
+                return {
+                    ok: false,
+                    message: `${displayName} keys may not start or end with whitespace`,
+                };
+            }
+            if (entries.some(([key]) => key.includes(",") || key.includes("="))) {
+                return {
+                    ok: false,
+                    message: `${displayName} keys may not contain commas or equals signs`,
+                };
+            }
+            if (
+                entries.some(
+                    ([, entryValue]) => typeof entryValue === "string" && entryValue.includes(","),
+                )
+            ) {
+                return { ok: false, message: `${displayName} values may not contain commas` };
+            }
+            const size = entries.length;
+            if (definition.required === true && size === 0) {
+                return { ok: false, message: `${displayName} is required` };
+            }
             if (definition.minItems !== undefined && size < definition.minItems) {
                 return {
                     ok: false,
@@ -1587,7 +1646,12 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
             continue;
         }
         sourcePaths.set(entry.key, entry.sourcePath);
-        flatDefinitions[entry.key] = entry.definition;
+        Object.defineProperty(flatDefinitions, entry.key, {
+            value: entry.definition,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
     }
     const validDefinitions: Record<string, ArgumentDefinition> = {};
     const names = Object.keys(flatDefinitions);
@@ -1629,7 +1693,12 @@ export function validateArgumentDefinitions(definitions: unknown): DefinitionDia
         if (!validateArgumentDefinitionShape(name, definition, diagnostics)) {
             continue;
         }
-        validDefinitions[name] = definition;
+        Object.defineProperty(validDefinitions, name, {
+            value: definition,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
 
         validateTypeSpecificRules(name, definition, diagnostics);
         if (isPositionalArgument(definition) || isFormOnlyArgument(definition)) {
@@ -1698,12 +1767,24 @@ export function applyArgumentDefaults(
     for (const [name, definition] of Object.entries(
         flattenGroupedArgumentDefinitions(definitions),
     )) {
-        if (next[name] !== undefined) {
+        if (!Object.hasOwn(next, name) && Object.hasOwn(Object.prototype, name)) {
+            Object.defineProperty(next, name, {
+                configurable: true,
+                value: undefined,
+                writable: true,
+            });
+        }
+        if (Object.hasOwn(next, name) && next[name] !== undefined) {
             continue;
         }
         const defaultValue = applyArgumentDefault(definition);
         if (defaultValue !== undefined) {
-            next[name] = defaultValue;
+            Object.defineProperty(next, name, {
+                configurable: true,
+                enumerable: true,
+                value: defaultValue,
+                writable: true,
+            });
         }
     }
     return next;
@@ -1831,7 +1912,7 @@ export function coerceArgumentValue(
                     ),
                 };
             }
-            return { ok: true, value: values };
+            return { ok: true, value: [...new Set(values)] };
         }
         case "string-list": {
             const values = raw
@@ -1841,7 +1922,10 @@ export function coerceArgumentValue(
             return { ok: true, value: values };
         }
         case "key-value": {
-            const entries: Record<string, string> = {};
+            const entries: Array<readonly [string, string]> = [];
+            if (raw.length === 0) {
+                return { ok: true, value: Object.fromEntries(entries) };
+            }
             for (const item of raw.split(",")) {
                 const equalsIndex = item.indexOf("=");
                 if (equalsIndex <= 0) {
@@ -1867,9 +1951,9 @@ export function coerceArgumentValue(
                         ),
                     };
                 }
-                entries[key] = item.slice(equalsIndex + 1);
+                entries.push([key, item.slice(equalsIndex + 1)]);
             }
-            return { ok: true, value: entries };
+            return { ok: true, value: Object.fromEntries(entries) };
         }
         default:
             return casesHandled(definition);
@@ -1944,15 +2028,15 @@ export function normalizeTextArgumentInput(
                 .map((item) => item.trim())
                 .filter((item) => item.length > 0);
         case "key-value": {
-            const entries: Record<string, string> = {};
+            const entries: Array<readonly [string, string]> = [];
             for (const item of trimmed.split(",")) {
                 const equalsIndex = item.indexOf("=");
                 if (equalsIndex <= 0) {
                     return undefined;
                 }
-                entries[item.slice(0, equalsIndex).trim()] = item.slice(equalsIndex + 1);
+                entries.push([item.slice(0, equalsIndex).trim(), item.slice(equalsIndex + 1)]);
             }
-            return entries;
+            return Object.fromEntries(entries);
         }
         case "boolean":
         case "enum":
@@ -2027,6 +2111,9 @@ export function formatArgumentDefault(definition: ArgumentDefinition): string {
         return `=${Object.entries(definition.default)
             .map(([key, value]) => `${key}=${value}`)
             .join(",")}`;
+    }
+    if (typeof definition.default === "number" && Object.is(definition.default, -0)) {
+        return "=-0";
     }
     return `=${String(definition.default)}`;
 }

@@ -49,6 +49,38 @@ describe("typed command presets", () => {
         assert.doesNotMatch(stored, /private/);
     });
 
+    it("preserves prototype-like command and preset names as data", () => {
+        const cwd = mkdtempSync(join(tmpdir(), "pi-typed-presets-prototype-"));
+        const context = { cwd, isProjectTrusted: () => true };
+        const prototypeCommand: RegisteredTypedCommand = { ...command, name: "__proto__" };
+
+        assert.equal(
+            recordTypedCommandRecentValues(context, prototypeCommand, { path: "recent" }),
+            true,
+        );
+        assert.equal(
+            saveTypedCommandPreset(context, prototypeCommand, "__proto__", { path: "saved" }),
+            true,
+        );
+
+        const loaded = loadTypedCommandPresets(context, prototypeCommand);
+        assert.deepEqual(loaded?.recent, { path: "recent" });
+        assert.equal(Object.hasOwn(loaded?.presets ?? {}, "__proto__"), true);
+        assert.deepEqual(loaded?.presets["__proto__"], { path: "saved" });
+    });
+
+    it("returns false when preset storage cannot be created", () => {
+        const cwd = mkdtempSync(join(tmpdir(), "pi-typed-presets-blocked-"));
+        const blockedDirectory = join(cwd, CONFIG_DIR_NAME, "pi-typed-args");
+        mkdirSync(dirname(blockedDirectory), { recursive: true });
+        writeFileSync(blockedDirectory, "blocker");
+        const context = { cwd, isProjectTrusted: () => true };
+
+        assert.doesNotThrow(() => {
+            assert.equal(recordTypedCommandRecentValues(context, command, { path: "demo" }), false);
+        });
+    });
+
     it("does not overwrite malformed preset data", () => {
         const cwd = mkdtempSync(join(tmpdir(), "pi-typed-presets-malformed-"));
         const path = join(cwd, CONFIG_DIR_NAME, "pi-typed-args", "presets.json");

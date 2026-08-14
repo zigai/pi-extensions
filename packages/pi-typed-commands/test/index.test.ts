@@ -64,6 +64,21 @@ describe("argument issue policy", () => {
 });
 
 describe("registerTypedCommand", () => {
+    it("rejects command names that cannot be safely invoked or displayed", () => {
+        for (const name of ["", "two words", "-leading-dash", "control\u001bname"]) {
+            assert.throws(
+                () =>
+                    defineTypedCommand({
+                        name,
+                        description: "Invalid command name",
+                        args: {},
+                        run() {},
+                    }),
+                /Invalid command name/,
+            );
+        }
+    });
+
     it("rejects colliding and reserved TypeScript argument flags", () => {
         const pi = createTestExtensionApi();
 
@@ -285,11 +300,154 @@ describe("registerTypedCommand", () => {
             }),
             'create --verbose --path="feature branch" --count=2',
         );
+        assert.equal(command.formatUsage(), "/workspace-test [<subcommand>] [--verbose]");
 
         const help = command.formatHelp();
         assert.match(help, /Subcommands:/);
         assert.match(help, /create, aliases new/);
         assert.match(help, /\/workspace-test create/);
+    });
+
+    it("applies shared and branch refinements to subcommand arguments", () => {
+        const command = defineTypedCommand({
+            name: "refined-subcommand-test",
+            description: "Refined subcommand",
+            args: {
+                start: { type: "number", required: true },
+                end: { type: "number", required: true },
+            },
+            refine(args) {
+                if (args.start === undefined || args.end === undefined || args.start <= args.end) {
+                    return [];
+                }
+                return [{ code: "range.invalid", message: "start must not exceed end" }];
+            },
+            subcommands: {
+                run: {
+                    description: "Run a range",
+                    args: { force: { type: "boolean" } },
+                    refine(args) {
+                        if (args.force !== true || args.start !== args.end) return [];
+                        return [
+                            {
+                                code: "forced-empty-range",
+                                message: "force requires a non-empty range",
+                            },
+                        ];
+                    },
+                    run() {},
+                },
+            },
+        });
+
+        const sharedFailure = command.parse("run --start 2 --end 1");
+        assert.equal(sharedFailure.status, "error");
+        if (sharedFailure.status === "error") {
+            assert.deepEqual(
+                sharedFailure.issues.map((issue) => issue.code),
+                ["range.invalid"],
+            );
+        }
+
+        const branchFailure = command.parse("run --start 1 --end 1 --force");
+        assert.equal(branchFailure.status, "error");
+        if (branchFailure.status === "error") {
+            assert.deepEqual(
+                branchFailure.issues.map((issue) => issue.code),
+                ["forced-empty-range"],
+            );
+        }
+    });
+
+    it("projects grouped shared arguments into subcommand refinements", () => {
+        let sharedSawGroup = false;
+        let branchSawGroup = false;
+        const command = defineTypedCommand({
+            name: "grouped-shared-subcommand-test",
+            description: "Grouped shared subcommand",
+            args: {
+                database: group({
+                    host: { type: "string", required: true },
+                }),
+            },
+            refine(args) {
+                sharedSawGroup = args.database?.host === "primary";
+                if (!sharedSawGroup) {
+                    return [{ message: "shared group was not projected" }];
+                }
+                return [];
+            },
+            subcommands: {
+                run: {
+                    description: "Run with a database",
+                    args: { force: { type: "boolean" } },
+                    refine(args) {
+                        branchSawGroup = args.database?.host === "primary";
+                        if (!branchSawGroup) {
+                            return [{ message: "branch group was not projected" }];
+                        }
+                        return [];
+                    },
+                    run() {},
+                },
+            },
+        });
+
+        const parsed = command.parse("run --database.host primary");
+
+        assert.equal(parsed.status, "success");
+        assert.equal(sharedSawGroup, true);
+        assert.equal(branchSawGroup, true);
+    });
+
+    it("rejects reserved prototype argument names inside subcommands", () => {
+        const args: Record<string, { type: "string" }> = {};
+        Object.defineProperty(args, "__proto__", {
+            configurable: true,
+            enumerable: true,
+            value: { type: "string" },
+            writable: true,
+        });
+
+        assert.throws(
+            () =>
+                defineTypedCommand({
+                    name: "prototype-subcommand-argument-test",
+                    description: "Prototype subcommand argument",
+                    args: {},
+                    subcommands: {
+                        run: {
+                            description: "Run",
+                            args,
+                            run() {},
+                        },
+                    },
+                }),
+            /argument path segment __proto__ is reserved/,
+        );
+    });
+
+    it("routes prototype-named subcommands as ordinary data properties", () => {
+        const command = defineTypedCommand({
+            name: "prototype-subcommand-test",
+            description: "Prototype subcommand",
+            args: {},
+            subcommands: {
+                ["__proto__"]: {
+                    description: "Prototype spelling",
+                    args: {},
+                    run() {},
+                },
+            },
+        });
+
+        const parsed = command.parse("__proto__");
+        assert.equal(parsed.status, "success");
+        assert.ok("subcommand" in parsed);
+        if ("subcommand" in parsed) {
+            assert.equal(parsed.subcommand, "__proto__");
+        }
+        assert.match(command.formatHelp(), /^  __proto__$/m);
     });
 
     it("rejects colliding shared and subcommand arguments", () => {
@@ -517,12 +675,21 @@ describe("slash command text parsing", () => {
             rawArgs: "src --fix",
             trailingBody: "line one\nline two",
         });
+        assert.deepEqual(parseSlashCommandText("/skill:demo src --fix\r\nline one"), {
+            commandName: "skill:demo",
+            rawArgs: "src --fix",
+            trailingBody: "line one",
+        });
     });
 
     it("combines unexpected positional leftovers with multi-line skill body text", () => {
         assert.equal(
             combineSkillAdditionalInput("extra words", "line one\nline two"),
             "extra words\nline one\nline two",
+        );
+        assert.equal(
+            combineSkillAdditionalInput("", "  indented line\ntrailing spaces  "),
+            "  indented line\ntrailing spaces  ",
         );
     });
 
@@ -1175,6 +1342,38 @@ describe("typed command live helper", () => {
         assert.deepEqual(completeTypedCommandOnTab("/choice-tab-test --layout ", commands), {
             handled: false,
         });
+
+        const subcommand: RegisteredTypedCommand = {
+            ...command,
+            name: "choice-subcommand-test run",
+            args: {
+                environment: { type: "enum", values: ["dev", "prod"] },
+            },
+        };
+        const root: RegisteredTypedCommand = {
+            ...command,
+            name: "choice-subcommand-test",
+            args: {},
+            hasRootHandler: false,
+            subcommands: { run: subcommand },
+        };
+        const subcommands = {
+            get(name: string) {
+                if (name === root.name) return root;
+                return undefined;
+            },
+            list() {
+                return [root];
+            },
+        };
+
+        assert.deepEqual(
+            completeTypedCommandOnTab("/choice-subcommand-test run --environment d", subcommands),
+            {
+                handled: true,
+                editorText: "/choice-subcommand-test run --environment dev ",
+            },
+        );
     });
 
     it("reports detached argument-form failures", async () => {

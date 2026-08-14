@@ -52,11 +52,12 @@ export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxO
 
     const registry = getPiTypedCommandRegistry();
     const session = new TypedCommandUxSession(pi, options, registry);
-    installations.set(key, {
+    const installation: SharedTypedCommandUxInstallation = {
         mergeOptions(nextOptions) {
             session.mergeConfiguredOptions(nextOptions);
         },
-    });
+    };
+    installations.set(key, installation);
 
     pi.on("session_start", async (_event, ctx) => {
         refreshTypedSkills(pi, registry);
@@ -92,9 +93,12 @@ export function installTypedCommandUx(pi: ExtensionAPI, options: TypedCommandUxO
         return { action: "continue" } as const;
     });
 
-    pi.on("session_shutdown", async (_event, ctx) => {
+    pi.on("session_shutdown", async (event, ctx) => {
         await session.stop();
         session.clearWidget(ctx);
+        if (event.reason === "reload" && installations.get(key) === installation) {
+            installations.delete(key);
+        }
     });
 }
 

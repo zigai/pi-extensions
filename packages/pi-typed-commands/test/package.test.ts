@@ -15,7 +15,20 @@ import {
     type SkillFrontmatterMetadata,
 } from "pi-typed-args/skills";
 import { createHeadlessFormModel, type FormMode } from "pi-typed-args/pi-tui";
-import { piTypedCommandsConfigJsonSchema } from "../src/pi/config-schema.js";
+import exportedSkillSchema from "pi-typed-args/schema" with { type: "json" };
+import {
+    DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON,
+    piTypedCommandsConfigJsonSchema,
+} from "../src/pi/config-schema.js";
+
+function configurationJsonBlock(path: string): unknown {
+    const source = readFileSync(path, "utf8");
+    const heading = source.search(/^#{1,2} Configuration$/mu);
+    assert.notEqual(heading, -1, `${path} must contain a Configuration section`);
+    const match = /```json\n([\s\S]*?)\n```/u.exec(source.slice(heading));
+    assert.ok(match, `${path} must contain a JSON configuration block`);
+    return JSON.parse(match[1] ?? "");
+}
 
 describe("package subpath exports", () => {
     it("loads the public core, pi, skills, and pi-tui subpaths", () => {
@@ -66,6 +79,18 @@ describe("package subpath exports", () => {
         );
 
         assert.deepEqual(schema, skillArgumentsJsonSchema());
+        assert.deepEqual(exportedSkillSchema, schema);
+    });
+
+    it("keeps user-facing configuration blocks aligned with the scaffolded defaults", () => {
+        assert.deepEqual(
+            configurationJsonBlock("README.md"),
+            DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON,
+        );
+        assert.deepEqual(
+            configurationJsonBlock("docs/configuration.md"),
+            DEFAULT_PI_TYPED_COMMANDS_CONFIG_JSON,
+        );
     });
 
     it("keeps the published config JSON schema aligned with the TypeBox source", () => {

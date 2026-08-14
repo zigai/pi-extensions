@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { flattenGroupedArgumentDefinitions, group } from "../src/arguments.js";
+import {
+    expandGroupedArgumentValues,
+    flattenGroupedArgumentDefinitions,
+    flattenGroupedArgumentValues,
+    group,
+} from "../src/arguments.js";
 import { compileTypedCommandDefinition } from "../src/compiler.js";
 import {
     applyArgumentDefaults,
@@ -12,7 +17,11 @@ import {
     validateArgumentDefinitions,
     validateArgumentValue,
 } from "../src/schema.js";
-import type { ArgumentDefinition, FlatArgumentDefinitions } from "../src/types.js";
+import type {
+    ArgumentDefinition,
+    ArgumentDefinitions,
+    FlatArgumentDefinitions,
+} from "../src/types.js";
 
 const definitions: FlatArgumentDefinitions = {
     action: {
@@ -123,6 +132,18 @@ describe("typed command schema", () => {
         );
     });
 
+    it("requires datetime values to use a valid ISO date-time shape", () => {
+        const datetime = { type: "string", format: "datetime" } as const;
+
+        assert.deepEqual(validateArgumentValue("at", datetime, "2024-02-29T23:59:59Z"), {
+            ok: true,
+        });
+        assert.equal(validateArgumentValue("at", datetime, "2024-01-01").ok, false);
+        assert.equal(validateArgumentValue("at", datetime, "December 17, 1995").ok, false);
+        assert.equal(validateArgumentValue("at", datetime, "2023-02-29T12:00:00Z").ok, false);
+        assert.equal(validateArgumentValue("at", datetime, "2024-01-01T24:00:00Z").ok, false);
+    });
+
     it("applies defaults and derives display hints", () => {
         assert.deepEqual(applyArgumentDefaults(definitions, {}), { count: 1 });
         assert.equal(argumentValueHint(definitionNamed("branchName"), "branchName"), "branch-name");
@@ -162,6 +183,11 @@ describe("typed command schema", () => {
             },
             many: { type: "multi-enum", values: ["a"], minItems: 3, maxItems: 1 },
             commaMulti: { type: "multi-enum", values: ["a,b"] },
+            duplicateMultiDefault: {
+                type: "multi-enum",
+                values: ["a"],
+                default: ["a", "a"],
+            },
             badCompletionTimeout: { type: "string", completionTimeoutMs: -1 },
             defaulted: { type: "string", required: true, default: "main" },
             first: { type: "string", position: 0 },
@@ -186,6 +212,7 @@ describe("typed command schema", () => {
         );
         assert.match(text, /many\.minItems must be less than or equal to maxItems/);
         assert.match(text, /commaMulti\.values may not contain commas/);
+        assert.match(text, /duplicateMultiDefault\.default .* may not contain duplicate values/);
         assert.match(
             text,
             /badCompletionTimeout\.completionTimeoutMs must be a non-negative integer/,
@@ -209,6 +236,49 @@ describe("typed command schema", () => {
                     diagnostic.path.join(".") === "range.min",
             ),
         );
+    });
+
+    it("rejects a prototype-reserved top-level argument from decoded JSON", () => {
+        const definitions: unknown = JSON.parse('{"__proto__":{"type":"string"}}');
+        const diagnostics = validateArgumentDefinitions(definitions);
+
+        assert.equal(
+            diagnostics.some(
+                (diagnostic) =>
+                    diagnostic.code === "argument.name.reserved-segment" &&
+                    diagnostic.path.join(".") === "__proto__",
+            ),
+            true,
+        );
+    });
+
+    it("applies defaults for valid names inherited by ordinary objects", () => {
+        const inheritedNameDefinitions = {
+            toString: { type: "string" as const, default: "safe" },
+            valueOf: { type: "string" as const },
+        } satisfies ArgumentDefinitions;
+        const defaulted = applyArgumentDefaults(inheritedNameDefinitions, {});
+
+        assert.equal(Object.hasOwn(defaulted, "toString"), true);
+        assert.equal(Reflect.get(defaulted, "toString"), "safe");
+        assert.equal(Reflect.get(defaulted, "valueOf"), undefined);
+        assert.equal(Object.keys(defaulted).includes("valueOf"), false);
+    });
+
+    it("preserves prototype-like keys in direct grouping utility results", () => {
+        const runtimeDefinitions = Object.fromEntries([["__proto__", { type: "string" as const }]]);
+        const runtimeValues = Object.fromEntries([["__proto__", "safe"]]);
+
+        const flattenedDefinitions = flattenGroupedArgumentDefinitions(runtimeDefinitions);
+        const flattenedValues = flattenGroupedArgumentValues(runtimeValues, runtimeDefinitions);
+        const expandedValues = expandGroupedArgumentValues(flattenedValues, runtimeDefinitions);
+
+        assert.equal(Object.hasOwn(flattenedDefinitions, "__proto__"), true);
+        assert.equal(Object.hasOwn(flattenedValues, "__proto__"), true);
+        assert.equal(Object.hasOwn(expandedValues, "__proto__"), true);
+        assert.equal(flattenedValues["__proto__"], "safe");
+        assert.equal(expandedValues["__proto__"], "safe");
+        assert.equal(Reflect.get({}, "safe"), undefined);
     });
 
     it("rejects colliding grouped and literal canonical paths in either insertion order", () => {

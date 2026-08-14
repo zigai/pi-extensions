@@ -83,6 +83,16 @@ export function createHeadlessFormModel(
     mode: FormMode,
 ): HeadlessFormModel {
     const state: FormState = { ...parsed.values };
+    for (const name of Object.keys(definitions)) {
+        if (!Object.hasOwn(state, name) && Object.hasOwn(Object.prototype, name)) {
+            Object.defineProperty(state, name, {
+                configurable: true,
+                enumerable: true,
+                value: undefined,
+                writable: true,
+            });
+        }
+    }
     const namedIssues = issuesByName(parsed);
     const fields: FormField[] = [];
     let initialSelection = -1;

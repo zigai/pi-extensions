@@ -166,6 +166,9 @@ export function completeTypedCommandOnTab(
                         spelling.startsWith(token),
                     ),
             );
+            if (candidates.length === 0) {
+                return { handled: false };
+            }
             let replacement = commonStringPrefix(candidates);
             if (candidates.length === 1) {
                 const onlyCandidate = candidates[0];
@@ -189,7 +192,19 @@ export function completeTypedCommandOnTab(
         }
     }
 
-    const choiceCompletion = fixedChoiceCompletionOnTab(invocation, firstLine, rest);
+    let completionCommand = invocation.command;
+    let completionInvocation = invocation;
+    if (route.status === "subcommand" && route.subcommand !== undefined) {
+        completionCommand =
+            invocation.command.subcommands?.[route.subcommand] ?? invocation.command;
+        completionInvocation = {
+            command: completionCommand,
+            rawArgs: route.rawArgs,
+            trailingBody: invocation.trailingBody,
+        };
+    }
+
+    const choiceCompletion = fixedChoiceCompletionOnTab(completionInvocation, firstLine, rest);
     if (choiceCompletion.handled) {
         return choiceCompletion;
     }
@@ -204,11 +219,6 @@ export function completeTypedCommandOnTab(
         return { handled: false };
     }
 
-    let completionCommand = invocation.command;
-    if (route.status === "subcommand" && route.subcommand !== undefined) {
-        completionCommand =
-            invocation.command.subcommands?.[route.subcommand] ?? invocation.command;
-    }
     const completion = flagCompletionForTab(completionCommand, token);
     if (completion === undefined) {
         return { handled: true };

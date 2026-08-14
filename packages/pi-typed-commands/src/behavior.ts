@@ -94,7 +94,11 @@ function appendsOccurrenceValues(
     }
 }
 
-function appendValues(current: ArgumentValue, next: ArgumentValue): ArgumentValue {
+function appendValues(
+    definition: ArgumentDefinition,
+    current: ArgumentValue,
+    next: ArgumentValue,
+): ArgumentValue {
     if (isKeyValueArgumentValue(next)) {
         let previous: Readonly<Record<string, string>> = {};
         if (isKeyValueArgumentValue(current)) {
@@ -108,6 +112,9 @@ function appendValues(current: ArgumentValue, next: ArgumentValue): ArgumentValu
     let values: string[] = [];
     if (isStringArrayValue(current)) {
         values = current;
+    }
+    if (definition.type === "string-list") {
+        return [...values, ...next];
     }
     const combined = [...values];
     for (const item of next) {
@@ -186,7 +193,7 @@ function decodeOccurrences(
         }
 
         if (appendsOccurrenceValues(definition, policy)) {
-            value = appendValues(value, next);
+            value = appendValues(definition, value, next);
         } else {
             value = next;
         }
@@ -231,16 +238,22 @@ function serializeValue(definition: ArgumentDefinition, name: string, value: unk
             return [];
         }
         case "multi-enum": {
-            if (!Array.isArray(value) || value.length === 0) {
+            if (!Array.isArray(value)) {
                 return [];
+            }
+            if (value.length === 0) {
+                return [`${formatArgumentFlagName(name, definition)}=""`];
             }
             return [
                 `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value.join(","))}`,
             ];
         }
         case "string-list": {
-            if (!Array.isArray(value) || value.length === 0) {
+            if (!Array.isArray(value)) {
                 return [];
+            }
+            if (value.length === 0) {
+                return [`${formatArgumentFlagName(name, definition)}=""`];
             }
             return [
                 `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value.join(","))}`,
@@ -250,7 +263,11 @@ function serializeValue(definition: ArgumentDefinition, name: string, value: unk
             if (typeof value !== "object" || value === null || Array.isArray(value)) {
                 return [];
             }
-            return Object.entries(value).map(
+            const entries = Object.entries(value);
+            if (entries.length === 0) {
+                return [`${formatArgumentFlagName(name, definition)}=""`];
+            }
+            return entries.map(
                 ([key, entryValue]) =>
                     `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(`${key}=${entryValue}`)}`,
             );
@@ -264,13 +281,16 @@ function serializeValue(definition: ArgumentDefinition, name: string, value: unk
                 return [];
             }
             return [`${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(value)}`];
-        case "number":
+        case "number": {
             if (typeof value !== "number") {
                 return [];
             }
-            return [
-                `${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(String(value))}`,
-            ];
+            let text = String(value);
+            if (Object.is(value, -0)) {
+                text = "-0";
+            }
+            return [`${formatArgumentFlagName(name, definition)}=${quoteSerializedValue(text)}`];
+        }
         default:
             return casesHandled(definition);
     }

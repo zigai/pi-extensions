@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "vitest";
+import type { AutocompleteProvider } from "@earendil-works/pi-tui";
 import { normalizeRegisteredCommand } from "../src/command/registered-command.js";
 import { createTypedCommandRegistry } from "../src/registry.js";
 import { typedSkillCommandFromMetadata } from "../src/skills/command.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 import { TypedCommandUxSession } from "../src/pi/ux-session.js";
 import { createTestExtensionApi, createTestExtensionContext } from "./pi-test-adapter.js";
+
+function isAutocompleteProviderFactory(
+    value: unknown,
+): value is (current: AutocompleteProvider) => AutocompleteProvider {
+    return typeof value === "function";
+}
 
 type SessionHarness = {
     readonly ctx: ReturnType<typeof createTestExtensionContext>;
@@ -66,45 +73,131 @@ function createSessionHarness(
 }
 
 describe("typed command UX session", () => {
-    it("selects a subcommand, collects its values, and writes the serialized invocation", async () => {
-        const registry = createTypedCommandRegistry();
-        const command = normalizeRegisteredCommand({
-            name: "workspace",
-            description: "Manage workspaces",
-            args: {},
-            run() {},
-            subcommands: {
-                create: {
-                    description: "Create a workspace",
-                    args: { path: { type: "string", required: true } },
-                    run() {},
+    it.each([
+        ["missing", "/workspace"],
+        ["unknown", "/workspace typo"],
+    ])(
+        "selects a subcommand for %s input, collects values, and writes the invocation",
+        async (_route, editorText) => {
+            const registry = createTypedCommandRegistry();
+            const command = normalizeRegisteredCommand({
+                name: "workspace",
+                description: "Manage workspaces",
+                args: {},
+                run() {},
+                subcommands: {
+                    create: {
+                        description: "Create a workspace",
+                        args: { path: { type: "string", required: true } },
+                        run() {},
+                    },
+                    remove: {
+                        description: "Remove a workspace",
+                        args: { force: { type: "boolean" } },
+                        run() {},
+                    },
                 },
-                remove: {
-                    description: "Remove a workspace",
-                    args: { force: { type: "boolean" } },
-                    run() {},
+            });
+            registry.register(command);
+            const harness = createSessionHarness(editorText, ["demo"], ["create"]);
+            const session = new TypedCommandUxSession(createTestExtensionApi(), {}, registry);
+
+            try {
+                await session.start(harness.ctx);
+                const terminalInput = harness.getTerminalInput();
+                assert.ok(terminalInput);
+                assert.deepEqual(terminalInput("\t"), { consume: true });
+                await session.waitForFormCompletion();
+
+                assert.deepEqual(harness.selectedOptions, [
+                    {
+                        title: "Select subcommand",
+                        options: ["(root command)", "create", "remove"],
+                    },
+                ]);
+                assert.deepEqual(harness.inputTitles, ["Set --path (current: )"]);
+                assert.deepEqual(harness.editorUpdates, ["/workspace create --path=demo"]);
+            } finally {
+                await session.stop();
+                registry.unregister(command);
+            }
+        },
+    );
+
+    it("serves typed suggestions through the installed editor completion bridge", async () => {
+        const registry = createTypedCommandRegistry();
+        let asyncCalls = 0;
+        const command = normalizeRegisteredCommand({
+            name: "bridge-completion",
+            description: "Test editor completion",
+            args: {
+                environment: { type: "enum", values: ["dev", "prod"] },
+                remote: {
+                    type: "string",
+                    async completeAsync() {
+                        asyncCalls += 1;
+                        return [];
+                    },
+                },
+            },
+            run() {},
+        });
+        registry.register(command);
+        let providerFactory: ((current: AutocompleteProvider) => AutocompleteProvider) | undefined;
+        let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+        const editorText = "/bridge-completion --environment d";
+        const ctx = createTestExtensionContext({
+            ui: {
+                addAutocompleteProvider(factory) {
+                    if (!isAutocompleteProviderFactory(factory)) {
+                        assert.fail("expected an autocomplete provider factory");
+                    }
+                    providerFactory = factory;
+                },
+                getEditorText() {
+                    return editorText;
+                },
+                onTerminalInput(handler) {
+                    terminalInput = handler;
+                    return () => {
+                        terminalInput = undefined;
+                    };
                 },
             },
         });
-        registry.register(command);
-        const harness = createSessionHarness("/workspace", ["demo"], ["create"]);
         const session = new TypedCommandUxSession(createTestExtensionApi(), {}, registry);
+        const base: AutocompleteProvider = {
+            async getSuggestions() {
+                return null;
+            },
+            applyCompletion(lines, cursorLine, cursorCol) {
+                return { lines, cursorLine, cursorCol };
+            },
+        };
 
         try {
-            await session.start(harness.ctx);
-            const terminalInput = harness.getTerminalInput();
-            assert.ok(terminalInput);
-            assert.deepEqual(terminalInput("\t"), { consume: true });
-            await session.waitForFormCompletion();
+            await session.start(ctx);
+            assert.ok(providerFactory);
+            const provider = providerFactory(base);
+            const suggestions = await provider.getSuggestions([editorText], 0, editorText.length, {
+                signal: new AbortController().signal,
+            });
 
-            assert.deepEqual(harness.selectedOptions, [
-                {
-                    title: "Select subcommand",
-                    options: ["(root command)", "create", "remove"],
-                },
-            ]);
-            assert.deepEqual(harness.inputTitles, ["Set --path (current: )"]);
-            assert.deepEqual(harness.editorUpdates, ["/workspace create --path=demo"]);
+            assert.equal(suggestions?.prefix, "d");
+            assert.deepEqual(
+                suggestions?.items.map((item) => item.value),
+                ["dev"],
+            );
+            assert.ok(terminalInput);
+            assert.equal(terminalInput("\t"), undefined);
+
+            const request = new AbortController();
+            request.abort();
+            const remoteText = "/bridge-completion --remote x";
+            await provider.getSuggestions([remoteText], 0, remoteText.length, {
+                signal: request.signal,
+            });
+            assert.equal(asyncCalls, 0);
         } finally {
             await session.stop();
             registry.unregister(command);

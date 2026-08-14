@@ -78,9 +78,11 @@ const sharedArgumentYamlPropertiesWithUi = {
     ui: Type.Optional(SkillArgumentUiYamlSchema),
 };
 
-const stringArraySchema = Type.Array(Type.String({ minLength: 1 }), {
+const uniqueStringArraySchema = Type.Array(Type.String({ minLength: 1 }), {
     uniqueItems: true,
 });
+
+const stringListArraySchema = Type.Array(Type.String({ minLength: 1 }));
 
 const nonEmptyStringArraySchema = Type.Array(Type.String({ minLength: 1 }), {
     minItems: 1,
@@ -155,7 +157,7 @@ export const MultiEnumSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Enum(["multi_enum", "multi-enum"] as const),
         ...sharedArgumentYamlPropertiesWithUi,
-        default: Type.Optional(stringArraySchema),
+        default: Type.Optional(uniqueStringArraySchema),
         values: nonEmptyStringArraySchema,
         min_items: Type.Optional(Type.Integer({ minimum: 0 })),
         max_items: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -168,7 +170,7 @@ export const StringListSkillArgumentYamlSchema = Type.Object(
     {
         type: Type.Enum(["string_list", "string-list"] as const),
         ...sharedArgumentYamlPropertiesWithUi,
-        default: Type.Optional(stringArraySchema),
+        default: Type.Optional(stringListArraySchema),
         min_items: Type.Optional(Type.Integer({ minimum: 0 })),
         max_items: Type.Optional(Type.Integer({ minimum: 0 })),
     },

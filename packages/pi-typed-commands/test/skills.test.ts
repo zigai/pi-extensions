@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "vitest";
 import {
     expandArgumentObject,
+    isTypedSkillCommand,
     normalizeSkillArguments,
     parseSkillMarkdown,
     readTypedSkillMetadataResult,
@@ -12,6 +13,7 @@ import {
     typedSkillCommandFromMetadata,
     type TypedSkillMetadata,
 } from "../src/skills.js";
+import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
 
 function isPrototypeSection(value: unknown): value is Readonly<Record<string, unknown>> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -56,7 +58,7 @@ describe("normalizeSkillArguments", () => {
             },
             contacts: {
                 type: "string_list",
-                default: ["dev@example.com"],
+                default: ["dev@example.com", "dev@example.com"],
                 min_items: 1,
                 ui: { widget: "list", section: "Delivery", advanced: true },
             },
@@ -104,7 +106,7 @@ describe("normalizeSkillArguments", () => {
             "current-tab": "Add panes beside this Pi",
         });
         assert.equal(result.args.contacts?.type, "string-list");
-        assert.deepEqual(result.args.contacts?.default, ["dev@example.com"]);
+        assert.deepEqual(result.args.contacts?.default, ["dev@example.com", "dev@example.com"]);
         assert.equal(result.args.contacts?.ui?.section, "Delivery");
         assert.equal(result.args.environment?.type, "key-value");
         assert.deepEqual(result.args.environment?.default, { MODE: "safe" });
@@ -702,13 +704,57 @@ describe("renderTypedSkillInvocation", () => {
         assert.equal(protoSection.polluted, "yes");
     });
 
-    it("creates a typed skill command from metadata", () => {
-        const command = typedSkillCommandFromMetadata(skill);
+    it("does not classify source-only metadata as a complete typed skill command", () => {
+        const incomplete: RegisteredTypedCommand = {
+            name: "skill:incomplete",
+            description: "Incomplete skill metadata",
+            args: {},
+            formSymbols: {
+                selectedCheckbox: "■",
+                unselectedCheckbox: "□",
+                selectedRadio: "●",
+                unselectedRadio: "○",
+            },
+            source: "skill",
+        };
+
+        assert.equal(isTypedSkillCommand(incomplete), false);
+    });
+
+    it("rejects typed skill names that cannot be safely invoked", () => {
+        assert.throws(
+            () => typedSkillCommandFromMetadata({ ...skill, name: "bad name" }),
+            /Invalid typed skill name/,
+        );
+    });
+
+    it("creates an immutable typed skill command snapshot from metadata", () => {
+        const values = ["dev", "prod"];
+        const mutableSkill: TypedSkillMetadata = {
+            ...skill,
+            body: "Original environment: {args.environment}.",
+            args: {
+                environment: { type: "enum", values },
+            },
+        };
+        const command = typedSkillCommandFromMetadata(mutableSkill);
+        mutableSkill.body = "Mutated environment: {args.environment}.";
+        values.push("qa");
 
         assert.equal(command.name, "skill:fix-ruff-errors");
         assert.equal(command.source, "skill");
         assert.equal(command.target?.kind, "skill");
         assert.equal(command.ghostText, "Choose files to lint");
         assert.equal(command.skill.filePath, skill.filePath);
+        const environment = command.args.environment;
+        assert.equal(environment?.type, "enum");
+        if (environment?.type === "enum") {
+            assert.deepEqual(environment.values, ["dev", "prod"]);
+        }
+        assert.equal(command.target?.kind, "skill");
+        if (command.target?.kind === "skill") {
+            assert.match(command.target.render({ environment: "dev" }), /Original environment/);
+            assert.doesNotMatch(command.target.render({ environment: "dev" }), /Mutated/);
+        }
     });
 });

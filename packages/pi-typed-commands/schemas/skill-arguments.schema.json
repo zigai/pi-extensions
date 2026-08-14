@@ -936,8 +936,7 @@
           "items": {
             "type": "string",
             "minLength": 1
-          },
-          "uniqueItems": true
+          }
         },
         "min_items": {
           "type": "integer",

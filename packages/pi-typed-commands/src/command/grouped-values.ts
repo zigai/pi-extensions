@@ -6,6 +6,7 @@ import {
 import type {
     ArgumentDefinitions,
     ArgumentPath,
+    ArgumentValue,
     FlatArgumentDefinitions,
     InferArguments,
     ParsedArgumentDraft,
@@ -26,7 +27,7 @@ function expandValidatedGroupedValues<TDefinitions extends ArgumentDefinitions>(
     values: InferArguments<FlatArgumentDefinitions> | ParsedArgumentDraft<FlatArgumentDefinitions>,
     definitions: TDefinitions,
 ): InferArguments<TDefinitions> | ParsedArgumentDraft<TDefinitions> {
-    let expanded: Record<string, unknown> = { ...values };
+    let expanded: Readonly<Record<string, unknown>> = values;
     if (hasArgumentGroups(definitions)) {
         expanded = expandGroupedArgumentValues(values, definitions);
     }
@@ -35,6 +36,19 @@ function expandValidatedGroupedValues<TDefinitions extends ArgumentDefinitions>(
     // total handler input remains total, while draft input remains optional.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: validated leaves are regrouped through their matching definition tree.
     return expanded as InferArguments<TDefinitions> | ParsedArgumentDraft<TDefinitions>;
+}
+
+function expandRefinementValues<TDefinitions extends ArgumentDefinitions>(
+    values: ParsedArgumentDraft<FlatArgumentDefinitions>,
+    definitions: TDefinitions,
+): ParsedArgumentDraft<TDefinitions> {
+    const projected: Record<string, ArgumentValue> = {};
+    for (const key of Object.keys(flattenGroupedArgumentDefinitions(definitions))) {
+        if (Object.hasOwn(values, key)) {
+            projected[key] = values[key];
+        }
+    }
+    return expandValidatedGroupedValues(projected, definitions);
 }
 
 function isGroupedArgumentPath<TDefinitions extends ArgumentDefinitions>(
@@ -66,10 +80,7 @@ export function maybeWrapGroupedRefinement<TDefinitions extends ArgumentDefiniti
         return undefined;
     }
     return (args, context) =>
-        refine(
-            expandValidatedGroupedValues(args, definitions),
-            refinementContext(definitions, context),
-        );
+        refine(expandRefinementValues(args, definitions), refinementContext(definitions, context));
 }
 
 /** Adapt grouped command handlers to the parser's flat dotted-value representation. */

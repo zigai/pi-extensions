@@ -82,6 +82,27 @@ const roundTripValues = fc.record({
     }),
 });
 
+const collectionCommand = defineTypedCommand({
+    name: "collection-property-demo",
+    description: "Collection round-trip property",
+    args: {
+        item: { type: "string-list" },
+        setting: { type: "key-value" },
+    },
+    run() {},
+});
+
+const collectionValues = fc.record({
+    item: fc.array(fc.constantFrom("alpha", "beta", "path\\to", "x=y"), { maxLength: 12 }),
+    setting: fc.dictionary(
+        fc.constantFrom("alpha", "beta", "path\\to", "__proto__", "constructor"),
+        fc.constantFrom("plain", "x=y", " leading", "trailing ", "path\\to"),
+        { maxKeys: 3 },
+    ),
+});
+
+const finiteNumber = fc.double({ noNaN: true, noDefaultInfinity: true });
+
 const boundedString = fc.string({ maxLength: 120 });
 const nonEmptyBoundedString = boundedString.map((value) => `x${value}`);
 
@@ -97,6 +118,43 @@ describe("parser and serializer properties", () => {
                     return;
                 }
                 assert.deepEqual(parsed.value, { ...values });
+            }),
+            { numRuns: PROPERTY_RUNS },
+        );
+    });
+
+    it("round-trips generated canonical string-list and key-value values", () => {
+        fc.assert(
+            fc.property(collectionValues, (values) => {
+                const raw = collectionCommand.serialize(values);
+                const parsed = collectionCommand.parse(raw);
+
+                assert.equal(parsed.status, "success");
+                if (parsed.status !== "success") return;
+                assert.deepEqual(parsed.value, {
+                    item: values.item,
+                    setting: { ...values.setting },
+                });
+            }),
+            { numRuns: PROPERTY_RUNS },
+        );
+    });
+
+    it("round-trips every generated finite number including signed zero", () => {
+        const numberCommand = defineTypedCommand({
+            name: "number-property-demo",
+            description: "Number round-trip property",
+            args: { value: { type: "number", required: true } },
+            run() {},
+        });
+        fc.assert(
+            fc.property(finiteNumber, (value) => {
+                const raw = numberCommand.serialize({ value });
+                const parsed = numberCommand.parse(raw);
+
+                assert.equal(parsed.status, "success");
+                if (parsed.status !== "success") return;
+                assert.equal(Object.is(parsed.value.value, value), true);
             }),
             { numRuns: PROPERTY_RUNS },
         );

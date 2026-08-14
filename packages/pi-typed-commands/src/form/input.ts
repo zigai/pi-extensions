@@ -32,10 +32,9 @@ function numberInputPrefixIsValid(definition: ArgumentDefinition, value: string)
     if (numberAllowsNegative(definition)) {
         signPattern = "[+-]?";
     }
-    if (definition.integer === true) {
-        return new RegExp(`^${signPattern}\\d*$`).test(value);
-    }
-    return new RegExp(`^${signPattern}(?:\\d+|\\d*\\.\\d*)?$`).test(value);
+    return new RegExp(
+        `^${signPattern}(?:\\d+(?:\\.\\d*)?(?:[eE][+-]?\\d*)?|\\.\\d+(?:[eE][+-]?\\d*)?|\\.)?$`,
+    ).test(value);
 }
 
 function printableInputText(data: string): string | undefined {

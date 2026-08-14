@@ -176,14 +176,23 @@ describe("registered typed command handler", () => {
     it("selects a subcommand before opening its form and dispatching its handler", async () => {
         const received: string[] = [];
         const selected: Array<{ title: string; options: readonly string[] }> = [];
+        const resolvedFormTitles: string[] = [];
         const registration = captureRegistration({
             name: "select-subcommand-handler-test",
             description: "Subcommand selection",
             args: {},
+            formTitle() {
+                resolvedFormTitles.push("root");
+                return "Root form";
+            },
             subcommands: {
                 inspect: {
                     description: "Inspect",
                     args: { path: { type: "string", required: true } },
+                    formTitle() {
+                        resolvedFormTitles.push("inspect");
+                        return "Inspect form";
+                    },
                     run(args) {
                         received.push(valueText(args.path));
                     },
@@ -206,6 +215,7 @@ describe("registered typed command handler", () => {
         try {
             await registration.handler("", ctx);
             assert.deepEqual(selected, [{ title: "Select subcommand", options: ["inspect"] }]);
+            assert.deepEqual(resolvedFormTitles, ["inspect"]);
             assert.deepEqual(received, ["src"]);
         } finally {
             registration.dispose();

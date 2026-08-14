@@ -56,10 +56,14 @@ export async function openDenseArgumentForm<TDefinitions extends ArgumentDefinit
             const abort = (): void => {
                 done(undefined);
             };
-            options.signal?.addEventListener("abort", abort, { once: true });
-            removeAbortListener = () => {
-                options.signal?.removeEventListener("abort", abort);
-            };
+            if (signalAborted(options.signal)) {
+                done(undefined);
+            } else {
+                options.signal?.addEventListener("abort", abort, { once: true });
+                removeAbortListener = () => {
+                    options.signal?.removeEventListener("abort", abort);
+                };
+            }
             return new ArgumentFormComponent(
                 tui,
                 resolveFormTitle(command, options),

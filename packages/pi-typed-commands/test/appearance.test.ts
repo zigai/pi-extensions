@@ -271,6 +271,27 @@ describe("global presentation config", () => {
         });
     });
 
+    it("ignores prototype-like unknown project keys instead of inheriting settings", () => {
+        const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-prototype-agent-"));
+        const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-prototype-project-"));
+        writeGlobalConfig(agentDir, {});
+        const prototypeConfig: unknown = JSON.parse(
+            '{"__proto__":{"helperPlacement":"belowEditor"}}',
+        );
+        writeProjectConfig(projectDir, prototypeConfig);
+
+        withAgentDir(agentDir, () => {
+            const snapshot = resolvePiTypedCommandsConfigSnapshot({
+                cwd: projectDir,
+                projectTrusted: true,
+            });
+
+            assert.equal(snapshot.project.status, "loaded");
+            assert.equal(snapshot.settings.helperPlacement, "aboveEditor");
+            assert.equal(Object.getPrototypeOf(snapshot.settings.appearance), Object.prototype);
+        });
+    });
+
     it("does not read config from an untrusted project", () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
         const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-project-"));
@@ -427,7 +448,9 @@ describe("global presentation config", () => {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-agent-"));
         const projectDir = mkdtempSync(join(tmpdir(), "pi-typed-appearance-project-"));
         writeGlobalConfig(agentDir, {
-            appearance: { form: { symbols: { focusedField: "G" } } },
+            appearance: {
+                form: { symbols: { focusedField: "G", selectedCheckbox: "X" } },
+            },
         });
         writeProjectConfig(projectDir, {
             appearance: { form: { symbols: { focusedField: "P" } } },
@@ -437,6 +460,7 @@ describe("global presentation config", () => {
             const appearance = resolveAppearance(projectDir);
 
             assert.equal(appearance.form.symbols.focusedField, "P");
+            assert.equal(appearance.form.symbols.selectedCheckbox, "X");
         });
     });
 

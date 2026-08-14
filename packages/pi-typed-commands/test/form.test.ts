@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../src/form.js";
+import { formAutocompleteItem } from "../src/form/dense-component.js";
+import { filterNumberInputData } from "../src/form/input.js";
 import { DEFAULT_PI_TYPED_COMMANDS_APPEARANCE } from "../src/pi/presentation-config.js";
 import type { FlatArgumentDefinitions, ParsedCommandArguments } from "../src/types.js";
 import type { RegisteredTypedCommand } from "../src/pi/command-types.js";
@@ -29,6 +31,139 @@ const tui = createTestTui();
 const keybindings = createTestKeybindings();
 
 describe("dense argument form", () => {
+    it("accepts scientific notation while filtering number input", () => {
+        const numberDefinition = { type: "number" } as const;
+        const positiveInteger = { type: "number", integer: true, min: 0 } as const;
+
+        assert.equal(filterNumberInputData(numberDefinition, "", 0, "1e3"), "1e3");
+        assert.equal(filterNumberInputData(positiveInteger, "", 0, "1.0e+3"), "1.0e+3");
+        assert.equal(filterNumberInputData(positiveInteger, "1e", 2, "-3"), "-3");
+        assert.equal(filterNumberInputData(positiveInteger, "", 0, "-1"), "1");
+    });
+
+    it("preserves negative zero when an unchanged number form is submitted", async () => {
+        const definitions = {
+            amount: { type: "number" },
+        } satisfies FlatArgumentDefinitions;
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "negative-zero-form",
+            description: "Negative zero form",
+            args: definitions,
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: { amount: -0 },
+            provided: new Set(["amount"]),
+            issues: [],
+            mode: "run",
+        };
+        const ctx = createTestExtensionCommandContext({
+            mode: "tui",
+            ui: {
+                custom: async (factory) => {
+                    let result: unknown;
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, (value: unknown) => {
+                            result = value;
+                        }),
+                    );
+                    component.handleInput("\r");
+                    return result;
+                },
+            },
+        });
+
+        const result = await openArgumentForm(command, parsed, "all", ctx, formOptions);
+
+        assert.equal(Object.is(result?.amount, -0), true);
+    });
+
+    it("masks sensitive strings even when an explicit text widget is configured", async () => {
+        const definitions = {
+            token: {
+                type: "string" as const,
+                sensitive: true,
+                ui: { widget: "text" as const },
+            },
+        };
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "sensitive-widget-form",
+            description: "Sensitive widget form",
+            args: definitions,
+            formSymbols: symbols,
+        };
+        let rendered: string[] = [];
+        const ctx = createTestExtensionCommandContext({
+            mode: "tui",
+            ui: {
+                custom: async (factory) => {
+                    let result: unknown;
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, (value: unknown) => {
+                            result = value;
+                        }),
+                    );
+                    rendered = component.render(80);
+                    component.handleInput("\u001b");
+                    return result;
+                },
+            },
+        });
+
+        await openArgumentForm(
+            command,
+            {
+                values: { token: "private-value" },
+                provided: new Set(["token"]),
+                issues: [],
+                mode: "run",
+            },
+            "all",
+            ctx,
+            formOptions,
+        );
+
+        assert.doesNotMatch(rendered.join("\n"), /private-value/);
+        assert.match(rendered.join("\n"), /•/);
+    });
+
+    it("keeps absent Object prototype spellings unset in dense form state", async () => {
+        const definitions = {
+            toString: { type: "string" as const },
+        };
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "prototype-field-form",
+            description: "Prototype field form",
+            args: definitions,
+            formSymbols: symbols,
+        };
+        const ctx = createTestExtensionCommandContext({
+            mode: "tui",
+            ui: {
+                custom: async (factory) => {
+                    let result: unknown;
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, (value: unknown) => {
+                            result = value;
+                        }),
+                    );
+                    component.handleInput("\r");
+                    return result;
+                },
+            },
+        });
+
+        const result = await openArgumentForm(
+            command,
+            { values: {}, provided: new Set(), issues: [], mode: "run" },
+            "all",
+            ctx,
+            formOptions,
+        );
+
+        assert.equal(Reflect.get(result ?? {}, "toString"), undefined);
+    });
+
     it("shows field names instead of CLI flags in validation messages", async () => {
         const definitions = {
             count: { type: "number", integer: true, max: 3, default: 1 },
@@ -498,6 +633,65 @@ describe("dense argument form", () => {
         );
     });
 
+    it("uses logical provider values instead of CLI replacement text in form editors", () => {
+        assert.deepEqual(
+            formAutocompleteItem({
+                value: "feature branch",
+                label: "Feature branch",
+                description: "Resolved ref",
+                replacement: '"feature branch"',
+            }),
+            {
+                value: "feature branch",
+                label: "Feature branch",
+                description: "Resolved ref",
+            },
+        );
+    });
+
+    it("renders the value row of selected completion-backed single-line editors", async () => {
+        const definitions = {
+            ref: {
+                type: "string",
+                complete: () => [{ value: "feature branch" }],
+            },
+        } satisfies FlatArgumentDefinitions;
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "completion-value",
+            description: "Completion value form",
+            args: definitions,
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: {},
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+        let rendered: string[] = [];
+        const ctx = createTestExtensionCommandContext({
+            mode: "tui",
+            ui: {
+                custom: async (factory) => {
+                    const component = requireInteractiveComponent(
+                        await factory(tui, theme, keybindings, () => {}),
+                    );
+                    component.focused = true;
+                    component.handleInput("\u001b[200~feature\u001b[201~");
+                    rendered = component.render(100);
+                    return undefined;
+                },
+            },
+        });
+
+        await openArgumentForm(command, parsed, "all", ctx, formOptions);
+
+        assert.ok(
+            rendered.some((line) => line.includes("feature")),
+            JSON.stringify(rendered),
+        );
+    });
+
     it("computes read-only field values", async () => {
         const definitions: FlatArgumentDefinitions = {
             source: { type: "string", default: "api" },
@@ -757,6 +951,58 @@ describe("dense argument form", () => {
         assert.ok(renderedLines.some((line) => line.includes("ctrl+n next field")));
         assert.ok(renderedLines.some((line) => line.includes("ctrl+x cancel")));
         assert.equal(result?.enabled, false);
+    });
+
+    it("cancels when the signal aborts before a delayed TUI factory is created", async () => {
+        const definitions = {
+            path: { type: "string" },
+        } satisfies FlatArgumentDefinitions;
+        const command: RegisteredTypedCommand<typeof definitions> = {
+            name: "delayed-form-cancel",
+            description: "Delayed form cancellation",
+            args: definitions,
+            formSymbols: symbols,
+        };
+        const parsed: ParsedCommandArguments = {
+            values: {},
+            provided: new Set(),
+            issues: [],
+            mode: "run",
+        };
+        const controller = new AbortController();
+        const createFactory = createTestSignal<void>();
+        const factoryCreated = createTestSignal<void>();
+        const customCompletion = createTestSignal<unknown>();
+        let doneCalled = false;
+        const ctx = createTestExtensionCommandContext({
+            mode: "tui",
+            ui: {
+                custom: async (factory) => {
+                    await createFactory.promise;
+                    await factory(tui, theme, keybindings, (value: unknown) => {
+                        doneCalled = true;
+                        customCompletion.resolve(value);
+                    });
+                    factoryCreated.resolve();
+                    return customCompletion.promise;
+                },
+            },
+        });
+
+        const formCompletion = openArgumentForm(command, parsed, "all", ctx, {
+            ...formOptions,
+            signal: controller.signal,
+        });
+        controller.abort();
+        createFactory.resolve();
+        await factoryCreated.promise;
+        const observedDone = doneCalled;
+        if (!doneCalled) {
+            customCompletion.resolve(undefined);
+        }
+
+        assert.equal(await formCompletion, undefined);
+        assert.equal(observedDone, true);
     });
 });
 

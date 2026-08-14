@@ -1,4 +1,6 @@
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
+import { compileTypedCommandDefinition } from "../compiler.js";
+import { diagnosticMessages } from "../diagnostics.js";
 import { DEFAULT_FORM_SYMBOLS } from "../command/symbols.js";
 import type { RegisteredTypedCommand } from "../pi/command-types.js";
 import { renderTypedSkillInvocation } from "./prompt.js";
@@ -19,22 +21,44 @@ export function skillPathFromCommand(command: SlashCommandInfo): string | undefi
 export function typedSkillCommandFromMetadata(
     skill: TypedSkillMetadata,
 ): RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
-    const formFields: { formTitle?: string; ghostText?: string } = {};
-    if (skill.formTitle !== undefined) {
-        formFields.formTitle = skill.formTitle;
+    if (skill.name.length === 0 || /[\s\p{Cc}]/u.test(skill.name) || skill.name.startsWith("-")) {
+        throw new TypeError(`Invalid typed skill name ${JSON.stringify(skill.name)}`);
     }
-    if (skill.ghostText !== undefined) {
-        formFields.ghostText = skill.ghostText;
-    }
-    const command: RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } = {
-        name: `skill:${skill.name}`,
+    const commandName = `skill:${skill.name}`;
+    const compiled = compileTypedCommandDefinition({
+        name: commandName,
         description: skill.description,
         args: skill.args,
+    });
+    if (!compiled.ok) {
+        throw new TypeError(
+            [
+                `Invalid typed arguments for /${commandName}:`,
+                ...diagnosticMessages(compiled.diagnostics),
+            ].join("\n"),
+        );
+    }
+    const snapshot: TypedSkillMetadata = Object.freeze({
+        ...skill,
+        args: compiled.command.args,
+    });
+    const formFields: { formTitle?: string; ghostText?: string } = {};
+    if (snapshot.formTitle !== undefined) {
+        formFields.formTitle = snapshot.formTitle;
+    }
+    if (snapshot.ghostText !== undefined) {
+        formFields.ghostText = snapshot.ghostText;
+    }
+    const command: RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } = {
+        name: commandName,
+        description: snapshot.description,
+        args: compiled.command.args,
+        compiled: compiled.command,
         target: {
             kind: "skill",
             render: (args, additionalInput) => {
                 const options: RenderTypedSkillInvocationOptions = {
-                    skill,
+                    skill: snapshot,
                     values: args,
                 };
                 if (additionalInput !== undefined) {
@@ -43,17 +67,34 @@ export function typedSkillCommandFromMetadata(
                 return renderTypedSkillInvocation(options);
             },
         },
-        formSymbols: { ...DEFAULT_FORM_SYMBOLS },
+        formSymbols: Object.freeze({ ...DEFAULT_FORM_SYMBOLS }),
         source: "skill",
-        skill,
+        skill: snapshot,
         ...formFields,
     };
-    return command;
+    return Object.freeze(command);
 }
 
-/** Return whether a registered typed command represents a typed skill invocation. */
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Return whether a registered typed command represents a complete typed skill invocation. */
 export function isTypedSkillCommand(
     command: RegisteredTypedCommand,
 ): command is RegisteredTypedCommand & { source: "skill"; skill: TypedSkillMetadata } {
-    return command.source === "skill";
+    if (command.source !== "skill" || !("skill" in command) || !isRecord(command.skill)) {
+        return false;
+    }
+    const skill = command.skill;
+    return (
+        typeof skill.name === "string" &&
+        typeof skill.description === "string" &&
+        typeof skill.filePath === "string" &&
+        typeof skill.baseDir === "string" &&
+        typeof skill.body === "string" &&
+        isRecord(skill.args) &&
+        (skill.formTitle === undefined || typeof skill.formTitle === "string") &&
+        (skill.ghostText === undefined || typeof skill.ghostText === "string")
+    );
 }

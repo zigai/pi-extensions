@@ -153,7 +153,7 @@ export function formatCommandUsage<TDefinitions extends ArgumentDefinitions>(
         if (parts.length > 0) {
             sharedArguments = ` ${parts.join(" ")}`;
         }
-        return `/${commandName}${sharedArguments} ${subcommandToken}`;
+        return `/${commandName} ${subcommandToken}${sharedArguments}`;
     }
     if (parts.length === 0) {
         return `/${commandName}`;
@@ -178,6 +178,14 @@ export function formatHelperLineParts<TDefinitions extends ArgumentDefinitions>(
         { kind: "muted", text: "usage: " },
         { kind: "command", text: `/${command.invocationName ?? command.name}` },
     ];
+
+    if (command.subcommands !== undefined) {
+        let subcommandToken = "<subcommand>";
+        if (command.hasRootHandler === true) {
+            subcommandToken = "[<subcommand>]";
+        }
+        parts.push({ kind: "muted", text: " " }, { kind: "positional", text: subcommandToken });
+    }
 
     for (const [name, definition] of orderedCommandArgumentEntries(command)) {
         parts.push({ kind: "muted", text: " " });
@@ -268,6 +276,9 @@ function detailedDefault(definition: ArgumentDefinition): string {
         return Object.entries(value)
             .map(([key, entryValue]) => `${key}=${entryValue}`)
             .join(",");
+    }
+    if (typeof value === "number" && Object.is(value, -0)) {
+        return "-0";
     }
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
         return String(value);

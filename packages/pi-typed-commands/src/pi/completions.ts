@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
 import {
@@ -20,15 +20,14 @@ class PiCompletionScheduler implements CompletionScheduler {
         work: (signal: AbortSignal) => Promise<T>,
         timeoutMs: number | undefined,
     ): Promise<T | undefined> {
+        if (this.parentSignal?.aborted === true) {
+            return undefined;
+        }
         const controller = new AbortController();
         const abort = (): void => {
             controller.abort(this.parentSignal?.reason);
         };
-        if (this.parentSignal?.aborted === true) {
-            abort();
-        } else {
-            this.parentSignal?.addEventListener("abort", abort, { once: true });
-        }
+        this.parentSignal?.addEventListener("abort", abort, { once: true });
 
         let timer: NodeJS.Timeout | undefined;
         if (timeoutMs !== undefined) {
@@ -37,14 +36,12 @@ class PiCompletionScheduler implements CompletionScheduler {
             }, timeoutMs);
         }
         try {
-            return await Promise.race([
-                work(controller.signal),
-                new Promise<undefined>((resolve) => {
-                    controller.signal.addEventListener("abort", () => resolve(undefined), {
-                        once: true,
-                    });
-                }),
-            ]);
+            const aborted = new Promise<undefined>((resolve) => {
+                controller.signal.addEventListener("abort", () => resolve(undefined), {
+                    once: true,
+                });
+            });
+            return await Promise.race([work(controller.signal), aborted]);
         } catch {
             return undefined;
         } finally {
@@ -73,10 +70,7 @@ class PiCompletionTaskOwner implements CompletionTaskOwner {
 }
 
 async function completePathItems(query: string, cwd: string): Promise<TypedCompletionItem[]> {
-    let raw = query;
-    if (raw.length === 0) {
-        raw = ".";
-    }
+    const raw = query;
     let directoryPart = dirname(raw);
     let filePrefix = basename(raw);
     if (raw.endsWith("/")) {
@@ -95,22 +89,32 @@ async function completePathItems(query: string, cwd: string): Promise<TypedCompl
     }
 
     const entries = await readdir(lookupDirectory, { withFileTypes: true });
-    return entries
-        .filter((entry) => entry.name.startsWith(filePrefix))
-        .sort((left, right) => left.name.localeCompare(right.name))
-        .map((entry) => {
-            let value = `${valuePrefix}${entry.name}`;
-            if (entry.isDirectory()) {
-                value += "/";
+    const matchingEntries = entries
+        .filter((entry) => entry.name.startsWith(filePrefix) && !/\p{Cc}/u.test(entry.name))
+        .sort((left, right) => left.name.localeCompare(right.name));
+    return Promise.all(
+        matchingEntries.map(async (entry) => {
+            let isDirectory = entry.isDirectory();
+            if (!isDirectory && entry.isSymbolicLink()) {
+                try {
+                    isDirectory = (await stat(join(lookupDirectory, entry.name))).isDirectory();
+                } catch {
+                    // Keep broken or inaccessible symbolic links as ordinary path candidates.
+                }
             }
-            let label = entry.name;
+            let suffix = "";
             let description = "file";
-            if (entry.isDirectory()) {
-                label = `${entry.name}/`;
+            if (isDirectory) {
+                suffix = "/";
                 description = "directory";
             }
-            return { value, label, description };
-        });
+            return {
+                value: `${valuePrefix}${entry.name}${suffix}`,
+                label: `${entry.name}${suffix}`,
+                description,
+            };
+        }),
+    );
 }
 
 /** Compose completion decisions with Pi/Node filesystem, cancellation, and registry adapters. */

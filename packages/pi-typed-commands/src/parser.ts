@@ -329,11 +329,24 @@ function cloneDefaultValue(value: ArgumentValue): ArgumentValue {
     return value;
 }
 
+function ownRecordValue(values: Readonly<Record<string, unknown>>, name: string): unknown {
+    if (!Object.hasOwn(values, name)) {
+        return undefined;
+    }
+    return values[name];
+}
+
 function serializedArgumentText(value: unknown): string | undefined {
     if (typeof value === "string") {
         return value;
     }
-    if (typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === "number") {
+        if (Object.is(value, -0)) {
+            return "-0";
+        }
+        return String(value);
+    }
+    if (typeof value === "boolean") {
         return String(value);
     }
     if (isStringArrayValue(value)) {
@@ -395,6 +408,15 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             issues: [],
             mode: "run",
         };
+        for (const argument of this.grammar.arguments) {
+            if (Object.hasOwn(Object.prototype, argument.key)) {
+                Object.defineProperty(this.result.values, argument.key, {
+                    configurable: true,
+                    value: undefined,
+                    writable: true,
+                });
+            }
+        }
         Object.defineProperty(this.result, "grammar", { value: this.grammar });
     }
 
@@ -644,6 +666,15 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
         }
     }
 
+    private setResultValue(name: string, value: ArgumentValue): void {
+        Object.defineProperty(this.result.values, name, {
+            configurable: true,
+            enumerable: true,
+            value,
+            writable: true,
+        });
+    }
+
     private decodeOccurrences(): void {
         for (const [name, occurrences] of this.occurrencesByName) {
             const argument = this.grammar.argumentByName.get(name);
@@ -652,7 +683,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
             }
             const decoded = argument.decode(occurrences);
             if (decoded.value !== undefined) {
-                this.result.values[name] = decoded.value;
+                this.setResultValue(name, decoded.value);
             }
             if (!decoded.ok) {
                 this.result.issues.push(...decoded.issues);
@@ -663,12 +694,15 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
     private applyDefaults(): void {
         for (const argument of this.grammar.arguments) {
             const name = argument.key;
-            if (this.result.values[name] !== undefined || this.result.provided.has(name)) {
+            if (
+                ownRecordValue(this.result.values, name) !== undefined ||
+                this.result.provided.has(name)
+            ) {
                 continue;
             }
             const defaultValue = applyArgumentDefault(argument.definition);
             if (defaultValue !== undefined) {
-                this.result.values[name] = cloneDefaultValue(defaultValue);
+                this.setResultValue(name, cloneDefaultValue(defaultValue));
                 if (!this.result.provided.has(name)) {
                     this.result.sources?.set(name, "default");
                 }
@@ -678,7 +712,7 @@ class ArgumentParser<TDefinitions extends ArgumentDefinitions> {
 
     private addValidationIssues(): void {
         for (const argument of this.grammar.arguments) {
-            const value = this.result.values[argument.key];
+            const value = ownRecordValue(this.result.values, argument.key);
             const validationIssues = argument.validate(value);
             for (const issue of validationIssues) {
                 if (
@@ -727,8 +761,11 @@ export function serializeTypedCommandArgs<TDefinitions extends ArgumentDefinitio
         ];
     }
     for (const argument of serializationOrder) {
-        const value = flatValues[argument.key];
+        const value = ownRecordValue(flatValues, argument.key);
         if (isPositionalArgument(argument.definition)) {
+            if (argument.definition.type === "string" && argument.definition.sensitive === true) {
+                continue;
+            }
             if (value !== undefined) {
                 const issues = argument.validate(value);
                 if (issues.length > 0) {
@@ -849,7 +886,7 @@ function validatedParsedValues(
     const issues = [...parsed.issues];
     const reconstructedDefaults = new Set<string>();
     for (const argument of grammar.arguments) {
-        let value: unknown = parsed.values[argument.key];
+        let value: unknown = ownRecordValue(parsed.values, argument.key);
         if (value === undefined) {
             const defaultValue = applyArgumentDefault(argument.definition);
             if (defaultValue !== undefined) {
@@ -877,7 +914,7 @@ function typedDraft<TDefinitions extends ArgumentDefinitions>(
     grammar: CompiledCommand<TDefinitions>,
     values: Readonly<Record<string, ArgumentValue>>,
 ): ParsedArgumentDraft<TDefinitions> {
-    let grouped: Readonly<Record<string, unknown>> = { ...values };
+    let grouped: Readonly<Record<string, unknown>> = values;
     if (hasArgumentGroups(grammar.definitions)) {
         grouped = expandGroupedArgumentValues(values, grammar.definitions);
     }

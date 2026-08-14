@@ -25,6 +25,10 @@ function isMultiArgumentValue(value: ArgumentValue): value is readonly string[] 
     return Array.isArray(value);
 }
 
+function isKeyValueArgumentValue(value: ArgumentValue): value is Readonly<Record<string, string>> {
+    return value !== undefined && typeof value === "object" && !Array.isArray(value);
+}
+
 /** Register the active session callback for submitted invalid command editor text. */
 export function registerSubmittedInvalidCommandHandler(
     ctx: ExtensionContext,
@@ -87,6 +91,10 @@ function cloneArgumentValues(
     for (const [name, value] of Object.entries(values)) {
         if (isMultiArgumentValue(value)) {
             cloned[name] = [...value];
+            continue;
+        }
+        if (isKeyValueArgumentValue(value)) {
+            cloned[name] = { ...value };
             continue;
         }
         cloned[name] = value;

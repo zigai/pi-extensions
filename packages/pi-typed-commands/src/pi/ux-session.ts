@@ -3,7 +3,7 @@ import {
     type ExtensionAPI,
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { getKeybindings } from "@earendil-works/pi-tui";
+import { getKeybindings, type AutocompleteProvider } from "@earendil-works/pi-tui";
 import { openArgumentForm } from "../form/open.js";
 import {
     parseTypedCommandArgs,
@@ -76,6 +76,7 @@ async function openEditorCommandForm(
             ctx,
             "all",
             options.appearance,
+            registry,
             signal,
         );
         if (transformed === undefined || !isCurrent()) {
@@ -97,6 +98,7 @@ async function openEditorCommandForm(
         selectedCommand = command.subcommands?.[selectedSubcommand] ?? command;
     } else if (
         routed.route.status === "missing" ||
+        routed.route.status === "unknown" ||
         (rawArgs.trim().length === 0 && command.subcommands !== undefined)
     ) {
         const rootOption = "(root command)";
@@ -294,6 +296,8 @@ export class TypedCommandUxSession {
         | undefined;
     private submittedInvalidEditorText: string | undefined;
     private armedDoubleTabEditorText: string | undefined;
+    private completionRequestId = 0;
+    private activeTypedCompletionEditorText: string | undefined;
     private helperWidgetSignature: string | undefined;
     private editorUxInstallation: EditorUxInstallation | undefined;
     private configSnapshot: ResolvedPiTypedCommandsConfigSnapshot | undefined;
@@ -361,6 +365,8 @@ export class TypedCommandUxSession {
         this.formRunId += 1;
         this.submittedInvalidEditorText = undefined;
         this.armedDoubleTabEditorText = undefined;
+        this.completionRequestId += 1;
+        this.activeTypedCompletionEditorText = undefined;
         const task = this.formTask;
         this.formTask = undefined;
         if (task !== undefined) {
@@ -605,11 +611,22 @@ export class TypedCommandUxSession {
         if (!getKeybindings().matches(data, "tui.input.tab")) {
             this.submittedInvalidEditorText = undefined;
             this.armedDoubleTabEditorText = undefined;
+            this.activeTypedCompletionEditorText = undefined;
             this.scheduleRefresh(ctx);
             return undefined;
         }
 
         const editorText = ctx.ui.getEditorText();
+        const invocation = commandInvocationForEditorText(editorText, this.registry);
+        if (
+            this.activeTypedCompletionEditorText === editorText &&
+            invocation !== undefined &&
+            invocation.rawArgs.length > 0
+        ) {
+            this.activeTypedCompletionEditorText = undefined;
+            this.scheduleRefresh(ctx);
+            return undefined;
+        }
         const completion = completeTypedCommandOnTab(editorText, this.registry);
         if (completion.handled === true) {
             this.armedDoubleTabEditorText = undefined;
@@ -641,34 +658,45 @@ export class TypedCommandUxSession {
 
     private addAutocompleteProvider(ctx: ExtensionContext): void {
         const registry = this.registry;
-        ctx.ui.addAutocompleteProvider((current) => ({
-            async getSuggestions(lines, cursorLine, cursorCol, options) {
-                if (
-                    commandInvocationForEditorText(
-                        (lines[cursorLine] ?? "").slice(0, cursorCol),
-                        registry,
-                    ) !== undefined
-                ) {
-                    return null;
-                }
-
-                const suggestions = await getTypedAutocompleteSuggestions(
-                    lines,
-                    cursorLine,
-                    cursorCol,
-                    createPiCompletionCapabilities(ctx.cwd, registry, ctx.signal),
-                );
-                if (suggestions !== undefined) {
-                    return suggestions;
-                }
-                return current.getSuggestions(lines, cursorLine, cursorCol, options);
-            },
-            applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-                return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
-            },
-            shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
-                return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
-            },
-        }));
+        ctx.ui.addAutocompleteProvider((current) => {
+            const provider: AutocompleteProvider = {
+                getSuggestions: async (lines, cursorLine, cursorCol, options) => {
+                    const requestId = this.completionRequestId + 1;
+                    this.completionRequestId = requestId;
+                    let completionSignal = options.signal;
+                    if (ctx.signal !== undefined) {
+                        completionSignal = AbortSignal.any([ctx.signal, options.signal]);
+                    }
+                    const suggestions = await getTypedAutocompleteSuggestions(
+                        lines,
+                        cursorLine,
+                        cursorCol,
+                        createPiCompletionCapabilities(ctx.cwd, registry, completionSignal),
+                    );
+                    if (requestId === this.completionRequestId) {
+                        this.activeTypedCompletionEditorText = undefined;
+                        if (suggestions !== undefined && suggestions.items.length > 0) {
+                            this.activeTypedCompletionEditorText = lines.join("\n");
+                        }
+                    }
+                    if (suggestions !== undefined) {
+                        return suggestions;
+                    }
+                    return current.getSuggestions(lines, cursorLine, cursorCol, options);
+                },
+                applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+                    return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+                },
+                shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+                    return (
+                        current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true
+                    );
+                },
+            };
+            if (current.triggerCharacters !== undefined) {
+                provider.triggerCharacters = [...current.triggerCharacters];
+            }
+            return provider;
+        });
     }
 }

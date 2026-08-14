@@ -16,6 +16,10 @@ import type {
 import { maybeWrapGroupedHandler, maybeWrapGroupedRefinement } from "./grouped-values.js";
 import { DEFAULT_FORM_SYMBOLS } from "./symbols.js";
 
+function invalidCommandSpelling(value: string): boolean {
+    return value.length === 0 || /[\s\p{Cc}]/u.test(value) || value.startsWith("-");
+}
+
 /** Create a startup-style error for invalid typed command definitions. */
 export function definitionError(name: string, diagnostics: readonly DefinitionDiagnostic[]): Error {
     return new Error(
@@ -63,7 +67,16 @@ function mergeArgumentDefinitions<
             );
         }
     }
-    return Object.assign({}, shared, local);
+    return { ...shared, ...local };
+}
+
+function combineRefinements(
+    shared: TypedCommandRefinement<FlatArgumentDefinitions> | undefined,
+    branch: TypedCommandRefinement<FlatArgumentDefinitions> | undefined,
+): TypedCommandRefinement<FlatArgumentDefinitions> | undefined {
+    if (shared === undefined) return branch;
+    if (branch === undefined) return shared;
+    return (args, context) => [...shared(args, context), ...branch(args, context)];
 }
 
 function normalizeSubcommands<
@@ -80,19 +93,20 @@ function normalizeSubcommands<
         return undefined;
     }
 
-    const normalized: Record<string, RegisteredTypedCommand> = {};
+    const normalizedEntries: Array<readonly [string, RegisteredTypedCommand]> = [];
     const names = new Set<string>();
+    const sharedRefine = maybeWrapGroupedRefinement(sharedDefinitions, definition.refine);
     for (const name in definitions) {
         if (!Object.hasOwn(definitions, name)) {
             continue;
         }
         const subcommand = definitions[name];
-        if (name.length === 0 || /\s/.test(name) || name.startsWith("-")) {
+        if (invalidCommandSpelling(name)) {
             throw new TypeError(`Invalid subcommand name ${JSON.stringify(name)}`);
         }
         const spellings = [name, ...(subcommand.aliases ?? [])];
         for (const spelling of spellings) {
-            if (spelling.length === 0 || /\s/.test(spelling) || spelling.startsWith("-")) {
+            if (invalidCommandSpelling(spelling)) {
                 throw new TypeError(`Invalid subcommand alias ${JSON.stringify(spelling)}`);
             }
             if (names.has(spelling)) {
@@ -110,7 +124,8 @@ function normalizeSubcommands<
         if (!compiled.ok) {
             throw definitionError(`${definition.name} ${name}`, compiled.diagnostics);
         }
-        const refine = maybeWrapGroupedRefinement(args, subcommand.refine);
+        const branchRefine = maybeWrapGroupedRefinement(args, subcommand.refine);
+        const refine = combineRefinements(sharedRefine, branchRefine);
         const subcommandFields: {
             refine?: TypedCommandRefinement<FlatArgumentDefinitions>;
             formTitle?: NonNullable<typeof subcommand.formTitle>;
@@ -137,25 +152,28 @@ function normalizeSubcommands<
         if (subcommand.ghostText !== undefined) {
             subcommandFields.ghostText = subcommand.ghostText;
         }
-        normalized[name] = {
-            name: `${definition.name} ${name}`,
-            description: subcommand.description,
-            aliases: Object.freeze([...(subcommand.aliases ?? [])]),
-            args: compiled.command.args,
-            compiled: compiled.command,
-            formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...subcommand.formSymbols },
-            source: "extension",
-            target: {
-                kind: "extension",
-                run: maybeWrapGroupedHandler(args, subcommand.run),
+        normalizedEntries.push([
+            name,
+            {
+                name: `${definition.name} ${name}`,
+                description: subcommand.description,
+                aliases: Object.freeze([...(subcommand.aliases ?? [])]),
+                args: compiled.command.args,
+                compiled: compiled.command,
+                formSymbols: { ...DEFAULT_FORM_SYMBOLS, ...subcommand.formSymbols },
+                source: "extension",
+                target: {
+                    kind: "extension",
+                    run: maybeWrapGroupedHandler(args, subcommand.run),
+                },
+                ...subcommandFields,
             },
-            ...subcommandFields,
-        };
+        ]);
     }
-    if (Object.keys(normalized).length === 0) {
+    if (normalizedEntries.length === 0) {
         throw new TypeError(`Typed command /${definition.name} must not define empty subcommands`);
     }
-    return Object.freeze(normalized);
+    return Object.freeze(Object.fromEntries(normalizedEntries));
 }
 
 /** Normalize a user command definition into metadata consumed by Pi registration and UX adapters. */
@@ -167,6 +185,9 @@ export function normalizeRegisteredCommand<
         | TypedCommandDefinition<TDefinitions, TSubcommands>
         | DefinedTypedCommand<TDefinitions, TSubcommands>,
 ): RegisteredTypedCommand<TDefinitions> & { readonly compiled: CompiledCommand<TDefinitions> } {
+    if (invalidCommandSpelling(definition.name)) {
+        throw new TypeError(`Invalid command name ${JSON.stringify(definition.name)}`);
+    }
     const compiled = compileTypedCommandDefinition({
         name: definition.name,
         description: definition.description,

@@ -110,6 +110,32 @@ describe("Pi form-only arguments", () => {
         }
     });
 
+    it("clones staged key-value records before later handler consumption", () => {
+        const ctx = createTestExtensionCommandContext();
+        const cleanup = registerSubmittedInvalidCommandHandler(
+            ctx,
+            resolveTypedCommandUxOptions(),
+            () => {},
+        );
+        const environment = { MODE: "safe" };
+
+        try {
+            assert.equal(
+                stageExpandedFormArguments(ctx, "staged-record", "/staged-record", {
+                    environment,
+                }),
+                true,
+            );
+            environment.MODE = "mutated";
+
+            assert.deepEqual(takeExpandedFormArguments(ctx, "staged-record", "/staged-record"), {
+                environment: { MODE: "safe" },
+            });
+        } finally {
+            cleanup();
+        }
+    });
+
     it("submits an expanded extension command when the form submit key is pressed", async () => {
         let commandHandler:
             | ((rawArgs: string, ctx: ExtensionCommandContext) => Promise<void>)
@@ -422,6 +448,7 @@ describe("Pi form-only arguments", () => {
         const formCompletion = createTestSignal<unknown>();
         const editorUpdates: string[] = [];
         let sentMessageCount = 0;
+        let completionCapabilitiesSeen = false;
         let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
         const pi = createTestExtensionApi({
             sendUserMessage() {
@@ -432,7 +459,7 @@ describe("Pi form-only arguments", () => {
             mode: "tui",
             ui: {
                 custom: async (factory) => {
-                    await factory(
+                    const component = await factory(
                         createTestTui(),
                         createTestTheme(),
                         createTestKeybindings(),
@@ -444,6 +471,8 @@ describe("Pi form-only arguments", () => {
                             formCompletion.resolve(value);
                         },
                     );
+                    completionCapabilitiesSeen =
+                        Reflect.get(component, "completionCapabilities") !== undefined;
                     formStarted.resolve();
                     return formCompletion.promise;
                 },
@@ -468,6 +497,7 @@ describe("Pi form-only arguments", () => {
             assert.ok(terminalInput);
             assert.deepEqual(terminalInput("\t"), { consume: true });
             await formStarted.promise;
+            assert.equal(completionCapabilitiesSeen, true);
 
             const restart = session.start(ctx);
             await abortObserved.promise;
@@ -479,6 +509,43 @@ describe("Pi form-only arguments", () => {
         } finally {
             await session.stop();
         }
+    });
+
+    it("allows a fresh UX installation after an extension reload", async () => {
+        const sharedEvents = createTestExtensionApi().events;
+        const firstHandlers = new Map<
+            string,
+            Array<(event: unknown, ctx: ExtensionContext) => unknown>
+        >();
+        const secondHandlers = new Map<
+            string,
+            Array<(event: unknown, ctx: ExtensionContext) => unknown>
+        >();
+        const firstPi = createTestExtensionApi({
+            events: sharedEvents,
+            on(name, handler) {
+                const current = firstHandlers.get(name) ?? [];
+                firstHandlers.set(name, [...current, handler]);
+            },
+        });
+        const secondPi = createTestExtensionApi({
+            events: sharedEvents,
+            on(name, handler) {
+                const current = secondHandlers.get(name) ?? [];
+                secondHandlers.set(name, [...current, handler]);
+            },
+        });
+        const ctx = createTestExtensionContext();
+
+        installTypedCommandUx(firstPi);
+        const shutdown = firstHandlers.get("session_shutdown")?.[0];
+        assert.ok(shutdown);
+        await shutdown({ reason: "reload" }, ctx);
+        installTypedCommandUx(secondPi);
+
+        assert.equal(secondHandlers.get("session_start")?.length, 1);
+        assert.equal(secondHandlers.get("input")?.length, 1);
+        assert.equal(secondHandlers.get("session_shutdown")?.length, 1);
     });
 
     it("deduplicates composed UX installs and merges a later double-Tab trigger", async () => {

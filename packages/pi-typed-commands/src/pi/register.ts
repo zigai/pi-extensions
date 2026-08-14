@@ -129,14 +129,14 @@ async function resolveCommandArguments<TDefinitions extends ArgumentDefinitions>
         const { openArgumentForm } = await import("../form/open.js");
         let formOptions: OpenArgumentFormOptions = {
             appearance: options.appearance,
-            title: resolveTypedCommandFormTitle(command, ctx),
+            title: resolveTypedCommandFormTitle(selectedCommand, ctx),
             completionCapabilities: createPiCompletionCapabilities(ctx.cwd, registry, ctx.signal),
         };
         if (ctx.signal !== undefined) {
             formOptions = {
                 appearance: options.appearance,
                 signal: ctx.signal,
-                title: resolveTypedCommandFormTitle(command, ctx),
+                title: resolveTypedCommandFormTitle(selectedCommand, ctx),
                 completionCapabilities: createPiCompletionCapabilities(
                     ctx.cwd,
                     registry,

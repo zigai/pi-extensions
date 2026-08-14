@@ -3,6 +3,7 @@ import { openArgumentForm, type OpenArgumentFormOptions } from "../form/open.js"
 import { combineSkillAdditionalInput, decideArgumentIssueAction } from "../invocation.js";
 import { parseTypedCommandArgs } from "../parser.js";
 import type { TypedCommandRegistry } from "../registry.js";
+import { createPiCompletionCapabilities } from "./completions.js";
 import {
     isTypedSkillCommand,
     skillPathFromCommand,
@@ -97,6 +98,7 @@ export async function renderTypedSkillInput(
     ctx: ExtensionContext,
     formMode: FormMode,
     appearance: ResolvedPiTypedCommandsAppearance,
+    registry: TypedCommandRegistry,
     signal?: AbortSignal,
 ): Promise<string | undefined> {
     if (!isTypedSkillCommand(command)) {
@@ -124,13 +126,10 @@ export async function renderTypedSkillInput(
         let formOptions: OpenArgumentFormOptions = {
             appearance,
             title: resolveTypedCommandFormTitle(command, ctx),
+            completionCapabilities: createPiCompletionCapabilities(ctx.cwd, registry, signal),
         };
         if (signal !== undefined) {
-            formOptions = {
-                appearance,
-                signal,
-                title: resolveTypedCommandFormTitle(command, ctx),
-            };
+            formOptions = { ...formOptions, signal };
         }
         const collected = await openArgumentForm(command, parsed, formMode, ctx, formOptions);
         if (collected === undefined) {
@@ -170,6 +169,7 @@ export async function transformTypedSkillInput(
         ctx,
         formMode,
         appearance,
+        registry,
         signal,
     );
     if (transformed === undefined) {

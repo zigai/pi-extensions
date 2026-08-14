@@ -100,6 +100,10 @@ function tokenizeLoose(input: string): readonly Token[] {
     return lexTypedArgumentString(input).tokens;
 }
 
+function endsWithWhitespace(value: string): boolean {
+    return /\s$/u.test(value);
+}
+
 function providedArgumentNames<TDefinitions extends ArgumentDefinitions>(
     command: CoreRegisteredTypedCommand<TDefinitions>,
     tokens: readonly Token[],
@@ -430,7 +434,11 @@ async function asyncArgumentValueItems(
     if (definition.completeAsync !== undefined) {
         return asyncProviderArgumentValueItems(definition, query, context);
     }
-    if (definition.ui?.widget === "path") {
+    if (
+        definition.ui?.widget === "path" ||
+        definition.ui?.widget === "file" ||
+        definition.ui?.widget === "directory"
+    ) {
         return pathCompletionItems(query, context.capabilities);
     }
     return syncArgumentValueItems(definition, query, context);
@@ -595,7 +603,7 @@ function nextPositionalValueCompletion(
     }
 
     let completedTokenCount = tokens.length - 1;
-    if (context.argsBeforeCursor.endsWith(" ")) {
+    if (endsWithWhitespace(context.argsBeforeCursor)) {
         completedTokenCount = tokens.length;
     }
     let positionalIndex = 0;
@@ -639,7 +647,7 @@ function nextPositionalValueCompletion(
 
     const [, definition] = entry;
     let query = context.currentPrefix;
-    if (context.argsBeforeCursor.endsWith(" ")) {
+    if (endsWithWhitespace(context.argsBeforeCursor)) {
         query = "";
     }
     const mapItems = (items: TypedCompletionItem[]): TypedCompletionItem[] | undefined => {
@@ -761,8 +769,11 @@ function subcommandCompletionDecision(context: CommandLineContext): CompletionDe
     if (first === undefined) {
         return { items: subcommandItems(context.command, ""), prefix: "" };
     }
-    if (first.value.startsWith("-")) {
-        return undefined;
+    if (first.quote !== undefined || first.value.startsWith("-")) {
+        if (context.command.hasRootHandler === true) {
+            return undefined;
+        }
+        return { items: [], prefix: context.replacementPrefix };
     }
     const selected = Object.entries(context.command.subcommands).find(
         ([name, subcommand]) =>
@@ -771,7 +782,7 @@ function subcommandCompletionDecision(context: CommandLineContext): CompletionDe
     if (selected !== undefined) {
         return undefined;
     }
-    if (tokens.length === 1 && !context.argsBeforeCursor.endsWith(" ")) {
+    if (tokens.length === 1 && !endsWithWhitespace(context.argsBeforeCursor)) {
         return {
             items: subcommandItems(context.command, first.value),
             prefix: first.raw,
@@ -780,13 +791,24 @@ function subcommandCompletionDecision(context: CommandLineContext): CompletionDe
     return { items: [], prefix: context.replacementPrefix };
 }
 
+function projectCommandHookItems(
+    argumentPrefix: string,
+    context: CommandLineContext,
+    decision: CompletionDecision,
+): readonly TypedCompletionItem[] {
+    const contextOffset = argumentPrefix.length - context.argsBeforeCursor.length;
+    const replacementOffset = context.argsBeforeCursor.length - decision.prefix.length;
+    const retainedPrefix = argumentPrefix.slice(0, contextOffset + replacementOffset);
+    return decision.items.map((item) => ({ ...item, value: `${retainedPrefix}${item.value}` }));
+}
+
 function selectedSubcommandContext(context: CommandLineContext): CommandLineContext {
     const subcommands = context.command.subcommands;
     if (subcommands === undefined) {
         return context;
     }
     const first = lexTypedArgumentString(context.argsBeforeCursor).tokens[0];
-    if (first === undefined) {
+    if (first === undefined || first.quote !== undefined) {
         return context;
     }
     const selected = Object.entries(subcommands).find(
@@ -799,7 +821,7 @@ function selectedSubcommandContext(context: CommandLineContext): CommandLineCont
     const argsBeforeCursor = context.argsBeforeCursor.slice(first.end).trimStart();
     const tokens = lexTypedArgumentString(argsBeforeCursor).tokens;
     const last = tokens[tokens.length - 1];
-    const trailingSpace = argsBeforeCursor.endsWith(" ");
+    const trailingSpace = endsWithWhitespace(argsBeforeCursor);
     let currentPrefix = last?.value ?? "";
     let replacementPrefix = last?.raw ?? "";
     let previousToken = tokens[tokens.length - 2];
@@ -840,13 +862,13 @@ export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinit
         replacementPrefix = lastToken.raw;
     }
 
-    if (argumentPrefix.endsWith(" ")) {
+    if (endsWithWhitespace(argumentPrefix)) {
         query = "";
         replacementPrefix = "";
     }
 
     let previousToken = tokens[tokens.length - 2];
-    if (argumentPrefix.endsWith(" ")) {
+    if (endsWithWhitespace(argumentPrefix)) {
         previousToken = tokens[tokens.length - 1];
     }
     const context: CommandLineContext = {
@@ -862,13 +884,18 @@ export function getTypedArgumentCompletions<TDefinitions extends ArgumentDefinit
 
     const subcommandDecision = subcommandCompletionDecision(context);
     if (subcommandDecision !== undefined) {
-        return Promise.resolve(subcommandDecision.items);
+        return Promise.resolve(
+            projectCommandHookItems(argumentPrefix, context, subcommandDecision),
+        );
     }
     const selectedContext = selectedSubcommandContext(context);
     return resolveCompletionDecisionAsync(
         selectedContext,
         tokenizeLoose(selectedContext.argsBeforeCursor),
-    ).then((decision) => decision?.items ?? null);
+    ).then((decision) => {
+        if (decision === undefined) return null;
+        return projectCommandHookItems(argumentPrefix, selectedContext, decision);
+    });
 }
 
 function commandLineContext(
@@ -877,6 +904,9 @@ function commandLineContext(
     cursorCol: number,
     capabilities: CompletionCapabilities,
 ): CommandLineContext | undefined {
+    if (cursorLine !== 0) {
+        return undefined;
+    }
     const line = lines[cursorLine];
     if (line === undefined) {
         return undefined;
@@ -906,7 +936,7 @@ function commandLineContext(
     const tokens = tokenizeLoose(argsBeforeCursor);
     let currentPrefix = "";
     let replacementPrefix = "";
-    if (!argsBeforeCursor.endsWith(" ")) {
+    if (!endsWithWhitespace(argsBeforeCursor)) {
         const lastToken = tokens[tokens.length - 1];
         if (lastToken !== undefined) {
             currentPrefix = lastToken.value;
@@ -915,7 +945,7 @@ function commandLineContext(
     }
 
     let previousToken: Token | undefined;
-    if (argsBeforeCursor.endsWith(" ")) {
+    if (endsWithWhitespace(argsBeforeCursor)) {
         previousToken = tokens[tokens.length - 1];
     } else {
         previousToken = tokens[tokens.length - 2];

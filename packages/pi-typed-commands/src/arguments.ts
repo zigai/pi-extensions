@@ -187,7 +187,12 @@ function assignUniqueDefinition(
     if (Object.hasOwn(flattened, key)) {
         throw new TypeError(`Duplicate canonical argument path ${key}`);
     }
-    flattened[key] = definition;
+    Object.defineProperty(flattened, key, {
+        configurable: true,
+        enumerable: true,
+        value: definition,
+        writable: true,
+    });
 }
 
 function flattenGroupedArgumentDefinitionsInto(
@@ -239,14 +244,32 @@ function flattenGroupedArgumentValuesUnchecked(
         if (isArgumentGroupDefinition(definition)) {
             const nested = values[name];
             if (isRecord(nested)) {
-                Object.assign(
-                    flattened,
-                    flattenGroupedArgumentValuesUnchecked(nested, definition.args, key),
+                const nestedValues = flattenGroupedArgumentValuesUnchecked(
+                    nested,
+                    definition.args,
+                    key,
                 );
+                for (const [nestedName, nestedValue] of Object.entries(nestedValues)) {
+                    Object.defineProperty(flattened, nestedName, {
+                        configurable: true,
+                        enumerable: true,
+                        value: nestedValue,
+                        writable: true,
+                    });
+                }
             }
             continue;
         }
-        flattened[key] = values[name];
+        let value: unknown;
+        if (Object.hasOwn(values, name)) {
+            value = values[name];
+        }
+        Object.defineProperty(flattened, key, {
+            configurable: true,
+            enumerable: true,
+            value,
+            writable: true,
+        });
     }
     return flattened;
 }
@@ -269,11 +292,19 @@ function expandGroupedArgumentValuesUnchecked(
     const expanded: Record<string, unknown> = {};
     for (const [name, definition] of Object.entries(definitions)) {
         const key = groupedKey(prefix, name);
-        if (isArgumentGroupDefinition(definition)) {
-            expanded[name] = expandGroupedArgumentValuesUnchecked(values, definition.args, key);
-            continue;
+        let value: unknown;
+        if (Object.hasOwn(values, key)) {
+            value = values[key];
         }
-        expanded[name] = values[key];
+        if (isArgumentGroupDefinition(definition)) {
+            value = expandGroupedArgumentValuesUnchecked(values, definition.args, key);
+        }
+        Object.defineProperty(expanded, name, {
+            configurable: true,
+            enumerable: true,
+            value,
+            writable: true,
+        });
     }
     return expanded;
 }

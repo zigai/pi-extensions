@@ -28,6 +28,7 @@ import type {
     ArgumentValue,
     ParseIssue,
     TypedCommandFormSymbols,
+    TypedCompletionItem,
 } from "../types.js";
 import type { ResolvedFormAppearance, ResolvedFormSymbols } from "../pi/presentation-config.js";
 import { FORM_MESSAGE_OPTIONS, UNSET_OPTION } from "./constants.js";
@@ -57,13 +58,13 @@ export type FormResult = {
 };
 
 function widgetFor(definition: ArgumentDefinition): string {
+    if (definition.type === "string" && definition.sensitive === true) {
+        return "secret";
+    }
     if (definition.ui?.widget !== undefined) {
         return definition.ui.widget;
     }
     if (definition.type === "string") {
-        if (definition.sensitive === true) {
-            return "secret";
-        }
         if (definition.format !== undefined) {
             return definition.format;
         }
@@ -218,6 +219,9 @@ function formatValue(value: ArgumentValue): string {
             .map(([key, entryValue]) => `${key}=${entryValue}`)
             .join(", ");
     }
+    if (typeof value === "number" && Object.is(value, -0)) {
+        return "-0";
+    }
     return String(value);
 }
 
@@ -277,6 +281,21 @@ function stepValue(
 
     const nextIndex = (valueIndex(values, current) + direction + values.length) % values.length;
     return values[nextIndex];
+}
+
+export function formAutocompleteItem(item: TypedCompletionItem): {
+    value: string;
+    label: string;
+    description?: string;
+} {
+    const mapped: { value: string; label: string; description?: string } = {
+        value: item.value,
+        label: item.label ?? item.value,
+    };
+    if (item.description !== undefined) {
+        mapped.description = item.description;
+    }
+    return mapped;
 }
 
 function createEditorTheme(theme: FormTheme, appearance: ResolvedFormAppearance): TextEditorTheme {
@@ -741,8 +760,7 @@ export class ArgumentFormComponent implements Component, Focusable {
 
         if (selected && isTextareaWidget(field.definition)) {
             const editorWidth = Math.max(20, width - this.appearance.layout.leftPadding - 2);
-            const rows = editorRows(field.definition);
-            for (const line of this.editor.render(editorWidth).slice(0, rows)) {
+            for (const line of this.editor.render(editorWidth)) {
                 lines.push(
                     this.fitLine(" ".repeat(this.appearance.layout.leftPadding + 2) + line, width),
                 );
@@ -1325,20 +1343,7 @@ export class ArgumentFormComponent implements Component, Focusable {
                 }
                 return {
                     prefix: query,
-                    items: items.map((item) => {
-                        const mapped: {
-                            value: string;
-                            label: string;
-                            description?: string;
-                        } = {
-                            value: item.replacement ?? item.value,
-                            label: item.label ?? item.value,
-                        };
-                        if (item.description !== undefined) {
-                            mapped.description = item.description;
-                        }
-                        return mapped;
-                    }),
+                    items: items.map(formAutocompleteItem),
                 };
             },
             applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
