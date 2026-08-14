@@ -40,6 +40,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "test": "vitest run",
+    "test:tui": "vitest run test/glowup-rendering.test.ts",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check:platform-smoke": "node scripts/platform-smoke/check.mjs",
@@ -59,8 +60,10 @@
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.84.0",
     "@earendil-works/pi-coding-agent": "^0.84.0",
+    "@earendil-works/pi-tui": "^0.84.1",
     "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^4.1.10",
+    "@xterm/headless": "^6.0.0",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
     "oxlint-tsgolint": "^7.0.2001",
