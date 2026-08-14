@@ -11,6 +11,7 @@ import { parseExtensionSettingsSchema } from "../src/settings-schema.ts";
 import type { CatalogExtensionSettings } from "../src/settings-store.ts";
 import { SettingsEditorComponent, type SettingsUiTheme } from "../src/settings-ui.ts";
 import { editableCatalog, generatedSchemaText, parseFixtureSchema } from "./fixture.ts";
+import { VirtualTerminal } from "./support/virtual-terminal.ts";
 
 function fakeTerminal(columns = 100, rows = 30): Terminal {
     return {
@@ -42,6 +43,12 @@ const plainTheme: SettingsUiTheme = {
     fg: (_color, text) => text,
     bg: (_color, text) => text,
     bold: (text) => text,
+};
+
+const ansiTheme: SettingsUiTheme = {
+    fg: (color, text) => `\u001b[${color === "accent" ? 32 : 31}m${text}\u001b[39m`,
+    bg: (color, text) => `\u001b[${color === "selectedBg" ? 46 : 44}m${text}\u001b[49m`,
+    bold: (text) => `\u001b[1m${text}\u001b[22m`,
 };
 
 const defaultKeys: Pick<KeybindingsManager, "matches"> = {
@@ -810,5 +817,124 @@ describe("settings TUI", () => {
         const rendered = component.render(80).join("\n");
         expect(rendered.split("\n")).toContain("  Active");
         expect(rendered).not.toContain("Status bar › Active");
+    });
+});
+
+describe.each([
+    { name: "main screen", createTui: (terminal: VirtualTerminal) => new TUI(terminal, true) },
+    {
+        name: "alternate screen",
+        createTui: (terminal: VirtualTerminal) => new TuiAltScreen(terminal, true),
+    },
+] as const)("settings TUI terminal seam on $name", ({ createTui }) => {
+    it("owns input, focus, resizing, cursor state, and complete terminal rows", async () => {
+        const terminal = new VirtualTerminal(68, 18);
+        const tui = createTui(terminal);
+        const model = new SettingsEditorModel(
+            editableCatalog([fixtureExtension("pi-first", "First Extension")]),
+            false,
+        );
+        const component = new SettingsEditorComponent({
+            cwd: "/project",
+            model,
+            piSettings: fakePiSettingsPane(),
+            tui,
+            theme: ansiTheme,
+            keybindings: defaultKeys,
+            save: async () => [],
+            close() {},
+        });
+
+        tui.addChild(component);
+        tui.setFocus(component);
+        tui.start();
+
+        try {
+            tui.renderNow(true);
+            await terminal.settle();
+            expect(component.focused).toBe(true);
+            expect(terminal.screenText()).toContain("Settings");
+            const expandedRows = terminal.screenRows();
+            const visibleControlRows = new Set(
+                ["Auto-compact", "Steering mode"].map((label) => {
+                    const row = expandedRows.findIndex((screenRow) => screenRow.includes(label));
+                    expect(row).toBeGreaterThanOrEqual(0);
+                    return row;
+                }),
+            );
+            const structuralRows = new Set<number>();
+            expandedRows.forEach((row, index) => {
+                const isBorder = row.length > 0 && row.split("─").join("").length === 0;
+                if (isBorder || row.includes("Settings")) structuralRows.add(index);
+            });
+            const allowedStyledMarginRows = new Set([...structuralRows, ...visibleControlRows]);
+            const expandedStyledMarginCells = terminal.styledRightMarginCells();
+            expect(
+                expandedStyledMarginCells.filter(({ row }) => !allowedStyledMarginRows.has(row)),
+            ).toEqual([]);
+
+            terminal.feed("\u0010");
+            tui.renderNow();
+            await terminal.settle();
+            expect(terminal.screenText()).toContain("Choose settings tab");
+
+            terminal.resize(52, 12);
+            tui.renderNow();
+            await terminal.settle();
+            expect(terminal.wrappedRows()).toEqual([]);
+            expect(terminal.screenRows().every((row) => row.length <= terminal.columns)).toBe(true);
+
+            terminal.feed("\u001b");
+            tui.renderNow();
+            await terminal.settle();
+            expect(terminal.screenText()).not.toContain("Choose settings tab");
+
+            terminal.feed("\t");
+            terminal.feed("\u001b[B");
+            terminal.feed("\u001b[B");
+            const beforeInlineEditor = terminal.rawOutput().length;
+            terminal.feed("\r");
+            tui.renderNow(true);
+            await terminal.settle();
+
+            const inlineEditorOutput = terminal.rawOutput().slice(beforeInlineEditor);
+            expect(terminal.screenText()).toContain("Threshold");
+            expect(inlineEditorOutput).toContain("\u001b[?25h");
+            const nonemptyRows = terminal.screenRows().filter((row) => row.length > 0);
+            const resetCount = inlineEditorOutput.split("\u001b[0m").length - 1;
+            expect(resetCount).toBeGreaterThanOrEqual(nonemptyRows.length);
+
+            terminal.resize(31, 9);
+            tui.renderNow();
+            await terminal.settle();
+            const screenRows = terminal.screenRows();
+            const screenText = terminal.screenText();
+            expect(screenText).toContain("Threshold");
+            expect(screenText).not.toContain("Choose settings tab");
+            const styledMarginCells = terminal.styledRightMarginCells();
+            const thresholdRow = screenRows.findIndex((row) => row.includes("Threshold"));
+            expect(thresholdRow).toBeGreaterThanOrEqual(0);
+            expect(
+                styledMarginCells.filter(({ row }) => row < 0 || row >= screenRows.length),
+            ).toEqual([]);
+            expect(styledMarginCells.filter(({ row }) => screenRows[row]?.trim() === "")).toEqual(
+                [],
+            );
+            expect(
+                styledMarginCells.filter(({ column }) => column < 0 || column >= terminal.columns),
+            ).toEqual([]);
+            expect(terminal.wrappedRows()).toEqual([]);
+            expect(terminal.screenRows().every((row) => row.length <= terminal.columns)).toBe(true);
+
+            const beforeCancel = terminal.rawOutput().length;
+            terminal.feed("\u001b");
+            tui.renderNow();
+            await terminal.settle();
+            expect(terminal.rawOutput().slice(beforeCancel)).toContain("\u001b[?25l");
+        } finally {
+            tui.stop();
+            await terminal.settle();
+            terminal.dispose();
+        }
     });
 });

@@ -53,6 +53,7 @@
     "@earendil-works/pi-tui": "^0.84.0",
     "@types/node": "^24.13.3",
     "@vitest/coverage-v8": "^4.1.10",
+    "@xterm/headless": "^6.0.0",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
     "oxlint-tsgolint": "^7.0.2001",
