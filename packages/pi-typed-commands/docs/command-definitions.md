@@ -21,7 +21,7 @@ const deploy = defineTypedCommand({
 });
 ```
 
-Inline enum arrays keep literal inference, so `args.env` is typed as `"dev" | "prod"`.
+Inline enum arrays keep literal inference, so `args.env` is typed as `"dev" | "prod"`. Command and subcommand names must be non-empty single tokens, contain no control characters, and must not start with `-`.
 
 ## Register with Pi
 

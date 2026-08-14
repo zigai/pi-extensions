@@ -99,9 +99,9 @@ Rules enforced by the compiler include:
 | `error`  | Report a duplicate argument issue. Default for scalar arguments. |
 | `first`  | Keep the first value and ignore later occurrences.               |
 | `last`   | Keep the last value.                                             |
-| `append` | Append values. Valid for `multi-enum`.                           |
+| `append` | Append values. Valid for collection arguments.                   |
 
-`multi-enum` defaults to append and deduplicates selected values. Because CLI multi-enum values are comma-separated, individual `multi-enum.values` entries may not contain commas.
+Collection arguments default to append. `multi-enum` deduplicates selections, while `string-list` preserves repeated items. Required collections must contain at least one item or entry. Because collection values use comma-separated CLI syntax, `multi-enum.values` and `string-list` items may not contain commas. String-list items must also be non-empty and may not start or end with whitespace. Key-value keys must be non-empty, trimmed, and contain neither commas nor equals signs; values may not contain commas.
 
 ## Groups
 

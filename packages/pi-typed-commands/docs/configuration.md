@@ -140,19 +140,3 @@ Use global config at `~/.pi/agent/pi-typed-args/config.json`.
 Unrecognized keys are left untouched but ignored by the installed version. This preserves newer
 configuration when an older package version reads the file; misspelled setting names have no
 effect.
-
-## Package Notes
-
-Current package characteristics:
-
-- distributed as a Git dependency until the first npm publication;
-- ESM package with TypeScript source exports;
-- tested with `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` `^0.79.7`;
-- public subpaths for core, Pi adapter, skills, TUI integration, and JSON Schema.
-
-Because Pi can load TypeScript extension packages directly, source exports are sufficient for Pi usage. Define commands once and register the definition or defined command with Pi:
-
-```ts
-const command = defineTypedCommand(...);
-registerTypedCommand(pi, command);
-```

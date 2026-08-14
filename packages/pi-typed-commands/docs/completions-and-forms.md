@@ -33,8 +33,8 @@ The completion context contains:
 - `signal` - cancellation signal that is aborted when the completion request times out.
 
 `complete` must return its items synchronously and is available to both editor and command-level
-completion. `completeAsync` returns a promise and is invoked only by Pi's asynchronous command-level
-completion hook, so synchronous editor completion never starts work that it cannot own. Provider
+completion. `completeAsync` returns a promise and is invoked by Pi's asynchronous command-level and
+editor completion paths; synchronous library completion never starts work that it cannot own. Provider
 failures are contained: thrown errors, rejected promises, and invalid items produce no suggestions
 instead of breaking completion. Async providers time out after 1000 ms by default; set
 `completionTimeoutMs` on the argument to override that, or `0` to disable the timeout.
@@ -67,7 +67,7 @@ The completion engine supports:
 - separate flag values such as `--env p`;
 - positional values;
 - `enum` and `multi-enum` values;
-- `ui.widget: "path"` for filesystem entries;
+- `ui.widget: "path"`, `"file"`, or `"directory"` for filesystem entries;
 - `ui.widget: "command"` for known typed commands.
 
 It respects `--` as an end-of-options marker and keeps repeatable multi-enum flags available.

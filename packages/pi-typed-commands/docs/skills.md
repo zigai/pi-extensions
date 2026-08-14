@@ -102,7 +102,7 @@ Diagnostics include a code, message, path, and severity. Invalid YAML frontmatte
 The JSON Schema for skill arguments is exported as a package subpath and stored in the repository:
 
 ```ts
-import schema from "pi-typed-args/schema";
+import schema from "pi-typed-args/schema" with { type: "json" };
 ```
 
 Repository path:
@@ -111,4 +111,4 @@ Repository path:
 schemas/skill-arguments.schema.json
 ```
 
-The schema mirrors the compiler rules for serializable skill definitions, including required/default exclusivity, enum uniqueness, valid widgets, and positional constraints.
+The schema covers the serializable skill shape and structural constraints, including required/default exclusivity, enum uniqueness, valid widgets, and non-negative positions. Runtime normalization also reports cross-field constraints such as duplicate positions and invalid minimum/maximum ranges.
