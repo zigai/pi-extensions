@@ -210,7 +210,9 @@ export class TogglesPanel implements Component, Focusable {
 
     render(width: number): string[] {
         const safeWidth = Math.max(1, width);
-        const lines = [this.styles.border("─".repeat(safeWidth))];
+        const borderWidth = Math.max(0, safeWidth - 1);
+        const border = this.styles.border("─".repeat(borderWidth));
+        const lines = [border];
         lines.push(this.renderTitle(safeWidth), "");
         lines.push(...this.renderTabs(safeWidth), "");
 
@@ -225,7 +227,7 @@ export class TogglesPanel implements Component, Focusable {
             "",
         );
         lines.push(...this.renderTable(safeWidth));
-        lines.push("", ...this.renderFooter(safeWidth), this.styles.border("─".repeat(safeWidth)));
+        lines.push("", ...this.renderFooter(safeWidth), border);
         return lines;
     }
 
