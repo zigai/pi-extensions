@@ -1,6 +1,5 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
-import { Compile } from "typebox/schema";
 import { Value } from "typebox/value";
 
 const jsonValueSchema = Type.Cyclic(
@@ -24,9 +23,8 @@ const pickerPayloadSchema = Type.Refine(Type.Record(Type.String(), jsonValueSche
         return false;
     }
 });
-const pickerPayloadValidator = Compile(pickerPayloadSchema);
 const pickerPayloadParser = {
-    parse: pickerPayloadValidator.Parse.bind(pickerPayloadValidator),
+    parse: (Value.Parse<typeof pickerPayloadSchema>).bind(undefined, pickerPayloadSchema),
 };
 
 type PickerPayload = Static<typeof pickerPayloadSchema>;

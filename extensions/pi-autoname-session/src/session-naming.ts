@@ -1,7 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ImageContent, TextContent, ThinkingContent, ToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { Compile } from "typebox/schema";
 import { Value } from "typebox/value";
 import type { ExtensionSettings } from "./settings.ts";
 
@@ -54,9 +53,11 @@ const storedSessionNamingStateCandidateSchema = Type.Union([
     legacySessionNamingStateSchema,
     Type.Object({ version: Type.Number() }),
 ]);
-const storedSessionNamingStateValidator = Compile(storedSessionNamingStateCandidateSchema);
 const storedSessionNamingStateParser = {
-    parse: storedSessionNamingStateValidator.Parse.bind(storedSessionNamingStateValidator),
+    parse: (Value.Parse<typeof storedSessionNamingStateCandidateSchema>).bind(
+        undefined,
+        storedSessionNamingStateCandidateSchema,
+    ),
 };
 const bigintSchema = Type.BigInt();
 const primitiveValueSchema = Type.Union([
