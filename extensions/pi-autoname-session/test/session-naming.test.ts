@@ -298,7 +298,12 @@ describe("session naming", () => {
 
     it("serializes cyclic and bigint tool arguments safely in full scope", () => {
         const session = SessionManager.inMemory("/workspace/project");
-        const cyclicArguments: Record<string, unknown> = { count: 10n };
+        type CyclicArguments = {
+            readonly count: bigint;
+            readonly notFinite: number;
+            self?: CyclicArguments;
+        };
+        const cyclicArguments: CyclicArguments = { count: 10n, notFinite: Number.NaN };
         cyclicArguments.self = cyclicArguments;
         session.appendMessage({ role: "user", content: "Inspect arguments", timestamp: 1 });
         session.appendMessage({
@@ -328,6 +333,7 @@ describe("session naming", () => {
 
         const full = buildConversationContext(session.getBranch(), "full");
         expect(full).toContain('"count":"10"');
+        expect(full).toContain('"notFinite":null');
         expect(full).toContain('"self":"[circular]"');
     });
 });

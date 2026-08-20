@@ -12,11 +12,7 @@ import type {
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import extension from "../src/index.ts";
-import {
-    AUTONAME_STATE_ENTRY_TYPE,
-    parseSessionNamingState,
-    type SessionNamingState,
-} from "../src/session-naming.ts";
+import { AUTONAME_STATE_ENTRY_TYPE, type SessionNamingState } from "../src/session-naming.ts";
 import type { ExtensionSettingsDocument } from "../src/settings.ts";
 
 const FAUX_API = "faux-test";
@@ -89,7 +85,24 @@ type TestContext = {
     isProjectTrusted(): boolean;
 };
 
-type Handler = (event: { type: string } & Record<string, unknown>, ctx: TestContext) => unknown;
+type TestEvent =
+    | { readonly type: "session_start" }
+    | { readonly type: "agent_settled" }
+    | { readonly type: "session_shutdown" }
+    | {
+          readonly type: "session_tree";
+          readonly newLeafId: string | null;
+          readonly oldLeafId: string | null;
+      }
+    | {
+          readonly type: "model_select";
+          readonly model: Model<Api>;
+          readonly previousModel: Model<Api> | undefined;
+          readonly source: "set";
+      }
+    | { readonly type: "session_info_changed"; readonly name: string };
+
+type Handler = (event: TestEvent, ctx: TestContext) => void | Promise<void>;
 
 /**
  * Recording stand-in for the ExtensionAPI. Mirrors the real pi surface the
@@ -99,17 +112,17 @@ type Handler = (event: { type: string } & Record<string, unknown>, ctx: TestCont
  */
 class FakePi {
     readonly handlers = new Map<string, Handler>();
-    readonly appended: { customType: string; data: unknown }[] = [];
+    readonly appended: { customType: string; data: SessionNamingState }[] = [];
     readonly notified: { message: string; severity: "info" | "warning" | "error" }[] = [];
     sessionName: string | undefined = undefined;
     lastCtx: TestContext | undefined;
-    private readonly pendingEvents: ({ type: string } & Record<string, unknown>)[] = [];
+    private readonly pendingEvents: TestEvent[] = [];
 
     on(event: string, handler: Handler): void {
         this.handlers.set(event, handler);
     }
 
-    appendEntry<T = unknown>(customType: string, data?: T): void {
+    appendEntry(customType: string, data: SessionNamingState): void {
         this.appended.push({ customType, data });
         this.lastCtx?.sessionManager.appendCustomEntry(customType, data);
     }
@@ -126,7 +139,7 @@ class FakePi {
         return this.sessionName;
     }
 
-    async emit(event: { type: string } & Record<string, unknown>, ctx: TestContext): Promise<void> {
+    async emit(event: TestEvent, ctx: TestContext): Promise<void> {
         this.lastCtx = ctx;
         const handler = this.handlers.get(event.type);
         if (handler !== undefined) {
@@ -166,7 +179,7 @@ class Harness {
         // exclusively through these four members, so the narrower fake is
         // behaviorally complete for every path under test.
         const pi = new FakePi();
-        const model = faux.getModel() as Model<Api>;
+        const model = faux.getModel();
         const registry = new FakeModelRegistry(model);
         const session = SessionManager.inMemory("/workspace/project");
         const ctx: TestContext = {
@@ -182,8 +195,8 @@ class Harness {
             model,
             isProjectTrusted: () => false,
         };
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the harness implements exactly the ExtensionAPI members the extension uses (on, appendEntry, setSessionName, getSessionName); the remaining members are unreachable through the extension factory, so narrowing the fake to ExtensionAPI is behaviorally sound for every path under test.
-        extension(pi as unknown as ExtensionAPI);
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the harness implements the on, appendEntry, setSessionName, and getSessionName operations read by the extension factory, and these tests exercise every registered event through that adapter; TypeScript cannot express a callable subset of ExtensionAPI where on retains its event-specific callback types.
+        extension(pi as ExtensionAPI & FakePi);
         const harness = new Harness(agentDir, faux, model, registry, session, pi, ctx);
         pi.lastCtx = ctx;
         return harness;
@@ -277,10 +290,12 @@ function appendAssistantTurn(session: SessionManager, text: string, timestamp: n
     });
 }
 
-function createDeferred<T>(): {
+type Deferred<T> = {
     readonly promise: Promise<T>;
     readonly resolve: (value: T) => void;
-} {
+};
+
+function createDeferred<T>(): Deferred<T> {
     let resolve: (value: T) => void = () => {};
     const promise = new Promise<T>((res) => {
         resolve = res;
@@ -288,15 +303,14 @@ function createDeferred<T>(): {
     return { promise, resolve };
 }
 
-function stateEntries(harness: Harness): unknown[] {
+function stateEntries(harness: Harness): SessionNamingState[] {
     return harness.pi.appended
         .filter((entry) => entry.customType === AUTONAME_STATE_ENTRY_TYPE)
         .map((entry) => entry.data);
 }
 
 function latestState(harness: Harness): SessionNamingState | undefined {
-    const entries = stateEntries(harness);
-    return parseSessionNamingState(entries[entries.length - 1]);
+    return stateEntries(harness).at(-1);
 }
 
 function allDiagnostics(harness: Harness): string {
@@ -969,10 +983,9 @@ describe("extension orchestration", () => {
             harness.faux.setResponses([
                 (context) => {
                     const content = context.messages[0]?.content;
-                    const textBlock =
-                        typeof content === "string"
-                            ? undefined
-                            : content?.find((block): block is TextContent => block.type === "text");
+                    const textBlock = Array.isArray(content)
+                        ? content.find((block): block is TextContent => block.type === "text")
+                        : undefined;
                     capturedPrompt = textBlock?.text ?? "";
                     return fauxAssistantMessage("Compacted name");
                 },

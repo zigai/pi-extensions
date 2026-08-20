@@ -1,5 +1,5 @@
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import type { Api, Model, TextContent } from "@earendil-works/pi-ai";
+import type { Api, Model, SimpleStreamOptions, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { preparePickerPayload } from "./picker-request.ts";
 import {
@@ -63,6 +63,11 @@ type AuthenticationResolution =
     | { readonly type: "cancelled" }
     | { readonly type: "failed" };
 
+type RestoredNamingState = {
+    readonly state: SessionNamingState;
+    readonly storedStateIssue: "invalid" | "unsupportedVersion" | undefined;
+};
+
 function resolvePickerModel(
     reference: PickerModelReference,
     ctx: ExtensionContext,
@@ -117,10 +122,7 @@ function restoreNamingState(
     currentName: string | undefined,
     missingStateBaseline: "current" | "zero",
     nowMs: number,
-): {
-    readonly state: SessionNamingState;
-    readonly storedStateIssue: "invalid" | "unsupportedVersion" | undefined;
-} {
+): RestoredNamingState {
     const currentMetrics = measureSession(entries);
     const stored = maybeFindStoredNamingState(entries);
     if (stored.type === "found") {
@@ -260,6 +262,22 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
     );
 
     try {
+        const streamOptions: SimpleStreamOptions = {};
+        if (auth.apiKey !== undefined) {
+            streamOptions.apiKey = auth.apiKey;
+        }
+        if (auth.headers !== undefined) {
+            streamOptions.headers = auth.headers;
+        }
+        if (auth.env !== undefined) {
+            streamOptions.env = auth.env;
+        }
+        if (settings.reasoningEffort !== "off") {
+            streamOptions.reasoning = settings.reasoningEffort;
+        }
+        streamOptions.onPayload = (payload) => preparePickerPayload(model, payload);
+        streamOptions.signal = operationSignal;
+
         const response = await completeSimple(
             model,
             {
@@ -271,16 +289,7 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
                     },
                 ],
             },
-            {
-                ...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
-                ...(auth.headers === undefined ? {} : { headers: auth.headers }),
-                ...(auth.env === undefined ? {} : { env: auth.env }),
-                ...(settings.reasoningEffort === "off"
-                    ? {}
-                    : { reasoning: settings.reasoningEffort }),
-                onPayload: (payload) => preparePickerPayload(model, payload),
-                signal: operationSignal,
-            },
+            streamOptions,
         );
 
         if (response.stopReason === "aborted") {

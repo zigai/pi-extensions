@@ -1,6 +1,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ImageContent, TextContent, ThinkingContent, ToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { Compile } from "typebox/schema";
 import { Value } from "typebox/value";
 import type { ExtensionSettings } from "./settings.ts";
 
@@ -47,6 +48,27 @@ const legacySessionNamingStateSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+
+const storedSessionNamingStateCandidateSchema = Type.Union([
+    sessionNamingStateSchema,
+    legacySessionNamingStateSchema,
+    Type.Object({ version: Type.Number() }),
+]);
+const storedSessionNamingStateValidator = Compile(storedSessionNamingStateCandidateSchema);
+const storedSessionNamingStateParser = {
+    parse: storedSessionNamingStateValidator.Parse.bind(storedSessionNamingStateValidator),
+};
+const bigintSchema = Type.BigInt();
+const primitiveValueSchema = Type.Union([
+    Type.Null(),
+    Type.Boolean(),
+    Type.Number(),
+    Type.String(),
+]);
+const referenceValueSchema = Type.Union([
+    Type.Array(Type.Unknown()),
+    Type.Object({}, { additionalProperties: true }),
+]);
 
 export type SessionMetrics = {
     readonly messages: number;
@@ -106,41 +128,37 @@ export function createSessionNamingState(input: SessionNamingStateInput): Sessio
 
 /** Classify and parse one persisted naming-state entry. */
 export function parseStoredSessionNamingState(value: unknown): StoredSessionNamingStateResult {
-    if (!Value.Check(sessionNamingStateSchema, value)) {
-        if (Value.Check(legacySessionNamingStateSchema, value)) {
-            const legacy = Value.Decode(legacySessionNamingStateSchema, value);
+    try {
+        const candidate = storedSessionNamingStateParser.parse(value);
+        if ("version" in candidate) {
+            if (candidate.version !== NAMING_STATE_VERSION) {
+                return { type: "unsupportedVersion" };
+            }
+            if (!Value.Check(sessionNamingStateSchema, candidate)) {
+                return { type: "invalid" };
+            }
+
             return {
                 type: "found",
                 state: createSessionNamingState({
-                    initialNameSet: legacy.initialNameSet,
-                    baseline: legacy.baseline,
-                    baselineAtMs: legacy.baselineAtMs,
+                    initialNameSet: candidate.initialNameSet,
+                    baseline: candidate.baseline,
+                    baselineAtMs: candidate.baselineAtMs,
                 }),
             };
         }
 
-        if (
-            typeof value === "object" &&
-            value !== null &&
-            "version" in value &&
-            typeof value.version === "number" &&
-            value.version !== NAMING_STATE_VERSION
-        ) {
-            return { type: "unsupportedVersion" };
-        }
-
+        return {
+            type: "found",
+            state: createSessionNamingState({
+                initialNameSet: candidate.initialNameSet,
+                baseline: candidate.baseline,
+                baselineAtMs: candidate.baselineAtMs,
+            }),
+        };
+    } catch {
         return { type: "invalid" };
     }
-
-    const decoded = Value.Decode(sessionNamingStateSchema, value);
-    return {
-        type: "found",
-        state: createSessionNamingState({
-            initialNameSet: decoded.initialNameSet,
-            baseline: decoded.baseline,
-            baselineAtMs: decoded.baselineAtMs,
-        }),
-    };
 }
 
 /**
@@ -291,17 +309,16 @@ export function renderNamingPrompt(
     minLength: number,
     maxLength: number,
 ): string {
-    const replacements: Record<string, string> = {
-        "{{repository_context}}": variables.repositoryContext,
-        "{{conversation}}": variables.conversation,
-        "{{current_name}}": variables.currentName,
-        "{{cwd}}": variables.cwd,
-        "{{reason}}": variables.reason,
-    };
+    const replacements = new Map([
+        ["{{repository_context}}", variables.repositoryContext],
+        ["{{conversation}}", variables.conversation],
+        ["{{current_name}}", variables.currentName],
+        ["{{cwd}}", variables.cwd],
+        ["{{reason}}", variables.reason],
+    ]);
 
-    const rendered = prompt.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
-        const value = replacements[`{{${key}}}`];
-        return value ?? match;
+    const rendered = prompt.replace(/\{\{\w+\}\}/g, (placeholder) => {
+        return replacements.get(placeholder) ?? placeholder;
     });
 
     return [
@@ -322,21 +339,32 @@ function truncatePromptContext(text: string, maxCharacters: number): string {
     return `${text.slice(0, headLength)}\n...[context truncated]...\n${text.slice(-tailLength)}`;
 }
 
-function stringifyPromptValue(value: unknown): string {
+function stringifyPromptValue(value: ToolCall["arguments"]): string {
     const seen = new WeakSet<object>();
     try {
         return (
-            JSON.stringify(value, (_key, nestedValue: unknown) => {
-                if (typeof nestedValue === "bigint") {
+            JSON.stringify(value, (_key, nestedValue) => {
+                if (Value.Check(bigintSchema, nestedValue)) {
                     return nestedValue.toString();
                 }
-                if (typeof nestedValue === "object" && nestedValue !== null) {
+                if (
+                    Object.is(nestedValue, Number.NaN) ||
+                    nestedValue === Number.POSITIVE_INFINITY ||
+                    nestedValue === Number.NEGATIVE_INFINITY
+                ) {
+                    return null;
+                }
+                if (Value.Check(referenceValueSchema, nestedValue)) {
                     if (seen.has(nestedValue)) {
                         return "[circular]";
                     }
                     seen.add(nestedValue);
+                    return nestedValue;
                 }
-                return nestedValue;
+                if (Value.Check(primitiveValueSchema, nestedValue)) {
+                    return nestedValue;
+                }
+                return undefined;
             }) ?? "[unserializable value]"
         );
     } catch {
@@ -407,7 +435,7 @@ function renderContent(
     content: string | readonly (TextContent | ImageContent | ThinkingContent | ToolCall)[],
     scope: ConversationScope,
 ): string {
-    if (typeof content === "string") {
+    if (Value.Check(Type.String(), content)) {
         return content.trim();
     }
 

@@ -1,17 +1,39 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { Type, type Static } from "typebox";
+import { Compile } from "typebox/schema";
+import { Value } from "typebox/value";
 
-function isPlainPayloadRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return false;
-    }
-
+const jsonValueSchema = Type.Cyclic(
+    {
+        JsonValue: Type.Union([
+            Type.Null(),
+            Type.Boolean(),
+            Type.Number(),
+            Type.String(),
+            Type.Array(Type.Ref("JsonValue")),
+            Type.Record(Type.String(), Type.Ref("JsonValue")),
+        ]),
+    },
+    "JsonValue",
+);
+const pickerPayloadSchema = Type.Refine(Type.Record(Type.String(), jsonValueSchema), (payload) => {
     try {
-        const prototype = Reflect.getPrototypeOf(value);
+        const prototype = Reflect.getPrototypeOf(payload);
         return prototype === Object.prototype || prototype === null;
     } catch {
         return false;
     }
-}
+});
+const pickerPayloadValidator = Compile(pickerPayloadSchema);
+const pickerPayloadParser = {
+    parse: pickerPayloadValidator.Parse.bind(pickerPayloadValidator),
+};
+
+type PickerPayload = Static<typeof pickerPayloadSchema>;
+type LunaPickerPayload = PickerPayload & {
+    readonly parallel_tool_calls: false;
+    readonly reasoning: PickerPayload;
+};
 
 function requiresLunaPickerPayload(model: Model<Api>): boolean {
     return (
@@ -21,19 +43,29 @@ function requiresLunaPickerPayload(model: Model<Api>): boolean {
     );
 }
 
-/** Apply request requirements imposed by picker models with specialized endpoints. */
-export function preparePickerPayload(model: Model<Api>, payload: unknown): unknown {
-    if (!requiresLunaPickerPayload(model) || !isPlainPayloadRecord(payload)) {
-        return payload;
-    }
+/** Return a replacement payload when a picker model requires one, or undefined to keep it. */
+export function preparePickerPayload(
+    model: Model<Api>,
+    payload: unknown,
+): LunaPickerPayload | undefined {
+    try {
+        const parsedPayload = pickerPayloadParser.parse(payload);
+        if (!requiresLunaPickerPayload(model)) {
+            return undefined;
+        }
 
-    const reasoning = isPlainPayloadRecord(payload.reasoning) ? payload.reasoning : {};
-    return {
-        ...payload,
-        parallel_tool_calls: false,
-        reasoning: {
-            ...reasoning,
-            context: "all_turns",
-        },
-    };
+        const reasoning = Value.Check(pickerPayloadSchema, parsedPayload.reasoning)
+            ? parsedPayload.reasoning
+            : {};
+        return {
+            ...parsedPayload,
+            parallel_tool_calls: false,
+            reasoning: {
+                ...reasoning,
+                context: "all_turns",
+            },
+        };
+    } catch {
+        return undefined;
+    }
 }
