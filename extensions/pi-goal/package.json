@@ -35,8 +35,8 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "lint": "oxlint -c ./.oxlintrc.json src test && oxlint -c ./.oxlintrc.json --disable-typescript-plugin scripts platform-smoke.config.mjs",
-    "lint:fix": "oxlint -c ./.oxlintrc.json src test --fix && oxlint -c ./.oxlintrc.json --disable-typescript-plugin scripts platform-smoke.config.mjs --fix",
+    "lint": "oxlint -c ./oxlint.config.ts src test && oxlint -c ./oxlint.config.ts --disable-typescript-plugin scripts platform-smoke.config.mjs",
+    "lint:fix": "oxlint -c ./oxlint.config.ts src test --fix && oxlint -c ./oxlint.config.ts --disable-typescript-plugin scripts platform-smoke.config.mjs --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "test": "vitest run",
@@ -66,6 +66,7 @@
     "@xterm/headless": "^6.0.0",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
+    "oxlint-rules": "0.1.0",
     "oxlint-tsgolint": "^7.0.2001",
     "typebox": "^1.3.8",
     "typescript": "^6.0.3",

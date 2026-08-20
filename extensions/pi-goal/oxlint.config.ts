@@ -1,15 +1,17 @@
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["oxc", "typescript", "unicorn", "promise"],
-  "options": {
-    "typeAware": true
+import { defineConfig, type OxlintConfig } from "oxlint";
+import antislop from "oxlint-rules/config";
+
+const projectConfig: OxlintConfig = {
+  plugins: ["oxc", "typescript", "unicorn", "promise"],
+  options: {
+    typeAware: true,
   },
-  "env": {
-    "builtin": true,
-    "node": true
+  env: {
+    builtin: true,
+    node: true,
   },
-  "ignorePatterns": ["node_modules/**"],
-  "rules": {
+  ignorePatterns: ["node_modules/**"],
+  rules: {
     "@typescript-eslint/ban-ts-comment": "error",
     "@typescript-eslint/no-duplicate-enum-values": "error",
     "@typescript-eslint/no-empty-object-type": "error",
@@ -29,7 +31,7 @@
     "@typescript-eslint/triple-slash-reference": "error",
     "default-case-last": "error",
     "default-param-last": "error",
-    "eqeqeq": "error",
+    eqeqeq: "error",
     "no-array-constructor": "error",
     "no-duplicate-imports": "warn",
     "no-use-before-define": "warn",
@@ -65,20 +67,25 @@
     "typescript/switch-exhaustiveness-check": "error",
     "unicorn/no-object-as-default-parameter": "error",
     "unicorn/prefer-date-now": "error",
-    "unicorn/prefer-math-trunc": "error"
+    "unicorn/prefer-math-trunc": "error",
   },
-  "overrides": [
+  overrides: [
     {
-      "files": ["src/**/*.ts", "test/**/*.ts"],
-      "rules": {
+      files: ["src/**/*.ts", "test/**/*.ts"],
+      rules: {
         "typescript/no-base-to-string": "off",
         "typescript/no-floating-promises": "off",
         "typescript/no-unsafe-type-assertion": "off",
         "typescript/prefer-nullish-coalescing": "off",
         "typescript/prefer-optional-chain": "off",
         "typescript/strict-boolean-expressions": "off",
-        "typescript/switch-exhaustiveness-check": "off"
-      }
-    }
-  ]
-}
+        "typescript/switch-exhaustiveness-check": "off",
+      },
+    },
+  ],
+};
+
+export default defineConfig({
+  ...projectConfig,
+  extends: [antislop, ...(projectConfig.extends ?? [])],
+});
