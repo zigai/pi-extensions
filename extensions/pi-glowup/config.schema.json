@@ -468,6 +468,19 @@
           ],
           "description": "Choose when composed Bash commands are reflowed at safe syntax boundaries."
         },
+        "shellOperatorPosition": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "trailing"
+            },
+            {
+              "type": "string",
+              "const": "leading"
+            }
+          ],
+          "description": "Place Bash chain operators before or after reflowed line breaks."
+        },
         "formatters": {
           "type": "object",
           "patternProperties": {
@@ -489,6 +502,7 @@
         "maxCodePreviewLines": 8,
         "showPrologueOmission": false,
         "shellLayout": "auto",
+        "shellOperatorPosition": "trailing",
         "formatters": {}
       }
     }

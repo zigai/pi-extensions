@@ -1226,26 +1226,32 @@ export const grownWriteTwelve = 12;
         activeTui.start();
         await pendingTerminal.settle();
 
-        expect(pendingTerminal.requireRowContaining("uv run pytest").text).not.toContain(
-            "&& just test",
-        );
-        pendingTerminal.requireRowContaining("&& just test feature");
-        pendingTerminal.requireRowContaining("&& git status --short");
+        expect(
+            pendingTerminal.requireRowContaining("uv run pytest").text.trimEnd().endsWith("&&"),
+        ).toBe(true);
+        expect(
+            pendingTerminal.requireRowContaining("just test feature").text.trimEnd().endsWith("&&"),
+        ).toBe(true);
+        pendingTerminal.requireRowContaining("git status --short");
         pendingTerminal.assertNoWrappedRows();
 
         pendingTerminal.resize(42, 20);
         await pendingTerminal.settle();
-        pendingTerminal.requireRowContaining("&& just test feature");
-        pendingTerminal.requireRowContaining("&& git status --short");
+        expect(
+            pendingTerminal.requireRowContaining("just test feature").text.trimEnd().endsWith("&&"),
+        ).toBe(true);
+        pendingTerminal.requireRowContaining("git status --short");
         pendingTerminal.assertNoWrappedRows();
 
         pendingTerminal.resize(110, 20);
         await pendingTerminal.settle();
-        expect(pendingTerminal.requireRowContaining("uv run pytest").text).not.toContain(
-            "&& just test",
-        );
-        pendingTerminal.requireRowContaining("&& just test feature");
-        pendingTerminal.requireRowContaining("&& git status --short");
+        expect(
+            pendingTerminal.requireRowContaining("uv run pytest").text.trimEnd().endsWith("&&"),
+        ).toBe(true);
+        expect(
+            pendingTerminal.requireRowContaining("just test feature").text.trimEnd().endsWith("&&"),
+        ).toBe(true);
+        pendingTerminal.requireRowContaining("git status --short");
         pendingTerminal.assertNoWrappedRows();
         expect(pendingTerminal.countOccurrences("BEFORE_BASH_CHAIN")).toBe(1);
         expect(pendingTerminal.countOccurrences("AFTER_BASH_CHAIN")).toBe(1);

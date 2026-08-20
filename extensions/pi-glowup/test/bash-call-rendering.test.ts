@@ -21,6 +21,7 @@ function render(command: string, options: { width: number; expanded?: boolean })
         showPrologueOmission: false,
         headerLayout: "auto",
         shellLayout: "auto",
+        shellOperatorPosition: "trailing",
     }).render(options.width);
 }
 
@@ -37,13 +38,30 @@ describe("bash command rendering", () => {
             showPrologueOmission: false,
             headerLayout: "auto",
             shellLayout: "always",
+            shellOperatorPosition: "trailing",
         })
             .render(80)
             .join("\n");
 
-        expect(rendered).toContain("│ one | two");
-        expect(rendered).toContain("│ && three");
+        expect(rendered).toContain("│ one | two &&");
+        expect(rendered).toContain("│ three");
         expect(rendered).not.toContain("│ | two");
+    });
+
+    it("keeps leading operators selectable", () => {
+        const rendered = renderBashCommandCall(theme, "one && two", {
+            state: "success",
+            expanded: false,
+            maxCodePreviewLines: 8,
+            showPrologueOmission: false,
+            headerLayout: "auto",
+            shellLayout: "always",
+            shellOperatorPosition: "leading",
+        })
+            .render(80)
+            .join("\n");
+
+        expect(rendered).toContain("│ && two");
     });
 
     it("keeps pipelines and fallbacks on their step line when they fit", () => {
@@ -52,9 +70,9 @@ describe("bash command rendering", () => {
             `&& ls -l /tmp/opencode || true && pnpm --version`;
         const rendered = render(command, { width: 100 }).join("\n");
 
-        expect(rendered).toContain("│ && opencode debug --help | head -80");
-        expect(rendered).toContain("│ && ls -l /tmp/opencode || true");
-        expect(rendered).toContain("│ && pnpm --version");
+        expect(rendered).toContain("│ opencode debug --help | head -80 &&");
+        expect(rendered).toContain("│ ls -l /tmp/opencode || true &&");
+        expect(rendered).toContain("│ pnpm --version");
         expect(rendered).not.toContain("│ | head -80");
         expect(rendered).not.toContain("│ || true");
     });
@@ -66,7 +84,7 @@ describe("bash command rendering", () => {
         const rendered = render(command, { width: 54 }).join("\n");
 
         expect(rendered).toContain("│ cat records.json | python -c");
-        expect(rendered).toContain("│ && git status --short");
+        expect(rendered).toContain("│ git status --short");
         expect(rendered).not.toContain("• Python");
     });
 
@@ -86,8 +104,8 @@ describe("bash command rendering", () => {
         const rendered = render(command, { width: 44 }).join("\n");
 
         expect(rendered).toContain("git add");
-        expect(rendered).toContain("&& git commit -m");
-        expect(rendered).toContain("&& git status --short");
+        expect(rendered).toContain("git commit -m");
+        expect(rendered).toContain("git status --short");
         expect(rendered).toContain("…");
     });
 
@@ -99,10 +117,12 @@ describe("bash command rendering", () => {
             showPrologueOmission: false,
             headerLayout: "auto",
             shellLayout: "auto",
+            shellOperatorPosition: "trailing",
         });
 
         expect(component.render(100)).toHaveLength(1);
-        expect(component.render(16).join("\n")).toContain("&& beta");
+        expect(component.render(16).join("\n")).toContain("alpha &&");
+        expect(component.render(16).join("\n")).toContain("beta");
         expect(component.render(100)).toHaveLength(1);
     });
 
@@ -116,7 +136,7 @@ describe("bash command rendering", () => {
         expect(rendered[0]).toBe("• Bash");
         expect(rendered.join("\n")).toContain("│ for item in alpha beta gamma delta; do");
         expect(rendered.join("\n")).toContain("│   if test");
-        expect(rendered.join("\n")).toContain("│ && case");
+        expect(rendered.join("\n")).toContain("│ case");
     });
 
     it("leaves code-writing heredocs as Bash without special body labels", () => {

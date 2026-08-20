@@ -11,6 +11,7 @@ import {
     analyzeBashCommand,
     type BashCommandAnalysis,
     type ShellLayout,
+    type ShellOperatorPosition,
 } from "../script-preview/bash-analysis.ts";
 import { graphemes } from "../text-boundaries.ts";
 
@@ -97,6 +98,7 @@ export type BashCommandRenderOptions = {
     readonly showPrologueOmission: boolean;
     readonly headerLayout: ScriptPreviewHeaderLayout;
     readonly shellLayout: ShellLayout;
+    readonly shellOperatorPosition: ShellOperatorPosition;
     readonly pureScriptOverride?: ScriptInvocation;
     readonly invalidate?: () => void;
 };
@@ -107,7 +109,7 @@ export function renderBashCommandCall(
     command: string,
     options: BashCommandRenderOptions,
 ): Component {
-    const analysis = analyzeBashCommand(command);
+    const analysis = analyzeBashCommand(command, options.shellOperatorPosition);
     const pureScript = options.pureScriptOverride ?? analysis.pureScript;
     if (pureScript !== undefined) {
         return renderScriptCall(theme, pureScript, {

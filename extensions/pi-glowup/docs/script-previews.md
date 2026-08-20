@@ -27,6 +27,9 @@ Set `scriptPreview.headerLayout` to `"inline"` or `"block"` to force one layout 
 statements; simpler one-line commands reflow only when their submitted form would wrap. Use
 `"preserve"` to keep the submitted layout or `"always"` to reflow every safely parsed command.
 
+Reflowed chain and case operators stay at the end of the preceding row by default. Set
+`scriptPreview.shellOperatorPosition` to `"leading"` to place them at the start of the next row.
+
 Reflow uses the Bash syntax tree to place logical operators, pipelines, statements, and compound
 shell bodies on readable rows. It retains the original shell tokens, never extracts language
 blocks from a composed command, and leaves submitted multiline commands and heredocs unchanged.

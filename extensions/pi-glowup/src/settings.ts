@@ -57,6 +57,7 @@ const DEFAULT_SCRIPT_PREVIEW = {
     maxCodePreviewLines: 8,
     showPrologueOmission: false,
     shellLayout: "auto",
+    shellOperatorPosition: "trailing",
     formatters: {},
 } as const;
 
@@ -295,6 +296,9 @@ const scriptPreviewSchema = Type.Object(
                     "Choose when composed Bash commands are reflowed at safe syntax boundaries.",
             },
         ),
+        shellOperatorPosition: Type.Union([Type.Literal("trailing"), Type.Literal("leading")], {
+            description: "Place Bash chain operators before or after reflowed line breaks.",
+        }),
         formatters: Type.Record(Type.String(), formatterCommandSchema, {
             description: "Commands that format script previews through stdin/stdout.",
         }),

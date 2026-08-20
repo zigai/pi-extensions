@@ -9,7 +9,7 @@ import type {
     ScriptPreviewHeaderLayout,
     ToolCallIndicator,
 } from "../rendering/core.ts";
-import type { ShellLayout } from "../script-preview/bash-analysis.ts";
+import type { ShellLayout, ShellOperatorPosition } from "../script-preview/bash-analysis.ts";
 import {
     extensionSettingsDefinition,
     loadGlowupSettings,
@@ -39,6 +39,7 @@ export type GlowupConfig = {
     readonly scriptMaxCodePreviewLines: number;
     readonly scriptShowPrologueOmission: boolean;
     readonly shellLayout: ShellLayout;
+    readonly shellOperatorPosition: ShellOperatorPosition;
     readonly toolCallIndicator: ToolCallIndicator;
     readonly toolLabels: {
         readonly mode: ToolLabelMode;
@@ -107,6 +108,7 @@ function normalizeGlowupConfig(
         scriptMaxCodePreviewLines: settings.scriptPreview.maxCodePreviewLines,
         scriptShowPrologueOmission: settings.scriptPreview.showPrologueOmission,
         shellLayout: settings.scriptPreview.shellLayout,
+        shellOperatorPosition: settings.scriptPreview.shellOperatorPosition,
         toolCallIndicator: settings.toolCallIndicator,
         toolLabels: settings.toolLabels,
         writePreview: settings.writePreview,

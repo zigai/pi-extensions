@@ -14,7 +14,7 @@ describe("bash command analysis", () => {
         expect(composed.pureScript).toBeUndefined();
         expect(composed.structurallyComplex).toBe(true);
         expect(composed.reflowedCommand).toBe(
-            `cd app\n&& python -c "print('check')"\n&& just test`,
+            `cd app &&\npython -c "print('check')" &&\njust test`,
         );
         expect(
             analyzeBashCommand(`python -c "import sys; print(sys.argv)" -- --help`).pureScript,
@@ -31,21 +31,21 @@ describe("bash command analysis", () => {
 
     it("reflows at step boundaries while keeping pipelines and fallbacks together", () => {
         expect(reflowBashCommand(`echo "a && b | c" && cat data | python -c "print('x')"`)).toBe(
-            `echo "a && b | c"\n&& cat data | python -c "print('x')"`,
+            `echo "a && b | c" &&\ncat data | python -c "print('x')"`,
         );
         expect(reflowBashCommand(`check cache || rebuild cache && publish`)).toBe(
-            `check cache || rebuild cache\n&& publish`,
+            `check cache || rebuild cache &&\npublish`,
         );
         expect(reflowBashCommand(`opencode debug --help | head -80`)).toBeUndefined();
         expect(reflowBashCommand(`ls -l /tmp/opencode || true`)).toBeUndefined();
         expect(reflowBashCommand(`echo $(first && second) && final`)).toBe(
-            `echo $(first && second)\n&& final`,
+            `echo $(first && second) &&\nfinal`,
         );
     });
 
     it("keeps test-expression operators inside the expression", () => {
         expect(reflowBashCommand(`[[ -f one && -f two ]] && echo yes`)).toBe(
-            `[[ -f one && -f two ]]\n&& echo yes`,
+            `[[ -f one && -f two ]] &&\necho yes`,
         );
     });
 
@@ -63,26 +63,18 @@ describe("bash command analysis", () => {
 
     it("structures conditionals, functions, subshells, and case arms", () => {
         expect(reflowBashCommand(`if check; then one && two; else three; fi`)).toBe(
-            [`if check; then`, `  one`, `  && two;`, `else`, `  three;`, `fi`].join("\n"),
+            [`if check; then`, `  one &&`, `  two;`, `else`, `  three;`, `fi`].join("\n"),
         );
         expect(reflowBashCommand(`f() { one && two; }`)).toBe(
-            [`f() {`, `  one`, `  && two;`, `}`].join("\n"),
+            [`f() {`, `  one &&`, `  two;`, `}`].join("\n"),
         );
         expect(reflowBashCommand(`(one && two) || three`)).toBe(
-            [`(`, `  one`, `  && two`, `) || three`].join("\n"),
+            [`(`, `  one &&`, `  two`, `) || three`].join("\n"),
         );
         expect(reflowBashCommand(`case "$x" in a) one && two;; b) three;& esac`)).toBe(
-            [
-                `case "$x" in`,
-                `  a)`,
-                `    one`,
-                `    && two`,
-                `    ;;`,
-                `  b)`,
-                `    three`,
-                `    ;&`,
-                `esac`,
-            ].join("\n"),
+            [`case "$x" in`, `  a)`, `    one &&`, `    two;;`, `  b)`, `    three;&`, `esac`].join(
+                "\n",
+            ),
         );
     });
 
@@ -91,7 +83,14 @@ describe("bash command analysis", () => {
             reflowBashCommand(
                 `git add src/one.ts && git commit -m "fix: handle imports for scripts"`,
             ),
-        ).toBe(`git add src/one.ts\n&& git commit -m "fix: handle imports for scripts"`);
+        ).toBe(`git add src/one.ts &&\ngit commit -m "fix: handle imports for scripts"`);
+    });
+
+    it("keeps leading operators selectable", () => {
+        expect(reflowBashCommand(`one && two && three`, "leading")).toBe(`one\n&& two\n&& three`);
+        expect(reflowBashCommand(`case "$x" in a) one && two;; esac`, "leading")).toContain(
+            `    ;;`,
+        );
     });
 
     it("leaves multiline commands and code-writing heredocs unchanged", () => {

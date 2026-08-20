@@ -157,7 +157,8 @@ test.prop([shellChainArbitrary], {
     for (const [index, part] of scenario.commands.slice(1).entries()) {
         const operator = scenario.operators[index % scenario.operators.length] ?? "&&";
         if (operator === "&&") {
-            expectedLines.push(`${operator} ${part}`);
+            expectedLines[expectedLines.length - 1] += ` ${operator}`;
+            expectedLines.push(part);
         } else {
             expectedLines[expectedLines.length - 1] += ` ${operator} ${part}`;
         }

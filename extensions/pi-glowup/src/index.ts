@@ -241,6 +241,7 @@ function configDiagnostics(config: GlowupConfig): DebugLogFields {
             maxCodePreviewLines: config.scriptMaxCodePreviewLines,
             showPrologueOmission: config.scriptShowPrologueOmission,
             shellLayout: config.shellLayout,
+            shellOperatorPosition: config.shellOperatorPosition,
             formatterCount: config.scriptFormatters.size,
         },
         toolLabels: {
@@ -557,6 +558,7 @@ function renderBuiltInToolCall(options: {
     readonly maxCodePreviewLines: () => number;
     readonly showPrologueOmission: () => boolean;
     readonly shellLayout: () => GlowupConfig["shellLayout"];
+    readonly shellOperatorPosition: () => GlowupConfig["shellOperatorPosition"];
     readonly labelMode: ToolLabelMode;
     readonly movingWriteViewport: boolean;
     readonly mutationSettings: MutationSettings;
@@ -606,6 +608,7 @@ function renderBuiltInToolCall(options: {
                     options.maxCodePreviewLines,
                     options.showPrologueOmission,
                     options.shellLayout,
+                    options.shellOperatorPosition,
                 );
             case "write":
                 return renderWriteCall(args, theme, context, {
@@ -842,6 +845,7 @@ function renderBashCall(
     maxCodePreviewLines: () => number,
     showPrologueOmission: () => boolean,
     shellLayout: () => GlowupConfig["shellLayout"],
+    shellOperatorPosition: () => GlowupConfig["shellOperatorPosition"],
 ) {
     registerExplorationBoundary(context.toolCallId);
     rememberBashRenderInvalidation(context.toolCallId, context.invalidate);
@@ -882,6 +886,7 @@ function renderBashCall(
         showPrologueOmission: showPrologueOmission(),
         headerLayout: headerLayout(),
         shellLayout: shellLayout(),
+        shellOperatorPosition: shellOperatorPosition(),
         ...(stableScript === undefined ? {} : { pureScriptOverride: stableScript }),
         ...(context.invalidate === undefined ? {} : { invalidate: context.invalidate }),
     });
@@ -1259,6 +1264,7 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
                 maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
                 showPrologueOmission: () => config.scriptShowPrologueOmission,
                 shellLayout: () => config.shellLayout,
+                shellOperatorPosition: () => config.shellOperatorPosition,
                 labelMode: config.toolLabels.mode,
                 movingWriteViewport: config.writePreview.movingViewport,
                 mutationSettings: config.mutations,

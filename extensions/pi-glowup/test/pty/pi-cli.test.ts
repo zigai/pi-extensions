@@ -368,13 +368,19 @@ describe("actual Pi CLI in a real PTY", () => {
             const narrow = await pi.waitForFrame(
                 (frame) =>
                     frame.columns === 44 &&
-                    frame.rows.filter((row) => row.text.includes("&& printf")).length === 1,
+                    frame.rows.some(
+                        (row) =>
+                            row.text.includes("CHAIN_ALPHA") && row.text.trimEnd().endsWith("&&"),
+                    ),
                 PTY_TIMEOUT_MS,
                 narrowSequence,
             );
             expect(
                 narrow.rows
-                    .filter((row) => row.text.includes("&& printf"))
+                    .filter(
+                        (row) =>
+                            row.text.includes("CHAIN_ALPHA") || row.text.includes("CHAIN_BETA"),
+                    )
                     .every((row) => !row.isWrapped),
             ).toBe(true);
             expectTerminalInvariants(narrow, [resolve("test/pty/fixtures/offline-provider.ts")]);

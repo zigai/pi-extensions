@@ -95,6 +95,7 @@ For compatibility with the previous appearance, `addedRowBackground` and
 | `scriptPreview.maxCodePreviewLines`       | `8`              | Collapsed script content rows before a separate omission row.   |
 | `scriptPreview.showPrologueOmission`      | `false`          | Show a count row for omitted leading setup imports.             |
 | `scriptPreview.shellLayout`               | `"auto"`         | Choose when composed Bash commands are safely reflowed.         |
+| `scriptPreview.shellOperatorPosition`     | `"trailing"`     | Place Bash chain operators before or after reflowed breaks.     |
 | `scriptPreview.formatters`                | `{}`             | Commands that format script previews through stdin/stdout.      |
 
 ## Full default configuration
@@ -160,6 +161,7 @@ For compatibility with the previous appearance, `addedRowBackground` and
     "maxCodePreviewLines": 8,
     "showPrologueOmission": false,
     "shellLayout": "auto",
+    "shellOperatorPosition": "trailing",
     "formatters": {}
   }
 }

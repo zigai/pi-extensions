@@ -3,6 +3,7 @@ import { parse, type CompoundList, type If, type Node, type ParsedScript } from 
 import { parseScriptInvocation, type ScriptInvocation } from "../rendering/core.ts";
 
 export type ShellLayout = "preserve" | "auto" | "always";
+export type ShellOperatorPosition = "trailing" | "leading";
 
 export type BashCommandAnalysis = {
     readonly command: string;
@@ -44,10 +45,12 @@ function operatorIndex(
 class BashLayoutCollector {
     readonly #breakpoints = new Map<number, number>();
     readonly #source: string;
+    readonly #operatorPosition: ShellOperatorPosition;
     #structurallyComplex = false;
 
-    constructor(source: string) {
+    constructor(source: string, operatorPosition: ShellOperatorPosition) {
         this.#source = source;
+        this.#operatorPosition = operatorPosition;
     }
 
     add(index: number, indent: number): void {
@@ -64,6 +67,10 @@ class BashLayoutCollector {
             index,
             existing === undefined ? normalizedIndent : Math.min(existing, normalizedIndent),
         );
+    }
+
+    addOperator(index: number, operator: string, indent: number): void {
+        this.add(this.#operatorPosition === "trailing" ? index + operator.length : index, indent);
     }
 
     get structurallyComplex(): boolean {
@@ -143,7 +150,9 @@ class BashLayoutCollector {
                                 command.pos,
                                 operator,
                             );
-                            if (boundary !== undefined) this.add(boundary, indent);
+                            if (boundary !== undefined) {
+                                this.addOperator(boundary, operator, indent);
+                            }
                         }
                     }
                     this.walkNode(command, indent, depth + 1);
@@ -179,7 +188,9 @@ class BashLayoutCollector {
                             item.end,
                             item.terminator,
                         );
-                        if (terminator !== undefined) this.add(terminator, indent + 2);
+                        if (terminator !== undefined) {
+                            this.addOperator(terminator, item.terminator, indent + 2);
+                        }
                     }
                 }
                 const finalItemEnd = node.items.at(-1)?.end ?? node.word.end;
@@ -244,7 +255,10 @@ type BashLayoutAnalysis = {
     readonly structurallyComplex: boolean;
 };
 
-function analyzeBashLayout(command: string): BashLayoutAnalysis {
+function analyzeBashLayout(
+    command: string,
+    operatorPosition: ShellOperatorPosition,
+): BashLayoutAnalysis {
     const unchanged = { reflowedCommand: undefined, structurallyComplex: false } as const;
     if (
         command.includes("\n") ||
@@ -262,7 +276,7 @@ function analyzeBashLayout(command: string): BashLayoutAnalysis {
     }
     if ((script.errors?.length ?? 0) > 0) return unchanged;
 
-    const collector = new BashLayoutCollector(command);
+    const collector = new BashLayoutCollector(command, operatorPosition);
     collector.walkScript(script);
     return {
         reflowedCommand: collector.render(),
@@ -271,14 +285,21 @@ function analyzeBashLayout(command: string): BashLayoutAnalysis {
 }
 
 /** Reflows a complete one-line Bash program while retaining its original non-whitespace text. */
-export function reflowBashCommand(command: string): string | undefined {
-    return analyzeBashLayout(command).reflowedCommand;
+export function reflowBashCommand(
+    command: string,
+    operatorPosition: ShellOperatorPosition = "trailing",
+): string | undefined {
+    return analyzeBashLayout(command, operatorPosition).reflowedCommand;
 }
 
 /** Identifies clean standalone language calls and a safe display-only Bash reflow. */
-export function analyzeBashCommand(command: string): BashCommandAnalysis {
+export function analyzeBashCommand(
+    command: string,
+    operatorPosition: ShellOperatorPosition = "trailing",
+): BashCommandAnalysis {
     const pureScript = parseScriptInvocation(command);
-    const layout = pureScript === undefined ? analyzeBashLayout(command) : undefined;
+    const layout =
+        pureScript === undefined ? analyzeBashLayout(command, operatorPosition) : undefined;
     return {
         command,
         pureScript,
