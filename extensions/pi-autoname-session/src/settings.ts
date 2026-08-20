@@ -4,6 +4,7 @@ import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-exten
 import { Type, type Static } from "typebox";
 
 const NAMING_TRIGGERS = ["messages", "turns", "tool_calls", "tokens", "minutes"] as const;
+const INITIAL_NAMING_TIMINGS = ["prompt", "settled"] as const;
 const CONVERSATION_SCOPES = ["minimized", "full"] as const;
 
 const initialTriggerSchema = StringEnum(NAMING_TRIGGERS, {
@@ -34,6 +35,11 @@ const settingsObjectSchema = Type.Object(
                     default: true,
                     description: "Automatically name an otherwise unnamed session once.",
                 }),
+                timing: StringEnum(INITIAL_NAMING_TIMINGS, {
+                    default: "prompt",
+                    description:
+                        "When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled.",
+                }),
                 trigger: initialTriggerSchema,
                 threshold: Type.Integer({
                     default: 1,
@@ -43,7 +49,7 @@ const settingsObjectSchema = Type.Object(
             },
             {
                 additionalProperties: false,
-                default: { enabled: true, trigger: "messages", threshold: 1 },
+                default: { enabled: true, timing: "prompt", trigger: "messages", threshold: 1 },
             },
         ),
         refreshNaming: Type.Object(
@@ -143,6 +149,7 @@ export type ExtensionSettings = {
     readonly enabled: boolean;
     readonly initialNaming: {
         readonly enabled: boolean;
+        readonly timing: ExtensionSettingsDocument["initialNaming"]["timing"];
         readonly trigger: ExtensionSettingsDocument["initialNaming"]["trigger"];
         readonly threshold: number;
     };
@@ -257,6 +264,7 @@ export function loadAutonameSessionSettings(
             enabled: loaded.settings.enabled,
             initialNaming: {
                 enabled: loaded.settings.initialNaming.enabled,
+                timing: loaded.settings.initialNaming.timing,
                 trigger: loaded.settings.initialNaming.trigger,
                 threshold: loaded.settings.initialNaming.threshold,
             },

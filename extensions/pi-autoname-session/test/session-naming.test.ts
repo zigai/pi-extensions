@@ -14,7 +14,7 @@ import {
 
 const settings: ExtensionSettings = {
     enabled: true,
-    initialNaming: { enabled: true, trigger: "messages", threshold: 1 },
+    initialNaming: { enabled: true, timing: "prompt", trigger: "messages", threshold: 1 },
     refreshNaming: { enabled: false, trigger: "turns", threshold: 10 },
     model: { type: "current" },
     reasoningEffort: "low",

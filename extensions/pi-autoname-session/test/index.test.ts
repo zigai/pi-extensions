@@ -87,6 +87,18 @@ type TestContext = {
 
 type TestEvent =
     | { readonly type: "session_start" }
+    | {
+          readonly type: "before_agent_start";
+          readonly prompt: string;
+          readonly images: undefined;
+          readonly systemPromptOptions: {
+              readonly cwd: string;
+              readonly contextFiles: readonly {
+                  readonly path: string;
+                  readonly content: string;
+              }[];
+          };
+      }
     | { readonly type: "agent_settled" }
     | { readonly type: "session_shutdown" }
     | {
@@ -215,6 +227,18 @@ class Harness {
         return this.pi.emit({ type: "session_start" }, this.ctx);
     }
 
+    beforeAgentStart(prompt: string): Promise<void> {
+        return this.pi.emit(
+            {
+                type: "before_agent_start",
+                prompt,
+                images: undefined,
+                systemPromptOptions: { cwd: this.ctx.cwd, contextFiles: [] },
+            },
+            this.ctx,
+        );
+    }
+
     settled(): Promise<void> {
         return this.pi.emit({ type: "agent_settled" }, this.ctx);
     }
@@ -248,7 +272,7 @@ function createSettings(
 ): ExtensionSettingsDocument {
     return {
         enabled: true,
-        initialNaming: { enabled: true, trigger: "messages", threshold: 1 },
+        initialNaming: { enabled: true, timing: "prompt", trigger: "messages", threshold: 1 },
         refreshNaming: { enabled: false, trigger: "turns", threshold: 10 },
         model: "current",
         reasoningEffort: "low",
@@ -260,7 +284,13 @@ function createSettings(
     };
 }
 
-function writeSettings(harness: Harness, settings: ExtensionSettingsDocument): void {
+type TestSettingsDocument =
+    | ExtensionSettingsDocument
+    | (Omit<ExtensionSettingsDocument, "initialNaming"> & {
+          readonly initialNaming: Omit<ExtensionSettingsDocument["initialNaming"], "timing">;
+      });
+
+function writeSettings(harness: Harness, settings: TestSettingsDocument): void {
     const settingsDir = join(harness.agentDir, "extension-settings");
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(join(settingsDir, "pi-autoname-session.json"), JSON.stringify(settings), "utf8");
@@ -318,6 +348,129 @@ function allDiagnostics(harness: Harness): string {
 }
 
 describe("extension orchestration", () => {
+    it("names an unnamed session before the agent starts when prompt timing is enabled", async () => {
+        const harness = Harness.create();
+        try {
+            writeSettings(
+                harness,
+                createSettings({
+                    initialNaming: {
+                        enabled: true,
+                        timing: "prompt",
+                        trigger: "messages",
+                        threshold: 1,
+                    },
+                }),
+            );
+            await harness.startSession();
+            let capturedPrompt = "";
+            harness.faux.setResponses([
+                (context) => {
+                    const content = context.messages[0]?.content;
+                    const textBlock = Array.isArray(content)
+                        ? content.find((block): block is TextContent => block.type === "text")
+                        : undefined;
+                    capturedPrompt = textBlock?.text ?? "";
+                    return fauxAssistantMessage("Fix parser tests");
+                },
+            ]);
+
+            await harness.beforeAgentStart("Fix the parser");
+
+            expect(harness.pi.sessionName).toBe("Fix parser tests");
+            expect(capturedPrompt).toContain("user:\nFix the parser");
+            expect(harness.faux.state.callCount).toBe(1);
+            expect(latestState(harness)).toEqual(expect.objectContaining({ initialNameSet: true }));
+
+            await harness.settled();
+            expect(harness.faux.state.callCount).toBe(1);
+        } finally {
+            harness.dispose();
+        }
+    });
+
+    it("defaults existing settings without timing to prompt naming", async () => {
+        const harness = Harness.create();
+        try {
+            const settings = createSettings();
+            writeSettings(harness, {
+                ...settings,
+                initialNaming: { enabled: true, trigger: "messages", threshold: 1 },
+            });
+            await harness.startSession();
+            harness.faux.setResponses([fauxAssistantMessage("Fix parser tests")]);
+
+            await harness.beforeAgentStart("Fix the parser");
+
+            expect(harness.faux.state.callCount).toBe(1);
+            expect(harness.pi.sessionName).toBe("Fix parser tests");
+        } finally {
+            harness.dispose();
+        }
+    });
+
+    it("waits for the agent to settle when settled timing is configured", async () => {
+        const harness = Harness.create();
+        try {
+            writeSettings(
+                harness,
+                createSettings({
+                    initialNaming: {
+                        enabled: true,
+                        timing: "settled",
+                        trigger: "messages",
+                        threshold: 1,
+                    },
+                }),
+            );
+            await harness.startSession();
+
+            await harness.beforeAgentStart("Fix the parser");
+            expect(harness.faux.state.callCount).toBe(0);
+            expect(harness.pi.sessionName).toBeUndefined();
+
+            appendUserMessage(harness.session, "Fix the parser", 1);
+            harness.faux.setResponses([fauxAssistantMessage("Fix parser tests")]);
+            await harness.settled();
+
+            expect(harness.faux.state.callCount).toBe(1);
+            expect(harness.pi.sessionName).toBe("Fix parser tests");
+        } finally {
+            harness.dispose();
+        }
+    });
+
+    it("falls back to the settled checkpoint for post-prompt activity triggers", async () => {
+        const harness = Harness.create();
+        try {
+            writeSettings(
+                harness,
+                createSettings({
+                    initialNaming: {
+                        enabled: true,
+                        timing: "prompt",
+                        trigger: "turns",
+                        threshold: 1,
+                    },
+                }),
+            );
+            await harness.startSession();
+
+            await harness.beforeAgentStart("Fix the parser");
+            expect(harness.faux.state.callCount).toBe(0);
+
+            appendUserMessage(harness.session, "Fix the parser", 1);
+            appendAssistantTurn(harness.session, "I will fix it", 2);
+            harness.faux.setResponses([fauxAssistantMessage("Fix parser tests")]);
+            await harness.settled();
+
+            expect(harness.faux.state.callCount).toBe(1);
+            expect(harness.pi.sessionName).toBe("Fix parser tests");
+        } finally {
+            harness.dispose();
+        }
+    });
+
     it("names an unnamed session after the initial trigger", async () => {
         const harness = Harness.create();
         try {

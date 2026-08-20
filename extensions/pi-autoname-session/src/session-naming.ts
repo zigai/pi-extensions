@@ -492,6 +492,7 @@ function renderMessage(
 export function buildConversationContext(
     entries: readonly SessionEntry[],
     scope: ConversationScope,
+    pendingPrompt?: string,
 ): string {
     const sections: string[] = [];
 
@@ -514,6 +515,10 @@ export function buildConversationContext(
         if (text.length > 0) {
             sections.push(`${entry.message.role}:\n${text}`);
         }
+    }
+
+    if (pendingPrompt !== undefined) {
+        sections.push(`user:\n${pendingPrompt}`);
     }
 
     return truncatePromptContext(sections.join("\n\n"), MAX_CONVERSATION_CONTEXT_CHARACTERS);

@@ -19,6 +19,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | Enable the extension. |
 | `initialNaming.enabled` | boolean | `true` | Automatically name an otherwise unnamed session once. |
+| `initialNaming.timing` | `prompt` \| `settled` | `"prompt"` | When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled. |
 | `initialNaming.trigger` | `messages` \| `turns` \| `tool_calls` \| `tokens` \| `minutes` | `"messages"` | The session activity that starts a naming attempt. |
 | `initialNaming.threshold` | integer | `1` | The initial activity threshold. |
 | `refreshNaming.enabled` | boolean | `false` | Periodically refresh the name as the session develops. |
@@ -38,6 +39,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
   "enabled": true,
   "initialNaming": {
     "enabled": true,
+    "timing": "prompt",
     "trigger": "messages",
     "threshold": 1
   },

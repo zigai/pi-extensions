@@ -24,6 +24,15 @@
           "default": true,
           "description": "Automatically name an otherwise unnamed session once."
         },
+        "timing": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "settled"
+          ],
+          "description": "When to first check the naming trigger: before the agent starts on a prompt, or after the agent has settled.",
+          "default": "prompt"
+        },
         "trigger": {
           "type": "string",
           "enum": [
@@ -46,6 +55,7 @@
       "additionalProperties": false,
       "default": {
         "enabled": true,
+        "timing": "prompt",
         "trigger": "messages",
         "threshold": 1
       }

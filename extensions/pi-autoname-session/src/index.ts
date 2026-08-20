@@ -48,10 +48,15 @@ type PickSessionNameOptions = {
     readonly settings: ExtensionSettings;
     readonly phase: NamingPhase;
     readonly entries: readonly SessionEntry[];
+    readonly pendingPrompt: string | undefined;
     readonly ctx: ExtensionContext;
     readonly signal: AbortSignal;
     readonly repositoryContext: string;
 };
+
+type NamingCheckpoint =
+    | { readonly type: "prompt"; readonly prompt: string }
+    | { readonly type: "settled" };
 
 type AuthenticationResolution =
     | {
@@ -207,7 +212,7 @@ async function resolveAuthentication(
 }
 
 async function pickSessionName(options: PickSessionNameOptions): Promise<PickSessionNameOutcome> {
-    const { settings, phase, entries, ctx, signal, repositoryContext } = options;
+    const { settings, phase, entries, pendingPrompt, ctx, signal, repositoryContext } = options;
     const timeoutSignal = AbortSignal.timeout(settings.timeoutMs);
     const operationSignal = AbortSignal.any([signal, timeoutSignal]);
     const model = resolvePickerModel(settings.model, ctx);
@@ -252,7 +257,11 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         settings.prompt,
         {
             repositoryContext,
-            conversation: buildConversationContext(entries, settings.conversationScope),
+            conversation: buildConversationContext(
+                entries,
+                settings.conversationScope,
+                pendingPrompt,
+            ),
             currentName: ctx.sessionManager.getSessionName() ?? "(unnamed)",
             cwd: ctx.cwd,
             reason: phase,
@@ -397,13 +406,6 @@ export default function extension(pi: ExtensionAPI): void {
         }
     });
 
-    pi.on("before_agent_start", (event) => {
-        repositoryContext = buildRepositoryContext(
-            event.systemPromptOptions.cwd,
-            event.systemPromptOptions.contextFiles,
-        );
-    });
-
     pi.on("session_info_changed", (event, ctx) => {
         if (pendingAutoName !== undefined && event.name === pendingAutoName) {
             pendingAutoName = undefined;
@@ -458,7 +460,10 @@ export default function extension(pi: ExtensionAPI): void {
         namingBlockedReason = undefined;
     });
 
-    pi.on("agent_settled", async (_event, ctx) => {
+    const maybeNameSession = async (
+        ctx: ExtensionContext,
+        checkpoint: NamingCheckpoint,
+    ): Promise<void> => {
         if (
             settings === undefined ||
             namingState === undefined ||
@@ -473,9 +478,18 @@ export default function extension(pi: ExtensionAPI): void {
         }
 
         const nowMs = Date.now();
-        const currentMetrics = measureSession(ctx.sessionManager.getBranch());
+        const measuredMetrics = measureSession(ctx.sessionManager.getBranch());
+        const currentMetrics =
+            checkpoint.type === "prompt"
+                ? { ...measuredMetrics, messages: measuredMetrics.messages + 1 }
+                : measuredMetrics;
         const request = getNamingRequest(settings, namingState, currentMetrics, nowMs);
-        if (request === undefined || sessionAbortController === undefined) {
+        if (
+            request === undefined ||
+            sessionAbortController === undefined ||
+            (checkpoint.type === "prompt" &&
+                (request.phase !== "initial" || settings.initialNaming.timing !== "prompt"))
+        ) {
             return;
         }
 
@@ -516,6 +530,7 @@ export default function extension(pi: ExtensionAPI): void {
                 settings,
                 phase: request.phase,
                 entries,
+                pendingPrompt: checkpoint.type === "prompt" ? checkpoint.prompt : undefined,
                 ctx,
                 signal: AbortSignal.any([sessionAbort.signal, attempt.controller.signal]),
                 repositoryContext,
@@ -577,6 +592,22 @@ export default function extension(pi: ExtensionAPI): void {
                 activeAttempt = undefined;
             }
         }
+    };
+
+    pi.on("before_agent_start", async (event, ctx) => {
+        repositoryContext = buildRepositoryContext(
+            event.systemPromptOptions.cwd,
+            event.systemPromptOptions.contextFiles,
+        );
+        const imageSummary =
+            event.images === undefined || event.images.length === 0
+                ? ""
+                : `\n[${event.images.length} image${event.images.length === 1 ? "" : "s"} attached]`;
+        await maybeNameSession(ctx, { type: "prompt", prompt: event.prompt + imageSummary });
+    });
+
+    pi.on("agent_settled", async (_event, ctx) => {
+        await maybeNameSession(ctx, { type: "settled" });
     });
 
     pi.on("session_shutdown", () => {
