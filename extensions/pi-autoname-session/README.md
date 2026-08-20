@@ -28,7 +28,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 | `reasoningEffort` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | `"low"` | Reasoning effort used by the session-name picker. |
 | `timeoutMs` | integer | `30000` | Maximum time in milliseconds for picker authentication and the model response before the naming attempt is treated as failed. |
 | `conversationScope` | `minimized` \| `full` | `"minimized"` | How much conversation to send to the picker. Minimized omits tool arguments, results, and shell output; full includes them. |
-| `prompt` | string | *See JSON below ↓* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}. |
+| `prompt` | string | *See JSON below* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}. |
 | `nameConstraints.minLength` | integer | `6` | Minimum number of characters in a name returned by the picker. |
 | `nameConstraints.maxLength` | integer | `60` | Maximum number of characters in a name returned by the picker. |
 
