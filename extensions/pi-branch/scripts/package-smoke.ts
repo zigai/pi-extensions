@@ -59,7 +59,7 @@ try {
         "package/Justfile",
         "package/index.test.ts",
         "package/tsconfig.json",
-        "package/.oxlintrc.json",
+        "package/oxlint.config.ts",
     ]) {
         if (files.has(excluded)) fail(`unexpectedly included ${excluded}`);
     }
