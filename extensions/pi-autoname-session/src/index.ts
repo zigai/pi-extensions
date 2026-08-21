@@ -284,7 +284,10 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         if (settings.reasoningEffort !== "off") {
             streamOptions.reasoning = settings.reasoningEffort;
         }
-        streamOptions.onPayload = (payload) => preparePickerPayload(model, payload);
+        // Request headers decide whether the picker model requires the
+        // Responses Lite payload shape, so the resolved auth headers must
+        // accompany every payload inspection.
+        streamOptions.onPayload = (payload) => preparePickerPayload(model, payload, auth.headers);
         streamOptions.signal = operationSignal;
 
         const response = await completeSimple(
