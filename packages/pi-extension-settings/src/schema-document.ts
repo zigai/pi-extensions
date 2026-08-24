@@ -4,7 +4,7 @@ import {
     cloneJson,
     isJsonArray,
     isJsonObject,
-    isJsonValue,
+    isJsonString,
     type JsonObject,
     type JsonValue,
     parseJson,
@@ -131,7 +131,7 @@ export function findUndocumentedSettings(schema: TSchema): readonly string[] {
             }
             if (
                 !isJsonObject(value) ||
-                typeof value.description !== "string" ||
+                !isJsonString(value.description) ||
                 value.description.trim() === ""
             ) {
                 issues.push(path);
@@ -163,35 +163,34 @@ export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject
         throw new TypeError("The TypeBox settings schema must be an object with properties.");
     }
 
-    const properties: Record<string, JsonValue> = {
-        $schema: {
-            type: "string",
-            default: `./schemas/${input.id}.schema.json`,
-            description: "JSON Schema used by editors for this settings file.",
-        },
+    const properties: Record<string, JsonValue> = {};
+    properties.$schema = {
+        type: "string",
+        default: `./schemas/${input.id}.schema.json`,
+        description: "JSON Schema used by editors for this settings file.",
     };
     for (const [key, value] of Object.entries(partial.properties)) {
         properties[key] = cloneJson(value);
     }
 
-    const document: Record<string, JsonValue> = {
-        $schema: JSON_SCHEMA_DIALECT,
-        $id: input.schemaId,
-        title: `${input.title} settings`,
-        description: input.description,
-    };
-
+    const schemaKeywords: Record<string, JsonValue> = {};
     for (const [key, value] of Object.entries(partial)) {
         if (["$schema", "$id", "title", "description", "properties", "required"].includes(key)) {
             continue;
         }
-        document[key] = cloneJson(value);
+        schemaKeywords[key] = cloneJson(value);
     }
-    document.type = "object";
-    document.properties = properties;
-    document.additionalProperties = false;
 
-    return document;
+    return {
+        $schema: JSON_SCHEMA_DIALECT,
+        $id: input.schemaId,
+        title: `${input.title} settings`,
+        description: input.description,
+        ...schemaKeywords,
+        type: "object",
+        properties,
+        additionalProperties: false,
+    } satisfies JsonObject;
 }
 
 export function createSettingsDocument(
@@ -199,21 +198,17 @@ export function createSettingsDocument(
     settings: JsonObject,
     schemaReference = `./schemas/${id}.schema.json`,
 ): JsonObject {
-    const document: Record<string, JsonValue> = {
+    const settingsEntries = Object.entries(settings).map(
+        ([key, value]) => [key, cloneJson(value)] as const,
+    );
+    return {
         $schema: schemaReference,
-    };
-    for (const [key, value] of Object.entries(settings)) {
-        document[key] = cloneJson(value);
-    }
-    return document;
+        ...Object.fromEntries(settingsEntries),
+    } satisfies JsonObject;
 }
 
 export function createDefaultSettingsDocument(
     input: SchemaDocumentInput & { readonly defaultSettings: JsonObject },
 ): JsonObject {
     return createSettingsDocument(input.id, input.defaultSettings);
-}
-
-export function isJsonSettingsDefault(value: unknown): value is JsonObject {
-    return isJsonObject(value) && isJsonValue(value);
 }

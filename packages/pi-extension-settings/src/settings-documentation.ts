@@ -1,5 +1,13 @@
 import type { ExtensionSettingsDefinition } from "./definition.ts";
-import { isJsonObject, isJsonValue, type JsonObject, type JsonValue } from "./json-value.ts";
+import {
+    isJsonArray,
+    isJsonBoolean,
+    isJsonNumber,
+    isJsonObject,
+    isJsonString,
+    type JsonObject,
+    type JsonValue,
+} from "./json-value.ts";
 import { defaultGlobalSettingsDisplayPath } from "./paths.ts";
 import {
     createDefaultSettingsDocument,
@@ -50,13 +58,13 @@ function markdownCode(value: string): string {
 }
 
 function literalType(value: JsonValue): string {
-    if (typeof value === "string") return markdownCode(value === "" ? '""' : value);
+    if (isJsonString(value)) return markdownCode(value === "" ? '""' : value);
     return markdownCode(JSON.stringify(value));
 }
 
 function directPrimitiveType(schema: JsonObject): string | undefined {
-    if (schema.const !== undefined || Array.isArray(schema.enum)) return undefined;
-    if (typeof schema.type !== "string") return undefined;
+    if (schema.const !== undefined || isJsonArray(schema.enum)) return undefined;
+    if (!isJsonString(schema.type)) return undefined;
     if (["boolean", "integer", "null", "number", "string"].includes(schema.type)) {
         return schema.type;
     }
@@ -65,25 +73,27 @@ function directPrimitiveType(schema: JsonObject): string | undefined {
 
 function valueCoveredByPrimitiveTypes(value: JsonValue, types: ReadonlySet<string>): boolean {
     if (value === null) return types.has("null");
-    if (typeof value === "number") {
+    if (isJsonNumber(value)) {
         if (types.has("number")) return true;
         return Number.isInteger(value) && types.has("integer");
     }
-    return types.has(typeof value);
+    if (isJsonBoolean(value)) return types.has("boolean");
+    if (isJsonString(value)) return types.has("string");
+    return false;
 }
 
 function schemaCoveredByPrimitiveTypes(schema: JsonObject, types: ReadonlySet<string>): boolean {
-    if (schema.const !== undefined && isJsonValue(schema.const)) {
+    if (schema.const !== undefined) {
         return valueCoveredByPrimitiveTypes(schema.const, types);
     }
-    if (Array.isArray(schema.enum)) {
-        const values = schema.enum.filter(isJsonValue);
+    if (isJsonArray(schema.enum)) {
         return (
-            values.length > 0 && values.every((value) => valueCoveredByPrimitiveTypes(value, types))
+            schema.enum.length > 0 &&
+            schema.enum.every((value) => valueCoveredByPrimitiveTypes(value, types))
         );
     }
     const alternatives = schema.anyOf ?? schema.oneOf;
-    if (!Array.isArray(alternatives) || alternatives.length === 0) return false;
+    if (!isJsonArray(alternatives) || alternatives.length === 0) return false;
     return alternatives.every(
         (alternative) =>
             isJsonObject(alternative) && schemaCoveredByPrimitiveTypes(alternative, types),
@@ -91,19 +101,19 @@ function schemaCoveredByPrimitiveTypes(schema: JsonObject, types: ReadonlySet<st
 }
 
 function schemaTypeTitle(schema: JsonObject): string | undefined {
-    if (typeof schema.title !== "string") return undefined;
+    if (!isJsonString(schema.title)) return undefined;
     const title = schema.title.trim();
     return TYPE_NAME_PATTERN.test(title) ? title : undefined;
 }
 
 function schemaType(schema: JsonObject): string {
-    if (schema.const !== undefined && isJsonValue(schema.const)) return literalType(schema.const);
-    if (Array.isArray(schema.enum)) {
-        return schema.enum.filter(isJsonValue).map(literalType).join(" | ");
+    if (schema.const !== undefined) return literalType(schema.const);
+    if (isJsonArray(schema.enum)) {
+        return schema.enum.map(literalType).join(" | ");
     }
 
     const alternatives = schema.anyOf ?? schema.oneOf;
-    if (Array.isArray(alternatives)) {
+    if (isJsonArray(alternatives)) {
         const schemas = alternatives.filter(isJsonObject);
         const primitiveTypes = new Set(
             schemas
@@ -136,9 +146,7 @@ function schemaType(schema: JsonObject): string {
         if (title !== undefined) return title;
         if (isJsonObject(schema.properties)) {
             const required = new Set(
-                Array.isArray(schema.required)
-                    ? schema.required.filter((value): value is string => typeof value === "string")
-                    : [],
+                isJsonArray(schema.required) ? schema.required.filter(isJsonString) : [],
             );
             const fields = Object.entries(schema.properties).map(([key, value]) => {
                 const optional = required.has(key) ? "" : "?";
@@ -155,14 +163,14 @@ function schemaType(schema: JsonObject): string {
         }
         return "object";
     }
-    if (Array.isArray(schema.type)) {
+    if (isJsonArray(schema.type)) {
         return schema.type
-            .filter((value): value is string => typeof value === "string")
+            .filter(isJsonString)
             .filter((value, index, values) => values.indexOf(value) === index)
             .join(" | ");
     }
-    if (typeof schema.type === "string") return schema.type;
-    if (typeof schema.$ref === "string") {
+    if (isJsonString(schema.type)) return schema.type;
+    if (isJsonString(schema.$ref)) {
         const segments = schema.$ref.split(/[/#]/).filter((segment) => segment !== "");
         return segments.at(-1) ?? "referenced value";
     }
@@ -192,7 +200,7 @@ function collectRows(
             path: path.join("."),
             type,
             defaultValue: valueAtPath(defaults, path),
-            description: typeof value.description === "string" ? value.description : "",
+            description: isJsonString(value.description) ? value.description : "",
         });
     }
     return rows;
@@ -203,8 +211,8 @@ function markdownCell(value: string): string {
 }
 
 function canRenderDefaultInline(value: JsonValue): boolean {
-    if (value === null || typeof value === "boolean" || typeof value === "number") return true;
-    if (typeof value === "string") {
+    if (value === null || isJsonBoolean(value) || isJsonNumber(value)) return true;
+    if (isJsonString(value)) {
         return (
             !value.includes("\n") && JSON.stringify(value).length <= MAX_INLINE_DEFAULT_CHARACTERS
         );

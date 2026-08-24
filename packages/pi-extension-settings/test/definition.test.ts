@@ -54,7 +54,7 @@ describe("defineExtensionSettings", () => {
         if (marker === undefined) throw new Error("definition marker is missing");
         const definitionMarker = marker;
 
-        function marked(fields: Record<string, unknown>): Record<string | symbol, unknown> {
+        function marked<const Fields extends object>(fields: Fields) {
             return { ...fields, [definitionMarker]: true };
         }
 
@@ -79,6 +79,31 @@ describe("defineExtensionSettings", () => {
                 }),
             ),
         ).toBe(true);
+        expect(
+            isExtensionSettingsDefinition(
+                marked({
+                    id: valid.id,
+                    title: valid.title,
+                    description: valid.description,
+                    schemaId: valid.schemaId,
+                    schema: valid.schema,
+                    defaultSettings: { value: 1n },
+                }),
+            ),
+        ).toBe(false);
+        expect(
+            isExtensionSettingsDefinition(
+                marked({
+                    id: valid.id,
+                    title: valid.title,
+                    description: valid.description,
+                    schemaId: valid.schemaId,
+                    schema: valid.schema,
+                    defaultSettings: valid.defaultSettings,
+                    exampleSettings: { value: 1n },
+                }),
+            ),
+        ).toBe(false);
         expect(
             isExtensionSettingsDefinition(
                 marked({

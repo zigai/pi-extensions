@@ -1,7 +1,15 @@
 import type { TObject, TSchema } from "typebox";
-import { Value } from "typebox/value";
 
-import { isJsonObject, parseJson, type JsonObject } from "./json-value.ts";
+import { Value } from "./typebox-runtime.ts";
+
+import {
+    isJsonObject,
+    isJsonString,
+    JsonValueSchema,
+    parseJson,
+    type JsonObject,
+    type JsonValue,
+} from "./json-value.ts";
 import { mergeSettings, settingsLayerFromFile } from "./settings-merge.ts";
 
 export type SettingsScope = "global" | "project";
@@ -68,7 +76,7 @@ export type ParsedSettingsLayer = {
 
 export function settingsValidationIssues(
     schema: TSchema,
-    value: unknown,
+    value: JsonValue,
 ): readonly SettingsValidationIssue[] {
     return [...Value.Errors(schema, value)].map((issue) => ({
         path: issue.instancePath === "" ? "/" : issue.instancePath,
@@ -117,10 +125,11 @@ export function parseSettingsLayer(
     }
 
     const schemaReference =
-        isJsonObject(parsed) && typeof parsed.$schema === "string" ? parsed.$schema : undefined;
+        isJsonObject(parsed) && isJsonString(parsed.$schema) ? parsed.$schema : undefined;
     try {
         const decoded: unknown = Value.Decode(layerSchema, parsed);
-        if (!isJsonObject(decoded)) {
+        const decodedJson = Value.Parse(JsonValueSchema, decoded);
+        if (!isJsonObject(decodedJson)) {
             return {
                 settings: undefined,
                 schemaReference,
@@ -135,7 +144,7 @@ export function parseSettingsLayer(
                 ],
             };
         }
-        return { settings: settingsLayerFromFile(decoded), schemaReference, diagnostics: [] };
+        return { settings: settingsLayerFromFile(decodedJson), schemaReference, diagnostics: [] };
     } catch {
         return {
             settings: undefined,
@@ -153,13 +162,18 @@ export function parseSettingsLayer(
     }
 }
 
+export type AppliedSettingsLayer = {
+    readonly settings: JsonObject;
+    readonly diagnostic?: SettingsDiagnostic;
+};
+
 export function applySettingsLayer<Schema extends TObject>(
     schema: Schema,
     current: JsonObject,
     layer: Pick<ParsedSettingsLayer, "settings">,
     path: string,
     scope: SettingsScope,
-): { readonly settings: JsonObject; readonly diagnostic?: SettingsDiagnostic } {
+): AppliedSettingsLayer {
     if (layer.settings === undefined) return { settings: current };
 
     const merged = mergeSettings(current, layer.settings);

@@ -4,11 +4,17 @@ import { isDeepStrictEqual } from "node:util";
 
 import lockfile from "proper-lockfile";
 import type { TObject, TSchema } from "typebox";
-import { Value } from "typebox/value";
 
 import type { ExtensionSettingsDefinition, ExtensionSettingsLayer } from "./definition.ts";
 import { readTextIfPresentAsync, writeTextAtomicallyAsync } from "./file-system.ts";
-import { cloneJson, formatJson, isJsonObject, type JsonObject } from "./json-value.ts";
+import {
+    cloneJson,
+    formatJson,
+    isJsonObject,
+    JsonValueSchema,
+    type JsonObject,
+} from "./json-value.ts";
+import { Value } from "./typebox-runtime.ts";
 import type { ExtensionSettingsPaths } from "./paths.ts";
 import { createSettingsDocument, createSettingsFileSchema } from "./schema-document.ts";
 import {
@@ -109,8 +115,8 @@ async function persistently<Result>(operation: () => Promise<Result>): Promise<R
 
 function typedSettingsLayer<Schema extends TObject>(
     schema: TSchema,
-    value: unknown,
-): value is ExtensionSettingsLayer<Schema> {
+    value: JsonObject,
+): value is JsonObject & ExtensionSettingsLayer<Schema> {
     return isJsonObject(value) && !("$schema" in value) && Value.Check(schema, value);
 }
 
@@ -270,24 +276,32 @@ async function runSettingsTransaction<Schema extends TObject>(
     }
 
     const candidate: unknown = options.update(currentForUpdate);
-    if (!isJsonObject(candidate)) {
+    let candidateJson;
+    try {
+        candidateJson = Value.Parse(JsonValueSchema, candidate);
+    } catch {
         return invalidUpdate("The settings updater must return a JSON object.", [
             { path: "/", message: "Expected a JSON object" },
         ]);
     }
-    if ("$schema" in candidate) {
+    if (!isJsonObject(candidateJson)) {
+        return invalidUpdate("The settings updater must return a JSON object.", [
+            { path: "/", message: "Expected a JSON object" },
+        ]);
+    }
+    if ("$schema" in candidateJson) {
         return invalidUpdate("The settings updater cannot modify $schema metadata.", [
             { path: "/$schema", message: "$schema is reserved for editor metadata" },
         ]);
     }
-    if (!Value.Check(layerSchema, candidate)) {
+    if (!Value.Check(layerSchema, candidateJson)) {
         return invalidUpdate(
             "The settings update does not match the extension schema.",
-            settingsValidationIssues(layerSchema, candidate),
+            settingsValidationIssues(layerSchema, candidateJson),
         );
     }
 
-    const nextLayer = cloneJson(candidate);
+    const nextLayer = cloneJson(candidateJson);
     const resolved = mergeSettings(validationBase, nextLayer);
     if (!Value.Check(definition.schema, resolved)) {
         return invalidUpdate(

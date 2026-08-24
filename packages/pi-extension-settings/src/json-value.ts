@@ -1,3 +1,20 @@
+import { Typebox, Value } from "./typebox-runtime.ts";
+
+const {
+    Array: ArrayType,
+    Boolean: BooleanType,
+    Cyclic,
+    Null,
+    Number: NumberType,
+    Record: RecordType,
+    Ref,
+    Refine,
+    String: StringType,
+    Union,
+    Unknown,
+    Unsafe,
+} = Typebox;
+
 export type JsonPrimitive = boolean | null | number | string;
 
 export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
@@ -10,52 +27,67 @@ export interface JsonObject {
     readonly [key: string]: JsonValue;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+const JsonObjectCandidateSchema = RecordType(StringType(), Unknown());
+
+function isPlainJsonObject(value: JsonValue): value is JsonObject {
+    if (!Value.Check(JsonObjectCandidateSchema, value)) return false;
+    const prototype = Reflect.getPrototypeOf(value);
     return (
-        value !== null &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
-        Object.prototype.toString.call(value) === "[object Object]"
+        (prototype === Object.prototype || prototype === null) &&
+        Object.getOwnPropertySymbols(value).length === 0
     );
 }
 
-export function isJsonValue(value: unknown): value is JsonValue {
-    if (value === null) return true;
+// SAFETY: TypeBox widens deeply recursive Cyclic static types. This schema exactly mirrors the
+// JsonValue recursion, rejects non-plain and symbol-keyed objects, and Value.Parse validates every
+// nested value before it receives the JsonValue type.
+export const JsonValueSchema = Unsafe<JsonValue>(
+    Cyclic(
+        {
+            JsonValue: Union([
+                Null(),
+                BooleanType(),
+                NumberType(),
+                StringType(),
+                ArrayType(Ref("JsonValue")),
+                Refine(RecordType(StringType(), Ref("JsonValue")), isPlainJsonObject),
+            ]),
+        },
+        "JsonValue",
+    ),
+);
 
-    switch (typeof value) {
-        case "boolean":
-        case "string":
-            return true;
-        case "number":
-            return Number.isFinite(value);
-        case "object":
-            if (Array.isArray(value)) return value.every(isJsonValue);
-            return isRecord(value) && Object.values(value).every(isJsonValue);
-        case "bigint":
-        case "function":
-        case "symbol":
-        case "undefined":
-            return false;
-    }
-    return false;
+const JsonBooleanSchema = BooleanType();
+const JsonNumberSchema = NumberType();
+const JsonStringSchema = StringType();
+
+export function isJsonBoolean(value: JsonValue | undefined): value is boolean {
+    return Value.Check(JsonBooleanSchema, value);
 }
 
-export function isJsonArray(value: unknown): value is JsonArray {
-    return Array.isArray(value) && value.every((item: unknown) => isJsonValue(item));
+export function isJsonNumber(value: JsonValue | undefined): value is number {
+    return Value.Check(JsonNumberSchema, value);
 }
 
-export function isJsonObject(value: unknown): value is Record<string, JsonValue> {
-    return isRecord(value) && Object.values(value).every(isJsonValue);
+export function isJsonString(value: JsonValue | undefined): value is string {
+    return Value.Check(JsonStringSchema, value);
+}
+
+export function isJsonArray(value: JsonValue | undefined): value is JsonArray {
+    return Array.isArray(value);
+}
+
+export function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+    return value !== undefined && isPlainJsonObject(value);
 }
 
 export function cloneJson<Value extends JsonValue>(value: Value): Value {
     return structuredClone(value);
 }
 
-export function parseJson(text: string): unknown {
+export function parseJson(text: string): JsonValue | undefined {
     try {
-        const value: unknown = JSON.parse(text);
-        return value;
+        return Value.Parse(JsonValueSchema, JSON.parse(text));
     } catch {
         return undefined;
     }

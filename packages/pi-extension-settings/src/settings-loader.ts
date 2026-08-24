@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 
 import type { StaticDecode, TObject, TSchema } from "typebox";
-import { Value } from "typebox/value";
 
 import type { ExtensionSettingsDefinition } from "./definition.ts";
 import { readTextIfPresent, writeTextAtomically, writeTextIfMissing } from "./file-system.ts";
@@ -17,6 +16,7 @@ import {
     type SettingsScope,
 } from "./settings-layer.ts";
 import { createSettingsRevision, type PiSettingsRevision } from "./settings-revision.ts";
+import { Value } from "./typebox-runtime.ts";
 
 /**
  * Source for the generated `config.schema.json` shipped with an extension.

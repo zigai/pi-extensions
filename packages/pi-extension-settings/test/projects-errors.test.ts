@@ -16,14 +16,14 @@ async function temporaryProject(): Promise<string> {
     return path;
 }
 
-function recordingIo(): { readonly io: CliIo; readonly out: string[]; readonly err: string[] } {
+function recordingIo() {
     const out: string[] = [];
     const err: string[] = [];
-    return {
-        io: { stdout: (message) => out.push(message), stderr: (message) => err.push(message) },
-        out,
-        err,
+    const io: CliIo = {
+        stdout: (message) => out.push(message),
+        stderr: (message) => err.push(message),
     };
+    return { io, out, err };
 }
 
 async function writeDefinition(path: string): Promise<void> {

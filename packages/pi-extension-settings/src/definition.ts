@@ -1,22 +1,49 @@
 import { isDeepStrictEqual } from "node:util";
 
-import { IsSchema, type StaticDecode, type StaticEncode, type TObject } from "typebox";
-import { Value } from "typebox/value";
+import type { Static, StaticDecode, StaticEncode, TObject, TSchema } from "typebox";
 
-import { cloneJson, isJsonObject, type JsonObject, parseJson } from "./json-value.ts";
+import { IsSchema, Type, Value } from "./typebox-runtime.ts";
+
+import {
+    cloneJson,
+    isJsonObject,
+    JsonValueSchema,
+    type JsonArray,
+    type JsonObject,
+    parseJson,
+} from "./json-value.ts";
+import { extensionSettingsDefinitionMarker as definitionMarker } from "./definition-marker.ts";
 import {
     createSettingsFileSchema,
     findNonStrictObjectSchemas,
     findUndocumentedSettings,
     hasReservedSchemaProperty,
-    isJsonSettingsDefault,
 } from "./schema-document.ts";
 import { mergeSettings } from "./settings-merge.ts";
 
-const definitionMarker = Symbol.for("@zigai/pi-extension-settings/definition");
 const SETTINGS_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
+const StringValueSchema = Type.String();
 
-function isSettingsSchema(value: unknown): value is TObject {
+export const ExtensionSettingsDefinitionCandidateSchema = Type.Object(
+    {
+        id: Type.Optional(Type.Unknown()),
+        title: Type.Optional(Type.Unknown()),
+        description: Type.Optional(Type.Unknown()),
+        schemaId: Type.Optional(Type.Unknown()),
+        schema: Type.Optional(Type.Unknown()),
+        defaultSettings: Type.Optional(Type.Unknown()),
+        exampleSettings: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+
+export type ExtensionSettingsDefinitionCandidate = Static<
+    typeof ExtensionSettingsDefinitionCandidateSchema
+> & {
+    readonly [definitionMarker]?: unknown;
+};
+
+function isSettingsSchema(value: TSchema): value is TObject {
     if (!IsSchema(value)) return false;
     let serialized: string | undefined;
     try {
@@ -29,16 +56,14 @@ function isSettingsSchema(value: unknown): value is TObject {
     return isJsonObject(parsed) && parsed.type === "object" && isJsonObject(parsed.properties);
 }
 
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function freezeRecursively(value: unknown): void {
-    if (value === null || typeof value !== "object" || Object.isFrozen(value)) return;
-    if (Array.isArray(value)) {
-        for (const item of value) freezeRecursively(item);
-    } else if (isObjectRecord(value)) {
-        for (const child of Object.values(value)) freezeRecursively(child);
+function freezeRecursively(value: JsonArray | JsonObject | TSchema): void {
+    if (Object.isFrozen(value)) return;
+    for (const child of Object.values(value)) {
+        if (Value.Check(JsonValueSchema, child)) {
+            if (Array.isArray(child) || isJsonObject(child)) freezeRecursively(child);
+        } else if (IsSchema(child)) {
+            freezeRecursively(child);
+        }
     }
     Object.freeze(value);
 }
@@ -182,26 +207,62 @@ export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
  */
 export function defineExtensionSettings<const Schema extends TObject>(
     input: ExtensionSettingsDefinitionInput<Schema>,
-): ExtensionSettingsDefinition<Schema> {
-    if (!SETTINGS_ID_PATTERN.test(input.id)) {
+): ExtensionSettingsDefinition<Schema>;
+export function defineExtensionSettings(
+    input: ExtensionSettingsDefinitionCandidate,
+): ExtensionSettingsDefinition;
+export function defineExtensionSettings(
+    input: ExtensionSettingsDefinitionCandidate,
+): ExtensionSettingsDefinition {
+    let id: string;
+    try {
+        id = Value.Parse(StringValueSchema, input.id);
+    } catch {
         throw new InvalidSettingsDefinition(
             "id must be 1-128 lowercase filename-safe characters and cannot end with punctuation",
         );
     }
-    if (input.title.trim() === "") {
+    if (!SETTINGS_ID_PATTERN.test(id)) {
+        throw new InvalidSettingsDefinition(
+            "id must be 1-128 lowercase filename-safe characters and cannot end with punctuation",
+        );
+    }
+
+    let title: string;
+    try {
+        title = Value.Parse(StringValueSchema, input.title);
+    } catch {
         throw new InvalidSettingsDefinition("title must not be blank");
     }
-    if (input.description.trim() === "") {
+    if (title.trim() === "") throw new InvalidSettingsDefinition("title must not be blank");
+
+    let description: string;
+    try {
+        description = Value.Parse(StringValueSchema, input.description);
+    } catch {
+        throw new InvalidSettingsDefinition("description must not be blank");
+    }
+    if (description.trim() === "") {
         throw new InvalidSettingsDefinition("description must not be blank");
     }
 
-    const schemaId = input.schemaId ?? `urn:pi-extension-settings:${input.id}`;
+    let schemaId = `urn:pi-extension-settings:${id}`;
+    if (input.schemaId !== undefined) {
+        try {
+            schemaId = Value.Parse(StringValueSchema, input.schemaId);
+        } catch {
+            throw new InvalidSettingsDefinition("schemaId must be an absolute URI");
+        }
+    }
     try {
         new URL(schemaId);
     } catch {
         throw new InvalidSettingsDefinition("schemaId must be an absolute URI");
     }
 
+    if (!IsSchema(input.schema) || !isSettingsSchema(input.schema)) {
+        throw new InvalidSettingsDefinition("schema must be a TypeBox object schema");
+    }
     const schema = Value.Clone(input.schema);
     if (hasReservedSchemaProperty(schema)) {
         throw new InvalidSettingsDefinition("$schema is reserved for editor metadata");
@@ -229,7 +290,14 @@ export function defineExtensionSettings<const Schema extends TObject>(
             `required settings must have valid defaults${issues === "" ? "" : `: ${issues}`}`,
         );
     }
-    if (!isJsonSettingsDefault(rawDefaults)) {
+    let serializedDefaults: string;
+    try {
+        serializedDefaults = JSON.stringify(rawDefaults);
+    } catch {
+        throw new InvalidSettingsDefinition("schema defaults must produce a JSON object");
+    }
+    const parsedDefaults = parseJson(serializedDefaults);
+    if (!isJsonObject(parsedDefaults) || !isDeepStrictEqual(rawDefaults, parsedDefaults)) {
         throw new InvalidSettingsDefinition("schema defaults must produce a JSON object");
     }
 
@@ -239,22 +307,32 @@ export function defineExtensionSettings<const Schema extends TObject>(
         throw new InvalidSettingsDefinition("schema defaults could not be decoded");
     }
 
-    const defaultSettings = cloneJson(rawDefaults);
+    const defaultSettings = cloneJson(parsedDefaults);
     let exampleSettings: JsonObject | undefined;
     if (input.exampleSettings !== undefined) {
-        if (!isJsonSettingsDefault(input.exampleSettings)) {
+        let serializedExample: string;
+        try {
+            serializedExample = JSON.stringify(input.exampleSettings);
+        } catch {
+            throw new InvalidSettingsDefinition("exampleSettings must be a JSON object");
+        }
+        const parsedExample = parseJson(serializedExample);
+        if (
+            !isJsonObject(parsedExample) ||
+            !isDeepStrictEqual(input.exampleSettings, parsedExample)
+        ) {
             throw new InvalidSettingsDefinition("exampleSettings must be a JSON object");
         }
 
         const fileSchema = createSettingsFileSchema({
-            id: input.id,
-            title: input.title,
-            description: input.description,
+            id,
+            title,
+            description,
             schemaId,
             schema,
         });
-        if (!Value.Check(fileSchema, input.exampleSettings)) {
-            const issues = [...Value.Errors(fileSchema, input.exampleSettings)]
+        if (!Value.Check(fileSchema, parsedExample)) {
+            const issues = [...Value.Errors(fileSchema, parsedExample)]
                 .map((issue) => `${issue.instancePath || "/"}: ${issue.message}`)
                 .join("; ");
             throw new InvalidSettingsDefinition(
@@ -262,7 +340,7 @@ export function defineExtensionSettings<const Schema extends TObject>(
             );
         }
 
-        const mergedExample = mergeSettings(defaultSettings, input.exampleSettings);
+        const mergedExample = mergeSettings(defaultSettings, parsedExample);
         if (!Value.Check(schema, mergedExample)) {
             throw new InvalidSettingsDefinition(
                 "exampleSettings must resolve to valid settings when merged with defaults",
@@ -278,18 +356,18 @@ export function defineExtensionSettings<const Schema extends TObject>(
                 "exampleSettings must demonstrate configuration that differs from the defaults",
             );
         }
-        exampleSettings = cloneJson(input.exampleSettings);
+        exampleSettings = cloneJson(parsedExample);
     }
 
     freezeRecursively(schema);
     freezeRecursively(defaultSettings);
-    freezeRecursively(exampleSettings);
+    if (exampleSettings !== undefined) freezeRecursively(exampleSettings);
 
-    const definition: ExtensionSettingsDefinition<Schema> = Object.freeze({
+    const definition: ExtensionSettingsDefinition = Object.freeze({
         [definitionMarker]: true as const,
-        id: input.id,
-        title: input.title,
-        description: input.description,
+        id,
+        title,
+        description,
         schemaId,
         schema,
         defaultSettings,
@@ -302,25 +380,50 @@ export function defineExtensionSettings<const Schema extends TObject>(
 }
 
 export function isExtensionSettingsDefinition(
-    value: unknown,
+    value: ExtensionSettingsDefinitionCandidate,
 ): value is ExtensionSettingsDefinition {
-    if (value === null || typeof value !== "object") return false;
     if (!(definitionMarker in value) || value[definitionMarker] !== true) return false;
-    if (!("id" in value) || typeof value.id !== "string" || !SETTINGS_ID_PATTERN.test(value.id)) {
-        return false;
-    }
-    if (!("title" in value) || typeof value.title !== "string") return false;
-    if (!("description" in value) || typeof value.description !== "string") return false;
-    if (!("schemaId" in value) || typeof value.schemaId !== "string") return false;
-    if (!("schema" in value) || !isSettingsSchema(value.schema)) return false;
-    if (!("defaultSettings" in value) || !isJsonSettingsDefault(value.defaultSettings))
-        return false;
     if (
-        "exampleSettings" in value &&
-        value.exampleSettings !== undefined &&
-        !isJsonSettingsDefault(value.exampleSettings)
+        !("id" in value) ||
+        !Value.Check(StringValueSchema, value.id) ||
+        !SETTINGS_ID_PATTERN.test(value.id)
     ) {
         return false;
+    }
+    if (!("title" in value) || !Value.Check(StringValueSchema, value.title)) return false;
+    if (!("description" in value) || !Value.Check(StringValueSchema, value.description)) {
+        return false;
+    }
+    if (!("schemaId" in value) || !Value.Check(StringValueSchema, value.schemaId)) return false;
+    if (!("schema" in value) || !IsSchema(value.schema) || !isSettingsSchema(value.schema)) {
+        return false;
+    }
+    if (!("defaultSettings" in value)) return false;
+    const exampleSettings = "exampleSettings" in value ? value.exampleSettings : undefined;
+    let serializedDefaults: string;
+    try {
+        serializedDefaults = JSON.stringify(value.defaultSettings);
+    } catch {
+        return false;
+    }
+    const parsedDefaults = parseJson(serializedDefaults);
+    if (
+        !isJsonObject(parsedDefaults) ||
+        !isDeepStrictEqual(value.defaultSettings, parsedDefaults)
+    ) {
+        return false;
+    }
+    if (exampleSettings !== undefined) {
+        let serializedExample: string;
+        try {
+            serializedExample = JSON.stringify(exampleSettings);
+        } catch {
+            return false;
+        }
+        const parsedExample = parseJson(serializedExample);
+        if (!isJsonObject(parsedExample) || !isDeepStrictEqual(exampleSettings, parsedExample)) {
+            return false;
+        }
     }
     return true;
 }

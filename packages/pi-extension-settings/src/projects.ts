@@ -3,16 +3,26 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { SettingsArtifactTargets } from "./artifacts.ts";
-import { isExtensionSettingsDefinition, type ExtensionSettingsDefinition } from "./definition.ts";
+import {
+    defineExtensionSettings,
+    ExtensionSettingsDefinitionCandidateSchema,
+    type ExtensionSettingsDefinition,
+} from "./definition.ts";
 import { readTextIfPresent } from "./file-system.ts";
-import { isJsonObject, parseJson, type JsonObject } from "./json-value.ts";
+import { isJsonObject, isJsonString, parseJson, type JsonObject } from "./json-value.ts";
+import { Type, Value } from "./typebox-runtime.ts";
 
 export const PACKAGE_MANIFEST_KEY = "piExtensionSettings";
+
+const ImportedDefinitionModuleSchema = Type.Object({
+    default: ExtensionSettingsDefinitionCandidateSchema,
+});
 
 type SettingsProjectManifest = {
     readonly definition: string;
     readonly schema: string;
     readonly readme: string;
+    readonly prevalidation?: string;
     readonly globalPath?: string;
 };
 
@@ -28,7 +38,7 @@ function manifestError(path: string, reason: string): Error {
 
 function stringProperty(object: JsonObject, key: string): string | undefined {
     const value = object[key];
-    return typeof value === "string" && value.trim() !== "" ? value : undefined;
+    return isJsonString(value) && value.trim() !== "" ? value : undefined;
 }
 
 function parseSettingsManifest(
@@ -41,7 +51,7 @@ function parseSettingsManifest(
         throw manifestError(packagePath, `${PACKAGE_MANIFEST_KEY} must be an object`);
     }
 
-    const supported = new Set(["definition", "schema", "readme", "globalPath"]);
+    const supported = new Set(["definition", "schema", "readme", "prevalidation", "globalPath"]);
     const unknownKeys = Object.keys(raw).filter((key) => !supported.has(key));
     if (unknownKeys.length > 0) {
         throw manifestError(packagePath, `unknown keys: ${unknownKeys.join(", ")}`);
@@ -54,10 +64,16 @@ function parseSettingsManifest(
 
     const schema = stringProperty(raw, "schema") ?? "config.schema.json";
     const readme = stringProperty(raw, "readme") ?? "README.md";
+    const prevalidation = stringProperty(raw, "prevalidation");
     const globalPath = stringProperty(raw, "globalPath");
+    if (prevalidation === undefined) {
+        return globalPath === undefined
+            ? { definition, schema, readme }
+            : { definition, schema, readme, globalPath };
+    }
     return globalPath === undefined
-        ? { definition, schema, readme }
-        : { definition, schema, readme, globalPath };
+        ? { definition, schema, readme, prevalidation }
+        : { definition, schema, readme, prevalidation, globalPath };
 }
 
 function resolveInside(packageRoot: string, configuredPath: string): string | undefined {
@@ -73,10 +89,10 @@ function resolveInside(packageRoot: string, configuredPath: string): string | un
 function workspacePatterns(packageJson: JsonObject): readonly string[] {
     const workspaces = packageJson.workspaces;
     if (Array.isArray(workspaces)) {
-        return workspaces.filter((value): value is string => typeof value === "string");
+        return workspaces.filter(isJsonString);
     }
     if (!isJsonObject(workspaces) || !Array.isArray(workspaces.packages)) return [];
-    return workspaces.packages.filter((value): value is string => typeof value === "string");
+    return workspaces.packages.filter(isJsonString);
 }
 
 function readPackageJson(path: string): JsonObject {
@@ -107,10 +123,6 @@ async function packageJsonPaths(root: string): Promise<readonly string[]> {
     return [...paths].sort();
 }
 
-function isObjectWithDefault(value: unknown): value is { readonly default: unknown } {
-    return value !== null && typeof value === "object" && "default" in value;
-}
-
 async function importDefinition(path: string): Promise<ExtensionSettingsDefinition> {
     let imported: unknown;
     try {
@@ -124,12 +136,20 @@ async function importDefinition(path: string): Promise<ExtensionSettingsDefiniti
         );
     }
 
-    if (!isObjectWithDefault(imported) || !isExtensionSettingsDefinition(imported.default)) {
-        throw new Error(
-            `Invalid settings definition module ${path}: default export must be created by defineExtensionSettings`,
-        );
+    const invalidDefaultMessage = `Invalid settings definition module ${path}: default export must be created by defineExtensionSettings or be a valid definition input`;
+    let candidateModule;
+    try {
+        candidateModule = Value.Parse(ImportedDefinitionModuleSchema, imported);
+    } catch (cause: unknown) {
+        throw new Error(invalidDefaultMessage, { cause });
     }
-    return imported.default;
+    try {
+        // Always execute exhaustive authoring validation, including when the module exported a
+        // pre-existing definition created through a runtime fast path.
+        return defineExtensionSettings(candidateModule.default);
+    } catch (cause: unknown) {
+        throw new Error(invalidDefaultMessage, { cause });
+    }
 }
 
 async function loadProject(packagePath: string): Promise<SettingsArtifactProject | undefined> {
@@ -141,18 +161,40 @@ async function loadProject(packagePath: string): Promise<SettingsArtifactProject
     const definitionPath = resolveInside(packageRoot, manifest.definition);
     const schemaPath = resolveInside(packageRoot, manifest.schema);
     const readmePath = resolveInside(packageRoot, manifest.readme);
-    if (definitionPath === undefined || schemaPath === undefined || readmePath === undefined) {
+    const prevalidationPath =
+        manifest.prevalidation === undefined
+            ? undefined
+            : resolveInside(packageRoot, manifest.prevalidation);
+    if (
+        definitionPath === undefined ||
+        schemaPath === undefined ||
+        readmePath === undefined ||
+        (manifest.prevalidation !== undefined && prevalidationPath === undefined)
+    ) {
         throw manifestError(
             packagePath,
-            "definition, schema, and readme paths must stay inside the package",
+            "definition, schema, readme, and prevalidation paths must stay inside the package",
         );
     }
 
     const definition = await importDefinition(definitionPath);
-    const targets: SettingsArtifactTargets =
-        manifest.globalPath === undefined
-            ? { schemaPath, readmePath }
-            : { schemaPath, readmePath, globalPath: manifest.globalPath };
+    let targets: SettingsArtifactTargets;
+    if (prevalidationPath === undefined) {
+        targets =
+            manifest.globalPath === undefined
+                ? { schemaPath, readmePath }
+                : { schemaPath, readmePath, globalPath: manifest.globalPath };
+    } else {
+        targets =
+            manifest.globalPath === undefined
+                ? { schemaPath, readmePath, prevalidationPath }
+                : {
+                      schemaPath,
+                      readmePath,
+                      prevalidationPath,
+                      globalPath: manifest.globalPath,
+                  };
+    }
     return { packageRoot, definition, targets };
 }
 

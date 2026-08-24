@@ -1,12 +1,8 @@
-import {
-    CONFIG_DIR_NAME,
-    getAgentDir,
-    type ExtensionContext,
-    withFileMutationQueue,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TObject } from "typebox";
 
 import type { ExtensionSettingsDefinition } from "./definition.ts";
+import { getPiAgentDir, PI_CONFIG_DIR_NAME } from "./pi-host-paths.ts";
 import { resolveGlobalSettingsPaths, resolveProjectSettingsPaths } from "./paths.ts";
 import {
     loadSettings,
@@ -62,7 +58,7 @@ export type {
  * @param extensionId The definition ID used in the settings filename.
  */
 export function getPiGlobalSettingsPath(extensionId: string): string {
-    return resolveGlobalSettingsPaths(getAgentDir(), extensionId).configPath;
+    return resolveGlobalSettingsPaths(getPiAgentDir(), extensionId).configPath;
 }
 
 /**
@@ -75,7 +71,7 @@ export function getPiGlobalSettingsPath(extensionId: string): string {
  * @param cwd The project directory, normally `ctx.cwd`.
  */
 export function getPiProjectSettingsPath(extensionId: string, cwd: string): string {
-    return resolveProjectSettingsPaths(cwd, CONFIG_DIR_NAME, extensionId).configPath;
+    return resolveProjectSettingsPaths(cwd, PI_CONFIG_DIR_NAME, extensionId).configPath;
 }
 
 /**
@@ -116,24 +112,32 @@ export function loadPiExtensionSettings<const Schema extends TObject>(
     options: LoadPiExtensionSettingsOptions,
 ): LoadedPiExtensionSettings<Schema> {
     return loadSettings(definition, {
-        agentDir: getAgentDir(),
+        agentDir: getPiAgentDir(),
         bundledSchema: options.bundledSchema,
         project: {
             cwd: context.cwd,
-            configDirName: CONFIG_DIR_NAME,
+            configDirName: PI_CONFIG_DIR_NAME,
             trusted: context.isProjectTrusted(),
         },
     });
 }
 
+type FileMutationQueue = <Result>(
+    path: string,
+    operation: () => Promise<Result>,
+) => Promise<Result>;
+
 async function withFileMutationQueues<Result>(
     paths: readonly string[],
     operation: () => Promise<Result>,
+    withFileMutationQueue: FileMutationQueue,
     index = 0,
 ): Promise<Result> {
     const path = paths[index];
     if (path === undefined) return operation();
-    return withFileMutationQueue(path, () => withFileMutationQueues(paths, operation, index + 1));
+    return withFileMutationQueue(path, () =>
+        withFileMutationQueues(paths, operation, withFileMutationQueue, index + 1),
+    );
 }
 
 /**
@@ -166,19 +170,25 @@ export async function updatePiExtensionSettings<const Schema extends TObject>(
     options: UpdatePiExtensionSettingsOptions<Schema>,
 ): Promise<UpdatePiExtensionSettingsResult> {
     // Read-only consumers should not initialize the lock library or its process signal handlers.
-    const { updateSettingsTransaction } = await import("./settings-transaction.ts");
-    const global = resolveGlobalSettingsPaths(getAgentDir(), definition.id);
-    const project = resolveProjectSettingsPaths(context.cwd, CONFIG_DIR_NAME, definition.id);
+    const [{ updateSettingsTransaction }, { withFileMutationQueue }] = await Promise.all([
+        import("./settings-transaction.ts"),
+        import("@earendil-works/pi-coding-agent"),
+    ]);
+    const global = resolveGlobalSettingsPaths(getPiAgentDir(), definition.id);
+    const project = resolveProjectSettingsPaths(context.cwd, PI_CONFIG_DIR_NAME, definition.id);
     const projectTrusted = context.isProjectTrusted();
     const paths =
         options.scope === "global"
             ? [global.configPath]
             : [global.configPath, project.configPath].sort();
-    return withFileMutationQueues(paths, () =>
-        updateSettingsTransaction(definition, {
-            ...options,
-            paths: { global, project },
-            projectTrusted,
-        }),
+    return withFileMutationQueues(
+        paths,
+        () =>
+            updateSettingsTransaction(definition, {
+                ...options,
+                paths: { global, project },
+                projectTrusted,
+            }),
+        withFileMutationQueue,
     );
 }

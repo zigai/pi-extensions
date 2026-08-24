@@ -3,20 +3,21 @@ import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } 
 import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
+import { Type, Value } from "./typebox-runtime.ts";
+
 type WriteStatus = "created" | "unchanged" | "updated";
 
-function errorCode(cause: unknown): string | undefined {
-    if (!(cause instanceof Error) || !("code" in cause) || typeof cause.code !== "string") {
-        return undefined;
-    }
-    return cause.code;
+const CodedErrorSchema = Type.Object({ code: Type.String() });
+
+function errorCode(cause: Error): string | undefined {
+    return Value.Check(CodedErrorSchema, cause) ? cause.code : undefined;
 }
 
 export function readTextIfPresent(path: string): string | undefined {
     try {
         return readFileSync(path, "utf8");
     } catch (cause: unknown) {
-        if (errorCode(cause) === "ENOENT") return undefined;
+        if (cause instanceof Error && errorCode(cause) === "ENOENT") return undefined;
         throw cause;
     }
 }
@@ -25,7 +26,7 @@ export async function readTextIfPresentAsync(path: string): Promise<string | und
     try {
         return await readFile(path, "utf8");
     } catch (cause: unknown) {
-        if (errorCode(cause) === "ENOENT") return undefined;
+        if (cause instanceof Error && errorCode(cause) === "ENOENT") return undefined;
         throw cause;
     }
 }
@@ -42,7 +43,7 @@ export function writeTextIfMissing(path: string, content: string, mode = 0o600):
             linkSync(temporaryPath, path);
             return "created";
         } catch (cause: unknown) {
-            if (errorCode(cause) === "EEXIST") return "unchanged";
+            if (cause instanceof Error && errorCode(cause) === "EEXIST") return "unchanged";
             throw cause;
         }
     } finally {
@@ -84,7 +85,7 @@ export async function writeTextAtomicallyAsync(
     try {
         mode = (await stat(path)).mode & 0o777;
     } catch (cause: unknown) {
-        if (errorCode(cause) !== "ENOENT") throw cause;
+        if (!(cause instanceof Error) || errorCode(cause) !== "ENOENT") throw cause;
     }
 
     const directory = dirname(path);

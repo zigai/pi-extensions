@@ -190,6 +190,23 @@ describe("settings transactions", () => {
         expect(await readFile(setup.loaded.globalConfigPath, "utf8")).toBe(before);
     });
 
+    it("rejects class instances even when their fields match the layer schema", async () => {
+        const setup = await testSetup();
+        const before = await readFile(setup.loaded.globalConfigPath, "utf8");
+
+        class SettingsUpdate {
+            readonly enabled = false;
+        }
+
+        const result = await updatePiExtensionSettings(setup.definition, setup.context, {
+            scope: "global",
+            update: () => new SettingsUpdate(),
+        });
+
+        expect(result).toMatchObject({ status: "invalid-update" });
+        expect(await readFile(setup.loaded.globalConfigPath, "utf8")).toBe(before);
+    });
+
     it("rejects reserved metadata returned by an updater", async () => {
         const setup = await testSetup();
         const result = await updatePiExtensionSettings(setup.definition, setup.context, {
