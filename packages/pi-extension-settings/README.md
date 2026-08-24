@@ -1,62 +1,95 @@
 # Pi Extension Settings
 
-Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions.
+Persistent, typed settings for [Pi](https://github.com/badlogic/pi-mono) extensions. Define one TypeBox schema and use it for defaults, runtime validation, `config.schema.json`, and generated documentation.
 
-Define one TypeBox schema and this package uses it for defaults, runtime validation, `config.schema.json`, and generated documentation. An optional example settings layer can demonstrate a realistic non-default setup in the README.
+## Install
 
-The runtime API consists of:
-
-- `defineExtensionSettings()` for defining settings.
-- `loadPiExtensionSettings()` for loading defaults, global settings, and trusted project overrides.
-- `updatePiExtensionSettings()` for validated, conflict-aware global or project updates.
-- `getPiGlobalSettingsPath()` and `getPiProjectSettingsPath()` for locating settings files.
-
-## Recommended: use the template
-
-For the easiest setup, use [pi-extension-template](https://github.com/zigai/pi-extension-template), which has extension settings built in.
-
-If you do not want to use the template, or you want to add settings to an existing extension, follow the manual setup below.
-
-## Manual setup
-
-### Install
-
-Install [@zigai/pi-extension-settings](https://github.com/zigai/pi-extension-settings):
+We recommend starting new extensions with [pi-extension-template](https://github.com/zigai/pi-extension-template) because it includes settings support. To add settings to an existing extension, install the package:
 
 ```sh
 npm install @zigai/pi-extension-settings
 ```
 
-### Define and load settings
+## Define settings
+
+Keep schema authoring in `src/settings-input.ts`. The generator imports this module, so it must not import the generated artifact or Pi runtime.
 
 ```ts
-import { defineExtensionSettings } from "@zigai/pi-extension-settings";
-import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-extension-settings/pi";
+import type { ExtensionSettingsDefinitionInput } from "@zigai/pi-extension-settings";
 import { Type } from "typebox";
 
-export const settingsDefinition = defineExtensionSettings({
+export const settingsSchema = Type.Object(
+  {
+    enabled: Type.Boolean({
+      default: true,
+      description: "Enable the extension's behavior.",
+      "x-control": "switch",
+    }),
+    excludedTools: Type.Array(Type.String(), {
+      default: [],
+      description: "Tool names the extension should ignore.",
+    }),
+  },
+  { additionalProperties: false },
+);
+
+const settingsInput = {
   id: "pi-example",
   title: "Pi Example",
   description: "Settings for Pi Example.",
   schemaId: "https://raw.githubusercontent.com/zigai/pi-example/main/config.schema.json",
-  schema: Type.Object(
-    {
-      enabled: Type.Boolean({
-        default: true,
-        description: "Enable the extension.",
-        "x-control": "switch",
-      }),
-      excludedTools: Type.Array(Type.String(), {
-        default: [],
-        description: "Tool names the extension should ignore.",
-      }),
-    },
-    { additionalProperties: false },
-  ),
+  schema: settingsSchema,
   exampleSettings: {
     excludedTools: ["bash", "write"],
   },
-});
+} as const satisfies ExtensionSettingsDefinitionInput<typeof settingsSchema>;
+
+export default settingsInput;
+```
+
+`exampleSettings` is optional. Use it only when complex settings need a realistic non-default example in the generated documentation.
+
+## Generate artifacts
+
+Add the definition, prevalidation artifact, and commands to `package.json`:
+
+```json
+{
+  "piExtensionSettings": {
+    "definition": "./src/settings-input.ts",
+    "prevalidation": "./src/settings.prevalidated.ts"
+  },
+  "scripts": {
+    "config:generate": "pi-extension-settings generate",
+    "config:check": "pi-extension-settings check"
+  }
+}
+```
+
+The schema and README paths default to `config.schema.json` and `README.md`; set `schema` or `readme` in the manifest only to override them.
+
+```sh
+npm run config:generate
+npm run config:check
+```
+
+`generate` writes the schema and prevalidation artifact and updates the generated README configuration section. Commit all three outputs. `check` verifies them without modifying files, making it suitable for pre-commit and CI. Both commands support standalone packages and npm workspaces.
+
+## Load settings in Pi
+
+The `/pi` and `/runtime` imports are for extension code loaded by Pi. In Node.js scripts and other authoring tools, import from the package root instead.
+
+```ts
+import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-extension-settings/pi";
+import { definePrevalidatedExtensionSettings } from "@zigai/pi-extension-settings/runtime";
+import type { StaticDecode } from "typebox";
+
+import artifact from "./settings.prevalidated.ts";
+import settingsInput, { settingsSchema } from "./settings-input.ts";
+
+export type ExtensionSettings = StaticDecode<typeof settingsSchema>;
+
+export const settingsDefinition = definePrevalidatedExtensionSettings(settingsInput, artifact);
 
 export function loadExampleSettings(ctx: PiSettingsContext) {
   return loadPiExtensionSettings(settingsDefinition, ctx, {
@@ -67,12 +100,15 @@ export function loadExampleSettings(ctx: PiSettingsContext) {
 export default settingsDefinition;
 ```
 
-`exampleSettings` is optional. Add it only when complex settings need an **Advanced example** alongside the generated **Defaults**.
+Settings are resolved from schema defaults, global settings, and then trusted project settings. Objects merge recursively; arrays and scalar values replace earlier values. Invalid layers are ignored and reported in `diagnostics`.
 
-### Update settings transactionally
+Loading installs the generated editor schema and creates the global settings file when missing. It never overwrites an existing settings file or creates a project settings file. Use `getPiGlobalSettingsPath()` and `getPiProjectSettingsPath()` when you need the resolved paths.
 
-Use `updatePiExtensionSettings()` to change the latest global or project settings layer. It handles
-locking, validation, and atomic writes. Load settings first to install and verify the schema.
+`StaticDecode` represents the resolved value after TypeBox codecs run; use it instead of `Static` for runtime settings types.
+
+## Update settings
+
+Use `updatePiExtensionSettings()` to update the latest global or project settings layer with locking, validation, and atomic writes. Load settings first to install and verify the schema.
 
 ```ts
 import { updatePiExtensionSettings } from "@zigai/pi-extension-settings/pi";
@@ -87,77 +123,29 @@ if (result.status !== "updated" && result.status !== "unchanged") {
 }
 ```
 
-The callback receives the latest encoded layer. Invalid files or updates are left untouched, and
-project updates require a trusted project.
+The synchronous callback receives the latest encoded layer and runs once while the settings file is locked. Invalid files and updates remain untouched, and project updates require a trusted project.
 
-To detect stale editor snapshots, pass the loaded `globalRevision` or `projectRevision` as
-`expectedRevision`; a mismatch returns `conflict`. Omit it to always update the latest valid layer.
+For snapshot-based editors, pass the loaded `globalRevision` or `projectRevision` as `expectedRevision`; a stale revision returns `conflict`. Omit it to update the latest valid layer.
 
-### Optional TUI control hints
+## Optional UI controls
 
-TypeBox preserves custom JSON Schema annotations in the generated schema. Extension authors can use
-the optional `x-control` keyword to tell compatible settings editors how a property should be
-presented when its ordinary JSON Schema shape is ambiguous. The annotation does not change runtime
-validation, defaults, or loading behavior.
+The optional `x-control` TypeBox annotation tells compatible settings editors how to present a property. It does not affect validation, defaults, or loading. [Pi Settings UI](https://github.com/zigai/pi-settings-ui) supports:
 
-[Pi Settings UI](https://github.com/zigai/pi-settings-ui) recognizes these values:
+| `x-control`   | Compatible schema           | Presentation                                                            |
+| ------------- | --------------------------- | ----------------------------------------------------------------------- |
+| `text`        | string                      | Single-line input                                                       |
+| `textarea`    | string                      | Multiline editor                                                        |
+| `switch`      | boolean                     | Toggle                                                                  |
+| `segmented`   | primitive choices           | Compact Left/Right choice                                               |
+| `select`      | primitive choices           | Searchable picker                                                       |
+| `slider`      | number or integer           | Range control using schema bounds and `multipleOf`                      |
+| `numeric`     | number or integer           | Numeric input                                                           |
+| `color`       | string                      | Text input with a hexadecimal color preview                             |
+| `path`        | string                      | Text input with Tab completion                                          |
+| `combobox`    | string or string-only union | Suggestions from `examples` or union branches, plus custom valid values |
+| `json-editor` | any property schema         | Validated JSON editor                                                   |
 
-| `x-control`   | Compatible schema           | TUI behavior                                                                                                      |
-| ------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `text`        | string                      | Single-line inline input.                                                                                         |
-| `textarea`    | string                      | Pi's multiline editor.                                                                                            |
-| `switch`      | boolean                     | Boolean toggle.                                                                                                   |
-| `segmented`   | primitive choices           | Compact choice changed with Left and Right.                                                                       |
-| `select`      | primitive choices           | Searchable choice picker.                                                                                         |
-| `slider`      | number or integer           | Compact range bar with stepping and exact-number entry. Schema bounds and `multipleOf` refine its range and step. |
-| `numeric`     | number or integer           | Single-line numeric input.                                                                                        |
-| `color`       | string                      | Single-line color input with a live swatch for hexadecimal colors.                                                |
-| `path`        | string                      | Single-line path input with Tab completion.                                                                       |
-| `combobox`    | string or string-only union | Searchable suggestions from string `examples` or finite string branches, plus a custom schema-validated value.    |
-| `json-editor` | any property schema         | Full validated JSON editor instead of a shape-derived control.                                                    |
-
-Pass the annotation as a quoted TypeBox option:
-
-```ts
-const schema = Type.Object({
-  prompt: Type.String({ "x-control": "textarea" }),
-  root: Type.String({ "x-control": "path" }),
-  limit: Type.Integer({ minimum: 1, maximum: 20, "x-control": "slider" }),
-  color: Type.String({
-    "x-control": "combobox",
-    examples: ["accent", "warning"],
-  }),
-});
-```
-
-### Generate the schema and documentation
-
-Add the settings definition and commands to `package.json`:
-
-```json
-{
-  "piExtensionSettings": {
-    "definition": "./src/settings.ts",
-    "schema": "./config.schema.json",
-    "readme": "./README.md"
-  },
-  "scripts": {
-    "config:generate": "pi-extension-settings generate",
-    "config:check": "pi-extension-settings check"
-  }
-}
-```
-
-Then run:
-
-```sh
-npm run config:generate
-npm run config:check
-```
-
-`generate` writes `config.schema.json` and adds or updates the generated configuration section in the README.
-
-`check` verifies that both artifacts are up to date without changing files, making it suitable for pre-commit and CI.
+Pass the annotation as a quoted schema option, as shown by `"x-control": "switch"` in the definition example.
 
 ## License
 
