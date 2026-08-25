@@ -8,8 +8,8 @@ const HELP = `Usage: pi-extension-settings <command> [--root PATH]
 Generate and verify TypeBox-derived Pi extension settings artifacts.
 
 Commands:
-  generate    Update config.schema.json and marked README sections.
-  check       Fail when generated schema or README artifacts are stale.
+  generate    Update generated schema, prevalidation, and marked README artifacts.
+  check       Fail when any generated settings artifact is stale.
 
 Options:
   --root PATH  Standalone package or npm workspace root (default: current directory)
