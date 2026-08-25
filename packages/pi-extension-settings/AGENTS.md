@@ -8,6 +8,14 @@
 - Keep Pi-specific path and trust resolution in `src/pi.ts`; internal loading remains testable with explicit paths.
 - Publish compiled JavaScript and declarations from `dist`, but do not commit that generated directory. Git installs and package publishing build it through `prepare`; executable package exports must continue to target compiled JavaScript rather than TypeScript source.
 
+## Consumer Lifecycle Contract
+
+- Loading performs synchronous filesystem work. Public documentation and examples must keep module import and the extension factory free of settings I/O.
+- This package is stateless with respect to Pi sessions. The consuming extension owns exactly-once session caching, the activation sentinel, diagnostic presentation, enabled behavior, cancellation, stale-result rejection, reset, and disposal.
+- Recommend `session_start` as the reset boundary and the first callback that needs settings as the activation boundary. When enabled behavior genuinely begins during `session_start`, loading there is correct.
+- Explain that deferred loading moves work from Pi startup to first feature use; it does not remove the load cost.
+- Do not add a generic session activation helper unless it can preserve extension-specific lifecycle ownership without hiding diagnostics, invalid settings, cancellation, or cleanup.
+
 ## Configuration Invariants
 
 - TypeBox definitions are the source of truth for runtime types, persisted input schemas, defaults, checked-in JSON Schema, README option tables, README default JSON, and optional example settings.

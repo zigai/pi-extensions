@@ -86,6 +86,10 @@ export function getPiProjectSettingsPath(extensionId: string, cwd: string): stri
  * installs the editor schema and creates the global settings file if it does not exist. Existing
  * settings files are never overwritten, and project settings files are never created.
  *
+ * Keep this call out of module import and the extension factory. Cache its result once per session
+ * and invoke it from the first lifecycle callback that needs settings. If enabled behavior must
+ * begin during `session_start`, that handler is the correct first-use boundary.
+ *
  * @template Schema The TypeBox object schema used to infer the decoded `settings` value.
  * @param definition A validated definition created by `defineExtensionSettings`.
  * @param context The current Pi extension context.
