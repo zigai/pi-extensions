@@ -128,6 +128,10 @@ try {
         "dist/runtime.d.ts",
         "dist/cli-entry.js",
         "README.md",
+        "docs/manual-setup.md",
+        "docs/generation.md",
+        "docs/runtime.md",
+        "docs/ui-controls.md",
         "LICENSE",
     ]) {
         if (!packedFiles.has(required)) throw new Error(`npm package is missing ${required}`);
@@ -232,7 +236,7 @@ try {
         }
     }
 
-    console.log("packed package smoke passed");
+    console.log("packed package check passed");
 } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
 }
