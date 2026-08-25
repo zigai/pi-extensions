@@ -31,9 +31,9 @@ Settings resolve in a predictable order:
 schema defaults ← global settings ← trusted-project settings
 ```
 
-Objects merge recursively; arrays and scalar values replace earlier values. Invalid layers are ignored and returned as diagnostics. Existing settings files are never silently overwritten.
+Project settings override global settings, and global settings override defaults. Nested object fields are combined; lists and individual values are replaced. Invalid settings are skipped and reported. Existing files are never overwritten automatically.
 
-Keep module import and extension registration free of settings I/O. Resolve settings once per session at the first lifecycle event that needs them. Use Pi's package configuration when you need a true zero-load extension switch.
+To keep startup fast, load settings once per session, when the extension first needs them. To disable an extension without loading it, disable its package in Pi's configuration.
 
 ## Documentation
 
