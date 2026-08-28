@@ -6,6 +6,7 @@ import {
     buildRepositoryContext,
     createSessionNamingState,
     getNamingRequest,
+    isOpaqueNamingPrompt,
     measureSession,
     normalizeSessionName,
     parseSessionNamingState,
@@ -68,12 +69,12 @@ describe("session naming", () => {
             toolCalls: 1,
             tokens: 20,
         });
-        expect(buildConversationContext(session.getBranch(), "minimized")).toContain(
-            "Fix the parser",
-        );
-        expect(buildConversationContext(session.getBranch(), "minimized")).toContain(
-            "tool call: read",
-        );
+        const context = buildConversationContext(session.getBranch(), {
+            phase: "refresh",
+            scope: "minimized",
+        });
+        expect(context).toContain("Fix the parser");
+        expect(context).not.toContain("tool call: read");
     });
 
     it("triggers initial naming after the first processed user message", () => {
@@ -239,12 +240,65 @@ describe("session naming", () => {
         });
     });
 
-    it("includes the working directory and loaded repository guidance", () => {
-        expect(
-            buildRepositoryContext("/workspace/project", [
-                { path: "AGENTS.md", content: "Use strict TypeScript." },
-            ]),
-        ).toContain("AGENTS.md");
+    it("builds compact workspace metadata without repository guidance", () => {
+        const context = buildRepositoryContext(
+            "/workspace/project",
+            "## feature/naming...origin/feature/naming\n M packages/one/src/index.ts\n M packages/one/test.ts\n?? src/new.ts\n",
+        );
+
+        expect(context).toContain("Repository: project");
+        expect(context).toContain("Branch: feature/naming");
+        expect(context).toContain("- packages/one");
+        expect(context).toContain("- src/new.ts");
+        expect(context).not.toContain("AGENTS.md");
+    });
+
+    it("recognizes opaque command and follow-up prompts", () => {
+        expect(isOpaqueNamingPrompt("$commit")).toBe(true);
+        expect(isOpaqueNamingPrompt("fix it please")).toBe(true);
+        expect(isOpaqueNamingPrompt("continue working on OAuth refresh")).toBe(false);
+        expect(isOpaqueNamingPrompt("Fix OAuth refresh races")).toBe(false);
+    });
+
+    it("uses only the first user request for initial naming", () => {
+        const session = SessionManager.inMemory("/workspace/project");
+        session.appendMessage({ role: "user", content: "Fix parser recovery", timestamp: 1 });
+        session.appendMessage({ role: "user", content: "Then update the docs", timestamp: 2 });
+
+        const context = buildConversationContext(session.getBranch(), {
+            phase: "initial",
+            scope: "minimized",
+        });
+        expect(context).toContain("Fix parser recovery");
+        expect(context).not.toContain("Then update the docs");
+    });
+
+    it("pins the first user goal and recent tail within the refresh budget", () => {
+        const session = SessionManager.inMemory("/workspace/project");
+        session.appendMessage({
+            role: "user",
+            content: `first-goal ${"a".repeat(3_000)}`,
+            timestamp: 1,
+        });
+        session.appendMessage({
+            role: "user",
+            content: `middle ${"b".repeat(5_000)}`,
+            timestamp: 2,
+        });
+        session.appendMessage({
+            role: "user",
+            content: `latest-goal ${"c".repeat(2_000)}`,
+            timestamp: 3,
+        });
+
+        const context = buildConversationContext(session.getBranch(), {
+            phase: "refresh",
+            scope: "minimized",
+        });
+        expect(context.length).toBeLessThanOrEqual(8_000);
+        expect(context).toContain("first-goal");
+        expect(context).toContain("latest-goal");
+        expect(context).toContain("[Earlier conversation truncated]");
     });
 
     it("excludes tool results and shell output in minimized scope", () => {
@@ -284,14 +338,20 @@ describe("session naming", () => {
             timestamp: 3,
         });
 
-        const minimized = buildConversationContext(session.getBranch(), "minimized");
+        const minimized = buildConversationContext(session.getBranch(), {
+            phase: "refresh",
+            scope: "minimized",
+        });
         expect(minimized).toContain("Deploy the service");
         expect(minimized).toContain("I will deploy it now.");
-        expect(minimized).toContain("tool call: bash");
+        expect(minimized).not.toContain("tool call: bash");
         expect(minimized).not.toContain("cat /etc/passwd");
         expect(minimized).not.toContain("root:x:0:0:root");
 
-        const full = buildConversationContext(session.getBranch(), "full");
+        const full = buildConversationContext(session.getBranch(), {
+            phase: "refresh",
+            scope: "full",
+        });
         expect(full).toContain("cat /etc/passwd");
         expect(full).toContain("root:x:0:0:root");
     });
@@ -331,7 +391,10 @@ describe("session naming", () => {
             timestamp: 2,
         });
 
-        const full = buildConversationContext(session.getBranch(), "full");
+        const full = buildConversationContext(session.getBranch(), {
+            phase: "refresh",
+            scope: "full",
+        });
         expect(full).toContain('"count":"10"');
         expect(full).toContain('"notFinite":null');
         expect(full).toContain('"self":"[circular]"');

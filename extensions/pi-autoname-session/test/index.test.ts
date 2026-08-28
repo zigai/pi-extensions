@@ -126,8 +126,11 @@ class FakePi {
     readonly handlers = new Map<string, Handler>();
     readonly appended: { customType: string; data: SessionNamingState }[] = [];
     readonly notified: { message: string; severity: "info" | "warning" | "error" }[] = [];
+    readonly execCalls: { command: string; args: readonly string[]; cwd: string | undefined }[] =
+        [];
     sessionName: string | undefined = undefined;
     lastCtx: TestContext | undefined;
+    gitStatus = "## main\n";
     private readonly pendingEvents: TestEvent[] = [];
 
     on(event: string, handler: Handler): void {
@@ -149,6 +152,15 @@ class FakePi {
 
     getSessionName(): string | undefined {
         return this.sessionName;
+    }
+
+    exec(
+        command: string,
+        args: string[],
+        options?: { readonly cwd?: string },
+    ): Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> {
+        this.execCalls.push({ command, args, cwd: options?.cwd });
+        return Promise.resolve({ stdout: this.gitStatus, stderr: "", code: 0, killed: false });
     }
 
     async emit(event: TestEvent, ctx: TestContext): Promise<void> {
@@ -186,9 +198,9 @@ class Harness {
         const faux = registerFauxProvider({ api: FAUX_API, provider: FAUX_PROVIDER });
         // The extension only reads this subset of ExtensionAPI; the harness
         // implements exactly those members (on, appendEntry, setSessionName,
-        // getSessionName), which is why the full interface is asserted away.
+        // getSessionName, and exec), which is why the full interface is asserted away.
         // SAFETY: extension() registers handlers and reads session state
-        // exclusively through these four members, so the narrower fake is
+        // exclusively through these members, so the narrower fake is
         // behaviorally complete for every path under test.
         const pi = new FakePi();
         const model = faux.getModel();
@@ -207,7 +219,7 @@ class Harness {
             model,
             isProjectTrusted: () => false,
         };
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the harness implements the on, appendEntry, setSessionName, and getSessionName operations read by the extension factory, and these tests exercise every registered event through that adapter; TypeScript cannot express a callable subset of ExtensionAPI where on retains its event-specific callback types.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the harness implements the on, appendEntry, setSessionName, getSessionName, and exec operations read by the extension factory, and these tests exercise every registered event through that adapter; TypeScript cannot express a callable subset of ExtensionAPI where on retains its event-specific callback types.
         extension(pi as ExtensionAPI & FakePi);
         const harness = new Harness(agentDir, faux, model, registry, session, pi, ctx);
         pi.lastCtx = ctx;
@@ -381,7 +393,7 @@ describe("extension orchestration", () => {
             expect(harness.pi.sessionName).toBeUndefined();
             expect(stateEntries(harness)).toHaveLength(0);
             await expect.poll(() => harness.faux.state.callCount).toBe(1);
-            expect(capturedPrompt).toContain("user:\nFix the parser");
+            expect(capturedPrompt).toContain("USER:\nFix the parser");
 
             // Pi appends the submitted message while background naming is in flight.
             // Normal descendant progress must not make the picker result stale.
@@ -392,6 +404,59 @@ describe("extension orchestration", () => {
 
             await harness.settled();
             expect(harness.faux.state.callCount).toBe(1);
+        } finally {
+            harness.dispose();
+        }
+    });
+
+    it("adds changed areas only when the first prompt is opaque", async () => {
+        const harness = Harness.create();
+        try {
+            writeSettings(
+                harness,
+                createSettings({
+                    prompt: "{{repository_context}}\n\n{{conversation}}",
+                }),
+            );
+            harness.pi.gitStatus =
+                "## feature/naming...origin/feature/naming\n M packages/pi-model-filter/src/index.ts\n M packages/pi-model-filter/test.ts\n M README.md\n";
+            await harness.startSession();
+            let capturedPrompt = "";
+            harness.faux.setResponses([
+                (context) => {
+                    const content = context.messages[0]?.content;
+                    const textBlock = Array.isArray(content)
+                        ? content.find((block): block is TextContent => block.type === "text")
+                        : undefined;
+                    capturedPrompt = textBlock?.text ?? "";
+                    return fauxAssistantMessage("Update model filtering");
+                },
+            ]);
+
+            await harness.beforeAgentStart("$commit");
+
+            await expect.poll(() => harness.pi.sessionName).toBe("Update model filtering");
+            expect(harness.pi.execCalls).toHaveLength(1);
+            expect(capturedPrompt).toContain("Branch: feature/naming");
+            expect(capturedPrompt).toContain("- packages/pi-model-filter");
+            expect(capturedPrompt).toContain("- README.md");
+            expect(capturedPrompt).toContain("USER:\n$commit");
+        } finally {
+            harness.dispose();
+        }
+    });
+
+    it("does not inspect git for a descriptive first prompt", async () => {
+        const harness = Harness.create();
+        try {
+            writeSettings(harness, createSettings());
+            await harness.startSession();
+            harness.faux.setResponses([fauxAssistantMessage("Fix parser recovery")]);
+
+            await harness.beforeAgentStart("Fix parser recovery after malformed input");
+
+            await expect.poll(() => harness.pi.sessionName).toBe("Fix parser recovery");
+            expect(harness.pi.execCalls).toHaveLength(0);
         } finally {
             harness.dispose();
         }
@@ -1119,7 +1184,7 @@ describe("extension orchestration", () => {
         }
     });
 
-    it("uses the compaction-aware entry list for the picker prompt", async () => {
+    it("uses only the first active user request for settled initial naming", async () => {
         const harness = Harness.create();
         try {
             writeSettings(harness, createSettings());
@@ -1153,9 +1218,9 @@ describe("extension orchestration", () => {
             await harness.settled();
 
             expect(harness.pi.sessionName).toBe("Compacted name");
-            expect(capturedPrompt).toContain("summary of the old work");
-            expect(capturedPrompt).toContain("new question");
-            expect(capturedPrompt).toContain("newest question");
+            expect(capturedPrompt).toContain("USER:\nnew question");
+            expect(capturedPrompt).not.toContain("summary of the old work");
+            expect(capturedPrompt).not.toContain("newest question");
             expect(capturedPrompt).not.toContain("old secret material in history");
         } finally {
             harness.dispose();
