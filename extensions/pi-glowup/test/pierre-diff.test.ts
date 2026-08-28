@@ -33,6 +33,7 @@ import { DEFAULT_MUTATION_SETTINGS } from "../src/mutations/settings.ts";
 type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
 
 const fgColors = {
+    text: "#cccccc",
     dim: "#777777",
     muted: "#888888",
     thinkingXhigh: "#777777",

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { createHighlighter, type BundledLanguage, type Highlighter } from "shiki";
+import type { BundledLanguage, Highlighter } from "shiki";
 import { tokensToAnsiLines } from "./ansi.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
 import {
@@ -114,7 +114,7 @@ const syntaxStateListeners = new Set<SyntaxStateListener>();
 let syntaxRenderingVersion = 0;
 let activeConfigurationKey: string | undefined;
 
-export type SyntaxHighlighterFactory = typeof createHighlighter;
+export type SyntaxHighlighterFactory = typeof import("shiki").createHighlighter;
 
 export type SyntaxInitializationOptions = {
     readonly createHighlighter?: SyntaxHighlighterFactory;
@@ -133,10 +133,9 @@ export async function initializeSyntaxHighlighting(
     }
 
     const generation = syntaxGeneration;
-    const createSyntaxHighlighter = options.createHighlighter ?? createHighlighter;
     initializationPromise = Promise.all([
         syntaxConfigurationKey(env, options),
-        initializeSyntaxHighlightingOnce(env, createSyntaxHighlighter, options),
+        initializeSyntaxHighlightingOnce(env, options),
     ]).then(([configurationKey, state]) => {
         if (generation !== syntaxGeneration) {
             disposeReadySyntaxState(state);
@@ -159,10 +158,9 @@ export async function reinitializeSyntaxHighlighting(
     const generation = syntaxGeneration + 1;
     syntaxGeneration = generation;
     const previousState = syntaxState;
-    const createSyntaxHighlighter = options.createHighlighter ?? createHighlighter;
     const replacement = Promise.all([
         syntaxConfigurationKey(env, options),
-        initializeSyntaxHighlightingOnce(env, createSyntaxHighlighter, options),
+        initializeSyntaxHighlightingOnce(env, options),
     ]).then(([configurationKey, state]) => {
         if (generation !== syntaxGeneration) {
             disposeReadySyntaxState(state);
@@ -181,9 +179,18 @@ export async function reinitializeSyntaxHighlighting(
 }
 
 /** Rebuilds syntax state only when environment, theme contents, or preload inputs changed. */
-export async function refreshSyntaxHighlighting(
+export function refreshSyntaxHighlighting(
     env: NodeJS.ProcessEnv = process.env,
     options: SyntaxInitializationOptions = {},
+): Promise<SyntaxState> {
+    const refresh = refreshSyntaxHighlightingOnce(env, options);
+    initializationPromise = refresh;
+    return refresh;
+}
+
+async function refreshSyntaxHighlightingOnce(
+    env: NodeJS.ProcessEnv,
+    options: SyntaxInitializationOptions,
 ): Promise<SyntaxState> {
     const configurationKey = await syntaxConfigurationKey(env, options);
     if (syntaxState !== undefined && activeConfigurationKey === configurationKey) {
@@ -482,7 +489,6 @@ function disposedSyntaxState(config: SyntaxConfig): SyntaxState {
 
 async function initializeSyntaxHighlightingOnce(
     env: NodeJS.ProcessEnv,
-    createSyntaxHighlighter: SyntaxHighlighterFactory,
     options: SyntaxInitializationOptions,
 ): Promise<SyntaxState> {
     const config = loadSyntaxConfig(env);
@@ -499,6 +505,8 @@ async function initializeSyntaxHighlightingOnce(
         const preloadSelection = selectSyntaxPreloadLanguages(options);
         syntaxPreloadDiagnostics = preloadSelection.diagnostics;
 
+        const createSyntaxHighlighter =
+            options.createHighlighter ?? (await import("shiki")).createHighlighter;
         const highlighter = await createSyntaxHighlighter({
             themes: [theme.registration],
             langs: [...preloadSelection.languages],

@@ -10,7 +10,11 @@ import type { TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getGlowupGlobalConfigPath } from "../src/config/config.ts";
 import glowupExtension from "../src/index.ts";
-import { disposeSyntaxHighlighting, isSyntaxHighlightingReady } from "../src/syntax/highlighter.ts";
+import {
+    disposeSyntaxHighlighting,
+    initializeSyntaxHighlighting,
+    isSyntaxHighlightingReady,
+} from "../src/syntax/highlighter.ts";
 
 type SessionStartEvent = {
     readonly type: "session_start";
@@ -229,13 +233,16 @@ describe("extension lifecycle", () => {
         process.env[AGENT_DIR_ENV] = agentDir;
         const pi = new FakeExtensionApi();
 
-        await glowupExtension(pi as unknown as ExtensionAPI);
+        glowupExtension(pi as unknown as ExtensionAPI);
 
         expect(pi.registeredToolCount).toBe(0);
         expect(vi.getTimerCount()).toBe(0);
-        expect(isSyntaxHighlightingReady()).toBe(true);
+        expect(isSyntaxHighlightingReady()).toBe(false);
 
         await pi.startSession(join(root, "project"), false);
+        expect(vi.getTimerCount()).toBe(1);
+        await vi.advanceTimersByTimeAsync(5_000);
+        await initializeSyntaxHighlighting();
 
         expect(vi.getTimerCount()).toBe(0);
         expect(isSyntaxHighlightingReady()).toBe(true);
@@ -256,8 +263,10 @@ describe("extension lifecycle", () => {
         writeFileSync(configPath, JSON.stringify({ debugLog: { enabled: true } }));
         const pi = new FakeExtensionApi();
 
-        await glowupExtension(pi as unknown as ExtensionAPI);
+        glowupExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(join(root, "project"), false);
+        await vi.advanceTimersByTimeAsync(5_000);
+        await initializeSyntaxHighlighting();
 
         expect(vi.getTimerCount()).toBe(1);
         expect(readLogEvents(join(agentDir, "pi-glowup", "debug.log"))).toEqual(
@@ -279,9 +288,10 @@ describe("extension lifecycle", () => {
         );
         const pi = new FakeExtensionApi();
 
-        await glowupExtension(pi as unknown as ExtensionAPI);
+        glowupExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(join(root, "project"), false);
         pi.runBashToolCall("printf hello");
+        await initializeSyntaxHighlighting();
         await pi.runBashToolResult("printf hello", "hello");
         await pi.runTurn();
         await pi.shutdownSession("quit");
@@ -318,7 +328,7 @@ describe("extension lifecycle", () => {
         writeFileSync(filePath, "export const value = 1;\n");
         const pi = new FakeExtensionApi();
 
-        await glowupExtension(pi as unknown as ExtensionAPI);
+        glowupExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(project, false);
         await Promise.all(
             pi.runToolCall(
@@ -382,8 +392,10 @@ describe("extension lifecycle", () => {
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
 
-        await glowupExtension(pi as unknown as ExtensionAPI);
+        glowupExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(join(root, "project"), false);
+        pi.runBashToolCall("true");
+        await initializeSyntaxHighlighting();
         await pi.shutdownSession("reload");
 
         expect(isSyntaxHighlightingReady()).toBe(true);
@@ -394,10 +406,13 @@ describe("extension lifecycle", () => {
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
 
-        await glowupExtension(pi as unknown as ExtensionAPI);
+        glowupExtension(pi as unknown as ExtensionAPI);
         await pi.startSession(join(root, "project"), false, "tui");
 
         expect(pi.toolExpansionRefreshes).toBe(1);
+        pi.runBashToolCall("true");
+        await initializeSyntaxHighlighting();
+        await vi.waitFor(() => expect(pi.toolExpansionRefreshes).toBe(2));
     });
 
     it("does not block bash tool-call preflight on configured script formatters", async () => {
@@ -408,7 +423,7 @@ describe("extension lifecycle", () => {
         });
         const pi = new FakeExtensionApi();
 
-        await glowupExtension(pi as unknown as ExtensionAPI);
+        glowupExtension(pi as unknown as ExtensionAPI);
 
         expect(pi.runBashToolCall("python - <<'PY'\nprint('hi')\nPY")).toEqual([undefined]);
 
@@ -419,7 +434,7 @@ describe("extension lifecycle", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
-        await glowupExtension(pi as unknown as ExtensionAPI);
+        glowupExtension(pi as unknown as ExtensionAPI);
         initTheme("dark");
 
         // SAFETY: ToolExecutionComponent only calls requestRender() on this boundary in the

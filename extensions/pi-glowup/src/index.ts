@@ -92,7 +92,6 @@ import { detectStructuredOutputLanguage } from "./syntax/code-component.ts";
 import {
     disposeSyntaxHighlighting,
     configureSyntaxBracketPairColoring,
-    initializeSyntaxHighlighting,
     isSyntaxHighlightingReady,
     refreshSyntaxHighlighting,
     syntaxHighlighterDiagnostics,
@@ -1090,6 +1089,8 @@ function renderEditResult(
     });
 }
 
+const SYNTAX_WARMUP_DELAY_MS = 5_000;
+
 type SyntaxHighlightingLifecycleOptions = {
     readonly config: GlowupConfig;
     readonly cwd: string | undefined;
@@ -1097,7 +1098,7 @@ type SyntaxHighlightingLifecycleOptions = {
 };
 
 async function loadSyntaxHighlighting(
-    loader: typeof initializeSyntaxHighlighting,
+    loader: typeof refreshSyntaxHighlighting,
     options: SyntaxHighlightingLifecycleOptions,
 ): Promise<void> {
     try {
@@ -1112,10 +1113,6 @@ async function loadSyntaxHighlighting(
     } catch (cause: unknown) {
         options.reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
     }
-}
-
-async function startSyntaxHighlighting(options: SyntaxHighlightingLifecycleOptions): Promise<void> {
-    await loadSyntaxHighlighting(initializeSyntaxHighlighting, options);
 }
 
 async function restartSyntaxHighlighting(
@@ -1220,7 +1217,7 @@ function refreshToolRows(context: Pick<ExtensionContext, "mode" | "ui">): void {
     }
 }
 
-export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
+export default function glowupExtension(pi: ExtensionAPI): void {
     // SAFETY: The symbol property is extension-private metadata on the concrete
     // ExtensionAPI object. It does not alter Pi's public API or handler semantics.
     const guardedPi = pi as ExtensionAPI & { [key: symbol]: boolean | undefined };
@@ -1239,6 +1236,15 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
     let formatter = scriptBlockFormatter(config, reportWarning);
     let headerLayout = scriptPreviewHeaderLayout(config);
     let sessionGeneration = 0;
+    const pendingSyntaxTasks = new Set<Promise<void>>();
+    let pendingSyntaxStart:
+        | {
+              readonly generation: number;
+              readonly options: SyntaxHighlightingLifecycleOptions;
+              readonly context: ExtensionContext;
+          }
+        | undefined;
+    let syntaxTimer: NodeJS.Timeout | undefined;
 
     const applyConfig = (nextConfig: GlowupConfig): void => {
         config = nextConfig;
@@ -1282,7 +1288,46 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
         }));
     };
 
-    await startSyntaxHighlighting({ config, cwd: process.cwd(), reportWarning });
+    const startPendingSyntaxHighlighting = (): void => {
+        const pending = pendingSyntaxStart;
+        if (pending === undefined) return;
+        pendingSyntaxStart = undefined;
+        if (syntaxTimer !== undefined) {
+            clearTimeout(syntaxTimer);
+            syntaxTimer = undefined;
+        }
+        const syntaxTask = restartSyntaxHighlighting(pending.options);
+        pendingSyntaxTasks.add(syntaxTask);
+        void syntaxTask
+            .then(() => {
+                pendingSyntaxTasks.delete(syntaxTask);
+                if (sessionGeneration !== pending.generation) return;
+                refreshToolRows(pending.context);
+                debugLogger.record("session_start", () => ({
+                    phase: "after_syntax",
+                    ...diagnosticSnapshot(),
+                }));
+            })
+            .catch((cause: unknown) => {
+                pendingSyntaxTasks.delete(syntaxTask);
+                reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
+            });
+    };
+
+    const scheduleSyntaxHighlighting = (
+        options: SyntaxHighlightingLifecycleOptions,
+        context: ExtensionContext,
+    ): void => {
+        if (syntaxTimer !== undefined) clearTimeout(syntaxTimer);
+        pendingSyntaxStart = {
+            generation: sessionGeneration,
+            options,
+            context,
+        };
+        syntaxTimer = setTimeout(startPendingSyntaxHighlighting, SYNTAX_WARMUP_DELAY_MS);
+        syntaxTimer.unref?.();
+    };
+
     applyConfig(config);
     debugLogger.record("extension_loaded", diagnosticSnapshot);
 
@@ -1293,6 +1338,7 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
     });
 
     pi.on("tool_call", (event, ctx) => {
+        startPendingSyntaxHighlighting();
         const command = commandField(event.input);
         const builtInToolName = diagnosticBuiltInToolName(event.toolName);
         const preimageCapture =
@@ -1430,16 +1476,18 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
             phase: "after_reset",
             ...diagnosticSnapshot(),
         }));
-        await restartSyntaxHighlighting({ config: nextConfig, cwd: ctx.cwd, reportWarning });
         applyConfig(nextConfig);
         refreshToolRows(ctx);
+
+        scheduleSyntaxHighlighting({ config: nextConfig, cwd: ctx.cwd, reportWarning }, ctx);
         debugLogger.record("session_start", () => ({
-            phase: "after_syntax",
+            phase: "syntax_scheduled",
             ...diagnosticSnapshot(),
         }));
     });
 
     pi.on("agent_start", () => {
+        startPendingSyntaxHighlighting();
         explorationGroups.closeActiveGroup();
     });
 
@@ -1465,12 +1513,19 @@ export default async function glowupExtension(pi: ExtensionAPI): Promise<void> {
             ...diagnosticSnapshot(),
         }));
         clearSessionState();
+        pendingSyntaxStart = undefined;
+        if (syntaxTimer !== undefined) {
+            clearTimeout(syntaxTimer);
+            syntaxTimer = undefined;
+        }
         configureAssistantSeparatorPatch(false);
         configureWorkingWidgetSpacingPatch(false);
         configureAutocompleteCleanupPatch(false);
         configureMarkdownSyntaxPatch(false);
         configureThirdPartyToolRendererPatch(false);
         configureBuiltInToolRendererPatch(false);
+        await Promise.allSettled(pendingSyntaxTasks);
+        pendingSyntaxTasks.clear();
         if (event.reason === "quit") {
             await disposeSyntaxHighlighting();
         }

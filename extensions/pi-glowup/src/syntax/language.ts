@@ -1,5 +1,6 @@
 import path from "node:path";
-import { bundledLanguages, bundledLanguagesAlias, type BundledLanguage } from "shiki";
+import type { BundledLanguage } from "shiki";
+import { BUNDLED_SYNTAX_LANGUAGE_NAMES } from "./bundled-language-names.ts";
 
 const LANGUAGE_ALIASES = new Map<string, string>([
     ["bash", "bash"],
@@ -126,5 +127,5 @@ export function syntaxLanguageFromPath(
 
 /** Returns true when Shiki can load the language name or alias. */
 export function isBundledSyntaxLanguage(language: string): language is BundledLanguage {
-    return language in bundledLanguages || language in bundledLanguagesAlias;
+    return BUNDLED_SYNTAX_LANGUAGE_NAMES.has(language);
 }

@@ -50,6 +50,7 @@ type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
 
 const piTheme = new Theme(
     {
+        text: "#d4d4d4",
         toolDiffContext: "#d4d4d4",
         toolDiffAdded: "#89d185",
         toolDiffRemoved: "#f48771",

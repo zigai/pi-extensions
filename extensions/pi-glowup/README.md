@@ -46,7 +46,7 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `toolCallIndicator.bold` | boolean | `true` | Render the tool-call indicator in bold. |
 | `toolLabels.mode` | `static` \| `lifecycle` | `"static"` | Use stable or lifecycle-aware tool labels. |
 | `writePreview.movingViewport` | boolean | `true` | Follow the newest rows while writes stream. |
-| `syntax.preloadLanguages` | string[] | *See JSON below ↓* | Language ids or aliases to preload for synchronous syntax highlighting. |
+| `syntax.preloadLanguages` | string[] | *See JSON below* | Language ids or aliases to preload for synchronous syntax highlighting. |
 | `syntax.bracketPairColoring` | boolean | `true` | Color matching bracket pairs; false preserves the syntax theme color. |
 | `syntax.projectLanguageDetection.enabled` | boolean | `true` | Add languages inferred from project filenames to the preload set. |
 | `patches.assistantSeparator` | boolean | `true` | Add spacing and separators around assistant messages. |
