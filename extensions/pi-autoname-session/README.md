@@ -61,10 +61,6 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 ```
 <!-- pi-extension-settings:end -->
 
-## Data flow and privacy
-
-The picker receives the working directory, repository guidance, current name, reason, and active conversation. `minimized` excludes tool arguments, results, and shell output; `full` includes them, including for separate providers.
-
 ## Development
 
 ```sh
