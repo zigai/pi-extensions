@@ -366,6 +366,7 @@ export default function extension(pi: ExtensionAPI): void {
     let pendingAutoName: string | undefined;
     let namingBlockedReason: "modelUnavailable" | undefined;
     let lastFailedAttempt: { readonly metrics: SessionMetrics; readonly atMs: number } | undefined;
+    const backgroundNamingTasks = new Set<Promise<void>>();
 
     const invalidateActiveAttempt = (): void => {
         activeAttempt?.controller.abort();
@@ -539,12 +540,15 @@ export default function extension(pi: ExtensionAPI): void {
                 repositoryContext,
             });
 
+            const branchStillContainsAttempt =
+                attempt.leafIdAtStart === null ||
+                ctx.sessionManager.getBranch().some((entry) => entry.id === attempt.leafIdAtStart);
             const attemptIsCurrent =
                 activeAttempt === attempt &&
                 attempt.sessionGeneration === sessionGeneration &&
                 attempt.nameRevision === nameRevision &&
                 attempt.nameAtStart === pi.getSessionName() &&
-                attempt.leafIdAtStart === ctx.sessionManager.getLeafId() &&
+                branchStillContainsAttempt &&
                 !attempt.controller.signal.aborted &&
                 !sessionAbort.signal.aborted;
             if (!attemptIsCurrent) {
@@ -597,7 +601,28 @@ export default function extension(pi: ExtensionAPI): void {
         }
     };
 
-    pi.on("before_agent_start", async (event, ctx) => {
+    const startBackgroundNaming = (ctx: ExtensionContext, checkpoint: NamingCheckpoint): void => {
+        const taskGeneration = sessionGeneration;
+        const task = maybeNameSession(ctx, checkpoint);
+        backgroundNamingTasks.add(task);
+        void task
+            .catch(() => {
+                if (
+                    taskGeneration === sessionGeneration &&
+                    sessionAbortController?.signal.aborted === false &&
+                    !pickerDiagnosticShown &&
+                    ctx.hasUI
+                ) {
+                    pickerDiagnosticShown = true;
+                    ctx.ui.notify("Session naming failed unexpectedly.", "warning");
+                }
+            })
+            .finally(() => {
+                backgroundNamingTasks.delete(task);
+            });
+    };
+
+    pi.on("before_agent_start", (event, ctx) => {
         repositoryContext = buildRepositoryContext(
             event.systemPromptOptions.cwd,
             event.systemPromptOptions.contextFiles,
@@ -606,14 +631,17 @@ export default function extension(pi: ExtensionAPI): void {
             event.images === undefined || event.images.length === 0
                 ? ""
                 : `\n[${event.images.length} image${event.images.length === 1 ? "" : "s"} attached]`;
-        await maybeNameSession(ctx, { type: "prompt", prompt: event.prompt + imageSummary });
+        startBackgroundNaming(ctx, {
+            type: "prompt",
+            prompt: event.prompt + imageSummary,
+        });
     });
 
     pi.on("agent_settled", async (_event, ctx) => {
         await maybeNameSession(ctx, { type: "settled" });
     });
 
-    pi.on("session_shutdown", () => {
+    pi.on("session_shutdown", async () => {
         sessionAbortController?.abort();
         sessionAbortController = undefined;
         invalidateActiveAttempt();
@@ -624,5 +652,7 @@ export default function extension(pi: ExtensionAPI): void {
         pendingAutoName = undefined;
         namingBlockedReason = undefined;
         lastFailedAttempt = undefined;
+        await Promise.allSettled(backgroundNamingTasks);
+        backgroundNamingTasks.clear();
     });
 }

@@ -348,7 +348,7 @@ function allDiagnostics(harness: Harness): string {
 }
 
 describe("extension orchestration", () => {
-    it("names an unnamed session before the agent starts when prompt timing is enabled", async () => {
+    it("names an unnamed session without blocking prompt submission", async () => {
         const harness = Harness.create();
         try {
             writeSettings(
@@ -364,6 +364,7 @@ describe("extension orchestration", () => {
             );
             await harness.startSession();
             let capturedPrompt = "";
+            const response = createDeferred<AssistantMessage>();
             harness.faux.setResponses([
                 (context) => {
                     const content = context.messages[0]?.content;
@@ -371,15 +372,22 @@ describe("extension orchestration", () => {
                         ? content.find((block): block is TextContent => block.type === "text")
                         : undefined;
                     capturedPrompt = textBlock?.text ?? "";
-                    return fauxAssistantMessage("Fix parser tests");
+                    return response.promise;
                 },
             ]);
 
             await harness.beforeAgentStart("Fix the parser");
 
-            expect(harness.pi.sessionName).toBe("Fix parser tests");
+            expect(harness.pi.sessionName).toBeUndefined();
+            expect(stateEntries(harness)).toHaveLength(0);
+            await expect.poll(() => harness.faux.state.callCount).toBe(1);
             expect(capturedPrompt).toContain("user:\nFix the parser");
-            expect(harness.faux.state.callCount).toBe(1);
+
+            // Pi appends the submitted message while background naming is in flight.
+            // Normal descendant progress must not make the picker result stale.
+            appendUserMessage(harness.session, "Fix the parser", 1);
+            response.resolve(fauxAssistantMessage("Fix parser tests"));
+            await expect.poll(() => harness.pi.sessionName).toBe("Fix parser tests");
             expect(latestState(harness)).toEqual(expect.objectContaining({ initialNameSet: true }));
 
             await harness.settled();
@@ -402,8 +410,8 @@ describe("extension orchestration", () => {
 
             await harness.beforeAgentStart("Fix the parser");
 
-            expect(harness.faux.state.callCount).toBe(1);
-            expect(harness.pi.sessionName).toBe("Fix parser tests");
+            await expect.poll(() => harness.faux.state.callCount).toBe(1);
+            await expect.poll(() => harness.pi.sessionName).toBe("Fix parser tests");
         } finally {
             harness.dispose();
         }
@@ -1060,12 +1068,11 @@ describe("extension orchestration", () => {
         }
     });
 
-    it("aborts in-flight naming on session shutdown without applying results", async () => {
+    it("aborts and drains background prompt naming on session shutdown", async () => {
         const harness = Harness.create();
         try {
             writeSettings(harness, createSettings());
             await harness.startSession();
-            appendUserMessage(harness.session, "Fix the parser", 1);
 
             const requestStarted = createDeferred<void>();
             harness.faux.setResponses([
@@ -1079,11 +1086,10 @@ describe("extension orchestration", () => {
                         );
                     }),
             ]);
-            const settled = harness.settled();
+            await harness.beforeAgentStart("Fix the parser");
 
             await requestStarted.promise;
             await harness.shutdown();
-            await settled;
 
             expect(harness.pi.sessionName).toBeUndefined();
             expect(harness.faux.state.callCount).toBe(1);
