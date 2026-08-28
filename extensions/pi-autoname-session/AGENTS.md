@@ -1,52 +1,72 @@
 # AGENTS.md
 
-## Pi Extension Workflow
+Guidance for agents working in this repository.
 
-- This repository is a Pi package. Keep resources declared explicitly in `package.json` under the `pi` manifest.
-- The extension entrypoint is `src/index.ts` and should export a default factory that receives Pi's `ExtensionAPI`.
-- Do not edit Pi's installed source code to implement package behavior. Use Pi's extension API instead.
-- Keep Pi-bundled imports (`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox`) in `peerDependencies` with `"*"` and in `devDependencies` only for local typechecking.
-- Put the package description in the top-level `package.json` `description` field. Pi does not have extension-level description metadata.
+## Working method
 
-## Extension Settings
+1. Inspect `package.json`, the affected source modules, and the installed Pi types or documentation for every Pi API being changed. Do not guess at lifecycle, model-registry, provider-auth, or session-entry contracts.
+2. Preserve session ownership and stale-result rejection before changing naming behavior. A picked name must never overwrite a newer session, branch, or user rename.
+3. Keep persisted settings, session entries, provider payloads, and model output parsed at their boundaries. Pass typed domain values inward.
+4. Add behavior evidence at the seam that owns the change, regenerate settings artifacts when required, and run the release gate before handoff.
 
-This scaffold includes extension-owned settings. Keep the generated settings artifacts current as options are added or changed.
+Run `just setup` after cloning. For later changes, run:
 
-- Use `@zigai/pi-extension-settings` for extension-owned JSON settings. The template bundles it so published extensions remain independently installable.
-- Keep the TypeBox source of truth and runtime settings boundary together in a flat `src/settings.ts` module using `defineExtensionSettings`.
-- Use “settings” for the extension capability and source module; reserve “config” for concrete persisted-file concepts such as config paths and `config.schema.json`. Do not create a one-file `src/config/` directory or a parallel `config.ts`; split `settings.ts` only when a substantial domain capability earns its own specifically named module.
-- Register `src/settings.ts`, `config.schema.json`, and the README in the package's `piExtensionSettings` manifest field.
-- Expose the package-facing loader as `load<ExtensionName>Settings`, such as `loadExampleSettings`. This function owns the shared loader call and returns the extension's typed, resolved settings; ordinary extension code should call it rather than the definition or shared adapter directly.
-- Implement that loader with `loadPiExtensionSettings`. It uses `getAgentDir()` and `CONFIG_DIR_NAME`; never hardcode `~/.pi/agent` or `.pi` in runtime code.
-- Global settings live at `getAgentDir()/extension-settings/pi-autoname-session.json`; editor schemas live at `getAgentDir()/extension-settings/schemas/pi-autoname-session.schema.json`.
-- Trusted project overrides live at `ctx.cwd/CONFIG_DIR_NAME/extension-settings/pi-autoname-session.json`. Never read project settings for an untrusted project or create project settings automatically.
-- Parse settings at the boundary: `JSON.parse` to `unknown`, validate/decode with TypeBox, then pass typed settings inward. Never cast `JSON.parse` output to settings types or scatter hand-written shape checks.
-- Run the shared generator after changing the TypeBox definition. Check in `config.schema.json` and the generated README region; pre-commit and CI must run the shared artifact check.
-- The shared loader may scaffold default global settings only when missing, never overwrite existing or malformed user settings, and refresh missing or stale installed schemas from the checked-in bundled schema.
-- Use environment variables only for secrets, CI/session overrides, or explicit settings-path overrides, not normal persisted options.
-- Keep secrets out of ordinary JSON settings unless the extension deliberately designs secure storage and permissions.
-- Keep lifecycle, trust, and malformed-file policy in `AGENTS.md` and tests, not in generated README documentation.
+```sh
+npm run check
+```
 
-## README Settings Documentation
+The check validates generated settings, formatting, lint, strict TypeScript, and the Vitest suite. Keep pre-commit enabled. Use `just coverage` when coverage evidence is useful. The repository has real tests; do not retain or reintroduce `--passWithNoTests` when modernizing scripts.
 
-Keep the declared `piExtensionSettings` artifacts and generated README region synchronized with the settings definition.
+## Package and module contract
 
-- Put the generated settings region after installation and the normal first-use guidance.
-- Put `<!-- pi-extension-settings:start -->` and `<!-- pi-extension-settings:end -->` in the README exactly once.
-- Do not hand-edit content between those markers. The shared generator owns the settings path, compact option table, and complete default JSON document shown directly after the table.
-- Put user-facing descriptions on TypeBox properties in `src/settings.ts`; wording changes flow into README documentation through generation.
-- Do not document alternate paths, layering, TypeBox mechanics, schema refresh, trust, user-owned terminology, or malformed-file policy in the generated region.
+- This is a TypeScript ESM Pi extension package. `package.json` declares `src/index.ts` in `pi.extensions`; the entry exports a synchronous default factory receiving `ExtensionAPI`.
+- Keep module import and the factory free of settings I/O, model calls, timers, and other owned background work. Register lifecycle handlers synchronously.
+- `src/index.ts` owns Pi composition and session lifecycle: settings application, state restoration, event registration, naming attempts, cancellation, diagnostic presentation, and cleanup.
+- `src/session-naming.ts` owns pure naming rules: persisted-state parsing, metrics, trigger decisions, prompt/context construction, repository summaries, and output normalization.
+- `src/picker-request.ts` owns the narrow provider-payload compatibility boundary. Parse payloads from `unknown`; return no replacement when the model or payload does not require the compatibility shape.
+- `src/settings.ts` currently owns the legacy settings definition, semantic validation, model-reference parsing, and package-facing loader. Do not move unrelated naming logic into it.
+- Keep the source root flat while these capabilities remain cohesive. Do not add generic `utils.ts`, `helpers.ts`, `services.ts`, or one-file directories.
+- Keep Pi-provided packages in optional `peerDependencies` with `"*"` and in `devDependencies` for local checks. Put other runtime libraries in `dependencies`.
 
-## Implementation Notes
+## Session lifecycle and concurrency
 
-- Keep user/LLM-facing descriptions on registered tools, commands, flags, and shortcuts.
-- Tool `promptGuidelines` are appended flat to Pi's system prompt; every guideline must name the exact tool it refers to.
-- If an extension starts timers, intervals, file watchers, sockets, or subprocesses after `session_start`, clean them up in `session_shutdown` and during reload.
-- If a custom tool mutates files, use Pi's file mutation queue around the whole read-modify-write window.
-- Custom tools must truncate large output and tell the model where any full output was saved.
-- Use `StringEnum` from `@earendil-works/pi-ai` for model-facing string enums instead of `Type.Union` of literals.
-- Use `ctx.mode === "tui"` before terminal-only UI work and `ctx.hasUI` before dialogs/notifications.
-- Run `just setup` after cloning to install dependencies and Git hooks and verify the project.
-- Keep pre-commit enabled. Its first hook must run `config:check` so stale `config.schema.json` or generated README documentation cannot be committed.
-- Validate later changes with `just check` before handing off; use `just coverage` when coverage output is needed.
-- For visual/TUI changes, verify in a real tmux/TTY session instead of only relying on snapshots or non-interactive output.
+- `session_start` is the activation and reset boundary for this extension because naming state must be restored before the first `before_agent_start` event. Abort the predecessor session, increment the generation, reset diagnostic and retry state, load settings once, and restore state from the active branch.
+- Invalid settings disable naming for that session but still count as completed activation. Present loader and semantic diagnostics once and only when `ctx.hasUI` is true.
+- Prompt-timed initial naming runs in the background so it does not delay the user's agent turn. Settled naming may be awaited from `agent_settled`. Keep those timing semantics explicit in tests.
+- Own every background naming promise in `backgroundNamingTasks`. Attach rejection handling immediately, remove settled tasks, abort on shutdown, and await all remaining tasks before clearing ownership.
+- Every naming attempt is session-owned. Preserve the abort controller plus generation, name revision, starting name, and starting leaf checks. A result may call `pi.setSessionName()` only while all of those identities still match.
+- A user rename, branch navigation, session replacement, reload, or shutdown invalidates work computed against the old state. Do not weaken this because a model call appears likely to finish quickly.
+- Distinguish an extension-initiated `session_info_changed` event from a user rename through `pendingAutoName`. User renames invalidate attempts and establish a fresh baseline.
+- Restore branch-local state after `session_tree`. Persist successful baseline changes through `pi.appendEntry()` using `AUTONAME_STATE_ENTRY_TYPE`; do not use process-global persistence for session state.
+- `session_shutdown` must abort session and attempt controllers, invalidate state, increment the generation, await background tasks, and leave no promise capable of renaming a later session.
+
+## Naming and model boundaries
+
+- Persisted custom-entry data is untrusted. Validate it with TypeBox, preserve the explicit state version, accept the intentional legacy shape, and distinguish invalid data from unsupported future versions.
+- Count and context rules must remain deterministic across reload, branch navigation, compaction summaries, missing legacy usage, and circular or non-JSON tool arguments.
+- Preserve prompt-context limits. Truncation must bound model input while retaining useful head and tail context; repository guidance contents must not be copied into picker prompts.
+- Resolve picker models through `ctx.modelRegistry`, including provider auth, headers, environment, and credential-free providers. Do not infer credentials directly from environment variables.
+- Compose session cancellation and the configured timeout into the model request. Classify cancellation, timeout, authentication failure, unavailable models, provider failure, and invalid output without exposing credentials or prompt contents.
+- Keep the Responses Lite payload adjustment narrowly gated by provider, API, model/header evidence, and parsed object payloads. Do not mutate the provider payload in place.
+- Normalize model output before setting a name and enforce configured length constraints. Model text is boundary input, not a trusted session name.
+
+## Extension settings
+
+- This repository currently uses the legacy `@zigai/pi-extension-settings` 0.4.2 single-file definition in `src/settings.ts`, and its npm package bundles that dependency. Keep ordinary feature changes truthful to that current layout unless the task explicitly includes the settings-runtime migration.
+- The target settings architecture is the current prevalidated runtime. Migrate atomically: use the exact supported `@zigai/pi-extension-settings` version as a normal runtime dependency, remove it from `bundleDependencies`, move the build-safe TypeBox definition to `src/settings-input.ts`, generate `src/settings.prevalidated.ts`, hydrate it with `definePrevalidatedExtensionSettings` in `src/settings.ts`, derive decoded values with `StaticDecode`, update `piExtensionSettings` and `files`, regenerate artifacts, and verify the packed npm topology. Do not leave a half-migrated combination of old and new APIs.
+- Keep the root settings object closed with `additionalProperties: false`. Every option needs a valid default and a user-facing description. Use TypeBox codecs for encoded-to-decoded transformations instead of unchecked casts.
+- Define `exampleSettings` only when structured or interacting options need one focused, realistic advanced example. Give complex array-item and record-value schemas concise PascalCase titles so generated tables stay readable.
+- Resolution applies defaults, global settings, then trusted-project settings. Objects merge recursively; arrays and scalar values replace earlier values.
+- Never hardcode `~/.pi/agent` or `.pi`. Use the Pi settings adapter, `getAgentDir()`, `CONFIG_DIR_NAME`, and `ctx.isProjectTrusted()` as appropriate.
+- Loading may scaffold a missing global settings file and install or refresh its schema. It never repairs existing settings or creates project settings. Keep malformed or invalid files unchanged, and never include raw setting values or secrets in diagnostics.
+- If the extension gains settings-writing UI, first migrate to the current runtime and use `updatePiExtensionSettings()` rather than adding a custom lock or atomic writer. Project writes require trust and may explicitly create a missing project file; snapshot editors use the loaded revision for conflict detection.
+- Run `npm run config:generate` after changing the definition. Never hand-edit `config.schema.json` or the README text between the settings markers. `npm run config:check` must remain the first pre-commit and CI settings gate.
+
+## Verification
+
+- `test/index.test.ts` owns extension composition and lifecycle behavior. Preserve coverage for session replacement, shutdown, background rejection, stale attempts, user renames, branch navigation, disabled or malformed settings, and diagnostic deduplication.
+- `test/session-naming.test.ts` owns naming-domain and persisted-boundary behavior. Add focused cases for metrics, trigger baselines, truncation, state versions, prompt substitution, repository context, and output normalization.
+- `test/picker-request.test.ts` owns provider-payload compatibility behavior. Cover positive and negative provider/header/model evidence and malformed payloads.
+- Use temporary directories for settings tests and restore environment overrides. Do not write test data into the repository or shared Pi agent directory.
+- Test observable behavior through the extension harness or module boundary. Do not export implementation details merely for tests, and do not replace the subject under test with module mocks.
+- For package manifest, dependency, or `files` changes, inspect `npm pack --dry-run` and ensure runtime dependencies remain available when Pi installs the package without development dependencies.
