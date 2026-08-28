@@ -15,6 +15,7 @@ import {
     createSessionNamingState,
     getNamingRequest,
     hasReachedTrigger,
+    isOpaqueNamingPrompt,
     markSessionNamingComplete,
     measureSession,
     normalizeSessionName,
@@ -257,11 +258,11 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         settings.prompt,
         {
             repositoryContext,
-            conversation: buildConversationContext(
-                entries,
-                settings.conversationScope,
+            conversation: buildConversationContext(entries, {
+                phase,
+                scope: settings.conversationScope,
                 pendingPrompt,
-            ),
+            }),
             currentName: ctx.sessionManager.getSessionName() ?? "(unnamed)",
             cwd: ctx.cwd,
             reason: phase,
@@ -356,7 +357,6 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
 export default function extension(pi: ExtensionAPI): void {
     let settings: ExtensionSettings | undefined;
     let namingState: SessionNamingState | undefined;
-    let repositoryContext = "";
     let sessionGeneration = 0;
     let nameRevision = 0;
     let sessionAbortController: AbortController | undefined;
@@ -384,7 +384,6 @@ export default function extension(pi: ExtensionAPI): void {
         pendingAutoName = undefined;
         namingBlockedReason = undefined;
         lastFailedAttempt = undefined;
-        repositoryContext = buildRepositoryContext(ctx.cwd, undefined);
 
         const loaded = loadAutonameSessionSettings(ctx);
         settings = loaded.settings;
@@ -529,6 +528,31 @@ export default function extension(pi: ExtensionAPI): void {
         };
         activeAttempt = attempt;
         const entries = ctx.sessionManager.buildContextEntries();
+        const operationSignal = AbortSignal.any([sessionAbort.signal, attempt.controller.signal]);
+        let repositoryContext = buildRepositoryContext(ctx.cwd);
+        const visibleInitialPrompt =
+            checkpoint.type === "prompt"
+                ? checkpoint.prompt
+                : buildConversationContext(entries, {
+                      phase: "initial",
+                      scope: "minimized",
+                  }).replace(/^USER:\n/u, "");
+        if (request.phase === "initial" && isOpaqueNamingPrompt(visibleInitialPrompt)) {
+            try {
+                const gitStatus = await pi.exec(
+                    "git",
+                    ["status", "--short", "--branch", "--untracked-files=normal"],
+                    { cwd: ctx.cwd, signal: operationSignal, timeout: 2_000 },
+                );
+                if (gitStatus.code === 0) {
+                    repositoryContext = buildRepositoryContext(ctx.cwd, gitStatus.stdout);
+                }
+            } catch {
+                // Workspace metadata is optional. Naming continues with the
+                // repository identity when git is absent, slow, or cancelled.
+            }
+        }
+
         try {
             const outcome = await pickSessionName({
                 settings,
@@ -536,7 +560,7 @@ export default function extension(pi: ExtensionAPI): void {
                 entries,
                 pendingPrompt: checkpoint.type === "prompt" ? checkpoint.prompt : undefined,
                 ctx,
-                signal: AbortSignal.any([sessionAbort.signal, attempt.controller.signal]),
+                signal: operationSignal,
                 repositoryContext,
             });
 
@@ -623,10 +647,6 @@ export default function extension(pi: ExtensionAPI): void {
     };
 
     pi.on("before_agent_start", (event, ctx) => {
-        repositoryContext = buildRepositoryContext(
-            event.systemPromptOptions.cwd,
-            event.systemPromptOptions.contextFiles,
-        );
         const imageSummary =
             event.images === undefined || event.images.length === 0
                 ? ""
@@ -647,7 +667,6 @@ export default function extension(pi: ExtensionAPI): void {
         invalidateActiveAttempt();
         namingState = undefined;
         settings = undefined;
-        repositoryContext = "";
         sessionGeneration += 1;
         pendingAutoName = undefined;
         namingBlockedReason = undefined;

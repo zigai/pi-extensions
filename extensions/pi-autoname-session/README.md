@@ -28,10 +28,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
 | `model` | string | `"current"` | Picker model: provider/model-id, or current for the active model. |
 | `reasoningEffort` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` | `"low"` | Reasoning effort used by the session-name picker. |
 | `timeoutMs` | integer | `30000` | Maximum time in milliseconds for picker authentication and the model response before the naming attempt is treated as failed. |
-| `conversationScope` | `minimized` \| `full` | `"minimized"` | How much conversation to send to the picker. Minimized omits tool arguments, results, and shell output; full includes them. |
+| `conversationScope` | `minimized` \| `full` | `"minimized"` | How much refresh context to send. Minimized sends only user and assistant text; full also includes tool arguments, results, and shell output. Initial naming always uses only the first user request. |
 | `prompt` | string | *See JSON below* | Prompt used by the picker. Available placeholders are {{repository_context}}, {{conversation}}, {{current_name}}, {{cwd}}, and {{reason}}. |
 | `nameConstraints.minLength` | integer | `6` | Minimum number of characters in a name returned by the picker. |
-| `nameConstraints.maxLength` | integer | `60` | Maximum number of characters in a name returned by the picker. |
+| `nameConstraints.maxLength` | integer | `40` | Maximum number of characters in a name returned by the picker. |
 
 ```json
 {
@@ -52,10 +52,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-autoname-sessio
   "reasoningEffort": "low",
   "timeoutMs": 30000,
   "conversationScope": "minimized",
-  "prompt": "Your goal is to pick a coding session name for quick recognition in a session list.\nUse the repository context and conversation to identify the main goal or workstream.\nPrefer a specific, useful phrase over a generic one.\nReturn only the name; do not include quotes, Markdown, or an explanation.\n\nRepository context:\n<repository_context>\n{{repository_context}}\n</repository_context>\n\nConversation:\n<conversation>\n{{conversation}}\n</conversation>\n\nCurrent name: {{current_name}}",
+  "prompt": "Generate a title that will help the user recognize this coding session weeks later.\n\nBefore answering, silently identify:\n- Subject: the system, feature, or problem the request is really about.\n- Outcome: what the user ultimately wants to understand or change.\n- Incidental instructions: details about tools, process, output, or how the agent should work.\n\nTitle the durable subject and desired outcome. Discard incidental instructions.\nPrioritize user requests over assistant discoveries. Preserve the original subject until the user clearly changes goals.\n\nEditorial rules:\n- Use 3 to 8 words and a compact noun phrase or clear action phrase.\n- Capture the umbrella goal when the request lists several symptoms or steps.\n- Name the product change, not a plan, report, branch, commit, PR, test run, or monitoring step used to produce it.\n- Exclude models, subagents, tools, and output formats unless they are themselves the topic.\n- For reviews, name what is being reviewed and the relevant concern.\n- For research, name the question domain rather than the research process.\n- Do not claim the work is complete or merely copy and truncate the request.\n- Avoid repository names already visible in the workspace metadata, quotes, labels, filler, and trailing punctuation.\n\nWorkspace metadata:\n<workspace>\n{{repository_context}}\n</workspace>\n\nConversation:\n<conversation>\n{{conversation}}\n</conversation>\n\nCurrent title: {{current_name}}\nNaming phase: {{reason}}",
   "nameConstraints": {
     "minLength": 6,
-    "maxLength": 60
+    "maxLength": 40
   }
 }
 ```

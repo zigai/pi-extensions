@@ -1,11 +1,14 @@
+import { basename } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ImageContent, TextContent, ThinkingContent, ToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { ExtensionSettings } from "./settings.ts";
 
-const MAX_CONVERSATION_CONTEXT_CHARACTERS = 30_000;
-const MAX_REPOSITORY_CONTEXT_CHARACTERS = 12_000;
+const MAX_CONVERSATION_CONTEXT_CHARACTERS = 8_000;
+const MAX_FIRST_USER_CONTEXT_CHARACTERS = 2_000;
+const MAX_WORKSPACE_CONTEXT_CHARACTERS = 2_000;
+const MAX_CHANGED_AREAS = 20;
 const NAMING_STATE_VERSION = 1;
 
 export const AUTONAME_STATE_ENTRY_TYPE = "pi-autoname-session.state";
@@ -335,9 +338,14 @@ function truncatePromptContext(text: string, maxCharacters: number): string {
         return text;
     }
 
-    const headLength = Math.floor(maxCharacters / 2);
-    const tailLength = maxCharacters - headLength;
-    return `${text.slice(0, headLength)}\n...[context truncated]...\n${text.slice(-tailLength)}`;
+    const marker = "\n...[context truncated]...\n";
+    const contentCharacters = Math.max(0, maxCharacters - marker.length);
+    if (contentCharacters === 0) {
+        return marker.slice(0, maxCharacters);
+    }
+    const headLength = Math.floor(contentCharacters / 2);
+    const tailLength = contentCharacters - headLength;
+    return `${text.slice(0, headLength)}${marker}${text.slice(-tailLength)}`;
 }
 
 function stringifyPromptValue(value: ToolCall["arguments"]): string {
@@ -415,21 +423,103 @@ export function normalizeSessionName(
     return name.length >= minLength ? name : undefined;
 }
 
-/**
- * Build the repository context section: the working directory plus loaded
- * repository guidance files, truncated to MAX_REPOSITORY_CONTEXT_CHARACTERS.
- */
-export function buildRepositoryContext(
-    cwd: string,
-    contextFiles: readonly { readonly path: string; readonly content: string }[] | undefined,
-): string {
-    const sections = [`Working directory: ${cwd}`];
+const OPAQUE_PROMPT_WORDS = new Set([
+    "again",
+    "ahead",
+    "check",
+    "changes",
+    "commit",
+    "continue",
+    "current",
+    "do",
+    "finish",
+    "fix",
+    "go",
+    "implement",
+    "investigate",
+    "it",
+    "make",
+    "please",
+    "proceed",
+    "review",
+    "that",
+    "this",
+    "work",
+]);
 
-    for (const file of contextFiles ?? []) {
-        sections.push(`Loaded repository guidance (${file.path}):\n${file.content}`);
+/** True when the visible request lacks a durable subject of its own. */
+export function isOpaqueNamingPrompt(prompt: string): boolean {
+    const normalized = prompt.trim().replace(/^`+|`+$/g, "");
+    if (normalized.length === 0) {
+        return false;
+    }
+    if (/^[/$][\w.-]+(?:\s|$)/u.test(normalized)) {
+        return true;
     }
 
-    return truncatePromptContext(sections.join("\n\n"), MAX_REPOSITORY_CONTEXT_CHARACTERS);
+    const words = normalized.toLowerCase().match(/[\p{L}\p{N}_+-]+/gu) ?? [];
+    return (
+        words.length > 0 &&
+        words.length <= 5 &&
+        words.every((word) => OPAQUE_PROMPT_WORDS.has(word))
+    );
+}
+
+function summarizeChangedPath(rawPath: string): string | undefined {
+    const renameTarget = rawPath.split(" -> ").at(-1)?.trim();
+    const path = renameTarget?.replace(/^"|"$/g, "");
+    if (path === undefined || path.length === 0) {
+        return undefined;
+    }
+
+    const segments = path.split("/").filter((segment) => segment.length > 0);
+    if (segments.length >= 2 && ["apps", "crates", "packages"].includes(segments[0] ?? "")) {
+        return `${segments[0]}/${segments[1]}`;
+    }
+    return path;
+}
+
+/**
+ * Build compact workspace metadata. Git status is supplied only for opaque
+ * first prompts; repository guidance contents are deliberately excluded.
+ */
+export function buildRepositoryContext(cwd: string, gitStatus?: string): string {
+    const sections = [`Repository: ${basename(cwd)}`, `Working directory: ${cwd}`];
+    if (gitStatus === undefined) {
+        return sections.join("\n");
+    }
+
+    const changedAreas: string[] = [];
+    let branch: string | undefined;
+    for (const line of gitStatus.split(/\r?\n/u)) {
+        if (line.startsWith("## ")) {
+            branch = line.slice(3).split("...")[0]?.split(" [")[0]?.trim();
+            continue;
+        }
+        if (line.length < 4) {
+            continue;
+        }
+
+        const area = summarizeChangedPath(line.slice(3));
+        if (area !== undefined && !changedAreas.includes(area)) {
+            changedAreas.push(area);
+        }
+    }
+
+    if (branch !== undefined && branch.length > 0) {
+        sections.push(`Branch: ${branch}`);
+    }
+    if (changedAreas.length > 0) {
+        const visibleAreas = changedAreas.slice(0, MAX_CHANGED_AREAS);
+        const omitted = changedAreas.length - visibleAreas.length;
+        const lines = visibleAreas.map((area) => `- ${area}`);
+        if (omitted > 0) {
+            lines.push(`- ...and ${omitted} more`);
+        }
+        sections.push(`Changed areas:\n${lines.join("\n")}`);
+    }
+
+    return truncatePromptContext(sections.join("\n"), MAX_WORKSPACE_CONTEXT_CHARACTERS);
 }
 
 function renderContent(
@@ -447,11 +537,11 @@ function renderContent(
                 parts.push(block.text);
                 break;
             case "toolCall":
-                parts.push(
-                    scope === "minimized"
-                        ? `[tool call: ${block.name}]`
-                        : `[tool call: ${block.name} ${stringifyPromptValue(block.arguments)}]`,
-                );
+                if (scope === "full") {
+                    parts.push(
+                        `[tool call: ${block.name} ${stringifyPromptValue(block.arguments)}]`,
+                    );
+                }
                 break;
             case "image":
                 parts.push("[image attached]");
@@ -483,43 +573,113 @@ function renderMessage(
     }
 }
 
-/**
- * Render conversation entries for the picker model prompt, truncated to
- * MAX_CONVERSATION_CONTEXT_CHARACTERS. Pass the active, compaction-aware
- * entry list (SessionManager.buildContextEntries) so compacted-away history
- * is not resent.
- */
-export function buildConversationContext(
+type ConversationSection = {
+    readonly role: "USER" | "ASSISTANT" | "SUMMARY" | "TOOL";
+    readonly text: string;
+};
+
+function collectConversationSections(
     entries: readonly SessionEntry[],
     scope: ConversationScope,
-    pendingPrompt?: string,
-): string {
-    const sections: string[] = [];
-
+): ConversationSection[] {
+    const sections: ConversationSection[] = [];
     for (const entry of entries) {
-        if (entry.type === "compaction") {
-            sections.push(`Compaction summary:\n${entry.summary}`);
+        if (entry.type === "compaction" || entry.type === "branch_summary") {
+            sections.push({ role: "SUMMARY", text: entry.summary.trim() });
             continue;
         }
-
-        if (entry.type === "branch_summary") {
-            sections.push(`Branch summary:\n${entry.summary}`);
-            continue;
-        }
-
         if (entry.type !== "message") {
             continue;
         }
 
         const text = renderMessage(entry.message, scope);
-        if (text.length > 0) {
-            sections.push(`${entry.message.role}:\n${text}`);
+        if (text.length === 0) {
+            continue;
+        }
+        if (entry.message.role === "user") {
+            sections.push({ role: "USER", text });
+        } else if (entry.message.role === "assistant") {
+            sections.push({ role: "ASSISTANT", text });
+        } else {
+            sections.push({ role: "TOOL", text });
         }
     }
+    return sections;
+}
 
-    if (pendingPrompt !== undefined) {
-        sections.push(`user:\n${pendingPrompt}`);
+function renderConversationSection(section: ConversationSection): string {
+    return `${section.role}:\n${section.text}`;
+}
+
+function truncateInitialUserMessage(message: string): string {
+    const prefix = "USER:\n";
+    const available = MAX_CONVERSATION_CONTEXT_CHARACTERS - prefix.length;
+    if (message.length <= available) {
+        return `${prefix}${message}`;
+    }
+    return `${prefix}${message.slice(0, available - "\n[message truncated]".length)}\n[message truncated]`;
+}
+
+/**
+ * Render focused title context. Initial naming receives only the first user
+ * request. Refresh naming receives user and assistant text with the first
+ * user request pinned and the recent tail retained inside an 8k budget.
+ */
+export function buildConversationContext(
+    entries: readonly SessionEntry[],
+    options: {
+        readonly phase: NamingPhase;
+        readonly scope: ConversationScope;
+        readonly pendingPrompt?: string | undefined;
+    },
+): string {
+    const sections = collectConversationSections(entries, options.scope);
+    if (options.phase === "initial") {
+        const firstUserMessage =
+            options.pendingPrompt ??
+            sections.find((section) => section.role === "USER")?.text ??
+            "";
+        return truncateInitialUserMessage(firstUserMessage);
     }
 
-    return truncatePromptContext(sections.join("\n\n"), MAX_CONVERSATION_CONTEXT_CHARACTERS);
+    const rendered = sections.map(renderConversationSection);
+    const completeContext = rendered.join("\n\n");
+    if (completeContext.length <= MAX_CONVERSATION_CONTEXT_CHARACTERS) {
+        return completeContext;
+    }
+
+    const firstUserIndex = sections.findIndex((section) => section.role === "USER");
+    const firstUser = firstUserIndex >= 0 ? sections[firstUserIndex] : undefined;
+    const firstUserText = firstUser?.text ?? "";
+    const pinnedText = firstUserText.slice(0, MAX_FIRST_USER_CONTEXT_CHARACTERS);
+    const pinned = pinnedText.length > 0 ? `USER:\n${pinnedText}` : "";
+    const marker = "[Earlier conversation truncated]";
+    const separatorLength = pinned.length > 0 ? 4 : 2;
+    let remaining =
+        MAX_CONVERSATION_CONTEXT_CHARACTERS - pinned.length - marker.length - separatorLength;
+    const recent: string[] = [];
+
+    for (let index = rendered.length - 1; index >= 0 && remaining > 0; index -= 1) {
+        if (index === firstUserIndex) {
+            continue;
+        }
+        const section = rendered[index];
+        if (section === undefined) {
+            continue;
+        }
+        const separator = recent.length > 0 ? 2 : 0;
+        const available = remaining - separator;
+        if (available <= 0) {
+            break;
+        }
+        if (section.length > available) {
+            recent.unshift(section.slice(-available));
+            remaining = 0;
+            break;
+        }
+        recent.unshift(section);
+        remaining -= section.length + separator;
+    }
+
+    return [pinned, marker, recent.join("\n\n")].filter((part) => part.length > 0).join("\n\n");
 }
