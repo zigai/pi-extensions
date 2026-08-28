@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-autoname-session",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Automatically name and keep Pi sessions organized",
   "keywords": [
     "autoname-session",
