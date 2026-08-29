@@ -5,7 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import { compileSchema } from "../schema-parsing.ts";
 import { NATIVE_COMPACTION_SHIM_SUMMARY } from "./messages.ts";
 import type {
     BuildPromptInputResult,
@@ -26,8 +26,42 @@ const BRANCH_SUMMARY_PREFIX =
     "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n";
 const BRANCH_SUMMARY_SUFFIX = "</summary>";
 
-const JsonObjectSchema = Type.Record(Type.String(), Type.Unknown());
-const JsonObjectValidator = compileSchema(JsonObjectSchema);
+const JsonValueSchema = Type.Cyclic(
+    {
+        JsonValue: Type.Union([
+            Type.Null(),
+            Type.Boolean(),
+            Type.Number(),
+            Type.String(),
+            Type.Array(Type.Ref("JsonValue")),
+            Type.Record(Type.String(), Type.Union([Type.Ref("JsonValue"), Type.Undefined()])),
+        ]),
+    },
+    "JsonValue",
+);
+const JsonObjectSchema = Type.Record(
+    Type.String(),
+    Type.Union([JsonValueSchema, Type.Undefined()]),
+);
+export const JsonValueDecoder = compileSchema(JsonValueSchema);
+export const JsonArrayDecoder = compileSchema(Type.Array(JsonValueSchema));
+export const JsonObjectDecoder = compileSchema(JsonObjectSchema);
+export const ResponsesPayloadDecoder = compileSchema(
+    Type.Intersect([
+        JsonObjectSchema,
+        Type.Object({ model: Type.String(), input: Type.Array(JsonObjectSchema) }),
+    ]),
+);
+const StringValidator = compileSchema(Type.String());
+export const JsonStringDecoder = StringValidator;
+export const JsonNumberDecoder = compileSchema(Type.Number());
+const ImageDetailValidator = compileSchema(
+    Type.Union([Type.Literal("high"), Type.Literal("original")]),
+);
+const UnknownArrayValidator = compileSchema(Type.Array(Type.Unknown()));
+const CompactionMessageContentValidator = compileSchema(
+    Type.Union([Type.String(), Type.Array(Type.Unknown())]),
+);
 
 export function buildRemoteCompactionPromptInput(
     event: SessionBeforeCompactEvent,
@@ -108,7 +142,7 @@ function serializeMessagesToResponsesInput(
     const insertSyntheticToolResults = () => {
         if (pendingToolCalls.length === 0) return;
         for (const toolCall of pendingToolCalls) {
-            const id = typeof toolCall.call_id === "string" ? toolCall.call_id : undefined;
+            const id = StringValidator.decode(toolCall.call_id);
             if (id && !existingToolResultIds.has(id)) {
                 serializeNormalizedMessage({
                     role: "toolResult",
@@ -155,9 +189,7 @@ function transformMessageForResponses(
 ): CompactionMessage {
     if (message.role === "toolResult") {
         const mapped =
-            typeof message.toolCallId === "string"
-                ? toolCallIdMap.get(message.toolCallId)
-                : undefined;
+            message.toolCallId === undefined ? undefined : toolCallIdMap.get(message.toolCallId);
         return mapped ? { ...message, toolCallId: mapped } : message;
     }
     if (message.role !== "assistant") return message;
@@ -220,29 +252,30 @@ function compactionSummaryMessage(summary: string): CompactionMessage {
 }
 
 function parseCompactionMessage(value: unknown): CompactionMessage | undefined {
-    if (!isJsonObject(value)) return undefined;
-    if (value.role === "user") {
-        const content = parseCompactionMessageContent(value.content);
+    const message = parseJsonObject(value);
+    if (message === undefined) return undefined;
+    if (message.role === "user") {
+        const content = parseCompactionMessageContent(message.content);
         return content === undefined ? undefined : { role: "user", content };
     }
-    if (value.role === "assistant") {
-        const content = parseCompactionContentBlocks(value.content);
+    if (message.role === "assistant") {
+        const content = parseCompactionContentBlocks(message.content);
         if (!content) return undefined;
         return {
             role: "assistant",
             content,
-            provider: parseOptionalString(value.provider),
-            api: parseOptionalString(value.api),
-            model: parseOptionalString(value.model),
-            stopReason: parseOptionalString(value.stopReason),
+            provider: parseOptionalString(message.provider),
+            api: parseOptionalString(message.api),
+            model: parseOptionalString(message.model),
+            stopReason: parseOptionalString(message.stopReason),
         };
     }
-    if (value.role === "toolResult") {
-        const content = parseCompactionContentBlocks(value.content);
+    if (message.role === "toolResult") {
+        const content = parseCompactionContentBlocks(message.content);
         if (!content) return undefined;
         return {
             role: "toolResult",
-            toolCallId: parseOptionalString(value.toolCallId),
+            toolCallId: parseOptionalString(message.toolCallId),
             content,
         };
     }
@@ -250,16 +283,20 @@ function parseCompactionMessage(value: unknown): CompactionMessage | undefined {
 }
 
 function parseCompactionMessageContent(value: unknown): CompactionMessageContent | undefined {
-    if (typeof value === "string") return value;
-    return parseCompactionContentBlocks(value);
+    const content = CompactionMessageContentValidator.decode(value);
+    if (content === undefined) return undefined;
+    return Array.isArray(content)
+        ? parseCompactionContentBlocks(content)
+        : [{ type: "text", text: content }];
 }
 
 function parseCompactionContentBlocks(
     value: unknown,
 ): readonly CompactionContentBlock[] | undefined {
-    if (!Array.isArray(value)) return undefined;
+    const values = UnknownArrayValidator.decode(value);
+    if (values === undefined) return undefined;
     const content: CompactionContentBlock[] = [];
-    for (const item of value) {
+    for (const item of values) {
         const block = parseCompactionContentBlock(item);
         if (block) content.push(block);
     }
@@ -267,41 +304,27 @@ function parseCompactionContentBlocks(
 }
 
 function parseCompactionContentBlock(value: unknown): CompactionContentBlock | undefined {
-    if (!isJsonObject(value)) return undefined;
-    if (value.type === "text" && typeof value.text === "string") {
-        return { type: "text", text: value.text };
+    const block = parseJsonObject(value);
+    if (block === undefined) return undefined;
+    const text = StringValidator.decode(block.text);
+    if (block.type === "text" && text !== undefined) return { type: "text", text };
+    const data = StringValidator.decode(block.data);
+    const mimeType = StringValidator.decode(block.mimeType);
+    if (block.type === "image" && data !== undefined && mimeType !== undefined) {
+        return { type: "image", data, mimeType, detail: imageDetailForResponses(block.detail) };
     }
-    if (
-        value.type === "image" &&
-        typeof value.data === "string" &&
-        typeof value.mimeType === "string"
-    ) {
-        return {
-            type: "image",
-            data: value.data,
-            mimeType: value.mimeType,
-            detail: imageDetailForResponses(value.detail),
-        };
-    }
-    if (value.type === "thinking") {
+    if (block.type === "thinking") {
         return {
             type: "thinking",
-            thinking: parseOptionalString(value.thinking),
-            thinkingSignature: parseOptionalString(value.thinkingSignature),
-            redacted: value.redacted === true ? true : undefined,
+            thinking: parseOptionalString(block.thinking),
+            thinkingSignature: parseOptionalString(block.thinkingSignature),
+            redacted: block.redacted === true ? true : undefined,
         };
     }
-    if (
-        value.type === "toolCall" &&
-        typeof value.id === "string" &&
-        typeof value.name === "string"
-    ) {
-        return {
-            type: "toolCall",
-            id: value.id,
-            name: value.name,
-            arguments: parseJsonObject(value.arguments),
-        };
+    const id = StringValidator.decode(block.id);
+    const name = StringValidator.decode(block.name);
+    if (block.type === "toolCall" && id !== undefined && name !== undefined) {
+        return { type: "toolCall", id, name, arguments: parseJsonObject(block.arguments) };
     }
     return undefined;
 }
@@ -348,8 +371,6 @@ function inputContentFromContent(
     content: CompactionMessageContent,
     model: ExtensionContext["model"] | undefined,
 ): ResponsesInputItem[] {
-    if (typeof content === "string")
-        return [{ type: "input_text", text: sanitizeSurrogates(content) }];
     return content.flatMap((item): ResponsesInputItem[] => {
         if (item.type === "text") {
             return [{ type: "input_text", text: sanitizeSurrogates(item.text) }];
@@ -398,7 +419,6 @@ function toolResultOutputFromContent(
 }
 
 function textFromContent(content: CompactionMessageContent): string | undefined {
-    if (typeof content === "string") return sanitizeSurrogates(content).trim() || undefined;
     const parts = content.flatMap((item) =>
         item.type === "text" ? [sanitizeSurrogates(item.text)] : [],
     );
@@ -411,34 +431,37 @@ function toolCallsFromContent(content: readonly CompactionContentBlock[]): Respo
         if (item.type !== "toolCall") return [];
         const [callId, itemId] = splitResponseToolCallId(item.id);
         if (!callId) return [];
-        return [
-            {
-                type: "function_call",
-                ...(itemId ? { id: itemId } : {}),
-                call_id: callId,
-                name: item.name,
-                arguments: JSON.stringify(item.arguments ?? {}),
-            },
-        ];
+        const argumentsText = JSON.stringify(item.arguments ?? {});
+        return itemId
+            ? [
+                  {
+                      type: "function_call",
+                      id: itemId,
+                      call_id: callId,
+                      name: item.name,
+                      arguments: argumentsText,
+                  },
+              ]
+            : [
+                  {
+                      type: "function_call",
+                      call_id: callId,
+                      name: item.name,
+                      arguments: argumentsText,
+                  },
+              ];
     });
 }
 
 export function parseResponsesPayload(value: unknown): ResponsesPayload | undefined {
-    const payload = parseJsonObject(value);
-    if (!payload || typeof payload.model !== "string") return undefined;
-    const input = parseResponsesInputItems(payload.input);
-    if (!input) return undefined;
-    return {
-        ...payload,
-        model: payload.model,
-        input,
-    };
+    return ResponsesPayloadDecoder.decode(value);
 }
 
 export function parseResponsesInputItems(value: unknown): ResponsesInputItem[] | undefined {
-    if (!Array.isArray(value)) return undefined;
+    const rawItems = UnknownArrayValidator.decode(value);
+    if (rawItems === undefined) return undefined;
     const items: ResponsesInputItem[] = [];
-    for (const item of value) {
+    for (const item of rawItems) {
         const inputItem = parseJsonObject(item);
         if (!inputItem) return undefined;
         items.push(inputItem);
@@ -447,29 +470,33 @@ export function parseResponsesInputItems(value: unknown): ResponsesInputItem[] |
 }
 
 export function isInstructionItem(item: ResponsesInputItem | undefined): boolean {
-    return isJsonObject(item) && (item.role === "system" || item.role === "developer");
+    return item !== undefined && (item.role === "system" || item.role === "developer");
 }
 
 export function isRemoteCompactionOutputItem(
     item: ResponsesInputItem | undefined,
 ): item is ResponsesInputItem & { readonly encrypted_content: string } {
     return (
-        isJsonObject(item) &&
+        item !== undefined &&
         (item.type === "compaction" || item.type === "compaction_summary") &&
-        typeof item.encrypted_content === "string"
+        StringValidator.decode(item.encrypted_content) !== undefined
     );
 }
 
 export function itemContainsShimSummary(item: ResponsesInputItem): boolean {
-    if (!isJsonObject(item)) return false;
     return textFromResponsesContent(item.content).includes(NATIVE_COMPACTION_SHIM_SUMMARY);
 }
 
 export function textFromResponsesContent(content: JsonValue | undefined): string {
-    if (typeof content === "string") return content;
+    const textContent = StringValidator.decode(content);
+    if (textContent !== undefined) return textContent;
     if (!isJsonArray(content)) return "";
     return content
-        .flatMap((item) => (isJsonObject(item) && typeof item.text === "string" ? [item.text] : []))
+        .flatMap((item) => {
+            const text = parseJsonObject(item)?.text;
+            const parsed = StringValidator.decode(text);
+            return parsed === undefined ? [] : [parsed];
+        })
         .join("\n");
 }
 
@@ -484,36 +511,8 @@ export function sanitizeSurrogates(text: string): string {
     );
 }
 
-function parseJsonValue(value: unknown): JsonValue | undefined {
-    if (value === null) return null;
-    if (typeof value === "string" || typeof value === "boolean") return value;
-    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-    if (Array.isArray(value)) {
-        const items: JsonValue[] = [];
-        for (const item of value) {
-            const parsed = parseJsonValue(item);
-            if (parsed === undefined) return undefined;
-            items.push(parsed);
-        }
-        return items;
-    }
-    return parseJsonObject(value);
-}
-
 function parseJsonObject(value: unknown): JsonObject | undefined {
-    const record = parseWithSchema(JsonObjectValidator, value);
-    if (!record) return undefined;
-    const object: Record<string, JsonValue> = {};
-    for (const [key, nested] of Object.entries(record)) {
-        const parsed = parseJsonValue(nested);
-        if (parsed === undefined) return undefined;
-        object[key] = parsed;
-    }
-    return object;
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-    return parseWithSchema(JsonObjectValidator, value) !== undefined;
+    return JsonObjectDecoder.decode(value);
 }
 
 function modelSupportsImages(model: ExtensionContext["model"] | undefined): boolean {
@@ -521,7 +520,7 @@ function modelSupportsImages(model: ExtensionContext["model"] | undefined): bool
 }
 
 function imageDetailForResponses(value: unknown): "auto" | "high" | "original" {
-    return value === "high" || value === "original" ? value : "auto";
+    return ImageDetailValidator.decode(value) ?? "auto";
 }
 
 function normalizeResponsesToolCallId(id: string, isSameModel: boolean): string {
@@ -535,7 +534,7 @@ function normalizeResponsesToolCallId(id: string, isSameModel: boolean): string 
 }
 
 function responseCallIdFromToolCallId(value: string | undefined): string | undefined {
-    if (typeof value !== "string") return undefined;
+    if (value === undefined) return undefined;
     return splitResponseToolCallId(value)[0];
 }
 
@@ -563,5 +562,5 @@ function shortHash(value: string): string {
 }
 
 function parseOptionalString(value: unknown): string | undefined {
-    return typeof value === "string" ? value : undefined;
+    return StringValidator.decode(value);
 }

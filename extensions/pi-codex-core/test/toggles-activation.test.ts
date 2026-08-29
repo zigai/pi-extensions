@@ -1,6 +1,7 @@
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { JsonObjectDecoder, JsonStringDecoder } from "../src/compaction/responses-input.ts";
 import {
     OptionalTogglesActivation,
     type ToolActivationDecision,
@@ -74,10 +75,11 @@ test("switches from standalone to delegated after a later ready handshake", () =
 test("requires a fresh handshake after the session changes", () => {
     const events = createEventBus();
     events.on(PROPOSAL_EVENT, (value) => {
-        if (typeof value !== "object" || value === null || !("sessionId" in value)) return;
+        const sessionId = JsonStringDecoder.decode(JsonObjectDecoder.decode(value)?.sessionId);
+        if (sessionId === undefined) return;
         events.emit(ACCEPTED_EVENT, {
             version: 1,
-            sessionId: value.sessionId,
+            sessionId,
             owner: "pi-codex-core",
         });
     });

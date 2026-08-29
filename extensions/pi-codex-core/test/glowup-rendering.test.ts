@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
-import { isGlowupWireRecord } from "../src/glowup/wire.ts";
+import { parseGlowupWireRecord } from "../src/glowup/wire.ts";
+import { StringDecoder } from "../src/schema-parsing.ts";
 import { applyPatchGlowupRendering } from "../src/tools/apply-patch/glowup-rendering.ts";
 import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
 import { createImagegenTool } from "../src/tools/imagegen.ts";
 import { createViewImageTool } from "../src/tools/view-image/tool.ts";
 import { createWebRunTool } from "../src/tools/web-run/tool.ts";
+import { testDouble } from "./helpers.ts";
 
 const completeContext = {
     toolName: "tool",
@@ -20,41 +22,36 @@ const completeContext = {
     isError: false,
 } as const;
 
-function inlineText(value: unknown): string {
-    if (typeof value === "string") return value;
-    return isGlowupWireRecord(value) && typeof value.text === "string" ? value.text : "";
+function inlineText<Value>(value: Value): string {
+    const text = StringDecoder.decode(value);
+    if (text !== undefined) return text;
+    return StringDecoder.decode(parseGlowupWireRecord(value)?.text) ?? "";
 }
 
-function nodeText(node: unknown): string {
-    if (!isGlowupWireRecord(node)) return "";
-    switch (node.kind) {
-        case "text":
-            return inlineText(node.text);
-        case "call":
-            return nodeText(node.body);
-        case "output":
-            return typeof node.text === "string" ? node.text : "";
-        case "stack":
-            return Array.isArray(node.children) ? node.children.map(nodeText).join("\n") : "";
-        case "empty":
-            return "";
-        default:
-            return "";
+function nodeText<Value>(node: Value): string {
+    const record = parseGlowupWireRecord(node);
+    if (!record) return "";
+    if (record.kind === "text") return inlineText(record.text);
+    if (record.kind === "call") return nodeText(record.body);
+    if (record.kind === "output") return StringDecoder.decode(record.text) ?? "";
+    if (record.kind === "stack" && Array.isArray(record.children)) {
+        return record.children.map(nodeText).join("\n");
     }
+    return "";
 }
 
-function parseArgs<Args>(
-    renderer: { readonly parseArgs: (value: unknown) => Args | undefined },
-    value: unknown,
+function parseArgs<Args, Value>(
+    renderer: { readonly parseArgs: (value: Value) => Args | undefined },
+    value: Value,
 ): Args {
     const parsed = renderer.parseArgs(value);
     assert.ok(parsed);
     return parsed;
 }
 
-function parseResult<Result>(
-    renderer: { readonly parseResult: (value: unknown) => Result | undefined },
-    value: unknown,
+function parseResult<Result, Value>(
+    renderer: { readonly parseResult: (value: Value) => Result | undefined },
+    value: Value,
 ): Result {
     const parsed = renderer.parseResult(value);
     assert.ok(parsed);
@@ -74,9 +71,10 @@ test("Codex tools expose passive Glowup protocol v3 adapters", () => {
     }
 
     const applyPatch = createApplyPatchTool();
-    const rendering: unknown = Reflect.get(applyPatch, "glowupRendering");
-    assert.ok(rendering && typeof rendering === "object");
-    assert.equal(Reflect.get(rendering, "version"), 3);
+    const rendering = testDouble<{
+        readonly glowupRendering: typeof applyPatchGlowupRendering;
+    }>()(applyPatch).glowupRendering;
+    assert.equal(rendering.version, 3);
     assert.ok(applyPatch.renderCall, "apply_patch keeps its native renderer without Glowup");
 });
 
@@ -96,16 +94,18 @@ test("apply_patch adapter owns partial, planned, settled, and restored mutation 
     const args = rendering.parseArgs({ patch });
     assert.ok(args);
     const planned: unknown = rendering.renderCall(args, completeContext);
-    assert.ok(isGlowupWireRecord(planned));
-    assert.equal(planned.kind, "mutation");
-    assert.ok(Array.isArray(planned.files));
-    assert.equal(planned.files.length, 2);
+    const plannedRecord = parseGlowupWireRecord(planned);
+    assert.ok(plannedRecord);
+    assert.equal(plannedRecord.kind, "mutation");
+    assert.ok(Array.isArray(plannedRecord.files));
+    assert.equal(plannedRecord.files.length, 2);
 
     const partial: unknown = rendering.renderPartialCall({
         patch: "*** Begin Patch\n*** Add File: src/live.ts\n+export const live =",
     });
-    assert.ok(isGlowupWireRecord(partial));
-    assert.equal(partial.kind, "mutation");
+    const partialRecord = parseGlowupWireRecord(partial);
+    assert.ok(partialRecord);
+    assert.equal(partialRecord.kind, "mutation");
     const splitEmoji: unknown = rendering.renderPartialCall({
         patch: `*** Begin Patch\n*** Add File: src/live.ts\n+${"🧪".slice(0, 1)}`,
     });
@@ -132,9 +132,10 @@ test("apply_patch adapter owns partial, planned, settled, and restored mutation 
     });
     assert.ok(result);
     const restored: unknown = rendering.renderResult(result);
-    assert.ok(isGlowupWireRecord(restored));
-    assert.equal(restored.kind, "mutation");
-    assert.equal(typeof restored.patch === "string" && restored.patch.includes("src/b.ts"), true);
+    const restoredRecord = parseGlowupWireRecord(restored);
+    assert.ok(restoredRecord);
+    assert.equal(restoredRecord.kind, "mutation");
+    assert.equal(StringDecoder.decode(restoredRecord.patch)?.includes("src/b.ts"), true);
     assert.equal(rendering.parseResult({ details: { patch: "invalid" } }), undefined);
 });
 
@@ -168,8 +169,10 @@ test("web_run adapter summarizes calls and bounded source results", () => {
     for (const [rawArgs, label] of operationLabels) {
         const parsedArgs = parseArgs(renderer, rawArgs);
         const node = renderer.renderCall?.(parsedArgs, completeContext);
-        assert.ok(isGlowupWireRecord(node) && isGlowupWireRecord(node.labels));
-        assert.equal(node.labels.static, label);
+        const record = parseGlowupWireRecord(node);
+        const labels = parseGlowupWireRecord(record?.labels);
+        assert.ok(labels);
+        assert.equal(labels.static, label);
     }
 
     const output = [

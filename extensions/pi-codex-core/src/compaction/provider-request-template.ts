@@ -1,13 +1,25 @@
-import { textFromResponsesContent } from "./responses-input.ts";
+import { Type } from "typebox";
+
+import {
+    JsonObjectDecoder,
+    JsonValueDecoder,
+    textFromResponsesContent,
+} from "./responses-input.ts";
+import { compileSchema } from "../schema-parsing.ts";
 import type {
     JsonObject,
-    JsonValue,
     ProviderRequestLayout,
     ProviderRequestTemplate,
     ResponsesInputItem,
     ResponsesTool,
 } from "./types.ts";
 
+type ProviderRequestTemplateConstruction = {
+    -readonly [Key in keyof ProviderRequestTemplate]: ProviderRequestTemplate[Key];
+};
+
+const UnknownArrayDecoder = compileSchema(Type.Array(Type.Unknown()));
+const StringDecoder = compileSchema(Type.String());
 const templatesBySessionId = new Map<string, ProviderRequestTemplate>();
 
 /** Capture only static/cache-shaping fields from a provider-ready Responses request. */
@@ -16,18 +28,18 @@ export function captureProviderRequestTemplate(
     payload: unknown,
     options: { readonly activeToolNames?: readonly string[] | undefined } = {},
 ): ProviderRequestTemplate | undefined {
-    const request = unknownRecord(payload);
-    const model = ownValue(request, "model");
-    const input = ownValue(request, "input");
-    if (!request || typeof model !== "string" || !isUnknownArray(input)) {
+    const request = JsonObjectDecoder.decode(payload);
+    const model = StringDecoder.decode(ownValue(request, "model"));
+    const input = UnknownArrayDecoder.decode(ownValue(request, "input"));
+    if (!request || model === undefined || input === undefined) {
         templatesBySessionId.delete(sessionId);
         return undefined;
     }
 
     const rawFirstInput = input[0];
-    const rawFirstRecord = unknownRecord(rawFirstInput);
+    const rawFirstRecord = JsonObjectDecoder.decode(rawFirstInput);
     const additionalToolsItem = isAdditionalToolsRecord(rawFirstRecord)
-        ? parseJsonObject(rawFirstInput)
+        ? JsonObjectDecoder.decode(rawFirstInput)
         : undefined;
     if (isAdditionalToolsRecord(rawFirstRecord) && !additionalToolsItem) {
         templatesBySessionId.delete(sessionId);
@@ -43,26 +55,23 @@ export function captureProviderRequestTemplate(
               .map((item) => textFromResponsesContent(item.content))
               .filter((text) => text.length > 0)
               .join("\n")
-        : typeof standardInstructions === "string"
-          ? standardInstructions
-          : "";
+        : (StringDecoder.decode(standardInstructions) ?? "");
     const tools = parseTools(additionalToolsItem?.tools ?? ownValue(request, "tools"));
     const promptCacheKey = nonEmptyString(ownValue(request, "prompt_cache_key"));
-    const reasoning = parseJsonObject(ownValue(request, "reasoning"));
+    const reasoning = JsonObjectDecoder.decode(ownValue(request, "reasoning"));
     const serviceTier = nonEmptyString(ownValue(request, "service_tier"));
 
-    const template: ProviderRequestTemplate = {
-        model,
-        layout,
-        ...(options.activeToolNames ? { activeToolNames: [...options.activeToolNames] } : {}),
-        instructions,
-        ...(tools ? { tools } : {}),
-        ...(additionalToolsItem ? { additionalToolsItem } : {}),
-        ...(instructionItems && instructionItems.length > 0 ? { instructionItems } : {}),
-        ...(promptCacheKey ? { promptCacheKey } : {}),
-        ...(reasoning ? { reasoning } : {}),
-        ...(serviceTier ? { serviceTier } : {}),
-    };
+    const template: ProviderRequestTemplateConstruction = options.activeToolNames
+        ? { model, layout, activeToolNames: [...options.activeToolNames], instructions }
+        : { model, layout, instructions };
+    if (tools) template.tools = tools;
+    if (additionalToolsItem) template.additionalToolsItem = additionalToolsItem;
+    if (instructionItems && instructionItems.length > 0) {
+        template.instructionItems = instructionItems;
+    }
+    if (promptCacheKey) template.promptCacheKey = promptCacheKey;
+    if (reasoning) template.reasoning = reasoning;
+    if (serviceTier) template.serviceTier = serviceTier;
     templatesBySessionId.set(sessionId, template);
     return template;
 }
@@ -90,83 +99,45 @@ export function clearProviderRequestTemplate(sessionId: string): void {
 function leadingLiteInstructionItems(input: readonly unknown[]): ResponsesInputItem[] {
     const items: ResponsesInputItem[] = [];
     for (const rawItem of input) {
-        const rawRecord = unknownRecord(rawItem);
+        const rawRecord = JsonObjectDecoder.decode(rawItem);
         if (
             ownValue(rawRecord, "role") !== "developer" ||
             (ownValue(rawRecord, "type") !== undefined && ownValue(rawRecord, "type") !== "message")
         ) {
             break;
         }
-        const item = parseJsonObject(rawItem);
+        const item = JsonObjectDecoder.decode(rawItem);
         if (!item) break;
         items.push(item);
     }
     return items;
 }
 
-function isAdditionalToolsRecord(item: Record<string, unknown> | undefined): boolean {
+function isAdditionalToolsRecord(item: JsonObject | undefined): boolean {
     return ownValue(item, "type") === "additional_tools" && ownValue(item, "role") === "developer";
 }
 
 function parseTools(value: unknown): ResponsesTool[] | undefined {
-    if (!isUnknownArray(value)) return undefined;
+    const rawTools = UnknownArrayDecoder.decode(value);
+    if (rawTools === undefined) return undefined;
     const tools: ResponsesTool[] = [];
-    for (const item of value) {
-        const tool = parseJsonObject(item);
-        if (!tool || typeof tool.type !== "string") return undefined;
+    for (const item of rawTools) {
+        const tool = JsonObjectDecoder.decode(item);
+        if (!tool || StringDecoder.decode(tool.type) === undefined) return undefined;
         tools.push(tool);
     }
     return tools;
 }
 
-function parseJsonValue(value: unknown): JsonValue | undefined {
-    if (value === null) return null;
-    if (typeof value === "string" || typeof value === "boolean") return value;
-    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-    if (isUnknownArray(value)) {
-        const items: JsonValue[] = [];
-        for (const item of value) {
-            const parsed = parseJsonValue(item);
-            if (parsed === undefined) return undefined;
-            items.push(parsed);
-        }
-        return items;
-    }
-    return parseJsonObject(value);
-}
-
-function parseJsonObject(value: unknown): JsonObject | undefined {
-    const record = unknownRecord(value);
-    if (!record) return undefined;
-    const parsed: Record<string, JsonValue> = {};
-    for (const key of Object.keys(record)) {
-        const nested = ownValue(record, key);
-        if (nested === undefined) continue;
-        const parsedValue = parseJsonValue(nested);
-        if (parsedValue === undefined) return undefined;
-        parsed[key] = parsedValue;
-    }
-    return parsed;
-}
-
-function unknownRecord(value: unknown): Record<string, unknown> | undefined {
-    return isUnknownRecord(value) ? value : undefined;
-}
-
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function ownValue(record: Record<string, unknown> | undefined, key: string): unknown {
-    return record ? Object.getOwnPropertyDescriptor(record, key)?.value : undefined;
-}
-
-function isUnknownArray(value: unknown): value is readonly unknown[] {
-    return Array.isArray(value);
+function ownValue(record: JsonObject | undefined, key: string): JsonObject[string] {
+    return JsonValueDecoder.decode(
+        record ? Object.getOwnPropertyDescriptor(record, key)?.value : undefined,
+    );
 }
 
 function nonEmptyString(value: unknown): string | undefined {
-    return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+    const text = StringDecoder.decode(value)?.trim();
+    return text && text.length > 0 ? text : undefined;
 }
 
 function activeToolsStillMatch(

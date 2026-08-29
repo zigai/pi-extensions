@@ -26,7 +26,7 @@ import {
     type ApplyPatchFileSystem,
 } from "../src/tools/apply-patch/engine.ts";
 import { createApplyPatchTool } from "../src/tools/apply-patch/tool.ts";
-import { makeExtensionContext } from "./helpers.ts";
+import { makeExtensionContext, testDouble } from "./helpers.ts";
 
 function wrapPatch(body: string): string {
     return `*** Begin Patch\n${body}\n*** End Patch`;
@@ -412,8 +412,7 @@ test("apply_patch tool executes patch argument and formats parser errors", async
         assert.ok(params);
 
         const ctx = { cwd: root };
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture supplies the ExtensionContext cwd read by apply_patch execution.
-        const executionContext = ctx as unknown as ExtensionContext;
+        const executionContext = testDouble<ExtensionContext>()(ctx);
         const result = await tool.execute("call-1", params, undefined, undefined, executionContext);
 
         assert.equal(await readFile(join(root, "hello.txt"), "utf8"), "hi\n");

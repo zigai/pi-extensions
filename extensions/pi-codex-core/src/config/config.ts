@@ -18,7 +18,13 @@ import {
     type CodexConfigDiagnostic,
     type CodexCoreConfigParseResult,
 } from "./diagnostics.ts";
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import { compileSchema } from "../schema-parsing.ts";
+import {
+    JsonObjectDecoder,
+    JsonStringDecoder,
+    JsonValueDecoder,
+} from "../compaction/responses-input.ts";
+import type { JsonObject, JsonValue } from "../compaction/types.ts";
 
 export type CodexPromptMode = "pi" | "codex";
 export type CodexPersonality = "friendly" | "pragmatic" | "none";
@@ -178,10 +184,17 @@ const CodexCoreConfigJsonSchema = Type.Object(
     { additionalProperties: true },
 );
 
-const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
 const BooleanSchema = compileSchema(Type.Boolean());
 const NumberSchema = compileSchema(Type.Number());
-const StringSchema = compileSchema(Type.String());
+const StringSchema = JsonStringDecoder;
+const NodeErrorSchema = compileSchema(Type.Object({ code: Type.Optional(Type.String()) }));
+const ConfigReadOptionsSchema = compileSchema(
+    Type.Object({
+        cwd: Type.Optional(Type.String()),
+        agentDir: Type.Optional(Type.String()),
+        configPath: Type.Optional(Type.String()),
+    }),
+);
 
 export const DEFAULT_CODEX_CORE_CONFIG: CodexCoreConfig = {
     scope: { tools: "codex" },
@@ -235,13 +248,11 @@ export function getCodexCoreConfigPath(agentDir: string = getAgentDir()): string
     return getCodexCoreGlobalConfigPath(agentDir);
 }
 
-export function codexCoreConfigJsonSchema(): unknown {
-    const schema = structuredClone(CodexCoreConfigJsonSchema);
-    if (!isPlainRecord(schema)) return schema;
+export function codexCoreConfigJsonSchema() {
     return {
         $schema: JSON_SCHEMA_DRAFT_URI,
         $id: CODEX_CORE_CONFIG_SCHEMA_ID,
-        ...schema,
+        ...structuredClone(CodexCoreConfigJsonSchema),
     };
 }
 
@@ -260,8 +271,9 @@ export function parseCodexCoreConfig(value: unknown): CodexCoreConfig {
 export function parseCodexCoreConfigWithDiagnostics(
     value: unknown,
 ): CodexCoreConfigParseResult<CodexCoreConfig> {
+    const decodedValue = JsonValueDecoder.decode(value);
     const diagnostics: CodexConfigDiagnostic[] = [];
-    const root = parseRecord(value, "$", diagnostics);
+    const root = parseRecord(decodedValue, "$", diagnostics);
 
     const scope = parseRecord(root.scope, "$.scope", diagnostics);
     const tools = parseRecord(root.tools, "$.tools", diagnostics);
@@ -466,20 +478,21 @@ export function readCodexCoreConfig(
 export function readCodexCoreConfigWithDiagnostics(
     options: string | CodexCoreConfigReadOptions = {},
 ): CodexCoreConfigParseResult<CodexCoreConfig> {
-    if (typeof options === "string") {
-        return parseReadConfigInput(readConfigInput(options));
+    const directConfigPath = StringSchema.decode(options);
+    if (directConfigPath !== undefined) {
+        return parseReadConfigInput(readConfigInput(directConfigPath));
+    }
+    const readOptions = ConfigReadOptionsSchema.decode(options) ?? {};
+    if (readOptions.configPath !== undefined) {
+        return parseReadConfigInput(readConfigInput(readOptions.configPath));
     }
 
-    if (options.configPath !== undefined) {
-        return parseReadConfigInput(readConfigInput(options.configPath));
-    }
-
-    ensureCodexCoreGlobalConfigFiles(options.agentDir);
-    const globalInput = readConfigInput(getCodexCoreGlobalConfigPath(options.agentDir));
+    ensureCodexCoreGlobalConfigFiles(readOptions.agentDir);
+    const globalInput = readConfigInput(getCodexCoreGlobalConfigPath(readOptions.agentDir));
     const projectInput =
-        options.cwd === undefined
+        readOptions.cwd === undefined
             ? undefined
-            : readConfigInput(getCodexCoreProjectConfigPath(options.cwd));
+            : readConfigInput(getCodexCoreProjectConfigPath(readOptions.cwd));
     const parsed = parseCodexCoreConfigWithDiagnostics(
         mergeConfigInputs(globalInput.value ?? {}, projectInput?.value ?? {}),
     );
@@ -575,11 +588,15 @@ function existingConfigWriteBlocker(configPath: string): string | undefined {
     return `Refusing to overwrite ${unsafeDiagnostic.reason === "malformed-json" ? "malformed" : "unreadable"} config: ${configPath}`;
 }
 
-function serializeJson(value: unknown): string {
+type ScaffoldedJson =
+    | typeof DEFAULT_CODEX_CORE_CONFIG_JSON
+    | ReturnType<typeof codexCoreConfigJsonSchema>;
+
+function serializeJson(value: ScaffoldedJson): string {
     return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function writeJsonFileIfMissing(filePath: string, value: unknown): void {
+function writeJsonFileIfMissing(filePath: string, value: ScaffoldedJson): void {
     if (existsSync(filePath)) return;
 
     try {
@@ -595,7 +612,7 @@ function writeJsonFileIfMissing(filePath: string, value: unknown): void {
     }
 }
 
-function writeJsonFileIfChanged(filePath: string, value: unknown): void {
+function writeJsonFileIfChanged(filePath: string, value: ScaffoldedJson): void {
     const nextContent = serializeJson(value);
 
     try {
@@ -609,7 +626,7 @@ function writeJsonFileIfChanged(filePath: string, value: unknown): void {
 }
 
 type ConfigInputReadResult = {
-    readonly value: unknown;
+    readonly value: JsonValue | undefined;
     readonly diagnostics: readonly CodexConfigDiagnostic[];
 };
 
@@ -618,7 +635,7 @@ function readConfigInput(configPath: string): ConfigInputReadResult {
 
     try {
         const rawConfig: unknown = JSON.parse(readFileSync(configPath, "utf8"));
-        return { value: rawConfig, diagnostics: [] };
+        return { value: JsonValueDecoder.decode(rawConfig), diagnostics: [] };
     } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
         const reason = cause instanceof SyntaxError ? "malformed-json" : "unreadable";
@@ -667,58 +684,60 @@ function existingFileMode(filePath: string, fallback: number): number {
     }
 }
 
-function mergeConfigInputs(base: unknown, override: unknown): unknown {
-    if (!isPlainRecord(base)) return override ?? base;
-    if (!isPlainRecord(override)) return base;
+function mergeConfigInputs(
+    base: JsonValue | undefined,
+    override: JsonValue | undefined,
+): JsonValue | undefined {
+    const baseObject = JsonObjectDecoder.decode(base);
+    if (baseObject === undefined) return override ?? base;
+    const overrideObject = JsonObjectDecoder.decode(override);
+    if (overrideObject === undefined) return base;
 
-    const merged: Record<string, unknown> = { ...base };
-    for (const [key, value] of Object.entries(override)) {
+    const merged: Record<string, JsonValue | undefined> = {};
+    for (const [key, value] of Object.entries(baseObject)) merged[key] = value;
+    for (const [key, value] of Object.entries(overrideObject)) {
         merged[key] = mergeConfigInputs(merged[key], value);
     }
     return merged;
 }
 
 function parseRecord(
-    value: unknown,
+    value: JsonValue | undefined,
     path: string,
     diagnostics: CodexConfigDiagnostic[],
-): Record<string, unknown> {
+): JsonObject {
     if (value === undefined) return {};
-    const parsed = parseWithSchema(UnknownRecordSchema, value);
+    const parsed = JsonObjectDecoder.decode(value);
     if (parsed !== undefined) return parsed;
     diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected an object."));
     return {};
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
-    return isPlainRecord(cause) && cause.code === code;
+    return NodeErrorSchema.decode(cause)?.code === code;
 }
 
 function parseBoolean(
-    value: unknown,
+    value: JsonValue | undefined,
     fallback: boolean,
     path: string,
     diagnostics: CodexConfigDiagnostic[],
 ): boolean {
     if (value === undefined) return fallback;
-    const parsed = parseWithSchema(BooleanSchema, value);
+    const parsed = BooleanSchema.decode(value);
     if (parsed !== undefined) return parsed;
     diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a boolean."));
     return fallback;
 }
 
 function parsePercent(
-    value: unknown,
+    value: JsonValue | undefined,
     fallback: number,
     path: string,
     diagnostics: CodexConfigDiagnostic[],
 ): number {
     if (value === undefined) return fallback;
-    const parsed = parseWithSchema(NumberSchema, value);
+    const parsed = NumberSchema.decode(value);
     if (parsed === undefined || !Number.isInteger(parsed) || parsed < 1 || parsed > 99) {
         diagnostics.push(
             makeConfigDiagnostic(path, "invalid", "Expected an integer from 1 to 99."),
@@ -729,7 +748,7 @@ function parsePercent(
 }
 
 function parseIntegerInRange(
-    value: unknown,
+    value: JsonValue | undefined,
     fallback: number,
     minimum: number,
     maximum: number,
@@ -737,7 +756,7 @@ function parseIntegerInRange(
     diagnostics: CodexConfigDiagnostic[],
 ): number {
     if (value === undefined) return fallback;
-    const parsed = parseWithSchema(NumberSchema, value);
+    const parsed = NumberSchema.decode(value);
     if (parsed === undefined || !Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
         diagnostics.push(
             makeConfigDiagnostic(
@@ -752,13 +771,13 @@ function parseIntegerInRange(
 }
 
 function parseNonEmptyString(
-    value: unknown,
+    value: JsonValue | undefined,
     fallback: string,
     path: string,
     diagnostics: CodexConfigDiagnostic[],
 ): string {
     if (value === undefined) return fallback;
-    const parsed = parseWithSchema(StringSchema, value);
+    const parsed = StringSchema.decode(value);
     const text = parsed?.trim() ?? "";
     if (text.length > 0) return text;
     diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a non-empty string."));
@@ -766,14 +785,14 @@ function parseNonEmptyString(
 }
 
 function parseStringEnum<const TValue extends string>(
-    value: unknown,
+    value: JsonValue | undefined,
     allowed: readonly TValue[],
     fallback: TValue,
     path: string,
     diagnostics: CodexConfigDiagnostic[],
 ): TValue {
     if (value === undefined) return fallback;
-    const parsed = parseWithSchema(StringSchema, value);
+    const parsed = StringSchema.decode(value);
     if (parsed !== undefined && isOneOf(allowed, parsed)) return parsed;
     diagnostics.push(
         makeConfigDiagnostic(path, "invalid", `Expected one of: ${allowed.join(", ")}.`),

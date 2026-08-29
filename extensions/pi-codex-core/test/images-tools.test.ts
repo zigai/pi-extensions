@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getImageDimensions } from "@earendil-works/pi-tui";
+import { JsonArrayDecoder, JsonObjectDecoder } from "../src/compaction/responses-input.ts";
+import type { JsonObject, JsonValue } from "../src/compaction/types.ts";
 import { DEFAULT_CODEX_CORE_CONFIG } from "../src/config/config.ts";
 import {
     MAX_INPUT_IMAGE_BYTES,
@@ -27,6 +29,7 @@ import {
     renderComponent,
     makeRenderContext,
     messageEntry,
+    testDouble,
 } from "./helpers.ts";
 
 test("model-facing Codex tool guidance matches v0.145.0", async () => {
@@ -397,19 +400,7 @@ test("view_image returns durable image content with Codex patch budget", async (
             makeImageContext(root),
         );
 
-        const image = result.content.find(
-            (
-                item,
-            ): item is {
-                readonly type: "image";
-                readonly data: string;
-                readonly mimeType: string;
-            } =>
-                isRecord(item) &&
-                item.type === "image" &&
-                typeof item.data === "string" &&
-                typeof item.mimeType === "string",
-        );
+        const image = result.content.find((item) => item.type === "image");
         assert.ok(image);
         const dimensions = getImageDimensions(image.data, image.mimeType);
         assert.deepEqual(dimensions, { widthPx: 1600, heightPx: 1600 });
@@ -431,19 +422,7 @@ test("view_image preserves supported original detail", async () => {
             undefined,
             makeImageContext(root),
         );
-        const image = result.content.find(
-            (
-                item,
-            ): item is {
-                readonly type: "image";
-                readonly data: string;
-                readonly mimeType: string;
-            } =>
-                isRecord(item) &&
-                item.type === "image" &&
-                typeof item.data === "string" &&
-                typeof item.mimeType === "string",
-        );
+        const image = result.content.find((item) => item.type === "image");
         assert.ok(image);
         assert.deepEqual(getImageDimensions(image.data, image.mimeType), {
             widthPx: 3000,
@@ -1379,8 +1358,7 @@ function makeImageContext(cwd: string): ExtensionContext {
             getSessionId: () => "session/1",
         },
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test only exercises cwd, model image support, and session id lookup.
-    return ctx as unknown as ExtensionContext;
+    return testDouble<ExtensionContext>()(ctx);
 }
 
 type TestContextModel = NonNullable<ExtensionContext["model"]>;
@@ -1422,13 +1400,12 @@ function makeWebRunContext(
             getBranch: () => [],
         },
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test exercises web_run execution fields only.
-    return ctx as unknown as ExtensionContext;
+    return testDouble<ExtensionContext>()(ctx);
 }
 
 function makeWebRunContextWithBranch(
     cwd: string,
-    branchEntries: readonly Record<string, unknown>[],
+    branchEntries: readonly JsonObject[],
 ): ExtensionContext {
     const base = makeWebRunContext(cwd);
     const ctx = {
@@ -1438,8 +1415,7 @@ function makeWebRunContextWithBranch(
             getBranch: () => branchEntries,
         },
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test context changes only the session branch fixture used by image lookup.
-    return ctx as unknown as ExtensionContext;
+    return testDouble<ExtensionContext>()(ctx);
 }
 
 function solidPngBytes(
@@ -1486,12 +1462,12 @@ function pngChunk(type: string, data: Buffer): Buffer {
     return Buffer.concat([length, typeBytes, data, checksum]);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+function isRecord<Value>(value: Value): value is Value & JsonObject {
+    return JsonObjectDecoder.decode(value) !== undefined;
 }
 
-function isUnknownArray(value: unknown): value is unknown[] {
-    return Array.isArray(value);
+function isUnknownArray<Value>(value: Value): value is Value & JsonValue[] {
+    return JsonArrayDecoder.decode(value) !== undefined;
 }
 
 const CRC32_TABLE = makeCrc32Table();

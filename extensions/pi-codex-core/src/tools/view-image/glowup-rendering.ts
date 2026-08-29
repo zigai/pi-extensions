@@ -21,22 +21,21 @@ function imagePath(args: ViewImageGlowupArgs): string | undefined {
 
 function renderViewImageCall(args: ViewImageGlowupArgs) {
     const path = imagePath(args);
-    return {
-        kind: "call" as const,
-        labels: {
-            static: "View Image",
-            running: "Viewing Image",
-            completed: "Viewed Image",
-        },
-        ...(path === undefined || path.length === 0
-            ? {}
-            : {
-                  body: {
-                      kind: "text" as const,
-                      text: { kind: "text" as const, text: path, tone: "path" as const },
-                  },
-              }),
+    const labels = {
+        static: "View Image",
+        running: "Viewing Image",
+        completed: "Viewed Image",
     };
+    return path === undefined || path.length === 0
+        ? { kind: "call" as const, labels }
+        : {
+              kind: "call" as const,
+              labels,
+              body: {
+                  kind: "text" as const,
+                  text: { kind: "text" as const, text: path, tone: "path" as const },
+              },
+          };
 }
 
 export const viewImageGlowupRendering = {

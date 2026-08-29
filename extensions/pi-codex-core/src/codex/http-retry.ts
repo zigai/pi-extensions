@@ -24,7 +24,9 @@ export async function fetchTextWithRetries(
     let lastCause: unknown;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
         try {
-            const response = await runtime.fetch(input, { ...init, ...(signal ? { signal } : {}) });
+            const requestInit: RequestInit = { ...init };
+            if (signal !== undefined) requestInit.signal = signal;
+            const response = await runtime.fetch(input, requestInit);
             const text = await response.text();
             if ((response.status === 429 || response.status >= 500) && attempt + 1 < attempts) {
                 await retryDelay(initialDelayMs * 2 ** attempt, { signal });

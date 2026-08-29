@@ -24,7 +24,7 @@ import {
     type AppliedPatchFileChange,
     type ApplyPatchHunk,
 } from "./engine.ts";
-import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
+import { compileSchema, NodeErrorCodeDecoder, StringDecoder } from "../../schema-parsing.ts";
 
 export const APPLY_PATCH_TOOL_NAME = "apply_patch";
 
@@ -39,6 +39,18 @@ const APPLY_PATCH_PARAMETERS = Type.Object(
 );
 
 const ApplyPatchParametersValidator = compileSchema(APPLY_PATCH_PARAMETERS);
+const ApplyPatchArgumentObjectSchema = Type.Object(
+    {
+        patch: Type.Optional(Type.String()),
+        input: Type.Optional(Type.String()),
+        command: Type.Optional(Type.String()),
+    },
+    { additionalProperties: false },
+);
+const ApplyPatchArgumentsDecoder = compileSchema(
+    Type.Union([Type.String(), ApplyPatchArgumentObjectSchema]),
+);
+const ApplyPatchArgumentObjectDecoder = compileSchema(ApplyPatchArgumentObjectSchema);
 
 type ApplyPatchParams = Static<typeof APPLY_PATCH_PARAMETERS>;
 
@@ -72,6 +84,16 @@ type ApplyPatchDiffSummary = {
     readonly diff: string;
     readonly patch: string;
     readonly firstChangedLine: number | undefined;
+};
+
+type AppliedPatchChangeContents = {
+    readonly oldContent: string;
+    readonly newContent: string;
+};
+
+type ApplyPatchLineChangeCounts = {
+    readonly addedLines: number;
+    readonly removedLines: number;
 };
 
 const COMPACT_DIFF_LINE_LIMIT = 80;
@@ -220,31 +242,28 @@ function comparePaths(left: string, right: string): number {
 }
 
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
-    return typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;
+    return NodeErrorCodeDecoder.decode(cause)?.code === code;
 }
 
 function prepareApplyPatchArguments(args: unknown): ApplyPatchParams {
     const normalized = normalizeApplyPatchArguments(args);
-    const params = parseWithSchema(ApplyPatchParametersValidator, normalized);
+    const params = ApplyPatchParametersValidator.decode(normalized);
     if (!params) throw new Error("Invalid apply_patch arguments.");
     return params;
 }
 
-function normalizeApplyPatchArguments(args: unknown): unknown {
-    if (typeof args === "string") return { patch: args };
-    if (typeof args !== "object" || args === null) return args;
+function normalizeApplyPatchArguments(args: unknown): ApplyPatchParams | undefined {
+    const parsed = ApplyPatchArgumentsDecoder.decode(args);
+    if (parsed === undefined) return undefined;
+    const directPatch = StringDecoder.decode(parsed);
+    if (directPatch !== undefined) return { patch: directPatch };
 
-    const keys = Reflect.ownKeys(args);
-    if (keys.length !== 1) return args;
-    const key = keys[0];
-    if (key !== "patch" && key !== "input" && key !== "command") return args;
-    const patch = readStringProperty(args, key);
-    return patch === undefined ? args : { patch };
-}
-
-function readStringProperty(value: object, key: string): string | undefined {
-    const property: unknown = Object.getOwnPropertyDescriptor(value, key)?.value;
-    return typeof property === "string" ? property : undefined;
+    const parsedObject = ApplyPatchArgumentObjectDecoder.decode(parsed);
+    if (!parsedObject) return undefined;
+    const entries = Object.entries(parsedObject);
+    if (entries.length !== 1) return undefined;
+    const patch = entries[0]?.[1];
+    return patch === undefined ? undefined : { patch };
 }
 
 function summarizeApplyPatchCall(patch: string): string {
@@ -382,10 +401,7 @@ function formatAppliedChangePath(
     return change.path;
 }
 
-function getAppliedChangeContents(change: AppliedPatchFileChange): {
-    readonly oldContent: string;
-    readonly newContent: string;
-} {
+function getAppliedChangeContents(change: AppliedPatchFileChange): AppliedPatchChangeContents {
     if (change.type === "add") return { oldContent: "", newContent: change.content };
     if (change.type === "delete") return { oldContent: change.content, newContent: "" };
     return { oldContent: change.oldContent, newContent: change.newContent };
@@ -571,10 +587,9 @@ function formatLineDelta(addedLines: number, removedLines: number | undefined): 
     return parts.join(" ");
 }
 
-function countUpdateLineChanges(hunk: Extract<ApplyPatchHunk, { readonly type: "update" }>): {
-    readonly addedLines: number;
-    readonly removedLines: number;
-} {
+function countUpdateLineChanges(
+    hunk: Extract<ApplyPatchHunk, { readonly type: "update" }>,
+): ApplyPatchLineChangeCounts {
     let addedLines = 0;
     let removedLines = 0;
     for (const chunk of hunk.chunks) {
@@ -588,10 +603,7 @@ function countUpdateLineChanges(hunk: Extract<ApplyPatchHunk, { readonly type: "
 function countWholeFileLineChanges(
     oldContent: string,
     newContent: string,
-): {
-    readonly addedLines: number;
-    readonly removedLines: number;
-} {
+): ApplyPatchLineChangeCounts {
     const oldLines = splitContentLines(oldContent);
     const newLines = splitContentLines(newContent);
     const unchangedLineCount = longestCommonSubsequenceLength(oldLines, newLines);

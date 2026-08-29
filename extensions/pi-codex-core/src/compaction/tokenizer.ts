@@ -1,5 +1,9 @@
 import { Worker } from "node:worker_threads";
 
+import { Type } from "typebox";
+
+import { compileSchema, StringDecoder } from "../schema-parsing.ts";
+
 const TOKENIZER_WORKER_URL = new URL("./tokenizer-worker.js", import.meta.url);
 
 type TokenizerWorkerRequest =
@@ -11,13 +15,28 @@ type TokenizerWorkerRequest =
           readonly maxTokens: number;
       };
 
+type TokenizerWorkerResult = number | string;
+
 type TokenizerWorkerMessage =
     | { readonly type: "ready" }
-    | { readonly id: number; readonly type: "result"; readonly value: unknown }
+    | { readonly id: number; readonly type: "result"; readonly value: TokenizerWorkerResult }
     | { readonly id: number; readonly type: "error"; readonly error: string };
 
+const TokenizerWorkerMessageDecoder = compileSchema(
+    Type.Union([
+        Type.Object({ type: Type.Literal("ready") }),
+        Type.Object({
+            id: Type.Number(),
+            type: Type.Literal("result"),
+            value: Type.Union([Type.Number(), Type.String()]),
+        }),
+        Type.Object({ id: Type.Number(), type: Type.Literal("error"), error: Type.String() }),
+    ]),
+);
+const TokenCountDecoder = compileSchema(Type.Number());
+
 type PendingTokenizerRequest = {
-    readonly resolve: (value: unknown) => void;
+    readonly resolve: (value: TokenizerWorkerResult) => void;
     readonly reject: (cause: unknown) => void;
     readonly disposeAbort: () => void;
 };
@@ -68,9 +87,10 @@ export class CodexTokenizer {
                 { id: this.nextRequestId++, op: "count", text },
                 options,
             );
-            if (typeof value === "number" && Number.isFinite(value)) {
+            const count = TokenCountDecoder.decode(value);
+            if (count !== undefined) {
                 options.signal?.throwIfAborted();
-                return value;
+                return count;
             }
         } catch {
             options.signal?.throwIfAborted();
@@ -88,9 +108,10 @@ export class CodexTokenizer {
                 { id: this.nextRequestId++, op: "truncate", text, maxTokens },
                 options,
             );
-            if (typeof value === "string") {
+            const truncated = StringDecoder.decode(value);
+            if (truncated !== undefined) {
                 options.signal?.throwIfAborted();
-                return value;
+                return truncated;
             }
         } catch {
             options.signal?.throwIfAborted();
@@ -101,7 +122,7 @@ export class CodexTokenizer {
     private async requestWorker(
         request: TokenizerWorkerRequest,
         options: TokenizerOperationOptions,
-    ): Promise<unknown> {
+    ): Promise<TokenizerWorkerResult> {
         const { signal } = options;
         signal?.throwIfAborted();
         const state = this.ensureWorkerState();
@@ -153,7 +174,10 @@ export class CodexTokenizer {
         };
         this.workerState = state;
 
-        worker.on("message", (message: unknown) => this.handleWorkerMessage(state, message));
+        worker.on("message", (message) => {
+            const parsed = TokenizerWorkerMessageDecoder.decode(message);
+            if (parsed) this.handleWorkerMessage(state, parsed);
+        });
         worker.on("error", (cause: Error) => this.markWorkerFailed(state, cause));
         worker.on("exit", (code) => {
             if (code !== 0 || state.readyReject !== undefined || state.pending.size > 0) {
@@ -166,8 +190,10 @@ export class CodexTokenizer {
         return state;
     }
 
-    private handleWorkerMessage(state: TokenizerWorkerState, message: unknown): void {
-        if (!isWorkerMessage(message)) return;
+    private handleWorkerMessage(
+        state: TokenizerWorkerState,
+        message: TokenizerWorkerMessage,
+    ): void {
         if (message.type === "ready") {
             state.readyResolve?.();
             state.readyResolve = undefined;
@@ -297,14 +323,6 @@ function rejectPendingRequests(state: TokenizerWorkerState, cause: Error): void 
     state.pending.clear();
 }
 
-function isWorkerMessage(message: unknown): message is TokenizerWorkerMessage {
-    if (!isRecord(message) || typeof message.type !== "string") return false;
-    if (message.type === "ready") return true;
-    if (typeof message.id !== "number") return false;
-    if (message.type === "result") return true;
-    return message.type === "error" && typeof message.error === "string";
-}
-
 function approximateTextTokens(text: string): number {
     return Math.ceil(text.length / 4);
 }
@@ -319,8 +337,4 @@ function truncateTextByApproximateTokenBudget(text: string, maxTokens: number): 
     const headCount = Math.ceil(remaining / 2);
     const tailCount = Math.floor(remaining / 2);
     return `${text.slice(0, headCount)}${marker}${text.slice(text.length - tailCount)}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

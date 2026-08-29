@@ -41,7 +41,7 @@ export type CompactionContentBlock =
     | CompactionThinkingBlock
     | CompactionToolCallBlock;
 
-export type CompactionMessageContent = string | readonly CompactionContentBlock[];
+export type CompactionMessageContent = readonly CompactionContentBlock[];
 
 export type CompactionMessage =
     | {

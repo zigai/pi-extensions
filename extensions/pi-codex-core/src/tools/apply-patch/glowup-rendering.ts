@@ -1,3 +1,5 @@
+import { Type } from "typebox";
+
 import {
     call,
     empty,
@@ -8,6 +10,7 @@ import {
 } from "@zigai/pi-glowup/protocol";
 
 import { parseApplyPatch, type ApplyPatchHunk } from "./engine.js";
+import { compileSchema } from "../../schema-parsing.ts";
 
 const PATCH_LABELS = {
     static: "Patch",
@@ -20,6 +23,8 @@ type ApplyPatchRenderingArgs = {
     readonly patch: string;
     readonly files: readonly GlowupMutationFile[];
 };
+
+type ApplyPatchCallNode = ReturnType<typeof call> | ReturnType<typeof mutation>;
 
 type ApplyPatchRenderingResult = {
     readonly patch: string;
@@ -34,9 +39,28 @@ type PatchFileSummary = {
     readonly countsKnown: boolean;
 };
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+type GlowupMutationFileConstruction = {
+    -readonly [Key in keyof GlowupMutationFile]: GlowupMutationFile[Key];
+};
+
+const PatchArgumentSchema = compileSchema(Type.Object({ patch: Type.String() }));
+const PatchFileSummaryWireSchema = Type.Object({
+    path: Type.String(),
+    originalPath: Type.Optional(Type.String()),
+    addedLines: Type.Integer({ minimum: 0 }),
+    removedLines: Type.Optional(Type.Integer({ minimum: 0 })),
+});
+const ApplyPatchResultSchema = compileSchema(
+    Type.Object({
+        details: Type.Object({
+            patch: Type.String(),
+            lineSummary: Type.Object({ files: Type.Array(PatchFileSummaryWireSchema) }),
+        }),
+    }),
+);
+
+type ApplyPatchResultWire = ReturnType<(typeof ApplyPatchResultSchema)["Parse"]>;
+type PatchFileSummaryWire = ApplyPatchResultWire["details"]["lineSummary"]["files"][number];
 
 function removeUnpairedSurrogates(value: string): string {
     let normalized = "";
@@ -154,18 +178,15 @@ function mutationFileFromHunk(hunk: ApplyPatchHunk): GlowupMutationFile {
         };
     }
     const lines = updateLines(hunk);
-    return {
-        path: hunk.movePath ?? hunk.path,
-        ...(hunk.movePath === undefined ? {} : { previousPath: hunk.path }),
-        lines,
-        added: lines.filter((line) => line.kind === "addition").length,
-        removed: lines.filter((line) => line.kind === "deletion").length,
-    };
+    const added = lines.filter((line) => line.kind === "addition").length;
+    const removed = lines.filter((line) => line.kind === "deletion").length;
+    return hunk.movePath === undefined
+        ? { path: hunk.path, lines, added, removed }
+        : { path: hunk.movePath, previousPath: hunk.path, lines, added, removed };
 }
 
 function patchText(value: unknown): string | undefined {
-    if (!isRecord(value)) return undefined;
-    return typeof value.patch === "string" ? value.patch : undefined;
+    return PatchArgumentSchema.decode(value)?.patch;
 }
 
 function parseApplyPatchArgs(value: unknown): ApplyPatchRenderingArgs | undefined {
@@ -244,45 +265,50 @@ function parsePartialPatchFiles(patch: string): readonly GlowupMutationFile[] {
             current.lines.push({ kind: "context", text: rawLine.slice(1) });
         }
     }
-    return files.map((file) => ({
-        path: file.path,
-        ...(file.previousPath === undefined ? {} : { previousPath: file.previousPath }),
-        lines: file.lines,
-        added: file.added,
-        removed: file.removed,
-        ...(file.countsKnown ? {} : { countsKnown: false }),
-    }));
+    return files.map((file) => {
+        const mutationFile: GlowupMutationFileConstruction =
+            file.previousPath === undefined
+                ? {
+                      path: file.path,
+                      lines: file.lines,
+                      added: file.added,
+                      removed: file.removed,
+                  }
+                : {
+                      path: file.path,
+                      previousPath: file.previousPath,
+                      lines: file.lines,
+                      added: file.added,
+                      removed: file.removed,
+                  };
+        if (!file.countsKnown) mutationFile.countsKnown = false;
+        return mutationFile;
+    });
 }
 
-function parsePartialCall(value: unknown) {
+function parsePartialCall(value: unknown): ApplyPatchCallNode {
     const patch = patchText(value);
     if (patch === undefined) return call(PATCH_LABELS);
     const files = parsePartialPatchFiles(patch);
     return files.length === 0 ? call(PATCH_LABELS) : mutation(PATCH_LABELS, files);
 }
 
-function parseNonNegativeInteger(value: unknown): number | undefined {
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-        ? value
-        : undefined;
-}
-
-function parseFileSummary(value: unknown): PatchFileSummary | undefined {
-    if (!isRecord(value) || typeof value.path !== "string") return undefined;
-    const added = parseNonNegativeInteger(value.addedLines);
-    const removed =
-        value.removedLines === undefined ? undefined : parseNonNegativeInteger(value.removedLines);
-    if (added === undefined || (value.removedLines !== undefined && removed === undefined)) {
-        return undefined;
-    }
-    const previousPath = typeof value.originalPath === "string" ? value.originalPath : undefined;
-    return {
-        path: value.path,
-        ...(previousPath === undefined ? {} : { previousPath }),
-        added,
-        removed: removed ?? 0,
-        countsKnown: removed !== undefined,
-    };
+function parseFileSummary(value: PatchFileSummaryWire): PatchFileSummary {
+    const removed = value.removedLines;
+    return value.originalPath === undefined
+        ? {
+              path: value.path,
+              added: value.addedLines,
+              removed: removed ?? 0,
+              countsKnown: removed !== undefined,
+          }
+        : {
+              path: value.path,
+              previousPath: value.originalPath,
+              added: value.addedLines,
+              removed: removed ?? 0,
+              countsKnown: removed !== undefined,
+          };
 }
 
 function parseUnifiedPatchLines(patch: string): readonly (readonly GlowupMutationLine[])[] {
@@ -323,30 +349,32 @@ function parseUnifiedPatchLines(patch: string): readonly (readonly GlowupMutatio
 }
 
 function parseApplyPatchResult(value: unknown): ApplyPatchRenderingResult | undefined {
-    if (!isRecord(value) || !isRecord(value.details)) return undefined;
-    const patch = value.details.patch;
-    const lineSummary = value.details.lineSummary;
-    if (typeof patch !== "string" || !isRecord(lineSummary) || !Array.isArray(lineSummary.files)) {
-        return undefined;
-    }
-    const summaries: PatchFileSummary[] = [];
-    for (const rawFile of lineSummary.files) {
-        const file = parseFileSummary(rawFile);
-        if (file === undefined) return undefined;
-        summaries.push(file);
-    }
-    if (summaries.length === 0) return undefined;
+    const result = ApplyPatchResultSchema.decode(value);
+    if (result === undefined || result.details.lineSummary.files.length === 0) return undefined;
+    const patch = result.details.patch;
     const patchLines = parseUnifiedPatchLines(patch);
     return {
         patch,
-        files: summaries.map((file, index) => ({
-            path: file.path,
-            ...(file.previousPath === undefined ? {} : { previousPath: file.previousPath }),
-            lines: patchLines[index] ?? [],
-            added: file.added,
-            removed: file.removed,
-            ...(file.countsKnown ? {} : { countsKnown: false }),
-        })),
+        files: result.details.lineSummary.files.map((rawFile, index) => {
+            const file = parseFileSummary(rawFile);
+            const mutationFile: GlowupMutationFileConstruction =
+                file.previousPath === undefined
+                    ? {
+                          path: file.path,
+                          lines: patchLines[index] ?? [],
+                          added: file.added,
+                          removed: file.removed,
+                      }
+                    : {
+                          path: file.path,
+                          previousPath: file.previousPath,
+                          lines: patchLines[index] ?? [],
+                          added: file.added,
+                          removed: file.removed,
+                      };
+            if (!file.countsKnown) mutationFile.countsKnown = false;
+            return mutationFile;
+        }),
     };
 }
 

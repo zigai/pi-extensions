@@ -4,7 +4,7 @@ import {
     glowupWireNumber as getNumber,
     glowupWireString as getString,
     glowupWireTextOutput as textOutput,
-    isGlowupWireRecord as isRecord,
+    parseGlowupWireRecord as getRecord,
     parseGlowupWireArgs,
     parseGlowupWireResult,
     type GlowupWireCallContext,
@@ -50,9 +50,12 @@ function countedSummary(label: string, values: readonly unknown[] | undefined): 
     if (values === undefined || values.length === 0) return undefined;
     const prefix = label.length > 0 ? `${label} ` : "";
     const first = values[0];
-    if (isRecord(first)) {
+    const firstRecord = getRecord(first);
+    if (firstRecord) {
         const query =
-            getString(first, "q") ?? getString(first, "ref_id") ?? getString(first, "url");
+            getString(firstRecord, "q") ??
+            getString(firstRecord, "ref_id") ??
+            getString(firstRecord, "url");
         const quoted = compactQuotedText(query);
         if (quoted !== undefined) {
             return values.length === 1
@@ -230,9 +233,10 @@ function summarizeResult(
     result: WebRunGlowupResult,
     context: Pick<GlowupWireCallContext, "expanded">,
 ): string | undefined {
-    if (!isRecord(result.details)) return undefined;
-    const sourceCount = getNumber(result.details, "sourceCount");
-    const fullOutputPath = getString(result.details, "fullOutputPath");
+    const details = getRecord(result.details);
+    if (!details) return undefined;
+    const sourceCount = getNumber(details, "sourceCount");
+    const fullOutputPath = getString(details, "fullOutputPath");
     if (sourceCount === undefined && fullOutputPath === undefined) return undefined;
     return (
         inlineOutputSummary(textOutput(result), sourceCount, context) ??
@@ -330,11 +334,10 @@ function webRunLabels(args: WebRunGlowupArgs) {
 
 function renderWebRunCall(args: WebRunGlowupArgs) {
     const summary = summarizeArgs(args);
-    return {
-        kind: "call" as const,
-        labels: webRunLabels(args),
-        ...(summary === undefined ? {} : { body: { kind: "text" as const, text: summary } }),
-    };
+    const labels = webRunLabels(args);
+    return summary === undefined
+        ? { kind: "call" as const, labels }
+        : { kind: "call" as const, labels, body: { kind: "text" as const, text: summary } };
 }
 
 export const webRunGlowupRendering = {

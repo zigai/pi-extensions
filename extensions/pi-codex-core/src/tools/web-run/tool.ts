@@ -30,7 +30,7 @@ import {
 } from "../../codex/failures.ts";
 import { defaultCodexRuntime, type CodexRuntime } from "../../runtime.ts";
 import { CodexTokenizer } from "../../compaction/tokenizer.ts";
-import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
+import { compileSchema } from "../../schema-parsing.ts";
 import { recentWebSearchInput } from "./history.ts";
 import { formatWebRunToolOutput } from "./output.ts";
 import { webRunGlowupRendering } from "./glowup-rendering.ts";
@@ -161,6 +161,12 @@ const WEB_RUN_MAX_ATTEMPTS = 4;
 const WEB_RUN_INITIAL_RETRY_DELAY_MS = 100;
 
 type WebRunParams = Static<typeof WEB_RUN_PARAMETERS>;
+type WebRunCommandKey = (typeof WEB_RUN_COMMAND_KEYS)[number];
+type WebRunCommands = {
+    [Key in WebRunCommandKey]?: WebRunParams[Key];
+} & {
+    response_length?: WebRunParams["response_length"];
+};
 
 type WebRunDetails = {
     readonly fullOutputPath: string;
@@ -275,7 +281,7 @@ function readWebRunDescription(): string {
 }
 
 function prepareWebRunArguments(args: unknown): WebRunParams {
-    const params = parseWithSchema(WebRunParametersValidator, args);
+    const params = WebRunParametersValidator.decode(args);
     if (!params) throw new Error("Invalid web_run arguments.");
     splitSearchRequest(params);
     return params;
@@ -297,17 +303,16 @@ async function executeWebRun(
     const input = await recentWebSearchInput(ctx, tokenizer, { signal });
     const model = resolveCodexRequestModel(config.openai.webSearchModel, provider.value.model);
 
-    const requestBody = JSON.stringify({
-        id: ctx.sessionManager.getSessionId(),
-        model,
-        ...(input ? { input } : {}),
-        commands,
-        settings: {
-            allowed_callers: ["direct"],
-            external_web_access: externalWebAccess(config.tools.webSearchMode),
-        },
-        max_output_tokens: WEB_RUN_MAX_OUTPUT_TOKENS,
-    });
+    const id = ctx.sessionManager.getSessionId();
+    const settings = {
+        allowed_callers: ["direct"],
+        external_web_access: externalWebAccess(config.tools.webSearchMode),
+    };
+    const requestBody = JSON.stringify(
+        input
+            ? { id, model, input, commands, settings, max_output_tokens: WEB_RUN_MAX_OUTPUT_TOKENS }
+            : { id, model, commands, settings, max_output_tokens: WEB_RUN_MAX_OUTPUT_TOKENS },
+    );
     const fetched = await fetchWebRunWithRetries(
         `${provider.value.baseUrl}/alpha/search`,
         headers,
@@ -369,12 +374,10 @@ async function fetchWebRunWithRetries(
     for (let attempt = 0; attempt < WEB_RUN_MAX_ATTEMPTS; attempt += 1) {
         let response: Response;
         try {
-            response = await runtime.fetch(url, {
-                method: "POST",
-                headers,
-                ...(signal ? { signal } : {}),
-                body,
-            });
+            const requestInit: RequestInit = signal
+                ? { method: "POST", headers, signal, body }
+                : { method: "POST", headers, body };
+            response = await runtime.fetch(url, requestInit);
         } catch (cause: unknown) {
             if (isAbortCause(cause) || signal?.aborted) return cancelledWebRun(cause);
             if (attempt + 1 < WEB_RUN_MAX_ATTEMPTS) {
@@ -560,23 +563,31 @@ function findCardUrl(lines: readonly string[], startIndex: number): string | und
 
 function firstTextContent(content: readonly unknown[]): string | undefined {
     for (const item of content) {
-        const block = parseWithSchema(TextContentBlockSchema, item);
+        const block = TextContentBlockSchema.decode(item);
         if (block && block.text.trim().length > 0) return block.text.trim();
     }
     return undefined;
 }
 
-function splitSearchRequest(params: WebRunParams): Record<string, unknown> {
+function setWebRunCommand<Key extends WebRunCommandKey>(
+    commands: WebRunCommands,
+    key: Key,
+    value: WebRunParams[Key],
+): void {
+    commands[key] = value;
+}
+
+function splitSearchRequest(params: WebRunParams): WebRunCommands {
     if (!hasRealWebRunCommand(params)) {
         throw new Error("web_run requires at least one non-empty command.");
     }
 
-    const commands: Record<string, unknown> = {};
+    const commands: WebRunCommands = {};
     for (const key of WEB_RUN_COMMAND_KEYS) {
         const value = params[key];
         if (value === undefined) continue;
         if (Array.isArray(value) && value.length === 0) continue;
-        commands[key] = value;
+        setWebRunCommand(commands, key, value);
     }
     if (params.response_length) commands.response_length = params.response_length;
     return commands;
@@ -635,6 +646,6 @@ async function saveFullWebRunOutput(
 }
 
 function parseSearchOutput(value: unknown): string | undefined {
-    const output = parseWithSchema(SearchOutputSchema, value);
+    const output = SearchOutputSchema.decode(value);
     return output?.output;
 }

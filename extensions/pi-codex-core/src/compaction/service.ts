@@ -36,7 +36,12 @@ import {
     rewriteRemoteCompactionToolOutputsForContextWindow,
     shrinkRemoteCompactionRequestForContextWindow,
 } from "./request-budget.ts";
-import { buildRemoteCompactionPromptInput, parseResponsesPayload } from "./responses-input.ts";
+import {
+    buildRemoteCompactionPromptInput,
+    JsonNumberDecoder,
+    JsonStringDecoder,
+    ResponsesPayloadDecoder,
+} from "./responses-input.ts";
 import {
     buildLenientNativeReplayPayload,
     buildWindowLifecycle,
@@ -56,6 +61,7 @@ import type {
     NativeCompactionMatch,
     NativeCompactionWorldState,
     ResponsesInputItem,
+    ResponsesPayload,
 } from "./types.ts";
 
 const CODEX_CORE_WORLD_STATE_TAG = "codex_core_world_state";
@@ -301,11 +307,12 @@ export async function rewriteProviderRequestWithNativeCompaction(
     config: CodexCoreConfig,
     pi: ExtensionAPI,
     runtime: CodexRuntime = defaultCodexRuntime,
-): Promise<unknown> {
-    if (!config.compaction.enabled) return undefined;
+): Promise<ResponsesPayload | undefined> {
+    const responsesPayload = ResponsesPayloadDecoder.decode(payload);
+    if (!responsesPayload || !config.compaction.enabled) return undefined;
     const model = ctx.model;
     if (!model) return undefined;
-    const modelApi = typeof model.api === "string" ? model.api : undefined;
+    const modelApi = JsonStringDecoder.decode(model.api);
     if (modelApi === undefined) return undefined;
     const match: NativeCompactionMatch = {
         provider: model.provider,
@@ -317,8 +324,6 @@ export async function rewriteProviderRequestWithNativeCompaction(
     const latestNativeCompaction = findLatestActiveNativeCompactionEntry(branchEntries, match);
     if (!latestNativeCompaction) return undefined;
 
-    const responsesPayload = parseResponsesPayload(payload);
-    if (!responsesPayload) return undefined;
     const incompatibility = nativeCompactionCompatibilityFailure(
         latestNativeCompaction.entry.details.model,
         resolvedNativeCompactionHash(latestNativeCompaction.entry.details),
@@ -469,12 +474,14 @@ function notifyNativeCompactionIncompatibility(ctx: ExtensionContext, message: s
     }
 }
 
-function normalizeCreatedAt(value: unknown, runtime: CodexRuntime): string {
-    if (typeof value === "number" && Number.isFinite(value))
-        return new Date(value > 1_000_000_000_000 ? value : value * 1000).toISOString();
-    if (typeof value === "string" && value.trim().length > 0) {
-        const parsed = Date.parse(value);
-        return Number.isNaN(parsed) ? value : new Date(parsed).toISOString();
+function normalizeCreatedAt(value: number | string | undefined, runtime: CodexRuntime): string {
+    const numeric = JsonNumberDecoder.decode(value);
+    if (numeric !== undefined)
+        return new Date(numeric > 1_000_000_000_000 ? numeric : numeric * 1000).toISOString();
+    const text = JsonStringDecoder.decode(value)?.trim();
+    if (text) {
+        const parsed = Date.parse(text);
+        return Number.isNaN(parsed) ? text : new Date(parsed).toISOString();
     }
     return runtime.clock.nowDate().toISOString();
 }

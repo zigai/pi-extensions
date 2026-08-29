@@ -6,6 +6,7 @@ import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-wor
 import { DEFAULT_CODEX_CORE_CONFIG, type CodexCoreConfig } from "../src/config/config.ts";
 import { CodexRecoveryCoordinator, isTransientCodexFailure } from "../src/recovery/coordinator.ts";
 import type { ScheduledTask, Scheduler } from "../src/runtime.ts";
+import { testDouble } from "./helpers.ts";
 
 test("classifies transient provider failures without retrying terminal failures", () => {
     assert.equal(isTransientCodexFailure(errorMessage("WebSocket error")), true);
@@ -126,7 +127,7 @@ function makeRecoveryFixture(config: CodexCoreConfig = DEFAULT_CODEX_CORE_CONFIG
     const notifications: Array<{ readonly message: string; readonly type: string }> = [];
     let idle = true;
     const api = {
-        appendEntry(customType: string, data: unknown) {
+        appendEntry<Data>(customType: string, data: Data) {
             entries.push({
                 type: "custom",
                 id: `entry-${entries.length + 1}`,
@@ -156,10 +157,8 @@ function makeRecoveryFixture(config: CodexCoreConfig = DEFAULT_CODEX_CORE_CONFIG
             scheduler,
             nowMs: () => 1_000,
         }),
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Recovery tests provide exactly the two ExtensionAPI operations used by the coordinator.
-        api: api as unknown as ExtensionAPI,
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Recovery tests provide exactly the UI and session-manager fields used by the coordinator.
-        ctx: ctx as unknown as ExtensionContext,
+        api: testDouble<ExtensionAPI>()(api),
+        ctx: testDouble<ExtensionContext>()(ctx),
         scheduler,
         sent,
         notifications,
@@ -202,11 +201,15 @@ function successMessage(): AssistantMessage {
     return assistantMessage("stop");
 }
 
+type AssistantMessageConstruction = {
+    -readonly [Key in keyof AssistantMessage]: AssistantMessage[Key];
+};
+
 function assistantMessage(
     stopReason: AssistantMessage["stopReason"],
     errorMessage?: string,
 ): AssistantMessage {
-    return {
+    const message: AssistantMessageConstruction = {
         role: "assistant",
         content: [],
         api: "openai-codex-responses",
@@ -222,6 +225,7 @@ function assistantMessage(
         },
         stopReason,
         timestamp: 0,
-        ...(errorMessage === undefined ? {} : { errorMessage }),
     };
+    if (errorMessage !== undefined) message.errorMessage = errorMessage;
+    return message;
 }

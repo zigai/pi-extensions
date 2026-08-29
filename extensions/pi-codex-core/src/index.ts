@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { codexCoreActivationDecisions, syncCodexCoreTools } from "./activation.ts";
+import { isModelWithStringApi } from "./codex/auth.ts";
 import { codexModelRequestProfile } from "./codex/models.ts";
 import {
     CODEX_RESPONSES_LITE_HEADER,
@@ -278,18 +279,20 @@ export default function extension(pi: ExtensionAPI): void {
 }
 
 function isActiveCodexResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]): boolean {
+    const model = ctx.model;
     return (
-        ctx.model?.provider.trim().toLowerCase() === "openai-codex" &&
-        typeof ctx.model.api === "string" &&
-        ctx.model.api.toLowerCase().includes("responses")
+        isModelWithStringApi(model) &&
+        model.provider.trim().toLowerCase() === "openai-codex" &&
+        model.api.toLowerCase().includes("responses")
     );
 }
 
 function isActiveGptResponsesModel(ctx: Parameters<typeof syncCodexCoreTools>[1]): boolean {
+    const model = ctx.model;
     return (
-        ctx.model?.id.trim().toLowerCase().startsWith("gpt-") === true &&
-        typeof ctx.model?.api === "string" &&
-        ctx.model.api.toLowerCase().includes("responses")
+        isModelWithStringApi(model) &&
+        model.id.trim().toLowerCase().startsWith("gpt-") &&
+        model.api.toLowerCase().includes("responses")
     );
 }
 

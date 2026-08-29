@@ -69,14 +69,16 @@ async function openCodexMenu(
         return;
     }
 
-    await openCodexSettingsScreen(ctx, {
-        initialConfig: options.getConfig(),
-        additionalTabs,
-        ...(initialTab === undefined ? {} : { initialTab }),
-        onChange: (config) => saveAndApply(config, ctx, options),
-        onConsumeResetCredit: (redeemRequestId) =>
-            consumeCodexRateLimitResetCredit(ctx, redeemRequestId),
-    });
+    const initialSettings = { initialConfig: options.getConfig(), additionalTabs };
+    const onChange = (config: CodexCoreConfig) => saveAndApply(config, ctx, options);
+    const onConsumeResetCredit = (redeemRequestId: string) =>
+        consumeCodexRateLimitResetCredit(ctx, redeemRequestId);
+    await openCodexSettingsScreen(
+        ctx,
+        initialTab === undefined
+            ? { ...initialSettings, onChange, onConsumeResetCredit }
+            : { ...initialSettings, initialTab, onChange, onConsumeResetCredit },
+    );
 }
 
 function saveAndApply(

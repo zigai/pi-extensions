@@ -3,11 +3,15 @@ import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 
 import type { CodexRuntime } from "../runtime.ts";
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import { compileSchema } from "../schema-parsing.ts";
 import { NATIVE_COMPACTION_STRATEGY } from "./messages.ts";
 import {
     isInstructionItem,
     isRemoteCompactionOutputItem,
+    JsonArrayDecoder,
+    JsonNumberDecoder,
+    JsonObjectDecoder,
+    JsonStringDecoder,
     itemContainsShimSummary,
     parseResponsesInputItems,
     serializeEntriesToResponsesInput,
@@ -17,12 +21,14 @@ import type {
     NativeCompactionDetails,
     NativeCompactionMatch,
     NativeReplayResult,
+    JsonValue,
     ResponsesInputItem,
     ResponsesPayload,
 } from "./types.ts";
 
 const JsonObjectSchema = Type.Record(Type.String(), Type.Unknown());
 const StringArraySchema = Type.Array(Type.String());
+const BooleanDecoder = compileSchema(Type.Boolean());
 const NativeCompactionRequestMetaSchema = Type.Object({
     previousCompactionEntryId: Type.Optional(Type.String()),
     retainedInputItems: Type.Number(),
@@ -67,23 +73,25 @@ const NativeCompactionDetailsValidator = compileSchema(NativeCompactionDetailsSc
 
 const nativeReplayWarningKeys = new Set<string>();
 
-export function isNativeCompactionDetails(value: unknown): value is NativeCompactionDetails {
+export function isNativeCompactionDetails<Value>(
+    value: Value,
+): value is Value & NativeCompactionDetails {
     return parseNativeCompactionDetails(value) !== undefined;
 }
 
 function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails | undefined {
-    const details = parseWithSchema(NativeCompactionDetailsValidator, value);
+    const details = NativeCompactionDetailsValidator.decode(value);
     if (!details) return undefined;
     const compactedWindow = parseResponsesInputItems(details.compactedWindow);
     const legacyReplacementInput =
         details.replacementInput === undefined
             ? undefined
             : parseResponsesInputItems(details.replacementInput);
-    const worldState = parseWithSchema(NativeCompactionWorldStateValidator, details.worldState);
+    const worldState = NativeCompactionWorldStateValidator.decode(details.worldState);
     const requestMeta =
         details.requestMeta === undefined
             ? undefined
-            : parseWithSchema(NativeCompactionRequestMetaValidator, details.requestMeta);
+            : NativeCompactionRequestMetaValidator.decode(details.requestMeta);
     if (
         !compactedWindow ||
         !isValidCompactedWindow(compactedWindow) ||
@@ -168,16 +176,18 @@ export function nativeCompactionMatches(
     );
 }
 
-export function buildWindowLifecycle(
-    latestNativeCompaction: FoundNativeCompactionEntry | undefined,
-    runtime: CodexRuntime,
-): {
+export type WindowLifecycle = {
     readonly windowNumber: number;
     readonly windowId: string;
     readonly firstWindowId: string;
     readonly previousWindowId?: string | undefined;
     readonly sourceCompactionEntryId?: string | undefined;
-} {
+};
+
+export function buildWindowLifecycle(
+    latestNativeCompaction: FoundNativeCompactionEntry | undefined,
+    runtime: CodexRuntime,
+): WindowLifecycle {
     const previousDetails = latestNativeCompaction?.entry.details;
     const windowId = runtime.idGenerator.randomUUID();
     const previousWindowId = previousDetails?.windowId;
@@ -332,7 +342,7 @@ function buildPrefixTable(values: readonly string[]): number[] {
     return table;
 }
 
-function stableFingerprint(value: unknown): string {
+function stableFingerprint(value: JsonValue | undefined): string {
     const hash = createHash("sha256");
     const stats = { chars: 0, nodes: 0 };
     updateStableFingerprint(hash, value, stats, new WeakSet<object>());
@@ -341,50 +351,62 @@ function stableFingerprint(value: unknown): string {
 
 function updateStableFingerprint(
     hash: ReturnType<typeof createHash>,
-    value: unknown,
+    value: JsonValue | undefined,
     stats: { chars: number; nodes: number },
     seen: WeakSet<object>,
 ): void {
     stats.nodes += 1;
+    if (value === undefined) {
+        hash.update("undefined;");
+        return;
+    }
     if (value === null) {
         hash.update("null;");
         return;
     }
-    if (typeof value === "string") {
-        stats.chars += value.length;
-        hash.update(`string:${value.length}:`);
-        hash.update(value);
+    const text = JsonStringDecoder.decode(value);
+    if (text !== undefined) {
+        stats.chars += text.length;
+        hash.update(`string:${text.length}:`);
+        hash.update(text);
         hash.update(";");
         return;
     }
-    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-        hash.update(`${typeof value}:${String(value)};`);
+    const number = JsonNumberDecoder.decode(value);
+    if (number !== undefined) {
+        hash.update(`number:${String(number)};`);
         return;
     }
-    if (typeof value === "undefined" || typeof value === "symbol" || typeof value === "function") {
-        hash.update(`${typeof value};`);
+    const boolean = BooleanDecoder.decode(value);
+    if (boolean !== undefined) {
+        hash.update(`boolean:${String(boolean)};`);
         return;
     }
-    if (seen.has(value)) {
+    const array = JsonArrayDecoder.decode(value);
+    if (array !== undefined) {
+        if (seen.has(array)) {
+            hash.update("circular;");
+            return;
+        }
+        seen.add(array);
+        hash.update(`array:${array.length}[`);
+        for (const item of array) updateStableFingerprint(hash, item, stats, seen);
+        hash.update("];");
+        seen.delete(array);
+        return;
+    }
+    const object = JsonObjectDecoder.Parse(value);
+    if (seen.has(object)) {
         hash.update("circular;");
         return;
     }
-    seen.add(value);
-    if (Array.isArray(value)) {
-        hash.update(`array:${value.length}[`);
-        for (const item of value) updateStableFingerprint(hash, item, stats, seen);
-        hash.update("];");
-        seen.delete(value);
-        return;
-    }
-
+    seen.add(object);
     hash.update("object{");
-    const keys = Object.keys(value).sort((left, right) => left.localeCompare(right));
+    const keys = Object.keys(object).sort((left, right) => left.localeCompare(right));
     for (const key of keys) {
-        const nested: unknown = Reflect.get(value, key);
         updateStableFingerprint(hash, key, stats, seen);
-        updateStableFingerprint(hash, nested, stats, seen);
+        updateStableFingerprint(hash, object[key], stats, seen);
     }
     hash.update("};");
-    seen.delete(value);
+    seen.delete(object);
 }

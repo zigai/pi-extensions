@@ -1,7 +1,7 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import { compileSchema } from "../schema-parsing.ts";
 import { prepareCodexPromptImageContent } from "./codex-prompt.ts";
 import { loadImageContent } from "./file-artifacts.ts";
 
@@ -70,23 +70,20 @@ function extractImageRefsFromEntry(entry: SessionEntry): RecentImageRef[] {
 }
 
 function extractInlineImageRefs(message: unknown): RecentImageRef[] {
-    const parsed = parseWithSchema(MessageWithArrayContentSchema, message);
+    const parsed = MessageWithArrayContentSchema.decode(message);
     return parsed
-        ? parsed.content
-              .filter(isImageContent)
-              .map((content): RecentImageRef => ({ kind: "inline", content }))
+        ? parsed.content.flatMap((value): RecentImageRef[] => {
+              const content = ImageContentSchema.decode(value);
+              return content === undefined ? [] : [{ kind: "inline", content }];
+          })
         : [];
 }
 
 function extractImagegenArtifactRefs(message: unknown): RecentImageRef[] {
-    const parsed = parseWithSchema(ImagegenArtifactDetailsSchema, message);
+    const parsed = ImagegenArtifactDetailsSchema.decode(message);
     return parsed
         ? parsed.details.images.map(
               (image): RecentImageRef => ({ kind: "artifact", path: image.path }),
           )
         : [];
-}
-
-function isImageContent(value: unknown): value is ImageContent {
-    return parseWithSchema(ImageContentSchema, value) !== undefined;
 }

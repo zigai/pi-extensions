@@ -4,6 +4,7 @@ import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { codexToolProviderHeaders, resolveCodexToolProvider } from "../src/codex/auth.ts";
 import { Redacted } from "../src/codex/redacted.ts";
+import { testDouble } from "./helpers.ts";
 
 test("Codex tool auth requires account ids and omits empty account headers", async () => {
     const headers = codexToolProviderHeaders({
@@ -110,6 +111,5 @@ function makeToolAuthContext(auth: {
             }),
         },
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test context supplies only the model registry fields read by Codex auth.
-    return ctx as unknown as ExtensionContext;
+    return testDouble<ExtensionContext>()(ctx);
 }

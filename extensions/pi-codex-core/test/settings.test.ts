@@ -9,6 +9,7 @@ import {
     type ExtensionContext,
     type Theme,
 } from "@earendil-works/pi-coding-agent";
+import { JsonObjectDecoder } from "../src/compaction/responses-input.ts";
 import { registerCodexCommand } from "../src/settings/command.ts";
 import { registerCodexIntegration } from "../src/settings/integration.ts";
 import { openCodexSettingsScreen, type CodexSettingsTab } from "../src/settings/screen.ts";
@@ -18,7 +19,12 @@ import {
     getCodexCoreConfigPath,
     getCodexCoreProjectConfigPath,
 } from "../src/config/config.ts";
-import { DEFAULT_TEST_EXTENSION_MODEL, TEST_THEME, makeExtensionContext } from "./helpers.ts";
+import {
+    DEFAULT_TEST_EXTENSION_MODEL,
+    TEST_THEME,
+    makeExtensionContext,
+    testDouble,
+} from "./helpers.ts";
 
 test("codex command only opens settings UI for the bare command", async () => {
     let opened = 0;
@@ -86,22 +92,12 @@ test("codex command persists changed global settings and applies trusted project
 
         await command.run("", ctx);
 
-        const persisted: unknown = JSON.parse(await readFile(globalConfigPath, "utf8"));
-        assert.ok(persisted !== null && typeof persisted === "object" && "scope" in persisted);
-        const persistedScope = persisted.scope;
-        assert.ok(
-            persistedScope !== null &&
-                typeof persistedScope === "object" &&
-                "tools" in persistedScope,
+        const persisted = JsonObjectDecoder.Parse(
+            JSON.parse(await readFile(globalConfigPath, "utf8")),
         );
+        const persistedScope = JsonObjectDecoder.Parse(persisted.scope);
         assert.equal(persistedScope.tools, "all");
-        assert.ok("prompt" in persisted);
-        const persistedPrompt = persisted.prompt;
-        assert.ok(
-            persistedPrompt !== null &&
-                typeof persistedPrompt === "object" &&
-                "mode" in persistedPrompt,
-        );
+        const persistedPrompt = JsonObjectDecoder.Parse(persisted.prompt);
         assert.equal(persistedPrompt.mode, "pi");
         assert.equal(appliedConfigs.length, 1);
         assert.equal(appliedConfigs[0]?.prompt.mode, "codex");
@@ -406,7 +402,7 @@ test("settings screen shows personality only for supported bundled prompts", asy
 });
 
 test("settings screen renders a description for every setting", async () => {
-    const descriptionsByTab: Readonly<Record<CodexSettingsTab, readonly string[]>> = {
+    const descriptionsByTab = {
         general: [
             "Expose Codex extras only on Codex-like models, or on all models.",
             "Use Pi's prompt or the active GPT model's bundled Codex prompt.",
@@ -437,7 +433,7 @@ test("settings screen renders a description for every setting", async () => {
             "Fetch current Codex usage and banked reset credits.",
             "Spend one banked reset credit after an in-screen confirmation.",
         ],
-    };
+    } satisfies Readonly<Record<CodexSettingsTab, readonly string[]>>;
 
     for (const tab of ["general", "tools", "openai", "usage"] as const) {
         const renderedSelections: string[] = [];
@@ -516,10 +512,12 @@ type SettingsScreenComponent = {
     readonly handleInput?: (data: string) => void;
 };
 
+type SettingsKeybindings = Readonly<Record<string, never>>;
+
 type SettingsScreenFactory = (
     tui: { readonly requestRender: () => void },
     theme: Theme,
-    keybindings: unknown,
+    keybindings: SettingsKeybindings,
     done: () => void,
 ) => SettingsScreenComponent;
 
@@ -572,8 +570,7 @@ function makeCodexCommandHarness(): CodexCommandHarness {
         },
     };
     return {
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the ExtensionAPI member exercised by registerCodexCommand.
-        api: api as unknown as ExtensionAPI,
+        api: testDouble<ExtensionAPI>()(api),
         registeredCommands,
         get hasArgumentCompletions() {
             return hasArgumentCompletions;

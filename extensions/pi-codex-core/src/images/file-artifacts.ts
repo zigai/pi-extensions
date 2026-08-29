@@ -4,6 +4,7 @@ import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { resizeImage, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { NodeErrorCodeDecoder } from "../schema-parsing.ts";
 import {
     resolveCodexCoreArtifactPath,
     resolveCodexCoreArtifactRoot,
@@ -167,17 +168,18 @@ async function writeUniqueGeneratedImage(
     throw new Error("Unable to allocate a unique image artifact path.");
 }
 
-function parseArtifactName(fileName: string): { readonly stem: string; readonly ext: string } {
+type ArtifactName = {
+    readonly stem: string;
+    readonly ext: string;
+};
+
+function parseArtifactName(fileName: string): ArtifactName {
     const ext = extname(fileName);
     return { stem: fileName.slice(0, fileName.length - ext.length), ext };
 }
 
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
-    return isNodeError(cause) && cause.code === code;
-}
-
-function isNodeError(cause: unknown): cause is NodeJS.ErrnoException {
-    return typeof cause === "object" && cause !== null && "code" in cause;
+    return NodeErrorCodeDecoder.decode(cause)?.code === code;
 }
 
 async function authorizeImagePath(

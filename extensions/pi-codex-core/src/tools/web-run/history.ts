@@ -2,7 +2,7 @@ import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 
 import type { CodexTokenizer, TokenizerOperationOptions } from "../../compaction/tokenizer.ts";
-import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
+import { compileSchema } from "../../schema-parsing.ts";
 
 const ASSISTANT_CONTEXT_TOKEN_LIMIT = 1_000;
 
@@ -86,17 +86,17 @@ function findPreviousUserIndex(messages: readonly VisibleMessage[], before: numb
 
 function visibleMessage(entry: SessionEntry): VisibleMessage | undefined {
     if (entry.type !== "message") return undefined;
-    const message = parseWithSchema(MessageSchema, entry.message);
+    const message = MessageSchema.decode(entry.message);
     if (!message || (message.role !== "user" && message.role !== "assistant")) return undefined;
     const text = textFromContent(message.content);
     return text ? { role: message.role, text } : undefined;
 }
 
-function textFromContent(content: string | readonly unknown[]): string | undefined {
-    if (typeof content === "string") return content.trim() || undefined;
+function textFromContent(content: string | unknown[]): string | undefined {
+    if (!Array.isArray(content)) return content.trim() || undefined;
     const text = content
         .flatMap((item) => {
-            const block = parseWithSchema(TextBlockSchema, item);
+            const block = TextBlockSchema.decode(item);
             return block ? [block.text] : [];
         })
         .join("\n")

@@ -29,12 +29,12 @@ const GPT_5_5_FRIENDLY_PERSONALITY_PATH = fileURLToPath(
 const GPT_5_5_PRAGMATIC_PERSONALITY_PATH = fileURLToPath(
     new URL("./codex-gpt-5.5-personality-pragmatic.md", import.meta.url),
 );
-const CODEX_PROMPT_PATHS_BY_MODEL: Readonly<Record<string, string>> = {
-    "gpt-5.5": GPT_5_5_CODEX_PROMPT_PATH,
-    "gpt-5.6-sol": GPT_5_6_SOL_CODEX_PROMPT_PATH,
-    "gpt-5.6-terra": GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH,
-    "gpt-5.6-luna": GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH,
-};
+const CODEX_PROMPT_PATHS_BY_MODEL = new Map<string, string>([
+    ["gpt-5.5", GPT_5_5_CODEX_PROMPT_PATH],
+    ["gpt-5.6-sol", GPT_5_6_SOL_CODEX_PROMPT_PATH],
+    ["gpt-5.6-terra", GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH],
+    ["gpt-5.6-luna", GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH],
+]);
 const cachedCodexPromptsByPath = new Map<string, string>();
 const CODEX_PERSONALITY_PLACEHOLDER = "{{ personality }}";
 const PI_DEFAULT_PROMPT_START =
@@ -50,6 +50,11 @@ export type CodexSystemPromptContext = {
 
 /** How an earlier extension's direct system-prompt change was handled. */
 export type CodexPromptInterop = "unchanged" | "preserved-append" | "unrecognized-replacement";
+
+type EarlierPromptChange = {
+    readonly interop: CodexPromptInterop;
+    readonly appendedInstructions?: string | undefined;
+};
 
 /** Codex prompt output plus extension-chain interoperability diagnostics. */
 export type CodexSystemPromptBuildResult = {
@@ -103,7 +108,7 @@ function isGptPromptModel(modelId: string | undefined): boolean {
 function readCodexPrompt(modelId: string | undefined): string {
     const normalizedModelId = modelId?.trim().toLowerCase();
     const promptPath =
-        (normalizedModelId ? CODEX_PROMPT_PATHS_BY_MODEL[normalizedModelId] : undefined) ??
+        (normalizedModelId ? CODEX_PROMPT_PATHS_BY_MODEL.get(normalizedModelId) : undefined) ??
         FALLBACK_CODEX_PROMPT_PATH;
     return readPromptFile(promptPath);
 }
@@ -247,10 +252,7 @@ function buildPiCodexContext(
 function analyzeEarlierPromptChange(
     basePrompt: string,
     options: BuildSystemPromptOptions | undefined,
-): {
-    readonly interop: CodexPromptInterop;
-    readonly appendedInstructions?: string | undefined;
-} {
+): EarlierPromptChange {
     if (!options) return { interop: "unchanged" };
 
     const expectedPromptStart = options.customPrompt ?? PI_DEFAULT_PROMPT_START;

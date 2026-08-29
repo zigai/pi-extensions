@@ -1,7 +1,9 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 import { defaultCodexRuntime, type Scheduler, type ScheduledTask } from "../runtime.ts";
+import { compileSchema } from "../schema-parsing.ts";
 import type { CodexCoreConfig } from "../config/config.ts";
 
 export const CODEX_RECOVERY_ENTRY_TYPE = "pi-codex-core.recovery";
@@ -12,13 +14,20 @@ const TERMINAL_ERROR_PATTERN =
 const TRANSIENT_ERROR_PATTERN =
     /websocket|network|socket|connection|timeout|timed out|overload|rate.?limit|server|service.?unavailable|upstream|bad gateway|gateway timeout|(?:http )?5\d\d/i;
 
-type RecoveryState = {
-    readonly version: typeof RECOVERY_STATE_VERSION;
-    readonly pendingFollowUps: readonly string[];
-    readonly recoveryAttempt: number;
-    readonly resumeAtMs?: number;
-    readonly errorMessage?: string;
-};
+const RecoveryStateSchema = compileSchema(
+    Type.Object(
+        {
+            version: Type.Literal(RECOVERY_STATE_VERSION),
+            pendingFollowUps: Type.Array(Type.String()),
+            recoveryAttempt: Type.Integer({ minimum: 0 }),
+            resumeAtMs: Type.Optional(Type.Number({ minimum: 0 })),
+            errorMessage: Type.Optional(Type.String()),
+        },
+        { additionalProperties: false },
+    ),
+);
+
+type RecoveryState = ReturnType<(typeof RecoveryStateSchema)["Parse"]>;
 
 type RecoveryCoordinatorOptions = {
     readonly getConfig: () => CodexCoreConfig;
@@ -202,13 +211,14 @@ export class CodexRecoveryCoordinator {
     }
 
     private persist(pi: ExtensionAPI): void {
-        pi.appendEntry(CODEX_RECOVERY_ENTRY_TYPE, {
+        const state: RecoveryState = {
             version: RECOVERY_STATE_VERSION,
             pendingFollowUps: [...this.pendingFollowUps],
             recoveryAttempt: this.recoveryAttempt,
-            ...(this.resumeAtMs === undefined ? {} : { resumeAtMs: this.resumeAtMs }),
-            ...(this.errorMessage === undefined ? {} : { errorMessage: this.errorMessage }),
-        } satisfies RecoveryState);
+        };
+        if (this.resumeAtMs !== undefined) state.resumeAtMs = this.resumeAtMs;
+        if (this.errorMessage !== undefined) state.errorMessage = this.errorMessage;
+        pi.appendEntry(CODEX_RECOVERY_ENTRY_TYPE, state);
     }
 
     private takePendingFollowUps(): string[] {
@@ -237,25 +247,7 @@ export function isTransientCodexFailure(message: AssistantMessage): boolean {
 }
 
 function parseRecoveryState(value: unknown): RecoveryState | undefined {
-    if (!isRecord(value) || value.version !== RECOVERY_STATE_VERSION) return undefined;
-    if (!Array.isArray(value.pendingFollowUps)) return undefined;
-    if (!value.pendingFollowUps.every((item) => typeof item === "string")) return undefined;
-    if (!Number.isInteger(value.recoveryAttempt) || Number(value.recoveryAttempt) < 0) {
-        return undefined;
-    }
-    if (value.resumeAtMs !== undefined && !isNonNegativeFiniteNumber(value.resumeAtMs)) {
-        return undefined;
-    }
-    if (value.errorMessage !== undefined && typeof value.errorMessage !== "string") {
-        return undefined;
-    }
-    return {
-        version: RECOVERY_STATE_VERSION,
-        pendingFollowUps: value.pendingFollowUps,
-        recoveryAttempt: Number(value.recoveryAttempt),
-        ...(value.resumeAtMs === undefined ? {} : { resumeAtMs: value.resumeAtMs }),
-        ...(value.errorMessage === undefined ? {} : { errorMessage: value.errorMessage }),
-    };
+    return RecoveryStateSchema.decode(value);
 }
 
 function formatRecoveryPrompt(pending: readonly string[]): string {
@@ -290,12 +282,4 @@ export function supportsInteractiveRecovery(ctx: ExtensionContext): boolean {
 
 function notify(ctx: ExtensionContext, message: string, type: "info" | "warning"): void {
     if (ctx.hasUI) ctx.ui.notify(message, type);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNonNegativeFiniteNumber(value: unknown): value is number {
-    return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }

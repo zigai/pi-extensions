@@ -1,3 +1,10 @@
+import {
+    JsonArrayDecoder,
+    JsonObjectDecoder,
+    JsonStringDecoder,
+    parseResponsesInputItems,
+} from "../compaction/responses-input.ts";
+import type { JsonObject, JsonValue, ResponsesInputItem } from "../compaction/types.ts";
 import type { ImageDetail } from "./codex-prompt.ts";
 
 const IMAGE_DETAIL_MARKER_PREFIX = "[pi-codex-image-detail:";
@@ -12,10 +19,12 @@ export function isImageDetailMarker(text: string): boolean {
 }
 
 /** Restore detail lost by Pi's generic ImageContent conversion and remove internal markers. */
-export function rewriteProviderImageDetails(payload: unknown): unknown {
-    if (!isRecord(payload) || !Array.isArray(payload.input)) return undefined;
+export function rewriteProviderImageDetails(payload: unknown): JsonObject | undefined {
+    const parsedPayload = JsonObjectDecoder.decode(payload);
+    const parsedInput = parseResponsesInputItems(parsedPayload?.input);
+    if (!parsedPayload || !parsedInput) return undefined;
     let changed = false;
-    const input = payload.input.map((item): unknown => {
+    const input = parsedInput.map((item) => {
         const rewritten = rewriteFunctionOutput(item);
         if (rewritten !== undefined) {
             changed = true;
@@ -23,34 +32,35 @@ export function rewriteProviderImageDetails(payload: unknown): unknown {
         }
         return item;
     });
-    return changed ? { ...payload, input } : undefined;
+    return changed ? { ...parsedPayload, input } : undefined;
 }
 
-function rewriteFunctionOutput(item: unknown): unknown {
-    if (!isRecord(item) || item.type !== "function_call_output" || !Array.isArray(item.output)) {
-        return undefined;
-    }
-    const detail = item.output.flatMap((part) => {
-        if (!isRecord(part) || part.type !== "input_text" || typeof part.text !== "string") {
-            return [];
-        }
-        const parsed = parseImageDetailFromText(part.text);
+function rewriteFunctionOutput(item: ResponsesInputItem): ResponsesInputItem | undefined {
+    const output = JsonArrayDecoder.decode(item.output);
+    if (item.type !== "function_call_output" || !output) return undefined;
+    const detail = output.flatMap((part) => {
+        const object = JsonObjectDecoder.decode(part);
+        const text = JsonStringDecoder.decode(object?.text);
+        if (object?.type !== "input_text" || text === undefined) return [];
+        const parsed = parseImageDetailFromText(text);
         return parsed ? [parsed] : [];
     })[0];
     if (!detail) return undefined;
 
     return {
         ...item,
-        output: item.output.flatMap((part): unknown[] => {
-            if (isRecord(part) && part.type === "input_text" && typeof part.text === "string") {
-                const text = part.text
+        output: output.flatMap((part): JsonValue[] => {
+            const object = JsonObjectDecoder.decode(part);
+            const partText = JsonStringDecoder.decode(object?.text);
+            if (object?.type === "input_text" && partText !== undefined) {
+                const text = partText
                     .split("\n")
                     .filter((line) => !isImageDetailMarker(line))
                     .join("\n")
                     .trim();
-                return text.length > 0 ? [{ ...part, text }] : [];
+                return text.length > 0 ? [{ ...object, text }] : [];
             }
-            if (isRecord(part) && part.type === "input_image") return [{ ...part, detail }];
+            if (object?.type === "input_image") return [{ ...object, detail }];
             return [part];
         }),
     };
@@ -69,8 +79,4 @@ function parseImageDetailMarker(text: string): ImageDetail | undefined {
     if (trimmed === imageDetailMarker("high")) return "high";
     if (trimmed === imageDetailMarker("original")) return "original";
     return undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

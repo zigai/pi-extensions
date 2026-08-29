@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { CodexCoreConfig } from "./config/config.ts";
+import { StringDecoder } from "./schema-parsing.ts";
 import { APPLY_PATCH_TOOL_NAME } from "./tools/apply-patch/tool.ts";
 import { IMAGEGEN_TOOL_NAME } from "./tools/imagegen.ts";
 import { VIEW_IMAGE_TOOL_NAME } from "./tools/view-image/tool.ts";
@@ -97,7 +98,7 @@ export function shouldExposeApplyPatch(ctx: ExtensionContext, config: CodexCoreC
 export function isCodexLikeModel(model: ExtensionContext["model"]): boolean {
     if (!model) return false;
     const provider = model.provider.toLowerCase();
-    const api = typeof model.api === "string" ? model.api.toLowerCase() : "";
+    const api = StringDecoder.decode(model.api)?.toLowerCase() ?? "";
     const id = model.id.toLowerCase();
     if (provider.includes("codex")) return true;
     if (api.includes("codex")) return true;

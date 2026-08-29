@@ -1,3 +1,5 @@
+import { Type } from "typebox";
+
 import {
     CodexHttpRequestFailed,
     CodexInvalidJson,
@@ -11,14 +13,21 @@ import {
     type CodexResult,
 } from "../codex/failures.ts";
 import type { CodexRuntime, ScheduledTask } from "../runtime.ts";
-import { isRemoteCompactionOutputItem } from "./responses-input.ts";
+import { compileSchema } from "../schema-parsing.ts";
+import {
+    isRemoteCompactionOutputItem,
+    JsonObjectDecoder,
+    JsonStringDecoder,
+} from "./responses-input.ts";
 import type {
     JsonObject,
-    JsonValue,
     RemoteCompactionV2Request,
     RemoteCompactionV2Response,
     ResponsesInputItem,
 } from "./types.ts";
+
+const DiagnosticScalarDecoder = compileSchema(Type.Union([Type.String(), Type.Number()]));
+const NonNegativeIntegerDecoder = compileSchema(Type.Integer({ minimum: 0 }));
 
 const MAX_SSE_TAIL_CHARS = 1_000_000;
 const MAX_SSE_EVENT_CHARS = 2_000_000;
@@ -30,6 +39,22 @@ const REMOTE_COMPACTION_RETRY_INITIAL_DELAY_MS = 200;
 type ServerSentEvent = {
     readonly event: string;
     readonly data: readonly string[];
+};
+
+type LinkedAttemptController = {
+    readonly controller: AbortController;
+    readonly dispose: () => void;
+};
+
+type RemoteCompactionV2Collector = {
+    readonly consume: (event: ServerSentEvent) => CodexResult<void>;
+    readonly isComplete: () => boolean;
+    readonly finish: () => CodexResult<RemoteCompactionV2Response>;
+};
+
+type ServerSentEventDrainResult = {
+    readonly blocks: readonly string[];
+    readonly tail: string;
 };
 
 export async function executeRemoteCompactionV2(
@@ -233,10 +258,7 @@ class RemoteCompactionTransportFailure extends Error {
     }
 }
 
-function createLinkedAttemptController(parentSignal: AbortSignal): {
-    readonly controller: AbortController;
-    readonly dispose: () => void;
-} {
+function createLinkedAttemptController(parentSignal: AbortSignal): LinkedAttemptController {
     const controller = new AbortController();
     const onParentAbort = () =>
         controller.abort(parentSignal.reason ?? new DOMException("Aborted", "AbortError"));
@@ -363,9 +385,9 @@ async function readSafeHttpErrorDetail(
         if (isCodexAbortCause(cause) || signal.aborted) throw cause;
         return requestId ? `request_id=${requestId}` : undefined;
     }
-    const root = parseRemoteJsonObject(payload);
+    const root = JsonObjectDecoder.decode(payload);
     if (!root) return requestId ? `request_id=${requestId}` : undefined;
-    const nestedError = parseRemoteJsonObject(root.error);
+    const nestedError = JsonObjectDecoder.decode(root.error);
     const error = nestedError ?? root;
     const type = safeDiagnosticValue(error.type);
     const code = safeDiagnosticValue(error.code);
@@ -431,8 +453,9 @@ function readRemoteCompactionStreamChunk(
 }
 
 function safeDiagnosticValue(value: unknown, maxCharacters = 128): string | undefined {
-    if (typeof value !== "string" && typeof value !== "number") return undefined;
-    const normalized = String(value)
+    const diagnosticValue = DiagnosticScalarDecoder.decode(value);
+    if (diagnosticValue === undefined) return undefined;
+    const normalized = String(diagnosticValue)
         .replaceAll(/Bearer\s+[^\s,;]+/gi, "Bearer [redacted]")
         .replaceAll(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
         .replaceAll(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted]")
@@ -523,11 +546,7 @@ function collectRemoteCompactionV2Output(sseText: string): CodexResult<RemoteCom
     return collector.finish();
 }
 
-function createRemoteCompactionV2Collector(): {
-    readonly consume: (event: ServerSentEvent) => CodexResult<void>;
-    readonly isComplete: () => boolean;
-    readonly finish: () => CodexResult<RemoteCompactionV2Response>;
-} {
+function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
     let outputItemCount = 0;
     const compactionItems: ResponsesInputItem[] = [];
     let completed = false;
@@ -551,7 +570,7 @@ function createRemoteCompactionV2Collector(): {
                 const response = parseEventResponse(event.data);
                 if (response.isErr()) return fail(response.error);
                 completed = true;
-                responseId = typeof response.value?.id === "string" ? response.value.id : undefined;
+                responseId = JsonStringDecoder.decode(response.value?.id);
                 createdAt = parseCreatedAt(response.value);
                 usage = parseCompactionUsage(response.value);
                 return ok(undefined);
@@ -617,10 +636,7 @@ function createOversizedRemoteCompactionStreamError(): CodexUnexpectedResponse {
     });
 }
 
-function drainCompleteServerSentEventBlocks(buffer: string): {
-    readonly blocks: readonly string[];
-    readonly tail: string;
-} {
+function drainCompleteServerSentEventBlocks(buffer: string): ServerSentEventDrainResult {
     const blocks: string[] = [];
     let tail = buffer;
     for (;;) {
@@ -651,13 +667,13 @@ function parseServerSentEventBlock(block: string): ServerSentEvent | undefined {
 function parseEventItem(data: readonly string[]): CodexResult<ResponsesInputItem | undefined> {
     const payload = parseEventPayload(data);
     if (payload.isErr()) return payload;
-    return ok(parseRemoteJsonObject(payload.value?.item));
+    return ok(JsonObjectDecoder.decode(payload.value?.item));
 }
 
 function parseEventResponse(data: readonly string[]): CodexResult<ResponsesInputItem | undefined> {
     const payload = parseEventPayload(data);
     if (payload.isErr()) return payload;
-    return ok(parseRemoteJsonObject(payload.value?.response));
+    return ok(JsonObjectDecoder.decode(payload.value?.response));
 }
 
 function parseEventPayload(data: readonly string[]): CodexResult<JsonObject | undefined> {
@@ -665,7 +681,7 @@ function parseEventPayload(data: readonly string[]): CodexResult<JsonObject | un
     if (text.length === 0 || text === "[DONE]") return ok(undefined);
     try {
         const rawPayload: unknown = JSON.parse(text);
-        return ok(parseRemoteJsonObject(rawPayload));
+        return ok(JsonObjectDecoder.decode(rawPayload));
     } catch (cause: unknown) {
         return fail(
             new CodexInvalidJson({
@@ -678,70 +694,32 @@ function parseEventPayload(data: readonly string[]): CodexResult<JsonObject | un
     }
 }
 
-function parseRemoteJsonValue(value: unknown): JsonValue | undefined {
-    if (value === null) return null;
-    if (typeof value === "string" || typeof value === "boolean") return value;
-    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-    if (Array.isArray(value)) {
-        const items: JsonValue[] = [];
-        for (const item of value) {
-            const parsed = parseRemoteJsonValue(item);
-            if (parsed === undefined) return undefined;
-            items.push(parsed);
-        }
-        return items;
-    }
-    return parseRemoteJsonObject(value);
-}
-
-function parseRemoteJsonObject(value: unknown): JsonObject | undefined {
-    if (!isRemoteJsonObject(value)) return undefined;
-    const record: Record<string, JsonValue> = {};
-    for (const key of Object.keys(value)) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, key);
-        const nested: unknown = descriptor?.value;
-        const parsed = parseRemoteJsonValue(nested);
-        if (parsed === undefined) return undefined;
-        record[key] = parsed;
-    }
-    return record;
-}
-
-function isRemoteJsonObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function parseCreatedAt(response: ResponsesInputItem | undefined): number | string | undefined {
-    const createdAt = response?.created_at;
-    return typeof createdAt === "string" || typeof createdAt === "number" ? createdAt : undefined;
+    return DiagnosticScalarDecoder.decode(response?.created_at);
 }
 
 function parseCompactionUsage(
     response: ResponsesInputItem | undefined,
 ): RemoteCompactionV2Response["usage"] {
-    const usage = parseRemoteJsonObject(response?.usage);
+    const usage = JsonObjectDecoder.decode(response?.usage);
     if (!usage) return undefined;
     const inputTokens = nonNegativeTokenCount(usage.input_tokens);
-    const inputTokenDetails = parseRemoteJsonObject(usage.input_tokens_details);
+    const inputTokenDetails = JsonObjectDecoder.decode(usage.input_tokens_details);
     const cachedInputTokens = nonNegativeTokenCount(inputTokenDetails?.cached_tokens);
     return inputTokens !== undefined || cachedInputTokens !== undefined
         ? { inputTokens, cachedInputTokens }
         : undefined;
 }
 
-function nonNegativeTokenCount(value: JsonValue | undefined): number | undefined {
-    return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+function nonNegativeTokenCount(value: JsonObject[string]): number | undefined {
+    return NonNegativeIntegerDecoder.decode(value);
 }
 
 function formatResponsesStreamFailure(data: readonly string[], event: string): string {
     const response = parseEventResponse(data);
     if (response.isErr()) return response.error.message;
     const error = response.value?.error;
-    if (
-        isRemoteJsonObject(error) &&
-        typeof error.message === "string" &&
-        error.message.trim().length > 0
-    )
-        return `${event}: ${error.message.trim()}`;
+    const message = JsonStringDecoder.decode(JsonObjectDecoder.decode(error)?.message)?.trim();
+    if (message) return `${event}: ${message}`;
     return `${event} event received during remote compaction v2`;
 }

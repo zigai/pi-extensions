@@ -8,6 +8,8 @@ import {
 } from "../src/compaction/provider-request-template.ts";
 import { buildRemoteCompactionV2Request } from "../src/compaction/request-budget.ts";
 
+type LazyConversationItem = { role: string; content?: never };
+
 test("captures provider-ready cache fields without retaining conversation input", () => {
     const sessionId = "provider-template-standard";
     try {
@@ -157,7 +159,7 @@ test("isolates templates by session, model, and wire layout", () => {
 
 test("does not traverse conversation items while capturing a Lite prefix", () => {
     const sessionId = "provider-template-bounded-capture";
-    const conversationItem: Record<string, unknown> = { role: "user" };
+    const conversationItem: LazyConversationItem = { role: "user" };
     Object.defineProperty(conversationItem, "content", {
         enumerable: true,
         get(): never {

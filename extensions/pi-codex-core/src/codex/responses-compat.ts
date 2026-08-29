@@ -1,32 +1,36 @@
-import { Type } from "typebox";
-
 import { codexModelRequestProfile, codexReasoningEffortForRequest } from "./models.ts";
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import {
+    JsonArrayDecoder,
+    JsonObjectDecoder,
+    JsonStringDecoder,
+} from "../compaction/responses-input.ts";
+import type { JsonObject, JsonValue } from "../compaction/types.ts";
+
+type JsonObjectConstruction = Record<string, JsonValue | undefined>;
 
 export const CODEX_RESPONSES_LITE_HEADER = "x-openai-internal-codex-responses-lite";
 export const CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY =
     "ws_request_header_x_openai_internal_codex_responses_lite";
 
-const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
-
 /** Rewrites a GPT-5.6 Responses payload to the Responses Lite wire layout. */
 export function rewriteCodexResponsesPayload(
     payload: unknown,
     expectedModelId?: string,
-): Record<string, unknown> | undefined {
-    const request = parseWithSchema(UnknownRecordSchema, payload);
-    if (!request || typeof request.model !== "string" || !Array.isArray(request.input)) {
-        return undefined;
-    }
-    if (expectedModelId !== undefined && request.model !== expectedModelId) return undefined;
+): JsonObject | undefined {
+    const request = JsonObjectDecoder.decode(payload);
+    if (!request) return undefined;
+    const model = JsonStringDecoder.decode(request.model);
+    const requestInput = JsonArrayDecoder.decode(request.input);
+    if (model === undefined || requestInput === undefined) return undefined;
+    if (expectedModelId !== undefined && model !== expectedModelId) return undefined;
 
-    const profile = codexModelRequestProfile(request.model);
+    const profile = codexModelRequestProfile(model);
     if (!profile?.useResponsesLite) return undefined;
 
-    const rewrittenInput = request.input.map(stripInputImageDetail);
+    const rewrittenInput = requestInput.map(stripInputImageDetail);
     const alreadyUsesLiteLayout = isAdditionalToolsItem(rewrittenInput[0]);
-    const tools = Array.isArray(request.tools) ? request.tools : [];
-    const instructions = typeof request.instructions === "string" ? request.instructions : "";
+    const tools = JsonArrayDecoder.decode(request.tools) ?? [];
+    const instructions = JsonStringDecoder.decode(request.instructions) ?? "";
     const input = alreadyUsesLiteLayout
         ? rewrittenInput
         : [
@@ -42,92 +46,92 @@ export function rewriteCodexResponsesPayload(
                   : []),
               ...rewrittenInput,
           ];
-    const clientMetadata = parseWithSchema(UnknownRecordSchema, request.client_metadata) ?? {};
+    const clientMetadata = JsonObjectDecoder.decode(request.client_metadata) ?? {};
     const reasoning = responsesLiteReasoning(request.reasoning, profile.defaultReasoningEffort);
 
-    const rewritten = Object.fromEntries(
-        Object.entries(request).filter(
-            ([key]) =>
-                key !== "instructions" &&
-                key !== "tools" &&
-                key !== "input" &&
-                key !== "parallel_tool_calls" &&
-                key !== "reasoning" &&
-                key !== "client_metadata" &&
-                key !== "service_tier",
-        ),
+    const rewritten = omitJsonObjectKeys(
+        request,
+        new Set([
+            "instructions",
+            "tools",
+            "input",
+            "parallel_tool_calls",
+            "reasoning",
+            "client_metadata",
+            "service_tier",
+        ]),
     );
-    return {
-        ...rewritten,
-        input,
-        parallel_tool_calls: false,
-        reasoning,
-        client_metadata: {
-            ...clientMetadata,
-            [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
-        },
-        ...(request.service_tier === "priority" ? { service_tier: "priority" } : {}),
+    const result: JsonObjectConstruction = {};
+    for (const [key, value] of Object.entries(rewritten)) result[key] = value;
+    result.input = input;
+    result.parallel_tool_calls = false;
+    result.reasoning = reasoning;
+    result.client_metadata = {
+        ...clientMetadata,
+        [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
     };
+    if (request.service_tier === "priority") result.service_tier = "priority";
+    return result;
 }
 
 /** Removes the visible reasoning summary request while preserving hidden reasoning controls. */
 export function omitReasoningSummary(
     payload: unknown,
     expectedModelId?: string,
-): Record<string, unknown> | undefined {
-    const request = parseWithSchema(UnknownRecordSchema, payload);
-    if (!request || typeof request.model !== "string") return undefined;
-    if (expectedModelId !== undefined && request.model !== expectedModelId) return undefined;
+): JsonObject | undefined {
+    const request = JsonObjectDecoder.decode(payload);
+    if (!request) return undefined;
+    const model = JsonStringDecoder.decode(request.model);
+    if (model === undefined) return undefined;
+    if (expectedModelId !== undefined && model !== expectedModelId) return undefined;
 
-    const reasoning = parseWithSchema(UnknownRecordSchema, request.reasoning);
+    const reasoning = JsonObjectDecoder.decode(request.reasoning);
     if (!reasoning || !Object.hasOwn(reasoning, "summary")) return undefined;
-
-    return {
-        ...request,
-        reasoning: Object.fromEntries(
-            Object.entries(reasoning).filter(([key]) => key !== "summary"),
-        ),
-    };
+    return { ...request, reasoning: omitJsonObjectKeys(reasoning, new Set(["summary"])) };
 }
 
 function responsesLiteReasoning(
-    value: unknown,
+    value: JsonValue | undefined,
     defaultEffort: string | undefined,
-): Record<string, unknown> {
-    const current = parseWithSchema(UnknownRecordSchema, value) ?? {};
+): JsonObject {
+    const current = JsonObjectDecoder.decode(value) ?? {};
+    const currentEffort = JsonStringDecoder.decode(current.effort)?.trim();
     const effort =
-        typeof current.effort === "string" && current.effort.trim().length > 0
-            ? codexReasoningEffortForRequest(current.effort)
+        currentEffort && currentEffort.length > 0
+            ? codexReasoningEffortForRequest(currentEffort)
             : defaultEffort;
-    const summary =
-        typeof current.summary === "string" && current.summary !== "none"
-            ? current.summary
-            : undefined;
-    const reasoning = Object.fromEntries(
-        Object.entries(current).filter(
-            ([key]) => key !== "effort" && key !== "summary" && key !== "context",
-        ),
+    const currentSummary = JsonStringDecoder.decode(current.summary);
+    const summary = currentSummary === "none" ? undefined : currentSummary;
+    const reasoning: JsonObjectConstruction = omitJsonObjectKeys(
+        current,
+        new Set(["effort", "summary", "context"]),
     );
-    return {
-        ...reasoning,
-        ...(effort ? { effort } : {}),
-        ...(summary ? { summary } : {}),
-        context: "all_turns",
-    };
+    if (effort) reasoning.effort = effort;
+    if (summary) reasoning.summary = summary;
+    reasoning.context = "all_turns";
+    return reasoning;
 }
 
-function stripInputImageDetail(value: unknown): unknown {
+function stripInputImageDetail(value: JsonValue): JsonValue {
     if (Array.isArray(value)) return value.map(stripInputImageDetail);
-    const record = parseWithSchema(UnknownRecordSchema, value);
+    const record = JsonObjectDecoder.decode(value);
     if (!record) return value;
-    return Object.fromEntries(
-        Object.entries(record)
-            .filter(([key]) => record.type !== "input_image" || key !== "detail")
-            .map(([key, item]) => [key, stripInputImageDetail(item)]),
-    );
+    const stripped: JsonObjectConstruction = {};
+    for (const [key, item] of Object.entries(record)) {
+        if (record.type === "input_image" && key === "detail") continue;
+        stripped[key] = item === undefined ? undefined : stripInputImageDetail(item);
+    }
+    return stripped;
 }
 
-function isAdditionalToolsItem(value: unknown): boolean {
-    const item = parseWithSchema(UnknownRecordSchema, value);
-    return item?.type === "additional_tools";
+function isAdditionalToolsItem(value: JsonValue | undefined): boolean {
+    return JsonObjectDecoder.decode(value)?.type === "additional_tools";
+}
+
+function omitJsonObjectKeys(object: JsonObject, excluded: ReadonlySet<string>): JsonObject {
+    const filtered: JsonObjectConstruction = {};
+    for (const [key, value] of Object.entries(object)) {
+        if (!excluded.has(key)) filtered[key] = value;
+    }
+    return filtered;
 }

@@ -11,6 +11,8 @@ import { basename, dirname, isAbsolute, normalize, resolve } from "node:path";
 
 import { Result, type Result as BetterResult } from "better-result";
 
+import { NodeErrorCodeDecoder } from "../../schema-parsing.ts";
+
 const BEGIN_PATCH_MARKER = "*** Begin Patch";
 const END_PATCH_MARKER = "*** End Patch";
 const ADD_FILE_MARKER = "*** Add File: ";
@@ -1377,5 +1379,5 @@ function ioError(context: string, cause: unknown): ApplyPatchError {
 }
 
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
-    return typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;
+    return NodeErrorCodeDecoder.decode(cause)?.code === code;
 }

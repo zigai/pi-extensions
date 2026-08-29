@@ -10,7 +10,7 @@ import {
     type CodexResult,
 } from "./failures.ts";
 import { Redacted } from "./redacted.ts";
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import { compileSchema, StringDecoder } from "../schema-parsing.ts";
 import { CODEX_TEXT_MODEL_CHOICES } from "./models.ts";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -27,6 +27,10 @@ export type CodexToolProvider = {
     readonly redactedHeaders?: Readonly<Record<string, Redacted<string>>> | undefined;
 };
 
+type CodexToolProviderConstruction = {
+    -readonly [Key in keyof CodexToolProvider]: CodexToolProvider[Key];
+};
+
 export type CodexResponsesProvider = CodexToolProvider & {
     readonly provider: string;
     readonly api: string;
@@ -36,7 +40,13 @@ export type CodexResponsesProvider = CodexToolProvider & {
 
 type RuntimeModel = Model<Api>;
 
-const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
+const JwtPayloadSchema = compileSchema(
+    Type.Object({
+        [JWT_CLAIM_PATH]: Type.Optional(
+            Type.Object({ chatgpt_account_id: Type.Optional(Type.String()) }),
+        ),
+    }),
+);
 
 export function resolveCodexApiProviderBaseUrl(modelBaseUrl: string | undefined): string {
     const trimmedBaseUrl = modelBaseUrl?.trim();
@@ -164,14 +174,9 @@ export function extractAccountId(token: string): string | undefined {
         const rawPayload: unknown = JSON.parse(
             Buffer.from(payloadPart, "base64url").toString("utf8"),
         );
-        const payload = parseWithSchema(UnknownRecordSchema, rawPayload);
-        if (!payload) return undefined;
-        const authClaims = parseWithSchema(UnknownRecordSchema, payload[JWT_CLAIM_PATH]);
-        if (!authClaims) return undefined;
-        const accountId = authClaims.chatgpt_account_id;
-        return typeof accountId === "string" && accountId.trim().length > 0
-            ? accountId.trim()
-            : undefined;
+        const payload = JwtPayloadSchema.decode(rawPayload);
+        const accountId = payload?.[JWT_CLAIM_PATH]?.chatgpt_account_id?.trim();
+        return accountId && accountId.length > 0 ? accountId : undefined;
     } catch {
         return undefined;
     }
@@ -218,13 +223,12 @@ async function resolveCodexProviderForModel(
     }
 
     const redactedHeaders = redactProviderHeaders(auth.headers);
-    return ok({
-        baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
-        model: model.id,
-        ...(token ? { token: Redacted.of(token) } : {}),
-        accountId: accountId ?? "",
-        ...(Object.keys(redactedHeaders).length > 0 ? { redactedHeaders } : {}),
-    });
+    const baseUrl = resolveCodexApiProviderBaseUrl(model.baseUrl);
+    const provider: CodexToolProviderConstruction = token
+        ? { baseUrl, model: model.id, token: Redacted.of(token), accountId: accountId ?? "" }
+        : { baseUrl, model: model.id, accountId: accountId ?? "" };
+    if (Object.keys(redactedHeaders).length > 0) provider.redactedHeaders = redactedHeaders;
+    return ok(provider);
 }
 
 function hasCredentialHeader(headers: ProviderHeaders | undefined): boolean {
@@ -278,12 +282,12 @@ function isUsableOpenAICodexModel(
 export function isModelWithStringApi(
     model: ExtensionContext["model"] | undefined,
 ): model is RuntimeModel {
-    return model !== undefined && typeof model.api === "string";
+    return model !== undefined && StringDecoder.decode(model.api) !== undefined;
 }
 
 function redactProviderHeaders(
     headers: ProviderHeaders | undefined,
-): Record<string, Redacted<string>> {
+): NonNullable<CodexToolProvider["redactedHeaders"]> {
     const redactedHeaders: Record<string, Redacted<string>> = {};
     for (const [name, value] of Object.entries(headers ?? {})) {
         if (value === null) continue;

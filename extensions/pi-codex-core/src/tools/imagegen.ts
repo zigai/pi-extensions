@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { Type, type Static } from "typebox";
 
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import { compileSchema } from "../schema-parsing.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import type {
@@ -85,6 +85,17 @@ const ImagegenResponseSchema = compileSchema(
 );
 
 type ImagegenParams = Static<typeof IMAGEGEN_PARAMETERS>;
+
+type ImageGenerationResponse = {
+    readonly images: readonly string[];
+    readonly background?: string;
+    readonly quality?: string;
+    readonly size?: string;
+};
+
+type ImageGenerationResponseConstruction = {
+    -readonly [Key in keyof ImageGenerationResponse]: ImageGenerationResponse[Key];
+};
 
 type SavedImage = {
     readonly path: string;
@@ -228,23 +239,20 @@ function readImagegenDescription(): string {
 }
 
 export function prepareImagegenArguments(args: unknown): ImagegenParams {
-    const input = parseWithSchema(ImagegenParametersValidator, args);
+    const input = ImagegenParametersValidator.decode(args);
     if (!input) throw new Error("Invalid imagegen arguments.");
     const prompt = input.prompt.trim();
     if (prompt.length === 0) throw new Error("imagegen requires a non-empty prompt.");
-    return {
-        prompt,
-        ...(input.referenced_image_paths
-            ? {
-                  referenced_image_paths: input.referenced_image_paths.map(
-                      normalizeImageReferencePath,
-                  ),
-              }
-            : {}),
-        ...(input.num_last_images_to_include !== undefined
-            ? { num_last_images_to_include: input.num_last_images_to_include }
-            : {}),
-    };
+    const prepared: ImagegenParams = { prompt };
+    if (input.referenced_image_paths) {
+        prepared.referenced_image_paths = input.referenced_image_paths.map(
+            normalizeImageReferencePath,
+        );
+    }
+    if (input.num_last_images_to_include !== undefined) {
+        prepared.num_last_images_to_include = input.num_last_images_to_include;
+    }
+    return prepared;
 }
 
 function summarizeImagegenOptions(args: ImagegenParams): string {
@@ -414,13 +422,8 @@ async function resolveImageGenerationProvider(
     return resolveCodexToolProvider(ctx);
 }
 
-function parseImageResponse(value: unknown): CodexResult<{
-    readonly images: readonly string[];
-    readonly background?: string;
-    readonly quality?: string;
-    readonly size?: string;
-}> {
-    const response = parseWithSchema(ImagegenResponseSchema, value);
+function parseImageResponse(value: unknown): CodexResult<ImageGenerationResponse> {
+    const response = ImagegenResponseSchema.decode(value);
     if (!response) {
         return fail(
             new CodexUnexpectedResponse({
@@ -440,12 +443,11 @@ function parseImageResponse(value: unknown): CodexResult<{
             }),
         );
     }
-    return ok({
-        images,
-        ...(response.background ? { background: response.background } : {}),
-        ...(response.quality ? { quality: response.quality } : {}),
-        ...(response.size ? { size: response.size } : {}),
-    });
+    const imageResponse: ImageGenerationResponseConstruction = { images };
+    if (response.background) imageResponse.background = response.background;
+    if (response.quality) imageResponse.quality = response.quality;
+    if (response.size) imageResponse.size = response.size;
+    return ok(imageResponse);
 }
 
 function formatImagegenOutput(

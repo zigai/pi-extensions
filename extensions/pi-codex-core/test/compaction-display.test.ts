@@ -20,10 +20,14 @@ test("native compaction renderer displays checkpoint details at normal and narro
     );
 });
 
+type MutableCompactionMessage = {
+    content: string | { readonly unsupported: true };
+};
+
 test("native compaction renderer reflects message updates after invalidation", () => {
     const harness = makeExtensionHarness();
     extension(harness.api);
-    const message: { content: unknown } = { content: "Initial checkpoint\nSecond line" };
+    const message: MutableCompactionMessage = { content: "Initial checkpoint\nSecond line" };
     const component = harness.renderMessage(NATIVE_COMPACTION_MESSAGE_TYPE, message);
 
     assert.deepEqual(component.render(80), ["Initial checkpoint", "Second line"]);

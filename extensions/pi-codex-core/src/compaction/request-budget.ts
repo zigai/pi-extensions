@@ -1,7 +1,4 @@
 import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import { codexModelRequestProfile, codexReasoningEffortForRequest } from "../codex/models.ts";
 import { imageDimensionsFromBytes } from "../images/metadata.ts";
 import { CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY } from "../codex/responses-compat.ts";
@@ -9,6 +6,10 @@ import type { CodexCoreConfig } from "../config/config.ts";
 import {
     isJsonArray,
     isRemoteCompactionOutputItem,
+    JsonNumberDecoder,
+    JsonObjectDecoder,
+    JsonStringDecoder,
+    JsonValueDecoder,
     sanitizeSurrogates,
     textFromResponsesContent,
 } from "./responses-input.ts";
@@ -42,7 +43,15 @@ const RESIZED_IMAGE_TOKEN_ESTIMATE = Math.ceil(
 );
 const ORIGINAL_IMAGE_PATCH_SIZE = 32;
 const ORIGINAL_IMAGE_MAX_PATCHES = 10_000;
-const StringValueSchema = compileSchema(Type.String());
+const StringValueSchema = JsonStringDecoder;
+
+type CompactionReasoningResult = {
+    readonly reasoning: RemoteCompactionReasoning;
+};
+
+type RemoteCompactionV2RequestConstruction = {
+    -readonly [Key in keyof RemoteCompactionV2Request]: RemoteCompactionV2Request[Key];
+};
 
 type TokenWorkOptions = {
     readonly tokenizer: CodexTokenizer;
@@ -63,22 +72,15 @@ export function buildRemoteCompactionV2Request(input: {
 }): RemoteCompactionV2Request {
     const profile = codexModelRequestProfile(input.model);
     const requestTemplate = input.requestTemplate;
-    const reasoning =
-        input.reasoning ??
-        requestTemplate?.reasoning ??
-        (profile?.useResponsesLite
-            ? {
-                  ...(profile.defaultReasoningEffort
-                      ? { effort: profile.defaultReasoningEffort }
-                      : {}),
-                  context: "all_turns" as const,
-              }
-            : {
-                  ...(profile?.defaultReasoningEffort
-                      ? { effort: profile.defaultReasoningEffort }
-                      : {}),
-                  summary: "auto" as const,
-              });
+    const defaultEffort = profile?.defaultReasoningEffort;
+    const defaultReasoning = profile?.useResponsesLite
+        ? defaultEffort
+            ? { effort: defaultEffort, context: "all_turns" as const }
+            : { context: "all_turns" as const }
+        : defaultEffort
+          ? { effort: defaultEffort, summary: "auto" as const }
+          : { summary: "auto" as const };
+    const reasoning = input.reasoning ?? requestTemplate?.reasoning ?? defaultReasoning;
     const usePriorityServiceTier =
         (input.fast || requestTemplate?.serviceTier === "priority") &&
         (profile?.supportsPriorityServiceTier ?? true);
@@ -115,7 +117,7 @@ export function buildRemoteCompactionV2Request(input: {
             },
         };
     }
-    return {
+    const request: RemoteCompactionV2RequestConstruction = {
         model: input.model,
         instructions: sanitizeSurrogates(input.instructions),
         input: [...input.input.map(stripResponseItemId), { type: "compaction_trigger" }],
@@ -128,9 +130,10 @@ export function buildRemoteCompactionV2Request(input: {
         text,
         ...serviceTier,
         reasoning,
-        ...(tools && tools.length > 0 ? { tools } : {}),
-        ...(Object.keys(clientMetadata).length > 0 ? { client_metadata: clientMetadata } : {}),
     };
+    if (tools && tools.length > 0) request.tools = tools;
+    if (Object.keys(clientMetadata).length > 0) request.client_metadata = clientMetadata;
+    return request;
 }
 
 function buildLiteAdditionalToolsItem(
@@ -188,32 +191,7 @@ function toolInfoToResponsesTool(tool: ToolInfo): ResponsesTool {
 }
 
 function parseToolParameterValue(value: unknown): JsonValue | undefined {
-    if (value === null) return null;
-    if (typeof value === "string" || typeof value === "boolean") return value;
-    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-    if (Array.isArray(value)) {
-        const items: JsonValue[] = [];
-        for (const item of value) {
-            const parsed = parseToolParameterValue(item);
-            if (parsed === undefined) return undefined;
-            items.push(parsed);
-        }
-        return items;
-    }
-    if (typeof value !== "object" || value === null) return undefined;
-    const record: Record<string, JsonValue> = {};
-    for (const key of Object.keys(value)) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, key);
-        const nested: unknown = descriptor?.value;
-        const parsed = parseToolParameterValue(nested);
-        if (parsed === undefined) return undefined;
-        record[key] = parsed;
-    }
-    return record;
-}
-
-function isJsonObjectValue(value: JsonValue | undefined): value is JsonObject {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+    return JsonValueDecoder.decode(value);
 }
 
 export async function rewriteRemoteCompactionToolOutputsForContextWindow(
@@ -411,8 +389,10 @@ async function messageTextTokenCount(
     options: TokenWorkOptions,
 ): Promise<number> {
     const content = item.content;
-    if (!isJsonArray(content))
-        return typeof content === "string" ? estimateTextTokens(content, cache, options) : 0;
+    if (!isJsonArray(content)) {
+        const text = JsonStringDecoder.decode(content);
+        return text === undefined ? 0 : estimateTextTokens(text, cache, options);
+    }
     let tokenCount = 0;
     for (const part of content) {
         tokenCount += await retainedContentPartTokenCount(part, cache, options);
@@ -425,25 +405,15 @@ async function retainedContentPartTokenCount(
     cache: TokenEstimateCache,
     options: TokenWorkOptions,
 ): Promise<number> {
-    if (isResponsesTextPart(part)) return estimateTextTokens(part.text, cache, options);
-    if (isInputImagePart(part)) return inputImageTokenCount(part);
+    const object = JsonObjectDecoder.decode(part);
+    const text = JsonStringDecoder.decode(object?.text);
+    if (text !== undefined) return estimateTextTokens(text, cache, options);
+    if (object?.type === "input_image") return inputImageTokenCount(object);
     return estimateTokenCount(part, cache, options);
 }
 
-function isResponsesTextPart(
-    part: JsonValue,
-): part is ResponsesInputItem & { readonly text: string } {
-    return isJsonObjectValue(part) && typeof part.text === "string";
-}
-
-function isInputImagePart(
-    part: JsonValue,
-): part is ResponsesInputItem & { readonly type: "input_image" } {
-    return isJsonObjectValue(part) && part.type === "input_image";
-}
-
 function inputImageTokenCount(part: ResponsesInputItem): number {
-    const imageUrl = parseWithSchema(StringValueSchema, part.image_url);
+    const imageUrl = StringValueSchema.decode(part.image_url);
     if (part.detail !== "original" || !imageUrl) return RESIZED_IMAGE_TOKEN_ESTIMATE;
     const dataUrl = parseBase64ImageDataUrl(imageUrl);
     if (!dataUrl) return RESIZED_IMAGE_TOKEN_ESTIMATE;
@@ -478,8 +448,9 @@ async function truncateMessageTextToTokenBudget(
     if (maxTokens <= 0) return undefined;
     const cloned = structuredClone(item);
     const content = cloned.content;
-    if (typeof content === "string") {
-        const text = await options.tokenizer.truncate(content, maxTokens, options);
+    const textContent = JsonStringDecoder.decode(content);
+    if (textContent !== undefined) {
+        const text = await options.tokenizer.truncate(textContent, maxTokens, options);
         return text.length > 0 ? { ...cloned, content: text } : undefined;
     }
     if (!isJsonArray(content)) return cloned;
@@ -489,10 +460,11 @@ async function truncateMessageTextToTokenBudget(
     for (let index = content.length - 1; index >= 0; index -= 1) {
         const part = content[index];
         if (part === undefined) continue;
-        if (isInputImagePart(part)) {
-            const tokenCount = inputImageTokenCount(part);
+        const object = JsonObjectDecoder.decode(part);
+        if (object?.type === "input_image") {
+            const tokenCount = inputImageTokenCount(object);
             if (tokenCount <= remaining) {
-                retainedReversed.push(part);
+                retainedReversed.push(object);
                 remaining -= tokenCount;
             } else {
                 // Do not backfill older content after an atomic image exhausts the boundary.
@@ -501,14 +473,15 @@ async function truncateMessageTextToTokenBudget(
             continue;
         }
         if (remaining <= 0) continue;
-        if (isResponsesTextPart(part)) {
-            const tokenCount = await estimateTextTokens(part.text, cache, options);
+        const partText = JsonStringDecoder.decode(object?.text);
+        if (partText !== undefined) {
+            const tokenCount = await estimateTextTokens(partText, cache, options);
             const text =
                 tokenCount <= remaining
-                    ? part.text
-                    : await options.tokenizer.truncate(part.text, remaining, options);
+                    ? partText
+                    : await options.tokenizer.truncate(partText, remaining, options);
             remaining -= Math.min(tokenCount, remaining);
-            if (text.length > 0) retainedReversed.push({ ...part, text });
+            if (text.length > 0 && object !== undefined) retainedReversed.push({ ...object, text });
             continue;
         }
         const tokenCount = await estimateTokenCount(part, cache, options);
@@ -541,16 +514,17 @@ export function buildCompactionInstructions(
 export function buildReasoning(
     config: CodexCoreConfig,
     modelId: string,
-): { readonly reasoning: RemoteCompactionReasoning } {
+): CompactionReasoningResult {
     const profile = codexModelRequestProfile(modelId);
     const configuredEffort = config.openai.compactionReasoning;
     const effort =
         configuredEffort === "current"
             ? profile?.defaultReasoningEffort
             : codexReasoningEffortForRequest(configuredEffort);
-    return profile?.useResponsesLite
-        ? { reasoning: { ...(effort ? { effort } : {}), context: "all_turns" } }
-        : { reasoning: { ...(effort ? { effort } : {}), summary: "auto" } };
+    if (profile?.useResponsesLite) {
+        return { reasoning: effort ? { effort, context: "all_turns" } : { context: "all_turns" } };
+    }
+    return { reasoning: effort ? { effort, summary: "auto" } : { summary: "auto" } };
 }
 
 export function resolveCompactionTargetModel(
@@ -580,29 +554,31 @@ function stripResponsesLiteJsonObject(value: JsonObject): JsonObject {
 
 function stripResponsesLiteJsonValue(value: JsonValue | undefined): JsonValue | undefined {
     if (isJsonArray(value)) return value.map((item) => stripResponsesLiteJsonValue(item) ?? null);
-    if (isJsonObjectValue(value)) return stripResponsesLiteJsonObject(value);
+    const object = JsonObjectDecoder.decode(value);
+    if (object !== undefined) return stripResponsesLiteJsonObject(object);
     return value;
 }
 
 function inputImageCount(item: ResponsesInputItem): number {
     const content = item.content;
     if (!isJsonArray(content)) return 0;
-    return content.filter((part) => isJsonObjectValue(part) && part.type === "input_image").length;
+    return content.filter((part) => JsonObjectDecoder.decode(part)?.type === "input_image").length;
 }
 
 function hasInputImageDetail(item: ResponsesInputItem): boolean {
     const content = item.content;
     if (!isJsonArray(content)) return false;
-    return content.some(
-        (part) =>
-            isJsonObjectValue(part) && part.type === "input_image" && part.detail !== undefined,
-    );
+    return content.some((part) => {
+        const object = JsonObjectDecoder.decode(part);
+        return object?.type === "input_image" && object.detail !== undefined;
+    });
 }
 
 function compactRequestBudget(contextWindow: number | null | undefined): number | undefined {
-    if (typeof contextWindow !== "number" || !Number.isFinite(contextWindow) || contextWindow <= 0)
-        return undefined;
-    return Math.floor(contextWindow * COMPACTION_REQUEST_BUDGET_RATIO);
+    const parsed = JsonNumberDecoder.decode(contextWindow);
+    return parsed === undefined || parsed <= 0
+        ? undefined
+        : Math.floor(parsed * COMPACTION_REQUEST_BUDGET_RATIO);
 }
 
 function isRewritableToolOutputItem(item: ResponsesInputItem): boolean {
@@ -622,14 +598,15 @@ function estimateTokenCount(
     cache: TokenEstimateCache | undefined,
     options: TokenWorkOptions,
 ): Promise<number> {
-    if (cache && typeof value === "object" && value !== null) {
-        return cachedObjectTokenCount(value, cache, () => {
+    const object = JsonObjectDecoder.decode(value) ?? (Array.isArray(value) ? value : undefined);
+    if (cache && object !== undefined) {
+        return cachedObjectTokenCount(object, cache, () => {
             const serialized = JSON.stringify(sanitizeForTokenEstimate(value)) ?? "";
             return estimateTextTokens(serialized, cache, options);
         });
     }
     const serialized =
-        typeof value === "string" ? value : (JSON.stringify(sanitizeForTokenEstimate(value)) ?? "");
+        JsonStringDecoder.decode(value) ?? JSON.stringify(sanitizeForTokenEstimate(value)) ?? "";
     return estimateTextTokens(serialized, cache, options);
 }
 
@@ -665,9 +642,10 @@ async function estimateResponsesInputItemTokens(
 }
 
 function* responsesInputItemTokenParts(item: ResponsesInputItem): Generator<string> {
-    if (item.type === "function_call_output" && typeof item.output === "string") {
+    const output = JsonStringDecoder.decode(item.output);
+    if (item.type === "function_call_output" && output !== undefined) {
         yield JSON.stringify(sanitizeForTokenEstimate({ ...item, output: "" })) ?? "";
-        yield item.output;
+        yield output;
         return;
     }
     yield JSON.stringify(sanitizeForTokenEstimate(item)) ?? "";
@@ -679,21 +657,23 @@ function nestedInputImageTokenCount(value: JsonValue | undefined): number {
         for (const nested of value) total += nestedInputImageTokenCount(nested);
         return total;
     }
-    if (!isJsonObjectValue(value)) return 0;
-    let total = value.type === "input_image" ? inputImageTokenCount(value) : 0;
-    for (const nested of Object.values(value)) total += nestedInputImageTokenCount(nested);
+    const object = JsonObjectDecoder.decode(value);
+    if (object === undefined) return 0;
+    let total = object.type === "input_image" ? inputImageTokenCount(object) : 0;
+    for (const nested of Object.values(object)) total += nestedInputImageTokenCount(nested);
     return total;
 }
 
 function sanitizeForTokenEstimate(value: JsonValue): JsonValue {
     if (Array.isArray(value)) return value.map(sanitizeForTokenEstimate);
-    if (typeof value !== "object" || value === null) return value;
+    const object = JsonObjectDecoder.decode(value);
+    if (object === undefined) return value;
 
     const next: Record<string, JsonValue> = {};
-    for (const [key, nested] of Object.entries(value)) {
+    for (const [key, nested] of Object.entries(object)) {
         if (nested === undefined) continue;
         next[key] =
-            key === "image_url" && typeof nested === "string" && nested.startsWith("data:")
+            key === "image_url" && JsonStringDecoder.decode(nested)?.startsWith("data:") === true
                 ? INLINE_IMAGE_TOKEN_ESTIMATE_TEXT
                 : sanitizeForTokenEstimate(nested);
     }
@@ -725,8 +705,8 @@ async function estimateTokenParts(
     return chunk.length > 0 ? total + (await estimateTextTokens(chunk, cache, options)) : total;
 }
 
-async function cachedObjectTokenCount(
-    value: object,
+async function cachedObjectTokenCount<Value extends object>(
+    value: Value,
     cache: TokenEstimateCache,
     compute: () => Promise<number>,
 ): Promise<number> {

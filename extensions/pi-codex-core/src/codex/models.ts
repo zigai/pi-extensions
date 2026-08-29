@@ -6,7 +6,19 @@ export type CodexModelRequestProfile = {
     readonly supportsImageDetailOriginal: boolean;
 };
 
-const CODEX_MODEL_REQUEST_PROFILES: Readonly<Record<string, CodexModelRequestProfile>> = {
+/** Current text models surfaced by the Codex settings UI, newest first. */
+export const CODEX_TEXT_MODEL_CHOICES = [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+] as const;
+
+type CodexTextModel = (typeof CODEX_TEXT_MODEL_CHOICES)[number];
+
+const CODEX_MODEL_REQUEST_PROFILES = {
     "gpt-5.6-sol": {
         useResponsesLite: true,
         defaultReasoningEffort: "low",
@@ -49,24 +61,15 @@ const CODEX_MODEL_REQUEST_PROFILES: Readonly<Record<string, CodexModelRequestPro
         supportsPriorityServiceTier: false,
         supportsImageDetailOriginal: true,
     },
-};
-
-/** Current text models surfaced by the Codex settings UI, newest first. */
-export const CODEX_TEXT_MODEL_CHOICES = [
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-] as const;
+} satisfies Readonly<Record<CodexTextModel, CodexModelRequestProfile>>;
 
 /** Returns the checked-in request contract for a known Codex model. */
 export function codexModelRequestProfile(
     modelId: string | undefined,
 ): CodexModelRequestProfile | undefined {
     const normalizedModelId = modelId?.trim().toLowerCase();
-    return normalizedModelId ? CODEX_MODEL_REQUEST_PROFILES[normalizedModelId] : undefined;
+    const knownModel = CODEX_TEXT_MODEL_CHOICES.find((model) => model === normalizedModelId);
+    return knownModel === undefined ? undefined : CODEX_MODEL_REQUEST_PROFILES[knownModel];
 }
 
 /** Maps Codex client-only reasoning modes to the value accepted by Responses. */

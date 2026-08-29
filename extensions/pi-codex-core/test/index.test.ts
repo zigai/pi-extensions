@@ -11,6 +11,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import extension, { packageName, extensionName } from "../src/index.ts";
 import { DEFAULT_CODEX_CORE_CONFIG_JSON, getCodexCoreConfigPath } from "../src/config/config.ts";
+import { JsonObjectDecoder } from "../src/compaction/responses-input.ts";
+import type { JsonObject } from "../src/compaction/types.ts";
 import { CODEX_RESPONSES_LITE_HEADER } from "../src/codex/responses-compat.ts";
 import { getProviderRequestTemplate } from "../src/compaction/provider-request-template.ts";
 import {
@@ -18,6 +20,7 @@ import {
     TEST_THEME,
     makeExtensionHarness,
     makeExtensionContext,
+    testDouble,
 } from "./helpers.ts";
 
 test("exports extension metadata", () => {
@@ -49,8 +52,7 @@ test("registers extension handlers once per Pi API", () => {
         getAllTools: () => [],
     };
 
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements only extension registration members used during activation.
-    const extensionApi = api as unknown as ExtensionAPI;
+    const extensionApi = testDouble<ExtensionAPI>()(api);
     extension(extensionApi);
     const countsAfterFirstActivation = {
         registeredTools,
@@ -364,8 +366,8 @@ test("shows a scrollable startup warning when fast mode is enabled", async () =>
     }
 });
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+function isRecord<Value>(value: Value): value is Value & JsonObject {
+    return JsonObjectDecoder.decode(value) !== undefined;
 }
 
 function makeStartupWarningContext(
@@ -382,8 +384,7 @@ function makeStartupWarningContext(
             notify: onNotify,
         },
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This adapter supplies every context/UI member read by the session-start warning path; Pi's broad ExtensionContext test seam cannot express a partial UI implementation.
-    return context as unknown as ExtensionContext;
+    return testDouble<ExtensionContext>()(context);
 }
 
 test("applies GPT-5.6 Responses Lite compatibility through extension hooks", async () => {

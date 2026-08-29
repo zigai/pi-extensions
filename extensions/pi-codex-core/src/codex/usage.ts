@@ -1,7 +1,5 @@
 import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-
 import { extractAccountId, isModelWithStringApi, resolveCodexApiProviderBaseUrl } from "./auth.ts";
 import {
     CodexAuthUnavailable,
@@ -22,16 +20,21 @@ import {
     type CodexRuntime,
     type IdGenerator,
 } from "../runtime.ts";
-import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
+import {
+    JsonArrayDecoder,
+    JsonNumberDecoder,
+    JsonObjectDecoder,
+    JsonStringDecoder,
+    JsonValueDecoder,
+} from "../compaction/responses-input.ts";
+import type { JsonObject, JsonValue } from "../compaction/types.ts";
 
 const RESET_CREDITS_CACHE_MS = 5_000;
 const RESET_CREDIT_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 type RuntimeModel = Model<Api>;
 
-const UnknownRecordSchema = compileSchema(Type.Record(Type.String(), Type.Unknown()));
-const StringSchema = compileSchema(Type.String());
-const NumberSchema = compileSchema(Type.Number());
+const StringSchema = JsonStringDecoder;
 
 export type CodexUsageWindow = {
     readonly usedPercent?: number | undefined;
@@ -44,6 +47,10 @@ export type CodexUsageLimit = {
     readonly limitName?: string | undefined;
     readonly primary?: CodexUsageWindow | undefined;
     readonly secondary?: CodexUsageWindow | undefined;
+};
+
+type CodexUsageLimitConstruction = {
+    -readonly [Key in keyof CodexUsageLimit]: CodexUsageLimit[Key];
 };
 
 export type CodexRateLimitResetCredit = {
@@ -61,14 +68,14 @@ export type CodexRateLimitResetCredit = {
 export type CodexRateLimitResetCredits = {
     readonly availableCount: number;
     readonly credits: readonly CodexRateLimitResetCredit[];
-    readonly raw: unknown;
+    readonly raw: JsonValue;
 };
 
 export type CodexUsageSnapshot = {
     readonly planType?: string | undefined;
     readonly limits: readonly CodexUsageLimit[];
     readonly resetCredits?: CodexRateLimitResetCredits | undefined;
-    readonly raw: unknown;
+    readonly raw: JsonValue | undefined;
 };
 
 export type CodexRateLimitResetConsumeOutcome =
@@ -81,7 +88,7 @@ export type CodexRateLimitResetConsumeOutcome =
 export type CodexRateLimitResetConsumeResult = {
     readonly outcome: CodexRateLimitResetConsumeOutcome;
     readonly windowsReset?: number | undefined;
-    readonly raw: unknown;
+    readonly raw: JsonValue | undefined;
 };
 
 let resetCreditsCache:
@@ -125,11 +132,13 @@ export async function fetchCodexUsage(
     const headers = await buildCodexUsageHeaders(ctx, model.value);
     if (headers.isErr()) return headers;
 
-    const response = await fetchUsageResponse(runtime, buildCodexUsageUrl(model.value.baseUrl), {
-        method: "GET",
-        headers: headers.value,
-        ...(signal ? { signal } : {}),
-    });
+    const requestInit: RequestInit = { method: "GET", headers: headers.value };
+    if (signal) requestInit.signal = signal;
+    const response = await fetchUsageResponse(
+        runtime,
+        buildCodexUsageUrl(model.value.baseUrl),
+        requestInit,
+    );
     if (response.isErr()) return response;
     if (!response.value.ok) {
         return fail(
@@ -177,15 +186,16 @@ export async function consumeCodexRateLimitResetCredit(
     headers.value.set("content-type", "application/json");
     resetCreditsCache = undefined;
 
+    const requestInit: RequestInit = {
+        method: "POST",
+        headers: headers.value,
+        body: JSON.stringify({ redeem_request_id: redeemRequestId }),
+    };
+    if (signal) requestInit.signal = signal;
     const response = await fetchUsageResponse(
         runtime,
         buildCodexRateLimitResetConsumeUrl(model.value.baseUrl),
-        {
-            method: "POST",
-            headers: headers.value,
-            body: JSON.stringify({ redeem_request_id: redeemRequestId }),
-            ...(signal ? { signal } : {}),
-        },
+        requestInit,
     );
     if (response.isErr()) return response;
     if (!response.value.ok) {
@@ -206,19 +216,23 @@ export async function consumeCodexRateLimitResetCredit(
 }
 
 export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
-    const root = parseUsageRecord(payload) ?? {};
+    const raw = JsonValueDecoder.decode(payload);
+    const root = parseUsageRecord(raw) ?? {};
     const limits: CodexUsageLimit[] = [];
-    const addLimit = (limitId: string, limitName: string | undefined, source: unknown): void => {
+    const addLimit = (
+        limitId: string,
+        limitName: string | undefined,
+        source: JsonValue | undefined,
+    ): void => {
         const sourceRecord = parseUsageRecord(source);
         const rateLimit =
             sourceRecord && "rate_limit" in sourceRecord ? sourceRecord.rate_limit : source;
         const parsed = parseRateLimit(rateLimit);
-        limits.push({
-            limitId,
-            ...(limitName ? { limitName } : {}),
-            ...(parsed.primary ? { primary: parsed.primary } : {}),
-            ...(parsed.secondary ? { secondary: parsed.secondary } : {}),
-        });
+        const limit: CodexUsageLimitConstruction = { limitId };
+        if (limitName) limit.limitName = limitName;
+        if (parsed.primary) limit.primary = parsed.primary;
+        if (parsed.secondary) limit.secondary = parsed.secondary;
+        limits.push(limit);
     };
 
     addLimit("codex", undefined, root.rate_limit);
@@ -238,24 +252,23 @@ export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
         planType: parseString(root.plan_type),
         limits,
         resetCredits: parseCodexRateLimitResetCreditsSummary(root.rate_limit_reset_credits),
-        raw: payload,
+        raw,
     };
 }
 
 export function parseCodexRateLimitResetCreditsPayload(
     payload: unknown,
 ): CodexRateLimitResetCredits | undefined {
-    const root = parseUsageRecord(payload);
+    const root = JsonObjectDecoder.decode(payload);
     if (!root) return undefined;
     const availableCount = parseInteger(root.available_count);
     if (availableCount === undefined) return undefined;
-    const credits = Array.isArray(root.credits)
-        ? root.credits.flatMap((item) => {
-              const credit = parseResetCredit(item);
-              return credit ? [credit] : [];
-          })
-        : [];
-    return { availableCount, credits, raw: payload };
+    const rawCredits = JsonArrayDecoder.decode(root.credits) ?? [];
+    const credits = rawCredits.flatMap((item) => {
+        const credit = parseResetCredit(item);
+        return credit ? [credit] : [];
+    });
+    return { availableCount, credits, raw: root };
 }
 
 export function formatCodexUsage(snapshot: CodexUsageSnapshot, clock: Clock = systemClock): string {
@@ -401,11 +414,9 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
         return resetCreditsCache.promise;
     }
     const promise = (async (): Promise<CodexResult<CodexRateLimitResetCredits | undefined>> => {
-        const response = await fetchUsageResponse(runtime, creditsUrl, {
-            method: "GET",
-            headers,
-            ...(signal ? { signal } : {}),
-        });
+        const requestInit: RequestInit = { method: "GET", headers };
+        if (signal) requestInit.signal = signal;
+        const response = await fetchUsageResponse(runtime, creditsUrl, requestInit);
         if (response.isErr()) return response;
         if (!response.value.ok) return ok(undefined);
         const rawCreditsPayload = await parseJsonResponse(response.value, "codexResetCredits");
@@ -452,10 +463,13 @@ async function fetchUsageResponse(
 async function parseJsonResponse(
     response: Response,
     operation: "codexUsage" | "codexResetCredit" | "codexResetCredits",
-): Promise<CodexResult<unknown>> {
+): Promise<CodexResult<JsonValue>> {
     const text = await response.text();
     try {
-        return ok(JSON.parse(text));
+        const parsed: unknown = JSON.parse(text);
+        const value = JsonValueDecoder.decode(parsed);
+        if (value === undefined) throw new SyntaxError("Response is not valid JSON data.");
+        return ok(value);
     } catch (cause: unknown) {
         return fail(
             new CodexInvalidJson({
@@ -492,7 +506,8 @@ function requireOpenAICodexModel(model: ExtensionContext["model"]): CodexResult<
 function parseCodexRateLimitResetConsumePayload(
     payload: unknown,
 ): CodexRateLimitResetConsumeResult {
-    const root = parseUsageRecord(payload) ?? {};
+    const raw = JsonValueDecoder.decode(payload);
+    const root = parseUsageRecord(raw) ?? {};
     const code = parseString(root.code);
     const outcome: CodexRateLimitResetConsumeOutcome =
         code === "reset" ||
@@ -501,19 +516,19 @@ function parseCodexRateLimitResetConsumePayload(
         code === "no_credit"
             ? code
             : "unknown";
-    return { outcome, windowsReset: parseInteger(root.windows_reset), raw: payload };
+    return { outcome, windowsReset: parseInteger(root.windows_reset), raw };
 }
 
 function parseCodexRateLimitResetCreditsSummary(
-    value: unknown,
+    value: JsonValue | undefined,
 ): CodexRateLimitResetCredits | undefined {
     const summary = parseUsageRecord(value);
     if (!summary) return undefined;
     const availableCount = parseInteger(summary.available_count);
-    return availableCount === undefined ? undefined : { availableCount, credits: [], raw: value };
+    return availableCount === undefined ? undefined : { availableCount, credits: [], raw: summary };
 }
 
-function parseResetCredit(value: unknown): CodexRateLimitResetCredit | undefined {
+function parseResetCredit(value: JsonValue): CodexRateLimitResetCredit | undefined {
     const credit = parseUsageRecord(value);
     if (!credit) return undefined;
     return {
@@ -529,10 +544,12 @@ function parseResetCredit(value: unknown): CodexRateLimitResetCredit | undefined
     };
 }
 
-function parseRateLimit(value: unknown): {
+type ParsedRateLimit = {
     readonly primary?: CodexUsageWindow | undefined;
     readonly secondary?: CodexUsageWindow | undefined;
-} {
+};
+
+function parseRateLimit(value: JsonValue | undefined): ParsedRateLimit {
     const rateLimit = parseUsageRecord(value);
     if (!rateLimit) return {};
     return {
@@ -541,7 +558,7 @@ function parseRateLimit(value: unknown): {
     };
 }
 
-function parseWindow(value: unknown): CodexUsageWindow | undefined {
+function parseWindow(value: JsonValue | undefined): CodexUsageWindow | undefined {
     const window = parseUsageRecord(value);
     if (!window) return undefined;
     const usedPercent = parseNumber(window.used_percent);
@@ -611,24 +628,26 @@ function extractBearerToken(headers: Headers): string | undefined {
     return match?.[1]?.trim();
 }
 
-function parseString(value: unknown): string | undefined {
-    const parsed = parseWithSchema(StringSchema, value);
+function parseString(value: JsonValue | undefined): string | undefined {
+    const parsed = StringSchema.decode(value);
     if (parsed === undefined) return undefined;
     const text = parsed.trim();
     return text.length > 0 ? text : undefined;
 }
 
-function parseNumber(value: unknown): number | undefined {
-    return parseWithSchema(NumberSchema, value);
+function parseNumber(value: JsonValue | undefined): number | undefined {
+    return JsonNumberDecoder.decode(value);
 }
 
-function parseInteger(value: unknown): number | undefined {
-    if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
-    if (typeof value !== "string" || value.trim().length === 0) return undefined;
-    const parsed = Number(value);
+function parseInteger(value: JsonValue | undefined): number | undefined {
+    const numericValue = parseNumber(value);
+    if (numericValue !== undefined) return Math.max(0, Math.trunc(numericValue));
+    const text = StringSchema.decode(value)?.trim();
+    if (!text) return undefined;
+    const parsed = Number(text);
     return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : undefined;
 }
 
-function parseUsageRecord(value: unknown): Record<string, unknown> | undefined {
-    return parseWithSchema(UnknownRecordSchema, value);
+function parseUsageRecord(value: unknown): JsonObject | undefined {
+    return JsonObjectDecoder.decode(value);
 }

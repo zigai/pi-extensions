@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 
-import { compileSchema, parseWithSchema } from "../../schema-parsing.ts";
+import { compileSchema } from "../../schema-parsing.ts";
 import { StringEnum, type ImageContent } from "@earendil-works/pi-ai";
 import {
     Container,
@@ -283,7 +283,7 @@ function defaultViewImageComponentFactory(args: {
 }
 
 export function prepareViewImageArguments(args: unknown): ViewImageParams {
-    const input = parseWithSchema(ViewImageArgumentsSchema, args);
+    const input = ViewImageArgumentsSchema.decode(args);
     if (!input) throw new Error("Invalid view_image arguments.");
     const path = normalizeImageReferencePath(
         input.path ?? input.file_path ?? input.image_path ?? "",
@@ -292,31 +292,23 @@ export function prepareViewImageArguments(args: unknown): ViewImageParams {
     return input.detail ? { path, detail: input.detail } : { path };
 }
 
-type TextContentBlock = {
-    readonly type: "text";
-    readonly text: string;
-};
-
 function firstImageContent(content: readonly unknown[]): ImageContent | undefined {
-    return content.find(isImageContentBlock);
-}
-
-function firstTextContent(content: readonly unknown[]): string | undefined {
     for (const item of content) {
-        if (isTextContentBlock(item)) {
-            const text = item.text.trim();
-            if (text.length > 0) return text;
-        }
+        const image = ImageContentBlockSchema.decode(item);
+        if (image !== undefined) return image;
     }
     return undefined;
 }
 
-function isImageContentBlock(value: unknown): value is ImageContent {
-    return parseWithSchema(ImageContentBlockSchema, value) !== undefined;
-}
-
-function isTextContentBlock(value: unknown): value is TextContentBlock {
-    return parseWithSchema(TextContentBlockSchema, value) !== undefined;
+function firstTextContent(content: readonly unknown[]): string | undefined {
+    for (const item of content) {
+        const block = TextContentBlockSchema.decode(item);
+        if (block !== undefined) {
+            const text = block.text.trim();
+            if (text.length > 0) return text;
+        }
+    }
+    return undefined;
 }
 
 function compactText(value: string, maxCharacters: number): string {
@@ -442,7 +434,7 @@ async function describeImage(
 }
 
 function extractOutputText(value: unknown): string | undefined {
-    const response = parseWithSchema(DescriptionResponseSchema, value);
+    const response = DescriptionResponseSchema.decode(value);
     if (!response) return undefined;
     if (response.output_text && response.output_text.trim().length > 0)
         return response.output_text.trim();

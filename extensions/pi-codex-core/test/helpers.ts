@@ -1,24 +1,78 @@
 import assert from "node:assert/strict";
 import {
     createEventBus,
+    type BeforeAgentStartEvent,
+    type BeforeAgentStartEventResult,
+    type BeforeProviderHeadersEvent,
+    type BeforeProviderRequestEvent,
     type BuildSystemPromptOptions,
     type EventBus,
     type ExtensionAPI,
     type ExtensionContext,
     type Theme,
 } from "@earendil-works/pi-coding-agent";
+import { JsonObjectDecoder, JsonStringDecoder } from "../src/compaction/responses-input.ts";
+import type { JsonValue } from "../src/compaction/types.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
 
 export const TEST_THEME = makeTestTheme();
 
-type ExtensionEventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
+type HarnessInputEvent = {
+    readonly type: "input";
+    readonly text: string;
+    readonly source: string;
+    readonly images?: readonly JsonValue[];
+    readonly streamingBehavior?: "steer" | "followUp" | undefined;
+};
+type HarnessMessageEndEvent = { readonly type: "message_end"; readonly message: JsonValue };
+type HarnessAgentEndEvent = {
+    readonly type: "agent_end";
+    readonly messages: readonly JsonValue[];
+};
+type HarnessModelSelectEvent = { readonly type: "model_select" };
+type HarnessLifecycleEvent = {
+    readonly type: "agent_settled" | "session_compact" | "session_start";
+};
+type HarnessShutdownEvent = { readonly type: "session_shutdown"; readonly reason: string };
+type HarnessBeforeCompactEvent = {
+    readonly type: "session_before_compact";
+    readonly reason: string;
+    readonly customInstructions: string | undefined;
+    readonly signal: AbortSignal;
+    readonly branchEntries: readonly JsonValue[];
+    readonly preparation: JsonValue;
+};
+
+type ExtensionHarnessEvent =
+    | HarnessLifecycleEvent
+    | BeforeAgentStartEvent
+    | BeforeProviderHeadersEvent
+    | BeforeProviderRequestEvent
+    | HarnessAgentEndEvent
+    | HarnessInputEvent
+    | HarnessMessageEndEvent
+    | HarnessModelSelectEvent
+    | HarnessBeforeCompactEvent
+    | HarnessShutdownEvent;
+
+type ExtensionHarnessResult = BeforeAgentStartEventResult | JsonValue | void;
+
+type ExtensionEventHandler = (
+    event: ExtensionHarnessEvent,
+    ctx: ExtensionContext,
+) => ExtensionHarnessResult | Promise<ExtensionHarnessResult>;
 type MessageComponent = {
     readonly render: (width: number) => string[];
     readonly invalidate: () => void;
 };
+type HarnessRenderOptions = {
+    readonly expanded?: boolean;
+    readonly outputPad?: number;
+};
+type HarnessMessage = { readonly content?: JsonValue };
 type MessageRenderer = (
-    message: { content?: unknown },
-    options: unknown,
+    message: HarnessMessage,
+    options: HarnessRenderOptions,
     theme: Theme,
 ) => MessageComponent;
 
@@ -28,27 +82,35 @@ type ExtensionHarness = {
     readonly activeTools: readonly string[];
     readonly appendedEntries: readonly {
         readonly customType: string;
-        readonly data: unknown;
+        readonly data: JsonValue;
     }[];
-    readonly sentUserMessages: readonly unknown[];
+    readonly sentUserMessages: readonly JsonValue[];
     readonly startSession: (ctx: ExtensionContext) => Promise<void>;
     readonly selectModel: (ctx: ExtensionContext) => Promise<void>;
-    readonly submitInput: (event: unknown, ctx: ExtensionContext) => Promise<unknown>;
-    readonly endMessage: (message: unknown, ctx: ExtensionContext) => Promise<void>;
-    readonly endAgent: (messages: readonly unknown[], ctx: ExtensionContext) => Promise<void>;
+    readonly submitInput: (
+        event: HarnessInputEvent,
+        ctx: ExtensionContext,
+    ) => Promise<Readonly<Record<string, JsonValue | undefined>> | undefined>;
+    readonly endMessage: (message: JsonValue, ctx: ExtensionContext) => Promise<void>;
+    readonly endAgent: (messages: readonly JsonValue[], ctx: ExtensionContext) => Promise<void>;
     readonly settleAgent: (ctx: ExtensionContext) => Promise<void>;
     readonly shutdownSession: (reason: string, ctx: ExtensionContext) => Promise<void>;
     readonly renderMessage: (
         type: string,
-        message: { content?: unknown },
-        options?: unknown,
+        message: Parameters<MessageRenderer>[0],
+        options?: Parameters<MessageRenderer>[1],
     ) => MessageComponent;
     readonly prepareProviderHeaders: (
         headers: Record<string, string | null>,
         ctx: ExtensionContext,
     ) => Promise<void>;
-    readonly rewriteProviderRequest: (payload: unknown, ctx: ExtensionContext) => Promise<unknown>;
-    readonly beginCompaction: (ctx: ExtensionContext) => Promise<unknown>;
+    readonly rewriteProviderRequest: <Payload>(
+        payload: Payload,
+        ctx: ExtensionContext,
+    ) => Promise<(Payload & Readonly<Record<string, JsonValue | undefined>>) | undefined>;
+    readonly beginCompaction: (
+        ctx: ExtensionContext,
+    ) => Promise<Readonly<Record<string, JsonValue | undefined>> | undefined>;
     readonly finishCompaction: (ctx: ExtensionContext) => Promise<void>;
     readonly prepareSystemPrompt: (
         systemPrompt: string,
@@ -60,8 +122,8 @@ type ExtensionHarness = {
 export function makeExtensionHarness(initialActiveTools: readonly string[] = []): ExtensionHarness {
     let activeTools: string[] = [...initialActiveTools];
     const events = createEventBus();
-    const appendedEntries: Array<{ readonly customType: string; readonly data: unknown }> = [];
-    const sentUserMessages: unknown[] = [];
+    const appendedEntries: Array<{ readonly customType: string; readonly data: JsonValue }> = [];
+    const sentUserMessages: JsonValue[] = [];
     const messageRenderers = new Map<string, MessageRenderer>();
     const handlers = new Map<string, ExtensionEventHandler>();
     let sessionStart: ExtensionEventHandler | undefined;
@@ -86,10 +148,10 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             if (eventName === "session_before_compact") sessionBeforeCompact = handler;
             if (eventName === "session_compact") sessionCompact = handler;
         },
-        appendEntry(customType: string, data: unknown) {
+        appendEntry(customType: string, data: JsonValue) {
             appendedEntries.push({ customType, data });
         },
-        sendUserMessage(message: unknown) {
+        sendUserMessage(message: JsonValue) {
             sentUserMessages.push(message);
         },
         getActiveTools: () => activeTools,
@@ -99,8 +161,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         getAllTools: () => [],
     };
     return {
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the ExtensionAPI members exercised during extension registration and session_start.
-        api: api as unknown as ExtensionAPI,
+        api: testDouble<ExtensionAPI>()(api),
         events,
         get activeTools() {
             return activeTools;
@@ -114,13 +175,17 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         async selectModel(ctx: ExtensionContext): Promise<void> {
             await dispatch("model_select", { type: "model_select" }, ctx);
         },
-        async submitInput(event: unknown, ctx: ExtensionContext): Promise<unknown> {
-            return dispatch("input", event, ctx);
+        async submitInput(
+            event: HarnessInputEvent,
+            ctx: ExtensionContext,
+        ): Promise<Readonly<Record<string, JsonValue | undefined>> | undefined> {
+            const result = await dispatch("input", event, ctx);
+            return JsonObjectDecoder.decode(result);
         },
-        async endMessage(message: unknown, ctx: ExtensionContext): Promise<void> {
+        async endMessage(message: JsonValue, ctx: ExtensionContext): Promise<void> {
             await dispatch("message_end", { type: "message_end", message }, ctx);
         },
-        async endAgent(messages: readonly unknown[], ctx: ExtensionContext): Promise<void> {
+        async endAgent(messages: readonly JsonValue[], ctx: ExtensionContext): Promise<void> {
             await dispatch("agent_end", { type: "agent_end", messages }, ctx);
         },
         async settleAgent(ctx: ExtensionContext): Promise<void> {
@@ -131,8 +196,8 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         },
         renderMessage(
             type: string,
-            message: { content?: unknown },
-            options: unknown = {},
+            message: Parameters<MessageRenderer>[0],
+            options: Parameters<MessageRenderer>[1] = {},
         ): MessageComponent {
             const renderer = messageRenderers.get(type);
             assert.ok(renderer);
@@ -145,13 +210,27 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             assert.ok(beforeProviderHeaders);
             await beforeProviderHeaders({ type: "before_provider_headers", headers }, ctx);
         },
-        async rewriteProviderRequest(payload: unknown, ctx: ExtensionContext): Promise<unknown> {
+        async rewriteProviderRequest<Payload>(
+            payload: Payload,
+            ctx: ExtensionContext,
+        ): Promise<(Payload & Readonly<Record<string, JsonValue | undefined>>) | undefined> {
             assert.ok(beforeProviderRequest);
-            return beforeProviderRequest({ type: "before_provider_request", payload }, ctx);
+            const result = await beforeProviderRequest(
+                { type: "before_provider_request", payload },
+                ctx,
+            );
+            const resultObject = JsonObjectDecoder.decode(result);
+            return resultObject === undefined
+                ? undefined
+                : testDouble<Payload & Readonly<Record<string, JsonValue | undefined>>>()(
+                      resultObject,
+                  );
         },
-        async beginCompaction(ctx: ExtensionContext): Promise<unknown> {
+        async beginCompaction(
+            ctx: ExtensionContext,
+        ): Promise<Readonly<Record<string, JsonValue | undefined>> | undefined> {
             assert.ok(sessionBeforeCompact);
-            return sessionBeforeCompact(
+            const result = await sessionBeforeCompact(
                 {
                     type: "session_before_compact",
                     reason: "manual",
@@ -181,6 +260,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
                 },
                 ctx,
             );
+            return JsonObjectDecoder.decode(result);
         },
         async finishCompaction(ctx: ExtensionContext): Promise<void> {
             assert.ok(sessionCompact);
@@ -201,19 +281,20 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
                 },
                 ctx,
             );
-            assert.ok(isRecord(result));
-            if (typeof result.systemPrompt !== "string") {
+            const resultObject = JsonObjectDecoder.decode(result);
+            const preparedPrompt = JsonStringDecoder.decode(resultObject?.systemPrompt);
+            if (preparedPrompt === undefined) {
                 assert.fail("before_agent_start did not return a system prompt");
             }
-            return result.systemPrompt;
+            return preparedPrompt;
         },
     };
 
     async function dispatch(
         eventName: string,
-        event: unknown,
+        event: ExtensionHarnessEvent,
         ctx: ExtensionContext,
-    ): Promise<unknown> {
+    ): Promise<ExtensionHarnessResult> {
         const handler = handlers.get(eventName);
         assert.ok(handler);
         return handler(event, ctx);
@@ -244,19 +325,21 @@ export function makeExtensionContext(
     model: TestExtensionModel = DEFAULT_TEST_EXTENSION_MODEL,
     options: { readonly agentActive?: boolean } = {},
 ): ExtensionContext {
-    const ctx = {
-        cwd,
-        hasUI: false,
-        isProjectTrusted: () => trusted,
-        model,
-        ...(options.agentActive ? { signal: new AbortController().signal } : {}),
-        sessionManager: {
-            getSessionId: () => "extension-session",
-            getBranch: () => [],
-        },
+    const sessionManager = {
+        getSessionId: () => "extension-session",
+        getBranch: () => [],
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture supplies the fields read by session_start tool synchronization.
-    return ctx as unknown as ExtensionContext;
+    const ctx = options.agentActive
+        ? {
+              cwd,
+              hasUI: false,
+              isProjectTrusted: () => trusted,
+              model,
+              signal: new AbortController().signal,
+              sessionManager,
+          }
+        : { cwd, hasUI: false, isProjectTrusted: () => trusted, model, sessionManager };
+    return testDouble<ExtensionContext>()(ctx);
 }
 
 export function makeTestRuntime(
@@ -314,11 +397,11 @@ export function makeRenderContext<TArgs, TState extends object>(
     state: TState,
     options?: RenderContextOptions,
 ): TestRenderContext<TState, TArgs>;
-export function makeRenderContext<TArgs>(
+export function makeRenderContext<TArgs, TState extends object>(
     args: TArgs,
-    state: object | undefined,
+    state: TState | undefined,
     options: RenderContextOptions = {},
-): TestRenderContext<object, TArgs> {
+): TestRenderContext<TState | Record<string, never>, TArgs> {
     return {
         args,
         toolCallId: "call-test",
@@ -350,15 +433,18 @@ function makeTestTheme(): Theme {
         getThinkingBorderColor: () => (text: string) => text,
         getBashModeBorderColor: () => (text: string) => text,
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Renderer tests exercise only Theme's styling methods and do not rely on Theme identity.
-    return theme as unknown as Theme;
+    return testDouble<Theme>()(theme);
 }
 
-export function messageEntry(
-    id: string,
-    parentId: string | null,
-    message: unknown,
-): Record<string, unknown> {
+export function testDouble<TTarget>() {
+    return <TValue>(value: TValue): TTarget => {
+        // @ts-expect-error TS2352 -- Test fixtures intentionally implement only the host surface exercised by each test.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: The explicit fixture builders keep every implemented host member reviewable at the construction site.
+        return value as TTarget;
+    };
+}
+
+export function messageEntry<Message>(id: string, parentId: string | null, message: Message) {
     return {
         type: "message",
         id,
@@ -366,8 +452,4 @@ export function messageEntry(
         timestamp: "2026-01-01T00:00:00.000Z",
         message,
     };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

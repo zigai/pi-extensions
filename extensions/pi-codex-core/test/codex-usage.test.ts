@@ -8,7 +8,7 @@ import {
     parseCodexRateLimitResetCreditsPayload,
     parseCodexUsagePayload,
 } from "../src/codex/usage.ts";
-import { makeTestRuntime } from "./helpers.ts";
+import { makeTestRuntime, testDouble } from "./helpers.ts";
 
 const FIXED_NOW_MS = 1_700_000_000_000;
 const FIXED_CLOCK = {
@@ -253,8 +253,7 @@ function makeUsageContext(
             }),
         },
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test context supplies the model and auth fields read by Codex usage.
-    return ctx as unknown as ExtensionContext;
+    return testDouble<ExtensionContext>()(ctx);
 }
 
 function makeCodexJwtAccountToken(accountId: string): string {

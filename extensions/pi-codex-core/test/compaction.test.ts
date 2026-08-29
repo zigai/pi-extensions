@@ -24,7 +24,13 @@ import {
     rewriteRemoteCompactionToolOutputsForContextWindow,
     shrinkRemoteCompactionRequestForContextWindow,
 } from "../src/compaction/request-budget.ts";
-import type { ResponsesInputItem } from "../src/compaction/types.ts";
+import type { JsonObject, JsonValue, ResponsesInputItem } from "../src/compaction/types.ts";
+import {
+    JsonArrayDecoder,
+    JsonObjectDecoder,
+    JsonStringDecoder,
+    JsonValueDecoder,
+} from "../src/compaction/responses-input.ts";
 import {
     captureProviderRequestTemplate,
     clearProviderRequestTemplate,
@@ -35,7 +41,7 @@ import {
 } from "../src/codex/responses-compat.ts";
 import type { CodexRuntime, ScheduledTask } from "../src/runtime.ts";
 import { CodexTokenizer } from "../src/compaction/tokenizer.ts";
-import { makeTestRuntime, messageEntry } from "./helpers.ts";
+import { makeTestRuntime, messageEntry, testDouble } from "./helpers.ts";
 
 const compactionTokenizer = new CodexTokenizer();
 
@@ -822,10 +828,7 @@ test("streams remote compaction SSE without buffering response text", async () =
             throw new Error("response text should not be buffered");
         },
     };
-    const runtime = makeTestRuntime(async () => {
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the Response members read by remote compaction streaming.
-        return response as unknown as Response;
-    });
+    const runtime = makeTestRuntime(async () => testDouble<Response>()(response));
 
     const result = await handleCodexNativeCompaction(
         makeBeforeCompactEvent(),
@@ -864,10 +867,7 @@ test("cancels remote compaction streams with oversized pending SSE events", asyn
             throw new Error("response text should not be buffered");
         },
     };
-    const runtime = makeTestRuntime(async () => {
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture implements the Response members read by remote compaction streaming.
-        return response as unknown as Response;
-    });
+    const runtime = makeTestRuntime(async () => testDouble<Response>()(response));
 
     const result = await handleCodexNativeCompaction(
         makeBeforeCompactEvent(),
@@ -2289,31 +2289,32 @@ function makeBeforeCompactEvent(
                 ? [entry.message]
                 : [],
         );
+    const preparationBase = {
+        firstKeptEntryId,
+        messagesToSummarize: options.messagesToSummarize ?? derivedMessagesToSummarize,
+        turnPrefixMessages: options.turnPrefixMessages ?? [],
+        isSplitTurn: false,
+        tokensBefore: 123,
+        fileOps: {
+            read: new Set<string>(),
+            written: new Set<string>(),
+            edited: new Set<string>(),
+        },
+        settings: { enabled: true, reserveTokens: 10_000, keepRecentTokens: 20_000 },
+    };
+    const preparation =
+        options.previousSummary === undefined
+            ? preparationBase
+            : { ...preparationBase, previousSummary: options.previousSummary };
     const event = {
         type: "session_before_compact",
         branchEntries,
-        preparation: {
-            firstKeptEntryId,
-            messagesToSummarize: options.messagesToSummarize ?? derivedMessagesToSummarize,
-            turnPrefixMessages: options.turnPrefixMessages ?? [],
-            isSplitTurn: false,
-            tokensBefore: 123,
-            fileOps: {
-                read: new Set<string>(),
-                written: new Set<string>(),
-                edited: new Set<string>(),
-            },
-            settings: { enabled: true, reserveTokens: 10_000, keepRecentTokens: 20_000 },
-            ...(options.previousSummary !== undefined
-                ? { previousSummary: options.previousSummary }
-                : {}),
-        },
+        preparation,
         reason: options.reason ?? "manual",
         willRetry: false,
         signal: new AbortController().signal,
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This fixture supplies the fields read by handleCodexNativeCompaction.
-    return event as unknown as SessionBeforeCompactEvent;
+    return testDouble<SessionBeforeCompactEvent>()(event);
 }
 
 function nativeCompactionEntry(options: {
@@ -2322,7 +2323,7 @@ function nativeCompactionEntry(options: {
     readonly firstKeptEntryId: string;
     readonly model?: string;
     readonly compHash?: string | undefined;
-}): Record<string, unknown> {
+}) {
     const worldState = worldStateInput("window: 1");
     return {
         type: "compaction",
@@ -2357,7 +2358,7 @@ function nativeCompactionEntry(options: {
     };
 }
 
-function worldStateInput(extraLine = ""): Record<string, unknown> {
+function worldStateInput(extraLine = "") {
     return {
         role: "user",
         content: [
@@ -2379,11 +2380,11 @@ function worldStateInput(extraLine = ""): Record<string, unknown> {
     };
 }
 
-function userMessage(text: string): Record<string, unknown> {
+function userMessage(text: string) {
     return { role: "user", content: text, timestamp: 0 };
 }
 
-function imageOnlyUserMessage(index: number): Record<string, unknown> {
+function imageOnlyUserMessage(index: number) {
     return {
         role: "user",
         content: [
@@ -2435,16 +2436,17 @@ function pngCrc32(bytes: Buffer): number {
     return (value ^ 0xffffffff) >>> 0;
 }
 
-function imageUrlsFromResponseItem(item: unknown): string[] {
-    if (!isRecord(item) || !Array.isArray(item.content)) return [];
-    return item.content.flatMap((part) =>
-        isRecord(part) && part.type === "input_image" && typeof part.image_url === "string"
-            ? [part.image_url]
-            : [],
-    );
+function imageUrlsFromResponseItem(item: ResponsesInputItem | undefined): string[] {
+    const content = JsonArrayDecoder.decode(item?.content);
+    if (!content) return [];
+    return content.flatMap((part) => {
+        const object = JsonObjectDecoder.decode(part);
+        const imageUrl = JsonStringDecoder.decode(object?.image_url);
+        return object?.type === "input_image" && imageUrl !== undefined ? [imageUrl] : [];
+    });
 }
 
-function assistantMessage(content: readonly unknown[]): Record<string, unknown> {
+function assistantMessage(content: readonly JsonValue[]) {
     return {
         role: "assistant",
         provider: "openai-codex",
@@ -2457,7 +2459,7 @@ function assistantMessage(content: readonly unknown[]): Record<string, unknown> 
     };
 }
 
-function toolResultMessage(toolCallId: string, text: string): Record<string, unknown> {
+function toolResultMessage(toolCallId: string, text: string) {
     return {
         role: "toolResult",
         toolCallId,
@@ -2501,8 +2503,7 @@ function makeCompactionApi(): ExtensionAPI {
             },
         ],
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Compaction tests only exercise getActiveTools and getAllTools.
-    return api as unknown as ExtensionAPI;
+    return testDouble<ExtensionAPI>()(api);
 }
 
 function makeNativeCompactionContext(
@@ -2510,7 +2511,7 @@ function makeNativeCompactionContext(
         readonly contextWindow?: number;
         readonly sessionId?: string;
         readonly modelId?: string;
-        readonly branchEntries?: readonly Record<string, unknown>[];
+        readonly branchEntries?: readonly JsonObject[];
     } = {},
 ): ExtensionContext {
     const modelId = options.modelId ?? "gpt-5.5";
@@ -2549,8 +2550,7 @@ function makeNativeCompactionContext(
         },
         getSystemPrompt: () => "system prompt",
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test exercises a function that only reads these context fields.
-    return ctx as unknown as ExtensionContext;
+    return testDouble<ExtensionContext>()(ctx);
 }
 
 function makeAutoCompactionContext(
@@ -2596,14 +2596,15 @@ function makeAutoCompactionContext(
             getBranch: () => [{ type: "message", id: options.latestEntryId?.() ?? "entry-auto" }],
         },
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test exercises only fields read by scheduleCodexAutoCompaction.
-    return ctx as unknown as ExtensionContext;
+    return testDouble<ExtensionContext>()(ctx);
 }
 
-function makeStaleAutoCompactionFixture(compactCalls: unknown[]): {
+type StaleAutoCompactionFixture = {
     readonly context: ExtensionContext;
     readonly invalidate: () => void;
-} {
+};
+
+function makeStaleAutoCompactionFixture(compactCalls: unknown[]): StaleAutoCompactionFixture {
     let valid = true;
     const baseContext = makeAutoCompactionContext(
         compactCalls,
@@ -2632,21 +2633,11 @@ function makeCompactionContext(
         readonly warnings?: string[];
         readonly sessionId?: string;
         readonly modelId?: string;
-        readonly branchEntries?: readonly Record<string, unknown>[];
+        readonly branchEntries?: readonly JsonObject[];
     } = {},
 ): ExtensionContext {
     const modelId = options.modelId ?? "gpt-5.4-mini";
-    const ctx = {
-        hasUI: Boolean(options.warnings),
-        ...(options.warnings
-            ? {
-                  ui: {
-                      notify: (message: string) => {
-                          options.warnings?.push(message);
-                      },
-                  },
-              }
-            : {}),
+    const contextFields = {
         cwd: "/workspace",
         model: {
             provider: "openai-codex",
@@ -2671,43 +2662,62 @@ function makeCompactionContext(
                 ],
         },
     };
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: This test exercises a function that only reads model, UI notification, and sessionManager fields.
-    return ctx as unknown as ExtensionContext;
+    const ctx = options.warnings
+        ? {
+              hasUI: true,
+              ui: { notify: (message: string) => options.warnings?.push(message) },
+              ...contextFields,
+          }
+        : { hasUI: false, ...contextFields };
+    return testDouble<ExtensionContext>()(ctx);
 }
 
-function decodeRequestBody(init: RequestInit | undefined): unknown {
+function decodeRequestBody(init: RequestInit | undefined): JsonValue {
     const body = init?.body;
-    assert.ok(typeof body === "string" || body instanceof Uint8Array);
-    const bytes = typeof body === "string" ? Buffer.from(body) : Buffer.from(body);
+    const textBody = JsonStringDecoder.decode(body);
+    let bytes: Buffer;
+    if (textBody !== undefined) {
+        bytes = Buffer.from(textBody);
+    } else {
+        assert.ok(body instanceof Uint8Array);
+        bytes = Buffer.from(body);
+    }
     const contentEncoding = new Headers(init?.headers).get("content-encoding");
     assert.ok(contentEncoding === null || contentEncoding === "zstd");
     const serialized =
         contentEncoding === "zstd" ? zstdDecompressSync(bytes).toString() : bytes.toString();
-    return JSON.parse(serialized);
+    return JsonValueDecoder.Parse(JSON.parse(serialized));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+function isRecord<Value>(value: Value): value is Value & JsonObject {
+    return JsonObjectDecoder.decode(value) !== undefined;
 }
 
-function responseInput(value: unknown): unknown[] {
-    assert.ok(isRecord(value));
-    assert.ok(Array.isArray(value.input));
-    return value.input;
+function responseInput<Value>(value: Value): JsonValue[] {
+    return [...JsonArrayDecoder.Parse(JsonObjectDecoder.Parse(value).input)];
 }
 
-function worldStateText(item: unknown): string {
-    if (!isRecord(item) || !Array.isArray(item.content)) return "";
-    return item.content
-        .flatMap((part) => (isRecord(part) && typeof part.text === "string" ? [part.text] : []))
+function worldStateText<Value>(item: Value): string {
+    const content = JsonArrayDecoder.decode(JsonObjectDecoder.decode(item)?.content);
+    if (!content) return "";
+    return content
+        .flatMap((part) => {
+            const text = JsonStringDecoder.decode(JsonObjectDecoder.decode(part)?.text);
+            return text === undefined ? [] : [text];
+        })
         .join("\n");
 }
 
-function textFromResponseItem(item: unknown): string {
-    if (!isRecord(item)) return "";
-    if (typeof item.content === "string") return item.content;
-    if (!Array.isArray(item.content)) return "";
-    return item.content
-        .flatMap((part) => (isRecord(part) && typeof part.text === "string" ? [part.text] : []))
+function textFromResponseItem<Value>(item: Value): string {
+    const content = JsonObjectDecoder.decode(item)?.content;
+    const directText = JsonStringDecoder.decode(content);
+    if (directText !== undefined) return directText;
+    const parts = JsonArrayDecoder.decode(content);
+    if (!parts) return "";
+    return parts
+        .flatMap((part) => {
+            const text = JsonStringDecoder.decode(JsonObjectDecoder.decode(part)?.text);
+            return text === undefined ? [] : [text];
+        })
         .join("\n");
 }

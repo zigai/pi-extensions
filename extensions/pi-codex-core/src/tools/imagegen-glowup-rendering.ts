@@ -3,7 +3,7 @@ import {
     glowupWireArray,
     glowupWireNumber,
     glowupWireString,
-    isGlowupWireRecord,
+    parseGlowupWireRecord,
     parseGlowupWireArgs,
     parseGlowupWireResult,
     type GlowupWireCallContext,
@@ -127,42 +127,41 @@ function summarizeArgs(
 }
 
 function generatedImageCount(result: ImagegenGlowupResult): number | undefined {
-    if (!isGlowupWireRecord(result.details)) return undefined;
-    const images = glowupWireArray(result.details, "images");
+    const details = parseGlowupWireRecord(result.details);
+    if (!details) return undefined;
+    const images = glowupWireArray(details, "images");
     if (images !== undefined && images.length > 0) return images.length;
-    const generatedCount = glowupWireNumber(result.details, "generatedCount");
+    const generatedCount = glowupWireNumber(details, "generatedCount");
     return generatedCount === undefined ? undefined : Math.max(0, Math.trunc(generatedCount));
 }
 
 function renderImagegenCall(args: ImagegenGlowupArgs, context: GlowupWireCallContext) {
     const summary = summarizeArgs(args, context);
-    return {
-        kind: "call" as const,
-        labels: {
-            static: "Image Generate",
-            running: "Generating Image",
-            completed: "Generated Image",
-        },
-        ...(summary === undefined ? {} : { body: { kind: "text" as const, text: summary } }),
-        preview: {
-            collapsedLines: COLLAPSED_PROMPT_LINES + 1,
-            expandedLines: 500,
-        },
+    const labels = {
+        static: "Image Generate",
+        running: "Generating Image",
+        completed: "Generated Image",
     };
+    const preview = {
+        collapsedLines: COLLAPSED_PROMPT_LINES + 1,
+        expandedLines: 500,
+    };
+    return summary === undefined
+        ? { kind: "call" as const, labels, preview }
+        : {
+              kind: "call" as const,
+              labels,
+              body: { kind: "text" as const, text: summary },
+              preview,
+          };
 }
 
 export const imagegenGlowupRendering = {
     version: 3,
     parseArgs: parseGlowupWireArgs,
     parseResult: parseGlowupWireResult,
-    renderPartialCall(value: unknown, context: GlowupWireCallContext) {
-        const args = parseGlowupWireArgs(value);
-        return args === undefined
-            ? {
-                  kind: "call" as const,
-                  labels: { static: "Image Generate", running: "Generating Image" },
-              }
-            : renderImagegenCall(args, context);
+    renderPartialCall(value: ImagegenGlowupArgs, context: GlowupWireCallContext) {
+        return renderImagegenCall(value, context);
     },
     renderCall(args: ImagegenGlowupArgs, context: GlowupWireCallContext) {
         return renderImagegenCall(args, context);
