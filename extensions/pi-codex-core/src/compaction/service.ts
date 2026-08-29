@@ -235,7 +235,11 @@ export async function handleCodexNativeCompaction(
             shrink.promptInput,
             response.compactionOutput,
             tokenCache,
-            { tokenizer: options.tokenizer, signal: event.signal },
+            {
+                tokenizer: options.tokenizer,
+                signal: event.signal,
+                imageBudgetInput: promptInput.input,
+            },
         );
         if (compactedWindow.length === 0 || !hasCompactionOutputItem(compactedWindow)) {
             notifyCompactionFallback(

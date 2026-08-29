@@ -1,6 +1,9 @@
 import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
+import { compileSchema, parseWithSchema } from "../schema-parsing.ts";
 import { codexModelRequestProfile, codexReasoningEffortForRequest } from "../codex/models.ts";
+import { imageDimensionsFromBytes } from "../images/metadata.ts";
 import { CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY } from "../codex/responses-compat.ts";
 import type { CodexCoreConfig } from "../config/config.ts";
 import {
@@ -32,6 +35,14 @@ const TRUNCATED_TOOL_OUTPUT_MESSAGE =
 const TOKEN_ESTIMATE_CHUNK_CHARS = 512 * 1024;
 const TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS = 8 * 1024;
 const INLINE_IMAGE_TOKEN_ESTIMATE_TEXT = "(inline image data omitted for token estimate)";
+const APPROX_BYTES_PER_TOKEN = 4;
+const RESIZED_IMAGE_BYTES_ESTIMATE = 7_373;
+const RESIZED_IMAGE_TOKEN_ESTIMATE = Math.ceil(
+    RESIZED_IMAGE_BYTES_ESTIMATE / APPROX_BYTES_PER_TOKEN,
+);
+const ORIGINAL_IMAGE_PATCH_SIZE = 32;
+const ORIGINAL_IMAGE_MAX_PATCHES = 10_000;
+const StringValueSchema = compileSchema(Type.String());
 
 type TokenWorkOptions = {
     readonly tokenizer: CodexTokenizer;
@@ -213,11 +224,10 @@ export async function rewriteRemoteCompactionToolOutputsForContextWindow(
     options: TokenWorkOptions,
 ): Promise<RemoteCompactionPreflightResult> {
     options.signal?.throwIfAborted();
-    const estimatedTokensBefore = await estimateRemoteCompactionRequestTokens(
-        buildRemoteCompactionV2Request({ ...requestParts, input }),
-        cache,
-        options,
-    );
+    const request = buildRemoteCompactionV2Request({ ...requestParts, input });
+    const estimatedTokensBefore =
+        (await estimateRemoteCompactionRequestTokens(request, cache, options)) +
+        Math.max(0, nestedInputImageTokenCount(input) - nestedInputImageTokenCount(request.input));
     const budgetTokens = compactRequestBudget(contextWindow);
     if (budgetTokens === undefined || estimatedTokensBefore <= budgetTokens) {
         return {
@@ -325,15 +335,21 @@ export async function buildRemoteCompactionV2Window(
     promptInput: readonly ResponsesInputItem[],
     compactionOutput: ResponsesInputItem,
     cache: TokenEstimateCache,
-    options: TokenWorkOptions,
+    options: TokenWorkOptions & {
+        readonly imageBudgetInput?: readonly ResponsesInputItem[] | undefined;
+    },
 ): Promise<ResponsesInputItem[]> {
     options.signal?.throwIfAborted();
     const retained = promptInput.filter(isRetainedRemoteCompactionMessage);
+    const imageBudgetRetained = (options.imageBudgetInput ?? promptInput).filter(
+        isRetainedRemoteCompactionMessage,
+    );
     const truncated = await truncateRetainedMessages(
         retained,
         RETAINED_MESSAGE_TOKEN_BUDGET,
         cache,
         options,
+        imageBudgetRetained.length === retained.length ? imageBudgetRetained : retained,
     );
     return [...truncated, compactionOutput];
 }
@@ -353,23 +369,36 @@ async function truncateRetainedMessages(
     maxTokens: number,
     cache: TokenEstimateCache,
     options: TokenWorkOptions,
+    imageBudgetItems: readonly ResponsesInputItem[],
 ): Promise<ResponsesInputItem[]> {
     let remaining = maxTokens;
     const retainedReversed: ResponsesInputItem[] = [];
-    for (const item of [...items].reverse()) {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
         if (remaining <= 0) continue;
-        const tokenCount = Math.max(1, await messageTextTokenCount(item, cache, options));
+        const item = items[index];
+        if (item === undefined) continue;
+        const imageBudgetItem = imageBudgetItems[index] ?? item;
+        const tokenCount = Math.max(
+            1,
+            await messageTextTokenCount(imageBudgetItem, cache, options),
+        );
         if (tokenCount <= remaining) {
             retainedReversed.push(item);
             remaining -= tokenCount;
         } else {
             const truncated = await truncateMessageTextToTokenBudget(
-                item,
+                imageBudgetItem,
                 remaining,
                 cache,
                 options,
             );
-            if (truncated) retainedReversed.push(truncated);
+            if (truncated) {
+                retainedReversed.push(
+                    inputImageCount(item) > 0 && !hasInputImageDetail(item)
+                        ? stripResponsesLiteImageDetails(truncated)
+                        : truncated,
+                );
+            }
             remaining = 0;
         }
     }
@@ -397,7 +426,7 @@ async function retainedContentPartTokenCount(
     options: TokenWorkOptions,
 ): Promise<number> {
     if (isResponsesTextPart(part)) return estimateTextTokens(part.text, cache, options);
-    if (isInputImagePart(part)) return 0;
+    if (isInputImagePart(part)) return inputImageTokenCount(part);
     return estimateTokenCount(part, cache, options);
 }
 
@@ -411,6 +440,33 @@ function isInputImagePart(
     part: JsonValue,
 ): part is ResponsesInputItem & { readonly type: "input_image" } {
     return isJsonObjectValue(part) && part.type === "input_image";
+}
+
+function inputImageTokenCount(part: ResponsesInputItem): number {
+    const imageUrl = parseWithSchema(StringValueSchema, part.image_url);
+    if (part.detail !== "original" || !imageUrl) return RESIZED_IMAGE_TOKEN_ESTIMATE;
+    const dataUrl = parseBase64ImageDataUrl(imageUrl);
+    if (!dataUrl) return RESIZED_IMAGE_TOKEN_ESTIMATE;
+    try {
+        const dimensions = imageDimensionsFromBytes(
+            Buffer.from(dataUrl.base64, "base64"),
+            dataUrl.mimeType,
+        );
+        const patchesWide = Math.ceil(dimensions.width / ORIGINAL_IMAGE_PATCH_SIZE);
+        const patchesHigh = Math.ceil(dimensions.height / ORIGINAL_IMAGE_PATCH_SIZE);
+        return Math.min(patchesWide * patchesHigh, ORIGINAL_IMAGE_MAX_PATCHES);
+    } catch {
+        return RESIZED_IMAGE_TOKEN_ESTIMATE;
+    }
+}
+
+function parseBase64ImageDataUrl(
+    imageUrl: string,
+): { readonly mimeType: string; readonly base64: string } | undefined {
+    const match = /^data:([^;,]+);base64,(.*)$/s.exec(imageUrl);
+    const mimeType = match?.[1];
+    const base64 = match?.[2];
+    return mimeType && base64 ? { mimeType, base64 } : undefined;
 }
 
 async function truncateMessageTextToTokenBudget(
@@ -429,10 +485,19 @@ async function truncateMessageTextToTokenBudget(
     if (!isJsonArray(content)) return cloned;
 
     let remaining = maxTokens;
-    const nextContent: JsonValue[] = [];
-    for (const part of content) {
+    const retainedReversed: JsonValue[] = [];
+    for (let index = content.length - 1; index >= 0; index -= 1) {
+        const part = content[index];
+        if (part === undefined) continue;
         if (isInputImagePart(part)) {
-            nextContent.push(part);
+            const tokenCount = inputImageTokenCount(part);
+            if (tokenCount <= remaining) {
+                retainedReversed.push(part);
+                remaining -= tokenCount;
+            } else {
+                // Do not backfill older content after an atomic image exhausts the boundary.
+                remaining = 0;
+            }
             continue;
         }
         if (remaining <= 0) continue;
@@ -443,17 +508,20 @@ async function truncateMessageTextToTokenBudget(
                     ? part.text
                     : await options.tokenizer.truncate(part.text, remaining, options);
             remaining -= Math.min(tokenCount, remaining);
-            if (text.length > 0) nextContent.push({ ...part, text });
+            if (text.length > 0) retainedReversed.push({ ...part, text });
             continue;
         }
         const tokenCount = await estimateTokenCount(part, cache, options);
         if (tokenCount <= remaining) {
-            nextContent.push(part);
+            retainedReversed.push(part);
             remaining -= tokenCount;
+        } else {
+            remaining = 0;
         }
     }
-    if (nextContent.length === 0) return undefined;
-    return { ...cloned, content: nextContent };
+    if (retainedReversed.length === 0) return undefined;
+    retainedReversed.reverse();
+    return { ...cloned, content: retainedReversed };
 }
 
 export function hasCompactionOutputItem(compactedWindow: readonly ResponsesInputItem[]): boolean {
@@ -522,6 +590,15 @@ function inputImageCount(item: ResponsesInputItem): number {
     return content.filter((part) => isJsonObjectValue(part) && part.type === "input_image").length;
 }
 
+function hasInputImageDetail(item: ResponsesInputItem): boolean {
+    const content = item.content;
+    if (!isJsonArray(content)) return false;
+    return content.some(
+        (part) =>
+            isJsonObjectValue(part) && part.type === "input_image" && part.detail !== undefined,
+    );
+}
+
 function compactRequestBudget(contextWindow: number | null | undefined): number | undefined {
     if (typeof contextWindow !== "number" || !Number.isFinite(contextWindow) || contextWindow <= 0)
         return undefined;
@@ -577,9 +654,14 @@ async function estimateResponsesInputItemTokens(
     cache: TokenEstimateCache,
     options: TokenWorkOptions,
 ): Promise<number> {
-    return cachedObjectTokenCount(item, cache, () =>
-        estimateTokenParts(responsesInputItemTokenParts(item), cache, options),
-    );
+    return cachedObjectTokenCount(item, cache, async () => {
+        const serializedTokens = await estimateTokenParts(
+            responsesInputItemTokenParts(item),
+            cache,
+            options,
+        );
+        return serializedTokens + nestedInputImageTokenCount(item);
+    });
 }
 
 function* responsesInputItemTokenParts(item: ResponsesInputItem): Generator<string> {
@@ -589,6 +671,18 @@ function* responsesInputItemTokenParts(item: ResponsesInputItem): Generator<stri
         return;
     }
     yield JSON.stringify(sanitizeForTokenEstimate(item)) ?? "";
+}
+
+function nestedInputImageTokenCount(value: JsonValue | undefined): number {
+    if (isJsonArray(value)) {
+        let total = 0;
+        for (const nested of value) total += nestedInputImageTokenCount(nested);
+        return total;
+    }
+    if (!isJsonObjectValue(value)) return 0;
+    let total = value.type === "input_image" ? inputImageTokenCount(value) : 0;
+    for (const nested of Object.values(value)) total += nestedInputImageTokenCount(nested);
+    return total;
 }
 
 function sanitizeForTokenEstimate(value: JsonValue): JsonValue {
