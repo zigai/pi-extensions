@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { zstdDecompressSync } from "node:zlib";
+import { deflateSync, zstdDecompressSync } from "node:zlib";
 import { afterAll, test } from "vitest";
 import {
     type ExtensionAPI,
@@ -17,7 +17,14 @@ import {
     scheduleCodexAutoCompaction,
 } from "../src/compaction/service.ts";
 import { executeRemoteCompactionV2 } from "../src/compaction/remote-client.ts";
-import { buildRemoteCompactionV2Request } from "../src/compaction/request-budget.ts";
+import {
+    buildRemoteCompactionV2Request,
+    buildRemoteCompactionV2Window,
+    createTokenEstimateCache,
+    rewriteRemoteCompactionToolOutputsForContextWindow,
+    shrinkRemoteCompactionRequestForContextWindow,
+} from "../src/compaction/request-budget.ts";
+import type { ResponsesInputItem } from "../src/compaction/types.ts";
 import {
     captureProviderRequestTemplate,
     clearProviderRequestTemplate,
@@ -1379,7 +1386,7 @@ test("does not send remote v2 compaction when protected input cannot fit", async
     assert.equal(result, undefined);
 });
 
-test("retained image-only messages preserve their image content", async () => {
+test("retained image-only messages keep the newest images within the Codex budget", async () => {
     const runtime = makeTestRuntime(async () => {
         const body = [
             "event: response.output_item.done",
@@ -1412,7 +1419,79 @@ test("retained image-only messages preserve their image content", async () => {
 
     const compactedWindow = result?.compaction?.details.compactedWindow ?? [];
     const retainedImageUrls = compactedWindow.flatMap(imageUrlsFromResponseItem);
-    assert.equal(retainedImageUrls.length, 80);
+    assert.equal(retainedImageUrls.length, 34);
+    assert.deepEqual(
+        retainedImageUrls,
+        Array.from(
+            { length: 34 },
+            (_unused, index) =>
+                `data:image/png;base64,${Buffer.from(`image-${index + 46}`).toString("base64")}`,
+        ),
+    );
+});
+
+test("Responses Lite retains original-detail images by capped patch budget", async () => {
+    const imageUrls = Array.from({ length: 8 }, (_unused, index) =>
+        originalDetailPngDataUrl(6_000, 6_000, index),
+    );
+    const imageBudgetInput: ResponsesInputItem[] = imageUrls.map((imageUrl) => ({
+        role: "user",
+        content: [{ type: "input_image", image_url: imageUrl, detail: "original" }],
+    }));
+    const litePromptInput: ResponsesInputItem[] = imageUrls.map((imageUrl) => ({
+        role: "user",
+        content: [{ type: "input_image", image_url: imageUrl }],
+    }));
+
+    const compactedWindow = await buildRemoteCompactionV2Window(
+        litePromptInput,
+        { type: "compaction", encrypted_content: "sealed-original-images" },
+        createTokenEstimateCache(),
+        { tokenizer: compactionTokenizer, imageBudgetInput },
+    );
+
+    assert.deepEqual(compactedWindow.flatMap(imageUrlsFromResponseItem), imageUrls.slice(-6));
+    assert.doesNotMatch(JSON.stringify(compactedWindow), /"detail"/);
+});
+
+test("Responses Lite preflight charges original images before detail projection", async () => {
+    const input: ResponsesInputItem[] = [
+        {
+            role: "user",
+            content: [
+                {
+                    type: "input_image",
+                    image_url: originalDetailPngDataUrl(6_000, 6_000, 0),
+                    detail: "original",
+                },
+            ],
+        },
+    ];
+    const requestParts = {
+        model: "gpt-5.6-sol",
+        instructions: "system",
+        promptCacheKey: "cache",
+        verbosity: "medium",
+        fast: false,
+    };
+    const tokenCache = createTokenEstimateCache();
+    const preflight = await rewriteRemoteCompactionToolOutputsForContextWindow(
+        input,
+        requestParts,
+        10_000,
+        tokenCache,
+        { tokenizer: compactionTokenizer },
+    );
+    const request = buildRemoteCompactionV2Request({ ...requestParts, input });
+    const result = await shrinkRemoteCompactionRequestForContextWindow(
+        request,
+        10_000,
+        tokenCache,
+        { tokenizer: compactionTokenizer, preflight },
+    );
+
+    assert.ok(preflight.estimatedTokensAfter > 8_000);
+    assert.equal(result.kind, "too_large");
 });
 
 test("retained native compaction window truncates huge text and preserves its image", async () => {
@@ -2316,6 +2395,44 @@ function imageOnlyUserMessage(index: number): Record<string, unknown> {
         ],
         timestamp: 0,
     };
+}
+
+function originalDetailPngDataUrl(width: number, height: number, marker: number): string {
+    const rowBytes = Math.ceil(width / 8);
+    const raw = Buffer.alloc((rowBytes + 1) * height);
+    raw[1] = marker;
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(width, 0);
+    header.writeUInt32BE(height, 4);
+    header[8] = 1;
+    header[9] = 0;
+    const bytes = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        pngChunk("IHDR", header),
+        pngChunk("IDAT", deflateSync(raw)),
+        pngChunk("IEND", Buffer.alloc(0)),
+    ]);
+    return `data:image/png;base64,${bytes.toString("base64")}`;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length, 0);
+    const typeBytes = Buffer.from(type, "ascii");
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(pngCrc32(Buffer.concat([typeBytes, data])), 0);
+    return Buffer.concat([length, typeBytes, data, checksum]);
+}
+
+function pngCrc32(bytes: Buffer): number {
+    let value = 0xffffffff;
+    for (const byte of bytes) {
+        value ^= byte;
+        for (let bit = 0; bit < 8; bit += 1) {
+            value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+        }
+    }
+    return (value ^ 0xffffffff) >>> 0;
 }
 
 function imageUrlsFromResponseItem(item: unknown): string[] {
