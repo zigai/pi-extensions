@@ -1,0 +1,4 @@
+README.md text eol=lf
+config.schema.json text eol=lf
+src/settings.prevalidated.ts text eol=lf
+src/syntax/bundled-language-names.ts text eol=lf

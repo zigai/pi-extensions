@@ -29,7 +29,10 @@ assert.equal(schema, sourceSchema);
 for (const configuredPath of [
   packageManifest.piExtensionSettings.definition,
   packageManifest.piExtensionSettings.prevalidation,
+  "./src/unknown-values.ts",
   "./src/mutations/settings.ts",
+  "./src/tool-rendering/decode-node.ts",
+  "./src/tool-rendering/protocol.ts",
 ]) {
   const packagePath = configuredPath.replace(/^\.\//u, "");
   assert.equal(
