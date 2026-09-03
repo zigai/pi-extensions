@@ -23,6 +23,7 @@ import type {
     UnifiedDiffRow,
 } from "./types.ts";
 import type { PierreTerminalPalette } from "./theme.ts";
+import { syntaxLanguageFromFile } from "../syntax/language.ts";
 import { countContentLines } from "../text-boundaries.ts";
 import { isRecord } from "../unknown-values.ts";
 import { replacementFocusColumns } from "./intraline.ts";
@@ -873,6 +874,8 @@ function buildDiffMetadata(snapshot: DiffSnapshot): FileDiffMetadata {
     const metadata = normalizeDiffMetadataLanguage(
         parseDiffFromFile(oldFile, newFile, undefined, true),
         snapshot.newPath ?? snapshot.path,
+        snapshot.newContent,
+        snapshot.oldContent,
     );
     return metadata.cacheKey === undefined
         ? { ...metadata, cacheKey: `diff:${oldKey}:${newKey}` }
@@ -882,8 +885,14 @@ function buildDiffMetadata(snapshot: DiffSnapshot): FileDiffMetadata {
 function normalizeDiffMetadataLanguage(
     metadata: FileDiffMetadata,
     pathValue: string,
+    newContent?: string,
+    oldContent?: string,
 ): FileDiffMetadata {
-    const language = metadata.lang ?? getFiletypeFromFileName(pathValue);
+    const language =
+        syntaxLanguageFromFile(pathValue, newContent) ??
+        syntaxLanguageFromFile(pathValue, oldContent) ??
+        metadata.lang ??
+        getFiletypeFromFileName(pathValue);
     return language === undefined || language.length === 0
         ? metadata
         : setLanguageOverride(metadata, language);

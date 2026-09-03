@@ -587,6 +587,34 @@ describe("central syntax highlighting", () => {
         expect(rendered).not.toContain(TOML_INVALID_RGB_CODE);
     });
 
+    it("highlights an extensionless uv Python script edit as Python", async () => {
+        const oldContent = "#!/usr/bin/env -S uv run --script\ndef serve():\n    return 1\n";
+        const newContent = "#!/usr/bin/env -S uv run --script\ndef serve():\n    return 2\n";
+        const payload = buildPierreDiffPayload({
+            path: "bin/serve-model",
+            oldContent,
+            newContent,
+            oldSizeBytes: Buffer.byteLength(oldContent, "utf8"),
+            newSizeBytes: Buffer.byteLength(newContent, "utf8"),
+            canBuildPierreDiff: true,
+        });
+        if (payload?.kind !== "renderable") {
+            throw new Error("expected renderable Python diff payload");
+        }
+
+        const highlighted = await loadHighlightedDiff(payload.metadata);
+        expect(payload.metadata.lang).toBe("python");
+        expect(JSON.stringify(highlighted.dark.deletionLines)).toContain("#569CD6");
+
+        const rendered = renderPierreDiff(
+            payload,
+            piTheme,
+            { expanded: true },
+            { lastComponent: undefined },
+        ).render(100);
+        expect(rendered.join("\n")).toContain(TYPESCRIPT_KEYWORD_RGB_CODE);
+    });
+
     it("uses the same VS Code theme for Pierre diff highlighting", async () => {
         const payload = buildPierreDiffPayload({
             path: "example.ts",

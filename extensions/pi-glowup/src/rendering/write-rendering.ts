@@ -424,7 +424,7 @@ export function renderWriteCallPreview(
             body: formatPathTarget(theme, path),
         });
     }
-    scheduleCodeOutputSyntaxLoad({ path }, context.invalidate);
+    scheduleCodeOutputSyntaxLoad({ path }, context.invalidate, content);
 
     if (context.isPartial) {
         const update = {

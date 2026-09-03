@@ -1,4 +1,4 @@
-import { normalizeSyntaxLanguage, syntaxLanguageFromPath } from "./language.ts";
+import { normalizeSyntaxLanguage, syntaxLanguageFromFile } from "./language.ts";
 import {
     getLoadedSyntaxHighlighterForLanguage,
     highlightSyntaxCode,
@@ -31,7 +31,7 @@ onSyntaxHighlightingStateChange((status) => {
 
 /** Highlights code-like output when a language or path is known; otherwise returns normalized plain lines. */
 export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | undefined): string[] {
-    const language = syntax?.language ?? syntaxLanguageFromPath(syntax?.path);
+    const language = syntax?.language ?? syntaxLanguageFromFile(syntax?.path, text);
     return highlightSyntaxCode(text, language, { cache: syntax?.cache });
 }
 
@@ -39,11 +39,12 @@ export function highlightCodeOutput(text: string, syntax: CodeOutputSyntax | und
 export function scheduleCodeOutputSyntaxLoad(
     syntax: CodeOutputSyntax | undefined,
     invalidate: (() => void) | undefined,
+    content?: string,
 ): void {
     if (invalidate === undefined) {
         return;
     }
-    const language = syntax?.language ?? syntaxLanguageFromPath(syntax?.path);
+    const language = syntax?.language ?? syntaxLanguageFromFile(syntax?.path, content);
     const normalizedLanguage = normalizeSyntaxLanguage(language);
     if (normalizedLanguage === undefined || normalizedLanguage === "text") {
         return;

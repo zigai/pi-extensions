@@ -193,6 +193,24 @@ describe("Pierre diff rendering", () => {
         expect(JSON.stringify(payload)).not.toContain("newContent");
     });
 
+    it("marks extensionless uv Python script diffs for Python highlighting", () => {
+        const oldContent = "#!/usr/bin/env -S uv run --script\nvalue = 1\n";
+        const newContent = "#!/usr/bin/env -S uv run --script\nvalue = 2\n";
+        const payload = buildPierreDiffPayload({
+            path: "bin/serve-model",
+            oldContent,
+            newContent,
+            oldSizeBytes: Buffer.byteLength(oldContent),
+            newSizeBytes: Buffer.byteLength(newContent),
+            canBuildPierreDiff: true,
+        });
+
+        expect(payload).toMatchObject({
+            kind: "renderable",
+            metadata: { lang: "python" },
+        });
+    });
+
     it("builds a replayable edit diff from pre- and post-execution snapshots", async () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-edit-snapshot-"));
         const filePath = join(root, "sample.ts");
