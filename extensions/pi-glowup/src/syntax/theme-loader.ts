@@ -77,15 +77,16 @@ function parseThemeRegistration(value: unknown, themeName: string): ThemeRegistr
         throw new Error("Syntax theme JSON must include tokenColors");
     }
 
-    return {
-        ...value,
-        name: themeName,
-        ...(colors === undefined ? {} : { colors }),
-        tokenColors,
-    } satisfies ThemeRegistration;
+    const registration =
+        colors === undefined ? { ...value, name: themeName } : { ...value, name: themeName, colors };
+    return { ...registration, tokenColors } satisfies ThemeRegistration;
 }
 
-function stringRecord(record: UnknownRecord): Record<string, string> {
+interface ThemeColors {
+    readonly [key: string]: string;
+}
+
+function stringRecord(record: UnknownRecord): ThemeColors {
     const output: Record<string, string> = {};
     for (const [key, value] of Object.entries(record)) {
         if (typeof value === "string") {

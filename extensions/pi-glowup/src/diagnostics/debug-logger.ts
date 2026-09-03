@@ -11,9 +11,9 @@ export type DebugLogValue =
     | readonly DebugLogValue[]
     | { readonly [key: string]: DebugLogValue | undefined };
 
-export type DebugLogFields = {
+export interface DebugLogFields {
     readonly [key: string]: DebugLogValue | undefined;
-};
+}
 
 type DebugLogFieldsSupplier = () => DebugLogFields;
 

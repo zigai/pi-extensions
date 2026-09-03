@@ -80,7 +80,7 @@ const plainTheme: GlowupRenderTheme = {
     },
 };
 
-const fgColors: Record<ThemeColor, string> = {
+const fgColors = {
     accent: "#8ab4f8",
     border: "#666666",
     borderAccent: "#8ab4f8",
@@ -125,8 +125,9 @@ const fgColors: Record<ThemeColor, string> = {
     thinkingMedium: "#c4a7e7",
     thinkingHigh: "#f6c177",
     thinkingXhigh: "#f28b82",
+    thinkingMax: "#f28b82",
     bashMode: "#64c987",
-};
+} satisfies Record<ThemeColor, string>;
 
 const benchmarkTheme = new Theme(
     fgColors,
@@ -568,20 +569,23 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
     globalThis.gc?.();
     const startingHeap = process.memoryUsage().heapUsed;
     const rounds = options.quick ? 1 : 3;
-    const timings: Record<string, readonly number[]> = {
-        "cold-large-diff": renderColdLargeDiff(options.quick ? 3 : 9),
-        "write-stream-300": writeStreamTimings(300, rounds),
-        "write-stream-1000": writeStreamTimings(1_000, rounds),
-        "apply-patch-stream-300": patchStreamTimings(300, rounds),
-        "apply-patch-stream-1000": patchStreamTimings(1_000, rounds),
-        "wide-narrow-resize": resizeTimings(options.quick ? 12 : 60),
-        "restored-session-render": restoredSessionTimings(options.quick ? 12 : 80),
-    };
-    Object.assign(timings, await syntaxAdoptionTimings());
+    const timings: Record<string, readonly number[]> = {};
+    timings["cold-large-diff"] = renderColdLargeDiff(options.quick ? 3 : 9);
+    timings["write-stream-300"] = writeStreamTimings(300, rounds);
+    timings["write-stream-1000"] = writeStreamTimings(1_000, rounds);
+    timings["apply-patch-stream-300"] = patchStreamTimings(300, rounds);
+    timings["apply-patch-stream-1000"] = patchStreamTimings(1_000, rounds);
+    timings["wide-narrow-resize"] = resizeTimings(options.quick ? 12 : 60);
+    timings["restored-session-render"] = restoredSessionTimings(options.quick ? 12 : 80);
+    for (const [name, samples] of Object.entries(await syntaxAdoptionTimings())) {
+        timings[name] = samples;
+    }
     globalThis.gc?.();
     const retainedHeapBytes = Math.max(0, process.memoryUsage().heapUsed - startingHeap);
     const cache = syntaxHighlightCacheStats();
-    Object.assign(timings, await reviewFindingTimings());
+    for (const [name, samples] of Object.entries(await reviewFindingTimings())) {
+        timings[name] = samples;
+    }
     const summaries: Record<string, TimingSummary> = {};
     for (const [name, samples] of Object.entries(timings)) {
         summaries[name] = timingSummary(samples);

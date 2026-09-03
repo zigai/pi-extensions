@@ -32,10 +32,12 @@ export function diffTextStats(diffText: string): DiffTextStats {
     return { added, removed, lineCount };
 }
 
-export function countDiffStats(diffText: string): {
+export type DiffStats = {
     readonly added: number;
     readonly removed: number;
-} {
+};
+
+export function countDiffStats(diffText: string): DiffStats {
     const stats = diffTextStats(diffText);
     return { added: stats.added, removed: stats.removed };
 }

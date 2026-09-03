@@ -9,14 +9,26 @@ type DiffToken = TextRange & {
     readonly text: string;
 };
 
+export type ChangedTextRanges = {
+    readonly before: readonly TextRange[];
+    readonly after: readonly TextRange[];
+};
+
+export type ReplacementFocusColumns = {
+    readonly before: number | undefined;
+    readonly after: number | undefined;
+};
+
+type MatchedTokenIndexes = {
+    readonly before: ReadonlySet<number>;
+    readonly after: ReadonlySet<number>;
+};
+
 const MAX_LCS_TOKENS = 256;
 const tokenPattern = /\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]+/gu;
 
 /** Finds the changed token spans in a paired deletion and addition line. */
-export function changedTextRanges(
-    before: string,
-    after: string,
-): { readonly before: readonly TextRange[]; readonly after: readonly TextRange[] } {
+export function changedTextRanges(before: string, after: string): ChangedTextRanges {
     if (before === after) {
         return { before: [], after: [] };
     }
@@ -41,7 +53,7 @@ export function changedTextRanges(
 export function replacementFocusColumns(
     before: string,
     after: string,
-): { readonly before: number | undefined; readonly after: number | undefined } {
+): ReplacementFocusColumns {
     if (before === after) {
         return { before: undefined, after: undefined };
     }
@@ -123,7 +135,7 @@ function tokenize(text: string): DiffToken[] {
 function longestCommonTokenSubsequence(
     before: readonly DiffToken[],
     after: readonly DiffToken[],
-): { readonly before: ReadonlySet<number>; readonly after: ReadonlySet<number> } {
+): MatchedTokenIndexes {
     const rowLength = after.length + 1;
     const lengths = new Uint16Array((before.length + 1) * rowLength);
     const cell = (beforeIndex: number, afterIndex: number): number =>

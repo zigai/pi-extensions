@@ -14,6 +14,7 @@ import {
     type GlowupRenderTheme,
 } from "../src/rendering/core.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
+import { TEST_THEME_BACKGROUND_COLORS, TEST_THEME_COLORS } from "./support/theme-colors.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
 import {
     disposeSyntaxHighlighting,
@@ -46,10 +47,9 @@ function ansiRgbCode(hex: string): string {
     return `38;2;${Number.parseInt(hex.slice(1, 3), 16)};${Number.parseInt(hex.slice(3, 5), 16)};${Number.parseInt(hex.slice(5, 7), 16)}`;
 }
 
-type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
-
 const piTheme = new Theme(
     {
+        ...TEST_THEME_COLORS,
         text: "#d4d4d4",
         toolDiffContext: "#d4d4d4",
         toolDiffAdded: "#89d185",
@@ -66,15 +66,8 @@ const piTheme = new Theme(
         toolOutput: "#d4d4d4",
         success: "#89d185",
         thinkingXhigh: "#777777",
-    } as Record<ThemeColor, string>,
-    {
-        selectedBg: "#333333",
-        userMessageBg: "#1E1E2E",
-        customMessageBg: "#242436",
-        toolPendingBg: "#222222",
-        toolSuccessBg: "#123012",
-        toolErrorBg: "#301212",
-    } as ThemeBackgroundColors,
+    } satisfies Record<ThemeColor, string>,
+    TEST_THEME_BACKGROUND_COLORS,
     "truecolor",
     { name: "zigai-dark-test" },
 );

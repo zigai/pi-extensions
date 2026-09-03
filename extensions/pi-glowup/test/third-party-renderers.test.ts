@@ -11,6 +11,7 @@ import {
     stack,
     summary,
     text,
+    type GlowupNode,
     type GlowupRenderer,
 } from "../src/tool-rendering/protocol.ts";
 import {
@@ -388,9 +389,9 @@ describe("third-party tool renderers", () => {
     });
 
     it("falls back for owner node graphs beyond the protocol depth limit", () => {
-        let nestedNode: unknown = text("leaf");
+        let nestedNode: GlowupNode = text("leaf");
         for (let depth = 0; depth < 10; depth += 1) {
-            nestedNode = { kind: "stack", children: [nestedNode] };
+            nestedNode = stack([nestedNode]);
         }
         const renderer = createThirdPartyToolRenderer("deep_tool", undefined, {
             [GLOWUP_RENDERING_PROPERTY]: {

@@ -332,9 +332,13 @@ function installAssistantPrototypePatch(assistantPrototype: AssistantRenderProto
         enabled: true,
         originalRender,
         originalUpdateContent,
-        ...(wrapperRender === undefined ? {} : { wrapperRender }),
-        ...(wrapperUpdateContent === undefined ? {} : { wrapperUpdateContent }),
     };
+    if (wrapperRender !== undefined) {
+        nextState = { ...nextState, wrapperRender };
+    }
+    if (wrapperUpdateContent !== undefined) {
+        nextState = { ...nextState, wrapperUpdateContent };
+    }
     assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] = nextState;
     assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY] = true;
 }
@@ -358,8 +362,10 @@ function installChatPrototypePatch(container: ChatContainerPrototype): void {
     nextState = {
         enabled: true,
         originalAddChild,
-        ...(wrapperAddChild === undefined ? {} : { wrapperAddChild }),
     };
+    if (wrapperAddChild !== undefined) {
+        nextState = { ...nextState, wrapperAddChild };
+    }
     container[CHAT_TRANSITION_PATCH_STATE_KEY] = nextState;
     container[CHAT_TRANSITION_PATCH_KEY] = true;
 }

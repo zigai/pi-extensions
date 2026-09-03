@@ -5,6 +5,7 @@ import {
     renderGlowupOutput,
     toolExpandHint,
     type GlowupCallState,
+    type GlowupOutputRenderOptions,
     type GlowupRenderTheme,
 } from "../rendering/core.ts";
 import {
@@ -32,7 +33,7 @@ export type CallSummary = {
     readonly body: string | undefined;
 };
 
-type CallOptions = {
+export type ThirdPartyCallOptions = {
     readonly state: GlowupCallState;
     readonly statusText: string;
     readonly body: string | undefined;
@@ -85,16 +86,22 @@ export function renderSimpleResult(
     const rawOutput = textOutput(result) ?? detailsOutput(result);
     const output = options.expanded ? boundedExpandedResult(rawOutput) : rawOutput;
     const language = detectStructuredOutputLanguage(output);
-    return renderGlowupOutput(theme, output, {
+    let renderOptions: GlowupOutputRenderOptions = {
         expanded: options.expanded,
         mode: "headTail",
         maxPreviewLines: 4,
         noOutputLabel: null,
-        ...(language === undefined ? {} : { syntax: { language } }),
-    });
+    };
+    if (language !== undefined) {
+        renderOptions = { ...renderOptions, syntax: { language } };
+    }
+    return renderGlowupOutput(theme, output, renderOptions);
 }
 
-export function renderThirdPartyCall(theme: GlowupRenderTheme, options: CallOptions): Component {
+export function renderThirdPartyCall(
+    theme: GlowupRenderTheme,
+    options: ThirdPartyCallOptions,
+): Component {
     const maxRenderedLines =
         options.expanded && options.expandable !== false ? undefined : options.maxRenderedLines;
     if (options.body === undefined) {

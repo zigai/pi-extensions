@@ -275,6 +275,11 @@ type ShellHighlightState = {
     readonly subcommandSeen: boolean;
 };
 
+type ShellTokenStyleResult = {
+    readonly styled: string;
+    readonly state: ShellHighlightState;
+};
+
 const SUBCOMMAND_SHELL_COMMANDS = new Set([
     "apt",
     "brew",
@@ -895,15 +900,17 @@ function renderBullet(theme: GlowupRenderTheme, state: GlowupCallState): string 
     return muted(theme, indicator);
 }
 
+export type GlowupCallRenderOptions = {
+    readonly state: GlowupCallState;
+    readonly statusText: string;
+    readonly body?: string;
+    readonly maxRenderedLines?: number;
+    readonly omittedHint?: string;
+};
+
 export function renderGlowupCall(
     theme: GlowupRenderTheme,
-    options: {
-        readonly state: GlowupCallState;
-        readonly statusText: string;
-        readonly body?: string;
-        readonly maxRenderedLines?: number;
-        readonly omittedHint?: string;
-    },
+    options: GlowupCallRenderOptions,
 ): Component {
     return makeComponent((width) => {
         const bullet = renderBullet(theme, options.state);
@@ -948,15 +955,17 @@ export function renderGlowupExplore(
     });
 }
 
+export type MutationCallRenderOptions = {
+    readonly body?: Component;
+    readonly labelColumnWidth?: number;
+    readonly statDigitWidth?: number;
+    readonly state?: GlowupCallState;
+};
+
 export function renderMutationCall(
     theme: GlowupRenderTheme,
     summary: MutationSummary,
-    options: {
-        readonly body?: Component;
-        readonly labelColumnWidth?: number;
-        readonly statDigitWidth?: number;
-        readonly state?: GlowupCallState;
-    } = {},
+    options: MutationCallRenderOptions = {},
 ): Component {
     return makeComponent((width) => {
         const stats = formatMutationStats(theme, summary, options.statDigitWidth);
@@ -1056,20 +1065,22 @@ function renderCollapsedWrappedPreview(
     return [...head, marker(head.length === 0 ? options.prefixFirst : options.prefixRest), ...tail];
 }
 
+export type GlowupOutputRenderOptions = {
+    readonly expanded: boolean;
+    readonly mode?: "headTail" | "head" | "hidden";
+    readonly maxPreviewLines?: number;
+    readonly prefixFirst?: string;
+    readonly prefixRest?: string;
+    readonly dimContent?: boolean;
+    readonly noOutputLabel?: string | null;
+    readonly omittedHint?: string;
+    readonly syntax?: CodeOutputSyntax;
+};
+
 export function renderGlowupOutput(
     theme: GlowupRenderTheme,
     text: string | undefined,
-    options: {
-        readonly expanded: boolean;
-        readonly mode?: "headTail" | "head" | "hidden";
-        readonly maxPreviewLines?: number;
-        readonly prefixFirst?: string;
-        readonly prefixRest?: string;
-        readonly dimContent?: boolean;
-        readonly noOutputLabel?: string | null;
-        readonly omittedHint?: string;
-        readonly syntax?: CodeOutputSyntax;
-    },
+    options: GlowupOutputRenderOptions,
 ): Component {
     const mode = options.mode ?? "headTail";
     const maxPreviewLines = options.maxPreviewLines ?? 5;
@@ -2238,18 +2249,20 @@ function resolveScriptHeaderLayout(
     return "inline";
 }
 
+export type ScriptCallRenderOptions = {
+    readonly state: GlowupCallState;
+    readonly expanded: boolean;
+    readonly maxCodePreviewLines?: number;
+    readonly showPrologueOmission?: boolean;
+    readonly omittedHint?: string;
+    readonly headerLayout?: ScriptPreviewHeaderLayout;
+    readonly invalidate?: () => void;
+};
+
 export function renderScriptCall(
     theme: GlowupRenderTheme,
     invocation: ScriptInvocation,
-    options: {
-        readonly state: GlowupCallState;
-        readonly expanded: boolean;
-        readonly maxCodePreviewLines?: number;
-        readonly showPrologueOmission?: boolean;
-        readonly omittedHint?: string;
-        readonly headerLayout?: ScriptPreviewHeaderLayout;
-        readonly invalidate?: () => void;
-    },
+    options: ScriptCallRenderOptions,
 ): Component {
     const expanded = options.expanded;
     const state = options.state;
@@ -2486,7 +2499,7 @@ function styleShellToken(
     theme: GlowupRenderTheme,
     token: string,
     state: ShellHighlightState,
-): { readonly styled: string; readonly state: ShellHighlightState } {
+): ShellTokenStyleResult {
     if (/^\s+$/.test(token)) {
         return { styled: token, state };
     }
@@ -2684,17 +2697,15 @@ export function changedOnlyDiffSections(sections: ReadonlyArray<DiffSection>): D
 
         const lines = retainedIndices.map((index) => section.lines[index] ?? "");
         const lineCoordinates = section.lineCoordinates;
-        return [
-            {
-                ...section,
-                lines,
-                ...(lineCoordinates === undefined
-                    ? {}
-                    : {
-                          lineCoordinates: retainedIndices.map((index) => lineCoordinates[index]),
-                      }),
-            },
-        ];
+        const changedSection: DiffSection = { ...section, lines };
+        return lineCoordinates === undefined
+            ? [changedSection]
+            : [
+                  {
+                      ...changedSection,
+                      lineCoordinates: retainedIndices.map((index) => lineCoordinates[index]),
+                  },
+              ];
     });
 }
 
@@ -2900,19 +2911,21 @@ function wrapDiffText(text: string, width: number, maxWrappedRows: number | unde
     return wrapStyledText(boundedText, width).slice(0, maxWrappedRows);
 }
 
+type DiffRowRenderOptions = {
+    readonly path?: string;
+    readonly lineNumberWidth?: number;
+    readonly maxWrappedRows?: number;
+    readonly highlightedContent?: string;
+    readonly changedRanges?: readonly TextRange[];
+    readonly lineCoordinates?: DiffLineCoordinates;
+};
+
 function renderDiffRow(
     line: string,
     width: number,
     leftPrefix: string,
     theme: GlowupRenderTheme,
-    options?: {
-        readonly path?: string;
-        readonly lineNumberWidth?: number;
-        readonly maxWrappedRows?: number;
-        readonly highlightedContent?: string;
-        readonly changedRanges?: readonly TextRange[];
-        readonly lineCoordinates?: DiffLineCoordinates;
-    },
+    options?: DiffRowRenderOptions,
 ): string[] {
     const parsed = parseDiffLine(line);
     const rowWidth = Math.max(1, width);
@@ -3258,14 +3271,16 @@ function collapsedDiffLineIndices(
     );
 }
 
+export type GlowupDiffRenderOptions = {
+    readonly collapsedLineBudget?: number;
+    readonly maxWrappedRows?: number;
+};
+
 export function renderGlowupDiff(
     theme: GlowupRenderTheme,
     sections: ReadonlyArray<DiffSection>,
     expanded: boolean,
-    options: {
-        readonly collapsedLineBudget?: number;
-        readonly maxWrappedRows?: number;
-    } = {},
+    options: GlowupDiffRenderOptions = {},
 ): Component {
     return makeComponent((width) => {
         const allDiffLineCount = sections.reduce(
@@ -3344,22 +3359,27 @@ export function renderGlowupDiff(
                     if (isUnchangedReplacementSide(line, changedRanges[index])) {
                         continue;
                     }
-                    rendered.push(
-                        ...renderDiffRow(line, width, "    ", theme, {
-                            ...(section.path === undefined ? {} : { path: section.path }),
-                            lineNumberWidth: sectionLineNumberWidth,
-                            ...(section.lineCoordinates?.[index] === undefined
-                                ? {}
-                                : { lineCoordinates: section.lineCoordinates[index] }),
-                            ...(highlightedContents[index] === undefined
-                                ? {}
-                                : { highlightedContent: highlightedContents[index] }),
-                            ...(changedRanges[index] === undefined
-                                ? {}
-                                : { changedRanges: changedRanges[index] }),
-                            ...(maxWrappedRows === undefined ? {} : { maxWrappedRows }),
-                        }),
-                    );
+                    let rowOptions: DiffRowRenderOptions = {};
+                    if (section.path !== undefined) {
+                        rowOptions = { ...rowOptions, path: section.path };
+                    }
+                    rowOptions = { ...rowOptions, lineNumberWidth: sectionLineNumberWidth };
+                    const lineCoordinates = section.lineCoordinates?.[index];
+                    if (lineCoordinates !== undefined) {
+                        rowOptions = { ...rowOptions, lineCoordinates };
+                    }
+                    const highlightedContent = highlightedContents[index];
+                    if (highlightedContent !== undefined) {
+                        rowOptions = { ...rowOptions, highlightedContent };
+                    }
+                    const lineChangedRanges = changedRanges[index];
+                    if (lineChangedRanges !== undefined) {
+                        rowOptions = { ...rowOptions, changedRanges: lineChangedRanges };
+                    }
+                    if (maxWrappedRows !== undefined) {
+                        rowOptions = { ...rowOptions, maxWrappedRows };
+                    }
+                    rendered.push(...renderDiffRow(line, width, "    ", theme, rowOptions));
                 }
             };
 

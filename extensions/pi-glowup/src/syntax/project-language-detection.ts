@@ -113,13 +113,13 @@ export function detectProjectSyntaxLanguages(
         }
     }
 
-    return {
+    const result = {
         languages: [...languages].sort(),
         scannedFiles,
         scannedDirectories,
         readErrors,
-        ...(stoppedReason === undefined ? {} : { stoppedReason }),
-    };
+    } satisfies ProjectLanguageDetectionResult;
+    return stoppedReason === undefined ? result : { ...result, stoppedReason };
 }
 
 function shouldIgnoreProjectDirectory(name: string): boolean {

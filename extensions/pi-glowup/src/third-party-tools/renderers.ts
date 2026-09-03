@@ -1,3 +1,5 @@
+import Type, { type Static } from "typebox";
+import { Value } from "typebox/value";
 import { createAgentBrowserRenderer } from "./extensions/agent-browser/renderer.ts";
 import {
     createChromeDevtoolsMcpRenderer,
@@ -7,7 +9,7 @@ import {
 import { createPiCoreRenderer, isPiCoreTool } from "./extensions/pi/core-renderer.ts";
 import { createGenericRenderer } from "./call-rendering.ts";
 import { glowupRenderingAdapter, createProtocolRenderer } from "./protocol-renderer.ts";
-import { baseToolName, isRecord, getNonEmptyString } from "./tool-values.ts";
+import { baseToolName } from "./tool-values.ts";
 import { GLOWUP_RENDERING_PROPERTY } from "../tool-rendering/protocol.ts";
 import type {
     ThirdPartyToolRenderer,
@@ -29,6 +31,25 @@ export type {
 
 // Transitional compatibility renderers remain here until each owning package ships a protocol
 // adapter. Tool-owned adapters take precedence, so families can migrate independently.
+const toolDefinitionViewSchema = Type.Object(
+    {
+        label: Type.Optional(Type.String()),
+        [GLOWUP_RENDERING_PROPERTY]: Type.Optional(Type.Unknown()),
+    },
+    { additionalProperties: true },
+);
+type ToolDefinitionView = Static<typeof toolDefinitionViewSchema>;
+
+const toolDefinitionViewParser = {
+    parse(value: unknown): ToolDefinitionView | undefined {
+        try {
+            return Value.Parse(toolDefinitionViewSchema, value);
+        } catch {
+            return undefined;
+        }
+    },
+};
+
 const TRANSITIONAL_RENDERER_PLUGINS: ReadonlyArray<ThirdPartyToolRendererPlugin> = [
     {
         name: "agent-browser",
@@ -85,18 +106,14 @@ function matcherMatches(toolName: string, matcher: ToolNameMatcher): boolean {
 }
 
 function hasPreservePreference(toolDefinition: unknown): boolean {
-    if (!isRecord(toolDefinition)) {
-        return false;
-    }
-    try {
-        return Reflect.get(toolDefinition, GLOWUP_RENDERING_PROPERTY) === "preserve";
-    } catch {
-        return false;
-    }
+    return (
+        toolDefinitionViewParser.parse(toolDefinition)?.[GLOWUP_RENDERING_PROPERTY] === "preserve"
+    );
 }
 
 function toolDefinitionLabel(toolDefinition: unknown): string | undefined {
-    return isRecord(toolDefinition) ? getNonEmptyString(toolDefinition, "label") : undefined;
+    const label = toolDefinitionViewParser.parse(toolDefinition)?.label;
+    return label === undefined || label.length === 0 ? undefined : label;
 }
 
 /** Returns whether a tool definition carries a valid public Glowup adapter. */

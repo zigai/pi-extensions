@@ -4,6 +4,7 @@ import {
     renderScriptCall,
     type GlowupCallState,
     type GlowupRenderTheme,
+    type ScriptCallRenderOptions,
     type ScriptInvocation,
     type ScriptPreviewHeaderLayout,
 } from "./core.ts";
@@ -31,6 +32,23 @@ function truncatePlainTextToWidth(text: string, maxWidth: number): string {
     return `${content}${suffix}`;
 }
 
+function scriptCallRenderOptions(
+    options: BashCommandRenderOptions,
+    headerLayout: ScriptPreviewHeaderLayout,
+): ScriptCallRenderOptions {
+    let renderOptions: ScriptCallRenderOptions = {
+        state: options.state,
+        expanded: options.expanded,
+        maxCodePreviewLines: options.maxCodePreviewLines,
+        showPrologueOmission: options.showPrologueOmission,
+        headerLayout,
+    };
+    if (options.invalidate !== undefined) {
+        renderOptions = { ...renderOptions, invalidate: options.invalidate };
+    }
+    return renderOptions;
+}
+
 function renderFullShellCommand(
     theme: GlowupRenderTheme,
     command: string,
@@ -45,14 +63,7 @@ function renderFullShellCommand(
         renderScriptCall(
             theme,
             { label: "Bash", language: "bash", code },
-            {
-                state: options.state,
-                expanded: options.expanded,
-                maxCodePreviewLines: options.maxCodePreviewLines,
-                showPrologueOmission: options.showPrologueOmission,
-                headerLayout,
-                ...(options.invalidate === undefined ? {} : { invalidate: options.invalidate }),
-            },
+            scriptCallRenderOptions(options, headerLayout),
         );
     const unsplit = renderInvocation(command);
     const unsplitBaselineLines = headerLayout === "block" ? 2 : 1;
@@ -112,14 +123,11 @@ export function renderBashCommandCall(
     const analysis = analyzeBashCommand(command, options.shellOperatorPosition);
     const pureScript = options.pureScriptOverride ?? analysis.pureScript;
     if (pureScript !== undefined) {
-        return renderScriptCall(theme, pureScript, {
-            state: options.state,
-            expanded: options.expanded,
-            maxCodePreviewLines: options.maxCodePreviewLines,
-            showPrologueOmission: options.showPrologueOmission,
-            headerLayout: options.headerLayout,
-            ...(options.invalidate === undefined ? {} : { invalidate: options.invalidate }),
-        });
+        return renderScriptCall(
+            theme,
+            pureScript,
+            scriptCallRenderOptions(options, options.headerLayout),
+        );
     }
     return renderFullShellCommand(theme, command, analysis, options);
 }

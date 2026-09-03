@@ -8,9 +8,9 @@ describe("edit call rendering", () => {
                 path: "src/rendering.ts",
                 edits: [
                     { oldText: "old", newText: "new" },
-                    { old_string: "before", new_string: "after" },
-                    "stray generated text",
-                    { oldText: "missing new text" },
+                    { oldText: "before", newText: "after" },
+                    null,
+                    null,
                 ],
             },
             { isError: false, isPartial: false, argsComplete: true },
@@ -59,7 +59,7 @@ describe("edit call rendering", () => {
 
     it("treats an unfinished edit entry as pending while arguments stream", () => {
         const summary = summarizeEditCall(
-            { path: "src/rendering.ts", edits: [{ oldText: "old" }] },
+            { path: "src/rendering.ts", edits: [null] },
             {
                 isError: false,
                 isPartial: true,

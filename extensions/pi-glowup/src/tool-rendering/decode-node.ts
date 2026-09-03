@@ -72,12 +72,14 @@ function parseInline(value: unknown, state: DecodeState): GlowupInline | undefin
     if (rawTone !== undefined && tone === undefined) return undefined;
     const rawBold = field(value, "bold");
     if (rawBold !== undefined && typeof rawBold !== "boolean") return undefined;
-    return {
-        kind: "text",
-        text: valueText,
-        ...(tone === undefined ? {} : { tone }),
-        ...(rawBold === undefined ? {} : { bold: rawBold }),
-    };
+    let inline: GlowupInline = { kind: "text", text: valueText };
+    if (tone !== undefined) {
+        inline = { ...inline, tone };
+    }
+    if (rawBold !== undefined) {
+        inline = { ...inline, bold: rawBold };
+    }
+    return inline;
 }
 
 function parseSyntax(value: unknown, state: DecodeState): GlowupSyntax | undefined {
@@ -88,10 +90,14 @@ function parseSyntax(value: unknown, state: DecodeState): GlowupSyntax | undefin
     if (path !== undefined && typeof path !== "string") return undefined;
     if (typeof language === "string" && !countText(state, language)) return undefined;
     if (typeof path === "string" && !countText(state, path)) return undefined;
-    return {
-        ...(language === undefined ? {} : { language }),
-        ...(path === undefined ? {} : { path }),
-    };
+    let syntax: GlowupSyntax = {};
+    if (language !== undefined) {
+        syntax = { ...syntax, language };
+    }
+    if (path !== undefined) {
+        syntax = { ...syntax, path };
+    }
+    return syntax;
 }
 
 function parsePreview(value: unknown): GlowupPreview | undefined {
@@ -116,12 +122,20 @@ function parsePreview(value: unknown): GlowupPreview | undefined {
         return undefined;
     }
     if (expandable !== undefined && typeof expandable !== "boolean") return undefined;
-    return {
-        ...(mode === undefined ? {} : { mode }),
-        ...(parsedCollapsedLines === undefined ? {} : { collapsedLines: parsedCollapsedLines }),
-        ...(parsedExpandedLines === undefined ? {} : { expandedLines: parsedExpandedLines }),
-        ...(expandable === undefined ? {} : { expandable }),
-    };
+    let preview: GlowupPreview = {};
+    if (mode !== undefined) {
+        preview = { ...preview, mode };
+    }
+    if (parsedCollapsedLines !== undefined) {
+        preview = { ...preview, collapsedLines: parsedCollapsedLines };
+    }
+    if (parsedExpandedLines !== undefined) {
+        preview = { ...preview, expandedLines: parsedExpandedLines };
+    }
+    if (expandable !== undefined) {
+        preview = { ...preview, expandable };
+    }
+    return preview;
 }
 
 function parseLabels(value: unknown, state: DecodeState): GlowupCallLabels | undefined {
@@ -152,12 +166,17 @@ function parseLabels(value: unknown, state: DecodeState): GlowupCallLabels | und
     for (const label of [parsedRunning, parsedCompleted, parsedFailed]) {
         if (label !== undefined && !countText(state, label)) return undefined;
     }
-    return {
-        static: staticLabel,
-        ...(parsedRunning === undefined ? {} : { running: parsedRunning }),
-        ...(parsedCompleted === undefined ? {} : { completed: parsedCompleted }),
-        ...(parsedFailed === undefined ? {} : { failed: parsedFailed }),
-    };
+    let labels: GlowupCallLabels = { static: staticLabel };
+    if (parsedRunning !== undefined) {
+        labels = { ...labels, running: parsedRunning };
+    }
+    if (parsedCompleted !== undefined) {
+        labels = { ...labels, completed: parsedCompleted };
+    }
+    if (parsedFailed !== undefined) {
+        labels = { ...labels, failed: parsedFailed };
+    }
+    return labels;
 }
 
 function parseNonNegativeInteger(value: unknown): number | undefined {
@@ -196,12 +215,14 @@ function parseMutationLine(value: unknown, state: DecodeState): GlowupMutationLi
     ) {
         return undefined;
     }
-    return {
-        kind,
-        text,
-        ...(oldLine === undefined ? {} : { oldLine }),
-        ...(newLine === undefined ? {} : { newLine }),
-    };
+    let line: GlowupMutationLine = { kind, text };
+    if (oldLine !== undefined) {
+        line = { ...line, oldLine };
+    }
+    if (newLine !== undefined) {
+        line = { ...line, newLine };
+    }
+    return line;
 }
 
 function parseMutationFile(value: unknown, state: DecodeState): GlowupMutationFile | undefined {
@@ -232,14 +253,14 @@ function parseMutationFile(value: unknown, state: DecodeState): GlowupMutationFi
     if (added === undefined || removed === undefined) return undefined;
     const countsKnown = field(value, "countsKnown");
     if (countsKnown !== undefined && typeof countsKnown !== "boolean") return undefined;
-    return {
-        path,
-        ...(rawPreviousPath === undefined ? {} : { previousPath: rawPreviousPath }),
-        lines,
-        added,
-        removed,
-        ...(countsKnown === undefined ? {} : { countsKnown }),
-    };
+    if (rawPreviousPath === undefined) {
+        return countsKnown === undefined
+            ? { path, lines, added, removed }
+            : { path, lines, added, removed, countsKnown };
+    }
+    return countsKnown === undefined
+        ? { path, previousPath: rawPreviousPath, lines, added, removed }
+        : { path, previousPath: rawPreviousPath, lines, added, removed, countsKnown };
 }
 
 function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNode | undefined {
@@ -286,13 +307,17 @@ function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNod
             ) {
                 return undefined;
             }
-            return {
-                kind: "code",
-                text: rawText,
-                ...(title === undefined ? {} : { title }),
-                ...(syntax === undefined ? {} : { syntax }),
-                ...(preview === undefined ? {} : { preview }),
-            };
+            let node: GlowupNode = { kind: "code", text: rawText };
+            if (title !== undefined) {
+                node = { ...node, title };
+            }
+            if (syntax !== undefined) {
+                node = { ...node, syntax };
+            }
+            if (preview !== undefined) {
+                node = { ...node, preview };
+            }
+            return node;
         }
         case "list": {
             const rawItems = field(value, "items");
@@ -315,7 +340,11 @@ function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNod
             const rawPreview = field(value, "preview");
             const preview = rawPreview === undefined ? undefined : parsePreview(rawPreview);
             if (rawPreview !== undefined && preview === undefined) return undefined;
-            return { kind: "list", items, ...(preview === undefined ? {} : { preview }) };
+            let node: GlowupNode = { kind: "list", items };
+            if (preview !== undefined) {
+                node = { ...node, preview };
+            }
+            return node;
         }
         case "call": {
             const labels = parseLabels(field(value, "labels"), state);
@@ -330,12 +359,14 @@ function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNod
             ) {
                 return undefined;
             }
-            return {
-                kind: "call",
-                labels,
-                ...(body === undefined ? {} : { body }),
-                ...(preview === undefined ? {} : { preview }),
-            };
+            let node: GlowupNode = { kind: "call", labels };
+            if (body !== undefined) {
+                node = { ...node, body };
+            }
+            if (preview !== undefined) {
+                node = { ...node, preview };
+            }
+            return node;
         }
         case "output": {
             const rawText = field(value, "text");
@@ -355,13 +386,20 @@ function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNod
             ) {
                 return undefined;
             }
-            return {
-                kind: "output",
-                ...(rawText === undefined ? {} : { text: rawText }),
-                ...(syntax === undefined ? {} : { syntax }),
-                ...(preview === undefined ? {} : { preview }),
-                ...(rawNoOutputLabel === undefined ? {} : { noOutputLabel: rawNoOutputLabel }),
-            };
+            let node: GlowupNode = { kind: "output" };
+            if (rawText !== undefined) {
+                node = { ...node, text: rawText };
+            }
+            if (syntax !== undefined) {
+                node = { ...node, syntax };
+            }
+            if (preview !== undefined) {
+                node = { ...node, preview };
+            }
+            if (rawNoOutputLabel !== undefined) {
+                node = { ...node, noOutputLabel: rawNoOutputLabel };
+            }
+            return node;
         }
         case "mutation": {
             const labels = parseLabels(field(value, "labels"), state);
@@ -390,12 +428,11 @@ function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNod
             ) {
                 return undefined;
             }
-            return {
-                kind: "mutation",
-                labels,
-                files,
-                ...(rawPatch === undefined ? {} : { patch: rawPatch }),
-            };
+            let node: GlowupNode = { kind: "mutation", labels, files };
+            if (rawPatch !== undefined) {
+                node = { ...node, patch: rawPatch };
+            }
+            return node;
         }
         case "stack": {
             const rawChildren = field(value, "children");

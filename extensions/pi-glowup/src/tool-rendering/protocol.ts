@@ -286,13 +286,17 @@ export function code(
         readonly preview?: GlowupPreview;
     } = {},
 ): GlowupCodeNode {
-    return {
-        kind: "code",
-        text: value,
-        ...(options.title === undefined ? {} : { title: options.title }),
-        ...(options.syntax === undefined ? {} : { syntax: options.syntax }),
-        ...(options.preview === undefined ? {} : { preview: options.preview }),
-    };
+    let node: GlowupCodeNode = { kind: "code", text: value };
+    if (options.title !== undefined) {
+        node = { ...node, title: options.title };
+    }
+    if (options.syntax !== undefined) {
+        node = { ...node, syntax: options.syntax };
+    }
+    if (options.preview !== undefined) {
+        node = { ...node, preview: options.preview };
+    }
+    return node;
 }
 
 /** Creates a bounded list component. */
@@ -300,11 +304,11 @@ export function list(
     items: ReadonlyArray<GlowupInline | GlowupNode>,
     preview?: GlowupPreview,
 ): GlowupListNode {
-    return {
-        kind: "list",
-        items,
-        ...(preview === undefined ? {} : { preview }),
-    };
+    let node: GlowupListNode = { kind: "list", items };
+    if (preview !== undefined) {
+        node = { ...node, preview };
+    }
+    return node;
 }
 
 /** Creates a tool call component. */
@@ -312,12 +316,14 @@ export function call(
     labels: GlowupCallLabels,
     options: { readonly body?: GlowupNode; readonly preview?: GlowupPreview } = {},
 ): GlowupCallNode {
-    return {
-        kind: "call",
-        labels,
-        ...(options.body === undefined ? {} : { body: options.body }),
-        ...(options.preview === undefined ? {} : { preview: options.preview }),
-    };
+    let node: GlowupCallNode = { kind: "call", labels };
+    if (options.body !== undefined) {
+        node = { ...node, body: options.body };
+    }
+    if (options.preview !== undefined) {
+        node = { ...node, preview: options.preview };
+    }
+    return node;
 }
 
 /** Creates an output component. */
@@ -329,13 +335,20 @@ export function output(
         readonly noOutputLabel?: string | null;
     } = {},
 ): GlowupOutputNode {
-    return {
-        kind: "output",
-        ...(value === undefined ? {} : { text: value }),
-        ...(options.syntax === undefined ? {} : { syntax: options.syntax }),
-        ...(options.preview === undefined ? {} : { preview: options.preview }),
-        ...(options.noOutputLabel === undefined ? {} : { noOutputLabel: options.noOutputLabel }),
-    };
+    let node: GlowupOutputNode = { kind: "output" };
+    if (value !== undefined) {
+        node = { ...node, text: value };
+    }
+    if (options.syntax !== undefined) {
+        node = { ...node, syntax: options.syntax };
+    }
+    if (options.preview !== undefined) {
+        node = { ...node, preview: options.preview };
+    }
+    if (options.noOutputLabel !== undefined) {
+        node = { ...node, noOutputLabel: options.noOutputLabel };
+    }
+    return node;
 }
 
 /** Creates a responsive, syntax-aware file mutation component. */
@@ -344,12 +357,11 @@ export function mutation(
     files: ReadonlyArray<GlowupMutationFile>,
     options: { readonly patch?: string } = {},
 ): GlowupMutationNode {
-    return {
-        kind: "mutation",
-        labels,
-        files,
-        ...(options.patch === undefined ? {} : { patch: options.patch }),
-    };
+    let node: GlowupMutationNode = { kind: "mutation", labels, files };
+    if (options.patch !== undefined) {
+        node = { ...node, patch: options.patch };
+    }
+    return node;
 }
 
 /** Creates an ordered component composition. */

@@ -6,6 +6,7 @@ import {
     truncateGraphemeText,
 } from "../text-boundaries.ts";
 import { isRecord } from "./tool-values.ts";
+import { jsonObjectParser, type JsonObject } from "../json-value.ts";
 
 const MAX_PREVIEW_CHARACTERS = 700;
 const MAX_PREVIEW_ARRAY_ITEMS = 20;
@@ -16,6 +17,15 @@ const SENSITIVE_KEY_PATTERN =
     /(?:pass(?:word|phrase)?|secret|token|api[_-]?key|auth(?:orization)?|cookie|credential|private[_-]?key|access[_-]?key)/iu;
 const INTERNAL_DETAIL_PATH_KEY_PATTERN =
     /(?:artifact|transcript|workspace|report|patch|output|attachment|session)(?:[_-]?(?:file|dir(?:ectory)?))?[_-]?paths?$/iu;
+
+type PreviewValue =
+    | string
+    | number
+    | boolean
+    | null
+    | undefined
+    | readonly PreviewValue[]
+    | { readonly [key: string]: PreviewValue };
 
 function itemCount(count: number): string {
     return `${count} ${count === 1 ? "item" : "items"}`;
@@ -38,7 +48,7 @@ function boundedPreviewValue(
     seen: WeakSet<object>,
     depth: number,
     key?: string,
-): unknown {
+): PreviewValue {
     if (key !== undefined && SENSITIVE_KEY_PATTERN.test(key)) {
         return "[redacted]";
     }
@@ -56,8 +66,14 @@ function boundedPreviewValue(
             ? "Symbol"
             : `Symbol(${value.description})`;
     }
-    if (typeof value !== "object" || value === null) {
+    if (value === undefined || value === null) {
         return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value !== "object") {
+        return "[Unsupported value]";
     }
     if (seen.has(value)) {
         return "[Circular]";
@@ -68,7 +84,7 @@ function boundedPreviewValue(
     seen.add(value);
 
     if (Array.isArray(value)) {
-        const output: unknown[] = [];
+        const output: PreviewValue[] = [];
         const limit = Math.min(value.length, MAX_PREVIEW_ARRAY_ITEMS);
         for (let index = 0; index < limit; index += 1) {
             output.push(boundedPreviewValue(safeRead(value, String(index)), seen, depth + 1));
@@ -79,7 +95,7 @@ function boundedPreviewValue(
         return output;
     }
 
-    const output: Record<string, unknown> = {};
+    const output: Record<string, PreviewValue> = {};
     let copied = 0;
     let omitted = 0;
     for (const keyName of Object.keys(value)) {
@@ -163,7 +179,7 @@ function compactValue(value: unknown, key: string): string | undefined {
     return value === undefined ? undefined : key;
 }
 
-function compactObjectPreview(value: Record<string, unknown>): string | undefined {
+function compactObjectPreview(value: JsonObject): string | undefined {
     const parts: string[] = [];
     let omitted = false;
     for (const key of Object.keys(value)) {
@@ -206,7 +222,8 @@ function previewPartialArgs(args: unknown, fallback?: string): string | undefine
     if (Array.isArray(args)) {
         return args.length === 0 ? undefined : itemCount(args.length);
     }
-    return isRecord(args) ? compactObjectPreview(args) : undefined;
+    const record = jsonObjectParser.parse(args);
+    return record === undefined ? undefined : compactObjectPreview(record);
 }
 
 /** Returns a bounded structured argument preview for expanded views. */
@@ -243,7 +260,7 @@ export function textOutput(result: ThirdPartyToolResult): string | undefined {
     return texts.length === 0 ? undefined : texts.join("\n");
 }
 
-function compactDetailsPreview(value: Record<string, unknown>): string | undefined {
+function compactDetailsPreview(value: JsonObject): string | undefined {
     const parts: string[] = [];
     for (const key of Object.keys(value)) {
         if (INTERNAL_DETAIL_PATH_KEY_PATTERN.test(key)) continue;
@@ -259,10 +276,8 @@ function compactDetailsPreview(value: Record<string, unknown>): string | undefin
 
 /** Extracts a small, redacted summary when a result has no text content. */
 export function detailsOutput(result: ThirdPartyToolResult): string | undefined {
-    if (!isRecord(result.details)) {
-        return undefined;
-    }
-    return compactDetailsPreview(result.details);
+    const details = jsonObjectParser.parse(result.details);
+    return details === undefined ? undefined : compactDetailsPreview(details);
 }
 
 function compactWhitespaceText(text: string, maxCharacters: number): string | undefined {

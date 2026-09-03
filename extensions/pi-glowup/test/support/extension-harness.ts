@@ -26,7 +26,7 @@ export class GlowupExtensionHarness {
     }
 
     async install(cwd: string, branch: readonly unknown[] = []): Promise<void> {
-        await glowupExtension(this.extensionApi);
+        glowupExtension(this.extensionApi);
         await this.emit(
             "session_start",
             { type: "session_start", reason: "startup" },

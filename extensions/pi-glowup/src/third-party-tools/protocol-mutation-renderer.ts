@@ -1,7 +1,7 @@
 import type { Component } from "@earendil-works/pi-tui";
 
 import { buildPierreDiffPayloadsFromPatch } from "../diffs/diff.ts";
-import { renderPierreDiff } from "../diffs/renderer.ts";
+import { renderPierreDiff, type PierreDiffRenderContext } from "../diffs/renderer.ts";
 import type { PierreDiffPayload } from "../diffs/types.ts";
 import {
     PREVIEW_MUTATION_SETTINGS,
@@ -15,6 +15,7 @@ import {
     type DiffLineCoordinates,
     type DiffSection,
     type GlowupCallState,
+    type GlowupDiffRenderOptions,
     type GlowupRenderTheme,
 } from "../rendering/core.ts";
 import type {
@@ -61,10 +62,14 @@ function numberedDiffLine(line: GlowupMutationLine): string {
 
 function lineCoordinates(line: GlowupMutationLine): DiffLineCoordinates | undefined {
     if (line.oldLine === undefined && line.newLine === undefined) return undefined;
-    return {
-        ...(line.oldLine === undefined ? {} : { oldLine: line.oldLine }),
-        ...(line.newLine === undefined ? {} : { newLine: line.newLine }),
-    };
+    let coordinates: DiffLineCoordinates = {};
+    if (line.oldLine !== undefined) {
+        coordinates = { ...coordinates, oldLine: line.oldLine };
+    }
+    if (line.newLine !== undefined) {
+        coordinates = { ...coordinates, newLine: line.newLine };
+    }
+    return coordinates;
 }
 
 function diffSection(file: GlowupMutationFile): DiffSection {
@@ -181,12 +186,22 @@ class ProtocolMutationComponent implements Component {
             const previousDiff = this.diffComponents.get(componentKey);
             const payload = payloads[index];
             const expanded = showsFullMutation(update.mutationSettings, update.context.expanded);
+            let diffOptions: GlowupDiffRenderOptions = {
+                collapsedLineBudget: update.mutationSettings.previewLines,
+            };
+            if (!update.context.expanded) {
+                diffOptions = { ...diffOptions, maxWrappedRows: 4 };
+            }
+            let pierreContext: PierreDiffRenderContext = {
+                lastComponent: previousDiff,
+                toolCallId: `${this.toolCallId}:${componentKey}`,
+            };
+            if (update.context.invalidate !== undefined) {
+                pierreContext = { ...pierreContext, invalidate: update.context.invalidate };
+            }
             const diff =
                 payload === undefined
-                    ? renderGlowupDiff(update.theme, [diffSection(file)], expanded, {
-                          collapsedLineBudget: update.mutationSettings.previewLines,
-                          ...(update.context.expanded ? {} : { maxWrappedRows: 4 }),
-                      })
+                    ? renderGlowupDiff(update.theme, [diffSection(file)], expanded, diffOptions)
                     : renderPierreDiff(
                           payload,
                           update.theme,
@@ -195,13 +210,7 @@ class ProtocolMutationComponent implements Component {
                               mutationSettings: update.mutationSettings,
                               expandedRows: "full",
                           },
-                          {
-                              lastComponent: previousDiff,
-                              toolCallId: `${this.toolCallId}:${componentKey}`,
-                              ...(update.context.invalidate === undefined
-                                  ? {}
-                                  : { invalidate: update.context.invalidate }),
-                          },
+                          pierreContext,
                       );
             this.diffComponents.set(componentKey, diff);
             const showStats = update.state !== "running" && file.countsKnown !== false;
@@ -229,16 +238,18 @@ class ProtocolMutationComponent implements Component {
     }
 }
 
+export type ProtocolMutationRenderOptions = {
+    readonly label: string;
+    readonly state: GlowupCallState;
+    readonly mutationSettings?: MutationSettings;
+};
+
 /** Renders a decoded mutation node through Glowup's configured mutation engine. */
 export function renderProtocolMutation(
     node: GlowupMutationNode,
     theme: GlowupRenderTheme,
     context: ThirdPartyToolRenderContext,
-    options: {
-        readonly label: string;
-        readonly state: GlowupCallState;
-        readonly mutationSettings?: MutationSettings;
-    },
+    options: ProtocolMutationRenderOptions,
 ): Component {
     const update: ProtocolMutationUpdate = {
         node,

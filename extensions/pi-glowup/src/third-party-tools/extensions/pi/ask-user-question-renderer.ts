@@ -28,7 +28,7 @@ import {
     getString,
     isDefined,
     isNonEmptyString,
-    isRecord,
+    jsonObjectParser,
 } from "../../tool-values.ts";
 
 type AskUserQuestionOption = {
@@ -50,48 +50,51 @@ type AskUserQuestionAnswer = {
 };
 
 function parseAskUserQuestionOption(value: unknown): AskUserQuestionOption | undefined {
-    if (!isRecord(value)) {
+    const record = jsonObjectParser.parse(value);
+    if (record === undefined) {
         return undefined;
     }
 
-    const label = getNonEmptyString(value, "label");
+    const label = getNonEmptyString(record, "label");
     if (label === undefined) {
         return undefined;
     }
 
     return {
         label,
-        description: getString(value, "description"),
-        hasPreview: getNonEmptyString(value, "preview") !== undefined,
+        description: getString(record, "description"),
+        hasPreview: getNonEmptyString(record, "preview") !== undefined,
     };
 }
 
 function parseAskUserQuestionItem(value: unknown): AskUserQuestionItem | undefined {
-    if (!isRecord(value)) {
+    const record = jsonObjectParser.parse(value);
+    if (record === undefined) {
         return undefined;
     }
 
-    const question = getNonEmptyString(value, "question");
+    const question = getNonEmptyString(record, "question");
     if (question === undefined) {
         return undefined;
     }
 
-    const rawOptions = getArray(value, "options") ?? [];
+    const rawOptions = getArray(record, "options") ?? [];
     const options = rawOptions.map(parseAskUserQuestionOption).filter(isDefined);
     return {
-        header: getNonEmptyString(value, "header"),
+        header: getNonEmptyString(record, "header"),
         question,
         options,
-        multiSelect: getBoolean(value, "multiSelect") === true,
+        multiSelect: getBoolean(record, "multiSelect") === true,
     };
 }
 
 function parseAskUserQuestions(args: unknown): ReadonlyArray<AskUserQuestionItem> {
-    if (!isRecord(args)) {
+    const record = jsonObjectParser.parse(args);
+    if (record === undefined) {
         return [];
     }
 
-    const rawQuestions = getArray(args, "questions") ?? [];
+    const rawQuestions = getArray(record, "questions") ?? [];
     return rawQuestions.map(parseAskUserQuestionItem).filter(isDefined);
 }
 

@@ -47,7 +47,7 @@ describe("markdown syntax patch", () => {
     });
 
     it("does not clobber render wrappers installed later", () => {
-        const prototype: { render(width: number): string[] } = {
+        const prototype = {
             render(_width: number): string[] {
                 return ["original"];
             },

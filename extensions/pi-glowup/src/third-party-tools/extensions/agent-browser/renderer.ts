@@ -12,7 +12,14 @@ import {
 } from "../../call-rendering.ts";
 import { truncateGraphemeText } from "../../../text-boundaries.ts";
 import { previewArgs, previewArgsForContext } from "../../previews.ts";
-import { getArray, getNonEmptyString, isDefined, isRecord } from "../../tool-values.ts";
+import {
+    getArray,
+    getNonEmptyString,
+    isDefined,
+    jsonObjectParser,
+    type JsonObject,
+} from "../../tool-values.ts";
+import { stringParser } from "../../../json-scalar.ts";
 
 const AGENT_BROWSER_COMMAND_LABELS = new Map<string, string>([
     ["open", "Browser Open"],
@@ -43,7 +50,7 @@ function countLabel(count: number, singular: string, plural = `${singular}s`): s
     return `${count} ${count === 1 ? singular : plural}`;
 }
 
-function summarizeElectron(value: Readonly<Record<string, unknown>>): string | undefined {
+function summarizeElectron(value: JsonObject): string | undefined {
     const action = getNonEmptyString(value, "action");
     const app =
         getNonEmptyString(value, "appName") ??
@@ -52,7 +59,7 @@ function summarizeElectron(value: Readonly<Record<string, unknown>>): string | u
     return [action, app].filter(isDefined).join(" · ") || undefined;
 }
 
-function summarizeSemanticAction(value: Readonly<Record<string, unknown>>): string | undefined {
+function summarizeSemanticAction(value: JsonObject): string | undefined {
     const action = getNonEmptyString(value, "action");
     const locator = getNonEmptyString(value, "locator");
     const target =
@@ -71,12 +78,15 @@ function summarizeSemanticAction(value: Readonly<Record<string, unknown>>): stri
         .join(" · ");
 }
 
-function summarizeJob(value: Readonly<Record<string, unknown>>): string | undefined {
+function summarizeJob(value: JsonObject): string | undefined {
     const steps = getArray(value, "steps");
     if (steps === undefined) return undefined;
     const actions = steps
         .slice(0, 4)
-        .map((step) => (isRecord(step) ? getNonEmptyString(step, "action") : undefined))
+        .map((step) => {
+            const record = jsonObjectParser.parse(step);
+            return record === undefined ? undefined : getNonEmptyString(record, "action");
+        })
         .filter(isDefined);
     const omitted = steps.length - actions.length;
     return `${countLabel(steps.length, "step")}${
@@ -86,7 +96,7 @@ function summarizeJob(value: Readonly<Record<string, unknown>>): string | undefi
     }`;
 }
 
-function summarizeQa(value: Readonly<Record<string, unknown>>): string | undefined {
+function summarizeQa(value: JsonObject): string | undefined {
     const target =
         getNonEmptyString(value, "url") ??
         (value.attached === true ? "current browser session" : undefined);
@@ -100,7 +110,7 @@ function summarizeQa(value: Readonly<Record<string, unknown>>): string | undefin
         .join(" · ");
 }
 
-function summarizeSourceLookup(value: Readonly<Record<string, unknown>>): string | undefined {
+function summarizeSourceLookup(value: JsonObject): string | undefined {
     return (
         getNonEmptyString(value, "componentName") ??
         getNonEmptyString(value, "selector") ??
@@ -114,12 +124,14 @@ function summarizeAgentBrowserArgs(
     args: unknown,
     context: ThirdPartyToolRenderContext,
 ): CallSummary {
-    if (!isRecord(args)) {
+    const record = jsonObjectParser.parse(args);
+    if (record === undefined) {
         return { label: "Browser", body: previewArgsForContext(args, context) };
     }
 
-    if (typeof args.script === "string") {
-        const scriptLines = args.script.replace(/\r\n?/gu, "\n").split("\n");
+    const script = getNonEmptyString(record, "script");
+    if (script !== undefined) {
+        const scriptLines = script.replace(/\r\n?/gu, "\n").split("\n");
         const firstLine = scriptLines.map((line) => compactText(line, 120)).find(isDefined);
         const preview =
             firstLine === undefined
@@ -131,57 +143,69 @@ function summarizeAgentBrowserArgs(
         };
     }
 
-    if (isRecord(args.electron)) {
+    const electron = jsonObjectParser.parse(record.electron);
+    if (electron !== undefined) {
         return {
             label: AGENT_BROWSER_COMMAND_LABELS.get("electron") ?? "Electron",
-            body: summarizeElectron(args.electron) ?? previewArgsForContext(args.electron, context),
+            body: summarizeElectron(electron) ?? previewArgsForContext(electron, context),
         };
     }
 
-    if (isRecord(args.semanticAction)) {
+    const semanticAction = jsonObjectParser.parse(record.semanticAction);
+    if (semanticAction !== undefined) {
         return {
             label: AGENT_BROWSER_COMMAND_LABELS.get("semanticAction") ?? "Browser Action",
             body:
-                summarizeSemanticAction(args.semanticAction) ??
-                previewArgsForContext(args.semanticAction, context),
+                summarizeSemanticAction(semanticAction) ??
+                previewArgsForContext(semanticAction, context),
         };
     }
 
-    if (isRecord(args.job)) {
+    const job = jsonObjectParser.parse(record.job);
+    if (job !== undefined) {
         return {
             label: AGENT_BROWSER_COMMAND_LABELS.get("job") ?? "Browser Job",
-            body: summarizeJob(args.job) ?? previewArgsForContext(args.job, context),
+            body: summarizeJob(job) ?? previewArgsForContext(job, context),
         };
     }
 
-    if (isRecord(args.qa)) {
+    const qa = jsonObjectParser.parse(record.qa);
+    if (qa !== undefined) {
         return {
             label: AGENT_BROWSER_COMMAND_LABELS.get("qa") ?? "Browser QA",
-            body: summarizeQa(args.qa) ?? previewArgsForContext(args.qa, context),
+            body: summarizeQa(qa) ?? previewArgsForContext(qa, context),
         };
     }
 
     for (const key of ["sourceLookup", "networkSourceLookup"] as const) {
-        if (isRecord(args[key])) {
+        const sourceLookup = jsonObjectParser.parse(record[key]);
+        if (sourceLookup !== undefined) {
             return {
                 label: AGENT_BROWSER_COMMAND_LABELS.get(key) ?? "Browser Source Lookup",
-                body: summarizeSourceLookup(args[key]) ?? previewArgsForContext(args[key], context),
+                body:
+                    summarizeSourceLookup(sourceLookup) ??
+                    previewArgsForContext(sourceLookup, context),
             };
         }
     }
 
-    const commandArgs = getArray(args, "args");
+    const commandArgs = getArray(record, "args");
     const rawCommand = commandArgs?.[0];
-    const command =
-        typeof rawCommand === "string" && rawCommand.length > 0 ? rawCommand : undefined;
-    if (command !== undefined && commandArgs !== undefined) {
+    const command = stringParser.parse(rawCommand);
+    const nonEmptyCommand = command === undefined || command.length === 0 ? undefined : command;
+    if (nonEmptyCommand !== undefined && commandArgs !== undefined) {
         const commandBody = commandArgs
             .slice(1)
-            .map((value) => (typeof value === "string" ? compactText(value, 120) : undefined))
+            .map((value) => {
+                const text = stringParser.parse(value);
+                return text === undefined ? undefined : compactText(text, 120);
+            })
             .filter(isDefined)
             .join(" ");
         return {
-            label: AGENT_BROWSER_COMMAND_LABELS.get(command) ?? `Browser ${command}`,
+            label:
+                AGENT_BROWSER_COMMAND_LABELS.get(nonEmptyCommand) ??
+                `Browser ${nonEmptyCommand}`,
             body:
                 context.isPartial || !context.argsComplete
                     ? countLabel(Math.max(0, commandArgs.length - 1), "argument")
@@ -198,8 +222,11 @@ export function createAgentBrowserRenderer(
 ): ThirdPartyToolRenderer {
     return {
         renderCall(args, theme, context) {
+            const record = jsonObjectParser.parse(args);
             const hasEvolvingContent =
-                isRecord(args) && (typeof args.script === "string" || isRecord(args.job));
+                record !== undefined &&
+                (getNonEmptyString(record, "script") !== undefined ||
+                    jsonObjectParser.parse(record.job) !== undefined);
             if (!hasEvolvingContent && shouldDeferSimpleToolCall(context)) {
                 return emptyComponent();
             }

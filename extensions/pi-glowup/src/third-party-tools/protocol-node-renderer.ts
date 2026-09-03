@@ -3,6 +3,7 @@ import {
     makeComponent,
     renderGlowupBody,
     renderGlowupOutput,
+    type GlowupOutputRenderOptions,
     type GlowupRenderTheme,
 } from "../rendering/core.ts";
 import type { MutationSettings } from "../mutations/settings.ts";
@@ -19,8 +20,12 @@ import {
     DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderThirdPartyCall,
     thirdPartyStatusLabel,
+    type ThirdPartyCallOptions,
 } from "./call-rendering.ts";
-import { renderProtocolMutation } from "./protocol-mutation-renderer.ts";
+import {
+    renderProtocolMutation,
+    type ProtocolMutationRenderOptions,
+} from "./protocol-mutation-renderer.ts";
 import type { ThirdPartyToolRenderContext } from "./types.ts";
 
 const DEFAULT_EXPANDED_PREVIEW_LINES = 500;
@@ -146,13 +151,16 @@ export function renderProtocolNode(
         case "summary":
             return renderSummary(node, theme);
         case "code": {
-            const content = renderGlowupOutput(theme, node.text, {
+            let outputOptions: GlowupOutputRenderOptions = {
                 expanded: context.expanded,
                 mode: previewMode(node.preview),
                 maxPreviewLines: previewLines(node.preview, context.expanded),
                 noOutputLabel: null,
-                ...(node.syntax === undefined ? {} : { syntax: node.syntax }),
-            });
+            };
+            if (node.syntax !== undefined) {
+                outputOptions = { ...outputOptions, syntax: node.syntax };
+            }
+            const content = renderGlowupOutput(theme, node.text, outputOptions);
             if (node.title === undefined) return content;
             const title = renderGlowupBody(toneText(theme, node.title));
             return makeComponent((width) => [...title.render(width), ...content.render(width)]);
@@ -164,37 +172,45 @@ export function renderProtocolNode(
                 maxPreviewLines: previewLines(node.preview, context.expanded),
                 noOutputLabel: null,
             });
-        case "output":
-            return renderGlowupOutput(theme, node.text, {
+        case "output": {
+            let outputOptions: GlowupOutputRenderOptions = {
                 expanded: context.expanded,
                 mode: previewMode(node.preview),
                 maxPreviewLines: previewLines(node.preview, context.expanded),
                 noOutputLabel: node.noOutputLabel ?? null,
-                ...(node.syntax === undefined ? {} : { syntax: node.syntax }),
-            });
-        case "mutation":
-            return renderProtocolMutation(node, theme, context, {
+            };
+            if (node.syntax !== undefined) {
+                outputOptions = { ...outputOptions, syntax: node.syntax };
+            }
+            return renderGlowupOutput(theme, node.text, outputOptions);
+        }
+        case "mutation": {
+            let mutationOptions: ProtocolMutationRenderOptions = {
                 label: statusLabel(labelMode, context, node.labels),
                 state: callState(context),
-                ...(mutationSettings === undefined ? {} : { mutationSettings }),
-            });
+            };
+            if (mutationSettings !== undefined) {
+                mutationOptions = { ...mutationOptions, mutationSettings };
+            }
+            return renderProtocolMutation(node, theme, context, mutationOptions);
+        }
         case "call": {
-            const headerOptions = {
+            let headerOptions: ThirdPartyCallOptions = {
                 state: callState(context),
                 statusText: statusLabel(labelMode, context, node.labels),
                 body: undefined,
                 maxRenderedLines: previewLines(node.preview, context.expanded),
                 expanded: context.expanded,
-                ...(context.expanded
-                    ? { expandable: false }
-                    : node.preview?.expandable === undefined
-                      ? {}
-                      : { expandable: node.preview.expandable }),
             };
+            if (context.expanded) {
+                headerOptions = { ...headerOptions, expandable: false };
+            } else if (node.preview?.expandable !== undefined) {
+                headerOptions = { ...headerOptions, expandable: node.preview.expandable };
+            }
             if (node.body === undefined || node.body.kind === "text") {
                 return renderThirdPartyCall(theme, {
                     ...headerOptions,
-                    ...(node.body === undefined ? {} : { body: nodeText(node.body, theme) }),
+                    body: node.body === undefined ? undefined : nodeText(node.body, theme),
                 });
             }
             const header = renderThirdPartyCall(theme, headerOptions);

@@ -25,6 +25,11 @@ type ExplorationGroup = {
     ownerInvalidate: (() => void) | undefined;
 };
 
+export type ExplorationGroupStoreStats = {
+    readonly groups: number;
+    readonly toolCalls: number;
+};
+
 export class ExplorationGroupStore {
     private activeGroup: ExplorationGroup | undefined;
     private readonly groupsByToolCallId = new Map<string, ExplorationGroup>();
@@ -107,7 +112,7 @@ export class ExplorationGroupStore {
         this.groupStartToolCallIds.clear();
     }
 
-    stats(): { readonly groups: number; readonly toolCalls: number } {
+    stats(): ExplorationGroupStoreStats {
         return {
             groups: this.groupsInInsertionOrder.length,
             toolCalls: this.groupsByToolCallId.size,

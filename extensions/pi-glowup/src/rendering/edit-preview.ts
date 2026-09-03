@@ -25,6 +25,11 @@ type PreviewStoreOptions<TPreview> = {
     readonly measureBytes?: (preview: TPreview) => number;
 };
 
+export type PreviewStoreStats = {
+    readonly entries: number;
+    readonly bytes: number;
+};
+
 /** Bounded in-memory previews keyed by Pi tool call id. */
 export class PreviewStore<TPreview> {
     private readonly maxEntries: number;
@@ -64,7 +69,7 @@ export class PreviewStore<TPreview> {
         this.totalBytes = 0;
     }
 
-    stats(): { readonly entries: number; readonly bytes: number } {
+    stats(): PreviewStoreStats {
         return {
             entries: this.previewsByToolCallId.size,
             bytes: this.totalBytes,

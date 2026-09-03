@@ -19,9 +19,12 @@ import {
     baseToolName,
     getArray,
     getNonEmptyString,
+    getNumber,
     isDefined,
-    isRecord,
+    jsonObjectParser,
+    type JsonValue,
 } from "../../tool-values.ts";
+import { jsonValueParser } from "../../../json-value.ts";
 
 const CHROME_DEVTOOLS_PREFIX_PATTERN = /(?:^|__)chrome[-_]?devtools(?:__|_|$)/i;
 
@@ -71,10 +74,10 @@ function countLabel(count: number, singular: string, plural = `${singular}s`): s
     return `${count} ${count === 1 ? singular : plural}`;
 }
 
-function parseStructuredArgs(value: unknown): unknown {
+function parseStructuredArgs(value: JsonValue): JsonValue {
     if (typeof value !== "string") return value;
     try {
-        return JSON.parse(value) as unknown;
+        return jsonValueParser.parse(JSON.parse(value)) ?? value;
     } catch {
         return value;
     }
@@ -82,34 +85,35 @@ function parseStructuredArgs(value: unknown): unknown {
 
 function summarizeChromeArgs(
     command: string,
-    args: unknown,
+    args: JsonValue,
     context: ThirdPartyToolRenderContext,
 ): string | undefined {
-    if (!isRecord(args)) return previewArgsForContext(args, context);
-    const uid = getNonEmptyString(args, "uid");
+    const record = jsonObjectParser.parse(args);
+    if (record === undefined) return previewArgsForContext(args, context);
+    const uid = getNonEmptyString(record, "uid");
     const filePath =
-        getNonEmptyString(args, "filePath") ??
-        getNonEmptyString(args, "outputDirPath") ??
-        getNonEmptyString(args, "requestFilePath") ??
-        getNonEmptyString(args, "responseFilePath");
+        getNonEmptyString(record, "filePath") ??
+        getNonEmptyString(record, "outputDirPath") ??
+        getNonEmptyString(record, "requestFilePath") ??
+        getNonEmptyString(record, "responseFilePath");
     switch (command) {
         case "navigate_page": {
-            const navigationType = getNonEmptyString(args, "type") ?? "url";
-            const url = getNonEmptyString(args, "url");
+            const navigationType = getNonEmptyString(record, "type") ?? "url";
+            const url = getNonEmptyString(record, "url");
             return navigationType === "url" ? url : navigationType;
         }
         case "new_page":
-            return getNonEmptyString(args, "url");
+            return getNonEmptyString(record, "url");
         case "click":
-            return [uid, args.dblClick === true ? "double click" : undefined]
+            return [uid, record.dblClick === true ? "double click" : undefined]
                 .filter(isDefined)
                 .join(" · ");
         case "drag":
-            return [getNonEmptyString(args, "from_uid"), getNonEmptyString(args, "to_uid")]
+            return [getNonEmptyString(record, "from_uid"), getNonEmptyString(record, "to_uid")]
                 .filter(isDefined)
                 .join(" → ");
         case "fill": {
-            const value = getNonEmptyString(args, "value");
+            const value = getNonEmptyString(record, "value");
             return [
                 uid,
                 value === undefined ? undefined : countLabel(Array.from(value).length, "character"),
@@ -118,60 +122,66 @@ function summarizeChromeArgs(
                 .join(" · ");
         }
         case "fill_form": {
-            const elements = getArray(args, "elements");
+            const elements = getArray(record, "elements");
             return elements === undefined ? undefined : countLabel(elements.length, "field");
         }
         case "type_text": {
-            const value = getNonEmptyString(args, "text");
+            const value = getNonEmptyString(record, "text");
             return [
                 value === undefined ? undefined : countLabel(Array.from(value).length, "character"),
-                getNonEmptyString(args, "submitKey"),
+                getNonEmptyString(record, "submitKey"),
             ]
                 .filter(isDefined)
                 .join(" · ");
         }
         case "evaluate_script": {
-            const script = getNonEmptyString(args, "function");
+            const script = getNonEmptyString(record, "function");
             return [script === undefined ? undefined : compactText(script), filePath]
                 .filter(isDefined)
                 .join(" · ");
         }
         case "resize_page": {
-            const width = typeof args.width === "number" ? args.width : undefined;
-            const height = typeof args.height === "number" ? args.height : undefined;
+            const width = getNumber(record, "width");
+            const height = getNumber(record, "height");
             return width === undefined || height === undefined ? undefined : `${width}×${height}`;
         }
         case "select_page":
         case "close_page":
-            return typeof args.pageId === "number" ? `page ${args.pageId}` : undefined;
+            return getNumber(record, "pageId") === undefined
+                ? undefined
+                : `page ${getNumber(record, "pageId")}`;
         case "get_console_message":
-            return typeof args.msgid === "number" ? `message ${args.msgid}` : undefined;
+            return getNumber(record, "msgid") === undefined
+                ? undefined
+                : `message ${getNumber(record, "msgid")}`;
         case "get_network_request":
             return [
-                typeof args.reqid === "number" ? `request ${args.reqid}` : "selected request",
+                getNumber(record, "reqid") === undefined
+                    ? "selected request"
+                    : `request ${getNumber(record, "reqid")}`,
                 filePath,
             ]
                 .filter(isDefined)
                 .join(" · ");
         case "press_key":
-            return getNonEmptyString(args, "key");
+            return getNonEmptyString(record, "key");
         case "handle_dialog":
-            return getNonEmptyString(args, "action");
+            return getNonEmptyString(record, "action");
         case "wait_for": {
-            const values = getArray(args, "text")?.filter(
+            const values = getArray(record, "text")?.filter(
                 (value): value is string => typeof value === "string",
             );
             return values === undefined ? undefined : values.slice(0, 3).join(" · ");
         }
         case "performance_analyze_insight":
-            return [getNonEmptyString(args, "insightName"), getNonEmptyString(args, "insightSetId")]
+            return [getNonEmptyString(record, "insightName"), getNonEmptyString(record, "insightSetId")]
                 .filter(isDefined)
                 .join(" · ");
         case "emulate":
             return [
-                getNonEmptyString(args, "viewport"),
-                getNonEmptyString(args, "networkConditions"),
-                getNonEmptyString(args, "colorScheme"),
+                getNonEmptyString(record, "viewport"),
+                getNonEmptyString(record, "networkConditions"),
+                getNonEmptyString(record, "colorScheme"),
             ]
                 .filter(isDefined)
                 .join(" · ");
@@ -189,17 +199,23 @@ function summarizeChromeArgs(
     }
 }
 
+type McpGatewayArgsSummary = {
+    readonly label: string;
+    readonly body: string | undefined;
+};
+
 function summarizeMcpGatewayArgs(
     args: unknown,
     context: ThirdPartyToolRenderContext,
-): { readonly label: string; readonly body: string | undefined } {
-    if (!isRecord(args)) {
+): McpGatewayArgsSummary {
+    const record = jsonObjectParser.parse(args);
+    if (record === undefined) {
         return { label: "MCP", body: previewArgsForContext(args, context) };
     }
 
-    const tool = getNonEmptyString(args, "tool");
+    const tool = getNonEmptyString(record, "tool");
     if (tool !== undefined) {
-        const toolArgs = parseStructuredArgs(args.args);
+        const toolArgs = parseStructuredArgs(record.args ?? null);
         const command = tool.replace(/^chrome[-_]?devtools(?:__|[_-])?/iu, "");
         return {
             label: MCP_COMMAND_LABELS.get(command) ?? `MCP ${baseToolName(tool)}`,
@@ -216,12 +232,12 @@ function summarizeMcpGatewayArgs(
             ["instructions", "MCP Instructions"],
             ["connect", "MCP Connect"],
         ] as const
-    ).find(([key]) => getNonEmptyString(args, key) !== undefined);
+    ).find(([key]) => getNonEmptyString(record, key) !== undefined);
     if (operation !== undefined) {
-        return { label: operation[1], body: getNonEmptyString(args, operation[0]) };
+        return { label: operation[1], body: getNonEmptyString(record, operation[0]) };
     }
 
-    const action = getNonEmptyString(args, "action");
+    const action = getNonEmptyString(record, "action");
     if (action !== undefined) {
         const actionLabel =
             action === "ui-messages"
@@ -229,10 +245,10 @@ function summarizeMcpGatewayArgs(
                 : action === "auth-start" || action === "auth-complete"
                   ? "MCP Authenticate"
                   : `MCP ${action}`;
-        return { label: actionLabel, body: getNonEmptyString(args, "server") };
+        return { label: actionLabel, body: getNonEmptyString(record, "server") };
     }
 
-    const server = getNonEmptyString(args, "server");
+    const server = getNonEmptyString(record, "server");
     if (server !== undefined) return { label: "MCP Status", body: server };
     return { label: "MCP Status", body: undefined };
 }
@@ -316,10 +332,14 @@ export function createChromeDevtoolsMcpRenderer(
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
             const command = baseToolName(toolName).replace(/^chrome[-_]?devtools(?:__|[_-])?/i, "");
             const label = MCP_COMMAND_LABELS.get(command) ?? `MCP ${baseToolName(toolName)}`;
+            const parsedArgs = jsonValueParser.parse(args);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, mcpLifecycleLabels(label)),
-                body: summarizeChromeArgs(command, args, context),
+                body:
+                    parsedArgs === undefined
+                        ? previewArgsForContext(args, context)
+                        : summarizeChromeArgs(command, parsedArgs, context),
                 maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
             });

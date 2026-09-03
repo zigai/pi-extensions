@@ -6,7 +6,6 @@ import {
     truncateGraphemeText,
     truncateUtf8ByGrapheme,
 } from "../text-boundaries.ts";
-import { stringField } from "../unknown-values.ts";
 import {
     emptyComponent,
     formatPathTarget,
@@ -16,8 +15,10 @@ import {
     renderMutationCall,
     MUTATION_DIFF_PREVIEW_ROWS,
     toolExpandHint,
+    type GlowupDiffRenderOptions,
     type GlowupRenderTheme,
     type DiffSection,
+    type MutationCallRenderOptions,
 } from "./core.ts";
 import { isActiveToolCall, toolStatusLabel, type ToolLabelMode } from "./status-labels.ts";
 import {
@@ -28,7 +29,12 @@ import {
 
 const WRITE_PREVIEW_TRUNCATION_SUFFIX = "\n… write preview truncated";
 
-type WriteCallContext = {
+export type WriteCallArgs = {
+    readonly path?: string;
+    readonly content?: string;
+};
+
+export type WriteCallContext = {
     readonly toolCallId?: string;
     readonly isError: boolean;
     readonly isPartial: boolean;
@@ -43,6 +49,29 @@ type WriteCallContext = {
 };
 
 const PARTIAL_WRITE_PREVIEW_LINES = MUTATION_DIFF_PREVIEW_ROWS;
+
+function writeDiffRenderOptions(
+    collapsedLineBudget: number,
+    showAllRows: boolean,
+): GlowupDiffRenderOptions {
+    let options: GlowupDiffRenderOptions = { collapsedLineBudget };
+    if (!showAllRows) {
+        options = { ...options, maxWrappedRows: 1 };
+    }
+    return options;
+}
+
+function writeMutationCallOptions(
+    labelColumnWidth: number | undefined,
+    body: Component,
+    state: "running" | "success",
+): MutationCallRenderOptions {
+    let options: MutationCallRenderOptions = {};
+    if (labelColumnWidth !== undefined) {
+        options = { ...options, labelColumnWidth };
+    }
+    return { ...options, body, state };
+}
 const PARTIAL_WRITE_HEAD_LINES = PARTIAL_WRITE_PREVIEW_LINES;
 const PARTIAL_WRITE_MOVING_TAIL_LINES = PARTIAL_WRITE_PREVIEW_LINES;
 const PARTIAL_WRITE_SUFFIX_CHARS = 32;
@@ -341,10 +370,7 @@ class PartialWriteCallPreviewComponent implements Component {
                       this.theme,
                       [writeDiffSection(this.path, previewText, added)],
                       true,
-                      {
-                          collapsedLineBudget: PARTIAL_WRITE_PREVIEW_LINES,
-                          ...(this.expanded ? {} : { maxWrappedRows: 1 }),
-                      },
+                      writeDiffRenderOptions(PARTIAL_WRITE_PREVIEW_LINES, this.expanded),
                   );
         const component = renderMutationCall(
             this.theme,
@@ -362,13 +388,7 @@ class PartialWriteCallPreviewComponent implements Component {
                 added,
                 removed: 0,
             },
-            {
-                ...(this.mutationLabelColumnWidth === undefined
-                    ? {}
-                    : { labelColumnWidth: this.mutationLabelColumnWidth }),
-                body,
-                state: "running",
-            },
+            writeMutationCallOptions(this.mutationLabelColumnWidth, body, "running"),
         );
         const lines = component.render(width);
         this.cachedWidth = width;
@@ -395,17 +415,17 @@ function boundedWriteContentPreview(content: string, maxBytes: number | null): s
 }
 
 /** Returns the built-in write tool content argument when it is available to render. */
-function writeContentFromArgs(args: unknown): string | undefined {
-    return stringField(args, "content");
+function writeContentFromArgs(args: WriteCallArgs): string | undefined {
+    return args.content;
 }
 
 /** Renders a built-in write call with a bounded preview of the content being written. */
 export function renderWriteCallPreview(
-    args: unknown,
+    args: WriteCallArgs,
     theme: GlowupRenderTheme,
     context: WriteCallContext,
 ): Component {
-    const path = stringField(args, "path") ?? "";
+    const path = args.path ?? "";
     const content = writeContentFromArgs(args);
     const labelMode = context.labelMode ?? "static";
     const mutationSettings = context.mutationSettings ?? PREVIEW_MUTATION_SETTINGS;
@@ -466,10 +486,7 @@ export function renderWriteCallPreview(
                   theme,
                   [writeDiffSection(path, boundedContent, added)],
                   showAllRows,
-                  {
-                      collapsedLineBudget: mutationSettings.previewLines,
-                      ...(showAllRows ? {} : { maxWrappedRows: 1 }),
-                  },
+                  writeDiffRenderOptions(mutationSettings.previewLines, showAllRows),
               );
     return renderMutationCall(
         theme,
@@ -479,17 +496,11 @@ export function renderWriteCallPreview(
             added,
             removed: 0,
         },
-        {
-            ...(context.mutationLabelColumnWidth === undefined
-                ? {}
-                : { labelColumnWidth: context.mutationLabelColumnWidth }),
-            body,
-            state: "success",
-        },
+        writeMutationCallOptions(context.mutationLabelColumnWidth, body, "success"),
     );
 }
 
 /** Returns an empty successful write result when the call renderer already showed content. */
-export function renderSuccessfulWriteResultFallback(args: unknown): Component | undefined {
+export function renderSuccessfulWriteResultFallback(args: WriteCallArgs): Component | undefined {
     return writeContentFromArgs(args) === undefined ? undefined : emptyComponent();
 }

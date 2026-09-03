@@ -68,12 +68,17 @@ export function neutralizeTerminalControls(text: string): string {
     return neutralized.includes("\t") ? expandTerminalTabs(neutralized, 4, 0).text : neutralized;
 }
 
+export type ExpandedTerminalTabs = {
+    readonly text: string;
+    readonly finalDisplayColumn: number;
+};
+
 /** Expands tabs to terminal tab stops while preserving ANSI sequences and wide-character columns. */
 export function expandTerminalTabs(
     text: string,
     tabWidth = 4,
     initialDisplayColumn = 0,
-): { readonly text: string; readonly finalDisplayColumn: number } {
+): ExpandedTerminalTabs {
     const width = Math.max(1, Math.floor(tabWidth));
     let displayColumn = Math.max(0, Math.floor(initialDisplayColumn));
     let output = "";

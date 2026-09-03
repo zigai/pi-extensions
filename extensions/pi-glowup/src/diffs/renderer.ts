@@ -74,6 +74,12 @@ type QueuedHighlight = {
     readonly resolve: (result: HighlightedDiffLoadResult) => void;
 };
 
+type DiffHighlightSchedulerStats = {
+    readonly activeTimers: number;
+    readonly queued: number;
+    readonly running: boolean;
+};
+
 class DiffHighlightScheduler {
     private readonly queued: QueuedHighlight[] = [];
     private readonly pending = new Map<string, Promise<HighlightedDiffLoadResult>>();
@@ -117,7 +123,7 @@ class DiffHighlightScheduler {
         this.cached.clear();
     }
 
-    stats(): { readonly activeTimers: number; readonly queued: number; readonly running: boolean } {
+    stats(): DiffHighlightSchedulerStats {
         return {
             activeTimers: this.timer === undefined ? 0 : 1,
             queued: this.queued.length,
@@ -317,10 +323,15 @@ function trimSemanticEdgeCollapsedRows(
     return rows.slice(start, end);
 }
 
+type SemanticPreviewSelection = {
+    readonly sourceIndices: ReadonlySet<number>;
+    readonly omitted: number;
+};
+
 function semanticPreviewSelection(
     rows: readonly SemanticSourceRow[],
     rowBudget: number,
-): { readonly sourceIndices: ReadonlySet<number>; readonly omitted: number } {
+): SemanticPreviewSelection {
     const selected = selectSemanticDiffIndices(
         rows.map((row) => row.kind),
         Math.max(1, rowBudget - 1),
@@ -450,13 +461,15 @@ export function getPierreDiffPayloadFromDetails(
     return normalizePierreDiffPayload(details.pierreDiff, limits);
 }
 
-/** Returns bounded lazy-diff scheduler stats for diagnostics. */
-export function pierreDiffHighlightStats(): {
+export type PierreDiffHighlightStats = {
     readonly activeTimers: number;
     readonly activeHighlights: number;
     readonly queuedHighlights: number;
     readonly queueRunning: boolean;
-} {
+};
+
+/** Returns bounded lazy-diff scheduler stats for diagnostics. */
+export function pierreDiffHighlightStats(): PierreDiffHighlightStats {
     const stats = diffHighlightScheduler.stats();
     return {
         activeTimers: stats.activeTimers,
@@ -649,12 +662,16 @@ class PierreDiffComponent implements Component {
         narrowLayout: NarrowDiffLayout,
     ): ReadonlyArray<UnifiedDiffRow> {
         if (!this.rowPolicy.collapseSemantically) {
-            return buildUnifiedDiffRows(this.payload.metadata, highlighted, this.palette, {
-                ...(this.rowPolicy.maxSourceRows === undefined
-                    ? {}
-                    : { maxRows: this.rowPolicy.maxSourceRows }),
-                narrowLayout,
-            });
+            const rowOptions =
+                this.rowPolicy.maxSourceRows === undefined
+                    ? { narrowLayout }
+                    : { maxRows: this.rowPolicy.maxSourceRows, narrowLayout };
+            return buildUnifiedDiffRows(
+                this.payload.metadata,
+                highlighted,
+                this.palette,
+                rowOptions,
+            );
         }
         const selection = semanticPreviewSelection(
             semanticUnifiedSourceRows(this.payload.metadata, narrowLayout),

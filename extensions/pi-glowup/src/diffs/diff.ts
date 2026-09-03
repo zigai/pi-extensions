@@ -100,7 +100,7 @@ export async function createEditSnapshot(
         async finish() {
             const after = await readTextSnapshot(absolutePath, limits.maxBytes);
             const summaryReason = summaryReasonForSnapshots(before, after);
-            return {
+            const snapshot: DiffSnapshot = {
                 path: relativePath,
                 oldContent: before.content,
                 newContent: after.content,
@@ -109,8 +109,8 @@ export async function createEditSnapshot(
                 oldLineCount: before.lineCount,
                 newLineCount: after.lineCount,
                 canBuildPierreDiff: canDiffSnapshots(before, after),
-                ...(summaryReason === undefined ? {} : { summaryReason }),
             };
+            return summaryReason === undefined ? snapshot : { ...snapshot, summaryReason };
         },
     };
 }
@@ -696,14 +696,8 @@ function focusedReplacementRows(
 ): readonly [UnifiedLineRow, UnifiedLineRow] {
     const focus = replacementFocusColumns(unifiedRowText(deletion), unifiedRowText(addition));
     return [
-        {
-            ...deletion,
-            ...(focus.before === undefined ? {} : { focusColumn: focus.before }),
-        },
-        {
-            ...addition,
-            ...(focus.after === undefined ? {} : { focusColumn: focus.after }),
-        },
+        focus.before === undefined ? deletion : { ...deletion, focusColumn: focus.before },
+        focus.after === undefined ? addition : { ...addition, focusColumn: focus.after },
     ];
 }
 
@@ -995,14 +989,17 @@ function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
     const prevMode = optionalString(value.prevMode);
     const cacheKey = optionalString(value.cacheKey);
 
-    return {
-        name: value.name,
-        ...(prevName === undefined ? {} : { prevName }),
-        ...(lang === undefined ? {} : { lang }),
-        ...(newObjectId === undefined ? {} : { newObjectId }),
-        ...(prevObjectId === undefined ? {} : { prevObjectId }),
-        ...(mode === undefined ? {} : { mode }),
-        ...(prevMode === undefined ? {} : { prevMode }),
+    const withPrevName =
+        prevName === undefined ? { name: value.name } : { name: value.name, prevName };
+    const withLanguage = lang === undefined ? withPrevName : { ...withPrevName, lang };
+    const withNewObjectId =
+        newObjectId === undefined ? withLanguage : { ...withLanguage, newObjectId };
+    const withPreviousObjectId =
+        prevObjectId === undefined ? withNewObjectId : { ...withNewObjectId, prevObjectId };
+    const withMode = mode === undefined ? withPreviousObjectId : { ...withPreviousObjectId, mode };
+    const withPreviousMode = prevMode === undefined ? withMode : { ...withMode, prevMode };
+    const metadata: FileDiffMetadata = {
+        ...withPreviousMode,
         type,
         hunks,
         splitLineCount,
@@ -1010,8 +1007,8 @@ function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
         isPartial: value.isPartial,
         deletionLines,
         additionLines,
-        ...(cacheKey === undefined ? {} : { cacheKey }),
     };
+    return cacheKey === undefined ? metadata : { ...metadata, cacheKey };
 }
 
 function parseHunk(
@@ -1126,7 +1123,7 @@ function parseHunk(
     const hunkContext = optionalString(value.hunkContext);
     const hunkSpecs = optionalString(value.hunkSpecs);
 
-    return {
+    const hunkPrefix = {
         collapsedBefore: integers.get("collapsedBefore") ?? 0,
         additionStart: integers.get("additionStart") ?? 0,
         additionCount,
@@ -1137,8 +1134,13 @@ function parseHunk(
         deletionLines: deletedLines,
         deletionLineIndex,
         hunkContent,
-        ...(hunkContext === undefined ? {} : { hunkContext }),
-        ...(hunkSpecs === undefined ? {} : { hunkSpecs }),
+    };
+    const contextualizedHunk =
+        hunkContext === undefined ? hunkPrefix : { ...hunkPrefix, hunkContext };
+    const specifiedHunk =
+        hunkSpecs === undefined ? contextualizedHunk : { ...contextualizedHunk, hunkSpecs };
+    return {
+        ...specifiedHunk,
         splitLineStart: integers.get("splitLineStart") ?? 0,
         splitLineCount: integers.get("splitLineCount") ?? 0,
         unifiedLineStart: integers.get("unifiedLineStart") ?? 0,
@@ -1235,11 +1237,17 @@ function makeUnifiedLine(options: {
     readonly palette: PierreTerminalPalette;
 }): UnifiedLineRow {
     const colors = colorsForLineType(options.lineType, options.palette);
+    const lineType = { kind: "line" as const, lineType: options.lineType };
+    const withOldLineNumber =
+        options.oldLineNumber === undefined
+            ? lineType
+            : { ...lineType, oldLineNumber: options.oldLineNumber };
+    const withNewLineNumber =
+        options.newLineNumber === undefined
+            ? withOldLineNumber
+            : { ...withOldLineNumber, newLineNumber: options.newLineNumber };
     return {
-        kind: "line",
-        lineType: options.lineType,
-        ...(options.oldLineNumber === undefined ? {} : { oldLineNumber: options.oldLineNumber }),
-        ...(options.newLineNumber === undefined ? {} : { newLineNumber: options.newLineNumber }),
+        ...withNewLineNumber,
         spans: options.spans,
         rowFg: colors.fg,
         rowBg: colors.bg,
@@ -1278,10 +1286,15 @@ function makeEmptySplitCell(palette: PierreTerminalPalette): SplitDiffCell {
     };
 }
 
+type DiffLineColors = {
+    readonly fg: string;
+    readonly bg: string;
+};
+
 function colorsForLineType(
     lineType: "context" | "addition" | "deletion",
     palette: PierreTerminalPalette,
-): { readonly fg: string; readonly bg: string } {
+): DiffLineColors {
     if (lineType === "addition") {
         return { fg: palette.additionFg, bg: palette.additionRowBg };
     }

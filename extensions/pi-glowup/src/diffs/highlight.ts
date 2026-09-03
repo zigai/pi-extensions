@@ -285,14 +285,23 @@ function parseStyleValue(styleValue: unknown): ReadonlyMap<string, string> {
 }
 
 function makeDiffSpan(text: string, style: SpanStyle): DiffSpan {
-    return {
-        text,
-        ...(style.fg === undefined ? {} : { fg: style.fg }),
-        ...(style.bg === undefined ? {} : { bg: style.bg }),
-        ...(style.emphasized && style.boldEmphasized ? { bold: true } : {}),
-        ...(style.dimUnchanged && !style.emphasized ? { dim: true } : {}),
-        ...(style.emphasized ? { emphasized: true } : {}),
-    };
+    let span: DiffSpan = { text };
+    if (style.fg !== undefined) {
+        span = { ...span, fg: style.fg };
+    }
+    if (style.bg !== undefined) {
+        span = { ...span, bg: style.bg };
+    }
+    if (style.emphasized && style.boldEmphasized) {
+        span = { ...span, bold: true };
+    }
+    if (style.dimUnchanged && !style.emphasized) {
+        span = { ...span, dim: true };
+    }
+    if (style.emphasized) {
+        span = { ...span, emphasized: true };
+    }
+    return span;
 }
 
 function mergeSpan(target: DiffSpan[], next: DiffSpan): void {

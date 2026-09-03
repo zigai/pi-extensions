@@ -390,43 +390,46 @@ export function syntaxHighlightCacheStats(): SyntaxHighlightCacheStats {
 export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
     const state = syntaxState;
     const diagnostics = syntaxPreloadDiagnostics;
-    return {
+    let result: SyntaxHighlighterDiagnostics = {
         status: state?.status ?? "uninitialized",
         cacheEntries: highlightedCodeCache.size,
         cacheBytes: highlightedCodeCacheBytes,
-        ...(diagnostics === undefined
-            ? {}
-            : {
-                  configuredPreloadLanguages: diagnostics.configuredLanguages,
-                  preloadLanguages: diagnostics.preloadLanguages,
-                  ignoredPreloadLanguages: diagnostics.ignoredConfiguredLanguages,
-                  projectLanguageDetectionEnabled: diagnostics.projectDetectionEnabled,
-              }),
-        ...(diagnostics?.projectDetection === undefined
-            ? {}
-            : {
-                  projectLanguageDetectionCwd: diagnostics.projectDetection.cwd,
-                  projectLanguageDetectionScannedFiles:
-                      diagnostics.projectDetection.result.scannedFiles,
-                  projectLanguageDetectionScannedDirectories:
-                      diagnostics.projectDetection.result.scannedDirectories,
-                  projectLanguageDetectionReadErrors:
-                      diagnostics.projectDetection.result.readErrors,
-                  detectedProjectLanguages: diagnostics.projectDetection.result.languages,
-                  ...(diagnostics.projectDetection.result.stoppedReason === undefined
-                      ? {}
-                      : {
-                            projectLanguageDetectionStoppedReason:
-                                diagnostics.projectDetection.result.stoppedReason,
-                        }),
-              }),
-        ...(state?.status === "ready"
-            ? {
-                  loadedLanguages: [...state.loadedLanguages].sort(),
-                  dynamicLanguages: [...state.dynamicLanguages].sort(),
-              }
-            : {}),
     };
+    if (diagnostics !== undefined) {
+        result = {
+            ...result,
+            configuredPreloadLanguages: diagnostics.configuredLanguages,
+            preloadLanguages: diagnostics.preloadLanguages,
+            ignoredPreloadLanguages: diagnostics.ignoredConfiguredLanguages,
+            projectLanguageDetectionEnabled: diagnostics.projectDetectionEnabled,
+        };
+    }
+    if (diagnostics?.projectDetection !== undefined) {
+        result = {
+            ...result,
+            projectLanguageDetectionCwd: diagnostics.projectDetection.cwd,
+            projectLanguageDetectionScannedFiles: diagnostics.projectDetection.result.scannedFiles,
+            projectLanguageDetectionScannedDirectories:
+                diagnostics.projectDetection.result.scannedDirectories,
+            projectLanguageDetectionReadErrors: diagnostics.projectDetection.result.readErrors,
+            detectedProjectLanguages: diagnostics.projectDetection.result.languages,
+        };
+        if (diagnostics.projectDetection.result.stoppedReason !== undefined) {
+            result = {
+                ...result,
+                projectLanguageDetectionStoppedReason:
+                    diagnostics.projectDetection.result.stoppedReason,
+            };
+        }
+    }
+    if (state?.status === "ready") {
+        result = {
+            ...result,
+            loadedLanguages: [...state.loadedLanguages].sort(),
+            dynamicLanguages: [...state.dynamicLanguages].sort(),
+        };
+    }
+    return result;
 }
 
 /** Disposes the central highlighter and resets syntax state for reloads or shutdown. */
@@ -566,15 +569,18 @@ function selectSyntaxPreloadLanguages(
         }
     }
 
+    let diagnostics: SyntaxPreloadDiagnostics = {
+        configuredLanguages,
+        preloadLanguages: [...preloadLanguages],
+        ignoredConfiguredLanguages,
+        projectDetectionEnabled,
+    };
+    if (projectDetection !== undefined) {
+        diagnostics = { ...diagnostics, projectDetection };
+    }
     return {
         languages: [...preloadLanguages],
-        diagnostics: {
-            configuredLanguages,
-            preloadLanguages: [...preloadLanguages],
-            ignoredConfiguredLanguages,
-            projectDetectionEnabled,
-            ...(projectDetection === undefined ? {} : { projectDetection }),
-        },
+        diagnostics,
     };
 }
 

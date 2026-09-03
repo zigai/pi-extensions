@@ -34,12 +34,26 @@ type ProcessExit = {
     readonly signal: number | undefined;
 };
 
+type PiProcessEnvironment = {
+    PATH: string;
+    SHELL: string;
+    LANG: string;
+    TERM: string;
+    COLORTERM: string;
+    NODE_OPTIONS: string;
+    PI_CODING_AGENT_DIR: string;
+    PI_OFFLINE: string;
+    PI_SKIP_VERSION_CHECK: string;
+    PI_CLEAR_ON_SHRINK: string;
+    TMPDIR?: string;
+};
+
 function delay(delayMs: number): Promise<void> {
     return new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
 }
 
-function processEnvironment(agentDir: string): Record<string, string> {
-    const environment: Record<string, string> = {
+function processEnvironment(agentDir: string): PiProcessEnvironment {
+    const environment: PiProcessEnvironment = {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         SHELL: process.env.SHELL ?? "/bin/sh",
         LANG: process.env.LANG ?? "C.UTF-8",

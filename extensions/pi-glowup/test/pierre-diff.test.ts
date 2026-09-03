@@ -29,10 +29,14 @@ import type { UnifiedDiffRow } from "../src/diffs/types.ts";
 import { configureRenderingAppearance } from "../src/rendering/core.ts";
 import { reinitializeSyntaxHighlighting } from "../src/syntax/highlighter.ts";
 import { DEFAULT_MUTATION_SETTINGS } from "../src/mutations/settings.ts";
-
-type ThemeBackgroundColors = ConstructorParameters<typeof Theme>[1];
+import {
+    TEST_THEME_BACKGROUND_COLORS,
+    TEST_THEME_COLORS,
+    type TestThemeBackgroundColors,
+} from "./support/theme-colors.ts";
 
 const fgColors = {
+    ...TEST_THEME_COLORS,
     text: "#cccccc",
     dim: "#777777",
     muted: "#888888",
@@ -40,15 +44,12 @@ const fgColors = {
     toolDiffAdded: "#00ff00",
     toolDiffContext: "#cccccc",
     toolDiffRemoved: "#ff0000",
-} as Record<ThemeColor, string>;
+} satisfies Record<ThemeColor, string>;
 const bgColors = {
-    selectedBg: "#333333",
-    userMessageBg: "#1E1E2E",
-    customMessageBg: "#242436",
-    toolPendingBg: "#222222",
+    ...TEST_THEME_BACKGROUND_COLORS,
     toolErrorBg: "#220000",
     toolSuccessBg: "#002200",
-} as ThemeBackgroundColors;
+} satisfies TestThemeBackgroundColors;
 const testTheme = new Theme(fgColors, bgColors, "truecolor", { name: "pierre-dark" });
 const defaultAppearance = {
     diffBackgroundStyle: "two-tone",
@@ -1378,8 +1379,12 @@ describe("Pierre diff rendering", () => {
                 ...fgColors,
                 toolDiffAdded: 10,
                 toolDiffRemoved: 9,
-            } as Record<ThemeColor, string | number>,
-            { ...bgColors, toolErrorBg: 52, toolSuccessBg: 22 } as ThemeBackgroundColors,
+            } satisfies Record<ThemeColor, string | number>,
+            {
+                ...bgColors,
+                toolErrorBg: 52,
+                toolSuccessBg: 22,
+            } satisfies TestThemeBackgroundColors,
             "256color",
         );
 

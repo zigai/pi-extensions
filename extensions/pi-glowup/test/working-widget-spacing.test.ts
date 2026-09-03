@@ -85,7 +85,7 @@ describe("working widget spacing patch", () => {
     });
 
     it("does not clobber container render wrappers installed later", () => {
-        const prototype: { render(width: number): string[] } = {
+        const prototype = {
             render(_width: number): string[] {
                 return ["original"];
             },

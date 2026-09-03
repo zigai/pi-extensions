@@ -37,11 +37,12 @@ export function colorBracketPairsInTokenRows(
     const state: BracketState = { depth: 0 };
     return rows.map((row) =>
         colorPythonIdentifiersInTokens(row, language).flatMap((token) =>
-            splitBracketText(token.content, token.color, state).map((part) => ({
-                ...token,
-                content: part.text,
-                ...(part.color === undefined ? {} : { color: part.color }),
-            })),
+            splitBracketText(token.content, token.color, state).map((part) => {
+                const coloredToken = { ...token, content: part.text };
+                return part.color === undefined
+                    ? coloredToken
+                    : { ...coloredToken, color: part.color };
+            }),
         ),
     );
 }
@@ -53,11 +54,12 @@ export function enhanceSyntaxSegments<TSegment extends TextSegment>(
 ): TSegment[] {
     const state: BracketState = { depth: 0 };
     return colorPythonIdentifiersInSegments(segments, language).flatMap((segment) =>
-        splitBracketText(segment.text, segment.fg, state).map((part) => ({
-            ...segment,
-            text: part.text,
-            ...(part.color === undefined ? {} : { fg: part.color }),
-        })),
+        splitBracketText(segment.text, segment.fg, state).map((part) => {
+            const coloredSegment = { ...segment, text: part.text };
+            return part.color === undefined
+                ? coloredSegment
+                : { ...coloredSegment, fg: part.color };
+        }),
     );
 }
 
@@ -70,11 +72,12 @@ function colorPythonIdentifiersInTokens(
     }
     const line = row.map((token) => token.content).join("");
     return row.flatMap((token) =>
-        splitPythonIdentifiers(token.content, token.color, line).map((part) => ({
-            ...token,
-            content: part.text,
-            ...(part.color === undefined ? {} : { color: part.color }),
-        })),
+        splitPythonIdentifiers(token.content, token.color, line).map((part) => {
+            const coloredToken = { ...token, content: part.text };
+            return part.color === undefined
+                ? coloredToken
+                : { ...coloredToken, color: part.color };
+        }),
     );
 }
 
@@ -87,11 +90,12 @@ function colorPythonIdentifiersInSegments<TSegment extends TextSegment>(
     }
     const line = segments.map((segment) => segment.text).join("");
     return segments.flatMap((segment) =>
-        splitPythonIdentifiers(segment.text, segment.fg, line).map((part) => ({
-            ...segment,
-            text: part.text,
-            ...(part.color === undefined ? {} : { fg: part.color }),
-        })),
+        splitPythonIdentifiers(segment.text, segment.fg, line).map((part) => {
+            const coloredSegment = { ...segment, text: part.text };
+            return part.color === undefined
+                ? coloredSegment
+                : { ...coloredSegment, fg: part.color };
+        }),
     );
 }
 
