@@ -4,10 +4,13 @@ import { call, text } from "../src/tool-rendering/protocol.ts";
 import type {
     ThirdPartyToolRenderer,
     ThirdPartyToolRendererPlugin,
+    ThirdPartyToolResult,
 } from "../src/third-party-tools/renderers.ts";
 import {
     configureBuiltInToolRendererPatch,
+    configureCompletedLineCache,
     configureThirdPartyToolRendererPatch,
+    toolRendererPatchStats,
 } from "../src/patches/tool-execution-patch.ts";
 
 function installBuiltInToolRendererPatch(
@@ -157,7 +160,7 @@ describe("tool execution patches", () => {
 
     it("passes persisted results to restored built-in call renderers", () => {
         const prototype = createPrototype();
-        let receivedResult: unknown;
+        let receivedResult: ThirdPartyToolResult | undefined;
         let receivedArgsComplete: boolean | undefined;
         installBuiltInToolRendererPatch(
             {
@@ -190,7 +193,7 @@ describe("tool execution patches", () => {
 
     it("does not inject results into actively executed built-in call renderers", () => {
         const prototype = createPrototype();
-        let receivedResult: unknown = "unset";
+        let receivedResult: ThirdPartyToolResult | undefined;
         installBuiltInToolRendererPatch(
             {
                 renderCall: (_toolName, _args, _theme, context) => {
@@ -727,5 +730,325 @@ describe("tool execution patches", () => {
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["second renderer"]);
+    });
+
+    it("reuses completed built-in components across transcript repaints", () => {
+        const prototype = createPrototype();
+        let callRenders = 0;
+        let resultRenders = 0;
+        let callLineRenders = 0;
+        let resultLineRenders = 0;
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: () => {
+                    callRenders += 1;
+                    return {
+                        render: (width) => {
+                            callLineRenders += 1;
+                            return [`call:${width}`];
+                        },
+                        invalidate: noop,
+                    };
+                },
+                renderResult: () => {
+                    resultRenders += 1;
+                    return {
+                        render: (width) => {
+                            resultLineRenders += 1;
+                            return [`result:${width}`];
+                        },
+                        invalidate: noop,
+                    };
+                },
+            },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "read",
+            builtInToolDefinition: {},
+        };
+        const args = { path: "large.ts" };
+        const result = { content: [{ type: "text", text: "large output" }] };
+        const context = {
+            ...renderContext,
+            cwd: "/workspace",
+            invalidate: noop,
+            lastComponent: undefined,
+            state: {},
+        };
+
+        const firstCall = prototype.getCallRenderer.call(instance)?.(args, plainTheme, context);
+        const firstResult = prototype.getResultRenderer.call(instance)?.(
+            result,
+            { expanded: false, isPartial: false },
+            plainTheme,
+            context,
+        );
+        if (firstCall === undefined || firstResult === undefined) {
+            throw new Error("expected completed renderers");
+        }
+        expect(firstCall.render(80)).toEqual(["call:80"]);
+        expect(firstResult.render(80)).toEqual(["result:80"]);
+        firstCall.invalidate();
+        firstResult.invalidate();
+        const outerCallComponent = { render: () => firstCall.render(80), invalidate: noop };
+        const outerResultComponent = { render: () => firstResult.render(80), invalidate: noop };
+
+        const repeatedCall = prototype.getCallRenderer.call(instance)?.(args, plainTheme, {
+            ...context,
+            lastComponent: outerCallComponent,
+        });
+        const repeatedResult = prototype.getResultRenderer.call(instance)?.(
+            result,
+            { expanded: false, isPartial: false },
+            plainTheme,
+            { ...context, lastComponent: outerResultComponent },
+        );
+
+        expect(repeatedCall).toBe(firstCall);
+        expect(repeatedResult).toBe(firstResult);
+        expect(repeatedCall?.render(80)).toEqual(["call:80"]);
+        expect(repeatedCall?.render(40)).toEqual(["call:40"]);
+        expect(repeatedResult?.render(80)).toEqual(["result:80"]);
+        expect(repeatedResult?.render(40)).toEqual(["result:40"]);
+        expect(callRenders).toBe(1);
+        expect(resultRenders).toBe(1);
+        expect(callLineRenders).toBe(2);
+        expect(resultLineRenders).toBe(2);
+    });
+
+    it("evicts completed components for semantic changes and renderer invalidation", () => {
+        const prototype = createPrototype();
+        let callRenders = 0;
+        let repaintRequests = 0;
+        let invalidateRenderedCall = noop;
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: (_toolName, _args, _theme, context) => {
+                    callRenders += 1;
+                    invalidateRenderedCall = context.invalidate;
+                    return {
+                        render: () => [`call:${context.expanded ? "expanded" : "collapsed"}`],
+                        invalidate: noop,
+                    };
+                },
+                renderResult: () => undefined,
+            },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "bash",
+            builtInToolDefinition: {},
+        };
+        const args = { command: "printf output" };
+        const context = {
+            ...renderContext,
+            cwd: "/workspace",
+            invalidate: () => {
+                repaintRequests += 1;
+            },
+            lastComponent: undefined,
+            state: {},
+        };
+        const first = prototype.getCallRenderer.call(instance)?.(args, plainTheme, context);
+        if (first === undefined) throw new Error("expected completed call renderer");
+
+        const expanded = prototype.getCallRenderer.call(instance)?.(args, plainTheme, {
+            ...context,
+            expanded: true,
+            lastComponent: first,
+        });
+        expect(expanded?.render(80)).toEqual(["call:expanded"]);
+        expect(callRenders).toBe(2);
+
+        invalidateRenderedCall();
+        const afterInvalidation = prototype.getCallRenderer.call(instance)?.(args, plainTheme, {
+            ...context,
+            expanded: true,
+            lastComponent: expanded,
+        });
+        expect(afterInvalidation).not.toBe(expanded);
+        expect(callRenders).toBe(3);
+        expect(repaintRequests).toBe(1);
+
+        const alternateTheme: GlowupRenderTheme = {
+            fg(token, text) {
+                return `[${token}]${text}`;
+            },
+            bg(token, text) {
+                return `[${token}]${text}`;
+            },
+            bold(text) {
+                return `**${text}**`;
+            },
+        };
+        const afterThemeChange = prototype.getCallRenderer.call(instance)?.(args, alternateTheme, {
+            ...context,
+            expanded: true,
+            lastComponent: afterInvalidation,
+        });
+        expect(afterThemeChange).not.toBe(afterInvalidation);
+        expect(callRenders).toBe(4);
+    });
+
+    it("does not cache streaming rows", () => {
+        const prototype = createPrototype();
+        let callRenders = 0;
+        installBuiltInToolRendererPatch(
+            {
+                renderCall: () => {
+                    callRenders += 1;
+                    return { render: () => ["streaming"], invalidate: noop };
+                },
+                renderResult: () => undefined,
+            },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "write",
+            builtInToolDefinition: {},
+        };
+        const context = {
+            ...renderContext,
+            argsComplete: false,
+            isPartial: true,
+            cwd: "/workspace",
+            invalidate: noop,
+            lastComponent: undefined,
+            state: {},
+        };
+        const first = prototype.getCallRenderer.call(instance)?.({}, plainTheme, context);
+        prototype.getCallRenderer.call(instance)?.({}, plainTheme, {
+            ...context,
+            lastComponent: first,
+        });
+
+        expect(callRenders).toBe(2);
+    });
+
+    it("reuses completed third-party components without freezing width", () => {
+        const prototype = createPrototype();
+        let callRenders = 0;
+        const plugin: ThirdPartyToolRendererPlugin = {
+            name: "completed-row-plugin",
+            matches: (toolName) => toolName === "completed_tool",
+            createRenderer: () => ({
+                renderCall: () => {
+                    callRenders += 1;
+                    return {
+                        render: (width) => [`completed:${width}`],
+                        invalidate: noop,
+                    };
+                },
+                renderResult: () => ({ render: () => [], invalidate: noop }),
+            }),
+        };
+        installThirdPartyToolRendererPatch({ renderers: [plugin] }, prototype);
+        const instance: FakeToolExecutionInstance = {
+            toolName: "completed_tool",
+            toolDefinition: {},
+        };
+        const context = {
+            ...renderContext,
+            cwd: "/workspace",
+            invalidate: noop,
+            lastComponent: undefined,
+            state: {},
+        };
+        const args = {};
+        const first = prototype.getCallRenderer.call(instance)?.(args, plainTheme, context);
+        const repeated = prototype.getCallRenderer.call(instance)?.(args, plainTheme, {
+            ...context,
+            lastComponent: first,
+        });
+
+        expect(repeated).toBe(first);
+        expect(repeated?.render(120)).toEqual(["completed:120"]);
+        expect(repeated?.render(45)).toEqual(["completed:45"]);
+        expect(callRenders).toBe(1);
+    });
+
+    it("bounds completed rendered lines with least-recently-used eviction", () => {
+        const prototype = createPrototype();
+        configureCompletedLineCache({ maxBytes: 8 * 1024 * 1024, maxEntries: 10 });
+        const lineRenderCounts: number[] = [];
+        let rendererIndex = 0;
+        const options = {
+            renderCall: () => {
+                const index = rendererIndex;
+                rendererIndex += 1;
+                lineRenderCounts[index] = 0;
+                return {
+                    render: () => {
+                        lineRenderCounts[index] = (lineRenderCounts[index] ?? 0) + 1;
+                        return [`${index}:${"x".repeat(2 * 1024 * 1024)}`];
+                    },
+                    invalidate: noop,
+                };
+            },
+            renderResult: () => undefined,
+        } satisfies Parameters<typeof configureBuiltInToolRendererPatch>[1];
+        installBuiltInToolRendererPatch(options, prototype);
+        installBuiltInToolRendererPatch(options, prototype);
+        const before = toolRendererPatchStats(prototype);
+        expect(before.completedLineCacheBytes).toBe(0);
+        expect(before.completedLineCacheLimitBytes).toBe(8 * 1024 * 1024);
+        expect(before.completedLineCacheLimitEntries).toBe(10);
+
+        const components: FakeComponent[] = [];
+        for (let index = 0; index < 6; index += 1) {
+            const instance: FakeToolExecutionInstance = {
+                toolName: "read",
+                builtInToolDefinition: {},
+            };
+            const component = prototype.getCallRenderer.call(instance)?.(
+                { path: `large-${index}.txt` },
+                plainTheme,
+                {
+                    ...renderContext,
+                    cwd: "/workspace",
+                    invalidate: noop,
+                    lastComponent: undefined,
+                },
+            );
+            if (component === undefined) throw new Error("expected completed renderer");
+            components.push(component);
+            component.render(80);
+        }
+
+        const filled = toolRendererPatchStats(prototype);
+        expect(filled.completedLineCacheBytes).toBeLessThanOrEqual(
+            filled.completedLineCacheLimitBytes,
+        );
+        expect(filled.completedLineCacheEntries).toBeLessThan(components.length);
+        expect(filled.completedLineCacheEntries).toBeLessThanOrEqual(
+            filled.completedLineCacheLimitEntries,
+        );
+        expect(filled.completedLineCacheEvictions).toBeGreaterThan(
+            before.completedLineCacheEvictions,
+        );
+
+        components[0]?.render(80);
+        expect(lineRenderCounts[0]).toBe(2);
+        const afterReuse = toolRendererPatchStats(prototype);
+        expect(afterReuse.completedLineCacheBytes).toBeLessThanOrEqual(
+            afterReuse.completedLineCacheLimitBytes,
+        );
+
+        configureCompletedLineCache({ maxBytes: 4 * 1024 * 1024, maxEntries: 2 });
+        const reconfigured = toolRendererPatchStats(prototype);
+        expect(reconfigured.completedLineCacheBytes).toBe(0);
+        expect(reconfigured.completedLineCacheLimitBytes).toBe(4 * 1024 * 1024);
+        expect(reconfigured.completedLineCacheLimitEntries).toBe(2);
+        components.at(-1)?.render(80);
+        const afterReconfiguration = toolRendererPatchStats(prototype);
+        expect(afterReconfiguration.completedLineCacheBytes).toBeLessThanOrEqual(
+            afterReconfiguration.completedLineCacheLimitBytes,
+        );
+        expect(afterReconfiguration.completedLineCacheEntries).toBeLessThanOrEqual(2);
+
+        configureBuiltInToolRendererPatch(false, undefined, prototype);
+        expect(toolRendererPatchStats(prototype).completedLineCacheBytes).toBe(0);
+        configureCompletedLineCache({ maxBytes: 64 * 1024 * 1024, maxEntries: 10_000 });
     });
 });

@@ -289,6 +289,28 @@
         "memorySampleIntervalMs": 10000
       }
     },
+    "renderCache": {
+      "type": "object",
+      "properties": {
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 536870912,
+          "description": "Maximum bytes retained for completed rendered tool output."
+        },
+        "maxEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Maximum completed tool components retained in the render cache."
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "maxBytes": 67108864,
+        "maxEntries": 10000
+      }
+    },
     "toolCallIndicator": {
       "type": "object",
       "properties": {

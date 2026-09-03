@@ -63,6 +63,10 @@ describe("glowup config", () => {
             maxBytes: null,
             memorySampleIntervalMs: 10_000,
         });
+        expect(config.renderCache).toEqual({
+            maxBytes: 64 * 1024 * 1024,
+            maxEntries: 10_000,
+        });
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
@@ -83,6 +87,20 @@ describe("glowup config", () => {
             autocompleteCleanup: true,
             markdownSyntax: true,
             thirdPartyToolRenderers: true,
+        });
+    });
+
+    it("parses user-configured render cache limits", () => {
+        const config = parseGlowupConfig({
+            renderCache: {
+                maxBytes: 32 * 1024 * 1024,
+                maxEntries: 2_000,
+            },
+        });
+
+        expect(config.renderCache).toEqual({
+            maxBytes: 32 * 1024 * 1024,
+            maxEntries: 2_000,
         });
     });
 

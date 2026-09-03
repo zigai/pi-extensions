@@ -42,6 +42,8 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
 | `debugLog.path` | string | `"debug.log"` | Diagnostics path relative to the pi-glowup data directory unless absolute. |
 | `debugLog.maxBytes` | integer \| null | `null` | Rotate diagnostics after this size; null disables rotation. |
 | `debugLog.memorySampleIntervalMs` | integer | `10000` | Memory sampling interval; 0 disables sampling. |
+| `renderCache.maxBytes` | integer | `67108864` | Maximum bytes retained for completed rendered tool output. |
+| `renderCache.maxEntries` | integer | `10000` | Maximum completed tool components retained in the render cache. |
 | `toolCallIndicator.symbol` | string | `"•"` | Prefix shown before compact tool calls. |
 | `toolCallIndicator.bold` | boolean | `true` | Render the tool-call indicator in bold. |
 | `toolLabels.mode` | `static` \| `lifecycle` | `"static"` | Use stable or lifecycle-aware tool labels. |
@@ -92,6 +94,10 @@ Global settings are stored in `~/.pi/agent/extension-settings/pi-glowup.json`.
     "path": "debug.log",
     "maxBytes": null,
     "memorySampleIntervalMs": 10000
+  },
+  "renderCache": {
+    "maxBytes": 67108864,
+    "maxEntries": 10000
   },
   "toolCallIndicator": {
     "symbol": "•",

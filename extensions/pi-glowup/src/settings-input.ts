@@ -21,6 +21,11 @@ const DEFAULT_DEBUG_LOG = {
     memorySampleIntervalMs: 10_000,
 } as const;
 
+const DEFAULT_RENDER_CACHE = {
+    maxBytes: 64 * 1024 * 1024,
+    maxEntries: 10_000,
+} as const;
+
 const DEFAULT_TOOL_CALL_INDICATOR = {
     symbol: "•",
     bold: true,
@@ -177,6 +182,25 @@ const debugLogSchema = Type.Object(
     },
 );
 
+const renderCacheSchema = Type.Object(
+    {
+        maxBytes: Type.Integer({
+            minimum: 64 * 1024,
+            maximum: 512 * 1024 * 1024,
+            description: "Maximum bytes retained for completed rendered tool output.",
+        }),
+        maxEntries: Type.Integer({
+            minimum: 1,
+            maximum: 100_000,
+            description: "Maximum completed tool components retained in the render cache.",
+        }),
+    },
+    {
+        additionalProperties: false,
+        default: DEFAULT_RENDER_CACHE,
+    },
+);
+
 const toolCallIndicatorSchema = Type.Object(
     {
         symbol: Type.String({
@@ -316,6 +340,7 @@ export const settingsSchema = Type.Object(
         mutations: mutationsSchema,
         appearance: appearanceSchema,
         debugLog: debugLogSchema,
+        renderCache: renderCacheSchema,
         toolCallIndicator: toolCallIndicatorSchema,
         toolLabels: toolLabelsSchema,
         writePreview: writePreviewSchema,

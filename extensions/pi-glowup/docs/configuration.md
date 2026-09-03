@@ -79,6 +79,8 @@ For compatibility with the previous appearance, `addedRowBackground` and
 | `debugLog.path`                           | `"debug.log"`    | Diagnostics path relative to the pi-glowup data directory.      |
 | `debugLog.maxBytes`                       | `null`           | Rotate diagnostics after this size; `null` disables rotation.   |
 | `debugLog.memorySampleIntervalMs`         | `10000`          | Memory sampling interval; `0` disables sampling.                |
+| `renderCache.maxBytes`                    | `67108864`       | Maximum bytes retained for completed rendered tool output.      |
+| `renderCache.maxEntries`                  | `10000`          | Maximum completed tool components retained in the cache.        |
 | `toolCallIndicator.symbol`                | `"•"`            | Prefix shown before compact tool calls.                         |
 | `toolCallIndicator.bold`                  | `true`           | Render the tool-call indicator in bold.                         |
 | `toolLabels.mode`                         | `"static"`       | Use stable or lifecycle-aware tool labels.                      |
@@ -131,6 +133,10 @@ For compatibility with the previous appearance, `addedRowBackground` and
     "path": "debug.log",
     "maxBytes": null,
     "memorySampleIntervalMs": 10000
+  },
+  "renderCache": {
+    "maxBytes": 67108864,
+    "maxEntries": 10000
   },
   "toolCallIndicator": {
     "symbol": "•",

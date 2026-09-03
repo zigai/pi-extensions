@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { PiSettingsContext } from "@zigai/pi-extension-settings/pi";
+import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
 import type {
     RenderingAppearance,
@@ -22,7 +23,7 @@ import {
 } from "../script-preview/formatters.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import type { MutationSettings } from "../mutations/settings.ts";
-import { isRecord } from "../unknown-values.ts";
+import { jsonObjectParser, jsonValueParser, type JsonValue } from "../json-value.ts";
 
 export type GlowupConfig = {
     readonly preserveTools: readonly string[];
@@ -33,6 +34,10 @@ export type GlowupConfig = {
         readonly path: string;
         readonly maxBytes: number | null;
         readonly memorySampleIntervalMs: number;
+    };
+    readonly renderCache: {
+        readonly maxBytes: number;
+        readonly maxEntries: number;
     };
     readonly scriptFormatters: ScriptFormatterCommands;
     readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
@@ -76,6 +81,32 @@ const GLOWUP_CONFIG_SCHEMA_BASENAME = `${GLOWUP_EXTENSION_ID}.schema.json`;
 const GLOWUP_DIAGNOSTICS_DIRECTORY = GLOWUP_EXTENSION_ID;
 const LEGACY_CONFIG_BASENAME = "config.json";
 
+function parseDefaultSettingsInput(): JsonValue {
+    const parsed = jsonValueParser.parse(extensionSettingsDefinition.defaultSettings);
+    if (parsed === undefined) {
+        throw new Error("Generated default settings must be valid JSON");
+    }
+    return parsed;
+}
+
+const defaultSettingsInput = parseDefaultSettingsInput();
+
+const nodeErrorSchema = Type.Object(
+    { code: Type.Optional(Type.String()) },
+    { additionalProperties: true },
+);
+type NodeError = Static<typeof nodeErrorSchema>;
+
+const nodeErrorParser = {
+    parse(value: unknown): NodeError | undefined {
+        try {
+            return Value.Parse(nodeErrorSchema, value);
+        } catch {
+            return undefined;
+        }
+    },
+};
+
 /** Complete generated settings document used by the README and test fixtures. */
 export const DEFAULT_GLOWUP_CONFIG_JSON = {
     $schema: `./schemas/${GLOWUP_CONFIG_SCHEMA_BASENAME}`,
@@ -100,10 +131,13 @@ function normalizeGlowupConfig(
         mutations: settings.mutations,
         appearance: settings.appearance,
         debugLog: settings.debugLog,
-        scriptFormatters: parseScriptFormatterCommandsValue(settings.scriptPreview.formatters, {
-            source: "settings.scriptPreview.formatters",
-            ...(reportWarning === undefined ? {} : { reportWarning }),
-        }),
+        renderCache: settings.renderCache,
+        scriptFormatters: parseScriptFormatterCommandsValue(
+            settings.scriptPreview.formatters,
+            reportWarning === undefined
+                ? { source: "settings.scriptPreview.formatters" }
+                : { source: "settings.scriptPreview.formatters", reportWarning },
+        ),
         scriptHeaderLayout: settings.scriptPreview.headerLayout,
         scriptMaxCodePreviewLines: settings.scriptPreview.maxCodePreviewLines,
         scriptShowPrologueOmission: settings.scriptPreview.showPrologueOmission,
@@ -117,24 +151,27 @@ function normalizeGlowupConfig(
     };
 }
 
-function mergeConfigInputs(base: unknown, override: unknown): unknown {
-    if (!isRecord(base) || !isRecord(override)) return override;
+function mergeConfigInputs(base: JsonValue, override: JsonValue): JsonValue {
+    const baseRecord = jsonObjectParser.parse(base);
+    const overrideRecord = jsonObjectParser.parse(override);
+    if (baseRecord === undefined || overrideRecord === undefined) return override;
 
-    const merged: Record<string, unknown> = { ...base };
-    for (const [key, value] of Object.entries(override)) {
-        merged[key] = mergeConfigInputs(merged[key], value);
+    const merged = { ...baseRecord };
+    for (const [key, value] of Object.entries(overrideRecord)) {
+        merged[key] = mergeConfigInputs(merged[key] ?? null, value);
     }
     return merged;
 }
 
-function withoutSchemaMetadata(input: unknown): unknown {
-    if (!isRecord(input)) return input;
-    const { $schema: _schema, ...settings } = input;
+function withoutSchemaMetadata(input: JsonValue): JsonValue {
+    const record = jsonObjectParser.parse(input);
+    if (record === undefined) return input;
+    const { $schema: _schema, ...settings } = record;
     return settings;
 }
 
 function isNodeErrorWithCode(cause: unknown, code: string): boolean {
-    return isRecord(cause) && cause.code === code;
+    return nodeErrorParser.parse(cause)?.code === code;
 }
 
 function serializeJson(value: unknown): string {
@@ -148,24 +185,26 @@ function migrateLegacySettingsFile(
 ): void {
     if (existsSync(settingsPath) || !existsSync(legacyPath)) return;
 
-    let raw: unknown;
+    let raw: JsonValue | undefined;
     try {
-        raw = JSON.parse(readFileSync(legacyPath, "utf8"));
+        raw = jsonValueParser.parse(JSON.parse(readFileSync(legacyPath, "utf8")));
     } catch {
         reportWarning?.(`[pi-glowup] Legacy settings at ${legacyPath} were not migrated.`);
         return;
     }
-
-    const candidate = mergeConfigInputs(
-        extensionSettingsDefinition.defaultSettings,
-        withoutSchemaMetadata(raw),
-    );
-    if (!Value.Check(settingsSchema, candidate) || !isRecord(raw)) {
+    if (raw === undefined) {
         reportWarning?.(`[pi-glowup] Legacy settings at ${legacyPath} were not migrated.`);
         return;
     }
 
-    const { $schema: _schema, ...settings } = raw;
+    const candidate = mergeConfigInputs(defaultSettingsInput, withoutSchemaMetadata(raw));
+    const rawRecord = jsonObjectParser.parse(raw);
+    if (!Value.Check(settingsSchema, candidate) || rawRecord === undefined) {
+        reportWarning?.(`[pi-glowup] Legacy settings at ${legacyPath} were not migrated.`);
+        return;
+    }
+
+    const { $schema: _schema, ...settings } = rawRecord;
     const migrated = {
         $schema: `./schemas/${GLOWUP_CONFIG_SCHEMA_BASENAME}`,
         ...settings,
@@ -183,7 +222,7 @@ function migrateLegacySettingsFile(
     }
 }
 
-function configSchemaErrorSummary(input: unknown): string {
+function configSchemaErrorSummary(input: JsonValue): string {
     const errors = [...Value.Errors(settingsSchema, input)];
     const messages = errors.slice(0, 3).map((error) => {
         const path = error.instancePath.length > 0 ? error.instancePath : "/";
@@ -203,10 +242,8 @@ export function parseGlowupConfig(
         readonly reportWarning?: ConfigWarningReporter;
     } = {},
 ): GlowupConfig {
-    const candidate = mergeConfigInputs(
-        extensionSettingsDefinition.defaultSettings,
-        withoutSchemaMetadata(input),
-    );
+    const parsedInput = jsonValueParser.parse(input) ?? null;
+    const candidate = mergeConfigInputs(defaultSettingsInput, withoutSchemaMetadata(parsedInput));
     if (!Value.Check(settingsSchema, candidate)) {
         options.reportWarning?.(
             `[pi-glowup] Ignoring invalid ${options.source ?? "config"}: ${configSchemaErrorSummary(candidate)}`,

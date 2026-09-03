@@ -1,3 +1,5 @@
+import Type, { type Static } from "typebox";
+import { Value } from "typebox/value";
 import {
     isEditToolResult,
     isToolCallEventType,
@@ -41,6 +43,9 @@ import {
     renderGlowupOutput,
     renderMutationCall,
     renderScriptCall,
+    type GlowupCallRenderOptions,
+    type GlowupDiffRenderOptions,
+    type GlowupOutputRenderOptions,
     type GlowupRenderTheme,
     type FindActionArgs,
     type GrepActionArgs,
@@ -49,7 +54,7 @@ import {
     type ReadActionArgs,
     type ScriptPreviewHeaderLayout,
 } from "./rendering/core.ts";
-import { renderBashCommandCall } from "./rendering/bash-call.ts";
+import { renderBashCommandCall, type BashCommandRenderOptions } from "./rendering/bash-call.ts";
 import { captureDeletedTextPreview, type DeletedTextPreview } from "./rendering/delete-preview.ts";
 import {
     isActiveToolCall,
@@ -58,7 +63,11 @@ import {
     type ToolLabelMode,
 } from "./rendering/status-labels.ts";
 import { buildEditPreview, EditPreviewStore } from "./rendering/edit-preview.ts";
-import { summarizeEditCall } from "./rendering/edit-call-rendering.ts";
+import {
+    summarizeEditCall,
+    type EditCallArgs,
+    type EditTextPair,
+} from "./rendering/edit-call-rendering.ts";
 import {
     buildLargeDiffSummaryPayload,
     buildPierreDiffPayload,
@@ -83,6 +92,7 @@ import {
     canonicalBuiltInToolName,
     compatBuiltInToolName,
     configureBuiltInToolRendererPatch,
+    configureCompletedLineCache,
     configureThirdPartyToolRendererPatch,
     toolRendererPatchStats,
     type BuiltInToolRendererOptions,
@@ -100,10 +110,13 @@ import { configureMarkdownSyntaxPatch, markdownSyntaxPatchStats } from "./syntax
 import {
     renderSuccessfulWriteResultFallback,
     renderWriteCallPreview,
+    type WriteCallArgs,
+    type WriteCallContext,
 } from "./rendering/write-rendering.ts";
 import {
     rememberRawScriptPreview,
     scheduleFormattedScriptPreview,
+    type FormatScriptPreviewOptions,
 } from "./script-preview/events.ts";
 import { StreamingScriptIdentityStore } from "./script-preview/streaming-identity.ts";
 import type { MutationSettings } from "./mutations/settings.ts";
@@ -129,6 +142,25 @@ const SCRIPT_HEADER_LAYOUT_ENV = "PI_GLOWUP_SCRIPT_HEADER_LAYOUT";
 const MUTATION_LABEL_COLUMN_WIDTH = "Writing".length;
 const ACTIVE_MUTATION_ALIGNMENT_KEY = "glowupActiveMutationAlignment";
 const MUTATION_RESULT_RENDERED_KEY = "glowupMutationResultRendered";
+
+const mutableRenderStateSchema = Type.Object(
+    {
+        [ACTIVE_MUTATION_ALIGNMENT_KEY]: Type.Optional(Type.Boolean()),
+        [MUTATION_RESULT_RENDERED_KEY]: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: true },
+);
+type MutableRenderState = Static<typeof mutableRenderStateSchema>;
+
+const mutableRenderStateParser = {
+    parse(value: unknown): MutableRenderState | undefined {
+        try {
+            return Value.Parse(mutableRenderStateSchema, value);
+        } catch {
+            return undefined;
+        }
+    },
+};
 const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-glowup.extension-loaded");
 const builtInRenderCallCounts: Record<string, number> = {};
 const builtInRenderResultCounts: Record<string, number> = {};
@@ -205,6 +237,13 @@ function diagnosticSnapshot(): DebugLogFields {
             builtInPatchEnabled: rendererStats.builtInPatchEnabled,
             thirdPartyPatchEnabled: rendererStats.thirdPartyPatchEnabled,
             thirdPartyRendererCacheEntries: rendererStats.thirdPartyRendererCacheEntries,
+            completedLineCacheEntries: rendererStats.completedLineCacheEntries,
+            completedLineCacheBytes: rendererStats.completedLineCacheBytes,
+            completedLineCacheLimitBytes: rendererStats.completedLineCacheLimitBytes,
+            completedLineCacheLimitEntries: rendererStats.completedLineCacheLimitEntries,
+            completedLineCacheEvictions: rendererStats.completedLineCacheEvictions,
+            completedLineCacheHits: rendererStats.completedLineCacheHits,
+            completedLineCacheMisses: rendererStats.completedLineCacheMisses,
             builtInRenderCalls: { ...builtInRenderCallCounts },
             builtInRenderResults: { ...builtInRenderResultCounts },
         },
@@ -235,6 +274,7 @@ function configDiagnostics(config: GlowupConfig): DebugLogFields {
             maxBytes: config.debugLog.maxBytes,
             memorySampleIntervalMs: config.debugLog.memorySampleIntervalMs,
         },
+        renderCache: config.renderCache,
         scriptPreview: {
             headerLayout: config.scriptHeaderLayout,
             maxCodePreviewLines: config.scriptMaxCodePreviewLines,
@@ -289,14 +329,17 @@ function renderExplorationResult(
     if (output === undefined) {
         return emptyComponent();
     }
-    return renderGlowupOutput(theme, output, {
+    let renderOptions: GlowupOutputRenderOptions = {
         expanded,
         mode: "hidden",
         prefixFirst: "",
         prefixRest: "",
         noOutputLabel: null,
-        ...(options?.syntaxPath === undefined ? {} : { syntax: { path: options.syntaxPath } }),
-    });
+    };
+    if (options?.syntaxPath !== undefined) {
+        renderOptions = { ...renderOptions, syntax: { path: options.syntaxPath } };
+    }
+    return renderGlowupOutput(theme, output, renderOptions);
 }
 
 function makeMutationSummary(options: {
@@ -313,14 +356,6 @@ function makeMutationSummary(options: {
     };
 }
 
-type MutableRenderState = {
-    [key: string]: unknown;
-};
-
-function isMutableRenderState(value: unknown): value is MutableRenderState {
-    return isRecord(value);
-}
-
 function mutationLabelColumnWidth(
     context: BuiltInRenderContext,
     labelMode: ToolLabelMode,
@@ -329,7 +364,7 @@ function mutationLabelColumnWidth(
         return undefined;
     }
 
-    const state = isMutableRenderState(context.state) ? context.state : undefined;
+    const state = mutableRenderStateParser.parse(context.state);
     if (state === undefined) {
         return undefined;
     }
@@ -350,7 +385,7 @@ function mutationLabelColumnWidth(
 }
 
 function markMutationResultRendered(context: BuiltInRenderContext): void {
-    const state = isMutableRenderState(context.state) ? context.state : undefined;
+    const state = mutableRenderStateParser.parse(context.state);
     if (state === undefined) {
         return;
     }
@@ -440,17 +475,23 @@ function numberField(args: unknown, key: string): number | undefined {
     return typeof value === "number" ? value : undefined;
 }
 
-function normalizedWriteArgs(args: unknown): unknown {
+function normalizedWriteArgs(args: unknown): WriteCallArgs {
     const path = pathField(args);
     const content = stringFieldFrom(args, ["content", "contents"]);
-    return {
-        ...(isRecord(args) ? args : {}),
-        ...(path === undefined ? {} : { path }),
-        ...(content === undefined ? {} : { content }),
-    };
+    let normalized: WriteCallArgs = {};
+    if (path !== undefined) normalized = { ...normalized, path };
+    if (content !== undefined) normalized = { ...normalized, content };
+    return normalized;
 }
 
-function replacementEditFromArgs(args: unknown): ReadonlyArray<Record<string, string>> | undefined {
+function editTextPair(value: unknown): EditTextPair | null {
+    if (!isRecord(value)) return null;
+    const oldText = stringFieldFrom(value, ["oldText", "old_string"]);
+    const newText = stringFieldFrom(value, ["newText", "new_string"]);
+    return oldText === undefined || newText === undefined ? null : { oldText, newText };
+}
+
+function replacementEditFromArgs(args: unknown): ReadonlyArray<EditTextPair> | undefined {
     const oldText = stringFieldFrom(args, ["oldText", "old_string"]);
     const newText = stringFieldFrom(args, ["newText", "new_string"]);
     if (oldText === undefined || newText === undefined) {
@@ -459,37 +500,36 @@ function replacementEditFromArgs(args: unknown): ReadonlyArray<Record<string, st
     return [{ oldText, newText }];
 }
 
-function normalizedEditArgs(args: unknown): unknown {
+function normalizedEditArgs(args: unknown): EditCallArgs {
     const path = pathField(args);
     const existingEdits = isRecord(args) && Array.isArray(args.edits) ? args.edits : undefined;
-    const edits = existingEdits ?? replacementEditFromArgs(args);
-    return {
-        ...(isRecord(args) ? args : {}),
-        ...(path === undefined ? {} : { path }),
-        ...(edits === undefined ? {} : { edits }),
-    };
+    const edits = existingEdits?.map(editTextPair) ?? replacementEditFromArgs(args);
+    let normalized: EditCallArgs = {};
+    if (path !== undefined) normalized = { ...normalized, path };
+    if (edits !== undefined) normalized = { ...normalized, edits };
+    return normalized;
 }
 
 function readActionArgs(args: unknown): ReadActionArgs {
     const path = pathField(args);
     const offset = numberField(args, "offset");
     const limit = numberField(args, "limit");
-    return {
-        ...(path === undefined ? {} : { path }),
-        ...(offset === undefined ? {} : { offset }),
-        ...(limit === undefined ? {} : { limit }),
-    };
+    let action: ReadActionArgs = {};
+    if (path !== undefined) action = { ...action, path };
+    if (offset !== undefined) action = { ...action, offset };
+    if (limit !== undefined) action = { ...action, limit };
+    return action;
 }
 
 function findActionArgs(args: unknown): FindActionArgs {
     const pattern = stringFieldFrom(args, ["pattern", "glob"]);
     const path = pathField(args);
     const limit = numberField(args, "limit");
-    return {
-        ...(pattern === undefined ? {} : { pattern }),
-        ...(path === undefined ? {} : { path }),
-        ...(limit === undefined ? {} : { limit }),
-    };
+    let action: FindActionArgs = {};
+    if (pattern !== undefined) action = { ...action, pattern };
+    if (path !== undefined) action = { ...action, path };
+    if (limit !== undefined) action = { ...action, limit };
+    return action;
 }
 
 function grepActionArgs(args: unknown): GrepActionArgs {
@@ -497,21 +537,21 @@ function grepActionArgs(args: unknown): GrepActionArgs {
     const path = pathField(args);
     const glob = stringFieldFrom(args, ["glob", "include", "glob_filter"]);
     const limit = numberField(args, "limit");
-    return {
-        ...(pattern === undefined ? {} : { pattern }),
-        ...(path === undefined ? {} : { path }),
-        ...(glob === undefined ? {} : { glob }),
-        ...(limit === undefined ? {} : { limit }),
-    };
+    let action: GrepActionArgs = {};
+    if (pattern !== undefined) action = { ...action, pattern };
+    if (path !== undefined) action = { ...action, path };
+    if (glob !== undefined) action = { ...action, glob };
+    if (limit !== undefined) action = { ...action, limit };
+    return action;
 }
 
 function lsActionArgs(args: unknown): LsActionArgs {
     const path = pathField(args);
     const limit = numberField(args, "limit");
-    return {
-        ...(path === undefined ? {} : { path }),
-        ...(limit === undefined ? {} : { limit }),
-    };
+    let action: LsActionArgs = {};
+    if (path !== undefined) action = { ...action, path };
+    if (limit !== undefined) action = { ...action, limit };
+    return action;
 }
 
 function webSearchQuery(args: unknown): string | undefined {
@@ -807,10 +847,13 @@ function renderDeleteCall(
         return header;
     }
     const showAllRows = context.expanded || mutationSettings.defaultView === "full";
-    const body = renderGlowupDiff(theme, [preview.section], showAllRows, {
+    let diffOptions: GlowupDiffRenderOptions = {
         collapsedLineBudget: mutationSettings.previewLines,
-        ...(showAllRows ? {} : { maxWrappedRows: 1 }),
-    });
+    };
+    if (!showAllRows) {
+        diffOptions = { ...diffOptions, maxWrappedRows: 1 };
+    }
+    const body = renderGlowupDiff(theme, [preview.section], showAllRows, diffOptions);
     return makeComponent((width) => [...header.render(width), ...body.render(width)]);
 }
 
@@ -823,17 +866,21 @@ function renderWebSearchCall(
     registerExplorationBoundary(context.toolCallId);
     const query = webSearchQuery(args);
     const active = context.isPartial || !context.argsComplete;
-    return renderGlowupCall(theme, {
+    let callOptions: GlowupCallRenderOptions = {
         state: callState(context),
         statusText: toolStatusLabel(labelMode, context, {
             static: "Web Search",
             active: "Searching the web",
             completed: "Searched the web",
         }),
-        ...(query === undefined
-            ? {}
-            : { body: labelMode === "lifecycle" && !active ? `for ${query}` : query }),
-    });
+    };
+    if (query !== undefined) {
+        callOptions = {
+            ...callOptions,
+            body: labelMode === "lifecycle" && !active ? `for ${query}` : query,
+        };
+    }
+    return renderGlowupCall(theme, callOptions);
 }
 
 function renderBashCall(
@@ -878,7 +925,7 @@ function renderBashCall(
     const stableScript = context.argsComplete
         ? streamingScriptIdentities.finalize(context.toolCallId, script)
         : script;
-    return renderBashCommandCall(theme, displayCommand, {
+    let bashOptions: BashCommandRenderOptions = {
         state,
         expanded: context.expanded,
         maxCodePreviewLines: maxCodePreviewLines(),
@@ -886,9 +933,14 @@ function renderBashCall(
         headerLayout: headerLayout(),
         shellLayout: shellLayout(),
         shellOperatorPosition: shellOperatorPosition(),
-        ...(stableScript === undefined ? {} : { pureScriptOverride: stableScript }),
-        ...(context.invalidate === undefined ? {} : { invalidate: context.invalidate }),
-    });
+    };
+    if (stableScript !== undefined) {
+        bashOptions = { ...bashOptions, pureScriptOverride: stableScript };
+    }
+    if (context.invalidate !== undefined) {
+        bashOptions = { ...bashOptions, invalidate: context.invalidate };
+    }
+    return renderBashCommandCall(theme, displayCommand, bashOptions);
 }
 
 function renderBashResult(
@@ -901,15 +953,22 @@ function renderBashResult(
     const output = textOutput(result);
     const language = detectStructuredOutputLanguage(output);
     const script = parseScriptInvocation(commandField(context.args));
-    return renderGlowupOutput(theme, output, {
+    let outputOptions: GlowupOutputRenderOptions = {
         expanded: options.expanded,
         mode: "headTail",
         maxPreviewLines: 5,
-        ...(script !== undefined && headerLayout() === "block"
-            ? { prefixFirst: theme.fg("dim", "  → "), prefixRest: "    " }
-            : {}),
-        ...(language === undefined ? {} : { syntax: { language } }),
-    });
+    };
+    if (script !== undefined && headerLayout() === "block") {
+        outputOptions = {
+            ...outputOptions,
+            prefixFirst: theme.fg("dim", "  → "),
+            prefixRest: "    ",
+        };
+    }
+    if (language !== undefined) {
+        outputOptions = { ...outputOptions, syntax: { language } };
+    }
+    return renderGlowupOutput(theme, output, outputOptions);
 }
 
 function renderWriteCall(
@@ -924,13 +983,22 @@ function renderWriteCall(
 ) {
     registerExplorationBoundary(context.toolCallId);
     const labelColumnWidth = mutationLabelColumnWidth(context, options.labelMode);
-    return renderWriteCallPreview(normalizedWriteArgs(args), theme, {
-        ...context,
-        labelMode: options.labelMode,
-        movingViewport: options.movingViewport,
-        mutationSettings: options.mutationSettings,
-        ...(labelColumnWidth === undefined ? {} : { mutationLabelColumnWidth: labelColumnWidth }),
-    });
+    const writeContext: WriteCallContext =
+        labelColumnWidth === undefined
+            ? {
+                  ...context,
+                  labelMode: options.labelMode,
+                  movingViewport: options.movingViewport,
+                  mutationSettings: options.mutationSettings,
+              }
+            : {
+                  ...context,
+                  labelMode: options.labelMode,
+                  movingViewport: options.movingViewport,
+                  mutationSettings: options.mutationSettings,
+                  mutationLabelColumnWidth: labelColumnWidth,
+              };
+    return renderWriteCallPreview(normalizedWriteArgs(args), theme, writeContext);
 }
 
 function renderWriteResult(
@@ -997,10 +1065,9 @@ function renderEditCall(
                 added: preview.added,
                 removed: preview.removed,
             }),
-            {
-                ...(labelColumnWidth === undefined ? {} : { labelColumnWidth }),
-                state: "success",
-            },
+            labelColumnWidth === undefined
+                ? { state: "success" }
+                : { labelColumnWidth, state: "success" },
         );
     }
 
@@ -1077,10 +1144,13 @@ function renderEditResult(
         }
         const sections = parseDiffSections(result.details.diff, path);
         const showAllRows = options.expanded || mutationSettings.defaultView === "full";
-        return renderGlowupDiff(theme, sections, showAllRows, {
+        let diffOptions: GlowupDiffRenderOptions = {
             collapsedLineBudget: mutationSettings.previewLines,
-            ...(showAllRows ? {} : { maxWrappedRows: 1 }),
-        });
+        };
+        if (!showAllRows) {
+            diffOptions = { ...diffOptions, maxWrappedRows: 1 };
+        }
+        return renderGlowupDiff(theme, sections, showAllRows, diffOptions);
     }
     return renderGlowupOutput(theme, textOutput(result), {
         expanded: options.expanded || (!context.isError && mutationSettings.defaultView === "full"),
@@ -1102,12 +1172,16 @@ async function loadSyntaxHighlighting(
     options: SyntaxHighlightingLifecycleOptions,
 ): Promise<void> {
     try {
+        const projectLanguageDetection =
+            options.cwd === undefined
+                ? { enabled: options.config.syntax.projectLanguageDetection.enabled }
+                : {
+                      enabled: options.config.syntax.projectLanguageDetection.enabled,
+                      cwd: options.cwd,
+                  };
         await loader(process.env, {
             preloadLanguages: options.config.syntax.preloadLanguages,
-            projectLanguageDetection: {
-                enabled: options.config.syntax.projectLanguageDetection.enabled,
-                ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-            },
+            projectLanguageDetection,
             reportWarning: options.reportWarning,
         });
     } catch (cause: unknown) {
@@ -1258,6 +1332,7 @@ export default function glowupExtension(pi: ExtensionAPI): void {
         configureAutocompleteCleanupPatch(config.patches.autocompleteCleanup);
         configureSyntaxBracketPairColoring(config.syntax.bracketPairColoring);
         configureMarkdownSyntaxPatch(config.patches.markdownSyntax);
+        configureCompletedLineCache(config.renderCache);
         configureThirdPartyToolRendererPatch(
             true,
             config.patches.thirdPartyToolRenderers
@@ -1394,18 +1469,24 @@ export default function glowupExtension(pi: ExtensionAPI): void {
             if (command !== undefined) {
                 const formatterGeneration = sessionGeneration;
                 rememberRawScriptPreview(scriptPreviews, event.toolCallId, command);
-                scheduleFormattedScriptPreview({
+                let formatOptions: FormatScriptPreviewOptions = {
                     sink: scriptPreviews,
                     toolCallId: event.toolCallId,
                     command,
                     formatter,
-                    ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
+                };
+                if (ctx.signal !== undefined) {
+                    formatOptions = { ...formatOptions, signal: ctx.signal };
+                }
+                formatOptions = {
+                    ...formatOptions,
                     isCurrent: () => sessionGeneration === formatterGeneration,
                     invalidate: () => {
                         bashRenderInvalidations.get(event.toolCallId)?.();
                         refreshToolRows(ctx);
                     },
-                });
+                };
+                scheduleFormattedScriptPreview(formatOptions);
                 scheduledFormattedPreview = formatter !== undefined;
             }
         }
@@ -1448,12 +1529,10 @@ export default function glowupExtension(pi: ExtensionAPI): void {
             ...diagnosticSnapshot(),
         }));
         if (persistedEditPierrePayload !== undefined) {
-            return {
-                details: {
-                    ...(isRecord(event.details) ? event.details : {}),
-                    pierreDiff: persistedEditPierrePayload,
-                },
-            };
+            const details = isRecord(event.details)
+                ? { ...event.details, pierreDiff: persistedEditPierrePayload }
+                : { pierreDiff: persistedEditPierrePayload };
+            return { details };
         }
         return undefined;
     });
