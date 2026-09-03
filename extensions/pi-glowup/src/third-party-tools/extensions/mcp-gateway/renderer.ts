@@ -174,7 +174,10 @@ function summarizeChromeArgs(
             return values === undefined ? undefined : values.slice(0, 3).join(" · ");
         }
         case "performance_analyze_insight":
-            return [getNonEmptyString(record, "insightName"), getNonEmptyString(record, "insightSetId")]
+            return [
+                getNonEmptyString(record, "insightName"),
+                getNonEmptyString(record, "insightSetId"),
+            ]
                 .filter(isDefined)
                 .join(" · ");
         case "emulate":

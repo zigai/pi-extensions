@@ -74,9 +74,7 @@ function colorPythonIdentifiersInTokens(
     return row.flatMap((token) =>
         splitPythonIdentifiers(token.content, token.color, line).map((part) => {
             const coloredToken = { ...token, content: part.text };
-            return part.color === undefined
-                ? coloredToken
-                : { ...coloredToken, color: part.color };
+            return part.color === undefined ? coloredToken : { ...coloredToken, color: part.color };
         }),
     );
 }

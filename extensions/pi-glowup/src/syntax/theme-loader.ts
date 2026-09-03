@@ -78,7 +78,9 @@ function parseThemeRegistration(value: unknown, themeName: string): ThemeRegistr
     }
 
     const registration =
-        colors === undefined ? { ...value, name: themeName } : { ...value, name: themeName, colors };
+        colors === undefined
+            ? { ...value, name: themeName }
+            : { ...value, name: themeName, colors };
     return { ...registration, tokenColors } satisfies ThemeRegistration;
 }
 

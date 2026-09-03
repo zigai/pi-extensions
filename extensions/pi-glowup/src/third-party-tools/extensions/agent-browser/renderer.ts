@@ -204,8 +204,7 @@ function summarizeAgentBrowserArgs(
             .join(" ");
         return {
             label:
-                AGENT_BROWSER_COMMAND_LABELS.get(nonEmptyCommand) ??
-                `Browser ${nonEmptyCommand}`,
+                AGENT_BROWSER_COMMAND_LABELS.get(nonEmptyCommand) ?? `Browser ${nonEmptyCommand}`,
             body:
                 context.isPartial || !context.argsComplete
                     ? countLabel(Math.max(0, commandArgs.length - 1), "argument")

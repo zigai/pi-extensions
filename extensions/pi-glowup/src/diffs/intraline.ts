@@ -50,10 +50,7 @@ export function changedTextRanges(before: string, after: string): ChangedTextRan
 }
 
 /** Returns display columns for the first differing code point in a replacement. */
-export function replacementFocusColumns(
-    before: string,
-    after: string,
-): ReplacementFocusColumns {
+export function replacementFocusColumns(before: string, after: string): ReplacementFocusColumns {
     if (before === after) {
         return { before: undefined, after: undefined };
     }
