@@ -25,10 +25,6 @@ Model-aware Codex prompt mode uses the matching bundled GPT-6-Astra, GPT-5.6 Sol
 
 Optional Codex remote compaction v2 replay supports OpenAI Codex responses models, with chaining, metadata, fallbacks, world-state injection, auto-compaction, and token-aware shrinking.
 
-### Outage Recovery
-
-In TUI and RPC sessions, transient Codex failures can resume after a bounded cooldown. Optional follow-up batching can deliver text follow-ups entered during an active Codex turn together after it settles, preventing each queued line from creating its own retry cycle.
-
 ### `/codex` Slash Command
 
 - Configure extension settings through a dedicated settings UI.
