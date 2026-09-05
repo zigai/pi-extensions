@@ -177,6 +177,7 @@ export async function handleCodexNativeCompaction(
     const preflight = await rewriteRemoteCompactionToolOutputsForContextWindow(
         promptInput.input,
         {
+            sessionId,
             model: compactionModel,
             instructions,
             promptCacheKey,
@@ -194,6 +195,7 @@ export async function handleCodexNativeCompaction(
     promptInput = { ...promptInput, input: preflight.input };
 
     const request = buildRemoteCompactionV2Request({
+        sessionId,
         model: compactionModel,
         input: promptInput.input,
         instructions,

@@ -230,7 +230,7 @@ export default function extension(pi: ExtensionAPI): void {
         const allowLitePayload = responsesLitePolicy.shouldRewriteLitePayload(sessionId);
         const responsesPayload =
             isActiveCodexResponsesModel(ctx) && allowLitePayload
-                ? rewriteCodexResponsesPayload(payload, ctx.model?.id)
+                ? rewriteCodexResponsesPayload(payload, sessionId, ctx.model?.id)
                 : undefined;
         const compatiblePayload = responsesPayload ?? payload;
         const reasoningTracePayload =

@@ -4,10 +4,13 @@ export type CodexModelRequestProfile = {
     readonly compHash?: string | undefined;
     readonly supportsPriorityServiceTier: boolean;
     readonly supportsImageDetailOriginal: boolean;
+    readonly supportedReasoningEfforts: readonly string[];
+    readonly multiAgentReasoningEffort?: string | undefined;
 };
 
 /** Current text models surfaced by the Codex settings UI, newest first. */
 export const CODEX_TEXT_MODEL_CHOICES = [
+    "gpt-6-astra",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -19,12 +22,22 @@ export const CODEX_TEXT_MODEL_CHOICES = [
 type CodexTextModel = (typeof CODEX_TEXT_MODEL_CHOICES)[number];
 
 const CODEX_MODEL_REQUEST_PROFILES = {
+    "gpt-6-astra": {
+        useResponsesLite: true,
+        defaultReasoningEffort: "low",
+        compHash: "3000",
+        supportsPriorityServiceTier: true,
+        supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+        multiAgentReasoningEffort: "xhigh",
+    },
     "gpt-5.6-sol": {
         useResponsesLite: true,
         defaultReasoningEffort: "low",
         compHash: "3000",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
     },
     "gpt-5.6-terra": {
         useResponsesLite: true,
@@ -32,6 +45,7 @@ const CODEX_MODEL_REQUEST_PROFILES = {
         compHash: "3000",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
     },
     "gpt-5.6-luna": {
         useResponsesLite: true,
@@ -39,6 +53,7 @@ const CODEX_MODEL_REQUEST_PROFILES = {
         compHash: "3000",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     },
     "gpt-5.5": {
         useResponsesLite: false,
@@ -46,6 +61,7 @@ const CODEX_MODEL_REQUEST_PROFILES = {
         compHash: "2911",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
     },
     "gpt-5.4": {
         useResponsesLite: false,
@@ -53,6 +69,7 @@ const CODEX_MODEL_REQUEST_PROFILES = {
         compHash: "2911",
         supportsPriorityServiceTier: true,
         supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
     },
     "gpt-5.4-mini": {
         useResponsesLite: false,
@@ -60,6 +77,7 @@ const CODEX_MODEL_REQUEST_PROFILES = {
         compHash: "2911",
         supportsPriorityServiceTier: false,
         supportsImageDetailOriginal: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
     },
 } satisfies Readonly<Record<CodexTextModel, CodexModelRequestProfile>>;
 

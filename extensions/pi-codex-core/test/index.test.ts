@@ -527,13 +527,16 @@ test("suppresses reasoning traces only for GPT Responses models", async () => {
         extension(harness.api);
         const gptContext = makeExtensionContext("/workspace", true, {
             ...DEFAULT_TEST_EXTENSION_MODEL,
-            id: "gpt-5.6-terra",
+            id: "gpt-6-astra",
         });
         await harness.startSession(gptContext);
+        const headers: Record<string, string | null> = {};
+        await harness.prepareProviderHeaders(headers, gptContext);
+        assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], "true");
 
         const rewritten = await harness.rewriteProviderRequest(
             {
-                model: "gpt-5.6-terra",
+                model: "gpt-6-astra",
                 input: [{ role: "user", content: "hello" }],
                 reasoning: { effort: "high", summary: "auto" },
             },

@@ -30,6 +30,7 @@ const GPT_5_5_PRAGMATIC_PERSONALITY_PATH = fileURLToPath(
     new URL("./codex-gpt-5.5-personality-pragmatic.md", import.meta.url),
 );
 const CODEX_PROMPT_PATHS_BY_MODEL = new Map<string, string>([
+    ["gpt-6-astra", fileURLToPath(new URL("./codex-gpt-6-astra.md", import.meta.url))],
     ["gpt-5.5", GPT_5_5_CODEX_PROMPT_PATH],
     ["gpt-5.6-sol", GPT_5_6_SOL_CODEX_PROMPT_PATH],
     ["gpt-5.6-terra", GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH],
@@ -145,11 +146,12 @@ function adaptCodexPromptForPi(prompt: string, tools: readonly string[]): string
           : tools.includes("write")
             ? "`write`"
             : undefined;
-    let adaptedPrompt = prompt;
+    let adaptedPrompt = adaptCodexInteractionGuidance(prompt, tools);
     if (hasShellTool) {
         adaptedPrompt = adaptedPrompt
             .replaceAll("`exec_command`", "`bash`")
-            .replaceAll("exec_command", "`bash`");
+            .replaceAll("exec_command", "`bash`")
+            .replace("`cmd` argument", "`command` argument");
     } else {
         adaptedPrompt = removeLineContaining(adaptedPrompt, "exec_command calls").replace(
             " Do not end your turn while `exec_command` sessions needed for the user’s request are still running.",
@@ -196,6 +198,29 @@ function adaptCodexPromptForPi(prompt: string, tools: readonly string[]): string
         skillsIndex < 0 ? adaptedPrompt.trimEnd() : adaptedPrompt.slice(0, skillsIndex).trimEnd();
     if (!tools.includes("read")) return promptWithoutCodexSkills;
     return [promptWithoutCodexSkills, buildPiSkillUsageGuidance()].join("\n\n");
+}
+
+function adaptCodexInteractionGuidance(prompt: string, tools: readonly string[]): string {
+    const parallelGuidance =
+        "- Batch independent searches and reads using Pi's tool interface when it supports parallel calls; inspect every result. Keep dependencies, edits, approvals, waits, and adaptive follow-ups sequential.";
+    let adapted = prompt.replace(
+        /^- Batch independent searches and reads in one functions\.exec[^\n]+/m,
+        parallelGuidance,
+    );
+    adapted = removeLineContaining(adapted, "When calling `functions.exec`");
+    const asyncTool = tools.includes("request_user_input_async");
+    const questionGuidance = asyncTool
+        ? undefined
+        : tools.includes("ask_user_question")
+          ? "Use `ask_user_question` with its declared schema to ask for missing information, preferences, constraints, or clarification. Ask only for information that cannot be inferred from available context. This tool waits for the user's response; do not assume asynchronous delivery. If an answer or approval is required, do not proceed with dependent work until it arrives. Elapsed time is not an answer or approval."
+          : "Ask the user directly for missing information, preferences, constraints, or clarification only when it cannot be inferred from available context. If an answer or approval is required, do not proceed with dependent work until it arrives. Elapsed time is not an answer or approval.";
+    if (questionGuidance) {
+        return adapted.replace(
+            /^When available, you can use the `functions\.request_user_input_async` tool[^\n]+/m,
+            questionGuidance,
+        );
+    }
+    return adapted.replaceAll("functions.request_user_input_async", "request_user_input_async");
 }
 
 function removeLineContaining(prompt: string, marker: string): string {

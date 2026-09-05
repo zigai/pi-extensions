@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { codexModelRequestProfile, codexReasoningEffortForRequest } from "../codex/models.ts";
+import { buildResponsesLitePrefix } from "../codex/responses-lite-prefix.ts";
 import { imageDimensionsFromBytes } from "../images/metadata.ts";
 import { CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY } from "../codex/responses-compat.ts";
 import type { CodexCoreConfig } from "../config/config.ts";
@@ -59,6 +60,7 @@ type TokenWorkOptions = {
 };
 
 export function buildRemoteCompactionV2Request(input: {
+    readonly sessionId: string;
     readonly model: string;
     readonly input: readonly ResponsesInputItem[];
     readonly instructions: string;
@@ -92,11 +94,16 @@ export function buildRemoteCompactionV2Request(input: {
     const clientMetadata = { ...input.clientMetadata };
     if (profile?.useResponsesLite) {
         const instructions = sanitizeSurrogates(input.instructions);
+        const [additionalToolsItem, ...instructionItems] = buildResponsesLitePrefix(
+            input.sessionId,
+            tools ?? [],
+            instructions,
+        );
         return {
             model: input.model,
             input: [
-                buildLiteAdditionalToolsItem(requestTemplate, tools),
-                ...buildLiteInstructionItems(requestTemplate, instructions),
+                buildLiteAdditionalToolsItem(requestTemplate, additionalToolsItem),
+                ...buildLiteInstructionItems(requestTemplate, instructions, instructionItems),
                 ...input.input.map((item) =>
                     stripResponsesLiteImageDetails(stripResponseItemId(item)),
                 ),
@@ -138,21 +145,20 @@ export function buildRemoteCompactionV2Request(input: {
 
 function buildLiteAdditionalToolsItem(
     requestTemplate: ProviderRequestTemplate | undefined,
-    tools: readonly ResponsesTool[] | undefined,
+    generated: ResponsesInputItem,
 ): ResponsesInputItem {
     const base =
         requestTemplate?.layout === "responses-lite"
             ? requestTemplate.additionalToolsItem
             : undefined;
-    return {
-        ...(base ?? { type: "additional_tools", role: "developer" }),
-        tools: (tools ?? []).map((tool) => ({ ...tool })),
-    };
+    if (base && JSON.stringify(base.tools) === JSON.stringify(generated.tools)) return base;
+    return { ...base, ...generated };
 }
 
 function buildLiteInstructionItems(
     requestTemplate: ProviderRequestTemplate | undefined,
     instructions: string,
+    generated: readonly ResponsesInputItem[],
 ): readonly ResponsesInputItem[] {
     if (instructions.length === 0) return [];
     if (
@@ -162,13 +168,7 @@ function buildLiteInstructionItems(
     ) {
         return requestTemplate.instructionItems;
     }
-    return [
-        {
-            type: "message",
-            role: "developer",
-            content: [{ type: "input_text", text: instructions }],
-        },
-    ];
+    return generated;
 }
 
 export function buildCompactionTools(pi: ExtensionAPI): ResponsesTool[] | undefined {

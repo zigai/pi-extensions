@@ -179,6 +179,7 @@ export type BuildPromptInputResult = {
 };
 
 export type RemoteCompactionRequestParts = {
+    readonly sessionId: string;
     readonly model: string;
     readonly instructions: string;
     readonly promptCacheKey: string;

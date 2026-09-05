@@ -254,8 +254,56 @@ test("removes unavailable shell and editing assumptions from Codex prompts", () 
     assert.match(toolLessPrompt, /Available tools:\n\(none\)/);
 });
 
+test("adapts Astra code-mode and question guidance to active Pi capabilities", () => {
+    const config = parseCodexCoreConfig({ prompt: { mode: "codex" } });
+    const render = (selectedTools: string[]) =>
+        buildCodexCoreSystemPrompt(
+            "Pi prompt",
+            config,
+            {
+                cwd: "/workspace",
+                selectedTools,
+                appendSystemPrompt: "Custom functions.exec instruction must survive.",
+            },
+            { modelId: "gpt-6-astra" },
+        );
+    const questionPrompt = render(["read", "bash", "ask_user_question"]);
+    assert.match(questionPrompt, /^You are Codex, an agent based on GPT-6\./);
+    assert.match(questionPrompt, /Use `ask_user_question` with its declared schema/);
+    assert.match(questionPrompt, /This tool waits for the user's response/);
+    assert.match(questionPrompt, /Elapsed time is not an answer or approval/);
+    assert.match(questionPrompt, /Batch independent searches and reads using Pi's tool interface/);
+    assert.match(questionPrompt, /`command` argument/);
+    assert.doesNotMatch(
+        questionPrompt,
+        /functions\.request_user_input_async|Promise\.allSettled|When calling `functions\.exec`|exec_command/,
+    );
+    assert.equal(questionPrompt.split("functions.exec").length - 1, 1);
+    assert.doesNotMatch(questionPrompt, /skills\.(?:list|read)|tool_search|codex_apps|# Plugins/);
+    const asyncPrompt = render(["read", "request_user_input_async"]);
+    assert.match(asyncPrompt, /`request_user_input_async` tool/);
+    assert.match(
+        asyncPrompt,
+        /continue useful work that does not depend on the answer while waiting/,
+    );
+    assert.match(asyncPrompt, /Elapsed time is not an answer or approval/);
+    assert.doesNotMatch(asyncPrompt, /ask_user_question|exec_command/);
+    const noQuestionTool = render([]);
+    assert.match(noQuestionTool, /Ask the user directly for missing information/);
+    assert.match(noQuestionTool, /Elapsed time is not an answer or approval/);
+    assert.doesNotMatch(
+        noQuestionTool,
+        /request_user_input_async|ask_user_question|exec_command|`rg`/,
+    );
+    assert.equal(supportsCodexPromptPersonality("gpt-6-astra"), false);
+});
+
 test("bundled Codex prompts match the pinned upstream content", async () => {
     const prompts = [
+        [
+            new URL("../src/prompt/codex-gpt-6-astra.md", import.meta.url),
+            "152dfaeeb552876190962be1c12c93d426840ff12691f648261554a7675a6698",
+        ],
         [
             new URL("../src/prompt/codex-gpt-5.6-sol.md", import.meta.url),
             "cbefa6b0bede0e332d957fca70ccacf9f12f4c0ecdf81b819e5cbe1a3b16e265",

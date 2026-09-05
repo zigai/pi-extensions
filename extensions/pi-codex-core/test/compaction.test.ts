@@ -117,6 +117,7 @@ test("shutting down one Codex tokenizer does not affect another owner", async ()
 
 test("remote compaction requests always preserve encrypted reasoning context", () => {
     const liteRequest = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-5.6-sol",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -128,6 +129,7 @@ test("remote compaction requests always preserve encrypted reasoning context", (
     assert.deepEqual(liteRequest.include, ["reasoning.encrypted_content"]);
 
     const unknownModelRequest = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-future",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -470,7 +472,10 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
         "00000000-0000-7000-8000-000000000001",
     );
     const input = responseInput(requestBody);
+    assert.ok(isRecord(input[0]));
+    assert.match(String(input[0]?.id), /^at_[0-9a-f-]{36}$/);
     assert.deepEqual(input[0], {
+        id: input[0]?.id,
         type: "additional_tools",
         role: "developer",
         tools: [
@@ -487,7 +492,10 @@ test("creates GPT-5.6 native compaction with Responses Lite", async () => {
             },
         ],
     });
+    assert.ok(isRecord(input[1]));
+    assert.match(String(input[1]?.id), /^msg_[0-9a-f-]{36}$/);
     assert.deepEqual(input[1], {
+        id: input[1]?.id,
         type: "message",
         role: "developer",
         content: [{ type: "input_text", text: "system prompt" }],
@@ -514,6 +522,7 @@ test("reports bounded redacted remote compaction HTTP error details", async () =
             ),
     );
     const request = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-5.6-sol",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -548,6 +557,7 @@ test("reports top-level Codex compatibility error details", async () => {
             ),
     );
     const request = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-5.6-sol",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -591,6 +601,7 @@ test("retries transient remote compaction failures", async () => {
         );
     });
     const request = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-5.5",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -635,6 +646,7 @@ test("does not retry HTTP 429 compaction responses", async () => {
         });
     });
     const request = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-5.5",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -680,6 +692,7 @@ test("times out and retries idle remote compaction streams", async () => {
         },
     };
     const request = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-5.5",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -720,6 +733,7 @@ test("does not retry unexpected stream-processing exceptions", async () => {
         },
     };
     const request = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-5.5",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -756,6 +770,7 @@ test("rejects malformed remote compaction output items", async () => {
             ),
     );
     const request = buildRemoteCompactionV2Request({
+        sessionId: "session",
         model: "gpt-5.5",
         input: [{ role: "user", content: "compact" }],
         instructions: "system",
@@ -1468,6 +1483,7 @@ test("Responses Lite preflight charges original images before detail projection"
         },
     ];
     const requestParts = {
+        sessionId: "session",
         model: "gpt-5.6-sol",
         instructions: "system",
         promptCacheKey: "cache",

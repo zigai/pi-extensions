@@ -1,4 +1,5 @@
 import { codexModelRequestProfile, codexReasoningEffortForRequest } from "./models.ts";
+import { buildResponsesLitePrefix } from "./responses-lite-prefix.ts";
 import {
     JsonArrayDecoder,
     JsonObjectDecoder,
@@ -12,9 +13,10 @@ export const CODEX_RESPONSES_LITE_HEADER = "x-openai-internal-codex-responses-li
 export const CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY =
     "ws_request_header_x_openai_internal_codex_responses_lite";
 
-/** Rewrites a GPT-5.6 Responses payload to the Responses Lite wire layout. */
+/** Rewrites a supported Codex Responses payload to the Responses Lite wire layout. */
 export function rewriteCodexResponsesPayload(
     payload: unknown,
+    sessionId: string,
     expectedModelId?: string,
 ): JsonObject | undefined {
     const request = JsonObjectDecoder.decode(payload);
@@ -33,19 +35,7 @@ export function rewriteCodexResponsesPayload(
     const instructions = JsonStringDecoder.decode(request.instructions) ?? "";
     const input = alreadyUsesLiteLayout
         ? rewrittenInput
-        : [
-              { type: "additional_tools", role: "developer", tools },
-              ...(instructions.length > 0
-                  ? [
-                        {
-                            type: "message",
-                            role: "developer",
-                            content: [{ type: "input_text", text: instructions }],
-                        },
-                    ]
-                  : []),
-              ...rewrittenInput,
-          ];
+        : [...buildResponsesLitePrefix(sessionId, tools, instructions), ...rewrittenInput];
     const clientMetadata = JsonObjectDecoder.decode(request.client_metadata) ?? {};
     const reasoning = responsesLiteReasoning(request.reasoning, profile.defaultReasoningEffort);
 

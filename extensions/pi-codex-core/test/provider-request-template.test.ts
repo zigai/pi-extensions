@@ -43,6 +43,7 @@ test("captures provider-ready cache fields without retaining conversation input"
         assert.equal(JSON.stringify(template).includes("conversation secret"), false);
 
         const request = buildRemoteCompactionV2Request({
+            sessionId,
             model: "gpt-5.5",
             input: [{ role: "user", content: "compact this" }],
             instructions: template.instructions,
@@ -110,6 +111,7 @@ test("captures and reuses the Responses Lite static prefix", () => {
         assert.equal(JSON.stringify(template).includes("conversation input"), false);
 
         const request = buildRemoteCompactionV2Request({
+            sessionId,
             model: "gpt-5.6-sol",
             input: [{ role: "user", content: "compact this" }],
             instructions: template.instructions,
