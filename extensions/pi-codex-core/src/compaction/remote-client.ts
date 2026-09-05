@@ -5,6 +5,7 @@ import {
     CodexInvalidJson,
     CodexNetworkUnavailable,
     CodexRequestCancelled,
+    CodexStreamRetryable,
     CodexUnexpectedResponse,
     fail,
     isAbortCause as isCodexAbortCause,
@@ -69,6 +70,7 @@ export async function executeRemoteCompactionV2(
     const encodedRequest = encodeRemoteCompactionRequest(request, runtime.headers);
     let lastResult: CodexResult<RemoteCompactionV2Response> | undefined;
     for (let attempt = 0; attempt <= MAX_REMOTE_COMPACTION_STREAM_RETRIES; attempt += 1) {
+        if (signal.aborted) return cancelledRemoteCompaction(signal.reason);
         const linkedAttempt = createLinkedAttemptController(signal);
         let result: CodexResult<RemoteCompactionV2Response>;
         try {
@@ -98,7 +100,9 @@ export async function executeRemoteCompactionV2(
         lastResult = result;
         try {
             await waitForRetry(
-                REMOTE_COMPACTION_RETRY_INITIAL_DELAY_MS * 2 ** attempt,
+                (result.error._tag === "CodexStreamRetryable"
+                    ? result.error.retryAfterMs
+                    : undefined) ?? REMOTE_COMPACTION_RETRY_INITIAL_DELAY_MS * 2 ** attempt,
                 signal,
                 services,
             );
@@ -271,7 +275,8 @@ function createLinkedAttemptController(parentSignal: AbortSignal): LinkedAttempt
 }
 
 function isRetryableRemoteCompactionFailure(error: CodexFailure): boolean {
-    if (error._tag === "CodexNetworkUnavailable") return true;
+    if (error._tag === "CodexNetworkUnavailable" || error._tag === "CodexStreamRetryable")
+        return true;
     if (error._tag !== "CodexHttpRequestFailed") return false;
     return error.status === 408 || error.status === 409 || error.status >= 500;
 }
@@ -576,13 +581,7 @@ function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
                 return ok(undefined);
             }
             if (event.event === "response.failed" || event.event === "response.incomplete") {
-                return fail(
-                    new CodexUnexpectedResponse({
-                        operation: "nativeCompaction",
-                        provider: "openai-codex",
-                        message: formatResponsesStreamFailure(event.data, event.event),
-                    }),
-                );
+                return fail(parseResponsesStreamFailure(event.data, event.event));
             }
             return ok(undefined);
         },
@@ -715,11 +714,55 @@ function nonNegativeTokenCount(value: JsonObject[string]): number | undefined {
     return NonNegativeIntegerDecoder.decode(value);
 }
 
-function formatResponsesStreamFailure(data: readonly string[], event: string): string {
+const FATAL_RESPONSES_ERROR_CODES = new Set([
+    "context_length_exceeded",
+    "insufficient_quota",
+    "usage_not_included",
+    "cyber_policy",
+    "misalignment_policy_violation",
+    "invalid_prompt",
+    "bio_policy",
+    "invalid_request",
+    "invalid_request_error",
+    "invalid_argument",
+    "invalid_input",
+    "content_policy_violation",
+]);
+
+function parseResponsesStreamFailure(data: readonly string[], event: string): CodexFailure {
     const response = parseEventResponse(data);
-    if (response.isErr()) return response.error.message;
-    const error = response.value?.error;
-    const message = JsonStringDecoder.decode(JsonObjectDecoder.decode(error)?.message)?.trim();
-    if (message) return `${event}: ${message}`;
-    return `${event} event received during remote compaction v2`;
+    if (response.isErr()) return response.error;
+    const error = JsonObjectDecoder.decode(response.value?.error);
+    const code = JsonStringDecoder.decode(error?.code);
+    const type = JsonStringDecoder.decode(error?.type);
+    const detail = JsonStringDecoder.decode(error?.message)?.trim();
+    const message = detail
+        ? `${event}: ${detail}`
+        : `${event} event received during remote compaction v2`;
+    if (
+        event === "response.failed" &&
+        error &&
+        type !== "invalid_request_error" &&
+        !FATAL_RESPONSES_ERROR_CODES.has(code ?? "")
+    ) {
+        return new CodexStreamRetryable({
+            operation: "nativeCompaction",
+            provider: "openai-codex",
+            message,
+            code,
+            retryAfterMs: code === "rate_limit_exceeded" ? parseRateLimitDelay(detail) : undefined,
+        });
+    }
+    return new CodexUnexpectedResponse({
+        operation: "nativeCompaction",
+        provider: "openai-codex",
+        message,
+    });
+}
+
+function parseRateLimitDelay(message: string | undefined): number | undefined {
+    const match = /try again in\s*(\d+(?:\.\d+)?)\s*(ms|seconds?|s)/i.exec(message ?? "");
+    if (!match) return undefined;
+    const delayMs = Number(match[1]) * (match[2]?.toLowerCase() === "ms" ? 1 : 1000);
+    return Number.isFinite(delayMs) && delayMs <= 2_147_483_647 ? Math.floor(delayMs) : undefined;
 }

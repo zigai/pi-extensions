@@ -50,6 +50,14 @@ export class CodexHttpRequestFailed extends TaggedError("CodexHttpRequestFailed"
     readonly message: string;
 }>() {}
 
+export class CodexStreamRetryable extends TaggedError("CodexStreamRetryable")<{
+    readonly operation: CodexOperation;
+    readonly provider: string;
+    readonly message: string;
+    readonly code: string | undefined;
+    readonly retryAfterMs: number | undefined;
+}>() {}
+
 export class CodexInvalidJson extends TaggedError("CodexInvalidJson")<{
     readonly operation: CodexOperation;
     readonly provider: string;
@@ -70,6 +78,7 @@ export type CodexFailure =
     | CodexRequestCancelled
     | CodexNetworkUnavailable
     | CodexHttpRequestFailed
+    | CodexStreamRetryable
     | CodexInvalidJson
     | CodexUnexpectedResponse;
 
