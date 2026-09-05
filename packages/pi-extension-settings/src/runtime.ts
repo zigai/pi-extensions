@@ -37,7 +37,7 @@ export type PrevalidatedExtensionSettingsArtifact = {
     readonly formatVersion: typeof PREVALIDATION_FORMAT_VERSION;
     /** Fast runtime proof over the complete JSON-visible definition contract. */
     readonly fingerprint: string;
-    /** Authoring proof that also covers TypeBox codecs and non-enumerable schema metadata. */
+    /** Authoring-only fingerprint checked by `check`; codec function text can change in Pi. */
     readonly semanticFingerprint: string;
     readonly defaultSettings: JsonObject;
     readonly exampleSettings?: JsonObject;
@@ -51,24 +51,34 @@ function cloneJson<Value extends JsonObject>(value: Value): Value {
     return structuredClone(value);
 }
 
-function freezeRecursively<Value extends object>(value: Value): void {
-    const pending: object[] = [value];
-    const seen = new WeakSet<object>();
+function freezeRecursively<Value extends object>(value: Value, original: Value): void {
+    const pending: object[] = [original, value];
     while (pending.length > 0) {
         const current = pending.pop();
-        if (current === undefined || seen.has(current)) continue;
-        seen.add(current);
+        const source = pending.pop();
+        if (
+            current === undefined ||
+            source === undefined ||
+            current === source ||
+            Object.isFrozen(current)
+        )
+            continue;
         for (const key of Reflect.ownKeys(current)) {
             const descriptor = Reflect.getOwnPropertyDescriptor(current, key);
             if (descriptor === undefined || !("value" in descriptor)) continue;
             const child: unknown = descriptor.value;
-            if (!Object.isFrozen(child)) {
-                // SAFETY: ECMAScript Object.isFrozen returns true for every primitive. A false
-                // result therefore proves that child is an object/function; TypeScript does not
-                // encode this standard-library invariant. Codec/schema clone tests cover both.
-                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Object.isFrozen false proves the object identity accepted by the worklist.
-                pending.push(child as object);
-            }
+            if (Object.isFrozen(child)) continue;
+            const sourceDescriptor = Reflect.getOwnPropertyDescriptor(source, key);
+            if (sourceDescriptor === undefined || !("value" in sourceDescriptor)) continue;
+            const originalChild: unknown = sourceDescriptor.value;
+            // TypeBox retains codec functions and other atomic values by identity. Only descend
+            // into values that were copied; never mutate those caller-owned references.
+            if (child === originalChild) continue;
+            // SAFETY: Object.isFrozen false proves child is an object/function. Both clone
+            // operations preserve primitives, so its distinct data-property source is an object
+            // too. Ownership, codec, array and shared-reference tests cover this correspondence.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the clone/source correspondence proves both worklist values are objects.
+            pending.push(...([originalChild, child] as [object, object]));
         }
         Object.freeze(current);
     }
@@ -176,8 +186,9 @@ function hasPlainObjectPrototype(value: JsonObject): boolean {
  * Hydrates a settings definition from a checked-in authoring-validated artifact.
  *
  * This startup path deliberately omits schema documentation/default/example validation. Generation
- * performs those exhaustive checks. A stale or malformed artifact fails closed before any settings
- * files are loaded.
+ * performs those exhaustive checks. Runtime fingerprints reject JSON-visible drift before any
+ * settings files are loaded. Codec function text is checked only by the authoring `check` command:
+ * Pi and bundlers transform functions without changing their behavior.
  */
 export function definePrevalidatedExtensionSettings<const Schema extends TObject>(
     input: ExtensionSettingsDefinitionInput<Schema>,
@@ -213,24 +224,15 @@ export function definePrevalidatedExtensionSettings<const Schema extends TObject
         );
     }
 
-    const expectedSemanticFingerprint = semanticFingerprint(
-        input,
-        artifact.defaultSettings,
-        artifact.exampleSettings,
-    );
-    if (artifact.semanticFingerprint !== expectedSemanticFingerprint) {
-        throw new InvalidPrevalidatedSettingsArtifact(
-            "prevalidated settings artifact is stale; run pi-extension-settings generate",
-        );
-    }
-
     const schema = Value.Clone(input.schema);
     const defaultSettings = cloneJson(artifact.defaultSettings);
     const exampleSettings =
         artifact.exampleSettings === undefined ? undefined : cloneJson(artifact.exampleSettings);
-    freezeRecursively(schema);
-    freezeRecursively(defaultSettings);
-    if (exampleSettings !== undefined) freezeRecursively(exampleSettings);
+    freezeRecursively(schema, input.schema);
+    freezeRecursively(defaultSettings, artifact.defaultSettings);
+    if (exampleSettings !== undefined && artifact.exampleSettings !== undefined) {
+        freezeRecursively(exampleSettings, artifact.exampleSettings);
+    }
 
     return Object.freeze({
         [definitionMarker]: true as const,

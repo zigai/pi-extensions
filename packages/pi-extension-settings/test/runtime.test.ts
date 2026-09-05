@@ -56,6 +56,102 @@ describe("prevalidated settings runtime", () => {
         expect(Object.isFrozen(hydrated.exampleSettings)).toBe(true);
     });
 
+    it.each([false, true])(
+        "leaves caller-owned codecs mutable (custom prototypes: %s)",
+        (customPrototypes) => {
+            class CodecOwner {
+                label = "original";
+            }
+            const owner = new CodecOwner();
+            const decode = Object.assign((value: string) => value.toUpperCase(), {
+                metadata: { calls: 0 },
+            });
+            const encode = (value: string) => value.toLowerCase();
+            const codecInput = {
+                id: "codec-ownership",
+                title: "Codec Ownership",
+                description: "Caller-owned codec functions.",
+                schema: Type.Object(
+                    {
+                        value: Type.Codec(Type.String({ default: "hello", description: "Value." }))
+                            .Decode(decode)
+                            .Encode(encode),
+                    },
+                    { additionalProperties: false },
+                ),
+            };
+            Object.defineProperty(codecInput.schema, "~owner", { value: owner });
+            const artifact = createPrevalidatedExtensionSettingsArtifact(
+                defineExtensionSettings(codecInput),
+            );
+            // Function identity, not its prototype, determines whether the clone owns it.
+            if (customPrototypes) {
+                Object.setPrototypeOf(decode, null);
+                Object.setPrototypeOf(encode, Object.prototype);
+            }
+            const hydrated = definePrevalidatedExtensionSettings(codecInput, artifact);
+
+            expect(Object.isFrozen(decode)).toBe(false);
+            expect(Object.isFrozen(encode)).toBe(false);
+            expect(Object.isFrozen(decode.metadata)).toBe(false);
+            expect(Object.getOwnPropertyDescriptor(hydrated.schema, "~owner")?.value).toBe(owner);
+            expect(Object.isFrozen(owner)).toBe(false);
+            owner.label = "updated";
+            expect(owner.label).toBe("updated");
+            decode.metadata.calls += 1;
+            expect(decode.metadata.calls).toBe(1);
+            expect(Object.isFrozen(hydrated.schema)).toBe(true);
+            expect(Object.isFrozen(hydrated.schema.properties.value)).toBe(true);
+            expect(Object.isFrozen(hydrated.defaultSettings)).toBe(true);
+            expect(Value.Decode(hydrated.schema, hydrated.defaultSettings)).toEqual({
+                value: "HELLO",
+            });
+            expect(Value.Encode(hydrated.schema, { value: "HELLO" })).toEqual({ value: "hello" });
+        },
+    );
+
+    it("freezes copied arrays and their shared records without freezing artifact data", () => {
+        const authoringInput = {
+            id: "array-ownership",
+            title: "Array Ownership",
+            description: "Copied JSON settings.",
+            schema: Type.Object(
+                {
+                    labels: Type.Array(
+                        Type.Object(
+                            { value: Type.String() },
+                            { additionalProperties: false, title: "Label" },
+                        ),
+                        {
+                            default: [{ value: "label" }, { value: "label" }],
+                            description: "Labels.",
+                        },
+                    ),
+                },
+                { additionalProperties: false },
+            ),
+        };
+        const generated = createPrevalidatedExtensionSettingsArtifact(
+            defineExtensionSettings(authoringInput),
+        );
+        const label = { value: "label" };
+        const artifact = { ...generated, defaultSettings: { labels: [label, label] } };
+        const hydrated = definePrevalidatedExtensionSettings(authoringInput, artifact);
+        const defaults = hydrated.defaultSettings;
+        if (!Value.Check(authoringInput.schema, defaults))
+            throw new Error("Invalid hydrated defaults");
+        expect(Object.isFrozen(defaults.labels)).toBe(true);
+        expect(defaults.labels[0]).toBe(defaults.labels[1]);
+        for (const entry of defaults.labels) {
+            expect(Object.isFrozen(entry)).toBe(true);
+            expect(Reflect.set(entry, "value", "changed")).toBe(false);
+        }
+        expect(Reflect.set(defaults.labels, "0", { value: "changed" })).toBe(false);
+        expect(Object.isFrozen(artifact.defaultSettings.labels)).toBe(false);
+        expect(Object.isFrozen(label)).toBe(false);
+        expect(defaults).toEqual({ labels: [{ value: "label" }, { value: "label" }] });
+    });
+
     it("creates deterministic artifacts and detects source, data, and format drift", () => {
         const authoringInput = input();
         const validated = defineExtensionSettings(authoringInput);
@@ -123,7 +219,7 @@ describe("prevalidated settings runtime", () => {
         ).toThrowError("defaultSettings must be a JSON object");
     });
 
-    it("fingerprints TypeBox codec behavior rather than JSON shape alone", () => {
+    it("uses current codecs without comparing function text at runtime", () => {
         const codecA = Type.Codec(Type.String({ default: "value", description: "Codec value." }))
             .Decode((value) => `${value}-a`)
             .Encode((value) => value.slice(0, -2));
@@ -151,15 +247,11 @@ describe("prevalidated settings runtime", () => {
         const artifactA = createPrevalidatedExtensionSettingsArtifact(validated);
         const artifactB = createPrevalidatedExtensionSettingsArtifact(validatedB);
         expect(artifactA.semanticFingerprint).not.toBe(artifactB.semanticFingerprint);
-        expect(() => definePrevalidatedExtensionSettings(inputB, artifactA)).toThrowError(
-            "artifact is stale",
-        );
-        expect(() =>
-            definePrevalidatedExtensionSettings(inputA, {
-                ...artifactA,
-                semanticFingerprint: artifactB.semanticFingerprint,
-            }),
-        ).toThrowError("artifact is stale");
+        // The runtime uses the supplied codecs; source-text drift belongs to artifact checking.
+        const hydratedB = definePrevalidatedExtensionSettings(inputB, artifactA);
+        expect(Value.Decode(hydratedB.schema, hydratedB.defaultSettings)).toEqual({
+            value: "value-b",
+        });
         expect(Value.Decode(inputA.schema, defaults)).toEqual({ value: "value-a" });
         const hydrated = definePrevalidatedExtensionSettings(inputA, artifactA);
         expect(Value.Decode(hydrated.schema, hydrated.defaultSettings)).toEqual({
