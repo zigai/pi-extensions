@@ -141,6 +141,23 @@ test("renders compact invocation summaries for Codex tools", () => {
     assert.match(renderedApplyPatchCall, /\+ new/);
 });
 
+test("native patch preview preserves deletion-first ties, move paths, and invalid fallback", () => {
+    const tool = createApplyPatchTool();
+    assert.ok(tool.renderCall);
+    const args = {
+        patch: "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@ section\n-a\n-b\n+b\n+a\n \n*** End Patch",
+    };
+    const rendered = renderComponent(tool.renderCall(args, TEST_THEME, makeRenderContext(args)));
+    assert.match(rendered, /old\.txt → new\.txt/);
+    assert.match(rendered, /- a *\n {2}b *\n\+ a/);
+    assert.match(rendered, /\+1 -1/);
+    const invalid = { patch: "*** Begin Patch" };
+    assert.equal(
+        renderComponent(tool.renderCall(invalid, TEST_THEME, makeRenderContext(invalid))).trim(),
+        "apply_patch patch",
+    );
+});
+
 test("renders apply_patch results with line stats and expanded diffs", () => {
     const applyPatchTool = createApplyPatchTool();
     assert.ok(applyPatchTool.renderResult);
@@ -295,6 +312,24 @@ test("reads image dimensions without full-buffer base64 conversion", () => {
     });
 
     assert.deepEqual(imageDimensionsFromBytes(bytes, "image/png"), { width: 2, height: 3 });
+});
+
+test("reads bounded VP8X unsigned 24-bit dimensions with their one-pixel bias", () => {
+    const bytes = Buffer.alloc(30);
+    bytes.write("RIFF", 0);
+    bytes.writeUInt32LE(22, 4);
+    bytes.write("WEBPVP8X", 8);
+    bytes.writeUInt32LE(10, 16);
+    bytes.writeUIntLE(0xabcdef, 24, 3);
+    bytes.writeUIntLE(0xffffff, 27, 3);
+    assert.deepEqual(imageDimensionsFromBytes(bytes, "image/webp"), {
+        width: 0xabcdf0,
+        height: 0x1000000,
+    });
+    assert.throws(
+        () => imageDimensionsFromBytes(bytes.subarray(0, 29), "image/webp"),
+        /Unable to read image dimensions/,
+    );
 });
 
 test("rejects oversized and mislabeled image files", async () => {
@@ -1152,6 +1187,92 @@ test("imagegen edits recent generated image artifacts from tool details", async 
         assert.ok(isRecord(requestBody));
         assert.ok(isUnknownArray(requestBody.images));
         const [editImage] = requestBody.images;
+        assert.ok(isRecord(editImage));
+        assert.equal(
+            editImage.image_url,
+            `data:image/png;base64,${solidPngBytes(1, 1, [0, 0, 255, 255]).toString("base64")}`,
+        );
+    } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("imagegen edits two distinct recent inline-plus-artifact results in chronological order", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-codex-core-imagegen-recent-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+        const cwd = join(root, "workspace");
+        const agentDir = join(root, "agent");
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        const previousImagePath = join(cwd, "previous.png");
+        await mkdir(cwd, { recursive: true });
+        await writeFile(previousImagePath, solidPngBytes(1, 1, [0, 0, 255, 255]));
+        const editedBase64 = solidPngBytes(1, 1, [255, 0, 0, 255]).toString("base64");
+        let requestUrl = "";
+        let requestBody: unknown;
+        const runtime = makeTestRuntime(async (input, init) => {
+            requestUrl = String(input);
+            requestBody = JSON.parse(String(init?.body));
+            return new Response(JSON.stringify({ data: [{ b64_json: editedBase64 }] }), {
+                status: 200,
+            });
+        });
+        const imagegenTool = createImagegenTool({
+            getConfig: () => DEFAULT_CODEX_CORE_CONFIG,
+            runtime,
+        });
+        const olderImagePath = join(cwd, "older.png");
+        const olderBase64 = solidPngBytes(1, 1, [0, 255, 0, 255]).toString("base64");
+        await writeFile(olderImagePath, Buffer.from(olderBase64, "base64"));
+        const ctx = makeWebRunContextWithBranch(cwd, [
+            messageEntry("older-imagegen-result", null, {
+                role: "toolResult",
+                content: [{ type: "image", data: olderBase64, mimeType: "image/png" }],
+                details: { images: [{ path: olderImagePath }] },
+            }),
+            messageEntry("imagegen-result", "older-imagegen-result", {
+                role: "toolResult",
+                content: [
+                    {
+                        type: "image",
+                        data: solidPngBytes(1, 1, [0, 0, 255, 255]).toString("base64"),
+                        mimeType: "image/png",
+                    },
+                    {
+                        type: "text",
+                        text: `Generated image output:\n- image: ${previousImagePath}`,
+                    },
+                ],
+                details: {
+                    images: [
+                        {
+                            path: previousImagePath,
+                            absolutePath: previousImagePath,
+                            latestPath: previousImagePath,
+                            latestAbsolutePath: previousImagePath,
+                        },
+                    ],
+                },
+            }),
+        ]);
+
+        await imagegenTool.execute(
+            "call/2",
+            { prompt: "Make the recent image red", num_last_images_to_include: 2 },
+            undefined,
+            undefined,
+            ctx,
+        );
+
+        assert.match(requestUrl, /\/images\/edits$/);
+        assert.ok(isRecord(requestBody));
+        assert.ok(isUnknownArray(requestBody.images));
+        assert.equal(requestBody.images.length, 2);
+        const [olderImage, editImage] = requestBody.images;
+        assert.ok(isRecord(olderImage));
+        assert.equal(olderImage.image_url, `data:image/png;base64,${olderBase64}`);
         assert.ok(isRecord(editImage));
         assert.equal(
             editImage.image_url,

@@ -287,7 +287,7 @@ export class StreamingPatchParser {
     }
 
     private ensureUpdateHunkIsNotEmpty(line: string): void {
-        const hunk = lastItem(this.hunks);
+        const hunk = this.hunks.at(-1);
         if (hunk?.type !== "update") return;
 
         if (hunk.chunks.length === 0 && this.mode.type === "updateFile") {
@@ -297,7 +297,7 @@ export class StreamingPatchParser {
             );
         }
 
-        const chunk = lastItem(hunk.chunks);
+        const chunk = hunk.chunks.at(-1);
         if (chunk && chunk.oldLines.length === 0 && chunk.newLines.length === 0) {
             if (line === END_PATCH_MARKER) {
                 throw invalidHunk("Update hunk does not contain any lines", this.lineNumber);
@@ -379,7 +379,7 @@ export class StreamingPatchParser {
             case "addFile": {
                 if (this.handleHunkHeadersAndEndPatch(trimmed)) return;
                 const lineToAdd = stripPrefix(line, "+");
-                const hunk = lastItem(this.hunks);
+                const hunk = this.hunks.at(-1);
                 if (lineToAdd !== undefined && hunk?.type === "add") {
                     hunk.contents += `${lineToAdd}\n`;
                     return;
@@ -405,12 +405,12 @@ export class StreamingPatchParser {
         const updateLine = line.trimEnd();
         if (this.handleHunkHeadersAndEndPatch(updateLine)) return;
 
-        const hunk = lastItem(this.hunks);
+        const hunk = this.hunks.at(-1);
         if (hunk?.type !== "update") {
             throw invalidHunk(unexpectedUpdateLineMessage(line), this.lineNumber);
         }
 
-        const previousChunk = lastItem(hunk.chunks);
+        const previousChunk = hunk.chunks.at(-1);
         if (previousChunk?.isEndOfFile) {
             if (updateLine.length === 0) return;
             if (
@@ -738,7 +738,7 @@ function makeUpdateChunk(changeContext: string | undefined): MutableUpdateFileCh
 }
 
 function ensureCurrentUpdateChunk(hunk: MutableUpdateFileHunk): MutableUpdateFileChunk {
-    const existing = lastItem(hunk.chunks);
+    const existing = hunk.chunks.at(-1);
     if (existing !== undefined) return existing;
     const chunk = makeUpdateChunk(undefined);
     hunk.chunks.push(chunk);
@@ -1351,10 +1351,6 @@ function stripPrefix(text: string, prefix: string): string | undefined {
 
 function trimOneTrailingCarriageReturn(text: string): string {
     return text.endsWith("\r") ? text.slice(0, -1) : text;
-}
-
-function lastItem<T>(items: readonly T[]): T | undefined {
-    return items.length === 0 ? undefined : items[items.length - 1];
 }
 
 function invalidPatch(message: string): ApplyPatchError {

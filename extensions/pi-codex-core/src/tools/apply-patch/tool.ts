@@ -1,3 +1,4 @@
+import { diffPatchLines } from "./line-diff.ts";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -161,14 +162,19 @@ export function createApplyPatchTool(): ToolDefinition<
                 }
             },
             renderCall(args, theme, _context) {
-                const summary = summarizeApplyPatchCall(args.patch);
+                const parsed = parseApplyPatch(args.patch);
+                const summary = parsed.isErr()
+                    ? "patch"
+                    : formatPatchCallSummary(summarizePlannedPatchLines(parsed.value.hunks));
                 let text =
                     theme.fg("toolTitle", theme.bold("apply_patch ")) +
                     theme.fg(
                         summary.length > 0 ? "accent" : "dim",
                         summary.length > 0 ? summary : "...",
                     );
-                const diff = summarizePlannedPatchDiffPreview(args.patch);
+                const diff = parsed.isErr()
+                    ? ""
+                    : summarizePlannedPatchDiffPreview(parsed.value.hunks);
                 if (diff.length > 0) {
                     text += `\n\n${renderApplyPatchDiff(truncateDiffLines(diff, COMPACT_DIFF_LINE_LIMIT), theme)}`;
                 }
@@ -266,17 +272,8 @@ function normalizeApplyPatchArguments(args: unknown): ApplyPatchParams | undefin
     return patch === undefined ? undefined : { patch };
 }
 
-function summarizeApplyPatchCall(patch: string): string {
-    const parsed = parseApplyPatch(patch);
-    return parsed.isErr()
-        ? "patch"
-        : formatPatchCallSummary(summarizePlannedPatchLines(parsed.value.hunks));
-}
-
-function summarizePlannedPatchDiffPreview(patch: string): string {
-    const parsed = parseApplyPatch(patch);
-    if (parsed.isErr()) return "";
-    return parsed.value.hunks
+function summarizePlannedPatchDiffPreview(hunks: readonly ApplyPatchHunk[]): string {
+    return hunks
         .map((hunk) => formatPlannedPatchHunkDiff(hunk))
         .filter((diff) => diff.length > 0)
         .join("\n\n");
@@ -621,40 +618,10 @@ function formatDisplayLineDiff(
     oldLines: readonly string[],
     newLines: readonly string[],
 ): readonly string[] {
-    const table = buildLongestCommonSubsequenceTable(oldLines, newLines);
-    const lines: string[] = [];
-    let oldIndex = 0;
-    let newIndex = 0;
-
-    while (oldIndex < oldLines.length && newIndex < newLines.length) {
-        const oldLine = oldLines[oldIndex] ?? "";
-        const newLine = newLines[newIndex] ?? "";
-        if (oldLine === newLine) {
-            lines.push(`  ${oldLine}`);
-            oldIndex += 1;
-            newIndex += 1;
-        } else if (
-            lcsTableValue(table, oldIndex + 1, newIndex) >=
-            lcsTableValue(table, oldIndex, newIndex + 1)
-        ) {
-            lines.push(`- ${oldLine}`);
-            oldIndex += 1;
-        } else {
-            lines.push(`+ ${newLine}`);
-            newIndex += 1;
-        }
-    }
-
-    while (oldIndex < oldLines.length) {
-        lines.push(`- ${oldLines[oldIndex] ?? ""}`);
-        oldIndex += 1;
-    }
-    while (newIndex < newLines.length) {
-        lines.push(`+ ${newLines[newIndex] ?? ""}`);
-        newIndex += 1;
-    }
-
-    return lines;
+    return diffPatchLines(oldLines, newLines).map((line) => {
+        const prefix = line.kind === "context" ? "  " : line.kind === "addition" ? "+ " : "- ";
+        return `${prefix}${line.text}`;
+    });
 }
 
 function splitContentLines(text: string): readonly string[] {
@@ -682,39 +649,6 @@ function longestCommonSubsequenceLength(
     return previousRow[newLines.length] ?? 0;
 }
 
-function buildLongestCommonSubsequenceTable(
-    oldLines: readonly string[],
-    newLines: readonly string[],
-): readonly (readonly number[])[] {
-    const table = Array.from({ length: oldLines.length + 1 }, () =>
-        makeZeroRow(newLines.length + 1),
-    );
-
-    for (let oldIndex = oldLines.length - 1; oldIndex >= 0; oldIndex -= 1) {
-        const row = table[oldIndex];
-        if (row === undefined) continue;
-        for (let newIndex = newLines.length - 1; newIndex >= 0; newIndex -= 1) {
-            row[newIndex] =
-                oldLines[oldIndex] === newLines[newIndex]
-                    ? lcsTableValue(table, oldIndex + 1, newIndex + 1) + 1
-                    : Math.max(
-                          lcsTableValue(table, oldIndex + 1, newIndex),
-                          lcsTableValue(table, oldIndex, newIndex + 1),
-                      );
-        }
-    }
-
-    return table;
-}
-
 function makeZeroRow(length: number): number[] {
     return Array.from<number>({ length }).fill(0);
-}
-
-function lcsTableValue(
-    table: readonly (readonly number[])[],
-    rowIndex: number,
-    columnIndex: number,
-): number {
-    return table[rowIndex]?.[columnIndex] ?? 0;
 }

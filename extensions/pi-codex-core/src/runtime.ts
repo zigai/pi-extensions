@@ -21,6 +21,45 @@ export type Scheduler = {
     readonly set: (delayMs: number, task: () => void) => ScheduledTask;
 };
 
+/** Wait with caller-owned cancellation and cleanup, including synchronous schedulers. */
+export function waitWithScheduler(
+    scheduler: Scheduler,
+    delayMs: number,
+    options: {
+        readonly signal?: AbortSignal | undefined;
+        readonly preservePreAbortReason?: boolean;
+    } = {},
+): Promise<void> {
+    const { signal } = options;
+    if (signal?.aborted) {
+        return Promise.reject(
+            options.preservePreAbortReason
+                ? signal.reason
+                : (signal.reason ?? new DOMException("Aborted", "AbortError")),
+        );
+    }
+    return new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let task: ScheduledTask | undefined;
+        const settle = (complete: () => void) => {
+            if (settled) return;
+            settled = true;
+            task?.cancel();
+            signal?.removeEventListener("abort", onAbort);
+            complete();
+        };
+        const onAbort = () =>
+            settle(() => reject(signal?.reason ?? new DOMException("Aborted", "AbortError")));
+        signal?.addEventListener("abort", onAbort, { once: true });
+        try {
+            task = scheduler.set(delayMs, () => settle(resolve));
+            if (settled) task.cancel();
+        } catch (cause: unknown) {
+            settle(() => reject(cause));
+        }
+    });
+}
+
 /** Runtime services used by boundary adapters and workflow shell code. */
 export type CodexRuntime = {
     readonly fetch: CodexFetch;

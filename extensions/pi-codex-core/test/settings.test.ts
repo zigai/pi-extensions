@@ -5,13 +5,15 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { dirname, join } from "node:path";
 import { test } from "vitest";
+import { Type } from "typebox";
+import { compileSchema } from "../src/schema-parsing.ts";
 import {
     initTheme,
     type ExtensionAPI,
     type ExtensionContext,
     type Theme,
 } from "@earendil-works/pi-coding-agent";
-import { JsonObjectDecoder } from "../src/compaction/responses-input.ts";
+import { JsonObjectDecoder, JsonStringDecoder } from "../src/compaction/responses-input.ts";
 import { registerCodexCommand } from "../src/settings/command.ts";
 import { registerCodexIntegration } from "../src/settings/integration.ts";
 import { openCodexSettingsScreen, type CodexSettingsTab } from "../src/settings/screen.ts";
@@ -608,8 +610,9 @@ test("settings screen aborts its default reset HTTP request when closed", async 
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     try {
-        const address = server.address();
-        assert.ok(address && typeof address !== "string");
+        const address = compileSchema(
+            Type.Object({ port: Type.Integer({ minimum: 1, maximum: 65_535 }) }),
+        ).Parse(server.address());
         const ctx = makeSettingsContext({
             model: {
                 ...DEFAULT_TEST_EXTENSION_MODEL,
@@ -649,8 +652,7 @@ test("settings screen aborts its default reset HTTP request when closed", async 
         assert.equal(requests[0]?.url, "/backend-api/wham/rate-limit-reset-credits/consume");
         const body = JsonObjectDecoder.Parse(JSON.parse(requests[0]?.body ?? ""));
         assert.deepEqual(Object.keys(body), ["redeem_request_id"]);
-        assert.equal(typeof body.redeem_request_id, "string");
-        assert.ok(body.redeem_request_id.length > 0);
+        assert.ok(JsonStringDecoder.Parse(body.redeem_request_id).length > 0);
     } finally {
         server.closeAllConnections();
         await new Promise<void>((resolve, reject) => {

@@ -37,7 +37,7 @@ export async function prepareCodexPromptImageContent(
     options.signal?.throwIfAborted();
     const target = codexPromptImageTargetDimensions(dimensions.width, dimensions.height, limits);
     if (target.width === dimensions.width && target.height === dimensions.height) {
-        return imageContentFromBytes(image.bytes, image.mimeType);
+        return { type: "image", data: image.bytes.toString("base64"), mimeType: image.mimeType };
     }
 
     const resized = await resizeImage(image.bytes, image.mimeType, {
@@ -101,10 +101,6 @@ export function modelSupportsImages(model: ExtensionContext["model"]): boolean {
 
 function codexPromptImageResizeLimits(detail: ImageDetail): CodexPromptImageResizeLimits {
     return detail === "original" ? CODEX_ORIGINAL_DETAIL_LIMITS : CODEX_HIGH_DETAIL_LIMITS;
-}
-
-function imageContentFromBytes(bytes: Buffer, mimeType: string): ImageContent {
-    return { type: "image", data: bytes.toString("base64"), mimeType };
 }
 
 function codexPromptImageDimensionsFit(

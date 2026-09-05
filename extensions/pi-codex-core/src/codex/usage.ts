@@ -27,7 +27,7 @@ import {
     JsonStringDecoder,
     JsonValueDecoder,
 } from "../compaction/responses-input.ts";
-import type { JsonObject, JsonValue } from "../compaction/types.ts";
+import type { JsonValue } from "../compaction/types.ts";
 
 const RESET_CREDITS_CACHE_MS = 5_000;
 const RESET_CREDIT_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
@@ -95,9 +95,10 @@ let resetCreditsCache:
     | {
           readonly key: string;
           readonly expiresAt: number;
-          readonly promise: Promise<CodexResult<CodexRateLimitResetCredits | undefined>>;
+          readonly credits: CodexRateLimitResetCredits;
       }
     | undefined;
+let resetCreditsCacheGeneration = 0;
 
 export function buildCodexUsageUrl(modelBaseUrl?: string): string {
     return `${resolveCodexWhamBaseUrl(modelBaseUrl)}/wham/usage`;
@@ -184,6 +185,7 @@ export async function consumeCodexRateLimitResetCredit(
     const headers = await buildCodexUsageHeaders(ctx, model.value);
     if (headers.isErr()) return headers;
     headers.value.set("content-type", "application/json");
+    resetCreditsCacheGeneration += 1;
     resetCreditsCache = undefined;
 
     const requestInit: RequestInit = {
@@ -196,7 +198,10 @@ export async function consumeCodexRateLimitResetCredit(
         runtime,
         buildCodexRateLimitResetConsumeUrl(model.value.baseUrl),
         requestInit,
-    );
+    ).finally(() => {
+        resetCreditsCacheGeneration += 1;
+        resetCreditsCache = undefined;
+    });
     if (response.isErr()) return response;
     if (!response.value.ok) {
         return fail(
@@ -209,7 +214,6 @@ export async function consumeCodexRateLimitResetCredit(
         );
     }
 
-    resetCreditsCache = undefined;
     const rawConsumePayload = await parseJsonResponse(response.value, "codexResetCredit");
     if (rawConsumePayload.isErr()) return rawConsumePayload;
     return ok(parseCodexRateLimitResetConsumePayload(rawConsumePayload.value));
@@ -217,14 +221,14 @@ export async function consumeCodexRateLimitResetCredit(
 
 export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
     const raw = JsonValueDecoder.decode(payload);
-    const root = parseUsageRecord(raw) ?? {};
+    const root = JsonObjectDecoder.decode(raw) ?? {};
     const limits: CodexUsageLimit[] = [];
     const addLimit = (
         limitId: string,
         limitName: string | undefined,
         source: JsonValue | undefined,
     ): void => {
-        const sourceRecord = parseUsageRecord(source);
+        const sourceRecord = JsonObjectDecoder.decode(source);
         const rateLimit =
             sourceRecord && "rate_limit" in sourceRecord ? sourceRecord.rate_limit : source;
         const parsed = parseRateLimit(rateLimit);
@@ -238,7 +242,7 @@ export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
     addLimit("codex", undefined, root.rate_limit);
     if (Array.isArray(root.additional_rate_limits)) {
         for (const item of root.additional_rate_limits) {
-            const additionalLimit = parseUsageRecord(item);
+            const additionalLimit = JsonObjectDecoder.decode(item);
             if (!additionalLimit) continue;
             addLimit(
                 parseString(additionalLimit.metered_feature) ?? "additional",
@@ -402,6 +406,15 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
     options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<CodexResult<CodexRateLimitResetCredits | undefined>> {
     const { signal } = options;
+    if (signal?.aborted) {
+        return fail(
+            new CodexRequestCancelled({
+                operation: "codexUsage",
+                message: "Codex usage request was cancelled.",
+                cause: signal.reason,
+            }),
+        );
+    }
     const creditsUrl = buildCodexRateLimitResetCreditsUrl(modelBaseUrl);
     const accountId = headers.get("chatgpt-account-id")?.trim();
     const cacheKey = accountId && accountId.length > 0 ? `${creditsUrl}:${accountId}` : undefined;
@@ -411,25 +424,30 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
         resetCreditsCache.key === cacheKey &&
         resetCreditsCache.expiresAt > runtime.clock.nowMs()
     ) {
-        return resetCreditsCache.promise;
+        return ok(resetCreditsCache.credits);
     }
-    const promise = (async (): Promise<CodexResult<CodexRateLimitResetCredits | undefined>> => {
-        const requestInit: RequestInit = { method: "GET", headers };
-        if (signal) requestInit.signal = signal;
-        const response = await fetchUsageResponse(runtime, creditsUrl, requestInit);
-        if (response.isErr()) return response;
-        if (!response.value.ok) return ok(undefined);
-        const rawCreditsPayload = await parseJsonResponse(response.value, "codexResetCredits");
-        if (rawCreditsPayload.isErr()) return rawCreditsPayload;
-        return ok(parseCodexRateLimitResetCreditsPayload(rawCreditsPayload.value));
-    })();
-    if (cacheKey)
-        resetCreditsCache = {
-            key: cacheKey,
-            expiresAt: runtime.clock.nowMs() + RESET_CREDITS_CACHE_MS,
-            promise,
-        };
-    return promise;
+    // Cold requests remain caller-owned: overlapping callers may each perform a GET.
+    // Only settled data is shared; expiry remains anchored to this request's start.
+    const generation = resetCreditsCacheGeneration;
+    const expiresAt = runtime.clock.nowMs() + RESET_CREDITS_CACHE_MS;
+    const requestInit: RequestInit = { method: "GET", headers };
+    if (signal) requestInit.signal = signal;
+    const response = await fetchUsageResponse(runtime, creditsUrl, requestInit);
+    if (response.isErr()) return response;
+    if (!response.value.ok) return ok(undefined);
+    const rawCreditsPayload = await parseJsonResponse(response.value, "codexResetCredits");
+    if (rawCreditsPayload.isErr()) return rawCreditsPayload;
+    const credits = parseCodexRateLimitResetCreditsPayload(rawCreditsPayload.value);
+    if (
+        cacheKey &&
+        credits &&
+        !signal?.aborted &&
+        generation === resetCreditsCacheGeneration &&
+        expiresAt > runtime.clock.nowMs()
+    ) {
+        resetCreditsCache = { key: cacheKey, expiresAt, credits };
+    }
+    return ok(credits);
 }
 
 async function fetchUsageResponse(
@@ -507,7 +525,7 @@ function parseCodexRateLimitResetConsumePayload(
     payload: unknown,
 ): CodexRateLimitResetConsumeResult {
     const raw = JsonValueDecoder.decode(payload);
-    const root = parseUsageRecord(raw) ?? {};
+    const root = JsonObjectDecoder.decode(raw) ?? {};
     const code = parseString(root.code);
     const outcome: CodexRateLimitResetConsumeOutcome =
         code === "reset" ||
@@ -522,14 +540,14 @@ function parseCodexRateLimitResetConsumePayload(
 function parseCodexRateLimitResetCreditsSummary(
     value: JsonValue | undefined,
 ): CodexRateLimitResetCredits | undefined {
-    const summary = parseUsageRecord(value);
+    const summary = JsonObjectDecoder.decode(value);
     if (!summary) return undefined;
     const availableCount = parseInteger(summary.available_count);
     return availableCount === undefined ? undefined : { availableCount, credits: [], raw: summary };
 }
 
 function parseResetCredit(value: JsonValue): CodexRateLimitResetCredit | undefined {
-    const credit = parseUsageRecord(value);
+    const credit = JsonObjectDecoder.decode(value);
     if (!credit) return undefined;
     return {
         id: parseString(credit.id),
@@ -550,7 +568,7 @@ type ParsedRateLimit = {
 };
 
 function parseRateLimit(value: JsonValue | undefined): ParsedRateLimit {
-    const rateLimit = parseUsageRecord(value);
+    const rateLimit = JsonObjectDecoder.decode(value);
     if (!rateLimit) return {};
     return {
         primary: parseWindow(rateLimit.primary_window) ?? parseWindow(rateLimit.primary),
@@ -559,14 +577,15 @@ function parseRateLimit(value: JsonValue | undefined): ParsedRateLimit {
 }
 
 function parseWindow(value: JsonValue | undefined): CodexUsageWindow | undefined {
-    const window = parseUsageRecord(value);
+    const window = JsonObjectDecoder.decode(value);
     if (!window) return undefined;
-    const usedPercent = parseNumber(window.used_percent);
-    const limitWindowSeconds = parseNumber(window.limit_window_seconds);
+    const usedPercent = JsonNumberDecoder.decode(window.used_percent);
+    const limitWindowSeconds = JsonNumberDecoder.decode(window.limit_window_seconds);
     const windowMinutes =
-        parseNumber(window.window_minutes) ??
+        JsonNumberDecoder.decode(window.window_minutes) ??
         (limitWindowSeconds === undefined ? undefined : Math.ceil(limitWindowSeconds / 60));
-    const resetsAt = parseNumber(window.resets_at) ?? parseNumber(window.reset_at);
+    const resetsAt =
+        JsonNumberDecoder.decode(window.resets_at) ?? JsonNumberDecoder.decode(window.reset_at);
     return usedPercent === undefined && windowMinutes === undefined && resetsAt === undefined
         ? undefined
         : { usedPercent, windowMinutes, resetsAt };
@@ -635,19 +654,11 @@ function parseString(value: JsonValue | undefined): string | undefined {
     return text.length > 0 ? text : undefined;
 }
 
-function parseNumber(value: JsonValue | undefined): number | undefined {
-    return JsonNumberDecoder.decode(value);
-}
-
 function parseInteger(value: JsonValue | undefined): number | undefined {
-    const numericValue = parseNumber(value);
+    const numericValue = JsonNumberDecoder.decode(value);
     if (numericValue !== undefined) return Math.max(0, Math.trunc(numericValue));
     const text = StringSchema.decode(value)?.trim();
     if (!text) return undefined;
     const parsed = Number(text);
     return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : undefined;
-}
-
-function parseUsageRecord(value: unknown): JsonObject | undefined {
-    return JsonObjectDecoder.decode(value);
 }

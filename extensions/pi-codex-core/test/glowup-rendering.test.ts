@@ -109,7 +109,28 @@ test("apply_patch adapter owns partial, planned, settled, and restored mutation 
     const splitEmoji: unknown = rendering.renderPartialCall({
         patch: `*** Begin Patch\n*** Add File: src/live.ts\n+${"🧪".slice(0, 1)}`,
     });
-    assert.doesNotMatch(JSON.stringify(splitEmoji), /�/u);
+    assert.deepEqual(
+        splitEmoji,
+        rendering.renderPartialCall({
+            patch: "*** Begin Patch\n*** Add File: src/live.ts\n+",
+        }),
+    );
+    const splitNode = rendering.renderPartialCall({
+        patch: `*** Begin Patch\n*** Add File: src/live.ts\n+text${"🧪".slice(0, 1)}`,
+    });
+    assert.equal(splitNode.kind, "mutation");
+    if (splitNode.kind === "mutation") {
+        const text = splitNode.files[0]?.lines[0]?.text;
+        assert.equal(text, "text");
+        assert.doesNotMatch(text ?? "", /[\uD800-\uDFFF]/u);
+    }
+    const completeEmoji = rendering.renderPartialCall({
+        patch: "*** Begin Patch\n*** Add File: src/live.ts\n+text🧪",
+    });
+    assert.equal(completeEmoji.kind, "mutation");
+    if (completeEmoji.kind === "mutation") {
+        assert.equal(completeEmoji.files[0]?.lines[0]?.text, "text🧪");
+    }
 
     const settled: unknown = rendering.renderCall(args, {
         ...completeContext,
@@ -137,6 +158,28 @@ test("apply_patch adapter owns partial, planned, settled, and restored mutation 
     assert.equal(restoredRecord.kind, "mutation");
     assert.equal(StringDecoder.decode(restoredRecord.patch)?.includes("src/b.ts"), true);
     assert.equal(rendering.parseResult({ details: { patch: "invalid" } }), undefined);
+});
+
+test("passive patch preview preserves deletion-first ties, blank context, and move paths", () => {
+    const args = applyPatchGlowupRendering.parseArgs({
+        patch: "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@ section\n-a\n-b\n+b\n+a\n \n*** End Patch",
+    });
+    assert.ok(args);
+    assert.deepEqual(args.files, [
+        {
+            path: "new.txt",
+            previousPath: "old.txt",
+            added: 1,
+            removed: 1,
+            lines: [
+                { kind: "metadata", text: "@@ section" },
+                { kind: "deletion", text: "a" },
+                { kind: "context", text: "b" },
+                { kind: "addition", text: "a" },
+                { kind: "context", text: "" },
+            ],
+        },
+    ]);
 });
 
 test("web_run adapter summarizes calls and bounded source results", () => {

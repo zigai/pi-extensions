@@ -46,8 +46,10 @@ type TokenEncoding = {
     readonly decode: (tokens: number[]) => string;
 };
 
+export type TokenizerWorker = Pick<Worker, "on" | "unref" | "postMessage" | "terminate">;
+
 type TokenizerWorkerState = {
-    readonly worker: Worker;
+    readonly worker: TokenizerWorker;
     readonly pending: Map<number, PendingTokenizerRequest>;
     readonly ready: Promise<void>;
     readyResolve: (() => void) | undefined;
@@ -64,6 +66,12 @@ export class CodexTokenizer {
     private nextRequestId = 1;
     private warmupPromise: Promise<void> | undefined;
     private mainEncodingPromise: Promise<TokenEncoding> | undefined;
+
+    constructor(
+        private readonly options: {
+            readonly createWorker?: (url: URL) => TokenizerWorker;
+        } = {},
+    ) {}
 
     /** Start initializing the tokenizer off the main thread without awaiting it. */
     warm(): void {
@@ -156,7 +164,9 @@ export class CodexTokenizer {
     private ensureWorkerState(): TokenizerWorkerState {
         if (this.workerState !== undefined) return this.workerState;
 
-        const worker = new Worker(TOKENIZER_WORKER_URL);
+        const worker = this.options.createWorker
+            ? this.options.createWorker(TOKENIZER_WORKER_URL)
+            : new Worker(TOKENIZER_WORKER_URL);
         worker.unref();
         const pending = new Map<number, PendingTokenizerRequest>();
         let readyResolve: (() => void) | undefined;

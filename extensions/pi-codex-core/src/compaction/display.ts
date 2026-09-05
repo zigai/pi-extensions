@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 
 import { NATIVE_COMPACTION_MESSAGE_TEXT, NATIVE_COMPACTION_MESSAGE_TYPE } from "./messages.ts";
 import { compileSchema } from "../schema-parsing.ts";
@@ -13,7 +14,9 @@ export function registerNativeCompactionDisplay(pi: ExtensionAPI): void {
             render(width: number): string[] {
                 const text =
                     MessageContentSchema.decode(message.content) ?? NATIVE_COMPACTION_MESSAGE_TEXT;
-                return text.split("\n").map((line) => theme.fg("dim", line).slice(0, width));
+                return text
+                    .split("\n")
+                    .map((line) => truncateToWidth(theme.fg("dim", line), width, ""));
             },
             invalidate(): void {},
         };

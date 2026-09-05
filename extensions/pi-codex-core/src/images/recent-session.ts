@@ -63,10 +63,11 @@ export async function recentImageContents(
 
 function extractImageRefsFromEntry(entry: SessionEntry): RecentImageRef[] {
     if (entry.type !== "message") return [];
-    return [
-        ...extractInlineImageRefs(entry.message),
-        ...extractImagegenArtifactRefs(entry.message),
-    ];
+    const inlineImages = extractInlineImageRefs(entry.message);
+    // Current imagegen results attach every generated image inline; saved artifacts
+    // are alternate representations (and may be only a subset after save failures).
+    // Restored results without attachments use the persisted artifacts instead.
+    return inlineImages.length > 0 ? inlineImages : extractImagegenArtifactRefs(entry.message);
 }
 
 function extractInlineImageRefs(message: unknown): RecentImageRef[] {

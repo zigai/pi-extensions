@@ -201,7 +201,7 @@ export class CodexRecoveryCoordinator {
         this.errorMessage = undefined;
         for (const entry of entries) {
             if (entry.type !== "custom" || entry.customType !== CODEX_RECOVERY_ENTRY_TYPE) continue;
-            const state = parseRecoveryState(entry.data);
+            const state = RecoveryStateSchema.decode(entry.data);
             if (!state) continue;
             this.pendingFollowUps = [...state.pendingFollowUps];
             this.recoveryAttempt = state.recoveryAttempt;
@@ -244,10 +244,6 @@ export function isTransientCodexFailure(message: AssistantMessage): boolean {
     if (message.stopReason !== "error" || !message.errorMessage) return false;
     if (TERMINAL_ERROR_PATTERN.test(message.errorMessage)) return false;
     return TRANSIENT_ERROR_PATTERN.test(message.errorMessage);
-}
-
-function parseRecoveryState(value: unknown): RecoveryState | undefined {
-    return RecoveryStateSchema.decode(value);
 }
 
 function formatRecoveryPrompt(pending: readonly string[]): string {

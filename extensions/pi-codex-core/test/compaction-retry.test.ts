@@ -105,6 +105,22 @@ for (const code of ["server_is_overloaded", "slow_down", "server_error", "unknow
     });
 }
 
+test("synchronous retry scheduling disposes tasks and preserves compaction attempts", async () => {
+    let cancellations = 0;
+    const scenario = runScenario([failure({ code: "server_error" }), success], (_delay, task) => {
+        task();
+        return {
+            cancel: () => {
+                cancellations += 1;
+            },
+        };
+    });
+    assert.ok((await scenario.result).isOk());
+    assert.equal(scenario.calls(), 2);
+    assert.deepEqual(scenario.delays, [200]);
+    assert.equal(cancellations, 1);
+});
+
 test("stream retries exhaust after two retries and preserve the last failure", async () => {
     const scenario = runScenario([failure({ code: "rate_limit_exceeded", message: "Busy" })]);
     const result = await scenario.result;

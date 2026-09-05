@@ -13,7 +13,7 @@ import {
     type CodexFailure,
     type CodexResult,
 } from "../codex/failures.ts";
-import type { CodexRuntime, ScheduledTask } from "../runtime.ts";
+import { waitWithScheduler, type CodexRuntime, type ScheduledTask } from "../runtime.ts";
 import { compileSchema } from "../schema-parsing.ts";
 import {
     isRemoteCompactionOutputItem,
@@ -68,8 +68,7 @@ export async function executeRemoteCompactionV2(
 ): Promise<CodexResult<RemoteCompactionV2Response>> {
     const { services, signal } = options;
     const encodedRequest = encodeRemoteCompactionRequest(request, runtime.headers);
-    let lastResult: CodexResult<RemoteCompactionV2Response> | undefined;
-    for (let attempt = 0; attempt <= MAX_REMOTE_COMPACTION_STREAM_RETRIES; attempt += 1) {
+    for (let attempt = 0; ; attempt += 1) {
         if (signal.aborted) return cancelledRemoteCompaction(signal.reason);
         const linkedAttempt = createLinkedAttemptController(signal);
         let result: CodexResult<RemoteCompactionV2Response>;
@@ -97,30 +96,18 @@ export async function executeRemoteCompactionV2(
         ) {
             return result;
         }
-        lastResult = result;
         try {
-            await waitForRetry(
+            await waitWithScheduler(
+                services.scheduler,
                 (result.error._tag === "CodexStreamRetryable"
                     ? result.error.retryAfterMs
                     : undefined) ?? REMOTE_COMPACTION_RETRY_INITIAL_DELAY_MS * 2 ** attempt,
-                signal,
-                services,
+                { signal },
             );
         } catch (cause: unknown) {
             return cancelledRemoteCompaction(cause);
         }
     }
-    return (
-        lastResult ??
-        fail(
-            new CodexNetworkUnavailable({
-                operation: "nativeCompaction",
-                provider: "openai-codex",
-                message: "Codex remote compaction retry limit was exhausted.",
-                cause: new Error("Remote compaction retry limit exhausted."),
-            }),
-        )
-    );
 }
 
 type EncodedRemoteCompactionRequest = {
@@ -342,28 +329,6 @@ function readRemoteCompactionResponseText(
     return withRemoteCompactionIdleTimeout(text, signal, services, (cause) =>
         attemptController.abort(cause),
     );
-}
-
-function waitForRetry(delayMs: number, signal: AbortSignal, services: CodexRuntime): Promise<void> {
-    if (signal.aborted) {
-        return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
-    }
-    return new Promise<void>((resolve, reject) => {
-        let settled = false;
-        let task: ScheduledTask | undefined;
-        const settle = (complete: () => void) => {
-            if (settled) return;
-            settled = true;
-            task?.cancel();
-            signal.removeEventListener("abort", onAbort);
-            complete();
-        };
-        const onAbort = () =>
-            settle(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
-        signal.addEventListener("abort", onAbort, { once: true });
-        task = services.scheduler.set(delayMs, () => settle(resolve));
-        if (settled) task.cancel();
-    });
 }
 
 async function readSafeHttpErrorDetail(

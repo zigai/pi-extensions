@@ -159,7 +159,7 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
             const images = result.details.images;
             const count = result.details.generatedCount;
             const firstImage = images.at(0);
-            const metadata = imagegenResultMetadata(result.details);
+            const metadata = imagegenMetadata(result.details);
             let text = theme.fg("success", `Generated ${count} image${count === 1 ? "" : "s"}`);
             if (firstImage) text += theme.fg("dim", ` → ${firstImage.latestPath}`);
             if (metadata) text += theme.fg("dim", ` (${metadata})`);
@@ -264,7 +264,10 @@ function summarizeImagegenOptions(args: ImagegenParams): string {
     return parts.join(" • ");
 }
 
-function imagegenResultMetadata(details: ImagegenDetails): string {
+function imagegenMetadata(details: {
+    readonly size?: string | undefined;
+    readonly quality?: string | undefined;
+}): string {
     return [
         details.size ? `size=${details.size}` : undefined,
         details.quality ? `quality=${details.quality}` : undefined,
@@ -462,12 +465,7 @@ function formatImagegenOutput(
         lines.push(`- latest image: ${image.latestPath}`);
     }
     for (const error of saveErrors) lines.push(`- save warning: ${error}`);
-    const metadata = [
-        response.size ? `size=${response.size}` : undefined,
-        response.quality ? `quality=${response.quality}` : undefined,
-    ]
-        .filter((item): item is string => Boolean(item))
-        .join(", ");
+    const metadata = imagegenMetadata(response);
     if (metadata) lines.push(`- ${metadata}`);
     return lines.join("\n");
 }

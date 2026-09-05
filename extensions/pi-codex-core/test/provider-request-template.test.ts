@@ -8,8 +8,6 @@ import {
 } from "../src/compaction/provider-request-template.ts";
 import { buildRemoteCompactionV2Request } from "../src/compaction/request-budget.ts";
 
-type LazyConversationItem = { role: string; content?: never };
-
 test("captures provider-ready cache fields without retaining conversation input", () => {
     const sessionId = "provider-template-standard";
     try {
@@ -132,6 +130,116 @@ test("captures and reuses the Responses Lite static prefix", () => {
     }
 });
 
+test("rejects malformed retained static fields and invalidates the previous template", () => {
+    const sessionId = "provider-template-invalid-static";
+    const invalid = { nested: { unsupported: () => undefined } };
+    const base = { model: "gpt-5.5", instructions: "system", input: [] };
+    try {
+        for (const payload of [
+            { ...base, tools: [{ type: "function", parameters: invalid }] },
+            { ...base, reasoning: invalid },
+            {
+                model: "gpt-5.6-sol",
+                input: [{ type: "additional_tools", role: "developer", tools: [], ...invalid }],
+            },
+            {
+                model: "gpt-5.6-sol",
+                input: [
+                    { type: "additional_tools", role: "developer", tools: [] },
+                    { role: "developer", content: [{ type: "input_text", ...invalid }] },
+                ],
+            },
+        ]) {
+            assert.ok(captureProviderRequestTemplate(sessionId, base));
+            assert.equal(captureProviderRequestTemplate(sessionId, payload), undefined);
+            assert.equal(getProviderRequestTemplate(sessionId, "gpt-5.5", "responses"), undefined);
+        }
+    } finally {
+        clearProviderRequestTemplate(sessionId);
+    }
+});
+
+test("captures standard static fields without reading conversation or unrelated fields", () => {
+    const sessionId = "provider-template-standard-bounded";
+    let reads = 0;
+    const input: unknown[] = [];
+    Object.defineProperty(input, "0", {
+        get() {
+            reads += 1;
+            return { role: "user", content: "secret" };
+        },
+    });
+    try {
+        const template = captureProviderRequestTemplate(sessionId, {
+            model: "gpt-5.5",
+            instructions: "system",
+            input,
+            get client_metadata() {
+                reads += 1;
+                return { unretained: "metadata" };
+            },
+        });
+        assert.equal(reads, 0);
+        assert.equal(template?.instructions, "system");
+        assert.equal(template?.layout, "responses");
+    } finally {
+        clearProviderRequestTemplate(sessionId);
+    }
+});
+
+test("rejects malformed shallow request boundaries and invalidates cached templates", () => {
+    const sessionId = "provider-template-malformed-boundary";
+    const base = { model: "gpt-5.5", instructions: "system", input: [] };
+    const arrayPayload = Object.assign([], base);
+    const revokedInput = Proxy.revocable([], {});
+    revokedInput.revoke();
+    const revokedPayload = Proxy.revocable(base, {});
+    revokedPayload.revoke();
+    const malformedLiteInput = new Proxy(
+        [{ type: "additional_tools", role: "developer", tools: [] }],
+        {
+            getOwnPropertyDescriptor(target, key) {
+                if (key === "length") throw new Error("invalid input length descriptor");
+                return Reflect.getOwnPropertyDescriptor(target, key);
+            },
+        },
+    );
+    try {
+        for (const payload of [
+            arrayPayload,
+            revokedPayload.proxy,
+            { ...base, input: revokedInput.proxy },
+            { model: "gpt-5.6-sol", input: malformedLiteInput },
+        ]) {
+            assert.ok(captureProviderRequestTemplate(sessionId, base));
+            assert.equal(captureProviderRequestTemplate(sessionId, payload), undefined);
+            assert.equal(getProviderRequestTemplate(sessionId, "gpt-5.5", "responses"), undefined);
+        }
+    } finally {
+        clearProviderRequestTemplate(sessionId);
+    }
+});
+
+test("rejects accessor input without invoking it", () => {
+    const sessionId = "provider-template-accessor-input";
+    let reads = 0;
+    try {
+        assert.equal(
+            captureProviderRequestTemplate(sessionId, {
+                model: "gpt-5.5",
+                get input() {
+                    reads += 1;
+                    throw new Error("invalid accessor input");
+                },
+            }),
+            undefined,
+        );
+        assert.equal(reads, 0);
+    } finally {
+        clearProviderRequestTemplate(sessionId);
+    }
+});
+
 test("isolates templates by session, model, and wire layout", () => {
     const sessionId = "provider-template-isolation";
     try {
@@ -161,28 +269,45 @@ test("isolates templates by session, model, and wire layout", () => {
 
 test("does not traverse conversation items while capturing a Lite prefix", () => {
     const sessionId = "provider-template-bounded-capture";
-    const conversationItem: LazyConversationItem = { role: "user" };
-    Object.defineProperty(conversationItem, "content", {
+    let contentReads = 0;
+    let tailReads = 0;
+    const conversationItem = {
+        role: "user",
+        get content() {
+            contentReads += 1;
+            return "conversation content";
+        },
+    };
+    const input = [
+        { type: "additional_tools", role: "developer", tools: [] },
+        {
+            id: "msg_static",
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: "system" }],
+        },
+        conversationItem,
+    ];
+    Object.defineProperty(input, "3", {
         enumerable: true,
-        get(): never {
-            throw new Error("conversation content was traversed");
+        get() {
+            tailReads += 1;
+            return { role: "assistant", content: "tail" };
         },
     });
     try {
-        assert.doesNotThrow(() =>
-            captureProviderRequestTemplate(sessionId, {
-                model: "gpt-5.6-sol",
-                input: [
-                    { type: "additional_tools", role: "developer", tools: [] },
-                    {
-                        type: "message",
-                        role: "developer",
-                        content: [{ type: "input_text", text: "system" }],
-                    },
-                    conversationItem,
-                ],
-            }),
-        );
+        const template = captureProviderRequestTemplate(sessionId, {
+            model: "gpt-5.6-sol",
+            input,
+        });
+        assert.equal(contentReads, 0);
+        assert.equal(tailReads, 0);
+        assert.ok(template);
+        assert.equal(template.model, "gpt-5.6-sol");
+        assert.equal(template.layout, "responses-lite");
+        assert.equal(template.instructions, "system");
+        assert.deepEqual(template.instructionItems, [input[1]]);
+        assert.equal(JSON.stringify(template).includes("conversation content"), false);
     } finally {
         clearProviderRequestTemplate(sessionId);
     }

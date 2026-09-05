@@ -31,7 +31,6 @@ import {
     buildRemoteCompactionV2Request,
     buildRemoteCompactionV2Window,
     createTokenEstimateCache,
-    hasCompactionOutputItem,
     resolveCompactionTargetModel,
     rewriteRemoteCompactionToolOutputsForContextWindow,
     shrinkRemoteCompactionRequestForContextWindow,
@@ -57,6 +56,7 @@ import {
     buildRemoteCompactionTransportMetadata,
 } from "./transport-metadata.ts";
 import type {
+    FoundNativeCompactionEntry,
     NativeCompactionDetails,
     NativeCompactionMatch,
     NativeCompactionWorldState,
@@ -249,13 +249,6 @@ export async function handleCodexNativeCompaction(
                 imageBudgetInput: promptInput.input,
             },
         );
-        if (compactedWindow.length === 0 || !hasCompactionOutputItem(compactedWindow)) {
-            notifyCompactionFallback(
-                ctx,
-                "Codex remote compaction v2 returned no usable compacted context",
-            );
-            return undefined;
-        }
         const worldState = captureNativeCompactionWorldState(ctx, pi, runtimeServices, event);
         const lifecycle = buildWindowLifecycle(latestNativeCompaction, runtimeServices);
         return {
@@ -310,21 +303,9 @@ export async function rewriteProviderRequestWithNativeCompaction(
     pi: ExtensionAPI,
     runtime: CodexRuntime = defaultCodexRuntime,
 ): Promise<ResponsesPayload | undefined> {
-    const responsesPayload = ResponsesPayloadDecoder.decode(payload);
-    if (!responsesPayload || !config.compaction.enabled) return undefined;
-    const model = ctx.model;
-    if (!model) return undefined;
-    const modelApi = JsonStringDecoder.decode(model.api);
-    if (modelApi === undefined) return undefined;
-    const match: NativeCompactionMatch = {
-        provider: model.provider,
-        api: modelApi,
-        baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
-    };
-
-    const branchEntries = ctx.sessionManager.getBranch();
-    const latestNativeCompaction = findLatestActiveNativeCompactionEntry(branchEntries, match);
-    if (!latestNativeCompaction) return undefined;
+    const request = NativeReplayRequestDecoder.decode(payload, ctx, config);
+    if (!request) return undefined;
+    const { responsesPayload, model, branchEntries, latestNativeCompaction } = request;
 
     const incompatibility = nativeCompactionCompatibilityFailure(
         latestNativeCompaction.entry.details.model,
@@ -355,6 +336,40 @@ export async function rewriteProviderRequestWithNativeCompaction(
     notifyNativeReplayFallbackOnce(ctx, latestNativeCompaction.entry.id, replay.reason);
     return buildLenientNativeReplayPayload(responsesPayload, replacementInput);
 }
+
+type NativeReplayRequest = {
+    readonly responsesPayload: ResponsesPayload;
+    readonly model: NonNullable<ExtensionContext["model"]>;
+    readonly branchEntries: ReturnType<ExtensionContext["sessionManager"]["getBranch"]>;
+    readonly latestNativeCompaction: FoundNativeCompactionEntry;
+};
+
+// Replay applicability is part of this optional boundary: only an active checkpoint needs payload decoding.
+const NativeReplayRequestDecoder = {
+    decode(
+        payload: unknown,
+        ctx: ExtensionContext,
+        config: CodexCoreConfig,
+    ): NativeReplayRequest | undefined {
+        if (!config.compaction.enabled) return undefined;
+        const model = ctx.model;
+        if (!model) return undefined;
+        const modelApi = JsonStringDecoder.decode(model.api);
+        if (modelApi === undefined) return undefined;
+        const match: NativeCompactionMatch = {
+            provider: model.provider,
+            api: modelApi,
+            baseUrl: resolveCodexApiProviderBaseUrl(model.baseUrl),
+        };
+        const branchEntries = ctx.sessionManager.getBranch();
+        const latestNativeCompaction = findLatestActiveNativeCompactionEntry(branchEntries, match);
+        if (!latestNativeCompaction) return undefined;
+        const responsesPayload = ResponsesPayloadDecoder.decode(payload);
+        return responsesPayload
+            ? { responsesPayload, model, branchEntries, latestNativeCompaction }
+            : undefined;
+    },
+};
 
 function resolvedNativeCompactionHash(details: NativeCompactionDetails): string | undefined {
     return details.compHash ?? codexModelRequestProfile(details.model)?.compHash;

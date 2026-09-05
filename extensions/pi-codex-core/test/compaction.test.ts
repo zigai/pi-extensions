@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { deflateSync, zstdDecompressSync } from "node:zlib";
+import { Worker } from "node:worker_threads";
+import { getEncoding } from "js-tiktoken";
 import { afterAll, test } from "vitest";
 import {
     type ExtensionAPI,
@@ -28,6 +30,7 @@ import type { JsonObject, JsonValue, ResponsesInputItem } from "../src/compactio
 import {
     JsonArrayDecoder,
     JsonObjectDecoder,
+    JsonNumberDecoder,
     JsonStringDecoder,
     JsonValueDecoder,
 } from "../src/compaction/responses-input.ts";
@@ -62,7 +65,7 @@ async function handleCodexNativeCompaction(
     });
 }
 
-test("Codex tokenizer worker restarts after shutdown", async () => {
+test("Codex tokenizer preserves count and truncation after shutdown", async () => {
     const tokenizer = new CodexTokenizer();
     await tokenizer.shutdown();
     try {
@@ -80,6 +83,117 @@ test("Codex tokenizer worker restarts after shutdown", async () => {
         assert.equal(countAfterShutdown, countBeforeShutdown);
         assert.equal(truncatedAfterShutdown, truncatedBeforeShutdown);
         assert.ok(truncatedAfterShutdown.length < text.length);
+    } finally {
+        await tokenizer.shutdown();
+    }
+});
+
+test("Codex tokenizer creates real workers and completes requests across shutdown", async () => {
+    const workers: Array<{
+        requests: unknown[];
+        messages: unknown[];
+        terminated: boolean;
+    }> = [];
+    const tokenizer = new CodexTokenizer({
+        createWorker(url) {
+            const worker = new Worker(url);
+            const record: (typeof workers)[number] = {
+                requests: [],
+                messages: [],
+                terminated: false,
+            };
+            workers.push(record);
+            worker.on("message", (message: unknown): number =>
+                record.messages.push(JsonObjectDecoder.Parse(message)),
+            );
+            return {
+                on: worker.on.bind(worker),
+                unref: worker.unref.bind(worker),
+                postMessage(request: unknown): void {
+                    const parsed = JsonObjectDecoder.Parse(request);
+                    record.requests.push(parsed);
+                    worker.postMessage(parsed);
+                },
+                async terminate() {
+                    const code = await worker.terminate();
+                    record.terminated = true;
+                    return code;
+                },
+            };
+        },
+    });
+    try {
+        for (let generation = 0; generation < 2; generation += 1) {
+            tokenizer.warm();
+            const text = "alpha beta gamma delta epsilon";
+            const count = await tokenizer.count(text);
+            const truncated = await tokenizer.truncate(text, 3);
+            assert.equal(workers.length, generation + 1);
+            const record = workers[generation];
+            assert.ok(record);
+            const countRequest = JsonObjectDecoder.Parse(record.requests[0]);
+            const truncateRequest = JsonObjectDecoder.Parse(record.requests[1]);
+            JsonNumberDecoder.Parse(countRequest.id);
+            JsonNumberDecoder.Parse(truncateRequest.id);
+            assert.notEqual(countRequest.id, truncateRequest.id);
+            assert.deepEqual(record.requests, [
+                { id: countRequest.id, op: "count", text },
+                { id: truncateRequest.id, op: "truncate", text, maxTokens: 3 },
+            ]);
+            assert.deepEqual(record.messages, [
+                { type: "ready" },
+                { id: countRequest.id, type: "result", value: count },
+                { id: truncateRequest.id, type: "result", value: truncated },
+            ]);
+            assert.equal(record.terminated, false);
+            await tokenizer.shutdown();
+            assert.equal(record.terminated, true);
+        }
+    } finally {
+        await tokenizer.shutdown();
+    }
+});
+
+test("Codex tokenizer uses exact fallback after controlled worker creation failure", async () => {
+    let attempts = 0;
+    const recoveredMessages: unknown[] = [];
+    const recoveredRequests: unknown[] = [];
+    const tokenizer = new CodexTokenizer({
+        createWorker(url) {
+            attempts += 1;
+            if (attempts <= 2) throw new Error("controlled worker creation failure");
+            const worker = new Worker(url);
+            worker.on("message", (message: unknown): number =>
+                recoveredMessages.push(JsonObjectDecoder.Parse(message)),
+            );
+            return {
+                on: worker.on.bind(worker),
+                unref: worker.unref.bind(worker),
+                terminate: worker.terminate.bind(worker),
+                postMessage(request: unknown): void {
+                    const parsed = JsonObjectDecoder.Parse(request);
+                    recoveredRequests.push(parsed);
+                    worker.postMessage(parsed);
+                },
+            };
+        },
+    });
+    try {
+        const text = "alpha beta gamma delta epsilon zeta eta theta";
+        const encoding = getEncoding("o200k_base");
+        const tokens = encoding.encode(text);
+        assert.equal(await tokenizer.count(text), tokens.length);
+        assert.equal(await tokenizer.truncate(text, 3), encoding.decode(tokens.slice(0, 3)));
+        assert.equal(attempts, 2);
+        assert.equal(await tokenizer.count(text), tokens.length);
+        assert.equal(attempts, 3);
+        const recoveredRequest = JsonObjectDecoder.Parse(recoveredRequests[0]);
+        JsonNumberDecoder.Parse(recoveredRequest.id);
+        assert.deepEqual(recoveredRequests, [{ id: recoveredRequest.id, op: "count", text }]);
+        assert.deepEqual(recoveredMessages, [
+            { type: "ready" },
+            { id: recoveredRequest.id, type: "result", value: tokens.length },
+        ]);
     } finally {
         await tokenizer.shutdown();
     }
@@ -1683,12 +1797,14 @@ test("keeps native fallback replay isolated by session branch", async () => {
 
 test("skips provider payload parsing when no native compaction state exists", async () => {
     cancelScheduledCodexAutoCompaction();
-    const payload = { model: "gpt-5.4-mini" };
-    Object.defineProperty(payload, "input", {
-        get() {
-            throw new Error("provider payload should not be parsed");
+    let inputReads = 0;
+    const payload = {
+        model: "gpt-5.4-mini",
+        get input() {
+            inputReads += 1;
+            return [{ role: "user", content: "ordinary provider input" }];
         },
-    });
+    };
 
     const rewritten = await rewriteProviderRequestWithNativeCompaction(
         payload,
@@ -1701,6 +1817,7 @@ test("skips provider payload parsing when no native compaction state exists", as
     );
 
     assert.equal(rewritten, undefined);
+    assert.equal(inputReads, 0);
 });
 
 test("native replay rejects malformed nested provider values", async () => {

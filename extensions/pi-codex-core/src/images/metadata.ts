@@ -128,8 +128,8 @@ function readWebpChunkDimensions(
 ): ImageDimensions | undefined {
     if (chunkType === "VP8X" && chunkSize >= 10) {
         return {
-            width: readUint24LE(bytes, dataOffset + 4) + 1,
-            height: readUint24LE(bytes, dataOffset + 7) + 1,
+            width: bytes.readUIntLE(dataOffset + 4, 3) + 1,
+            height: bytes.readUIntLE(dataOffset + 7, 3) + 1,
         };
     }
     if (chunkType === "VP8L" && chunkSize >= 5 && bytes[dataOffset] === 0x2f) {
@@ -155,10 +155,4 @@ function readWebpChunkDimensions(
         };
     }
     return undefined;
-}
-
-function readUint24LE(bytes: Buffer, offset: number): number {
-    return (
-        (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8) | ((bytes[offset + 2] ?? 0) << 16)
-    );
 }
