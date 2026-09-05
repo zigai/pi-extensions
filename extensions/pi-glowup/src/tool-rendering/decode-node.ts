@@ -1,6 +1,19 @@
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
-import type { GlowupInline, GlowupNode } from "./protocol.js";
+import type {
+    GlowupCallLabels,
+    GlowupCallNode,
+    GlowupCodeNode,
+    GlowupInline,
+    GlowupMutationFile,
+    GlowupMutationLine,
+    GlowupMutationNode,
+    GlowupNode,
+    GlowupOutputNode,
+    GlowupPreview,
+    GlowupSyntax,
+    GlowupTone,
+} from "./protocol.js";
 
 export type GlowupNodeDecodeLimits = {
     readonly maxDepth: number;
@@ -37,6 +50,12 @@ const inlineSchema = Type.Union([
         bold: Type.Optional(Type.Boolean()),
     }),
 ]);
+const inlineObjectSchema = Type.Object({
+    kind: Type.Literal("text"),
+    text: Type.String(),
+    tone: Type.Optional(toneSchema),
+    bold: Type.Optional(Type.Boolean()),
+});
 const syntaxSchema = Type.Object({
     language: Type.Optional(Type.String()),
     path: Type.Optional(Type.String()),
@@ -127,35 +146,198 @@ type DecodeState = {
     nodes: number;
     textCharacters: number;
 };
+
+type MutableMutationLine = {
+    kind: GlowupMutationLine["kind"];
+    text: string;
+    oldLine?: number;
+    newLine?: number;
+};
+
+type MutableMutationFile = {
+    path: string;
+    previousPath?: string;
+    lines: GlowupMutationLine[];
+    added: number;
+    removed: number;
+    countsKnown?: boolean;
+};
+
+type MutableGlowupCodeNode = {
+    readonly kind: "code";
+    readonly text: string;
+    title?: GlowupInline;
+    syntax?: GlowupSyntax;
+    preview?: GlowupPreview;
+};
+
+type MutableGlowupCallNode = {
+    readonly kind: "call";
+    readonly labels: GlowupCallLabels;
+    body?: GlowupNode;
+    preview?: GlowupPreview;
+};
+
+type MutableGlowupOutputNode = {
+    readonly kind: "output";
+    text?: string;
+    syntax?: GlowupSyntax;
+    preview?: GlowupPreview;
+    noOutputLabel?: string | null;
+};
+
+type MutableGlowupMutationNode = {
+    readonly kind: "mutation";
+    readonly labels: GlowupCallLabels;
+    readonly files: GlowupMutationFile[];
+    patch?: string;
+};
+
+function makeCodeNode(
+    text: string,
+    title: GlowupInline | undefined,
+    syntax: GlowupSyntax | undefined,
+    preview: GlowupPreview | undefined,
+): GlowupCodeNode {
+    const node: MutableGlowupCodeNode = { kind: "code", text };
+    if (title !== undefined) {
+        // SAFETY: Setting title on building MutableGlowupCodeNode.
+        (node as MutableGlowupCodeNode).title = title;
+    }
+    if (syntax !== undefined) {
+        // SAFETY: Setting syntax on building MutableGlowupCodeNode.
+        (node as MutableGlowupCodeNode).syntax = syntax;
+    }
+    if (preview !== undefined) {
+        // SAFETY: Setting preview on building MutableGlowupCodeNode.
+        (node as MutableGlowupCodeNode).preview = preview;
+    }
+    return node;
+}
+
+function makeCallNode(
+    labels: GlowupCallLabels,
+    body: GlowupNode | undefined,
+    preview: GlowupPreview | undefined,
+): GlowupCallNode {
+    const node: MutableGlowupCallNode = { kind: "call", labels };
+    if (body !== undefined) {
+        // SAFETY: Setting body on building MutableGlowupCallNode.
+        (node as MutableGlowupCallNode).body = body;
+    }
+    if (preview !== undefined) {
+        // SAFETY: Setting preview on building MutableGlowupCallNode.
+        (node as MutableGlowupCallNode).preview = preview;
+    }
+    return node;
+}
+
+function makeOutputNode(
+    text: string | undefined,
+    syntax: GlowupSyntax | undefined,
+    preview: GlowupPreview | undefined,
+    noOutputLabel: string | null | undefined,
+): GlowupOutputNode {
+    const node: MutableGlowupOutputNode = { kind: "output" };
+    if (text !== undefined) {
+        // SAFETY: Setting text on building MutableGlowupOutputNode.
+        (node as MutableGlowupOutputNode).text = text;
+    }
+    if (syntax !== undefined) {
+        // SAFETY: Setting syntax on building MutableGlowupOutputNode.
+        (node as MutableGlowupOutputNode).syntax = syntax;
+    }
+    if (preview !== undefined) {
+        // SAFETY: Setting preview on building MutableGlowupOutputNode.
+        (node as MutableGlowupOutputNode).preview = preview;
+    }
+    if (noOutputLabel !== undefined) {
+        // SAFETY: Setting noOutputLabel on building MutableGlowupOutputNode.
+        (node as MutableGlowupOutputNode).noOutputLabel = noOutputLabel;
+    }
+    return node;
+}
+
+function makeMutationNode(
+    labels: GlowupCallLabels,
+    files: GlowupMutationFile[],
+    patch: string | undefined,
+): GlowupMutationNode {
+    const node: MutableGlowupMutationNode = { kind: "mutation", labels, files };
+    if (patch !== undefined) {
+        // SAFETY: Setting patch on building MutableGlowupMutationNode.
+        (node as MutableGlowupMutationNode).patch = patch;
+    }
+    return node;
+}
 function countText(state: DecodeState, value: string): boolean {
     state.textCharacters += value.length;
     return state.textCharacters <= state.limits.maxTextCharacters;
 }
+type MutableInlineObject = {
+    kind: "text";
+    text: string;
+    tone?: GlowupTone;
+    bold?: boolean;
+};
+
+type MutableLabels = {
+    static: string;
+    running?: string;
+    completed?: string;
+    failed?: string;
+};
+
+type MutableSyntax = {
+    language?: string;
+    path?: string;
+};
+
 function inline(value: GlowupInline, state: DecodeState): GlowupInline | undefined {
-    const text = Value.Check(stringSchema, value) ? Value.Parse(stringSchema, value) : value.text;
-    return countText(state, text) ? value : undefined;
+    if (Value.Check(stringSchema, value)) {
+        return countText(state, value) ? value : undefined;
+    }
+    if (Value.Check(inlineObjectSchema, value) && countText(state, value.text)) {
+        const detached: MutableInlineObject = {
+            kind: "text",
+            text: value.text,
+        };
+        if (value.tone !== undefined) detached.tone = value.tone;
+        if (value.bold !== undefined) detached.bold = value.bold;
+        return detached;
+    }
+    return undefined;
 }
-function countSyntax(
-    value: { readonly language?: string; readonly path?: string },
-    state: DecodeState,
-): boolean {
-    return (
-        (value.language === undefined || countText(state, value.language)) &&
-        (value.path === undefined || countText(state, value.path))
-    );
+function cloneLabels(value: GlowupCallLabels, state: DecodeState): GlowupCallLabels | undefined {
+    if (!countText(state, value.static)) return undefined;
+    const detached: MutableLabels = {
+        static: value.static,
+    };
+    if (value.running !== undefined) {
+        if (!countText(state, value.running)) return undefined;
+        detached.running = value.running;
+    }
+    if (value.completed !== undefined) {
+        if (!countText(state, value.completed)) return undefined;
+        detached.completed = value.completed;
+    }
+    if (value.failed !== undefined) {
+        if (!countText(state, value.failed)) return undefined;
+        detached.failed = value.failed;
+    }
+    return detached;
 }
-function countLabels(
-    value: {
-        readonly static: string;
-        readonly running?: string;
-        readonly completed?: string;
-        readonly failed?: string;
-    },
-    state: DecodeState,
-): boolean {
-    return [value.static, value.running, value.completed, value.failed].every(
-        (label) => label === undefined || countText(state, label),
-    );
+function cloneSyntax(value: GlowupSyntax, state: DecodeState): GlowupSyntax | undefined {
+    const detached: MutableSyntax = {};
+    if (value.language !== undefined) {
+        if (!countText(state, value.language)) return undefined;
+        detached.language = value.language;
+    }
+    if (value.path !== undefined) {
+        if (!countText(state, value.path)) return undefined;
+        detached.path = value.path;
+    }
+    return detached;
 }
 function decodeParsedNode(
     value: ParsedNode,
@@ -170,25 +352,28 @@ function decodeParsedNode(
             const text = Value.Parse(inlineSchema, value.text);
             return inline(text, state) === undefined ? undefined : { kind: "text", text };
         }
-        case "summary":
+        case "summary": {
             if (value.rows.length > state.limits.maxCollectionItems) return undefined;
-            for (const row of value.rows)
-                if (
-                    inline(row.label, state) === undefined ||
-                    inline(row.value, state) === undefined
-                )
-                    return undefined;
-            return value;
-        case "code":
-            if (
-                !countText(state, value.text) ||
-                (value.title !== undefined && inline(value.title, state) === undefined) ||
-                (value.syntax !== undefined && !countSyntax(value.syntax, state))
-            )
-                return undefined;
-            return value.preview === undefined
-                ? value
-                : { ...value, preview: normalizePreview(value.preview) };
+            const rows: Array<{ label: GlowupInline; value: GlowupInline }> = [];
+            for (const row of value.rows) {
+                const label = inline(row.label, state);
+                const val = inline(row.value, state);
+                if (label === undefined || val === undefined) return undefined;
+                rows.push({ label, value: val });
+            }
+            return { kind: "summary", rows };
+        }
+        case "code": {
+            if (!countText(state, value.text)) return undefined;
+            const title = value.title !== undefined ? inline(value.title, state) : undefined;
+            if (value.title !== undefined && title === undefined) return undefined;
+            const syntax =
+                value.syntax !== undefined ? cloneSyntax(value.syntax, state) : undefined;
+            if (value.syntax !== undefined && syntax === undefined) return undefined;
+            const preview =
+                value.preview !== undefined ? normalizePreview(value.preview) : undefined;
+            return makeCodeNode(value.text, title, syntax, preview);
+        }
         case "list": {
             if (value.items.length > state.limits.maxCollectionItems) return undefined;
             const items: Array<GlowupInline | GlowupNode> = [];
@@ -208,34 +393,38 @@ function decodeParsedNode(
                 : { ...value, items, preview: normalizePreview(value.preview) };
         }
         case "call": {
-            if (!countLabels(value.labels, state)) return undefined;
+            const labels = cloneLabels(value.labels, state);
+            if (labels === undefined) return undefined;
             const body =
                 value.body === undefined
                     ? undefined
                     : decodeParsedNode(value.body, state, depth + 1);
             if (value.body !== undefined && body === undefined) return undefined;
-            let node: GlowupNode = { kind: "call", labels: value.labels };
-            if (body !== undefined) node = { ...node, body };
-            if (value.preview !== undefined)
-                node = { ...node, preview: normalizePreview(value.preview) };
-            return node;
+            const preview =
+                value.preview !== undefined ? normalizePreview(value.preview) : undefined;
+            return makeCallNode(labels, body, preview);
         }
-        case "output":
+        case "output": {
             if (
                 (value.text !== undefined && !countText(state, value.text)) ||
                 (value.noOutputLabel !== undefined &&
                     value.noOutputLabel !== null &&
-                    !countText(state, value.noOutputLabel)) ||
-                (value.syntax !== undefined && !countSyntax(value.syntax, state))
+                    !countText(state, value.noOutputLabel))
             )
                 return undefined;
-            return value.preview === undefined
-                ? value
-                : { ...value, preview: normalizePreview(value.preview) };
+            const syntax =
+                value.syntax !== undefined ? cloneSyntax(value.syntax, state) : undefined;
+            if (value.syntax !== undefined && syntax === undefined) return undefined;
+            const preview =
+                value.preview !== undefined ? normalizePreview(value.preview) : undefined;
+            return makeOutputNode(value.text, syntax, preview, value.noOutputLabel);
+        }
         case "mutation": {
-            if (!countLabels(value.labels, state)) return undefined;
+            const labels = cloneLabels(value.labels, state);
+            if (labels === undefined) return undefined;
             let itemCount = value.files.length;
             if (itemCount > state.limits.maxCollectionItems) return undefined;
+            const files: GlowupMutationFile[] = [];
             for (const file of value.files) {
                 itemCount += file.lines.length;
                 if (
@@ -244,9 +433,29 @@ function decodeParsedNode(
                     (file.previousPath !== undefined && !countText(state, file.previousPath))
                 )
                     return undefined;
-                for (const line of file.lines) if (!countText(state, line.text)) return undefined;
+                const lines: GlowupMutationLine[] = [];
+                for (const line of file.lines) {
+                    if (!countText(state, line.text)) return undefined;
+                    const mutationLine: MutableMutationLine = {
+                        kind: line.kind,
+                        text: line.text,
+                    };
+                    if (line.oldLine !== undefined) mutationLine.oldLine = line.oldLine;
+                    if (line.newLine !== undefined) mutationLine.newLine = line.newLine;
+                    lines.push(mutationLine);
+                }
+                const mutationFile: MutableMutationFile = {
+                    path: file.path,
+                    lines,
+                    added: file.added,
+                    removed: file.removed,
+                };
+                if (file.previousPath !== undefined) mutationFile.previousPath = file.previousPath;
+                if (file.countsKnown !== undefined) mutationFile.countsKnown = file.countsKnown;
+                files.push(mutationFile);
             }
-            return value.patch !== undefined && !countText(state, value.patch) ? undefined : value;
+            if (value.patch !== undefined && !countText(state, value.patch)) return undefined;
+            return makeMutationNode(labels, files, value.patch);
         }
         case "stack": {
             if (value.children.length > state.limits.maxCollectionItems) return undefined;

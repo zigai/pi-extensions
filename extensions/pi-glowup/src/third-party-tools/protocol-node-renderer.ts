@@ -1,3 +1,4 @@
+import { stringParser } from "../json-scalar.ts";
 import {
     emptyComponent,
     makeComponent,
@@ -102,11 +103,24 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                 .join("\n");
         case "list":
             return node.items
-                .map((item) =>
-                    item instanceof Object && "kind" in item
-                        ? `• ${nodeText(item, theme)}`
-                        : `• ${item}`,
-                )
+                .map((item) => {
+                    const str = stringParser.parse(item);
+                    if (str !== undefined) {
+                        return `• ${str}`;
+                    }
+                    if (
+                        item instanceof Object &&
+                        "kind" in item &&
+                        item.kind === "text" &&
+                        "text" in item &&
+                        stringParser.parse(item.text) !== undefined
+                    ) {
+                        // SAFETY: Validated item has kind 'text' and string text, matching GlowupInline object.
+                        return `• ${toneText(theme, item as GlowupInline)}`;
+                    }
+                    // SAFETY: Decoder verified list items are either GlowupInline or a valid GlowupNode.
+                    return `• ${nodeText(item as GlowupNode, theme)}`;
+                })
                 .join("\n");
         case "output":
             return node.text ?? "";

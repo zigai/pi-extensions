@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -19,13 +19,17 @@ describe("delete rendering", () => {
     });
 
     it("does not capture binary or out-of-project paths", async () => {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-glowup-native-delete-"));
+        const parent = mkdtempSync(path.join(tmpdir(), "pi-glowup-native-delete-parent-"));
+        const cwd = path.join(parent, "project");
+        mkdirSync(cwd, { recursive: true });
         try {
             writeFileSync(path.join(cwd, "binary.bin"), Buffer.from([1, 0, 2]));
+            writeFileSync(path.join(parent, "outside.ts"), "const secret = 'outside';\n");
+
             expect(await captureDeletedTextPreview(cwd, "binary.bin")).toBeUndefined();
             expect(await captureDeletedTextPreview(cwd, "../outside.ts")).toBeUndefined();
         } finally {
-            rmSync(cwd, { recursive: true, force: true });
+            rmSync(parent, { recursive: true, force: true });
         }
     });
 

@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
 import { jsonValueSchema } from "../src/json-value.js";
+import { GLOWUP_RENDERING_VERSION } from "../src/tool-rendering/protocol.ts";
 
 const packageJsonSchema = Type.Object({
     exports: Type.Optional(Type.Record(Type.String(), jsonValueSchema)),
@@ -34,12 +36,45 @@ describe("package manifest", () => {
     });
 
     it("keeps the public protocol independent from Pi and internal renderer types", () => {
-        const protocol = readFileSync("src/tool-rendering/protocol.ts", "utf8");
+        expect(GLOWUP_RENDERING_VERSION).toBe(3);
 
-        expect(protocol).toContain("GLOWUP_RENDERING_VERSION = 3");
-        expect(protocol).not.toContain("@earendil-works");
-        expect(protocol).not.toContain("Component");
-        expect(protocol).not.toContain("GlowupRenderTheme");
+        const visitedFiles = new Set<string>();
+        const externalImports = new Set<string>();
+
+        function visit(filePath: string) {
+            const normalizedPath = resolve(filePath);
+            if (visitedFiles.has(normalizedPath)) return;
+            visitedFiles.add(normalizedPath);
+            const content = readFileSync(normalizedPath, "utf8");
+            const importMatches = content.matchAll(
+                /(?:import|export)\s+[\s\S]*?\s+from\s+["']([^"']+)["']/g,
+            );
+            for (const match of importMatches) {
+                const specifier = match[1];
+                if (specifier !== undefined) {
+                    if (specifier.startsWith(".")) {
+                        let resolved = resolve(dirname(normalizedPath), specifier);
+                        if (resolved.endsWith(".js")) resolved = `${resolved.slice(0, -3)}.ts`;
+                        if (!resolved.endsWith(".ts")) resolved = `${resolved}.ts`;
+                        visit(resolved);
+                    } else {
+                        externalImports.add(specifier);
+                    }
+                }
+            }
+        }
+
+        visit("src/tool-rendering/protocol.ts");
+
+        for (const external of externalImports) {
+            expect(external.startsWith("@earendil-works")).toBe(false);
+        }
+        for (const file of visitedFiles) {
+            expect(file).not.toMatch(
+                /\/src\/(?:rendering|third-party-tools|diffs|patches|syntax|script-preview|mutations|config|diagnostics)\//,
+            );
+            expect(file).not.toMatch(/\/src\/index\.ts$/);
+        }
     });
 
     it("keeps Pi core packages as peers instead of bundled runtime dependencies", () => {

@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { existsSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import {
     createCommandScriptFormatter,
     formatScriptInvocation,
@@ -139,9 +142,12 @@ describe("script formatter settings", () => {
     });
 
     it("does not start command formatters after cancellation", async () => {
-        const commands = new Map([
-            ["python", [process.execPath, "-e", "process.stdin.pipe(process.stdout)"]],
-        ]);
+        const markerFile = join(
+            mkdtempSync(join(tmpdir(), "pi-glowup-formatter-test-")),
+            "start.marker",
+        );
+        const script = `require('fs').writeFileSync(${JSON.stringify(markerFile)}, 'started'); process.stdin.pipe(process.stdout);`;
+        const commands = new Map([["python", [process.execPath, "-e", script]]]);
         const formatter = createCommandScriptFormatter(commands);
         const invocation = { label: "Python", language: "python", code: "print(1)" };
         const controller = new AbortController();
@@ -150,14 +156,31 @@ describe("script formatter settings", () => {
         await expect(
             formatScriptInvocation(invocation, formatter, { signal: controller.signal }),
         ).resolves.toEqual(invocation);
+        expect(existsSync(markerFile)).toBe(false);
     });
 
     it("removes cancelled formatter work while it is queued", async () => {
+        const testDir = mkdtempSync(join(tmpdir(), "pi-glowup-formatter-queue-"));
+        const releaseFile = join(testDir, "release.flag");
+        const logFile = join(testDir, "executions.log");
+
         const delayedEcho = [
+            "const fs = require('fs');",
             "let input = '';",
             "process.stdin.on('data', (chunk) => { input += chunk; });",
-            "process.stdin.on('end', () => setTimeout(() => process.stdout.write(input), 100));",
-        ].join("");
+            "process.stdin.on('end', () => {",
+            `  fs.appendFileSync(${JSON.stringify(logFile)}, input.trim() + '\\n');`,
+            "  const check = () => {",
+            `    if (fs.existsSync(${JSON.stringify(releaseFile)})) {`,
+            "      process.stdout.write(input + ' formatted');",
+            "    } else {",
+            "      setTimeout(check, 10);",
+            "    }",
+            "  };",
+            "  check();",
+            "});",
+        ].join("\n");
+
         const formatter = createCommandScriptFormatter(
             new Map([["python", [process.execPath, "-e", delayedEcho]]]),
         );
@@ -168,13 +191,28 @@ describe("script formatter settings", () => {
 
         const firstResult = formatScriptInvocation(first, formatter);
         const secondResult = formatScriptInvocation(second, formatter);
+
+        await vi.waitUntil(() => {
+            if (!existsSync(logFile)) return false;
+            const lines = readFileSync(logFile, "utf8").trim().split("\n").filter(Boolean);
+            return lines.length >= 2;
+        });
+
         const cancelledResult = formatScriptInvocation(cancelled, formatter, {
             signal: controller.signal,
         });
         controller.abort();
 
+        writeFileSync(releaseFile, "go");
+
         await expect(cancelledResult).resolves.toEqual(cancelled);
-        await expect(Promise.all([firstResult, secondResult])).resolves.toEqual([first, second]);
+        await expect(Promise.all([firstResult, secondResult])).resolves.toEqual([
+            { label: "Python", language: "python", code: "print(1) formatted" },
+            { label: "Python", language: "python", code: "print(2) formatted" },
+        ]);
+
+        const executedJobs = readFileSync(logFile, "utf8").trim().split("\n");
+        expect(executedJobs).toEqual(["print(1)", "print(2)"]);
     });
 
     it("falls back to the original script when a formatter throws", async () => {

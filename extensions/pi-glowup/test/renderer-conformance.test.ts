@@ -11,6 +11,7 @@ type RendererConformanceCase = {
     readonly args: JsonValue;
     readonly callText: string;
     readonly result?: ThirdPartyToolResult;
+    readonly resultText?: string | null;
 };
 
 const theme: GlowupRenderTheme = {
@@ -47,6 +48,7 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         args: { args: ["open", "https://example.com"] },
         callText: "Browser",
         result: result("Opened https://example.com"),
+        resultText: "Opened",
     },
     {
         family: "mcp-gateway",
@@ -54,6 +56,7 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         args: { connect: "chrome-devtools" },
         callText: "MCP",
         result: result("Connected"),
+        resultText: "Connected",
     },
     {
         family: "chrome-devtools",
@@ -61,6 +64,7 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         args: {},
         callText: "Browser Snapshot",
         result: result("Snapshot complete"),
+        resultText: "Snapshot complete",
     },
     {
         family: "finalize-plan",
@@ -68,6 +72,7 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         args: { markdown: "# Plan\n\nShip it." },
         callText: "Finalized Plan",
         result: result("Plan finalized"),
+        resultText: null,
     },
     {
         family: "ask-user-question",
@@ -83,6 +88,7 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         },
         callText: "Asked User",
         result: result("Mode: Safe"),
+        resultText: "Mode: Safe",
     },
     {
         family: "generic-third-party",
@@ -90,21 +96,29 @@ const cases: ReadonlyArray<RendererConformanceCase> = [
         args: { nested: { value: "hello 世界" } },
         callText: "Called unknown_tool",
         result: result("Generic result"),
+        resultText: "Generic result",
     },
 ];
 
-function renderedLines(testCase: RendererConformanceCase, width: number): string[] {
+function renderCallLines(testCase: RendererConformanceCase, width: number): string[] {
     const renderer = createThirdPartyToolRenderer(testCase.toolName, {
         labelMode: "lifecycle",
     });
-    const call = renderer.renderCall(testCase.args, theme, context).render(width);
-    if (testCase.result === undefined) return call;
-    return [
-        ...call,
-        ...renderer
-            .renderResult(testCase.result, { expanded: false, isPartial: false }, theme, context)
-            .render(width),
-    ];
+    return renderer.renderCall(testCase.args, theme, context).render(width);
+}
+
+function renderResultLines(testCase: RendererConformanceCase, width: number): string[] {
+    if (testCase.result === undefined) return [];
+    const renderer = createThirdPartyToolRenderer(testCase.toolName, {
+        labelMode: "lifecycle",
+    });
+    return renderer
+        .renderResult(testCase.result, { expanded: false, isPartial: false }, theme, context)
+        .render(width);
+}
+
+function renderedLines(testCase: RendererConformanceCase, width: number): string[] {
+    return [...renderCallLines(testCase, width), ...renderResultLines(testCase, width)];
 }
 
 describe("renderer family conformance", () => {
@@ -121,11 +135,19 @@ describe("renderer family conformance", () => {
 
     it.each(cases)("$family preserves semantic output", (testCase) => {
         for (const width of [23, 50, 100, 180]) {
-            const lines = renderedLines(testCase, width);
-            expect(lines.join("\n"), `${testCase.family} at width ${width}`).toContain(
+            const call = renderCallLines(testCase, width);
+            const res = renderResultLines(testCase, width);
+            expect(call.join("\n"), `${testCase.family} call at width ${width}`).toContain(
                 testCase.callText,
             );
-            for (const line of lines) {
+            if (testCase.resultText === null) {
+                expect(res, `${testCase.family} result at width ${width}`).toEqual([]);
+            } else if (testCase.resultText !== undefined) {
+                expect(res.join("\n"), `${testCase.family} result at width ${width}`).toContain(
+                    testCase.resultText,
+                );
+            }
+            for (const line of [...call, ...res]) {
                 expect(
                     visibleWidth(line),
                     `${testCase.family} exceeded width ${width}`,

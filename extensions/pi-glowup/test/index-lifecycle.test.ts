@@ -290,7 +290,7 @@ describe("extension lifecycle", () => {
         await pi.startSession(join(root, "project"), false);
         expect(vi.getTimerCount()).toBe(1);
         await vi.advanceTimersByTimeAsync(5_000);
-        await initializeSyntaxHighlighting();
+        await vi.waitUntil(() => isSyntaxHighlightingReady());
 
         expect(vi.getTimerCount()).toBe(0);
         expect(isSyntaxHighlightingReady()).toBe(true);

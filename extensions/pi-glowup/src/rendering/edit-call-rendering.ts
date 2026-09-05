@@ -15,6 +15,7 @@ export type EditCallRenderContext = {
     readonly isPartial: boolean;
     readonly argsComplete?: boolean;
     readonly labelMode?: ToolLabelMode;
+    readonly result?: unknown;
 };
 
 export type EditCallSummary = {

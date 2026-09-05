@@ -6,8 +6,12 @@ import {
     list,
     mutation,
     stack,
+    summary,
     text,
     withGlowupRendering,
+    type GlowupInline,
+    type GlowupMutationFile,
+    type GlowupMutationLine,
     type GlowupNode,
 } from "../src/tool-rendering/protocol.ts";
 
@@ -37,6 +41,48 @@ describe("Glowup tool-rendering protocol", () => {
         children.push(list(["second"]));
 
         expect(decoded).toEqual(stack([text("first")]));
+
+        // Test summary rows and inline styling object isolation
+        const mutableInline = {
+            kind: "text" as const,
+            text: "mutable label",
+            tone: "accent" as const,
+        };
+        const rows: Array<{ label: GlowupInline; value: GlowupInline }> = [
+            { label: mutableInline, value: "val" },
+        ];
+        const summaryNode = summary(rows);
+        const decodedSummary = decodeGlowupNode(summaryNode);
+        rows.push({ label: "extra", value: "extraVal" });
+        mutableInline.text = "MUTATED LABEL";
+        expect(decodedSummary).toEqual(
+            summary([
+                {
+                    label: { kind: "text", text: "mutable label", tone: "accent" },
+                    value: "val",
+                },
+            ]),
+        );
+
+        // Test mutation file and line collection isolation
+        const mutableLine = { kind: "addition" as const, text: "add line" };
+        const lines: GlowupMutationLine[] = [mutableLine];
+        const files: GlowupMutationFile[] = [{ path: "a.ts", lines, added: 1, removed: 0 }];
+        const mutationNode = mutation({ static: "Patch" }, files);
+        const decodedMutation = decodeGlowupNode(mutationNode);
+        lines.push({ kind: "deletion", text: "del line" });
+        files.push({ path: "b.ts", lines: [], added: 0, removed: 0 });
+        mutableLine.text = "MUTATED LINE";
+        expect(decodedMutation).toEqual(
+            mutation({ static: "Patch" }, [
+                {
+                    path: "a.ts",
+                    lines: [{ kind: "addition", text: "add line" }],
+                    added: 1,
+                    removed: 0,
+                },
+            ]),
+        );
     });
 
     it("decodes bounded semantic mutation files and line coordinates", () => {

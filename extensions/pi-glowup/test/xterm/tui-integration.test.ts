@@ -72,6 +72,9 @@ type ExtensionProfile = {
               readonly addedContentBackground: string;
               readonly deletedContentBackground: string;
           };
+    readonly mutations?: {
+        readonly defaultView?: "full" | "preview";
+    };
 };
 
 const DEFAULT_APPEARANCE: Exclude<ExtensionProfile["appearance"], "default" | undefined> = {
@@ -270,10 +273,12 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             profile.appearance === "default"
                 ? {}
                 : { appearance: profile.appearance ?? DEFAULT_APPEARANCE };
-        writeFileSync(
-            getGlowupGlobalConfigPath(agentDir),
-            JSON.stringify({ toolLabels: { mode: "lifecycle" }, ...appearance }),
+        const config = Object.assign(
+            { toolLabels: { mode: "lifecycle" } },
+            appearance,
+            profile.mutations !== undefined ? { mutations: profile.mutations } : undefined,
         );
+        writeFileSync(getGlowupGlobalConfigPath(agentDir), JSON.stringify(config));
         const installedExtension = new GlowupExtensionHarness();
         extension = installedExtension;
         await installedExtension.install(cwd);
@@ -1435,6 +1440,7 @@ export const grownWriteTwelve = 12;
     });
 
     it("expands and collapses without duplicating or overwriting adjacent transcript blocks", async () => {
+        await installExtension({ mutations: { defaultView: "preview" } });
         const pendingTerminal = new VirtualTerminal(110, 32);
         const activeTui = createTui(pendingTerminal);
         const patch = `*** Begin Patch
@@ -1497,13 +1503,14 @@ export const grownWriteTwelve = 12;
         activeTui.start();
         await pendingTerminal.settle();
         const collapsed = pendingTerminal.screenText();
-        expect(collapsed).toContain("line9");
-        expect(collapsed).not.toContain("to expand");
+        expect(collapsed).not.toContain("line5");
+        expect(collapsed).toContain("lines");
 
         tool.setExpanded(true);
         activeTui.requestRender();
         await pendingTerminal.settle();
         const expanded = pendingTerminal.screenText();
+        expect(expanded).toContain("line5");
         expect(expanded).toContain("line9");
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Patched src/expanded.ts",

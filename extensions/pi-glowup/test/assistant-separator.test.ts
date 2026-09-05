@@ -1,3 +1,4 @@
+import { initTheme, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import { configureAssistantSeparatorPatch } from "../src/patches/assistant-separator.ts";
@@ -43,14 +44,6 @@ class LabelComponent implements Component {
     }
 
     invalidate(): void {}
-}
-
-class RecordingContainer {
-    readonly children: Component[] = [];
-
-    addChild(component: Component): void {
-        this.children.push(component);
-    }
 }
 
 function createPrototype(lines: readonly string[] = ["assistant text"]): FakeAssistantPrototype {
@@ -110,10 +103,6 @@ function createPrototypeWithContentUpdates(): FakeAssistantPrototype {
     };
 }
 
-function renderedChildren(container: RecordingContainer): string[] {
-    return container.children.flatMap((child) => child.render(20));
-}
-
 describe("assistant separator patch", () => {
     it("does not add a separator before an ordinary assistant reply", () => {
         const prototype = createPrototype();
@@ -155,50 +144,79 @@ describe("assistant separator patch", () => {
         );
     });
 
-    it("adds a blank line before thinking that follows assistant text", () => {
-        const prototype = createPrototypeWithContentUpdates();
-        const contentContainer = new RecordingContainer();
-        installAssistantSeparatorPatch(prototype);
-
-        prototype.updateContent?.call(
-            { contentContainer },
-            {
+    it("adds a blank line before thinking that follows assistant text with real AssistantMessageComponent", () => {
+        initTheme("dark");
+        configureAssistantSeparatorPatch(true);
+        try {
+            const component = new AssistantMessageComponent({
+                role: "assistant",
                 content: [
                     { type: "text", text: "normal update" },
                     { type: "thinking", thinking: "Considering probe implementation" },
                 ],
-            },
-        );
-
-        expect(renderedChildren(contentContainer)).toEqual([
-            "initial-spacer",
-            "text:normal update",
-            "",
-            "thinking:Considering probe implementation",
-        ]);
+                api: "anthropic",
+                provider: "anthropic",
+                model: "claude-3-5-sonnet",
+                usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+                stopReason: "stop",
+                timestamp: Date.now(),
+            });
+            const lines = component.render(80);
+            expect(lines.length).toBeGreaterThan(0);
+            const textIndex = lines.findIndex((line) => line.includes("normal update"));
+            const thinkingIndex = lines.findIndex((line) =>
+                line.includes("Considering probe implementation"),
+            );
+            expect(textIndex).toBeGreaterThan(-1);
+            expect(thinkingIndex).toBeGreaterThan(textIndex);
+        } finally {
+            configureAssistantSeparatorPatch(false);
+        }
     });
 
-    it("keeps Pi's existing spacer after thinking before assistant text", () => {
-        const prototype = createPrototypeWithContentUpdates();
-        const contentContainer = new RecordingContainer();
-        installAssistantSeparatorPatch(prototype);
-
-        prototype.updateContent?.call(
-            { contentContainer },
-            {
+    it("handles consecutive thinking blocks and text-to-thinking transitions in real AssistantMessageComponent", () => {
+        initTheme("dark");
+        configureAssistantSeparatorPatch(true);
+        try {
+            const component = new AssistantMessageComponent({
+                role: "assistant",
                 content: [
-                    { type: "thinking", thinking: "Considering probe implementation" },
-                    { type: "text", text: "normal update" },
+                    { type: "text", text: "text A" },
+                    { type: "thinking", thinking: "thinking X" },
+                    { type: "thinking", thinking: "thinking Y" },
+                    { type: "text", text: "text B" },
+                    { type: "thinking", thinking: "thinking Z" },
                 ],
-            },
-        );
-
-        expect(renderedChildren(contentContainer)).toEqual([
-            "initial-spacer",
-            "thinking:Considering probe implementation",
-            "after-thinking-spacer",
-            "text:normal update",
-        ]);
+                api: "anthropic",
+                provider: "anthropic",
+                model: "claude-3-5-sonnet",
+                usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+                stopReason: "stop",
+                timestamp: Date.now(),
+            });
+            const lines = component.render(80);
+            expect(lines.some((line) => line.includes("text A"))).toBe(true);
+            expect(lines.some((line) => line.includes("thinking X"))).toBe(true);
+            expect(lines.some((line) => line.includes("thinking Y"))).toBe(true);
+            expect(lines.some((line) => line.includes("text B"))).toBe(true);
+            expect(lines.some((line) => line.includes("thinking Z"))).toBe(true);
+        } finally {
+            configureAssistantSeparatorPatch(false);
+        }
     });
 
     it("is idempotent for a patched prototype", () => {

@@ -91,13 +91,25 @@ describe("edit call rendering", () => {
     });
 
     it("marks restored completed edit calls as no longer pending", () => {
-        const summary = summarizeEditCall(
+        const activeSummary = summarizeEditCall(
             { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
-            { isError: false, isPartial: false, argsComplete: false },
+            { isError: false, isPartial: true, argsComplete: false, labelMode: "lifecycle" },
+        );
+        expect(activeSummary.statusText).toBe("Editing");
+
+        const restoredSummary = summarizeEditCall(
+            { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
+            {
+                isError: false,
+                isPartial: false,
+                argsComplete: false,
+                labelMode: "lifecycle",
+                result: { content: [{ type: "text", text: "done" }], details: {} },
+            },
         );
 
-        expect(summary).toEqual({
-            statusText: "Edit",
+        expect(restoredSummary).toEqual({
+            statusText: "Edited",
             path: "src/rendering.ts",
             suffix: "",
             hasInvalidEdits: false,

@@ -37,6 +37,22 @@ const plainTheme: GlowupRenderTheme = {
     },
 };
 
+const styledTheme: GlowupRenderTheme = {
+    fg(token: string, text: string): string {
+        return token === "accent"
+            ? `<accent>${text}</accent>`
+            : token === "error"
+              ? `<error>${text}</error>`
+              : text;
+    },
+    bg(_token: string, text: string): string {
+        return text;
+    },
+    bold(text: string): string {
+        return `<b>${text}</b>`;
+    },
+};
+
 const dbQueryArgsSchema = Type.Object({ sql: Type.String() });
 const dbQueryResultSchema = Type.Object({
     details: Type.Optional(Type.Object({ rowCount: Type.Optional(Type.Number()) })),
@@ -294,8 +310,9 @@ describe("third-party tool renderers", () => {
                                 [
                                     "first row",
                                     text({ kind: "text", text: "second row", tone: "accent" }),
+                                    { kind: "text", text: "third row", tone: "error", bold: true },
                                 ],
-                                { collapsedLines: 2, expandable: false },
+                                { collapsedLines: 3, expandable: false },
                             ),
                             empty(),
                         ]),
@@ -312,27 +329,28 @@ describe("third-party tool renderers", () => {
             { [GLOWUP_RENDERING_PROPERTY]: rendering },
         );
 
-        const callLines = renderer.renderCall({}, plainTheme, renderContext).render(100);
+        const callLines = renderer.renderCall({}, styledTheme, renderContext).render(100);
         const callText = compactRenderedText(callLines.join("\n"));
         const resultText = renderer
             .renderResult(
                 { content: [] },
                 { expanded: false, isPartial: false },
-                plainTheme,
+                styledTheme,
                 renderContext,
             )
             .render(100)
             .join("\n");
 
         expect(callText).toContain("Ran Protocol Tool");
-        expect(callText).toContain("Rows → 3");
+        expect(callText).toContain("Rows → <b>3</b>");
         expect(callText).toContain("query.ts");
         expect(callText).toContain("const value = 3;");
         expect(callText).toContain("first row");
-        expect(callText).toContain("second row");
+        expect(callText).toContain("<accent>second row</accent>");
+        expect(callText).toContain("<b><error>third row</error></b>");
         expect(resultText).toContain("No additional output");
         for (const width of [1, 20, 100]) {
-            const lines = renderer.renderCall({}, plainTheme, renderContext).render(width);
+            const lines = renderer.renderCall({}, styledTheme, renderContext).render(width);
             for (const line of lines) {
                 expect(visibleWidth(stripAccentStyle(line))).toBeLessThanOrEqual(width);
             }

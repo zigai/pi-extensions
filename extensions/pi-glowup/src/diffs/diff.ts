@@ -508,7 +508,12 @@ export function buildUnifiedDiffRows(
                     palette,
                 });
             const narrowLayout = options.narrowLayout ?? "traditional";
-            if (narrowLayout === "traditional" || content.deletions * content.additions > 256) {
+            if (
+                narrowLayout === "traditional" ||
+                content.deletions === 0 ||
+                content.additions === 0 ||
+                content.deletions * content.additions > 256
+            ) {
                 for (let offset = 0; offset < content.deletions; offset += 1) {
                     if (pushLazyRow(() => makeDeletionRow(offset))) {
                         return trimEdgeCollapsedRows(rows);

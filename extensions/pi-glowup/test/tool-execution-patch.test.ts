@@ -1114,6 +1114,79 @@ describe("tool execution patches", () => {
 
         configureBuiltInToolRendererPatch(false, undefined, prototype);
         expect(toolRendererPatchStats(prototype).completedLineCacheBytes).toBe(0);
+
+        // Verify recency-specific least-recently-used eviction order (A/B -> touch A -> C evicts B)
+        const lruProto = createPrototype();
+        configureCompletedLineCache({ maxBytes: 8 * 1024 * 1024, maxEntries: 2 });
+        let renderCountA = 0;
+        let renderCountB = 0;
+        let renderCountC = 0;
+        const lruOptions = {
+            renderCall: (_toolName, args) => {
+                // SAFETY: Test fixture setup passes valid object args with name property.
+                const name = (args as { name: string }).name;
+                return {
+                    render: () => {
+                        if (name === "A") renderCountA += 1;
+                        if (name === "B") renderCountB += 1;
+                        if (name === "C") renderCountC += 1;
+                        return [`line ${name}`];
+                    },
+                    invalidate: noop,
+                };
+            },
+            renderResult: () => undefined,
+        } satisfies Parameters<typeof configureBuiltInToolRendererPatch>[1];
+        installBuiltInToolRendererPatch(lruOptions, lruProto);
+
+        const compA = lruProto.getCallRenderer.call({
+            toolName: "read",
+            builtInToolDefinition: {},
+        })?.({ name: "A" }, plainTheme, {
+            ...renderContext,
+            cwd: "/workspace",
+            invalidate: noop,
+            lastComponent: undefined,
+        });
+        const compB = lruProto.getCallRenderer.call({
+            toolName: "read",
+            builtInToolDefinition: {},
+        })?.({ name: "B" }, plainTheme, {
+            ...renderContext,
+            cwd: "/workspace",
+            invalidate: noop,
+            lastComponent: undefined,
+        });
+        const compC = lruProto.getCallRenderer.call({
+            toolName: "read",
+            builtInToolDefinition: {},
+        })?.({ name: "C" }, plainTheme, {
+            ...renderContext,
+            cwd: "/workspace",
+            invalidate: noop,
+            lastComponent: undefined,
+        });
+
+        if (!compA || !compB || !compC) throw new Error("expected components");
+
+        compA.render(80);
+        compB.render(80);
+        expect(renderCountA).toBe(1);
+        expect(renderCountB).toBe(1);
+
+        compA.render(80); // Hit on A -> moves A to MRU
+        expect(renderCountA).toBe(1);
+
+        compC.render(80); // Inserts C -> evicts B (LRU)
+        expect(renderCountC).toBe(1);
+
+        compA.render(80); // Hit on A
+        expect(renderCountA).toBe(1);
+
+        compB.render(80); // Miss on B -> re-renders
+        expect(renderCountB).toBe(2);
+
+        configureBuiltInToolRendererPatch(false, undefined, lruProto);
         configureCompletedLineCache({ maxBytes: 64 * 1024 * 1024, maxEntries: 10_000 });
     });
 });

@@ -27,15 +27,16 @@ describe("debug file logger", () => {
         logger.record("test_event", {
             memory: { heapUsedBytes: 123 },
             omitted: undefined,
+            explicitNull: null,
         });
 
         const entries = readJsonLines(join(extensionDirectory, "debug.log"));
         expect(entries).toHaveLength(1);
         expect(entries[0]).toMatchObject({
             event: "test_event",
-            fields: { memory: { heapUsedBytes: 123 } },
+            fields: { memory: { heapUsedBytes: 123 }, explicitNull: null },
         });
-        expect(entries[0]).not.toMatchObject({ fields: { omitted: expect.anything() } });
+        expect(entries[0]).not.toHaveProperty("fields.omitted");
     });
 
     it("does not create a file when disabled", () => {

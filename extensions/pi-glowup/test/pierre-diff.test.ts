@@ -27,7 +27,23 @@ import { pairReplacementLines } from "../src/diffs/layout.ts";
 import { getPierreAppearance, getPierrePalette } from "../src/diffs/theme.ts";
 import type { UnifiedDiffRow } from "../src/diffs/types.ts";
 import { configureRenderingAppearance } from "../src/rendering/core.ts";
+import { stringParser } from "../src/json-scalar.ts";
 import { reinitializeSyntaxHighlighting } from "../src/syntax/highlighter.ts";
+import { VirtualTerminal } from "./support/virtual-terminal.ts";
+
+function createReadCountingArray(lines: string[]) {
+    let count = 0;
+    const proxy = new Proxy(lines, {
+        get(target, prop) {
+            if (stringParser.parse(prop) !== undefined && !Number.isNaN(Number(prop))) {
+                count += 1;
+            }
+            // SAFETY: Array index property lookup on target array.
+            return target[Number(prop)] ?? "";
+        },
+    });
+    return { array: proxy, accessCount: () => count };
+}
 import { DEFAULT_MUTATION_SETTINGS } from "../src/mutations/settings.ts";
 import {
     TEST_THEME_BACKGROUND_COLORS,
@@ -661,10 +677,16 @@ describe("Pierre diff rendering", () => {
         if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
         const originalHunk = payload.metadata.hunks[0];
         if (originalHunk === undefined) throw new Error("expected hunk");
+
+        const rawDeletions = Array.from({ length: 20_000 }, (_, index) => `old ${index}`);
+        const rawAdditions = Array.from({ length: 20_000 }, (_, index) => `new ${index}`);
+        const deletionAccess = createReadCountingArray(rawDeletions);
+        const additionAccess = createReadCountingArray(rawAdditions);
+
         const metadata = {
             ...payload.metadata,
-            deletionLines: Array.from({ length: 20_000 }, (_, index) => `old ${index}`),
-            additionLines: Array.from({ length: 20_000 }, (_, index) => `new ${index}`),
+            deletionLines: deletionAccess.array,
+            additionLines: additionAccess.array,
             splitLineCount: 20_000,
             unifiedLineCount: 40_000,
             hunks: [
@@ -705,6 +727,46 @@ describe("Pierre diff rendering", () => {
 
         expect(rows).toHaveLength(6);
         expect(builtRows).toBe(6);
+        expect(deletionAccess.accessCount()).toBeLessThan(20);
+        expect(additionAccess.accessCount()).toBeLessThan(20);
+
+        // Verify one-sided addition-only paired diff
+        const oneSidedAdditionAccess = createReadCountingArray(rawAdditions);
+        const oneSidedMetadata = {
+            ...payload.metadata,
+            deletionLines: [],
+            additionLines: oneSidedAdditionAccess.array,
+            splitLineCount: 20_000,
+            unifiedLineCount: 20_000,
+            hunks: [
+                {
+                    ...originalHunk,
+                    additionCount: 20_000,
+                    additionLines: 20_000,
+                    deletionCount: 0,
+                    deletionLines: 0,
+                    splitLineCount: 20_000,
+                    unifiedLineCount: 20_000,
+                    hunkContent: [
+                        {
+                            type: "change" as const,
+                            additions: 20_000,
+                            deletions: 0,
+                            additionLineIndex: 0,
+                            deletionLineIndex: 0,
+                        },
+                    ],
+                },
+            ],
+        };
+        const oneSidedRows = buildUnifiedDiffRows(
+            oneSidedMetadata,
+            { deletionLines: [], additionLines: [] },
+            getPierrePalette(testTheme),
+            { maxRows: 6, narrowLayout: "paired" },
+        );
+        expect(oneSidedRows).toHaveLength(6);
+        expect(oneSidedAdditionAccess.accessCount()).toBeLessThan(20);
     });
 
     it("expands tabs at terminal stops across token and wide-character boundaries", () => {
@@ -1346,14 +1408,26 @@ describe("Pierre diff rendering", () => {
         expect(deletion).toContain(palette.deletionSpanBg);
         expect(addition).toContain(palette.additionRowBg);
         expect(addition).toContain(palette.additionSpanBg);
-        expect(deletion.split(palette.deletionRowBg).length).toBeGreaterThan(
-            deletion.split(palette.deletionSpanBg).length,
-        );
-        expect(addition.split(palette.additionRowBg).length).toBeGreaterThan(
-            addition.split(palette.additionSpanBg).length,
-        );
-        expect(deletion).not.toContain("\u001b[2m");
-        expect(addition).not.toContain("\u001b[2m");
+
+        const terminal = new VirtualTerminal(100, 10);
+        terminal.write(lines.join("\n"));
+        await terminal.settle(0);
+        const rows = terminal.interpretedRows();
+        const delRow = rows.find((r) => r.text.includes("2000"));
+        const addRow = rows.find((r) => r.text.includes("4000"));
+        expect(delRow).toBeDefined();
+        expect(addRow).toBeDefined();
+
+        const tokenCell2000 = delRow?.cells.find((c) => c.chars === "2");
+        const unchangedCellDel = delRow?.cells.find((c) => c.chars === "c");
+        expect(tokenCell2000?.background).not.toBe(unchangedCellDel?.background);
+
+        const tokenCell4000 = addRow?.cells.find((c) => c.chars === "4");
+        const unchangedCellAdd = addRow?.cells.find((c) => c.chars === "c");
+        expect(tokenCell4000?.background).not.toBe(unchangedCellAdd?.background);
+
+        expect(delRow?.cells.some((c) => c.isDim)).toBe(false);
+        expect(addRow?.cells.some((c) => c.isDim)).toBe(false);
     });
 
     it("honors independently configured two-tone shades", () => {
@@ -1437,10 +1511,20 @@ describe("Pierre diff rendering", () => {
             { expanded: false },
             { lastComponent: undefined, invalidate() {} },
         ).render(100);
-        const deletion = lines.find((line) => stripAnsi(line).includes("2000")) ?? "";
 
         expect(getPierrePalette(testTheme).deletionRowBg).toBe("");
-        expect(deletion.match(/48;2;34;0;0/gu)).toHaveLength(1);
+
+        const terminal = new VirtualTerminal(100, 10);
+        terminal.write(lines.join("\n"));
+        await terminal.settle(0);
+        const rows = terminal.interpretedRows();
+        const delRow = rows.find((r) => r.text.includes("2000"));
+        expect(delRow).toBeDefined();
+
+        const tokenCell = delRow?.cells.find((c) => c.chars === "2");
+        const unchangedCell = delRow?.cells.find((c) => c.chars === "c");
+        expect(tokenCell?.isBackgroundRgb).toBe(true);
+        expect(unchangedCell?.isBackgroundDefault).toBe(true);
     });
 
     it("dims unchanged Pierre replacement text when configured", async () => {

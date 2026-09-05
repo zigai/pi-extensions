@@ -74,7 +74,6 @@ function writeMutationCallOptions(
 }
 const PARTIAL_WRITE_HEAD_LINES = PARTIAL_WRITE_PREVIEW_LINES;
 const PARTIAL_WRITE_MOVING_TAIL_LINES = PARTIAL_WRITE_PREVIEW_LINES;
-const PARTIAL_WRITE_SUFFIX_CHARS = 32;
 const MAX_PARTIAL_WRITE_LINE_CHARS = 2_000;
 
 type PartialWritePreviewUpdate = {
@@ -120,7 +119,6 @@ function writeDiffSection(path: string, preview: string, totalLines: number): Di
 
 class PartialWriteContentPreview {
     private scannedLength = 0;
-    private suffix = "";
     private newlineCount = 0;
     private endsWithLineBreak = false;
     private sawContent = false;
@@ -132,13 +130,9 @@ class PartialWriteContentPreview {
     private currentLine = "";
 
     update(content: string): void {
-        if (!this.canAppend(content)) {
-            this.reset();
-        }
-
-        this.consume(content, this.scannedLength);
+        this.reset();
+        this.consume(content, 0);
         this.scannedLength = content.length;
-        this.suffix = content.slice(Math.max(0, content.length - PARTIAL_WRITE_SUFFIX_CHARS));
     }
 
     lineCount(): number {
@@ -181,20 +175,8 @@ class PartialWriteContentPreview {
         ].join("\n");
     }
 
-    private canAppend(content: string): boolean {
-        if (content.length < this.scannedLength) {
-            return false;
-        }
-        if (this.suffix.length === 0) {
-            return true;
-        }
-        const suffixStart = this.scannedLength - this.suffix.length;
-        return suffixStart >= 0 && content.slice(suffixStart, this.scannedLength) === this.suffix;
-    }
-
     private reset(): void {
         this.scannedLength = 0;
-        this.suffix = "";
         this.newlineCount = 0;
         this.endsWithLineBreak = false;
         this.sawContent = false;
