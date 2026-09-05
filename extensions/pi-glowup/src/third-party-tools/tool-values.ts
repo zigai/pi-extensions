@@ -44,14 +44,3 @@ export function baseToolName(toolName: string): string {
     const match = NAMESPACED_TOOL_PREFIX_PATTERN.exec(toolName);
     return match?.groups?.name ?? toolName;
 }
-
-export function compactInteger(value: number): string {
-    const normalized = Math.max(0, Math.trunc(value));
-    if (normalized < 100_000) {
-        return normalized.toLocaleString("en-US");
-    }
-    if (normalized < 1_000_000) {
-        return `${(normalized / 1_000).toLocaleString("en-US", { maximumFractionDigits: 0 })}K`;
-    }
-    return `${(normalized / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 })}M`;
-}

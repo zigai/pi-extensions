@@ -244,7 +244,7 @@ export class PiPtyProcess {
             const boundary = frameEnd + SYNCHRONIZED_OUTPUT_END.length;
             const frameAnsi = this.pendingAnsi.slice(0, boundary);
             this.pendingAnsi = this.pendingAnsi.slice(boundary);
-            this.enqueueAnsi(frameAnsi, true);
+            this.enqueueAnsi(frameAnsi);
             frameEnd = this.pendingAnsi.indexOf(SYNCHRONIZED_OUTPUT_END);
         }
     }
@@ -253,15 +253,15 @@ export class PiPtyProcess {
         if (this.pendingAnsi.length === 0) return;
         const trailing = this.pendingAnsi;
         this.pendingAnsi = "";
-        this.enqueueAnsi(trailing, true);
+        this.enqueueAnsi(trailing);
     }
 
-    private enqueueAnsi(data: string, capture: boolean): void {
+    private enqueueAnsi(data: string): void {
         this.parseQueue = this.parseQueue.then(
             () =>
                 new Promise<void>((resolveWrite) => {
                     this.terminal.write(data, () => {
-                        if (capture) this.captureFrame();
+                        this.captureFrame();
                         resolveWrite();
                     });
                 }),

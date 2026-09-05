@@ -9,9 +9,7 @@ import { Container, Spacer, type Component, visibleWidth } from "@earendil-works
 import ansiStyles from "ansi-styles";
 import { hasNonWhitespaceText } from "../text-boundaries.ts";
 
-const ASSISTANT_SEPARATOR_PATCH_KEY = Symbol.for("zigai.pi-glowup.assistant-separator");
 const ASSISTANT_SEPARATOR_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.state");
-const CHAT_TRANSITION_PATCH_KEY = Symbol.for("zigai.pi-glowup.chat-transition-separator");
 const CHAT_TRANSITION_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-glowup.chat-transition-separator.state",
 );
@@ -51,7 +49,6 @@ type AssistantSeparatorPatchState = {
 type AssistantRenderPrototype = {
     render?: (this: AssistantRenderInstance, width: number) => string[];
     updateContent?: (this: AssistantRenderInstance, message: AssistantMessageLike) => void;
-    [ASSISTANT_SEPARATOR_PATCH_KEY]?: true;
     [ASSISTANT_SEPARATOR_PATCH_STATE_KEY]?: AssistantSeparatorPatchState;
 };
 
@@ -67,7 +64,6 @@ type ChatTransitionPatchState = {
 
 type ChatContainerPrototype = {
     addChild?: (this: ChatContainerInstance, component: Component) => void;
-    [CHAT_TRANSITION_PATCH_KEY]?: true;
     [CHAT_TRANSITION_PATCH_STATE_KEY]?: ChatTransitionPatchState;
 };
 
@@ -339,7 +335,6 @@ function installAssistantPrototypePatch(assistantPrototype: AssistantRenderProto
         nextState = { ...nextState, wrapperUpdateContent };
     }
     assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] = nextState;
-    assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY] = true;
 }
 
 function installChatPrototypePatch(container: ChatContainerPrototype): void {
@@ -366,7 +361,6 @@ function installChatPrototypePatch(container: ChatContainerPrototype): void {
         nextState = { ...nextState, wrapperAddChild };
     }
     container[CHAT_TRANSITION_PATCH_STATE_KEY] = nextState;
-    container[CHAT_TRANSITION_PATCH_KEY] = true;
 }
 
 function restoreAssistantSeparatorPatch(assistantPrototype: AssistantRenderPrototype): void {
@@ -398,7 +392,6 @@ function restoreAssistantSeparatorPatch(assistantPrototype: AssistantRenderProto
 
     if (restoredOwnWrappers) {
         delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
-        delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_KEY];
     }
 }
 
@@ -420,7 +413,6 @@ function restoreChatTransitionPatch(container: ChatContainerPrototype): void {
         }
     }
     delete container[CHAT_TRANSITION_PATCH_STATE_KEY];
-    delete container[CHAT_TRANSITION_PATCH_KEY];
 }
 
 function restoreAssistantMethod<TName extends "render" | "updateContent">(

@@ -83,14 +83,12 @@ function filesFromPatch(patch: string): GlowupMutationFile[] {
 
 function parseArgs<Value>(value: Value) {
     const parsed = Value.Parse(patchArgsSchema, value);
-    if (parsed === undefined) return undefined;
     const files = filesFromPatch(parsed.patch);
     return files.length === 0 ? undefined : { patch: parsed.patch, files };
 }
 
 function parseResult<Value>(value: Value) {
     const parsed = Value.Parse(patchResultSchema, value);
-    if (parsed === undefined) return undefined;
     const files = filesFromPatch(parsed.details.inputPatch ?? parsed.details.patch);
     if (files.length === 0 && parsed.details.lineSummary !== undefined) {
         for (const file of parsed.details.lineSummary.files) {
@@ -116,8 +114,6 @@ export const applyPatchOwnerRendering = {
         } catch {
             return mutation(labels, [{ path: "…", lines: [], added: 0, removed: 0 }]);
         }
-        if (parsed === undefined)
-            return mutation(labels, [{ path: "…", lines: [], added: 0, removed: 0 }]);
         const files = filesFromPatch(parsed.patch);
         return files.length === 0
             ? mutation(labels, [{ path: "…", lines: [], added: 0, removed: 0 }])

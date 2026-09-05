@@ -1,6 +1,5 @@
 import { Editor, type TUI } from "@earendil-works/pi-tui";
 
-const AUTOCOMPLETE_CLEANUP_PATCH_KEY = Symbol.for("zigai.pi-glowup.autocomplete-cleanup");
 const AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-glowup.autocomplete-cleanup.state",
 );
@@ -12,7 +11,6 @@ type AutocompleteCleanupPatchState = {
 };
 
 type PatchableEditorPrototype = {
-    [AUTOCOMPLETE_CLEANUP_PATCH_KEY]?: true;
     [AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY]?: AutocompleteCleanupPatchState;
     clearAutocompleteUi?: (this: RuntimeEditor) => void;
 };
@@ -21,7 +19,6 @@ type EditorPrototypeOwner =
     | typeof Editor.prototype
     | {
           clearAutocompleteUi?: (...args: never[]) => void;
-          [AUTOCOMPLETE_CLEANUP_PATCH_KEY]?: true;
           [AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY]?: AutocompleteCleanupPatchState;
       };
 
@@ -58,7 +55,6 @@ export function configureAutocompleteCleanupPatch(
             if (editorPrototype.clearAutocompleteUi === state.wrapperClearAutocompleteUi) {
                 editorPrototype.clearAutocompleteUi = state.originalClearAutocompleteUi;
                 delete editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY];
-                delete editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY];
             }
         }
         return;
@@ -92,5 +88,4 @@ export function configureAutocompleteCleanupPatch(
     };
     editorPrototype.clearAutocompleteUi = wrapperClearAutocompleteUi;
     editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY] = nextState;
-    editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_KEY] = true;
 }

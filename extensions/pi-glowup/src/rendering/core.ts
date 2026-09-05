@@ -525,9 +525,6 @@ function wrapPrefixedLine(
         rendered.push(...wrapSinglePhysicalLine(physicalLine, width, prefix, restPrefix));
     }
 
-    if (rendered.length === 0) {
-        return [truncateToWidth(firstPrefix, width, "")];
-    }
     return rendered;
 }
 
@@ -582,47 +579,6 @@ function trimEdgeBlankLines(lines: ReadonlyArray<string>): string[] {
         end -= 1;
     }
     return start < end ? lines.slice(start, end) : [""];
-}
-
-function previewLines(
-    lines: ReadonlyArray<string>,
-    expanded: boolean,
-    maxPreviewLines: number,
-    mode: "headTail" | "head" | "hidden",
-    omittedHint: string,
-): string[] {
-    if (expanded) {
-        return [...lines];
-    }
-    return collapsedPreviewLines(lines, maxPreviewLines, mode, omittedHint);
-}
-
-function collapsedPreviewLines(
-    lines: ReadonlyArray<string>,
-    maxPreviewLines: number,
-    mode: "headTail" | "head" | "hidden",
-    omittedHint: string,
-): string[] {
-    if (mode === "hidden") {
-        return [];
-    }
-
-    const lineBudget = Math.max(1, Math.floor(maxPreviewLines));
-    if (lines.length <= lineBudget) {
-        return [...lines];
-    }
-    if (mode === "head") {
-        return [
-            ...lines.slice(0, lineBudget),
-            `… +${lines.length - lineBudget} lines (${omittedHint})`,
-        ];
-    }
-
-    const headCount = Math.ceil(lineBudget / 2);
-    const tailCount = Math.floor(lineBudget / 2);
-    const tailLines = tailCount === 0 ? [] : lines.slice(lines.length - tailCount);
-    const omitted = lines.length - headCount - tailLines.length;
-    return [...lines.slice(0, headCount), `… +${omitted} lines (${omittedHint})`, ...tailLines];
 }
 
 type CollapsedTextPreview =
@@ -1124,10 +1080,7 @@ export function renderGlowupOutput(
             return [truncateToWidth(`${prefixFirst}${muted(theme, label)}`, width, "")];
         }
 
-        const visible =
-            retained.kind === "expanded"
-                ? previewLines(rawLines, true, maxPreviewLines, mode, omittedHint)
-                : [...rawLines];
+        const visible = [...rawLines];
         const suppressTruncatedJsonHighlighting =
             retained.kind === "collapsed" &&
             visible.some(isPreviewMetaLine) &&
@@ -1136,13 +1089,7 @@ export function renderGlowupOutput(
             syntax === undefined || suppressTruncatedJsonHighlighting
                 ? visible
                 : retained.kind === "expanded"
-                  ? previewLines(
-                        trimEdgeBlankLines(highlightCodeOutput(retained.text, syntax)),
-                        true,
-                        maxPreviewLines,
-                        mode,
-                        omittedHint,
-                    )
+                  ? [...trimEdgeBlankLines(highlightCodeOutput(retained.text, syntax))]
                   : highlightPreviewLines(visible, syntax);
         const wrappedLines: WrappedPreviewLine[] = [];
         for (const [index, line] of displayLines.entries()) {
@@ -2300,10 +2247,7 @@ export function renderScriptCall(
                 : collapsedPreview === undefined
                   ? trimEdgeBlankLines(preview.code.split("\n"))
                   : collapsedPreview.lines;
-        const visible =
-            collapsedPreview === undefined
-                ? previewLines(rawLines, expanded, maxCodePreviewLines, "head", omittedHint)
-                : [...rawLines];
+        const visible = [...rawLines];
         const highlighted = highlightScriptPreviewLines(visible, retained.language, theme);
         const rendered: string[] = [];
         const headerLayout = resolveScriptHeaderLayout(headerLayoutOption, retained, highlighted);

@@ -18,9 +18,7 @@ import {
 } from "../third-party-tools/renderers.ts";
 import { executionPhase } from "../third-party-tools/types.ts";
 
-const BUILT_IN_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-glowup.built-in-renderers");
 const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.built-in-renderer-state");
-const THIRD_PARTY_RENDERER_PATCH_KEY = Symbol.for("zigai.pi-glowup.third-party-renderers");
 const THIRD_PARTY_RENDERER_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-glowup.third-party-renderer-state",
 );
@@ -235,9 +233,7 @@ type ToolExecutionPrototype = {
     getResultRenderer?: (this: ToolExecutionInstance) => ToolResultRenderer | undefined;
     getRenderShell?: (this: ToolExecutionInstance) => RenderShellMode;
     hasRendererDefinition?: (this: ToolExecutionInstance) => boolean;
-    [BUILT_IN_RENDERER_PATCH_KEY]?: true;
     [BUILT_IN_RENDERER_PATCH_STATE_KEY]?: BuiltInRendererPatchState;
-    [THIRD_PARTY_RENDERER_PATCH_KEY]?: true;
     [THIRD_PARTY_RENDERER_PATCH_STATE_KEY]?: ThirdPartyRendererPatchState;
 };
 
@@ -874,7 +870,6 @@ export function configureBuiltInToolRendererPatch(
     prototype.getResultRenderer = getResultRenderer;
     prototype.getRenderShell = getRenderShell;
     prototype.hasRendererDefinition = hasRendererDefinition;
-    prototype[BUILT_IN_RENDERER_PATCH_KEY] = true;
 }
 
 export type ToolRendererPatchStats = {
@@ -986,7 +981,6 @@ function restoreBuiltInRendererPatch(
 
     if (restoredOwnWrappers) {
         delete prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
-        delete prototype[BUILT_IN_RENDERER_PATCH_KEY];
     }
 }
 
@@ -1166,7 +1160,6 @@ export function configureThirdPartyToolRendererPatch(
     prototype.getResultRenderer = getResultRenderer;
     prototype.getRenderShell = getRenderShell;
     prototype.hasRendererDefinition = hasRendererDefinition;
-    prototype[THIRD_PARTY_RENDERER_PATCH_KEY] = true;
 }
 
 function restoreThirdPartyRendererPatch(
@@ -1200,6 +1193,5 @@ function restoreThirdPartyRendererPatch(
 
     if (restoredOwnWrappers) {
         delete prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
-        delete prototype[THIRD_PARTY_RENDERER_PATCH_KEY];
     }
 }

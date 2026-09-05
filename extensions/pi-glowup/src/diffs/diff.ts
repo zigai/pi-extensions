@@ -136,7 +136,6 @@ type RestoredMetadata = NonNullable<RestoredPayload["metadata"]>;
 type RestoredHunk = RestoredMetadata["hunks"][number];
 
 type FileSnapshot = {
-    readonly exists: boolean;
     readonly content: string;
     readonly sizeBytes: number;
     readonly lineCount: number;
@@ -870,10 +869,9 @@ async function readTextSnapshot(
         info = await stat(absolutePath);
     } catch (cause: unknown) {
         if (hasNodeErrorCode(cause, "ENOENT")) {
-            return { exists: false, content: "", sizeBytes: 0, lineCount: 0 };
+            return { content: "", sizeBytes: 0, lineCount: 0 };
         }
         return {
-            exists: true,
             content: "",
             sizeBytes: 0,
             lineCount: 0,
@@ -883,7 +881,6 @@ async function readTextSnapshot(
 
     if (!info.isFile()) {
         return {
-            exists: true,
             content: "",
             sizeBytes: info.size,
             lineCount: 0,
@@ -892,7 +889,6 @@ async function readTextSnapshot(
     }
     if (maxBytes !== null && info.size > maxBytes) {
         return {
-            exists: true,
             content: "",
             sizeBytes: info.size,
             lineCount: 0,
@@ -903,14 +899,12 @@ async function readTextSnapshot(
     try {
         const content = await readFile(absolutePath, "utf8");
         return {
-            exists: true,
             content,
             sizeBytes: info.size,
             lineCount: countContentLines(content),
         };
     } catch {
         return {
-            exists: true,
             content: "",
             sizeBytes: info.size,
             lineCount: 0,

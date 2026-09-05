@@ -117,17 +117,17 @@ function matcherMatches(toolName: string, matcher: ToolNameMatcher): boolean {
 }
 
 function hasPreservePreference(toolDefinition: unknown): boolean {
-    return toolDefinitionViewParser.parse(toolDefinition)?.preserve === true;
+    return toolDefinitionViewParser.parse(toolDefinition).preserve;
 }
 
-function toolDefinitionLabel(definition: ToolDefinitionView | undefined): string | undefined {
-    const label = definition?.label;
+function toolDefinitionLabel(definition: ToolDefinitionView): string | undefined {
+    const label = definition.label;
     return label === undefined || label.length === 0 ? undefined : label;
 }
 
 /** Returns whether a tool definition carries a valid public Glowup adapter. */
 export function hasGlowupRenderingAdapter(toolDefinition: unknown): boolean {
-    return toolDefinitionViewParser.parse(toolDefinition)?.adapter !== undefined;
+    return toolDefinitionViewParser.parse(toolDefinition).adapter !== undefined;
 }
 
 /** Parses comma-separated tool names for `PI_GLOWUP_PRESERVE_TOOLS`. */
@@ -178,7 +178,7 @@ export function createThirdPartyToolRenderer(
     const fallback =
         plugin?.createRenderer(toolName, options) ??
         createGenericRenderer(toolName, toolDefinitionLabel(definition), options?.labelMode);
-    const adapter = definition?.adapter;
+    const adapter = definition.adapter;
     return adapter === undefined
         ? fallback
         : createProtocolRenderer(adapter, fallback, options?.labelMode, options?.mutationSettings);

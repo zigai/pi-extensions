@@ -1,6 +1,5 @@
 import { Container, Loader, Spacer, type Component } from "@earendil-works/pi-tui";
 
-const WORKING_WIDGET_SPACING_PATCH_KEY = Symbol.for("zigai.pi-glowup.working-widget-spacing");
 const WORKING_WIDGET_SPACING_PATCH_STATE_KEY = Symbol.for(
     "zigai.pi-glowup.working-widget-spacing.state",
 );
@@ -12,7 +11,6 @@ type WorkingWidgetSpacingPatchState = {
 };
 
 type PatchableContainerPrototype = typeof Container.prototype & {
-    [WORKING_WIDGET_SPACING_PATCH_KEY]?: true;
     [WORKING_WIDGET_SPACING_PATCH_STATE_KEY]?: WorkingWidgetSpacingPatchState;
 };
 
@@ -63,7 +61,6 @@ export function configureWorkingWidgetSpacingPatch(
             if (containerPrototype.render === state.wrapperRender) {
                 containerPrototype.render = state.originalRender;
                 delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
-                delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY];
             }
         }
         return;
@@ -111,5 +108,4 @@ export function configureWorkingWidgetSpacingPatch(
     };
     containerPrototype.render = wrapperRender;
     containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY] = nextState;
-    containerPrototype[WORKING_WIDGET_SPACING_PATCH_KEY] = true;
 }

@@ -387,7 +387,7 @@ function pierreRowPolicy(
         };
     }
     if (options.expanded) {
-        const maxVisibleLines = maxVisibleDiffLines(true);
+        const maxVisibleLines = maxVisibleDiffLines();
         return {
             collapseSemantically: false,
             maxSourceRows: maxVisibleLines + 1,
@@ -1427,14 +1427,7 @@ function pierrePalettesEqual(left: PierreTerminalPalette, right: PierreTerminalP
     );
 }
 
-function maxVisibleDiffLines(expanded: boolean): number {
+function maxVisibleDiffLines(): number {
     const terminalRows = process.stdout.rows ?? 40;
-    const expandedLimit = Math.min(
-        MAX_VIEWPORT_DIFF_RENDER_LINES,
-        Math.max(24, Math.floor(terminalRows * 0.65)),
-    );
-    if (expanded) {
-        return expandedLimit;
-    }
-    return Math.min(expandedLimit, 18);
+    return Math.min(MAX_VIEWPORT_DIFF_RENDER_LINES, Math.max(24, Math.floor(terminalRows * 0.65)));
 }

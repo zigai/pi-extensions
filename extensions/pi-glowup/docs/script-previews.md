@@ -1,6 +1,6 @@
 # Script Previews
 
-Script previews use adaptive headers by default. Configure them with `scriptPreview` settings in `config.json`.
+Script previews use adaptive headers by default. Configure them with `scriptPreview` settings in `~/.pi/agent/extension-settings/pi-glowup.json`.
 
 ## Header Layout
 

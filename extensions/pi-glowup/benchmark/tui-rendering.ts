@@ -11,10 +11,7 @@ import {
 } from "../src/diffs/renderer.ts";
 import { emptyHighlightedDiffSet, loadHighlightedDiff } from "../src/diffs/highlight.ts";
 import { getPierrePalette } from "../src/diffs/theme.ts";
-import {
-    clearApplyPatchRenderingState,
-    restoreApplyPatchResultSummaries,
-} from "../src/rendering/apply-patch-rendering.ts";
+import { applyPatchOwnerToolDefinition } from "../test/support/apply-patch-owner-fixture.ts";
 import {
     configureRenderingAppearance,
     renderGlowupDiff,
@@ -275,10 +272,11 @@ function writeStreamTimings(updates: number, rounds: number): readonly number[] 
 function patchStreamTimings(updates: number, rounds: number): readonly number[] {
     const timings: number[] = [];
     for (let round = 0; round < rounds; round += 1) {
-        clearApplyPatchRenderingState();
-        const renderer = createThirdPartyToolRenderer("apply_patch", {
-            labelMode: "lifecycle",
-        });
+        const renderer = createThirdPartyToolRenderer(
+            "apply_patch",
+            { labelMode: "lifecycle" },
+            applyPatchOwnerToolDefinition,
+        );
         let patch = "*** Begin Patch\n*** Add File: src/generated.ts\n";
         let lastComponent: Component | undefined;
         for (let index = 1; index <= updates; index += 1) {
@@ -335,48 +333,40 @@ function resizeTimings(cycles: number): readonly number[] {
 }
 
 function restoredSessionTimings(samples: number): readonly number[] {
-    const branch = [
-        {
-            type: "message",
-            message: {
-                role: "toolResult",
-                toolCallId: "benchmark-restored",
-                toolName: "apply_patch",
-                details: {
-                    diff: "restored.ts\n+1 export const restored = true;\n",
-                    lineSummary: {
-                        files: [
-                            {
-                                action: "A",
-                                path: "restored.ts",
-                                addedLines: 1,
-                                removedLines: 0,
-                            },
-                        ],
-                    },
-                },
-            },
-        },
-    ];
     const patch =
         "*** Begin Patch\n*** Add File: restored.ts\n+export const restored = true;\n*** End Patch";
+    const renderer = createThirdPartyToolRenderer(
+        "apply_patch",
+        { labelMode: "lifecycle" },
+        applyPatchOwnerToolDefinition,
+    );
+    const resultDetails = {
+        content: [],
+        details: {
+            patch,
+            inputPatch: patch,
+        },
+    };
     const timings: number[] = [];
     for (let sample = 0; sample < samples; sample += 1) {
-        clearApplyPatchRenderingState();
         timings.push(
             measure(() => {
-                restoreApplyPatchResultSummaries(branch);
-                createThirdPartyToolRenderer("apply_patch", { labelMode: "lifecycle" })
-                    .renderCall({ patch }, plainTheme, {
-                        args: { patch },
-                        toolCallId: "benchmark-restored",
-                        executionStarted: true,
-                        argsComplete: false,
-                        isPartial: true,
-                        expanded: false,
-                        showImages: false,
-                        isError: false,
-                    })
+                renderer
+                    .renderResult(
+                        resultDetails,
+                        { expanded: false, isPartial: false },
+                        plainTheme,
+                        {
+                            args: { patch },
+                            toolCallId: "benchmark-restored",
+                            executionStarted: true,
+                            argsComplete: true,
+                            isPartial: false,
+                            expanded: false,
+                            showImages: false,
+                            isError: false,
+                        },
+                    )
                     .render(120);
             }),
         );
