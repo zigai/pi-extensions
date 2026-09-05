@@ -1,14 +1,16 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { Type } from "typebox";
 
 import {
     checkSettingsArtifacts,
     generateSettingsArtifacts,
     renderSettingsArtifacts,
 } from "../src/artifacts.ts";
+import { defineExtensionSettings } from "../src/definition.ts";
 import { README_GENERATED_END, README_GENERATED_START } from "../src/settings-documentation.ts";
 import { testDefinition } from "./fixture.ts";
 
@@ -79,6 +81,54 @@ describe("settings artifacts", () => {
             stalePaths: [targets.schemaPath, targets.readmePath],
         });
         expect(await readFile(targets.schemaPath, "utf8")).toBe("stale\n");
+    });
+
+    it("detects codec-only source drift during artifact checking without modifying files", async () => {
+        const files = await artifactFiles();
+        const targets = {
+            ...files,
+            prevalidationPath: join(dirname(files.schemaPath), "settings.prevalidated.ts"),
+        };
+        const input = {
+            id: "codec-artifacts",
+            title: "Codec Artifacts",
+            description: "Generated codec settings.",
+        };
+        const first = defineExtensionSettings({
+            ...input,
+            schema: Type.Object(
+                {
+                    value: Type.Codec(Type.String({ default: "value", description: "Value." }))
+                        .Decode((value) => `${value}-a`)
+                        .Encode((value) => value.slice(0, -2)),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        const changed = defineExtensionSettings({
+            ...input,
+            schema: Type.Object(
+                {
+                    value: Type.Codec(Type.String({ default: "value", description: "Value." }))
+                        .Decode((value) => `${value}-b`)
+                        .Encode((value) => value.slice(0, -2)),
+                },
+                { additionalProperties: false },
+            ),
+        });
+        expect(JSON.stringify(changed.schema)).toBe(JSON.stringify(first.schema));
+        generateSettingsArtifacts(first, targets);
+        const original = await readFile(targets.prevalidationPath, "utf8");
+
+        expect(checkSettingsArtifacts(changed, targets)).toEqual({
+            current: false,
+            stalePaths: [targets.prevalidationPath],
+        });
+        expect(await readFile(targets.prevalidationPath, "utf8")).toBe(original);
+        expect(generateSettingsArtifacts(changed, targets).changedPaths).toEqual([
+            targets.prevalidationPath,
+        ]);
+        expect(checkSettingsArtifacts(changed, targets)).toEqual({ current: true, stalePaths: [] });
     });
 
     it("rejects an incomplete generated README region", async () => {

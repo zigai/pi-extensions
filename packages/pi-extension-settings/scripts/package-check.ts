@@ -150,7 +150,18 @@ try {
 
     await writeFile(
         path.join(consumerDirectory, "package.json"),
-        `${JSON.stringify({ private: true, type: "module" }, undefined, 2)}\n`,
+        `${JSON.stringify(
+            {
+                private: true,
+                type: "module",
+                piExtensionSettings: {
+                    definition: "./settings-input.ts",
+                    prevalidation: "./settings.prevalidated.ts",
+                },
+            },
+            undefined,
+            2,
+        )}\n`,
     );
     const piVersion = await installedVersion(
         path.join(packageRoot, "node_modules", "@earendil-works", "pi-coding-agent"),
@@ -174,12 +185,46 @@ try {
         consumerDirectory,
     );
 
+    // Generate with Node before Pi transforms the same codec source. Function text changes
+    // during that transformation must not invalidate the generated runtime artifact.
+    await writeFile(path.join(consumerDirectory, "README.md"), "# Package check\n");
+    await writeFile(
+        path.join(consumerDirectory, "settings-input.ts"),
+        [
+            'import { Type } from "typebox";',
+            "export default {",
+            '  id: "package-check", title: "Package Check", description: "Packed codec settings.",',
+            "  schema: Type.Object({",
+            '    value: Type.Codec(Type.String({ default: "value", description: "Codec value." }))',
+            "      .Decode((value) => value + '-decoded')",
+            "      .Encode((value) => value.slice(0,-8)),",
+            "  }, { additionalProperties: false }),",
+            "};",
+            "",
+        ].join("\n"),
+    );
+    await runCommand(
+        npmExecutable,
+        ["exec", "--dry-run=false", "--", "pi-extension-settings", "generate"],
+        consumerDirectory,
+    );
+    await runCommand(
+        npmExecutable,
+        ["exec", "--dry-run=false", "--", "pi-extension-settings", "check"],
+        consumerDirectory,
+    );
     await writeFile(
         path.join(consumerDirectory, "extension.ts"),
         [
             'import * as authoring from "@zigai/pi-extension-settings";',
             'import * as runtime from "@zigai/pi-extension-settings/runtime";',
             'import * as piSettings from "@zigai/pi-extension-settings/pi";',
+            'import { Value } from "typebox/value";',
+            'import input from "./settings-input.ts";',
+            'import artifact from "./settings.prevalidated.ts";',
+            "const definition = runtime.definePrevalidatedExtensionSettings(input, artifact);",
+            "const decoded = Value.Decode(definition.schema, definition.defaultSettings);",
+            'if (decoded.value !== "value-decoded") throw new Error("packed codec did not decode");',
             "",
             "export default function extension(pi) {",
             '  if (typeof authoring.defineExtensionSettings !== "function") throw new Error("root export missing");',
@@ -201,6 +246,7 @@ try {
             "  cwd: process.cwd(),",
             '  agentDir: path.join(process.cwd(), "agent"),',
             '  additionalExtensionPaths: [path.join(process.cwd(), "extension.ts")],',
+            "  noSkills: true, noPromptTemplates: true, noThemes: true,",
             "});",
             "await loader.reload();",
             "const loaded = loader.getExtensions();",
