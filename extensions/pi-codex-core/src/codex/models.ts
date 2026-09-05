@@ -91,6 +91,16 @@ export function codexModelRequestProfile(
 }
 
 /** Maps Codex client-only reasoning modes to the value accepted by Responses. */
-export function codexReasoningEffortForRequest(effort: string): string {
-    return effort.trim().toLowerCase() === "ultra" ? "max" : effort.trim();
+export function codexReasoningEffortForRequest(effort: string, modelId: string): string {
+    if (effort.trim().toLowerCase() !== "ultra") return effort.trim();
+    const profile = codexModelRequestProfile(modelId);
+    const supported = profile?.supportedReasoningEfforts ?? [];
+    const multiAgentEffort = profile?.multiAgentReasoningEffort;
+    if (multiAgentEffort && multiAgentEffort !== "ultra" && supported.includes(multiAgentEffort)) {
+        return multiAgentEffort;
+    }
+    if (supported.includes("max")) return "max";
+    return (
+        [...supported].reverse().find((supportedEffort) => supportedEffort !== "ultra") ?? "medium"
+    );
 }

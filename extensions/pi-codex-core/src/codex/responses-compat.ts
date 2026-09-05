@@ -37,7 +37,11 @@ export function rewriteCodexResponsesPayload(
         ? rewrittenInput
         : [...buildResponsesLitePrefix(sessionId, tools, instructions), ...rewrittenInput];
     const clientMetadata = JsonObjectDecoder.decode(request.client_metadata) ?? {};
-    const reasoning = responsesLiteReasoning(request.reasoning, profile.defaultReasoningEffort);
+    const reasoning = responsesLiteReasoning(
+        request.reasoning,
+        profile.defaultReasoningEffort,
+        model,
+    );
 
     const rewritten = omitJsonObjectKeys(
         request,
@@ -83,12 +87,13 @@ export function omitReasoningSummary(
 function responsesLiteReasoning(
     value: JsonValue | undefined,
     defaultEffort: string | undefined,
+    modelId: string,
 ): JsonObject {
     const current = JsonObjectDecoder.decode(value) ?? {};
     const currentEffort = JsonStringDecoder.decode(current.effort)?.trim();
     const effort =
         currentEffort && currentEffort.length > 0
-            ? codexReasoningEffortForRequest(currentEffort)
+            ? codexReasoningEffortForRequest(currentEffort, modelId)
             : defaultEffort;
     const currentSummary = JsonStringDecoder.decode(current.summary);
     const summary = currentSummary === "none" ? undefined : currentSummary;

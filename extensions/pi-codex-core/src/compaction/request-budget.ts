@@ -520,7 +520,7 @@ export function buildReasoning(
     const effort =
         configuredEffort === "current"
             ? profile?.defaultReasoningEffort
-            : codexReasoningEffortForRequest(configuredEffort);
+            : codexReasoningEffortForRequest(configuredEffort, modelId);
     if (profile?.useResponsesLite) {
         return { reasoning: effort ? { effort, context: "all_turns" } : { context: "all_turns" } };
     }

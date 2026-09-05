@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { resolveCodexRequestModel } from "../src/config/config.ts";
+import {
+    DEFAULT_CODEX_CORE_CONFIG,
+    parseCodexCoreConfig,
+    resolveCodexRequestModel,
+} from "../src/config/config.ts";
 import type { JsonObject } from "../src/compaction/types.ts";
 import {
     CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY,
@@ -8,8 +12,11 @@ import {
     rewriteCodexResponsesPayload,
 } from "../src/codex/responses-compat.ts";
 import { ResponsesLiteRequestPolicy } from "../src/codex/responses-lite-policy.ts";
-import { codexModelRequestProfile } from "../src/codex/models.ts";
-import { buildRemoteCompactionV2Request } from "../src/compaction/request-budget.ts";
+import { codexModelRequestProfile, codexReasoningEffortForRequest } from "../src/codex/models.ts";
+import {
+    buildReasoning,
+    buildRemoteCompactionV2Request,
+} from "../src/compaction/request-budget.ts";
 import { JsonArrayDecoder, JsonObjectDecoder } from "../src/compaction/responses-input.ts";
 import {
     captureProviderRequestTemplate,
@@ -93,7 +100,27 @@ test("rewrites GPT-5.6 requests to the Responses Lite layout", () => {
     );
 });
 
-test("routes Astra through Lite with the upstream low default", () => {
+test("normalizes ultra to supported model reasoning without changing the medium default", () => {
+    const ultraConfig = parseCodexCoreConfig({ openai: { compactionReasoning: "ultra" } });
+    for (const [model, expected] of [
+        ["gpt-6-astra", "xhigh"],
+        ["gpt-5.6-sol", "max"],
+        ["gpt-5.6-terra", "max"],
+        ["gpt-5.6-luna", "max"],
+        ["gpt-5.5", "xhigh"],
+        ["gpt-5.4", "xhigh"],
+        ["gpt-5.4-mini", "xhigh"],
+        ["future-model", "medium"],
+    ]) {
+        assert.ok(model && expected);
+        assert.equal(codexReasoningEffortForRequest(" ULTRA ", model), expected);
+        assert.equal(buildReasoning(ultraConfig, model).reasoning.effort, expected);
+        assert.equal(buildReasoning(DEFAULT_CODEX_CORE_CONFIG, model).reasoning.effort, "medium");
+        assert.equal(codexReasoningEffortForRequest(" high ", model), "high");
+    }
+});
+
+test("routes Astra through Lite with the upstream low default and ultra override", () => {
     const payload = {
         model: "gpt-6-astra",
         instructions: "astra system",
@@ -106,6 +133,11 @@ test("routes Astra through Lite with the upstream low default", () => {
     assert.deepEqual(normal.reasoning, { effort: "low", context: "all_turns" });
     assert.equal(normal.service_tier, "priority");
     assert.equal(normal.parallel_tool_calls, false);
+    const ultra = rewriteCodexResponsesPayload(
+        { ...payload, reasoning: { effort: "ultra" } },
+        "astra-session",
+    );
+    assert.deepEqual(ultra?.reasoning, { effort: "xhigh", context: "all_turns" });
     assert.equal(rewriteCodexResponsesPayload(payload, "astra-session", "gpt-5.6-sol"), undefined);
 });
 
