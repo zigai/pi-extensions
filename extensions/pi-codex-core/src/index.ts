@@ -34,7 +34,7 @@ export const extensionName = "Pi Codex Core";
 export const packageName = "pi-codex-core";
 
 const FAST_MODE_STARTUP_WARNING =
-    "Fast mode is enabled: supported Codex calls can deliver up to 1.5x faster token velocity, with higher credit usage that varies by model and pricing.";
+    "Fast mode is enabled: supported Codex calls prioritize speed, with higher credit usage that varies by model and pricing.";
 
 type CompactionModule = typeof import("./compaction/service.ts");
 

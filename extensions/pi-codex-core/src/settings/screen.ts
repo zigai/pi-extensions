@@ -539,7 +539,7 @@ function buildItems(
             toggleItem(
                 "fast",
                 "Fast mode",
-                "Up to 1.5× faster token velocity; credit usage is higher and varies by model and pricing.",
+                "Prioritize speed; credit usage is higher and varies by model and pricing.",
                 config.openai.fast,
             ),
             toggleItem(

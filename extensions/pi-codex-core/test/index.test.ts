@@ -355,7 +355,7 @@ test("shows a scrollable startup warning when fast mode is enabled", async () =>
         assert.deepEqual(notifications, [
             {
                 message:
-                    "Fast mode is enabled: supported Codex calls can deliver up to 1.5x faster token velocity, with higher credit usage that varies by model and pricing.",
+                    "Fast mode is enabled: supported Codex calls prioritize speed, with higher credit usage that varies by model and pricing.",
                 type: "warning",
             },
         ]);

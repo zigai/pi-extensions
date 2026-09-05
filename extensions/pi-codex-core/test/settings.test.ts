@@ -420,7 +420,7 @@ test("settings screen renders a description for every setting", async () => {
             "Use apply_patch instead of edit: off, OpenAI/Codex-like models, or all models.",
         ],
         openai: [
-            "Up to 1.5× faster token velocity; credit usage is higher and varies by model and pricing.",
+            "Prioritize speed; credit usage is higher and varies by model and pricing.",
             "Show streamed reasoning summaries for GPT Responses models.",
             "Text verbosity for Codex-native calls that support it.",
             "Model used by web_run; current follows the active Codex model.",

@@ -76,7 +76,7 @@ When Pi Toggles is active, Codex Core submits these tool settings as defaults in
 | `openai.compactionModel`       | `"current"`     | Model for compaction; `"current"` uses the active Codex model.                               |
 | `openai.compactionReasoning`   | `"medium"`      | Model-supported reasoning effort; also accepts `"current"`, `"max"`, and `"ultra"`.          |
 | `openai.verbosity`             | `"low"`         | Verbosity for Codex-backed requests.                                                         |
-| `openai.fast`                  | `false`         | Use up to 1.5× faster token velocity; credit usage varies by model and current pricing.      |
+| `openai.fast`                  | `false`         | Prioritize speed; credit usage is higher and varies by model and current pricing.      |
 | `openai.showReasoningTraces`   | `true`          | Show streamed reasoning summaries for GPT Responses models.                                  |
 
 ```json
