@@ -37,7 +37,6 @@ type PiRendererDefinition = {
 type ToolExecutionInstance = {
     readonly toolName?: string;
     readonly toolDefinition?: PiRendererDefinition;
-    readonly builtInToolDefinition?: PiRendererDefinition;
     readonly executionStarted?: boolean;
     readonly result?: ThirdPartyToolResult;
 };
@@ -249,6 +248,9 @@ const THEME_FOREGROUNDS: readonly ThemeForeground[] = [
     "dim",
     "text",
     "thinkingText",
+    "scrollbarTrack",
+    "scrollbarThumb",
+    "searchMatchText",
     "userMessageText",
     "customMessageText",
     "customMessageLabel",
@@ -288,7 +290,7 @@ const THEME_FOREGROUNDS: readonly ThemeForeground[] = [
 
 const THEME_BACKGROUNDS: readonly ThemeBackground[] = [
     "selectedBg",
-    "scrollbarThumb",
+    "searchMatchBg",
     "userMessageBg",
     "customMessageBg",
     "toolPendingBg",
@@ -567,22 +569,14 @@ function instanceToolName(instance: ToolExecutionInstance): string | undefined {
     return toolName === undefined || toolName.length === 0 ? undefined : toolName;
 }
 
-function hasBuiltInToolDefinition(instance: ToolExecutionInstance): boolean {
-    return instance.builtInToolDefinition !== undefined;
-}
-
 function builtInToolName(instance: ToolExecutionInstance): BuiltInToolName | undefined {
     const toolName = instanceToolName(instance);
     if (toolName === undefined) {
         return undefined;
     }
 
-    const nativeName = nativeBuiltInToolName(toolName);
-    if (nativeName !== undefined) {
-        return hasBuiltInToolDefinition(instance) ? nativeName : undefined;
-    }
-
-    return compatBuiltInToolName(toolName);
+    // Pi resolves built-in renderers into toolDefinition before constructing the row.
+    return nativeBuiltInToolName(toolName) ?? compatBuiltInToolName(toolName);
 }
 
 function toolDefinition(instance: ToolExecutionInstance): PiRendererDefinition | undefined {
@@ -646,12 +640,8 @@ function thirdPartyRenderContext(
 }
 
 function hasExplicitToolRenderer(instance: ToolExecutionInstance): boolean {
-    for (const definition of [instance.toolDefinition, instance.builtInToolDefinition]) {
-        if (definition?.renderCall !== undefined || definition?.renderResult !== undefined) {
-            return true;
-        }
-    }
-    return false;
+    const definition = instance.toolDefinition;
+    return definition?.renderCall !== undefined || definition?.renderResult !== undefined;
 }
 
 function shouldUseThirdPartyRenderer(
@@ -683,7 +673,7 @@ function shouldUseThirdPartyRenderer(
         return true;
     }
 
-    return !hasBuiltInToolDefinition(instance) && !hasOriginalRendererDefinition;
+    return nativeBuiltInToolName(toolName) === undefined && !hasOriginalRendererDefinition;
 }
 
 function rendererForInstance(
