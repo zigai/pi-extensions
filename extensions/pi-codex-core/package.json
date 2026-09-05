@@ -1,6 +1,6 @@
 {
   "name": "@zigai/pi-codex-core",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Everything GPT models need to feel at home in Pi.",
   "keywords": [
     "pi",
