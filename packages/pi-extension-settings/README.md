@@ -23,15 +23,11 @@ Then follow [Add settings to an existing Pi extension](docs/manual-setup.md).
 - Safe diagnostics that do not expose setting values
 - Locked, validated, atomic settings updates when an extension needs to write configuration
 
-## Runtime model
+## How settings work
 
-Settings resolve in a predictable order:
+Extensions provide defaults, so users only need to configure what they want to change. Global settings apply across projects. A trusted project can have its own settings—for example, to enable a feature just for that project.
 
-```text
-schema defaults ← global settings ← trusted-project settings
-```
-
-Project settings override global settings, and global settings override defaults. Nested object fields are combined; lists and individual values are replaced. Invalid settings are skipped and reported. Existing files are never overwritten automatically.
+For each option, the package uses the project's value if set, otherwise the global value, otherwise the extension's default. See [runtime details](docs/runtime.md) for validation and how more complex settings are combined.
 
 To keep startup fast, load settings once per session, when the extension first needs them. To disable an extension without loading it, disable its package in Pi's configuration.
 

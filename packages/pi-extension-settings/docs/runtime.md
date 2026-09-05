@@ -38,48 +38,45 @@ Loading installs or refreshes the generated editor schema and creates a missing 
 
 Keep module import and the extension factory free of settings I/O. Treat `session_start` as the reset boundary and load settings once in the first callback that needs them. If the feature genuinely begins during `session_start`, that handler is the correct activation boundary.
 
-Use a separate activation sentinel instead of relying on the settings value: disabled settings still count as completed activation, and an extension-specific wrapper may deliberately reject a resolved value during additional semantic validation. Every tool, command, renderer, shortcut, or event that can be the first feature entry point must call the same activation function.
+Cache the load result inside the extension factory. A cached result means loading is complete even when `enabled` is false; no separate activation flag is needed. Call the same getter from each tool execution, command, shortcut, or event handler that needs settings. Keep additional extension-specific validation with that getter and cache rejected results too.
 
 ```ts
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadExampleSettings, type ExtensionSettings } from "./settings.ts";
 
-let activationComplete = false;
-let settings: ExtensionSettings | undefined;
+export default function extension(pi: ExtensionAPI): void {
+  let loaded: ReturnType<typeof loadExampleSettings> | undefined;
 
-function resetSessionActivation(): void {
-  activationComplete = false;
-  settings = undefined;
-}
-
-function ensureSessionActivated(ctx: ExtensionContext): ExtensionSettings | undefined {
-  if (activationComplete) return settings?.enabled === true ? settings : undefined;
-
-  const loaded = loadExampleSettings(ctx);
-  settings = loaded.settings;
-  activationComplete = true;
-  for (const diagnostic of loaded.diagnostics) {
-    ctx.ui.notify(diagnostic.message, diagnostic.severity);
+  function getSettings(ctx: ExtensionContext): ExtensionSettings | undefined {
+    if (loaded === undefined) {
+      loaded = loadExampleSettings(ctx);
+      if (ctx.hasUI) {
+        for (const diagnostic of loaded.diagnostics) {
+          ctx.ui.notify(diagnostic.message, diagnostic.severity);
+        }
+      }
+    }
+    return loaded.settings.enabled ? loaded.settings : undefined;
   }
-  return settings?.enabled === true ? settings : undefined;
+
+  const reset = () => {
+    loaded = undefined;
+  };
+  pi.on("session_start", reset);
+  pi.on("session_shutdown", reset);
+
+  pi.on("before_agent_start", (_event, ctx) => {
+    const settings = getSettings(ctx);
+    if (settings === undefined) return;
+
+    // Run enabled behavior that needs settings.
+  });
 }
-
-pi.on("session_start", resetSessionActivation);
-
-pi.on("before_agent_start", (_event, ctx) => {
-  const activeSettings = ensureSessionActivated(ctx);
-  if (activeSettings === undefined) return;
-
-  // Run enabled behavior that needs activeSettings.
-});
-
-pi.on("session_shutdown", () => {
-  // Abort and dispose other session-owned work first.
-  resetSessionActivation();
-});
 ```
 
-This moves synchronous settings work from Pi startup to first feature use; it does not eliminate that cost. Disabled callbacks remain inert after activation. Pi-level package configuration is the zero-load switch when an extension should not be imported or registered at all.
+Renderers receive `ToolRenderContext`, not `ExtensionContext`. Keep rendering free of settings I/O and notifications; use presentation data captured during execution or already-owned session state. Renderers must also handle history rendered before settings activation and still return a component.
+
+This moves synchronous settings work from Pi startup to first feature use; it does not eliminate that cost. Pi-level package configuration is the zero-load switch when an extension should not be imported or registered at all. Add cancellation, stale-result rejection, and disposal when the extension acquires asynchronous work or resources that need them.
 
 ## Update settings safely
 

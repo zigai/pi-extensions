@@ -43,6 +43,8 @@ pi-extension-settings check
 
 `check` performs the same discovery and validation without modifying files. It fails for invalid inputs and missing or stale artifacts, making it suitable for pre-commit, CI, verification, and release gates.
 
+For prevalidated definitions, `check` also compares codec function text and non-enumerable schema metadata. Runtime hydration checks the JSON-visible contract only: Pi and bundlers can rewrite equivalent codec functions. Run `generate` and `check` against the authoring source before packaging.
+
 ## Package scripts
 
 Short package scripts keep automation independent of the installed CLI path:

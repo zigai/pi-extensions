@@ -11,9 +11,10 @@
 ## Consumer Lifecycle Contract
 
 - Loading performs synchronous filesystem work. Public documentation and examples must keep module import and the extension factory free of settings I/O.
-- This package is stateless with respect to Pi sessions. The consuming extension owns exactly-once session caching, the activation sentinel, diagnostic presentation, enabled behavior, cancellation, stale-result rejection, reset, and disposal.
+- This package is stateless with respect to Pi sessions. The consuming extension owns its cached load result, diagnostic presentation, enabled behavior, and reset. Cache the result even when disabled or rejected by extension-specific validation; a separate activation flag is unnecessary when the cached result records completion. Add cancellation, stale-result rejection, and disposal only for asynchronous work or resources the extension owns.
 - Recommend `session_start` as the reset boundary and the first callback that needs settings as the activation boundary. When enabled behavior genuinely begins during `session_start`, loading there is correct.
 - Explain that deferred loading moves work from Pi startup to first feature use; it does not remove the load cost.
+- Keep renderers free of settings I/O. Pi's `ToolRenderContext` does not provide the `ExtensionContext` needed for loading and notifications; rendering must work before activation using execution data or already-owned presentation state.
 - Do not add a generic session activation helper unless it can preserve extension-specific lifecycle ownership without hiding diagnostics, invalid settings, cancellation, or cleanup.
 
 ## Configuration Invariants
@@ -37,7 +38,7 @@
 
 - Never hand-edit generated `config.schema.json` content or README text between `<!-- pi-extension-settings:start -->` and `<!-- pi-extension-settings:end -->`. Generated README content includes the exact type table, complete defaults, and the optional advanced example.
 - Run `pi-extension-settings generate` after changing a definition.
-- `pi-extension-settings check` must remain non-mutating and deterministic for pre-commit and CI.
+- `pi-extension-settings check` must remain non-mutating and deterministic for pre-commit and CI. Prevalidation checks codec function text during authoring only; runtime hydration checks JSON-visible drift because Pi and bundlers transform function text.
 - Standalone packages and npm workspace packages use the same package-level `piExtensionSettings` manifest.
 
 ## Quality Gates
