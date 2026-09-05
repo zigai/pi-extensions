@@ -5,6 +5,7 @@ import {
     initTheme,
     ToolExecutionComponent,
     type ExtensionAPI,
+    type SessionTreeEvent,
     type ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
@@ -91,7 +92,29 @@ type ToolResultHandler = (
     context: ToolCallContext,
 ) => Promise<ToolResultHandlerResult> | ToolResultHandlerResult;
 
+type AssistantSourceMessage = {
+    readonly role: "assistant";
+    readonly content: ReadonlyArray<{
+        readonly type: "toolCall";
+        readonly id: string;
+        readonly name: string;
+        readonly arguments: Readonly<Record<string, string>>;
+    }>;
+};
+type SourceMessageHandler = (event: { readonly message: AssistantSourceMessage }) => void;
+type SessionTreeHandler = (
+    event: SessionTreeEvent,
+    context: Pick<SessionStartContext, "sessionManager">,
+) => void;
+type ExecutionStartHandler = (event: {
+    readonly toolName: string;
+    readonly toolCallId: string;
+}) => void;
+
 type RegisteredHandler =
+    | SourceMessageHandler
+    | SessionTreeHandler
+    | ExecutionStartHandler
     | SessionStartHandler
     | SessionShutdownHandler
     | ToolCallHandler
@@ -108,6 +131,10 @@ type SessionShutdownEvent = {
 type SessionShutdownHandler = (event: SessionShutdownEvent) => Promise<void> | void;
 
 class FakeExtensionApi {
+    private readonly sourceMessageHandlers: SourceMessageHandler[] = [];
+    private readonly sessionTreeHandlers: SessionTreeHandler[] = [];
+    private readonly executionStartHandlers: ExecutionStartHandler[] = [];
+    branch: readonly unknown[] = [];
     private readonly sessionStartHandlers: SessionStartHandler[] = [];
     private readonly sessionShutdownHandlers: SessionShutdownHandler[] = [];
     private readonly toolCallHandlers: ToolCallHandler[] = [];
@@ -122,6 +149,21 @@ class FakeExtensionApi {
     }
 
     on(eventName: string, handler: RegisteredHandler): void {
+        if (eventName === "session_tree") {
+            // SAFETY: Tree reset only reads sessionManager.getBranch from its context.
+            this.sessionTreeHandlers.push(handler as SessionTreeHandler);
+            return;
+        }
+        if (eventName === "message_update") {
+            // SAFETY: This event supplies the assistant source snapshot used by the extension.
+            this.sourceMessageHandlers.push(handler as SourceMessageHandler);
+            return;
+        }
+        if (eventName === "tool_execution_start") {
+            // SAFETY: These are the fields read by the execution-start handler.
+            this.executionStartHandlers.push(handler as ExecutionStartHandler);
+            return;
+        }
         if (eventName === "session_start") {
             // SAFETY: The extension API overload associates session_start with SessionStartHandler.
             this.sessionStartHandlers.push(handler as SessionStartHandler);
@@ -173,9 +215,7 @@ class FakeExtensionApi {
                         },
                     },
                     sessionManager: {
-                        getBranch() {
-                            return [];
-                        },
+                        getBranch: () => this.branch,
                     },
                     isProjectTrusted() {
                         return trusted;
@@ -183,6 +223,23 @@ class FakeExtensionApi {
                 },
             );
         }
+    }
+
+    navigateTree(): void {
+        for (const handler of this.sessionTreeHandlers) {
+            handler(
+                { type: "session_tree", newLeafId: null, oldLeafId: null },
+                { sessionManager: { getBranch: () => this.branch } },
+            );
+        }
+    }
+
+    updateAssistant(message: AssistantSourceMessage): void {
+        for (const handler of this.sourceMessageHandlers) handler({ message });
+    }
+
+    startExecution(toolName: string, toolCallId: string): void {
+        for (const handler of this.executionStartHandlers) handler({ toolName, toolCallId });
     }
 
     runToolCall(
@@ -524,6 +581,176 @@ describe("extension lifecycle", () => {
             "Bash cd /tmp && sleep 300",
         );
 
+        await pi.shutdownSession();
+    });
+
+    it.each(["event-first", "row-first", "restored"] as const)(
+        "keeps exploration runs separate across 350 preserved boundaries (%s)",
+        async (order) => {
+            const root = mkdtempSync(join(tmpdir(), "pi-glowup-boundaries-"));
+            process.env[AGENT_DIR_ENV] = join(root, "agent");
+            const pi = new FakeExtensionApi();
+            installGlowup(pi);
+            initTheme("dark");
+            const calls: AssistantSourceMessage["content"] = [
+                { type: "toolCall", id: "before", name: "read", arguments: { path: "before.ts" } },
+                ...Array.from({ length: 350 }, (_, index) => ({
+                    type: "toolCall" as const,
+                    id: `boundary-${index}`,
+                    name: "preserved_external",
+                    arguments: { path: "unused" },
+                })),
+                { type: "toolCall", id: "after", name: "read", arguments: { path: "after.ts" } },
+                { type: "toolCall", id: "child", name: "read", arguments: { path: "child.ts" } },
+                {
+                    type: "toolCall",
+                    id: "live-boundary",
+                    name: "preserved_external",
+                    arguments: {},
+                },
+                { type: "toolCall", id: "next", name: "read", arguments: { path: "next.ts" } },
+            ];
+            const message: AssistantSourceMessage = { role: "assistant", content: calls };
+            if (order === "restored") pi.branch = [{ type: "message", message }];
+            await pi.startSession(root, false, "tui");
+            if (order !== "restored") pi.updateAssistant(message);
+            // SAFETY: The real Pi component only requires requestRender at this test boundary.
+            const tui = { requestRender(): void {} } as TUI;
+            const makeRow = (call: AssistantSourceMessage["content"][number]) =>
+                new ToolExecutionComponent(
+                    call.name,
+                    call.id,
+                    call.arguments,
+                    undefined,
+                    call.name === "preserved_external"
+                        ? {
+                              renderCall: () => ({
+                                  render: () => ["external renderer unchanged"],
+                                  invalidate(): void {},
+                              }),
+                          }
+                        : undefined,
+                    tui,
+                    root,
+                );
+            const ready = (row: ToolExecutionComponent): void => {
+                if (order === "restored") row.updateResult({ content: [], isError: false });
+                else row.setArgsComplete();
+            };
+            const firstCall = calls[0];
+            const afterCall = calls[351];
+            const childCall = calls[352];
+            const liveBoundaryCall = calls[353];
+            const nextCall = calls[354];
+            if (!firstCall || !afterCall || !childCall || !liveBoundaryCall || !nextCall) {
+                throw new Error("missing boundary fixture calls");
+            }
+            const before = makeRow(firstCall);
+            ready(before);
+            const boundaryCalls = calls.slice(1, 351);
+            const boundaries: ToolExecutionComponent[] = [];
+            if (order === "event-first") {
+                for (const call of boundaryCalls) pi.startExecution(call.name, call.id);
+            } else {
+                for (const call of boundaryCalls) {
+                    const row = makeRow(call);
+                    ready(row);
+                    boundaries.push(row);
+                }
+            }
+            const after = makeRow(afterCall);
+            ready(after);
+            expect(stripAnsi(after.render(100).join("\n"))).toContain("after.ts");
+            expect(stripAnsi(before.render(100).join("\n"))).not.toContain("after.ts");
+
+            // Delay the other side of the handoff beyond the retention limit and
+            // until a new owner exists. Include old rows first rendered this late.
+            if (order === "event-first") {
+                for (const call of boundaryCalls) {
+                    const row = makeRow(call);
+                    ready(row);
+                    boundaries.push(row);
+                }
+            } else if (order === "row-first") {
+                for (const call of boundaryCalls) pi.startExecution(call.name, call.id);
+            }
+            for (const row of boundaries) {
+                row.setExpanded(true);
+                expect(stripAnsi(row.render(100).join("\n"))).toContain(
+                    "external renderer unchanged",
+                );
+            }
+            const child = makeRow(childCall);
+            ready(child);
+            expect(child.render(100)).toEqual([]);
+            expect(stripAnsi(after.render(100).join("\n"))).toContain("child.ts");
+
+            // Old-event suppression must never suppress a genuinely new boundary.
+            if (order !== "restored") pi.startExecution(liveBoundaryCall.name, liveBoundaryCall.id);
+            const liveBoundary = makeRow(liveBoundaryCall);
+            ready(liveBoundary);
+            const next = makeRow(nextCall);
+            ready(next);
+            expect(stripAnsi(next.render(100).join("\n"))).toContain("next.ts");
+            expect(stripAnsi(after.render(100).join("\n"))).not.toContain("next.ts");
+            await pi.shutdownSession();
+        },
+    );
+
+    it("observes boundaries at source-ordered argument completion, not ahead at construction", async () => {
+        const root = mkdtempSync(join(tmpdir(), "pi-glowup-boundary-ready-"));
+        process.env[AGENT_DIR_ENV] = join(root, "agent");
+        const pi = new FakeExtensionApi();
+        installGlowup(pi);
+        initTheme("dark");
+        await pi.startSession(root, false, "tui");
+        const calls: AssistantSourceMessage["content"] = [
+            { type: "toolCall", id: "ready-first", name: "read", arguments: { path: "first.ts" } },
+            { type: "toolCall", id: "ready-boundary", name: "bash", arguments: { command: "pwd" } },
+            { type: "toolCall", id: "ready-last", name: "read", arguments: { path: "last.ts" } },
+        ];
+        pi.updateAssistant({ role: "assistant", content: calls });
+        // SAFETY: This is the requestRender-only boundary used by Pi's real row.
+        const tui = { requestRender(): void {} } as TUI;
+        const rows = calls.map(
+            (call) =>
+                new ToolExecutionComponent(
+                    call.name,
+                    call.id,
+                    call.arguments,
+                    undefined,
+                    undefined,
+                    tui,
+                    root,
+                ),
+        );
+        for (const row of rows) row.setArgsComplete();
+        const first = rows[0];
+        const last = rows[2];
+        if (!first || !last) throw new Error("missing readiness fixture rows");
+        expect(stripAnsi(first.render(100).join("\n"))).toContain("first.ts");
+        expect(stripAnsi(first.render(100).join("\n"))).not.toContain("last.ts");
+        expect(stripAnsi(last.render(100).join("\n"))).toContain("last.ts");
+
+        // A tree rebuild has a new row/source lifetime even when call IDs recur.
+        pi.navigateTree();
+        pi.updateAssistant({ role: "assistant", content: calls });
+        const rebuilt = calls.map(
+            (call) =>
+                new ToolExecutionComponent(
+                    call.name,
+                    call.id,
+                    call.arguments,
+                    undefined,
+                    undefined,
+                    tui,
+                    root,
+                ),
+        );
+        for (const row of rebuilt) row.setArgsComplete();
+        const rebuiltLast = rebuilt[2];
+        if (!rebuiltLast) throw new Error("missing rebuilt fixture row");
+        expect(stripAnsi(rebuiltLast.render(100).join("\n"))).toContain("last.ts");
         await pi.shutdownSession();
     });
 });

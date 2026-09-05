@@ -80,6 +80,22 @@ function finishWithError(
     stream.end();
 }
 
+function streamCompletedToolCall(
+    model: Model<string>,
+    toolCall: ToolCall,
+): AssistantMessageEventStream {
+    const stream = createAssistantMessageEventStream();
+    const output = createOutput(model);
+    output.content.push(toolCall);
+    output.stopReason = "toolUse";
+    stream.push({ type: "start", partial: output });
+    stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
+    stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
+    stream.push({ type: "done", reason: "toolUse", message: output });
+    stream.end();
+    return stream;
+}
+
 function streamTextResponse(model: Model<string>): AssistantMessageEventStream {
     const stream = createAssistantMessageEventStream();
     const output = createOutput(model);
@@ -167,8 +183,6 @@ function streamPatchResponse(
 }
 
 function streamBashChainResponse(model: Model<string>): AssistantMessageEventStream {
-    const stream = createAssistantMessageEventStream();
-    const output = createOutput(model);
     const toolCall: ToolCall = {
         type: "toolCall",
         id: "pty-bash-chain",
@@ -177,19 +191,10 @@ function streamBashChainResponse(model: Model<string>): AssistantMessageEventStr
             command: "printf 'CHAIN_ALPHA\\n' && printf 'CHAIN_BETA\\n'",
         },
     };
-    output.content.push(toolCall);
-    output.stopReason = "toolUse";
-    stream.push({ type: "start", partial: output });
-    stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
-    stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
-    stream.push({ type: "done", reason: "toolUse", message: output });
-    stream.end();
-    return stream;
+    return streamCompletedToolCall(model, toolCall);
 }
 
 function streamWrappingEditResponse(model: Model<string>): AssistantMessageEventStream {
-    const stream = createAssistantMessageEventStream();
-    const output = createOutput(model);
     const toolCall: ToolCall = {
         type: "toolCall",
         id: "pty-wrapping-edit",
@@ -199,19 +204,10 @@ function streamWrappingEditResponse(model: Model<string>): AssistantMessageEvent
             edits: [{ oldText: wrappingEditOldText, newText: wrappingEditNewText }],
         },
     };
-    output.content.push(toolCall);
-    output.stopReason = "toolUse";
-    stream.push({ type: "start", partial: output });
-    stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
-    stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
-    stream.push({ type: "done", reason: "toolUse", message: output });
-    stream.end();
-    return stream;
+    return streamCompletedToolCall(model, toolCall);
 }
 
 function streamBashLayoutResponse(model: Model<string>): AssistantMessageEventStream {
-    const stream = createAssistantMessageEventStream();
-    const output = createOutput(model);
     const toolCall: ToolCall = {
         type: "toolCall",
         id: "pty-bash-layout",
@@ -224,14 +220,7 @@ function streamBashLayoutResponse(model: Model<string>): AssistantMessageEventSt
                 `*) printf '%s\\n' 'platform:other';; esac`,
         },
     };
-    output.content.push(toolCall);
-    output.stopReason = "toolUse";
-    stream.push({ type: "start", partial: output });
-    stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
-    stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
-    stream.push({ type: "done", reason: "toolUse", message: output });
-    stream.end();
-    return stream;
+    return streamCompletedToolCall(model, toolCall);
 }
 
 function streamReclassifiedBashResponse(
@@ -303,8 +292,6 @@ function streamReclassifiedBashResponse(
 }
 
 function streamFormattedPythonResponse(model: Model<string>): AssistantMessageEventStream {
-    const stream = createAssistantMessageEventStream();
-    const output = createOutput(model);
     const toolCall: ToolCall = {
         type: "toolCall",
         id: "pty-formatted-python",
@@ -313,19 +300,10 @@ function streamFormattedPythonResponse(model: Model<string>): AssistantMessageEv
             command: `python -c "import os; print(os.getcwd())"`,
         },
     };
-    output.content.push(toolCall);
-    output.stopReason = "toolUse";
-    stream.push({ type: "start", partial: output });
-    stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
-    stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
-    stream.push({ type: "done", reason: "toolUse", message: output });
-    stream.end();
-    return stream;
+    return streamCompletedToolCall(model, toolCall);
 }
 
 function streamUvPythonArgsResponse(model: Model<string>): AssistantMessageEventStream {
-    const stream = createAssistantMessageEventStream();
-    const output = createOutput(model);
     const command = [
         `uv run --offline --no-project python -c 'import json`,
         `import statistics`,
@@ -354,19 +332,10 @@ function streamUvPythonArgsResponse(model: Model<string>): AssistantMessageEvent
         name: "bash",
         arguments: { command },
     };
-    output.content.push(toolCall);
-    output.stopReason = "toolUse";
-    stream.push({ type: "start", partial: output });
-    stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
-    stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
-    stream.push({ type: "done", reason: "toolUse", message: output });
-    stream.end();
-    return stream;
+    return streamCompletedToolCall(model, toolCall);
 }
 
 function streamInlinePythonPipelineResponse(model: Model<string>): AssistantMessageEventStream {
-    const stream = createAssistantMessageEventStream();
-    const output = createOutput(model);
     const command = [
         `printf '%s\\n' '8 read' '3 write' '13 patch' '5 read' | python3 -c 'import sys`,
         `for line in sys.stdin:`,
@@ -380,14 +349,7 @@ function streamInlinePythonPipelineResponse(model: Model<string>): AssistantMess
         name: "bash",
         arguments: { command },
     };
-    output.content.push(toolCall);
-    output.stopReason = "toolUse";
-    stream.push({ type: "start", partial: output });
-    stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
-    stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
-    stream.push({ type: "done", reason: "toolUse", message: output });
-    stream.end();
-    return stream;
+    return streamCompletedToolCall(model, toolCall);
 }
 
 function latestUserText(context: Context): string {

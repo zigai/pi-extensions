@@ -1,6 +1,7 @@
 import { emptyComponent } from "../../../rendering/core.ts";
 import {
     shouldDeferSimpleToolCall,
+    toolStatusLabel,
     type ToolLabelMode,
     type ToolLifecycleLabels,
 } from "../../../rendering/status-labels.ts";
@@ -11,12 +12,11 @@ import {
     DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
-    thirdPartyStatusLabel,
 } from "../../call-rendering.ts";
-import { truncateGraphemeText } from "../../../text-boundaries.ts";
-import { previewArgsForContext } from "../../previews.ts";
+import { compactWhitespaceText, previewArgsForContext } from "../../previews.ts";
 import {
     baseToolName,
+    countLabel,
     getArray,
     getNonEmptyString,
     getNumber,
@@ -64,15 +64,6 @@ const MCP_COMMAND_LABELS = new Map<string, string>([
 /** Returns whether a tool name belongs to Chrome DevTools MCP. */
 export function hasChromeDevtoolsName(toolName: string): boolean {
     return CHROME_DEVTOOLS_PREFIX_PATTERN.test(toolName);
-}
-
-function compactText(value: string, maximum = 220): string | undefined {
-    const compact = value.replace(/\s+/gu, " ").trim();
-    return compact.length === 0 ? undefined : truncateGraphemeText(compact, maximum);
-}
-
-function countLabel(count: number, singular: string, plural = `${singular}s`): string {
-    return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function parseStructuredArgs(value: JsonValue): JsonValue {
@@ -138,7 +129,7 @@ function summarizeChromeArgs(
         }
         case "evaluate_script": {
             const script = getNonEmptyString(record, "function");
-            return [script === undefined ? undefined : compactText(script), filePath]
+            return [script === undefined ? undefined : compactWhitespaceText(script, 220), filePath]
                 .filter(isDefined)
                 .join(" · ");
         }
@@ -312,11 +303,7 @@ export function createMcpGatewayRenderer(
             const summary = summarizeMcpGatewayArgs(jsonValueParser.parse(args), context);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: thirdPartyStatusLabel(
-                    labelMode,
-                    context,
-                    mcpLifecycleLabels(summary.label),
-                ),
+                statusText: toolStatusLabel(labelMode, context, mcpLifecycleLabels(summary.label)),
                 body: summary.body,
                 maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
@@ -340,7 +327,7 @@ export function createChromeDevtoolsMcpRenderer(
             const parsedArgs = jsonValueParser.parse(args);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: thirdPartyStatusLabel(labelMode, context, mcpLifecycleLabels(label)),
+                statusText: toolStatusLabel(labelMode, context, mcpLifecycleLabels(label)),
                 body:
                     parsedArgs === undefined
                         ? previewArgsForContext(args, context)

@@ -16,9 +16,9 @@ type FixtureWorkspace = {
     readonly sessionPath: string;
 };
 
-function createFixtureWorkspace(): FixtureWorkspace {
+function createFixtureWorkspace(workspaceName = "workspace"): FixtureWorkspace {
     const root = mkdtempSync(join(tmpdir(), "pi-glowup-pty-"));
-    const cwd = join(root, "workspace");
+    const cwd = join(root, workspaceName);
     const agentDir = join(root, "agent");
     const extensionDirectory = join(agentDir, "extensions");
     const configDirectory = join(agentDir, "extension-settings");
@@ -43,7 +43,7 @@ function createFixtureWorkspace(): FixtureWorkspace {
     const sessionFixture = readFileSync(
         resolve("test/pty/fixtures/restored-session.jsonl"),
         "utf8",
-    ).replace("/deterministic/pty-fixture", cwd.replaceAll("\\", "\\\\"));
+    ).replace("/deterministic/pty-fixture", () => JSON.stringify(cwd).slice(1, -1));
     writeFileSync(sessionPath, sessionFixture);
     return { root, cwd, agentDir, sessionPath };
 }
@@ -138,7 +138,7 @@ describe("actual Pi CLI in a real PTY", () => {
     });
 
     it("keeps restored mutation history immutable through expansion, resize, reload, and resume", async () => {
-        const fixture = createFixtureWorkspace();
+        const fixture = createFixtureWorkspace('workspace "$&\\end');
         fixtures.push(fixture);
         let pi = new PiPtyProcess(launchOptions(fixture, { sessionPath: fixture.sessionPath }));
         try {

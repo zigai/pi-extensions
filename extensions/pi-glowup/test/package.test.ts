@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import Type, { type Static } from "typebox";
@@ -46,32 +47,67 @@ describe("package manifest", () => {
             if (visitedFiles.has(normalizedPath)) return;
             visitedFiles.add(normalizedPath);
             const content = readFileSync(normalizedPath, "utf8");
-            const importMatches = content.matchAll(
-                /(?:import|export)\s+[\s\S]*?\s+from\s+["']([^"']+)["']/g,
+            const source = ts.createSourceFile(
+                normalizedPath,
+                content,
+                ts.ScriptTarget.Latest,
+                true,
             );
-            for (const match of importMatches) {
-                const specifier = match[1];
+            function visitNode(node: ts.Node): void {
+                let specifier: string | undefined;
+                if (
+                    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+                    node.moduleSpecifier &&
+                    ts.isStringLiteralLike(node.moduleSpecifier)
+                ) {
+                    specifier = node.moduleSpecifier.text;
+                } else if (
+                    ts.isImportTypeNode(node) &&
+                    ts.isLiteralTypeNode(node.argument) &&
+                    ts.isStringLiteralLike(node.argument.literal)
+                ) {
+                    specifier = node.argument.literal.text;
+                } else if (
+                    ts.isCallExpression(node) &&
+                    node.expression.kind === ts.SyntaxKind.ImportKeyword
+                ) {
+                    const argument = node.arguments[0];
+                    expect(
+                        argument && ts.isStringLiteralLike(argument),
+                        "dynamic protocol dependency must be statically resolvable",
+                    ).toBe(true);
+                    if (argument && ts.isStringLiteralLike(argument)) specifier = argument.text;
+                } else if (
+                    ts.isExternalModuleReference(node) &&
+                    ts.isStringLiteralLike(node.expression)
+                ) {
+                    specifier = node.expression.text;
+                }
                 if (specifier !== undefined) {
                     if (specifier.startsWith(".")) {
-                        let resolved = resolve(dirname(normalizedPath), specifier);
-                        if (resolved.endsWith(".js")) resolved = `${resolved.slice(0, -3)}.ts`;
-                        if (!resolved.endsWith(".ts")) resolved = `${resolved}.ts`;
-                        visit(resolved);
+                        let dependency = resolve(dirname(normalizedPath), specifier);
+                        if (dependency.endsWith(".js"))
+                            dependency = `${dependency.slice(0, -3)}.ts`;
+                        if (!dependency.endsWith(".ts")) dependency = `${dependency}.ts`;
+                        visit(dependency);
                     } else {
                         externalImports.add(specifier);
                     }
                 }
+                ts.forEachChild(node, visitNode);
             }
+            visitNode(source);
         }
 
-        visit("src/tool-rendering/protocol.ts");
+        const entry = Value.Parse(Type.String(), readPackageJson().exports?.["./protocol"]);
+        visit(entry);
 
         for (const external of externalImports) {
             expect(external.startsWith("@earendil-works")).toBe(false);
         }
         for (const file of visitedFiles) {
             expect(file).not.toMatch(
-                /\/src\/(?:rendering|third-party-tools|diffs|patches|syntax|script-preview|mutations|config|diagnostics)\//,
+                /\/src\/(?:rendering|third-party-tools|diffs|patches|syntax|script-preview|mutations|config|diagnostics|themes)(?:\/|\.ts$)/,
             );
             expect(file).not.toMatch(/\/src\/index\.ts$/);
         }

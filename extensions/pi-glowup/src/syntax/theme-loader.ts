@@ -54,6 +54,14 @@ export async function loadSyntaxTheme(
     }
 
     const raw = await readFile(config.themePath, "utf8");
+    return parseSyntaxTheme(config, raw);
+}
+
+/** Parses a captured theme source without reading the path again. */
+export function parseSyntaxTheme(
+    config: Extract<SyntaxConfig, { readonly enabled: true }>,
+    raw: string,
+): LoadedSyntaxTheme {
     const parsed: unknown = JSON.parse(raw);
     const registration = parseThemeRegistration(parsed, config.themeName);
     return {

@@ -44,3 +44,7 @@ export function baseToolName(toolName: string): string {
     const match = NAMESPACED_TOOL_PREFIX_PATTERN.exec(toolName);
     return match?.groups?.name ?? toolName;
 }
+
+export function countLabel(count: number, singular: string, plural = `${singular}s`): string {
+    return `${count} ${count === 1 ? singular : plural}`;
+}

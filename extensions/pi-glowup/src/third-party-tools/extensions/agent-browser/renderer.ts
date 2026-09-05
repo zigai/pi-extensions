@@ -1,5 +1,9 @@
 import { emptyComponent } from "../../../rendering/core.ts";
-import { shouldDeferSimpleToolCall, type ToolLabelMode } from "../../../rendering/status-labels.ts";
+import {
+    shouldDeferSimpleToolCall,
+    toolStatusLabel,
+    type ToolLabelMode,
+} from "../../../rendering/status-labels.ts";
 import { browserLifecycleLabels } from "../../browser-labels.ts";
 import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "../../types.ts";
 import {
@@ -7,12 +11,11 @@ import {
     DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
-    thirdPartyStatusLabel,
     type CallSummary,
 } from "../../call-rendering.ts";
-import { truncateGraphemeText } from "../../../text-boundaries.ts";
-import { previewArgs, previewArgsForContext } from "../../previews.ts";
+import { compactWhitespaceText, previewArgs, previewArgsForContext } from "../../previews.ts";
 import {
+    countLabel,
     getArray,
     getNonEmptyString,
     isDefined,
@@ -41,15 +44,6 @@ const AGENT_BROWSER_COMMAND_LABELS = new Map<string, string>([
     ["evaluate", "Browser Evaluate"],
     ["eval", "Browser Evaluate"],
 ]);
-
-function compactText(value: string, maximum = 220): string | undefined {
-    const compact = value.replace(/\s+/gu, " ").trim();
-    return compact.length === 0 ? undefined : truncateGraphemeText(compact, maximum);
-}
-
-function countLabel(count: number, singular: string, plural = `${singular}s`): string {
-    return `${count} ${count === 1 ? singular : plural}`;
-}
 
 function summarizeElectron(value: JsonObject): string | undefined {
     const action = getNonEmptyString(value, "action");
@@ -133,7 +127,9 @@ function summarizeAgentBrowserArgs(
     const script = getNonEmptyString(record, "script");
     if (script !== undefined) {
         const scriptLines = script.replace(/\r\n?/gu, "\n").split("\n");
-        const firstLine = scriptLines.map((line) => compactText(line, 120)).find(isDefined);
+        const firstLine = scriptLines
+            .map((line) => compactWhitespaceText(line, 120))
+            .find(isDefined);
         const preview =
             firstLine === undefined
                 ? undefined
@@ -199,7 +195,7 @@ function summarizeAgentBrowserArgs(
             .slice(1)
             .map((value) => {
                 const text = stringParser.parse(value);
-                return text === undefined ? undefined : compactText(text, 120);
+                return text === undefined ? undefined : compactWhitespaceText(text, 120);
             })
             .filter(isDefined)
             .join(" ");
@@ -233,7 +229,7 @@ export function createAgentBrowserRenderer(
             const summary = summarizeAgentBrowserArgs(jsonValueParser.parse(args), context);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: thirdPartyStatusLabel(
+                statusText: toolStatusLabel(
                     labelMode,
                     context,
                     browserLifecycleLabels(summary.label),

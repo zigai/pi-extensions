@@ -1,4 +1,3 @@
-import { stringParser } from "../json-scalar.ts";
 import {
     emptyComponent,
     makeComponent,
@@ -8,7 +7,7 @@ import {
     type GlowupRenderTheme,
 } from "../rendering/core.ts";
 import type { MutationSettings } from "../mutations/settings.ts";
-import type { ToolLabelMode } from "../rendering/status-labels.ts";
+import { toolStatusLabel, type ToolLabelMode } from "../rendering/status-labels.ts";
 import type {
     GlowupCallLabels,
     GlowupInline,
@@ -20,7 +19,6 @@ import {
     callState,
     DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderThirdPartyCall,
-    thirdPartyStatusLabel,
     type ThirdPartyCallOptions,
 } from "./call-rendering.ts";
 import {
@@ -73,7 +71,7 @@ function statusLabel(
         active: labels.running ?? `Calling ${labels.static}`,
         completed: labels.completed ?? `Called ${labels.static}`,
     };
-    return thirdPartyStatusLabel(mode, context, lifecycle);
+    return toolStatusLabel(mode, context, lifecycle);
 }
 
 function previewLines(preview: GlowupPreview | undefined, expanded: boolean): number {
@@ -104,22 +102,11 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
         case "list":
             return node.items
                 .map((item) => {
-                    const str = stringParser.parse(item);
-                    if (str !== undefined) {
-                        return `• ${str}`;
+                    if (!(item instanceof Object)) return `• ${item}`;
+                    if (item.kind === "text" && ("tone" in item || "bold" in item)) {
+                        return `• ${toneText(theme, item)}`;
                     }
-                    if (
-                        item instanceof Object &&
-                        "kind" in item &&
-                        item.kind === "text" &&
-                        "text" in item &&
-                        stringParser.parse(item.text) !== undefined
-                    ) {
-                        // SAFETY: Validated item has kind 'text' and string text, matching GlowupInline object.
-                        return `• ${toneText(theme, item as GlowupInline)}`;
-                    }
-                    // SAFETY: Decoder verified list items are either GlowupInline or a valid GlowupNode.
-                    return `• ${nodeText(item as GlowupNode, theme)}`;
+                    return `• ${nodeText(item, theme)}`;
                 })
                 .join("\n");
         case "output":
@@ -235,13 +222,30 @@ export function renderProtocolNode(
             const body = renderProtocolNode(node.body, theme, context, labelMode, mutationSettings);
             return makeComponent((width) => [...header.render(width), ...body.render(width)]);
         }
-        case "stack":
-            return makeComponent((width) =>
-                node.children.flatMap((child) =>
-                    renderProtocolNode(child, theme, context, labelMode, mutationSettings).render(
-                        width,
+        case "stack": {
+            const buildChildren = () =>
+                node.children.map((child) =>
+                    renderProtocolNode(
+                        child,
+                        theme,
+                        { ...context, lastComponent: undefined },
+                        labelMode,
+                        mutationSettings,
                     ),
-                ),
+                );
+            let children = buildChildren();
+            const rendered = makeComponent((width) =>
+                children.flatMap((child) => child.render(width)),
             );
+            return {
+                render: (width) => rendered.render(width),
+                invalidate() {
+                    for (const child of children) child.invalidate();
+                    // Text and headers bake theme colors when constructed.
+                    children = buildChildren();
+                    rendered.invalidate();
+                },
+            };
+        }
     }
 }

@@ -36,9 +36,11 @@ type PiRendererDefinition = {
 type ToolExecutionPrototypeOwner = typeof ToolExecutionComponent.prototype | ToolExecutionPrototype;
 
 type ToolExecutionInstance = {
+    readonly toolCallId?: string;
     readonly toolName?: string;
     readonly toolDefinition?: PiRendererDefinition;
     readonly executionStarted?: boolean;
+    readonly argsComplete?: boolean;
     readonly result?: ThirdPartyToolResult;
 };
 
@@ -90,6 +92,12 @@ type ToolResultRenderer = (
 ) => Component;
 
 export type BuiltInToolRendererOptions = {
+    /** Called before renderer selection, including preserved and generic fallback rows. */
+    readonly observeRow?: <Row extends object>(
+        row: Row,
+        toolCallId: string,
+        toolName: string,
+    ) => void;
     readonly renderCall: (
         toolName: BuiltInToolName,
         args: ToolCallArguments,
@@ -763,9 +771,21 @@ export function configureBuiltInToolRendererPatch(
     const originalGetRenderShell = prototype.getRenderShell;
     const originalHasRendererDefinition = prototype.hasRendererDefinition;
     let state: BuiltInRendererPatchState;
+    const observeRow = (row: ToolExecutionInstance): void => {
+        // Constructors run ahead of argument completion. Observing boundaries there
+        // would precede deferred exploration renders and merge runs across a boundary.
+        // Pi completes live arguments in source order; restored rows become ready when
+        // their persisted result is replayed (without ever setting argsComplete).
+        const ready =
+            row.argsComplete === true || row.executionStarted === true || row.result !== undefined;
+        if (state.enabled && ready && row.toolCallId !== undefined && row.toolName !== undefined) {
+            state.renderingOptions.observeRow?.(row, row.toolCallId, row.toolName);
+        }
+    };
 
     const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
         function getGlowupBuiltInCallRenderer(this: ToolExecutionInstance) {
+            observeRow(this);
             const toolName = builtInToolName(this);
             const originalRenderer = originalGetCallRenderer?.call(this);
             if (!state.enabled || toolName === undefined) {
@@ -841,6 +861,7 @@ export function configureBuiltInToolRendererPatch(
 
     const hasRendererDefinition: RendererPatchWrappers["hasRendererDefinition"] =
         function hasGlowupBuiltInRendererDefinition(this: ToolExecutionInstance) {
+            observeRow(this);
             return state.enabled && builtInToolName(this) !== undefined
                 ? true
                 : (originalHasRendererDefinition?.call(this) ?? false);
@@ -953,31 +974,18 @@ function restoreBuiltInRendererPatch(
 ): void {
     state.enabled = false;
     clearCompletedLineCache();
-    let restoredOwnWrappers = true;
-    if (prototype.getCallRenderer === state.wrappers.getCallRenderer) {
-        restoreGetCallRenderer(prototype, state.originalGetCallRenderer);
-    } else {
-        restoredOwnWrappers = false;
-    }
-    if (prototype.getResultRenderer === state.wrappers.getResultRenderer) {
-        restoreGetResultRenderer(prototype, state.originalGetResultRenderer);
-    } else {
-        restoredOwnWrappers = false;
-    }
-    if (prototype.getRenderShell === state.wrappers.getRenderShell) {
-        restoreGetRenderShell(prototype, state.originalGetRenderShell);
-    } else {
-        restoredOwnWrappers = false;
-    }
-    if (prototype.hasRendererDefinition === state.wrappers.hasRendererDefinition) {
-        restoreHasRendererDefinition(prototype, state.originalHasRendererDefinition);
-    } else {
-        restoredOwnWrappers = false;
-    }
-
-    if (restoredOwnWrappers) {
-        delete prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
-    }
+    if (
+        prototype.getCallRenderer !== state.wrappers.getCallRenderer ||
+        prototype.getResultRenderer !== state.wrappers.getResultRenderer ||
+        prototype.getRenderShell !== state.wrappers.getRenderShell ||
+        prototype.hasRendererDefinition !== state.wrappers.hasRendererDefinition
+    )
+        return;
+    restoreGetCallRenderer(prototype, state.originalGetCallRenderer);
+    restoreGetResultRenderer(prototype, state.originalGetResultRenderer);
+    restoreGetRenderShell(prototype, state.originalGetRenderShell);
+    restoreHasRendererDefinition(prototype, state.originalHasRendererDefinition);
+    delete prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
 }
 
 /** Enables, updates, or disables Glowup fallback renderers for non-native tools. */
@@ -1165,29 +1173,16 @@ function restoreThirdPartyRendererPatch(
     state.enabled = false;
     clearCompletedLineCache();
     state.rendererCache.clear();
-    let restoredOwnWrappers = true;
-    if (prototype.getCallRenderer === state.wrappers.getCallRenderer) {
-        restoreGetCallRenderer(prototype, state.originalGetCallRenderer);
-    } else {
-        restoredOwnWrappers = false;
-    }
-    if (prototype.getResultRenderer === state.wrappers.getResultRenderer) {
-        restoreGetResultRenderer(prototype, state.originalGetResultRenderer);
-    } else {
-        restoredOwnWrappers = false;
-    }
-    if (prototype.getRenderShell === state.wrappers.getRenderShell) {
-        restoreGetRenderShell(prototype, state.originalGetRenderShell);
-    } else {
-        restoredOwnWrappers = false;
-    }
-    if (prototype.hasRendererDefinition === state.wrappers.hasRendererDefinition) {
-        restoreHasRendererDefinition(prototype, state.originalHasRendererDefinition);
-    } else {
-        restoredOwnWrappers = false;
-    }
-
-    if (restoredOwnWrappers) {
-        delete prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
-    }
+    if (
+        prototype.getCallRenderer !== state.wrappers.getCallRenderer ||
+        prototype.getResultRenderer !== state.wrappers.getResultRenderer ||
+        prototype.getRenderShell !== state.wrappers.getRenderShell ||
+        prototype.hasRendererDefinition !== state.wrappers.hasRendererDefinition
+    )
+        return;
+    restoreGetCallRenderer(prototype, state.originalGetCallRenderer);
+    restoreGetResultRenderer(prototype, state.originalGetResultRenderer);
+    restoreGetRenderShell(prototype, state.originalGetRenderShell);
+    restoreHasRendererDefinition(prototype, state.originalHasRendererDefinition);
+    delete prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
 }

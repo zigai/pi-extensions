@@ -11,6 +11,7 @@ import {
 import ansiStyles from "ansi-styles";
 import {
     buildSplitDiffRows,
+    hasTrailingCollapsedLines,
     buildUnifiedDiffRows,
     normalizePierreDiffPayload,
     type DiffRenderLimits,
@@ -225,7 +226,7 @@ function semanticUnifiedSourceRows(
         }
         if (hunk.noEOFCRDeletions || hunk.noEOFCRAdditions) push("meta");
     }
-    if (hasSemanticTrailingCollapsedLines(metadata)) push("meta", true);
+    if (hasTrailingCollapsedLines(metadata)) push("meta", true);
     return trimSemanticEdgeCollapsedRows(rows);
 }
 
@@ -299,20 +300,8 @@ function semanticSplitSourceRows(
         }
         if (hunk.noEOFCRDeletions || hunk.noEOFCRAdditions) push("meta");
     }
-    if (hasSemanticTrailingCollapsedLines(metadata)) push("meta", true);
+    if (hasTrailingCollapsedLines(metadata)) push("meta", true);
     return trimSemanticEdgeCollapsedRows(rows);
-}
-
-function hasSemanticTrailingCollapsedLines(
-    metadata: PierreRenderableDiffPayload["metadata"],
-): boolean {
-    const lastHunk = metadata.hunks.at(-1);
-    if (lastHunk === undefined || metadata.isPartial) return false;
-    const additions =
-        metadata.additionLines.length - (lastHunk.additionLineIndex + lastHunk.additionCount);
-    const deletions =
-        metadata.deletionLines.length - (lastHunk.deletionLineIndex + lastHunk.deletionCount);
-    return additions === deletions && additions > 0;
 }
 
 function trimSemanticEdgeCollapsedRows(
@@ -1319,13 +1308,10 @@ function ansiTransition(previous: AnsiStyle | undefined, next: AnsiStyle): strin
     const bg = toRgb(next.bg);
     const transitions: string[] = [];
     if (previous === undefined || previous.bold !== next.bold || previous.dim !== next.dim) {
-        transitions.push(
-            next.bold === true
-                ? ansiStyles.modifier.bold.open
-                : next.dim === true
-                  ? ansiStyles.modifier.dim.open
-                  : ansiStyles.modifier.bold.close,
-        );
+        // Bold and dim share the SGR 22 reset; enabling one does not clear the other.
+        transitions.push(ansiStyles.modifier.bold.close);
+        if (next.bold === true) transitions.push(ansiStyles.modifier.bold.open);
+        if (next.dim === true) transitions.push(ansiStyles.modifier.dim.open);
     }
     if (previous === undefined || previous.fg !== next.fg) {
         transitions.push(

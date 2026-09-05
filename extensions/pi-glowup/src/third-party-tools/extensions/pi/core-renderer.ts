@@ -1,6 +1,7 @@
 import { emptyComponent } from "../../../rendering/core.ts";
 import {
     shouldDeferSimpleToolCall,
+    toolStatusLabel,
     type ToolLabelMode,
     type ToolLifecycleLabels,
 } from "../../../rendering/status-labels.ts";
@@ -10,7 +11,6 @@ import {
     DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
-    thirdPartyStatusLabel,
 } from "../../call-rendering.ts";
 import { baseToolName, displayToolName } from "../../tool-values.ts";
 import { createAskUserQuestionRenderer } from "./ask-user-question-renderer.ts";
@@ -48,7 +48,7 @@ function createFinalizePlanRenderer(
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: thirdPartyStatusLabel(labelMode, context, piCoreCallLabels(toolName)),
+                statusText: toolStatusLabel(labelMode, context, piCoreCallLabels(toolName)),
                 body: undefined,
                 maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,

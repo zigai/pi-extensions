@@ -1,7 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
-import { jsonValueParser, type JsonValue } from "../json-value.ts";
 import type { MutationSettings } from "../mutations/settings.ts";
 import type { GlowupRenderTheme } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
@@ -11,14 +10,9 @@ import {
     type GlowupExecutionPhase,
     type GlowupNode,
     type GlowupRenderer,
-    type GlowupResultContext,
 } from "../tool-rendering/protocol.ts";
 import { renderProtocolNode } from "./protocol-node-renderer.ts";
-import type {
-    ThirdPartyToolRenderContext,
-    ThirdPartyToolRenderer,
-    ThirdPartyToolResult,
-} from "./types.ts";
+import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "./types.ts";
 
 const MAX_MUTATION_CALL_SLOTS = 500;
 const mutationCallSlots = new Map<string, ProtocolMutationCallSlot>();
@@ -107,8 +101,6 @@ const renderingAdapterSchema = Type.Object(
 );
 type UnknownGlowupRenderer = Static<typeof renderingAdapterSchema>;
 
-type ProtocolValue = JsonValue;
-
 function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallContext {
     const phase: GlowupExecutionPhase =
         context.phase ??
@@ -128,24 +120,6 @@ function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallCont
         isError: context.isError,
         hasResult: context.result !== undefined,
     };
-}
-
-function publicResultContext(
-    context: ThirdPartyToolRenderContext,
-    args: ProtocolValue,
-): GlowupResultContext<ProtocolValue> {
-    return { ...publicCallContext(context), args };
-}
-
-function safelyParse(
-    parser: UnknownGlowupRenderer["parseArgs"],
-    value: JsonValue | ThirdPartyToolResult | undefined,
-): ProtocolValue | undefined {
-    try {
-        return value === undefined ? undefined : jsonValueParser.parse(parser(value));
-    } catch {
-        return undefined;
-    }
 }
 
 function safelyRender(render: () => GlowupNode | undefined): GlowupNode | undefined {
@@ -182,13 +156,15 @@ export function createProtocolRenderer(
             if (adapter.renderCall === undefined) {
                 return fallback.renderCall(args, theme, context);
             }
-            const parsedArgs = safelyParse(adapter.parseArgs, args);
-            if (parsedArgs === undefined) {
-                return fallback.renderCall(args, theme, context);
-            }
-            const node = safelyRender(() =>
-                decodeGlowupNode(adapter.renderCall?.(parsedArgs, publicCallContext(context))),
-            );
+            const node = safelyRender(() => {
+                if (args === undefined) return undefined;
+                const parsedArgs = adapter.parseArgs(args);
+                return parsedArgs === undefined
+                    ? undefined
+                    : decodeGlowupNode(
+                          adapter.renderCall?.(parsedArgs, publicCallContext(context)),
+                      );
+            });
             return node === undefined
                 ? fallback.renderCall(args, theme, context)
                 : renderProtocolCallNode(node, theme, context, labelMode, mutationSettings);
@@ -197,20 +173,19 @@ export function createProtocolRenderer(
             if (adapter.renderResult === undefined || adapter.parseResult === undefined) {
                 return fallback.renderResult(result, options, theme, context);
             }
-            const parsedArgs = safelyParse(adapter.parseArgs, context.args);
-            const parsedResult = safelyParse(adapter.parseResult, result);
-            if (parsedArgs === undefined || parsedResult === undefined) {
-                return fallback.renderResult(result, options, theme, context);
-            }
-            const resultContext = { ...context, args: parsedArgs, result };
-            const node = safelyRender(() =>
-                decodeGlowupNode(
-                    adapter.renderResult?.(
-                        parsedResult,
-                        publicResultContext(resultContext, parsedArgs),
-                    ),
-                ),
-            );
+            const resultContext = { ...context, result };
+            const node = safelyRender(() => {
+                if (context.args === undefined) return undefined;
+                const parsedArgs = adapter.parseArgs(context.args);
+                const parsedResult = adapter.parseResult?.(result);
+                if (parsedArgs === undefined || parsedResult === undefined) return undefined;
+                return decodeGlowupNode(
+                    adapter.renderResult?.(parsedResult, {
+                        ...publicCallContext(resultContext),
+                        args: parsedArgs,
+                    }),
+                );
+            });
             if (node === undefined) {
                 return fallback.renderResult(result, options, theme, context);
             }

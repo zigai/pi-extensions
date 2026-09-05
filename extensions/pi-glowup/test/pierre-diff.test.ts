@@ -29,17 +29,40 @@ import type { UnifiedDiffRow } from "../src/diffs/types.ts";
 import { configureRenderingAppearance } from "../src/rendering/core.ts";
 import { stringParser } from "../src/json-scalar.ts";
 import { reinitializeSyntaxHighlighting } from "../src/syntax/highlighter.ts";
-import { VirtualTerminal } from "./support/virtual-terminal.ts";
+import { VirtualTerminal, type InterpretedRow } from "./support/virtual-terminal.ts";
+
+async function interpretedDiffRows(
+    lines: readonly string[],
+    width: number,
+): Promise<readonly InterpretedRow[]> {
+    const terminal = new VirtualTerminal(width, 20);
+    try {
+        terminal.write(lines.join("\r\n"));
+        await terminal.settle(0);
+        return terminal.interpretedRows();
+    } finally {
+        terminal.dispose();
+    }
+}
+
+function tokenCell(rows: readonly InterpretedRow[], token: string) {
+    const row = rows.find((candidate) => candidate.text.includes(token));
+    if (row === undefined) throw new Error(`Missing rendered token: ${token}`);
+    const cell = row.cells[row.text.indexOf(token)];
+    if (cell === undefined) throw new Error(`Missing terminal cell: ${token}`);
+    return cell;
+}
 
 function createReadCountingArray(lines: string[]) {
     let count = 0;
     const proxy = new Proxy(lines, {
-        get(target, prop) {
+        get(target, prop, receiver) {
             if (stringParser.parse(prop) !== undefined && !Number.isNaN(Number(prop))) {
                 count += 1;
             }
-            // SAFETY: Array index property lookup on target array.
-            return target[Number(prop)] ?? "";
+            // oxlint-disable-next-line antislop/no-reflect-get -- Transparent array probe forwards arbitrary keys, symbols and accessor receivers; the probe transparency test covers each behavior.
+            const value: unknown = Reflect.get(target, prop, receiver);
+            return value;
         },
     });
     return { array: proxy, accessCount: () => count };
@@ -91,6 +114,23 @@ function stripAnsi(text: string): string {
 }
 
 describe("Pierre diff rendering", () => {
+    it("keeps the source-read probe transparent to array iteration and accessor receivers", () => {
+        const source = ["initial"];
+        const receivers: string[][] = [];
+        Object.defineProperty(source, "0", {
+            get(this: string[]) {
+                receivers.push(this);
+                return "value";
+            },
+        });
+        const probe = createReadCountingArray(source);
+        expect(probe.array.length).toBe(1);
+        expect(probe.array[Symbol.iterator]).toBe(source[Symbol.iterator]);
+        expect([...probe.array]).toEqual(["value"]);
+        expect(receivers[0]).toBe(probe.array);
+        expect(probe.array[10]).toBeUndefined();
+        expect(probe.accessCount()).toBe(2);
+    });
     beforeEach(() => configureRenderingAppearance(defaultAppearance));
 
     it("accepts valid persisted summaries and rejects malformed payload details", () => {
@@ -766,7 +806,42 @@ describe("Pierre diff rendering", () => {
             { maxRows: 6, narrowLayout: "paired" },
         );
         expect(oneSidedRows).toHaveLength(6);
+        expect(oneSidedAdditionAccess.accessCount()).toBeGreaterThan(0);
         expect(oneSidedAdditionAccess.accessCount()).toBeLessThan(20);
+        const oneSidedDeletionAccess = createReadCountingArray(rawDeletions);
+        const deletionOnlyRows = buildUnifiedDiffRows(
+            {
+                ...oneSidedMetadata,
+                additionLines: [],
+                deletionLines: oneSidedDeletionAccess.array,
+                hunks: [
+                    {
+                        ...originalHunk,
+                        additionCount: 0,
+                        additionLines: 0,
+                        deletionCount: 20_000,
+                        deletionLines: 20_000,
+                        splitLineCount: 20_000,
+                        unifiedLineCount: 20_000,
+                        hunkContent: [
+                            {
+                                type: "change",
+                                additions: 0,
+                                deletions: 20_000,
+                                additionLineIndex: 0,
+                                deletionLineIndex: 0,
+                            },
+                        ],
+                    },
+                ],
+            },
+            { deletionLines: [], additionLines: [] },
+            getPierrePalette(testTheme),
+            { maxRows: 6, narrowLayout: "paired" },
+        );
+        expect(deletionOnlyRows).toHaveLength(6);
+        expect(oneSidedDeletionAccess.accessCount()).toBeGreaterThan(0);
+        expect(oneSidedDeletionAccess.accessCount()).toBeLessThan(20);
     });
 
     it("expands tabs at terminal stops across token and wide-character boundaries", () => {
@@ -1409,25 +1484,17 @@ describe("Pierre diff rendering", () => {
         expect(addition).toContain(palette.additionRowBg);
         expect(addition).toContain(palette.additionSpanBg);
 
-        const terminal = new VirtualTerminal(100, 10);
-        terminal.write(lines.join("\n"));
-        await terminal.settle(0);
-        const rows = terminal.interpretedRows();
-        const delRow = rows.find((r) => r.text.includes("2000"));
-        const addRow = rows.find((r) => r.text.includes("4000"));
-        expect(delRow).toBeDefined();
-        expect(addRow).toBeDefined();
-
-        const tokenCell2000 = delRow?.cells.find((c) => c.chars === "2");
-        const unchangedCellDel = delRow?.cells.find((c) => c.chars === "c");
-        expect(tokenCell2000?.background).not.toBe(unchangedCellDel?.background);
-
-        const tokenCell4000 = addRow?.cells.find((c) => c.chars === "4");
-        const unchangedCellAdd = addRow?.cells.find((c) => c.chars === "c");
-        expect(tokenCell4000?.background).not.toBe(unchangedCellAdd?.background);
-
-        expect(delRow?.cells.some((c) => c.isDim)).toBe(false);
-        expect(addRow?.cells.some((c) => c.isDim)).toBe(false);
+        const rows = await interpretedDiffRows(lines, 100);
+        for (const token of ["2000", "4000"]) {
+            const row = rows.filter((candidate) => candidate.text.includes(token));
+            const changed = tokenCell(row, token);
+            const unchanged = tokenCell(row, "const");
+            expect(changed.isBackgroundRgb).toBe(true);
+            expect(unchanged.isBackgroundRgb).toBe(true);
+            expect(changed.background).not.toBe(unchanged.background);
+            expect(changed.isDim).toBe(false);
+            expect(unchanged.isDim).toBe(false);
+        }
     });
 
     it("honors independently configured two-tone shades", () => {
@@ -1514,17 +1581,12 @@ describe("Pierre diff rendering", () => {
 
         expect(getPierrePalette(testTheme).deletionRowBg).toBe("");
 
-        const terminal = new VirtualTerminal(100, 10);
-        terminal.write(lines.join("\n"));
-        await terminal.settle(0);
-        const rows = terminal.interpretedRows();
-        const delRow = rows.find((r) => r.text.includes("2000"));
-        expect(delRow).toBeDefined();
-
-        const tokenCell = delRow?.cells.find((c) => c.chars === "2");
-        const unchangedCell = delRow?.cells.find((c) => c.chars === "c");
-        expect(tokenCell?.isBackgroundRgb).toBe(true);
-        expect(unchangedCell?.isBackgroundDefault).toBe(true);
+        const rows = await interpretedDiffRows(lines, 100);
+        for (const token of ["2000", "4000"]) {
+            const row = rows.filter((candidate) => candidate.text.includes(token));
+            expect(tokenCell(row, token).isBackgroundRgb).toBe(true);
+            expect(tokenCell(row, "const").isBackgroundDefault).toBe(true);
+        }
     });
 
     it("dims unchanged Pierre replacement text when configured", async () => {
@@ -1560,11 +1622,12 @@ describe("Pierre diff rendering", () => {
                 { expanded: false },
                 { lastComponent: undefined, invalidate() {} },
             ).render(100);
-            const deletion = lines.find((line) => stripAnsi(line).includes("2000")) ?? "";
-            const addition = lines.find((line) => stripAnsi(line).includes("4000")) ?? "";
-
-            expect(deletion).toContain("\u001b[2m");
-            expect(addition).toContain("\u001b[2m");
+            const rows = await interpretedDiffRows(lines, 100);
+            for (const token of ["2000", "4000"]) {
+                const row = rows.filter((candidate) => candidate.text.includes(token));
+                expect(tokenCell(row, "const").isDim).toBe(true);
+                expect(tokenCell(row, token).isDim).toBe(false);
+            }
         } finally {
             configureRenderingAppearance(defaultAppearance);
         }

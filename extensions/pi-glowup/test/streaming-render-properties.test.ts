@@ -72,149 +72,70 @@ test.prop([writeScenarioArbitrary], {
     "keeps append-truncate-rewrite write previews cache-equivalent across width changes",
     (scenario) => {
         const sourceLines = rotatedAtomicLines(scenario.truncateAt);
-        let lastComponent: Component | undefined;
-        let content = "";
-
-        for (const [index, sourceLine] of sourceLines.entries()) {
-            content += `${sourceLine}\r\n`;
-            const width = scenario.widthSequence[index % scenario.widthSequence.length] ?? 80;
-            const cached = renderWriteCallPreview(
-                { path: "src/generated.ts", content },
-                plainTheme,
-                {
+        for (const movingViewport of [false, true]) {
+            let lastComponent: Component | undefined;
+            let updateIndex = 0;
+            const checkUpdate = (content: string, path = "src/generated.ts"): Component => {
+                const context = {
+                    toolCallId: "write-stream-1",
                     isError: false,
                     isPartial: true,
                     expanded: false,
-                    labelMode: "lifecycle",
+                    labelMode: "lifecycle" as const,
+                    movingViewport,
+                };
+                const args = { path, content };
+                const cached = renderWriteCallPreview(args, plainTheme, {
+                    ...context,
                     lastComponent,
-                },
+                });
+                const cold = renderWriteCallPreview(args, plainTheme, context);
+                const width =
+                    scenario.widthSequence[updateIndex % scenario.widthSequence.length] ?? 80;
+                updateIndex += 1;
+                // Compare before another update can mutate the reused component.
+                for (const frameWidth of [width, Math.max(100, width)]) {
+                    const frame = cached.render(frameWidth);
+                    expect(frame).toEqual(cold.render(frameWidth));
+                    expectBoundedFrame(frame, frameWidth);
+                }
+                lastComponent = cached;
+                return cached;
+            };
+
+            let content = "";
+            for (const sourceLine of sourceLines) {
+                content += `${sourceLine}\r\n`;
+                checkUpdate(content);
+            }
+
+            const truncatedContent = sourceLines.slice(0, scenario.truncateAt).join("\n");
+            checkUpdate(truncatedContent);
+
+            // Keep the changed row visible in both head and moving-tail viewports.
+            const longSuffix = `\n// ${"x".repeat(40)}\nexport const tail = true;\n`;
+            const prefixA = `export const head = 'AAAA_${scenario.rewrittenSuffix}';`;
+            const prefixB = `export const head = 'BBBB_${scenario.rewrittenSuffix}';`;
+            checkUpdate(`${prefixA}${longSuffix}`, "src/rewritten.ts");
+            const rewrittenPrefix = checkUpdate(`${prefixB}${longSuffix}`, "src/rewritten.ts");
+            const prefixText = rewrittenPrefix.render(100).join("\n");
+            expect(prefixText).toContain(`BBBB_${scenario.rewrittenSuffix}`);
+            expect(prefixText).not.toContain(`AAAA_${scenario.rewrittenSuffix}`);
+            checkUpdate(
+                `${prefixB}${longSuffix}export const appended = 'after_rewrite';\n`,
+                "src/rewritten.ts",
             );
-            const reference = renderWriteCallPreview(
-                { path: "src/generated.ts", content },
-                plainTheme,
-                {
-                    isError: false,
-                    isPartial: true,
-                    expanded: false,
-                    labelMode: "lifecycle",
-                },
+
+            const rewritten = checkUpdate(
+                `${truncatedContent}\nexport const rewritten = '${scenario.rewrittenSuffix}';\n`,
+                "src/rewritten.ts",
             );
-            expect(cached.render(width)).toEqual(reference.render(width));
-            expectBoundedFrame(cached.render(width), width);
-            lastComponent = cached;
-        }
-
-        const truncatedContent = sourceLines.slice(0, scenario.truncateAt).join("\n");
-        const truncated = renderWriteCallPreview(
-            { path: "src/rewritten.ts", content: truncatedContent },
-            plainTheme,
-            {
-                isError: false,
-                isPartial: true,
-                expanded: false,
-                labelMode: "lifecycle",
-                lastComponent,
-            },
-        );
-        lastComponent = truncated;
-
-        // Long suffix (> 32 chars) so prefix changes with identical suffix can test PartialWriteContentPreview.canAppend
-        const longSuffix = "\n// " + "x".repeat(40) + "\nexport const tail = true;\n";
-        const prefixA = "export const head = 'AAAA';";
-        const prefixB = "export const head = 'BBBB';";
-        const sameSuffixContentA = `${prefixA}${longSuffix}`;
-        const sameSuffixContentB = `${prefixB}${longSuffix}`;
-
-        const suffixStreamA = renderWriteCallPreview(
-            { path: "src/rewritten.ts", content: sameSuffixContentA },
-            plainTheme,
-            {
-                isError: false,
-                isPartial: true,
-                expanded: false,
-                labelMode: "lifecycle",
-                lastComponent,
-            },
-        );
-        lastComponent = suffixStreamA;
-
-        const finalWidth = scenario.widthSequence.at(-1) ?? 100;
-
-        // Deliver same-length prefix rewrite with matching suffix
-        const suffixStreamB = renderWriteCallPreview(
-            { path: "src/rewritten.ts", content: sameSuffixContentB },
-            plainTheme,
-            {
-                isError: false,
-                isPartial: true,
-                expanded: false,
-                labelMode: "lifecycle",
-                lastComponent,
-            },
-        );
-        lastComponent = suffixStreamB;
-
-        // Append content after the rewrite
-        const appendedAfterRewriteContent = `${sameSuffixContentB}export const appended = 'after_rewrite';\n`;
-        const appendedAfterRewrite = renderWriteCallPreview(
-            { path: "src/rewritten.ts", content: appendedAfterRewriteContent },
-            plainTheme,
-            {
-                isError: false,
-                isPartial: true,
-                expanded: false,
-                labelMode: "lifecycle",
-                lastComponent,
-            },
-        );
-
-        const coldAppended = renderWriteCallPreview(
-            { path: "src/rewritten.ts", content: appendedAfterRewriteContent },
-            plainTheme,
-            {
-                toolCallId: "cold-appended",
-                isError: false,
-                isPartial: true,
-                expanded: false,
-                labelMode: "lifecycle",
-            },
-        );
-
-        const rewrittenContent = `${truncatedContent}\nexport const rewritten = '${scenario.rewrittenSuffix}';\n`;
-        const rewritten = renderWriteCallPreview(
-            { path: "src/rewritten.ts", content: rewrittenContent },
-            plainTheme,
-            {
-                toolCallId: "write-stream-1",
-                isError: false,
-                isPartial: true,
-                expanded: false,
-                labelMode: "lifecycle",
-                lastComponent: appendedAfterRewrite,
-            },
-        );
-        const cold = renderWriteCallPreview(
-            { path: "src/rewritten.ts", content: rewrittenContent },
-            plainTheme,
-            {
-                toolCallId: "cold-rewritten",
-                isError: false,
-                isPartial: true,
-                expanded: false,
-                labelMode: "lifecycle",
-            },
-        );
-        const rewrittenFrame = rewritten.render(finalWidth);
-        const semanticWidth = Math.max(100, finalWidth);
-        const rewrittenText = rewritten.render(semanticWidth).join("\n");
-
-        expect(appendedAfterRewrite.render(finalWidth)).toEqual(coldAppended.render(finalWidth));
-        expect(rewrittenFrame).toEqual(cold.render(finalWidth));
-        expectBoundedFrame(rewrittenFrame, finalWidth);
-        expect(rewrittenText).toContain("src/rewritten.ts");
-        expect(rewrittenText).toContain(scenario.rewrittenSuffix);
-        for (const removedLine of sourceLines.slice(scenario.truncateAt)) {
-            expect(rewrittenText).not.toContain(removedLine);
+            const rewrittenText = rewritten.render(100).join("\n");
+            expect(rewrittenText).toContain("src/rewritten.ts");
+            expect(rewrittenText).toContain(scenario.rewrittenSuffix);
+            for (const removedLine of sourceLines.slice(scenario.truncateAt)) {
+                expect(rewrittenText).not.toContain(removedLine);
+            }
         }
     },
 );

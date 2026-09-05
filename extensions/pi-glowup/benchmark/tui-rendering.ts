@@ -335,11 +335,6 @@ function resizeTimings(cycles: number): readonly number[] {
 function restoredSessionTimings(samples: number): readonly number[] {
     const patch =
         "*** Begin Patch\n*** Add File: restored.ts\n+export const restored = true;\n*** End Patch";
-    const renderer = createThirdPartyToolRenderer(
-        "apply_patch",
-        { labelMode: "lifecycle" },
-        applyPatchOwnerToolDefinition,
-    );
     const resultDetails = {
         content: [],
         details: {
@@ -351,23 +346,37 @@ function restoredSessionTimings(samples: number): readonly number[] {
     for (let sample = 0; sample < samples; sample += 1) {
         timings.push(
             measure(() => {
-                renderer
+                const renderer = createThirdPartyToolRenderer(
+                    "apply_patch",
+                    { labelMode: "lifecycle" },
+                    applyPatchOwnerToolDefinition,
+                );
+                const context = {
+                    args: { patch },
+                    toolCallId: "benchmark-restored",
+                    executionStarted: false,
+                    argsComplete: true,
+                    isPartial: false,
+                    expanded: false,
+                    showImages: false,
+                    isError: false,
+                    result: resultDetails,
+                };
+                const callLines = renderer.renderCall({ patch }, plainTheme, context).render(120);
+                const resultLines = renderer
                     .renderResult(
                         resultDetails,
                         { expanded: false, isPartial: false },
                         plainTheme,
-                        {
-                            args: { patch },
-                            toolCallId: "benchmark-restored",
-                            executionStarted: true,
-                            argsComplete: true,
-                            isPartial: false,
-                            expanded: false,
-                            showImages: false,
-                            isError: false,
-                        },
+                        context,
                     )
                     .render(120);
+                if (
+                    callLines.length !== 0 ||
+                    !resultLines.join("\n").includes("Patched restored.ts")
+                ) {
+                    throw new Error("Restored patch benchmark must render one completed mutation");
+                }
             }),
         );
     }

@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { initTheme, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
@@ -25,7 +26,11 @@ type FakeAssistantInstance = {
 
 type FakeAssistantPrototype = {
     render(this: FakeAssistantInstance, width: number): string[];
-    updateContent?(this: FakeAssistantInstance, message: FakeAssistantMessage): void;
+    updateContent?(
+        this: FakeAssistantInstance,
+        message: FakeAssistantMessage,
+        isStreaming?: boolean,
+    ): void;
 };
 
 type FakeContainerPrototype = {
@@ -175,7 +180,8 @@ describe("assistant separator patch", () => {
                 line.includes("Considering probe implementation"),
             );
             expect(textIndex).toBeGreaterThan(-1);
-            expect(thinkingIndex).toBeGreaterThan(textIndex);
+            expect(thinkingIndex).toBe(textIndex + 2);
+            expect(stripVTControlCharacters(lines[textIndex + 1] ?? "missing").trim()).toBe("");
         } finally {
             configureAssistantSeparatorPatch(false);
         }
@@ -190,6 +196,7 @@ describe("assistant separator patch", () => {
                 content: [
                     { type: "text", text: "text A" },
                     { type: "thinking", thinking: "thinking X" },
+                    { type: "thinking", thinking: "" },
                     { type: "thinking", thinking: "thinking Y" },
                     { type: "text", text: "text B" },
                     { type: "thinking", thinking: "thinking Z" },
@@ -208,15 +215,56 @@ describe("assistant separator patch", () => {
                 stopReason: "stop",
                 timestamp: Date.now(),
             });
-            const lines = component.render(80);
-            expect(lines.some((line) => line.includes("text A"))).toBe(true);
-            expect(lines.some((line) => line.includes("thinking X"))).toBe(true);
-            expect(lines.some((line) => line.includes("thinking Y"))).toBe(true);
-            expect(lines.some((line) => line.includes("text B"))).toBe(true);
-            expect(lines.some((line) => line.includes("thinking Z"))).toBe(true);
+            const expected = [
+                "",
+                "text A",
+                "",
+                "thinking X",
+                "",
+                "thinking Y",
+                "",
+                "text B",
+                "",
+                "thinking Z",
+            ];
+            expect(
+                component.render(80).map((line) => stripVTControlCharacters(line).trim()),
+            ).toEqual(expected);
+            component.invalidate();
+            expect(
+                component.render(80).map((line) => stripVTControlCharacters(line).trim()),
+            ).toEqual(expected);
+            component.setHideThinkingBlock(true);
+            expect(
+                component.render(80).map((line) => stripVTControlCharacters(line).trim()),
+            ).toEqual(["", "text A", "", "Thinking...", "", "text B", "", "Thinking..."]);
+            component.setHideThinkingBlock(false);
+            expect(
+                component.render(80).map((line) => stripVTControlCharacters(line).trim()),
+            ).toEqual(expected);
         } finally {
             configureAssistantSeparatorPatch(false);
         }
+    });
+
+    it("forwards streaming state through active, containerless and disabled wrappers", () => {
+        const received: Array<boolean | undefined> = [];
+        const prototype: FakeAssistantPrototype = {
+            render: () => [],
+            updateContent(_message, isStreaming) {
+                received.push(isStreaming);
+            },
+        };
+        installAssistantSeparatorPatch(prototype);
+        const instance = { contentContainer: { addChild(_component: Component) {} } };
+        const message = { content: [] };
+        prototype.updateContent?.call(instance, message, true);
+        prototype.updateContent?.call({}, message, false);
+        // Retain the wrapper to exercise another extension's captured delegation after disable.
+        const wrapped = prototype.updateContent?.bind(instance);
+        configureAssistantSeparatorPatch(false, prototype);
+        wrapped?.(message, true);
+        expect(received).toEqual([true, false, true]);
     });
 
     it("is idempotent for a patched prototype", () => {
@@ -308,5 +356,31 @@ describe("assistant separator patch", () => {
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([]);
         containerPrototype.addChild(new LabelComponent("child"));
         expect(addedChildren.flatMap((child) => child.render(20))).toEqual(["child"]);
+
+        configureAssistantSeparatorPatch(true, prototype, containerPrototype);
+        const contentChildren: Component[] = [];
+        prototype.updateContent?.call(
+            {
+                contentContainer: {
+                    addChild(component) {
+                        contentChildren.push(component);
+                    },
+                },
+            },
+            {
+                content: [
+                    { type: "text", text: "first" },
+                    { type: "thinking", thinking: "next" },
+                ],
+            },
+        );
+        expect(contentChildren.flatMap((child) => child.render(20))).toEqual([
+            "initial-spacer",
+            "text:first",
+            "",
+            "thinking:next",
+        ]);
+        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(laterRenderDescriptor);
+        configureAssistantSeparatorPatch(false, prototype, containerPrototype);
     });
 });

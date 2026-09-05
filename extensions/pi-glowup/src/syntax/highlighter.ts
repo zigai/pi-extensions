@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { BundledLanguage, Highlighter } from "shiki";
+import { normalizedCodeLines } from "../text-boundaries.ts";
 import { tokensToAnsiLines } from "./ansi.ts";
 import { configureBracketPairColoring } from "./brackets.ts";
 import {
@@ -14,7 +15,7 @@ import {
 } from "./project-language-detection.ts";
 import {
     loadSyntaxConfig,
-    loadSyntaxTheme,
+    parseSyntaxTheme,
     type LoadedSyntaxTheme,
     type SyntaxConfig,
 } from "./theme-loader.ts";
@@ -133,10 +134,9 @@ export async function initializeSyntaxHighlighting(
     }
 
     const generation = syntaxGeneration;
-    initializationPromise = Promise.all([
-        syntaxConfigurationKey(env, options),
-        initializeSyntaxHighlightingOnce(env, options),
-    ]).then(([configurationKey, state]) => {
+    initializationPromise = prepareSyntaxSource(env, options).then(async (source) => {
+        const state = await initializeSyntaxHighlightingOnce(source, options);
+        const configurationKey = source.configurationKey;
         if (generation !== syntaxGeneration) {
             disposeReadySyntaxState(state);
             return disposedSyntaxState(state.config);
@@ -155,13 +155,19 @@ export async function reinitializeSyntaxHighlighting(
     env: NodeJS.ProcessEnv = process.env,
     options: SyntaxInitializationOptions = {},
 ): Promise<SyntaxState> {
+    return replaceSyntaxHighlighting(prepareSyntaxSource(env, options), options);
+}
+
+function replaceSyntaxHighlighting(
+    sourcePromise: Promise<SyntaxSource>,
+    options: SyntaxInitializationOptions,
+): Promise<SyntaxState> {
     const generation = syntaxGeneration + 1;
     syntaxGeneration = generation;
     const previousState = syntaxState;
-    const replacement = Promise.all([
-        syntaxConfigurationKey(env, options),
-        initializeSyntaxHighlightingOnce(env, options),
-    ]).then(([configurationKey, state]) => {
+    const replacement = sourcePromise.then(async (source) => {
+        const state = await initializeSyntaxHighlightingOnce(source, options);
+        const configurationKey = source.configurationKey;
         if (generation !== syntaxGeneration) {
             disposeReadySyntaxState(state);
             return disposedSyntaxState(state.config);
@@ -192,11 +198,15 @@ async function refreshSyntaxHighlightingOnce(
     env: NodeJS.ProcessEnv,
     options: SyntaxInitializationOptions,
 ): Promise<SyntaxState> {
-    const configurationKey = await syntaxConfigurationKey(env, options);
-    if (syntaxState !== undefined && activeConfigurationKey === configurationKey) {
+    const generation = syntaxGeneration;
+    const source = await prepareSyntaxSource(env, options);
+    if (generation !== syntaxGeneration) {
+        return disposedSyntaxState(source.config);
+    }
+    if (syntaxState !== undefined && activeConfigurationKey === source.configurationKey) {
         return syntaxState;
     }
-    return reinitializeSyntaxHighlighting(env, options);
+    return replaceSyntaxHighlighting(Promise.resolve(source), options);
 }
 
 /** Returns true when syntax highlighting is available for synchronous render calls. */
@@ -238,12 +248,12 @@ export function highlightSyntaxCode(
         normalizedLanguage === "text" ||
         !state.loadedLanguages.has(normalizedLanguage)
     ) {
-        return splitCodeLines(code);
+        return normalizedCodeLines(code);
     }
 
     const codeByteLength = Buffer.byteLength(code, "utf8");
     if (codeByteLength > MAX_CODE_BYTES) {
-        return splitCodeLines(code);
+        return normalizedCodeLines(code);
     }
 
     const shouldCache = options.cache !== false && codeByteLength <= MAX_CACHEABLE_CODE_BYTES;
@@ -257,7 +267,7 @@ export function highlightSyntaxCode(
         }
     }
 
-    const plainLines = splitCodeLines(code);
+    const plainLines = normalizedCodeLines(code);
     if (plainLines.some((line) => line.length > MAX_LINE_LENGTH)) {
         return plainLines;
     }
@@ -448,21 +458,34 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     notifySyntaxStateListeners("uninitialized");
 }
 
-async function syntaxConfigurationKey(
+type SyntaxThemeSource =
+    | { readonly status: "read"; readonly contents: string }
+    | { readonly status: "failed"; readonly cause: unknown };
+
+type SyntaxSource = {
+    readonly config: SyntaxConfig;
+    readonly theme: SyntaxThemeSource;
+    readonly configurationKey: string;
+};
+
+async function prepareSyntaxSource(
     env: NodeJS.ProcessEnv,
     options: SyntaxInitializationOptions,
-): Promise<string> {
+): Promise<SyntaxSource> {
     const config = loadSyntaxConfig(env);
+    let theme: SyntaxThemeSource = { status: "read", contents: "" };
     let themeContents = "";
     if (config.enabled) {
         try {
             themeContents = await readFile(config.themePath, "utf8");
+            theme = { status: "read", contents: themeContents };
         } catch (cause: unknown) {
+            theme = { status: "failed", cause };
             themeContents =
                 cause instanceof Error ? `${cause.name}:${cause.message}` : String(cause);
         }
     }
-    return createHash("sha256")
+    const configurationKey = createHash("sha256")
         .update(
             JSON.stringify({
                 config,
@@ -472,6 +495,7 @@ async function syntaxConfigurationKey(
             }),
         )
         .digest("hex");
+    return { config, theme, configurationKey };
 }
 
 function notifySyntaxStateListeners(status: SyntaxStateStatus): void {
@@ -491,19 +515,25 @@ function disposedSyntaxState(config: SyntaxConfig): SyntaxState {
 }
 
 async function initializeSyntaxHighlightingOnce(
-    env: NodeJS.ProcessEnv,
+    source: SyntaxSource,
     options: SyntaxInitializationOptions,
 ): Promise<SyntaxState> {
-    const config = loadSyntaxConfig(env);
+    const { config } = source;
     if (!config.enabled) {
         return { status: "disabled", config, reason: config.reason };
     }
 
+    if (source.theme.status === "failed") {
+        const { cause } = source.theme;
+        return {
+            status: "failed",
+            config,
+            reason: cause instanceof Error ? cause.message : String(cause),
+        };
+    }
+
     try {
-        const theme = await loadSyntaxTheme(config);
-        if (!theme) {
-            return { status: "disabled", config, reason: "syntax theme disabled" };
-        }
+        const theme = parseSyntaxTheme(config, source.theme.contents);
 
         const preloadSelection = selectSyntaxPreloadLanguages(options);
         syntaxPreloadDiagnostics = preloadSelection.diagnostics;
@@ -588,11 +618,6 @@ function formatConfiguredLanguageForWarning(language: string): string {
     const trimmed = language.trim();
     const displayed = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
     return JSON.stringify(displayed) ?? '""';
-}
-
-function splitCodeLines(code: string): string[] {
-    const normalized = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    return normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
 }
 
 function normalizeHighlightedLineCount(lines: string[], expectedCount: number): string[] {

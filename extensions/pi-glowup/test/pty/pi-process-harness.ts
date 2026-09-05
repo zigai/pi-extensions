@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { spawn, type IPty } from "node-pty";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
@@ -47,10 +48,6 @@ type PiProcessEnvironment = {
     PI_CLEAR_ON_SHRINK: string;
     TMPDIR?: string;
 };
-
-function delay(delayMs: number): Promise<void> {
-    return new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
-}
 
 function processEnvironment(agentDir: string): PiProcessEnvironment {
     const environment: PiProcessEnvironment = {

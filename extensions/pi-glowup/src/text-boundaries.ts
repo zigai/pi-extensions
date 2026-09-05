@@ -111,12 +111,7 @@ export function expandTerminalTabs(
 }
 
 export function hasNonWhitespaceText(text: string): boolean {
-    for (let index = 0; index < text.length; index += 1) {
-        if (text.charAt(index).trim().length > 0) {
-            return true;
-        }
-    }
-    return false;
+    return /\S/u.test(text);
 }
 
 export function countContentLines(content: string): number {
@@ -215,4 +210,9 @@ export function truncateGraphemeText(text: string, maxCharacters: number, ellips
     const budget = normalizedBudget(maxCharacters);
     const source = completeUnicodePrefix(text);
     return source.length <= budget ? source : appendGraphemeEllipsis(source, budget, ellipsis);
+}
+
+export function normalizedCodeLines(code: string): string[] {
+    const normalized = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    return normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
 }

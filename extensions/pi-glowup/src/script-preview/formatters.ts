@@ -30,6 +30,7 @@ export type ScriptFormatterParseOptions = {
 };
 
 const FORMATTER_TIMEOUT_MS = 1_000;
+const FORMATTER_TERMINATION_GRACE_MS = 250;
 const FORMATTER_MAX_BUFFER = 1024 * 1024;
 const FORMATTER_MAX_INPUT_BYTES = 64 * 1024;
 const MAX_CONCURRENT_FORMATTERS = 2;
@@ -132,34 +133,26 @@ export function parseScriptFormatterCommands(
     }
 }
 
-function finishFormatterCommand(
-    resolve: (value: string | undefined) => void,
-    value: string | undefined,
-    state: { settled: boolean },
-    timeout: ReturnType<typeof setTimeout>,
-): void {
-    if (state.settled) {
-        return;
-    }
-    state.settled = true;
-    clearTimeout(timeout);
-    resolve(value);
-}
-
+// Result completion is deliberately independent of permit ownership: a failed preview
+// returns promptly, but the child owns its permit until Node confirms stdio closure.
 function runFormatterCommand(
     executable: string,
     args: readonly string[],
     input: string,
     options: ScriptBlockFormatterOptions,
+    release: () => void,
 ): Promise<string | undefined> {
     if (options.signal?.aborted === true) {
+        release();
         return Promise.resolve(undefined);
     }
 
     return new Promise((resolve) => {
-        const state = { settled: false };
+        let settled = false;
+        let terminating = false;
         let stdout = "";
         let stdoutBytes = 0;
+        let escalation: ReturnType<typeof setTimeout> | undefined;
         let child: ChildProcessByStdio<Writable, Readable, null>;
         try {
             child = spawn(executable, [...args], {
@@ -168,36 +161,62 @@ function runFormatterCommand(
                 stdio: ["pipe", "pipe", "ignore"],
             });
         } catch {
+            release();
             resolve(undefined);
             return;
         }
-        const timeout = setTimeout(() => {
+        const finish = (value: string | undefined): void => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            stdout = "";
+            resolve(value);
+        };
+        const fail = (): void => {
+            finish(undefined);
+            if (terminating) return;
+            terminating = true;
             child.kill();
-            finishFormatterCommand(resolve, undefined, state, timeout);
-        }, FORMATTER_TIMEOUT_MS);
-        timeout.unref?.();
+            // SIGTERM can be ignored. Cleanup stays owned even after preview fallback.
+            escalation = setTimeout(() => {
+                child.kill("SIGKILL");
+            }, FORMATTER_TERMINATION_GRACE_MS);
+            escalation.unref();
+        };
+        const timeout = setTimeout(fail, FORMATTER_TIMEOUT_MS);
+        timeout.unref();
 
         child.stdout.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => {
+            if (settled) return;
             stdoutBytes += Buffer.byteLength(chunk, "utf8");
             if (stdoutBytes > FORMATTER_MAX_BUFFER) {
-                child.kill();
-                finishFormatterCommand(resolve, undefined, state, timeout);
+                fail();
                 return;
             }
             stdout += chunk;
         });
-        child.stdin.on("error", () => {
-            finishFormatterCommand(resolve, undefined, state, timeout);
-        });
-        child.on("error", () => {
-            finishFormatterCommand(resolve, undefined, state, timeout);
-        });
-        child.on("close", (code) => {
-            finishFormatterCommand(resolve, code === 0 ? stdout : undefined, state, timeout);
+        child.stdin.on("error", fail);
+        child.on("error", fail);
+        options.signal?.addEventListener("abort", fail, { once: true });
+        child.once("close", (code) => {
+            options.signal?.removeEventListener("abort", fail);
+            clearTimeout(escalation);
+            finish(code === 0 ? stdout : undefined);
+            release();
         });
         child.stdin.end(input);
     });
+}
+
+export type ScriptFormatterWorkload = {
+    readonly active: number;
+    readonly queued: number;
+};
+
+/** Content-free workload snapshot for diagnostics; active includes children awaiting close. */
+export function getScriptFormatterWorkload(): ScriptFormatterWorkload {
+    return { active: activeFormatterCount, queued: queuedFormatters.length };
 }
 
 function acquireFormatterSlot(
@@ -269,6 +288,7 @@ export function createCommandScriptFormatter(
     const remember = (key: string, output: string): void => {
         const bytes = Buffer.byteLength(output, "utf8");
         if (bytes > MAX_FORMATTER_CACHE_BYTES) return;
+        cacheBytes -= cache.get(key)?.bytes ?? 0;
         cache.set(key, { output, bytes });
         cacheBytes += bytes;
         while (cache.size > MAX_FORMATTER_CACHE_ENTRIES || cacheBytes > MAX_FORMATTER_CACHE_BYTES) {
@@ -308,12 +328,7 @@ export function createCommandScriptFormatter(
             return undefined;
         }
 
-        let output: string | undefined;
-        try {
-            output = await runFormatterCommand(executable, args, input.code, options);
-        } finally {
-            release();
-        }
+        const output = await runFormatterCommand(executable, args, input.code, options, release);
         if (output === undefined) {
             return undefined;
         }

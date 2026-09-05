@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 
@@ -21,10 +22,6 @@ export type InterpretedRow = {
     readonly isWrapped: boolean;
     readonly cells: readonly InterpretedCell[];
 };
-
-function delay(delayMs: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, delayMs));
-}
 
 function validateRgbValue(rgb: number): void {
     if (!Number.isInteger(rgb) || rgb < 0 || rgb > 0xffffff) {

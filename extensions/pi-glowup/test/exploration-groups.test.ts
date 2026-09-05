@@ -209,4 +209,62 @@ describe("exploration groups", () => {
         expect(completedOwner).toMatchObject({ kind: "owner", active: false });
         expect(invalidations).toBe(2);
     });
+
+    it.each(["event-first", "row-first"] as const)(
+        "bounds unmatched handoff and preserves late rows/events after overflow (%s)",
+        (order) => {
+            let sourceAvailable = false;
+            const store = new ExplorationGroupStore(300, (id) =>
+                sourceAvailable ? [0, Number(id)] : undefined,
+            );
+            const rows = Array.from({ length: 350 }, () => ({}));
+            for (const [index, row] of rows.entries()) {
+                if (order === "event-first") store.registerBoundary(String(index));
+                else store.observeRow(row, String(index), false);
+                expect(store.stats().pendingBoundaries).toBeLessThanOrEqual(300);
+            }
+            expect(store.stats().pendingBoundaries).toBe(300);
+
+            sourceAvailable = true;
+            store.register({ toolCallId: "351", invalidate: noop }, "Read current.ts");
+            for (const [index, row] of rows.entries()) {
+                if (order === "event-first") store.observeRow(row, String(index), false);
+                else store.registerBoundary(String(index));
+                // Repainting retained rows is independent of pending-ID eviction.
+                store.observeRow(row, String(index), false);
+            }
+            expect(store.stats().pendingBoundaries).toBe(0);
+            expect(
+                store.register({ toolCallId: "352", invalidate: noop }, "Read child.ts"),
+            ).toEqual({ kind: "child" });
+            store.registerBoundary("353");
+            expect(
+                store.register({ toolCallId: "354", invalidate: noop }, "Read next.ts"),
+            ).toMatchObject({ kind: "owner", actions: ["Read next.ts"] });
+        },
+    );
+
+    it("does not let a historical boundary first observed late split a live group", () => {
+        const store = new ExplorationGroupStore(300, (id) => [0, Number(id)]);
+        store.register({ toolCallId: "400", invalidate: noop }, "Read live.ts");
+        store.observeRow({}, "1", false);
+        expect(store.register({ toolCallId: "401", invalidate: noop }, "Read child.ts")).toEqual({
+            kind: "child",
+        });
+        expect(store.stats().pendingBoundaries).toBe(0);
+    });
+
+    it("releases handoff and row-lifetime markers when the session is cleared", () => {
+        const row = {};
+        const store = new ExplorationGroupStore();
+        store.observeRow(row, "boundary", false);
+        expect(store.stats().pendingBoundaries).toBe(1);
+        store.clear();
+        expect(store.stats()).toEqual({ groups: 0, toolCalls: 0, pendingBoundaries: 0 });
+        store.register({ toolCallId: "first", invalidate: noop }, "Read first.ts");
+        store.observeRow(row, "boundary", false);
+        expect(
+            store.register({ toolCallId: "second", invalidate: noop }, "Read second.ts"),
+        ).toMatchObject({ kind: "owner" });
+    });
 });

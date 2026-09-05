@@ -62,15 +62,6 @@ export function summarizeEditCall(
         };
     }
 
-    if (context.isError) {
-        return {
-            statusText: editLabel,
-            path,
-            suffix: formatEditCount(validEdits),
-            hasInvalidEdits: false,
-        };
-    }
-
     return {
         statusText: editLabel,
         path,

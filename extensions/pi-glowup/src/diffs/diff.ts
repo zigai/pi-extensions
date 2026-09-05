@@ -1346,7 +1346,7 @@ function colorsForLineType(
     return { fg: palette.contextFg, bg: palette.contextRowBg };
 }
 
-function hasTrailingCollapsedLines(metadata: FileDiffMetadata): boolean {
+export function hasTrailingCollapsedLines(metadata: FileDiffMetadata): boolean {
     const lastHunk = metadata.hunks.at(-1);
     if (!lastHunk || metadata.isPartial) {
         return false;

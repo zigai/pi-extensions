@@ -12,7 +12,6 @@ import {
     shouldDeferSimpleToolCall,
     toolStatusLabel,
     type ToolLabelMode,
-    type ToolLifecycleLabels,
 } from "../rendering/status-labels.ts";
 import { detectStructuredOutputLanguage } from "../syntax/code-component.ts";
 import { takeGraphemePrefix, takeGraphemeSuffix } from "../text-boundaries.ts";
@@ -50,14 +49,6 @@ export function callState(context: ThirdPartyToolRenderContext): GlowupCallState
         return "running";
     }
     return "success";
-}
-
-export function thirdPartyStatusLabel(
-    mode: ToolLabelMode,
-    context: ThirdPartyToolRenderContext,
-    labels: ToolLifecycleLabels,
-): string {
-    return toolStatusLabel(mode, context, labels);
 }
 
 function boundedExpandedResult(output: string | undefined): string | undefined {
@@ -148,7 +139,7 @@ export function createGenericRenderer(
             const staticLabel = label ?? displayToolName(toolName);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: thirdPartyStatusLabel(labelMode, context, {
+                statusText: toolStatusLabel(labelMode, context, {
                     static: staticLabel,
                     active: `Calling ${staticLabel}`,
                     completed: `Called ${staticLabel}`,

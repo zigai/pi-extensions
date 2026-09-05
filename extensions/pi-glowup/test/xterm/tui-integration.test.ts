@@ -1502,7 +1502,23 @@ export const grownWriteTwelve = 12;
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
+        const assertAdjacentTranscript = (): number => {
+            pendingTerminal.assertUniqueTranscriptMarkers(
+                "Patched src/expanded.ts",
+                "BEFORE_TRANSCRIPT",
+                "AFTER_TRANSCRIPT",
+            );
+            const before = pendingTerminal.requireRowContaining("BEFORE_TRANSCRIPT");
+            const header = pendingTerminal.requireRowContaining("Patched src/expanded.ts");
+            const after = pendingTerminal.requireRowContaining("AFTER_TRANSCRIPT");
+            expect(before.index).toBeLessThan(header.index);
+            expect(header.index).toBeLessThan(after.index);
+            pendingTerminal.assertNeutralRange(before);
+            pendingTerminal.assertNeutralRange(after);
+            return after.index;
+        };
         const collapsed = pendingTerminal.screenText();
+        const collapsedAfter = assertAdjacentTranscript();
         expect(collapsed).not.toContain("line5");
         expect(collapsed).toContain("lines");
 
@@ -1512,16 +1528,20 @@ export const grownWriteTwelve = 12;
         const expanded = pendingTerminal.screenText();
         expect(expanded).toContain("line5");
         expect(expanded).toContain("line9");
-        pendingTerminal.assertUniqueTranscriptMarkers(
-            "Patched src/expanded.ts",
-            "BEFORE_TRANSCRIPT",
-            "AFTER_TRANSCRIPT",
-        );
+        const expandedAfter = assertAdjacentTranscript();
+        expect(expandedAfter).toBeGreaterThan(collapsedAfter);
 
         tool.setExpanded(false);
         activeTui.requestRender();
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).toBe(collapsed);
+        expect(assertAdjacentTranscript()).toBe(collapsedAfter);
+        for (const row of pendingTerminal.interpretedRows()) {
+            if (row.index > collapsedAfter && row.index <= expandedAfter) {
+                expect(row.text.trim()).toBe("");
+                pendingTerminal.assertNeutralRange(row);
+            }
+        }
     });
 
     it.each(THEME_STYLE_PROFILES)(

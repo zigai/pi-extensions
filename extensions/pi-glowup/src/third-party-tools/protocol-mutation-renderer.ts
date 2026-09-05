@@ -149,7 +149,7 @@ type ProtocolMutationUpdate = {
 };
 
 class ProtocolMutationComponent implements Component {
-    private readonly diffComponents = new Map<string, Component>();
+    private diffComponents = new Map<string, Component>();
     private rendered: Component;
 
     constructor(
@@ -178,6 +178,7 @@ class ProtocolMutationComponent implements Component {
     private build(update: ProtocolMutationUpdate): Component {
         const payloads = mutationPayloads(update.node, update.mutationSettings);
         const pathOccurrences = new Map<string, number>();
+        const nextDiffComponents = new Map<string, Component>();
         const sections = update.node.files.map((file, index) => {
             const path = mutationPath(file);
             const occurrence = pathOccurrences.get(path) ?? 0;
@@ -212,7 +213,7 @@ class ProtocolMutationComponent implements Component {
                           },
                           pierreContext,
                       );
-            this.diffComponents.set(componentKey, diff);
+            nextDiffComponents.set(componentKey, diff);
             const showStats = update.state !== "running" && file.countsKnown !== false;
             const header = renderMutationCall(
                 update.theme,
@@ -229,6 +230,7 @@ class ProtocolMutationComponent implements Component {
                 ...(file.lines.length === 0 && payload === undefined ? [] : diff.render(width)),
             ]);
         });
+        this.diffComponents = nextDiffComponents;
         return makeComponent((width) =>
             sections.flatMap((section, index) => [
                 ...(index === 0 ? [] : [""]),

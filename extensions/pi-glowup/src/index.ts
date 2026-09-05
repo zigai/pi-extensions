@@ -24,6 +24,7 @@ import { configureAutocompleteCleanupPatch } from "./patches/autocomplete-cleanu
 import {
     ExplorationGroupStore,
     type ExplorationRenderContext,
+    type ExplorationSourcePosition,
 } from "./rendering/exploration-groups.ts";
 import {
     configureRenderingAppearance,
@@ -50,7 +51,6 @@ import {
     type FindActionArgs,
     type GrepActionArgs,
     type LsActionArgs,
-    type MutationSummary,
     type ReadActionArgs,
     type ScriptPreviewHeaderLayout,
 } from "./rendering/core.ts";
@@ -136,7 +136,32 @@ type BuiltInResultOptions = Parameters<BuiltInToolRendererOptions["renderResult"
 
 const editPreviews = new EditPreviewStore(300);
 const scriptPreviews = createScriptPreviewStore();
-const explorationGroups = new ExplorationGroupStore();
+type ExplorationSessionEntry = ReturnType<ExtensionContext["sessionManager"]["getBranch"]>[number];
+type ExplorationMessage = Extract<ExplorationSessionEntry, { type: "message" }>["message"];
+let explorationSourceEntries: (() => readonly ExplorationSessionEntry[]) | undefined;
+let streamingExplorationMessage: ExplorationMessage | undefined;
+
+function explorationSourcePosition(toolCallId: string): ExplorationSourcePosition | undefined {
+    const entries = explorationSourceEntries?.() ?? [];
+    const contentIndex = (message: ExplorationMessage | undefined): number => {
+        if (message?.role !== "assistant") return -1;
+        return message.content.findIndex(
+            (content) => content.type === "toolCall" && content.id === toolCallId,
+        );
+    };
+    // Borrow the host-owned branch rather than building an unbounded ID index.
+    // Persisted source takes precedence over the latest streaming snapshot.
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index];
+        if (entry?.type !== "message") continue;
+        const found = contentIndex(entry.message);
+        if (found !== -1) return [index, found];
+    }
+    const streamingIndex = contentIndex(streamingExplorationMessage);
+    return streamingIndex === -1 ? undefined : [entries.length, streamingIndex];
+}
+
+const explorationGroups = new ExplorationGroupStore(undefined, explorationSourcePosition);
 const PARTIAL_BASH_COMMAND_PREVIEW_CHARS = 4_000;
 const PRESERVE_TOOLS_ENV = "PI_GLOWUP_PRESERVE_TOOLS";
 const SCRIPT_FORMATTERS_ENV = "PI_GLOWUP_SCRIPT_FORMATTERS";
@@ -177,11 +202,7 @@ function rememberBashRenderInvalidation(
     if (invalidate === undefined) return;
     bashRenderInvalidations.delete(toolCallId);
     bashRenderInvalidations.set(toolCallId, invalidate);
-    while (bashRenderInvalidations.size > MAX_BASH_RENDER_INVALIDATIONS) {
-        const oldest = bashRenderInvalidations.keys().next().value;
-        if (oldest === undefined) return;
-        bashRenderInvalidations.delete(oldest);
-    }
+    trimOldestMapEntries(bashRenderInvalidations, MAX_BASH_RENDER_INVALIDATIONS);
 }
 
 function recordBuiltInRender(kind: "call" | "result", toolName: BuiltInToolName): void {
@@ -215,6 +236,7 @@ function diagnosticSnapshot(): DebugLogFields {
             scriptPreviewBytes: scriptStats.bytes,
             explorationGroups: explorationStats.groups,
             explorationToolCalls: explorationStats.toolCalls,
+            explorationPendingBoundaries: explorationStats.pendingBoundaries,
         },
         syntax: {
             ready: isSyntaxHighlightingReady(),
@@ -406,10 +428,6 @@ function renderExplorationCall(
         ),
         state: decision.active ? "running" : "muted",
     });
-}
-
-function registerExplorationBoundary(toolCallId: string): void {
-    explorationGroups.registerBoundary(toolCallId);
 }
 
 function thirdPartyToolRenderingOptions(config: GlowupConfig): ThirdPartyToolRenderingOptions {
@@ -812,11 +830,7 @@ async function captureNativeDeletePreview(
     );
     if (preview !== undefined) {
         nativeDeletePreviews.set(toolCallId, preview);
-        while (nativeDeletePreviews.size > 300) {
-            const oldest = nativeDeletePreviews.keys().next().value;
-            if (oldest === undefined) break;
-            nativeDeletePreviews.delete(oldest);
-        }
+        trimOldestMapEntries(nativeDeletePreviews, 300);
     }
 }
 
@@ -827,7 +841,6 @@ function renderDeleteCall(
     labelMode: ToolLabelMode,
     mutationSettings: MutationSettings,
 ) {
-    registerExplorationBoundary(context.toolCallId);
     const filePath = pathField(args);
     const preview =
         nativeDeletePreviews.get(context.toolCallId) ??
@@ -861,7 +874,6 @@ function renderWebSearchCall(
     context: BuiltInRenderContext,
     labelMode: ToolLabelMode,
 ) {
-    registerExplorationBoundary(context.toolCallId);
     const query = webSearchQuery(args);
     const active = context.isPartial || !context.argsComplete;
     let callOptions: GlowupCallRenderOptions = {
@@ -891,7 +903,6 @@ function renderBashCall(
     shellLayout: () => GlowupConfig["shellLayout"],
     shellOperatorPosition: () => GlowupConfig["shellOperatorPosition"],
 ) {
-    registerExplorationBoundary(context.toolCallId);
     rememberBashRenderInvalidation(context.toolCallId, context.invalidate);
     const state = context.isError ? "error" : context.isPartial ? "running" : "success";
     const command = commandField(args) ?? "";
@@ -979,7 +990,6 @@ function renderWriteCall(
         readonly mutationSettings: MutationSettings;
     },
 ) {
-    registerExplorationBoundary(context.toolCallId);
     const labelColumnWidth = mutationLabelColumnWidth(context, options.labelMode);
     const writeContext: WriteCallContext =
         labelColumnWidth === undefined
@@ -1040,7 +1050,6 @@ function renderEditCall(
     context: BuiltInRenderContext,
     labelMode: ToolLabelMode,
 ) {
-    registerExplorationBoundary(context.toolCallId);
     const labelColumnWidth = mutationLabelColumnWidth(context, labelMode);
     const cachedPreview = editPreviews.get(context.toolCallId);
     const resultDetails = context.result?.details;
@@ -1197,6 +1206,8 @@ function clearSessionState(): void {
     bashRenderInvalidations.clear();
     streamingScriptIdentities.clear();
     explorationGroups.clear();
+    explorationSourceEntries = undefined;
+    streamingExplorationMessage = undefined;
     clearQueuedDiffHighlights();
 }
 
@@ -1232,12 +1243,8 @@ function detailsDiagnostics(details: unknown): DebugLogFields {
     };
 }
 
-function diagnosticBuiltInToolName(toolName: string): BuiltInToolName | undefined {
-    return canonicalBuiltInToolName(toolName);
-}
-
 function isExplorationToolName(toolName: string): boolean {
-    const builtInToolName = diagnosticBuiltInToolName(toolName);
+    const builtInToolName = canonicalBuiltInToolName(toolName);
     return (
         builtInToolName === "read" ||
         builtInToolName === "find" ||
@@ -1335,6 +1342,9 @@ export default function glowupExtension(pi: Pick<ExtensionAPI, "on">): void {
                 : { enabled: false },
         );
         configureBuiltInToolRendererPatch(true, {
+            observeRow: (row, toolCallId, toolName) => {
+                explorationGroups.observeRow(row, toolCallId, isExplorationToolName(toolName));
+            },
             renderCall: renderBuiltInToolCall({
                 headerLayout: () => headerLayout,
                 maxCodePreviewLines: () => config.scriptMaxCodePreviewLines,
@@ -1401,16 +1411,25 @@ export default function glowupExtension(pi: Pick<ExtensionAPI, "on">): void {
     applyConfig(config);
     debugLogger.record("extension_loaded", diagnosticSnapshot);
 
+    // Pi emits these extension events before constructing/updating transcript rows.
+    // Keep only the current host message; persisted chronology is read from getBranch().
+    pi.on("message_start", (event) => {
+        if (event.message.role === "assistant") streamingExplorationMessage = event.message;
+    });
+    pi.on("message_update", (event) => {
+        if (event.message.role === "assistant") streamingExplorationMessage = event.message;
+    });
+
     pi.on("tool_execution_start", (event) => {
         if (!isExplorationToolName(event.toolName)) {
-            registerExplorationBoundary(event.toolCallId);
+            explorationGroups.registerBoundary(event.toolCallId);
         }
     });
 
     pi.on("tool_call", (event, ctx) => {
         startPendingSyntaxHighlighting();
         const command = commandField(event.input);
-        const builtInToolName = diagnosticBuiltInToolName(event.toolName);
+        const builtInToolName = canonicalBuiltInToolName(event.toolName);
         const preimageCapture =
             builtInToolName === "edit"
                 ? captureNativeEditSnapshot(
@@ -1429,15 +1448,12 @@ export default function glowupExtension(pi: Pick<ExtensionAPI, "on">): void {
                   : undefined;
         debugLogger.record("tool_call", () => ({
             toolName: event.toolName,
-            builtInToolName: diagnosticBuiltInToolName(event.toolName),
+            builtInToolName: canonicalBuiltInToolName(event.toolName),
             toolCallId: event.toolCallId,
             inputKind: valueKind(jsonValueParser.parse(event.input)),
             commandBytes: textByteLength(command),
             ...diagnosticSnapshot(),
         }));
-        if (!isExplorationToolName(event.toolName)) {
-            registerExplorationBoundary(event.toolCallId);
-        }
         if (
             !isToolCallEventType("bash", event) &&
             compatBuiltInToolName(event.toolName) !== "bash"
@@ -1514,7 +1530,7 @@ export default function glowupExtension(pi: Pick<ExtensionAPI, "on">): void {
         const output = textOutput(event);
         debugLogger.record("tool_result", () => ({
             toolName: event.toolName,
-            builtInToolName: diagnosticBuiltInToolName(event.toolName),
+            builtInToolName: canonicalBuiltInToolName(event.toolName),
             toolCallId: event.toolCallId,
             isError: event.isError === true,
             outputTextBytes: textByteLength(output),
@@ -1545,7 +1561,9 @@ export default function glowupExtension(pi: Pick<ExtensionAPI, "on">): void {
             ...diagnosticSnapshot(),
         }));
         clearSessionState();
-        restoreExplorationGroupStarts(ctx.sessionManager.getBranch());
+        const sessionManager = ctx.sessionManager;
+        explorationSourceEntries = () => sessionManager.getBranch();
+        restoreExplorationGroupStarts(sessionManager.getBranch());
         debugLogger.record("session_start", () => ({
             phase: "after_reset",
             ...diagnosticSnapshot(),
@@ -1560,12 +1578,23 @@ export default function glowupExtension(pi: Pick<ExtensionAPI, "on">): void {
         }));
     });
 
+    pi.on("session_tree", (_event, ctx) => {
+        // Tree navigation can shorten/change the branch without session_start.
+        // Source offsets and row markers belong to the old transcript lifetime.
+        explorationGroups.clear();
+        streamingExplorationMessage = undefined;
+        const sessionManager = ctx.sessionManager;
+        explorationSourceEntries = () => sessionManager.getBranch();
+        restoreExplorationGroupStarts(sessionManager.getBranch());
+    });
+
     pi.on("agent_start", () => {
         startPendingSyntaxHighlighting();
         explorationGroups.closeActiveGroup();
     });
 
     pi.on("message_end", (event) => {
+        if (event.message.role === "assistant") streamingExplorationMessage = event.message;
         if (hasVisibleAssistantText(event.message)) {
             explorationGroups.closeActiveGroup();
         }

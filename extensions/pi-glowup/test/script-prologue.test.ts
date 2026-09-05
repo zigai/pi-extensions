@@ -46,6 +46,37 @@ describe("script import prologue selection", () => {
         });
     });
 
+    it.each([
+        ["python", 'import os; print("BODY")'],
+        ["python", 'from os import (\n    path\n); print("BODY")'],
+        ["javascript", 'import fs from "node:fs"; console.log("BODY");'],
+        ["javascript", 'const fs = require("node:fs"); console.log("BODY");'],
+        ["typescript", 'import type { Stats } from "node:fs"; console.log("BODY");'],
+        ["typescript", 'const fs = require(\n    "node:fs"\n); /* comment */ console.log("BODY");'],
+        ["javascript", 'import "node:fs"; "BODY";'],
+    ])("retains mixed import/body ranges in %s", (language, mixedLine) => {
+        const body = `${mixedLine}\nprintOrLog(1)\nprintOrLog(2)`;
+        expect(omitLeadingImportPrologue(body, language, 1)).toBeUndefined();
+
+        const leadingImport = language === "python" ? "import sys" : 'import "node:path";';
+        expect(omitLeadingImportPrologue(`${leadingImport}\n${body}`, language, 1)).toEqual({
+            code: body,
+            omittedLines: 1,
+        });
+    });
+
+    it.each([
+        ["python", "import os; # terminal semicolon"],
+        ["javascript", 'import "package;name"; // terminal semicolon'],
+        ["typescript", 'const fs = require("package;name"); /* terminal semicolon */'],
+        ["javascript", 'import "package;name"; /* multiline\ncomment */'],
+    ])("still omits quoted or terminal semicolons in %s", (language, setup) => {
+        expect(omitLeadingImportPrologue(`${setup}\nBODY\nTAIL`, language, 1)).toEqual({
+            code: "BODY\nTAIL",
+            omittedLines: setup.split("\n").length,
+        });
+    });
+
     it("does not skip comments, docstrings, or scripts containing only imports", () => {
         expect(
             omitLeadingImportPrologue(

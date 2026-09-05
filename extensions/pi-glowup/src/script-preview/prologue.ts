@@ -6,6 +6,7 @@ export type ImportPrologueOmission = {
 type LexicalBalance = {
     readonly delimiters: number;
     readonly continued: boolean;
+    readonly hasTrailingStatement: boolean;
 };
 
 function lexicalBalance(lines: readonly string[], start: number): LexicalBalance & { end: number } {
@@ -15,6 +16,8 @@ function lexicalBalance(lines: readonly string[], start: number): LexicalBalance
     let blockComment = false;
     let end = start;
     let continued = false;
+    let sawTopLevelSemicolon = false;
+    let hasTrailingStatement = false;
 
     for (; end < lines.length; end += 1) {
         const line = lines[end] ?? "";
@@ -50,6 +53,9 @@ function lexicalBalance(lines: readonly string[], start: number): LexicalBalance
                 index += 1;
                 continue;
             }
+            // Comments and whitespace after a terminal semicolon are still setup-only.
+            if (sawTopLevelSemicolon && /\S/u.test(character)) hasTrailingStatement = true;
+            if (character === ";" && stack.length === 0) sawTopLevelSemicolon = true;
             if (character === "'" || character === '"' || character === "`") {
                 quote = character;
                 continue;
@@ -61,14 +67,21 @@ function lexicalBalance(lines: readonly string[], start: number): LexicalBalance
         if (!continued) break;
     }
 
-    return { delimiters: stack.length, continued, end: Math.min(lines.length, end + 1) };
+    return {
+        delimiters: stack.length,
+        continued,
+        hasTrailingStatement,
+        end: Math.min(lines.length, end + 1),
+    };
 }
 
 function pythonImportEnd(lines: readonly string[], start: number): number | undefined {
     const first = (lines[start] ?? "").trimStart();
     if (!/^(?:from\s+\S+\s+import(?:\s|$)|import(?:\s|$))/u.test(first)) return undefined;
     const balance = lexicalBalance(lines, start);
-    return balance.delimiters === 0 && !balance.continued ? balance.end : undefined;
+    return balance.delimiters === 0 && !balance.continued && !balance.hasTrailingStatement
+        ? balance.end
+        : undefined;
 }
 
 function javascriptImportEnd(lines: readonly string[], start: number): number | undefined {
@@ -80,7 +93,8 @@ function javascriptImportEnd(lines: readonly string[], start: number): number | 
     if (!possibleImport) return undefined;
 
     const balance = lexicalBalance(lines, start);
-    if (balance.delimiters !== 0 || balance.continued) return undefined;
+    if (balance.delimiters !== 0 || balance.continued || balance.hasTrailingStatement)
+        return undefined;
     const statement = lines.slice(start, balance.end).join("\n");
     if (/^\s*import(?!\s*\()/u.test(statement)) return balance.end;
     if (/^\s*export\s+(?:type\s+)?(?:\{|\*)[\s\S]*?\sfrom\s/u.test(statement)) {

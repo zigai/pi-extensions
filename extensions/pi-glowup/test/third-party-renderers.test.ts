@@ -53,6 +53,82 @@ const styledTheme: GlowupRenderTheme = {
     },
 };
 
+describe("opaque owner parser values", () => {
+    it.each([null, new Map([["count", 3n]]), new Set([new Date(0)])])(
+        "passes parser-owned values to both render hooks",
+        (parsed) => {
+            const received: unknown[] = [];
+            const adapter: GlowupRenderer<typeof parsed, typeof parsed> = {
+                version: 3,
+                parseArgs: () => parsed,
+                parseResult: () => parsed,
+                renderCall(args) {
+                    received.push(args);
+                    return text("opaque call");
+                },
+                renderResult(result, context) {
+                    received.push(result, context.args);
+                    return text("opaque result");
+                },
+            };
+            const renderer = createThirdPartyToolRenderer("opaque", undefined, {
+                glowupRendering: adapter,
+            });
+            expect(
+                renderer.renderCall({}, plainTheme, renderContext).render(80).join("\n"),
+            ).toContain("opaque call");
+            expect(
+                renderer
+                    .renderResult(
+                        { content: [] },
+                        { expanded: false, isPartial: false },
+                        plainTheme,
+                        renderContext,
+                    )
+                    .render(80)
+                    .join("\n"),
+            ).toContain("opaque result");
+            expect(received).toHaveLength(3);
+            for (const value of received) expect(value).toBe(parsed);
+        },
+    );
+});
+
+it("retains stack child rendering across widths and rebuilds themed children on invalidation", () => {
+    let palette = "first";
+    const colored: string[] = [];
+    const theme: GlowupRenderTheme = {
+        ...plainTheme,
+        fg(_token, value) {
+            colored.push(value);
+            return `${palette}:${value}`;
+        },
+    };
+    const renderer = createThirdPartyToolRenderer("stack_owner", undefined, {
+        glowupRendering: {
+            version: 3,
+            parseArgs: () => ({}),
+            renderCall: () =>
+                stack([
+                    text({ kind: "text", text: "alpha", tone: "accent" }),
+                    text({ kind: "text", text: "beta", tone: "accent" }),
+                ]),
+        },
+    });
+    const component = renderer.renderCall({}, theme, renderContext);
+    expect(component.render(80).join("\n")).toContain("first:alpha");
+    const initialColors = [...colored];
+    component.render(60);
+    component.render(100);
+    expect(colored).toEqual(initialColors);
+    palette = "next";
+    component.invalidate();
+    const updated = component.render(80).join("\n");
+    expect(updated).toContain("next:alpha");
+    expect(updated).toContain("next:beta");
+    expect(updated).not.toContain("first:");
+});
+
 const dbQueryArgsSchema = Type.Object({ sql: Type.String() });
 const dbQueryResultSchema = Type.Object({
     details: Type.Optional(Type.Object({ rowCount: Type.Optional(Type.Number()) })),
@@ -355,6 +431,34 @@ describe("third-party tool renderers", () => {
                 expect(visibleWidth(stripAccentStyle(line))).toBeLessThanOrEqual(width);
             }
         }
+    });
+
+    it("preserves plain list nodes while styling direct and wrapped inline forms", () => {
+        const theme: GlowupRenderTheme = {
+            ...styledTheme,
+            fg(token, value) {
+                return `<${token}>${value}</${token}>`;
+            },
+        };
+        const renderer = createThirdPartyToolRenderer("list_tool", undefined, {
+            glowupRendering: {
+                version: 3,
+                parseArgs: jsonValueParser.parse.bind(jsonValueParser),
+                renderCall: () =>
+                    list([
+                        "plain string",
+                        text("plain node"),
+                        { kind: "text", text: "direct", tone: "accent", bold: true },
+                        text({ kind: "text", text: "wrapped", tone: "accent", bold: true }),
+                    ]),
+            },
+        });
+        const rendered = renderer.renderCall({}, theme, renderContext).render(500).join("\n");
+        expect(rendered).toContain("• plain string");
+        expect(rendered).toContain("• plain node");
+        expect(rendered).not.toContain("<toolTitle>plain node</toolTitle>");
+        expect(rendered).toContain("<b><accent>direct</accent></b>");
+        expect(rendered).toContain("<b><accent>wrapped</accent></b>");
     });
 
     it("falls back when an owner adapter returns a malformed node", () => {

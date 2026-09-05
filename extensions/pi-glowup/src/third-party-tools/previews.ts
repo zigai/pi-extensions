@@ -32,10 +32,6 @@ function itemCount(count: number): string {
     return `${count} ${count === 1 ? "item" : "items"}`;
 }
 
-function truncateText(text: string, maxCharacters: number): string {
-    return truncateGraphemeText(text, maxCharacters);
-}
-
 function safeRead(
     record: JsonObject | ReadonlyArray<JsonValue>,
     key: string,
@@ -77,7 +73,7 @@ function boundedPreviewValue(
 
     const str = previewValueDecoder.parseString(value);
     if (str !== undefined) {
-        return truncateText(str, MAX_PREVIEW_CHARACTERS);
+        return truncateGraphemeText(str, MAX_PREVIEW_CHARACTERS);
     }
 
     const num = previewValueDecoder.parseNumber(value);
@@ -167,12 +163,12 @@ function stringifyPreview(value: JsonValue | undefined): string | undefined {
     }
 }
 
-function compactWhitespaceText(text: string, maxCharacters: number): string | undefined {
+export function compactWhitespaceText(text: string, maxCharacters: number): string | undefined {
     const compact = text.replace(/\s+/gu, " ").trim();
     if (compact.length === 0) {
         return undefined;
     }
-    return truncateText(compact, maxCharacters);
+    return truncateGraphemeText(compact, maxCharacters);
 }
 
 function previewValue(value: JsonValue | undefined): string | undefined {
@@ -187,7 +183,7 @@ function previewValue(value: JsonValue | undefined): string | undefined {
     if (preview === undefined || preview.length === 0 || preview === "{}" || preview === "[]") {
         return undefined;
     }
-    return truncateText(preview, MAX_PREVIEW_CHARACTERS);
+    return truncateGraphemeText(preview, MAX_PREVIEW_CHARACTERS);
 }
 
 function compactValue(value: JsonValue | undefined, key: string): string | undefined {
@@ -235,7 +231,7 @@ function compactObjectPreview(value: JsonObject): string | undefined {
     if (parts.length === 0) {
         return undefined;
     }
-    return truncateText(
+    return truncateGraphemeText(
         `${parts.join(" • ")}${omitted ? " • more fields" : ""}`,
         MAX_PREVIEW_CHARACTERS,
     );
@@ -322,7 +318,9 @@ function compactDetailsPreview(value: JsonObject): string | undefined {
         const part = compactValue(safeRead(value, key), key);
         if (part !== undefined) parts.push(part);
     }
-    return parts.length === 0 ? undefined : truncateText(parts.join(" • "), MAX_PREVIEW_CHARACTERS);
+    return parts.length === 0
+        ? undefined
+        : truncateGraphemeText(parts.join(" • "), MAX_PREVIEW_CHARACTERS);
 }
 
 /** Extracts structured details preview for tool result. */

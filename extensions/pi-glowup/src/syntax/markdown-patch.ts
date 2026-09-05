@@ -1,3 +1,4 @@
+import { normalizedCodeLines } from "../text-boundaries.ts";
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { highlightSyntaxCode } from "./highlighter.ts";
 
@@ -43,7 +44,7 @@ export type MarkdownSyntaxPatchStats = {
 };
 
 function highlightMarkdownCode(code: string, lang?: string): string[] {
-    return markdownSyntaxEnabled ? highlightSyntaxCode(code, lang) : splitMarkdownCodeLines(code);
+    return markdownSyntaxEnabled ? highlightSyntaxCode(code, lang) : normalizedCodeLines(code);
 }
 
 /** Returns Markdown syntax patch counters for debug diagnostics. */
@@ -107,11 +108,6 @@ export function configureMarkdownSyntaxPatch(
     prototype.render = wrapperRender;
     prototype[MARKDOWN_PATCH_STATE_KEY] = { enabled: true, originalRender, wrapperRender };
     prototype[MARKDOWN_PATCH_KEY] = true;
-}
-
-function splitMarkdownCodeLines(code: string): string[] {
-    const normalized = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    return normalized.endsWith("\n") ? normalized.slice(0, -1).split("\n") : normalized.split("\n");
 }
 
 function restoreMarkdownRender(

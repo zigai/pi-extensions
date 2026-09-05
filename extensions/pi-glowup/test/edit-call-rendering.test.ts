@@ -101,7 +101,7 @@ describe("edit call rendering", () => {
             { path: "src/rendering.ts", edits: [{ oldText: "old", newText: "new" }] },
             {
                 isError: false,
-                isPartial: false,
+                isPartial: true,
                 argsComplete: false,
                 labelMode: "lifecycle",
                 result: { content: [{ type: "text", text: "done" }], details: {} },

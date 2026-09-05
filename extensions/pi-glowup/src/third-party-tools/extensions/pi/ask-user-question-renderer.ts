@@ -5,6 +5,7 @@ import {
 } from "../../../rendering/core.ts";
 import {
     shouldDeferSimpleToolCall,
+    toolStatusLabel,
     type ToolLabelMode,
     type ToolLifecycleLabels,
 } from "../../../rendering/status-labels.ts";
@@ -18,7 +19,6 @@ import {
     DEFAULT_TOOL_CALL_PREVIEW_LINES,
     renderSimpleResult,
     renderThirdPartyCall,
-    thirdPartyStatusLabel,
 } from "../../call-rendering.ts";
 import { previewArgsForContext, textOutput } from "../../previews.ts";
 import { jsonValueParser, type JsonValue } from "../../../json-value.ts";
@@ -249,7 +249,7 @@ export function createAskUserQuestionRenderer(
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
             return renderThirdPartyCall(theme, {
                 state: callState(context),
-                statusText: thirdPartyStatusLabel(labelMode, context, labels),
+                statusText: toolStatusLabel(labelMode, context, labels),
                 body: summarizeAskUserQuestionArgs(
                     jsonValueParser.parse(args),
                     theme,

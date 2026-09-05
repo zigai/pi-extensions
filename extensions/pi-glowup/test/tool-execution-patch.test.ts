@@ -124,6 +124,37 @@ function createPrototype(): FakeToolExecutionPrototype {
 }
 
 describe("tool execution patches", () => {
+    it("observes ready generic rows before renderer selection without replacing their renderer", () => {
+        const prototype = createPrototype();
+        const observed: object[] = [];
+        installBuiltInToolRendererPatch(
+            {
+                observeRow: (row) => {
+                    observed.push(row);
+                },
+                renderCall: () => undefined,
+                renderResult: () => undefined,
+            },
+            prototype,
+        );
+        const instance = {
+            toolName: "generic_external",
+            toolCallId: "generic",
+            argsComplete: false,
+        };
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
+        expect(observed).toEqual([]);
+        instance.argsComplete = true;
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
+        expect(observed).toEqual([instance]);
+        expect(
+            prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["existing renderer"]);
+        configureBuiltInToolRendererPatch(false, undefined, prototype);
+        prototype.hasRendererDefinition.call(instance);
+        expect(observed).toHaveLength(2);
+    });
+
     it.each([
         { name: "JSON arguments", args: { query: "select 1" }, expected: { query: "select 1" } },
         { name: "non-JSON arguments", args: { query: () => "select 1" }, expected: undefined },
@@ -346,6 +377,42 @@ describe("tool execution patches", () => {
 
         expect(Object.getOwnPropertyDescriptors(prototype)).toMatchObject(originalDescriptors);
         expect(prototype.getRenderShell.call(readInstance)).toBe("default");
+    });
+
+    it("reactivates all built-in slots when a later extension wraps only the call slot", () => {
+        const prototype = createPrototype();
+        const instance: FakeToolExecutionInstance = { toolName: "read", builtInToolDefinition: {} };
+        const options = {
+            renderCall: () => ({ render: () => ["glowup call"], invalidate: noop }),
+            renderResult: () => ({ render: () => ["glowup result"], invalidate: noop }),
+        };
+        configureBuiltInToolRendererPatch(true, options, prototype);
+        const originalCall = prototype.getCallRenderer.bind(instance);
+        prototype.getCallRenderer = () => originalCall();
+        const laterDescriptor = Object.getOwnPropertyDescriptor(prototype, "getCallRenderer");
+        configureBuiltInToolRendererPatch(false, undefined, prototype);
+        expect(prototype.getRenderShell.call(instance)).toBe("default");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
+        configureBuiltInToolRendererPatch(true, options, prototype);
+        expect(prototype.getRenderShell.call(instance)).toBe("self");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
+        expect(
+            prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
+        ).toEqual(["glowup call"]);
+        expect(
+            prototype.getResultRenderer
+                .call(instance)?.(
+                    { content: [] },
+                    { expanded: false, isPartial: false },
+                    plainTheme,
+                    renderContext,
+                )
+                .render(80),
+        ).toEqual(["glowup result"]);
+        expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
+            laterDescriptor,
+        );
+        configureBuiltInToolRendererPatch(false, undefined, prototype);
     });
 
     it("leaves built-in tools on their original render path", () => {
@@ -573,7 +640,7 @@ describe("tool execution patches", () => {
         expect(prototype.getRenderShell.call(instance)).toBe("default");
     });
 
-    it("disables third-party behavior without clobbering later wrappers", () => {
+    it("disables and re-enables all third-party slots without clobbering later wrappers", () => {
         const prototype = createPrototype();
         const instance: FakeToolExecutionInstance = {
             toolName: "custom_tool",
@@ -608,6 +675,14 @@ describe("tool execution patches", () => {
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["existing renderer"]);
+        expect(prototype.getRenderShell.call(instance)).toBe("default");
+        configureThirdPartyToolRendererPatch(true, undefined, prototype);
+        expect(prototype.getRenderShell.call(instance)).toBe("self");
+        expect(prototype.hasRendererDefinition.call(instance)).toBe(true);
+        expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
+            laterRendererDescriptor,
+        );
+        configureThirdPartyToolRendererPatch(false, undefined, prototype);
     });
 
     it("preserves opted-out third-party tools", () => {

@@ -396,11 +396,6 @@ function boundedWriteContentPreview(content: string, maxBytes: number | null): s
     return `${truncateUtf8ByGrapheme(content, maxContentBytes)}${WRITE_PREVIEW_TRUNCATION_SUFFIX}`;
 }
 
-/** Returns the built-in write tool content argument when it is available to render. */
-function writeContentFromArgs(args: WriteCallArgs): string | undefined {
-    return args.content;
-}
-
 /** Renders a built-in write call with a bounded preview of the content being written. */
 export function renderWriteCallPreview(
     args: WriteCallArgs,
@@ -408,7 +403,7 @@ export function renderWriteCallPreview(
     context: WriteCallContext,
 ): Component {
     const path = args.path ?? "";
-    const content = writeContentFromArgs(args);
+    const content = args.content;
     const labelMode = context.labelMode ?? "static";
     const mutationSettings = context.mutationSettings ?? PREVIEW_MUTATION_SETTINGS;
     const statusText = toolStatusLabel(labelMode, context, {
@@ -484,5 +479,5 @@ export function renderWriteCallPreview(
 
 /** Returns an empty successful write result when the call renderer already showed content. */
 export function renderSuccessfulWriteResultFallback(args: WriteCallArgs): Component | undefined {
-    return writeContentFromArgs(args) === undefined ? undefined : emptyComponent();
+    return args.content === undefined ? undefined : emptyComponent();
 }

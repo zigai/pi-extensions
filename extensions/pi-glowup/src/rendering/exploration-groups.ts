@@ -25,20 +25,31 @@ type ExplorationGroup = {
     ownerInvalidate: (() => void) | undefined;
 };
 
+/** Transcript entry and content offsets; stable until the session branch is reset. */
+export type ExplorationSourcePosition = readonly [entry: number, content: number];
+
 export type ExplorationGroupStoreStats = {
     readonly groups: number;
     readonly toolCalls: number;
+    readonly pendingBoundaries: number;
 };
 
 export class ExplorationGroupStore {
     private activeGroup: ExplorationGroup | undefined;
     private readonly groupsByToolCallId = new Map<string, ExplorationGroup>();
     private readonly groupsInInsertionOrder: ExplorationGroup[] = [];
-    private readonly boundaryToolCallIds = new Set<string>();
+    private observedRows = new WeakSet<object>();
+    private readonly pendingBoundaries = new Map<string, "event" | "row">();
+    private latestSourcePosition: ExplorationSourcePosition | undefined;
     private readonly groupStartToolCallIds = new Set<string>();
     private readonly maxRetainedToolCalls: number;
 
-    constructor(maxRetainedToolCalls = DEFAULT_MAX_RETAINED_TOOL_CALLS) {
+    constructor(
+        maxRetainedToolCalls = DEFAULT_MAX_RETAINED_TOOL_CALLS,
+        private readonly sourcePosition?: (
+            toolCallId: string,
+        ) => ExplorationSourcePosition | undefined,
+    ) {
         this.maxRetainedToolCalls = Math.max(1, Math.floor(maxRetainedToolCalls));
     }
 
@@ -56,6 +67,7 @@ export class ExplorationGroupStore {
             return this.decisionFor(context.toolCallId, existingGroup);
         }
 
+        this.advanceSourcePosition(context.toolCallId);
         if (this.groupStartToolCallIds.has(context.toolCallId)) {
             this.closeActiveGroup();
         }
@@ -79,19 +91,60 @@ export class ExplorationGroupStore {
         this.activeGroup = undefined;
     }
 
-    /**
-     * Closes the active group the first time a non-exploration tool call is observed.
-     *
-     * Tool components are rendered repeatedly as Pi redraws the transcript. Remembering
-     * the boundary by call ID prevents an older component from closing a newer group on
-     * every repaint.
-     */
-    registerBoundary(toolCallId: string): void {
-        if (this.boundaryToolCallIds.has(toolCallId)) {
+    /** Observe every row when its arguments or result become ready, including generic and preserved external rows. */
+    observeRow<Row extends object>(row: Row, toolCallId: string, exploration: boolean): void {
+        if (this.observedRows.has(row)) return;
+        this.observedRows.add(row);
+        if (exploration) {
+            this.advanceSourcePosition(toolCallId);
             return;
         }
-        this.boundaryToolCallIds.add(toolCallId);
+        this.observeBoundary(toolCallId, "row");
+    }
+
+    /** The execution-start event is the sole live boundary event source. */
+    registerBoundary(toolCallId: string): void {
+        this.observeBoundary(toolCallId, "event");
+    }
+
+    private observeBoundary(toolCallId: string, source: "row" | "event"): void {
+        const pending = this.pendingBoundaries.get(toolCallId);
+        if (pending !== undefined) {
+            if (pending !== source) {
+                this.pendingBoundaries.delete(toolCallId);
+            }
+            return;
+        }
+
+        // Source order is authoritative even after >maxRetainedToolCalls unmatched
+        // events/rows. In particular, a historical row first observed late must not
+        // close a newer live group. Row identity alone cannot establish that fact.
+        const advanced = this.advanceSourcePosition(toolCallId);
+        if (advanced === false) return;
+        if (advanced === undefined) {
+            // Detached/synthetic rows may have no transcript source yet. This is only
+            // a bounded handoff, not a permanent second index of the session's IDs.
+            this.pendingBoundaries.set(toolCallId, source);
+            while (this.pendingBoundaries.size > this.maxRetainedToolCalls) {
+                const oldest = this.pendingBoundaries.keys().next();
+                if (oldest.done === true) break;
+                this.pendingBoundaries.delete(oldest.value);
+            }
+        }
         this.closeActiveGroup();
+    }
+
+    private advanceSourcePosition(toolCallId: string): boolean | undefined {
+        const position = this.sourcePosition?.(toolCallId);
+        if (position === undefined) return undefined;
+        const latest = this.latestSourcePosition;
+        if (
+            latest !== undefined &&
+            (position[0] < latest[0] || (position[0] === latest[0] && position[1] <= latest[1]))
+        )
+            return false;
+        this.latestSourcePosition = position;
+        return true;
     }
 
     /** Marks the first exploration call in a historical assistant tool-call run. */
@@ -108,7 +161,9 @@ export class ExplorationGroupStore {
         this.activeGroup = undefined;
         this.groupsByToolCallId.clear();
         this.groupsInInsertionOrder.length = 0;
-        this.boundaryToolCallIds.clear();
+        this.observedRows = new WeakSet();
+        this.pendingBoundaries.clear();
+        this.latestSourcePosition = undefined;
         this.groupStartToolCallIds.clear();
     }
 
@@ -116,6 +171,7 @@ export class ExplorationGroupStore {
         return {
             groups: this.groupsInInsertionOrder.length,
             toolCalls: this.groupsByToolCallId.size,
+            pendingBoundaries: this.pendingBoundaries.size,
         };
     }
 
@@ -133,7 +189,7 @@ export class ExplorationGroupStore {
     }
 
     private trimRetainedGroups(): void {
-        while (this.retainedToolCallCount() > this.maxRetainedToolCalls) {
+        while (this.groupsByToolCallId.size > this.maxRetainedToolCalls) {
             const evictedGroup = this.groupsInInsertionOrder.find(
                 (group) => group !== this.activeGroup,
             );
@@ -142,14 +198,6 @@ export class ExplorationGroupStore {
             }
             this.evictGroup(evictedGroup);
         }
-    }
-
-    private retainedToolCallCount(): number {
-        let retainedToolCalls = 0;
-        for (const group of this.groupsInInsertionOrder) {
-            retainedToolCalls += group.actionsByToolCallId.size;
-        }
-        return retainedToolCalls;
     }
 
     private evictGroup(group: ExplorationGroup): void {

@@ -225,44 +225,40 @@ const MAX_COLLAPSED_SCRIPT_PREVIEW_BYTES = 64 * 1024;
 const UTF8_TRUNCATION_SUFFIX = "…";
 const RETAINED_OUTPUT_LOG_ENV = "PI_GLOWUP_RETAINED_OUTPUT_LOG";
 
-function fg(theme: GlowupRenderTheme, token: ThemeColor, text: string): string {
-    return theme.fg(token, text);
-}
-
 function actionText(
     theme: GlowupRenderTheme,
     text: string,
     options?: { readonly bold?: boolean },
 ): string {
     const styled = options?.bold === true ? theme.bold(text) : text;
-    return fg(theme, "toolTitle", styled);
+    return theme.fg("toolTitle", styled);
 }
 
 function shellCommand(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "syntaxFunction", text);
+    return theme.fg("syntaxFunction", text);
 }
 
 function shellText(theme: GlowupRenderTheme, text: string): string {
     if (text.length === 0) {
         return "";
     }
-    return fg(theme, "toolTitle", text);
+    return theme.fg("toolTitle", text);
 }
 
 function shellOperator(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "syntaxOperator", text);
+    return theme.fg("syntaxOperator", text);
 }
 
 function shellFlag(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "syntaxKeyword", text);
+    return theme.fg("syntaxKeyword", text);
 }
 
 function shellKeyword(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "syntaxKeyword", text);
+    return theme.fg("syntaxKeyword", text);
 }
 
 function shellString(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "syntaxString", text);
+    return theme.fg("syntaxString", text);
 }
 
 type ShellCommandKind = "generic" | "interpreter" | "script" | "subcommands";
@@ -380,34 +376,34 @@ const initialShellHighlightState: ShellHighlightState = {
 };
 
 function dim(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "dim", text);
+    return theme.fg("dim", text);
 }
 
 function muted(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "muted", text);
+    return theme.fg("muted", text);
 }
 
 function pathText(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "accent", text);
+    return theme.fg("accent", text);
 }
 
 function instructionPathText(theme: GlowupRenderTheme, text: string): string {
     if (renderingAppearance.instructionPathColor !== null) {
         return `${trueColorOpen(renderingAppearance.instructionPathColor, false)}${text}${ansiStyles.color.close}`;
     }
-    return fg(theme, "customMessageLabel", text);
+    return theme.fg("customMessageLabel", text);
 }
 
 function green(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "toolDiffAdded", text);
+    return theme.fg("toolDiffAdded", text);
 }
 
 function red(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "toolDiffRemoved", text);
+    return theme.fg("toolDiffRemoved", text);
 }
 
 function success(theme: GlowupRenderTheme, text: string): string {
-    return fg(theme, "success", text);
+    return theme.fg("success", text);
 }
 
 export function collapseHome(path: string): string {
@@ -480,15 +476,6 @@ function wrapStyledText(text: string, width: number): string[] {
     return wrapped.map((line) => truncateToWidth(line, safeWidth, ""));
 }
 
-function wrapSinglePhysicalLine(
-    line: string,
-    width: number,
-    firstPrefix: string,
-    restPrefix: string,
-): string[] {
-    return wrapSinglePhysicalLineWithContinuation(line, width, firstPrefix, restPrefix);
-}
-
 function wrapSinglePhysicalLineWithContinuation(
     line: string,
     width: number,
@@ -522,7 +509,9 @@ function wrapPrefixedLine(
 
     for (const physicalLine of physicalLines) {
         const prefix = rendered.length === 0 ? firstPrefix : restPrefix;
-        rendered.push(...wrapSinglePhysicalLine(physicalLine, width, prefix, restPrefix));
+        rendered.push(
+            ...wrapSinglePhysicalLineWithContinuation(physicalLine, width, prefix, restPrefix),
+        );
     }
 
     return rendered;
@@ -1268,9 +1257,7 @@ function unquoteCommandWord(word: string): string {
 }
 
 function scriptInterpreterForWord(word: string): ScriptInterpreter | undefined {
-    const cleanWord = unquoteCommandWord(word);
-    const parts = cleanWord.split(/[\\/]/);
-    const basename = (parts[parts.length - 1] ?? cleanWord).toLowerCase().replace(/\.exe$/, "");
+    const basename = commandBasename(word);
 
     if (basename === "py" || /^python(?:\d+(?:\.\d+)?)?$/.test(basename)) {
         return { displayName: "Python", language: "python" };
@@ -3042,7 +3029,7 @@ function styleDiffContent(
         return content;
     }
     if (kind === "insert") {
-        return fg(theme, "toolOutput", content);
+        return theme.fg("toolOutput", content);
     }
     if (kind === "delete") {
         return muted(theme, content);
