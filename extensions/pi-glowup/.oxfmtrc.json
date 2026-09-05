@@ -1,3 +1,8 @@
 {
-  "ignorePatterns": ["README.md", "config.schema.json", "src/settings.prevalidated.ts"]
+  "ignorePatterns": [
+    "README.md",
+    "config.schema.json",
+    "src/settings.prevalidated.ts",
+    ".agents/audit/**"
+  ]
 }

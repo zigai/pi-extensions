@@ -580,10 +580,6 @@ function builtInToolName(instance: ToolExecutionInstance): BuiltInToolName | und
     return nativeBuiltInToolName(toolName) ?? compatBuiltInToolName(toolName);
 }
 
-function toolDefinition(instance: ToolExecutionInstance): PiRendererDefinition | undefined {
-    return instance.toolDefinition;
-}
-
 function currentToolResult(instance: ToolExecutionInstance): ThirdPartyToolResult | undefined {
     // Live results have their own renderer pass. Forwarding them into the call renderer in the
     // same frame couples transcript growth to footer/input updates; restored calls never start.
@@ -655,7 +651,7 @@ function shouldUseThirdPartyRenderer(
         return false;
     }
 
-    const definition = toolDefinition(instance);
+    const definition = instance.toolDefinition;
 
     const preserveInput =
         options === undefined
@@ -690,7 +686,7 @@ function rendererForInstance(
         return undefined;
     }
 
-    const definition = toolDefinition(instance);
+    const definition = instance.toolDefinition;
     const cachedRenderer = cache?.get(toolName);
     if (cachedRenderer !== undefined && cachedRenderer.definition === definition) {
         return cachedRenderer.renderer;

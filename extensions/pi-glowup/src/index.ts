@@ -345,20 +345,6 @@ function renderExplorationResult(
     return renderGlowupOutput(theme, output, renderOptions);
 }
 
-function makeMutationSummary(options: {
-    readonly label: string;
-    readonly path: string;
-    readonly added: number;
-    readonly removed: number;
-}): MutationSummary {
-    return {
-        label: options.label,
-        path: options.path,
-        added: options.added,
-        removed: options.removed,
-    };
-}
-
 function mutationLabelColumnWidth(
     context: BuiltInRenderContext,
     labelMode: ToolLabelMode,
@@ -750,10 +736,6 @@ const nativeDeletePreviews = new Map<string, DeletedTextPreview>();
 const nativeEditSnapshots = new Map<string, EditSnapshotState>();
 const nativeEditPierrePayloads = new Map<string, PierreDiffPayload>();
 
-function nativeEditPierrePayload(toolCallId: string): PierreDiffPayload | undefined {
-    return nativeEditPierrePayloads.get(toolCallId);
-}
-
 async function captureNativeEditSnapshot(
     toolCallId: string,
     cwd: string,
@@ -795,10 +777,6 @@ function trimOldestMapEntries<T>(entries: Map<string, T>, limit: number): void {
         if (oldest === undefined) return;
         entries.delete(oldest);
     }
-}
-
-function nativeDeletePreview(toolCallId: string): DeletedTextPreview | undefined {
-    return nativeDeletePreviews.get(toolCallId);
 }
 
 function persistedDeletePreview(
@@ -852,7 +830,8 @@ function renderDeleteCall(
     registerExplorationBoundary(context.toolCallId);
     const filePath = pathField(args);
     const preview =
-        nativeDeletePreview(context.toolCallId) ?? persistedDeletePreview(context.result, filePath);
+        nativeDeletePreviews.get(context.toolCallId) ??
+        persistedDeletePreview(context.result, filePath);
     const header = renderGlowupCall(theme, {
         state: callState(context),
         statusText: toolStatusLabel(labelMode, context, {
@@ -1078,12 +1057,12 @@ function renderEditCall(
     if (!isActiveToolCall(context) && preview) {
         return renderMutationCall(
             theme,
-            makeMutationSummary({
+            {
                 label: labelMode === "lifecycle" ? "Edited" : "Edit",
                 path: preview.path,
                 added: preview.added,
                 removed: preview.removed,
-            }),
+            },
             labelColumnWidth === undefined
                 ? { state: "success" }
                 : { labelColumnWidth, state: "success" },
@@ -1127,7 +1106,7 @@ function renderEditResult(
     }
 
     const pierrePayload = !context.isError
-        ? (nativeEditPierrePayload(context.toolCallId) ??
+        ? (nativeEditPierrePayloads.get(context.toolCallId) ??
           getPierreDiffPayloadFromDetails(result.details, diffRenderLimits(mutationSettings)))
         : undefined;
     if (pierrePayload) {
@@ -1186,10 +1165,7 @@ type SyntaxHighlightingLifecycleOptions = {
     readonly reportWarning: (message: string) => void;
 };
 
-async function loadSyntaxHighlighting(
-    loader: typeof refreshSyntaxHighlighting,
-    options: SyntaxHighlightingLifecycleOptions,
-): Promise<void> {
+async function loadSyntaxHighlighting(options: SyntaxHighlightingLifecycleOptions): Promise<void> {
     try {
         const projectLanguageDetection =
             options.cwd === undefined
@@ -1198,7 +1174,7 @@ async function loadSyntaxHighlighting(
                       enabled: options.config.syntax.projectLanguageDetection.enabled,
                       cwd: options.cwd,
                   };
-        await loader(process.env, {
+        await refreshSyntaxHighlighting(process.env, {
             preloadLanguages: options.config.syntax.preloadLanguages,
             projectLanguageDetection,
             reportWarning: options.reportWarning,
@@ -1206,12 +1182,6 @@ async function loadSyntaxHighlighting(
     } catch (cause: unknown) {
         options.reportWarning(`[pi-glowup] Syntax preload failed: ${errorMessage(cause)}`);
     }
-}
-
-async function restartSyntaxHighlighting(
-    options: SyntaxHighlightingLifecycleOptions,
-): Promise<void> {
-    await loadSyntaxHighlighting(refreshSyntaxHighlighting, options);
 }
 
 function errorMessage(cause: unknown): string {
@@ -1396,7 +1366,7 @@ export default function glowupExtension(pi: Pick<ExtensionAPI, "on">): void {
             clearTimeout(syntaxTimer);
             syntaxTimer = undefined;
         }
-        const syntaxTask = restartSyntaxHighlighting(pending.options);
+        const syntaxTask = loadSyntaxHighlighting(pending.options);
         pendingSyntaxTasks.add(syntaxTask);
         void syntaxTask
             .then(() => {

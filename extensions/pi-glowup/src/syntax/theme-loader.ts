@@ -37,7 +37,7 @@ export function loadSyntaxConfig(env: NodeJS.ProcessEnv = process.env): SyntaxCo
     const themePath =
         configuredThemePath !== undefined && configuredThemePath.length > 0
             ? configuredThemePath
-            : defaultThemePath();
+            : bundledSyntaxThemePath();
     return {
         enabled: true,
         themePath,
@@ -61,10 +61,6 @@ export async function loadSyntaxTheme(
         path: config.themePath,
         registration,
     };
-}
-
-function defaultThemePath(): string {
-    return bundledSyntaxThemePath();
 }
 
 function parseThemeRegistration(value: unknown, themeName: string): ThemeRegistration {
