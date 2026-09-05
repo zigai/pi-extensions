@@ -362,9 +362,11 @@ export function parseCodexCoreConfigWithDiagnostics(
                     "$.compaction.auto",
                     diagnostics,
                 ),
-                thresholdPercent: parsePercent(
+                thresholdPercent: parseIntegerInRange(
                     compaction.thresholdPercent,
                     DEFAULT_CODEX_CORE_CONFIG.compaction.thresholdPercent,
+                    1,
+                    99,
                     "$.compaction.thresholdPercent",
                     diagnostics,
                 ),
@@ -728,23 +730,6 @@ function parseBoolean(
     if (parsed !== undefined) return parsed;
     diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a boolean."));
     return fallback;
-}
-
-function parsePercent(
-    value: JsonValue | undefined,
-    fallback: number,
-    path: string,
-    diagnostics: CodexConfigDiagnostic[],
-): number {
-    if (value === undefined) return fallback;
-    const parsed = NumberSchema.decode(value);
-    if (parsed === undefined || !Number.isInteger(parsed) || parsed < 1 || parsed > 99) {
-        diagnostics.push(
-            makeConfigDiagnostic(path, "invalid", "Expected an integer from 1 to 99."),
-        );
-        return fallback;
-    }
-    return parsed;
 }
 
 function parseIntegerInRange(

@@ -120,7 +120,6 @@ export async function openCodexSettingsScreen(
                         signal.throwIfAborted();
                         const usage = await fetchCodexUsage(ctx, { signal });
                         signal.throwIfAborted();
-                        if (signal.aborted) return;
                         usageState = Result.isOk(usage)
                             ? usage.value
                             : { error: usage.error.message };
@@ -384,7 +383,9 @@ class SettingsScreenTaskOwner {
             } catch {
                 // Each task handles its own expected rejection before returning to this owner.
             }
-        })();
+        })().then(() => {
+            this.#tasks.delete(ownedTask);
+        });
         this.#tasks.add(ownedTask);
     }
 

@@ -54,6 +54,10 @@ test("registers extension handlers once per Pi API", () => {
 
     const extensionApi = testDouble<ExtensionAPI>()(api);
     extension(extensionApi);
+    assert.ok(registeredTools > 0, "first activation registers tools");
+    assert.ok(registeredCommands > 0, "first activation registers commands");
+    assert.ok(registeredRenderers > 0, "first activation registers message renderers");
+    assert.ok(registeredHandlers > 0, "first activation registers event handlers");
     const countsAfterFirstActivation = {
         registeredTools,
         registeredCommands,

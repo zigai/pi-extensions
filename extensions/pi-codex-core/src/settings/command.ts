@@ -11,7 +11,6 @@ import {
     writeCodexCoreConfig,
 } from "../config/config.ts";
 import { openCodexSettingsScreen, type CodexSettingsSaveResult } from "./screen.ts";
-import { consumeCodexRateLimitResetCredit } from "../codex/usage.ts";
 import { getCodexCommandContributions, getCodexSettingsTabs } from "./integration.ts";
 
 type CodexCommandOptions = {
@@ -71,13 +70,11 @@ async function openCodexMenu(
 
     const initialSettings = { initialConfig: options.getConfig(), additionalTabs };
     const onChange = (config: CodexCoreConfig) => saveAndApply(config, ctx, options);
-    const onConsumeResetCredit = (redeemRequestId: string) =>
-        consumeCodexRateLimitResetCredit(ctx, redeemRequestId);
     await openCodexSettingsScreen(
         ctx,
         initialTab === undefined
-            ? { ...initialSettings, onChange, onConsumeResetCredit }
-            : { ...initialSettings, initialTab, onChange, onConsumeResetCredit },
+            ? { ...initialSettings, onChange }
+            : { ...initialSettings, initialTab, onChange },
     );
 }
 

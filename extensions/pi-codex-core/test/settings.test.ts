@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { dirname, join } from "node:path";
 import { test } from "vitest";
 import {
@@ -333,6 +335,68 @@ test("contributed settings keep the changed item selected after save", async () 
     assert.doesNotMatch(rendered, /First contributed description/);
 });
 
+test("settings tasks recover from failures and dispose contributions before afterClose", async () => {
+    initTheme(undefined, false);
+    const events: string[] = [];
+    const notifications: string[] = [];
+    let changes = 0;
+    const ctx = makeSettingsContext({
+        async run(factory) {
+            const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {
+                events.push("closed");
+            });
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                component.handleInput?.(" ");
+                await new Promise((resolve) => setImmediate(resolve));
+            }
+        },
+        notify(message) {
+            notifications.push(message);
+        },
+    });
+
+    await openCodexSettingsScreen(ctx, {
+        initialConfig: DEFAULT_CODEX_CORE_CONFIG,
+        initialTab: "tasks",
+        additionalTabs: [
+            {
+                id: "tasks",
+                label: "Tasks",
+                create: () => ({
+                    getItems: () => [
+                        {
+                            id: "task",
+                            label: "Run task",
+                            description: "Run the contributed task.",
+                            currentValue: "off",
+                            values: ["off", "on"],
+                        },
+                    ],
+                    onChange() {
+                        changes += 1;
+                        if (changes === 1) throw new Error("Synchronous task failure");
+                        if (changes === 2)
+                            return Promise.reject(new Error("Asynchronous task failure"));
+                        return {
+                            afterClose() {
+                                events.push("afterClose");
+                            },
+                        };
+                    },
+                    dispose() {
+                        events.push("disposed");
+                    },
+                }),
+            },
+        ],
+        onChange: () => ({ ok: false }),
+    });
+
+    assert.equal(changes, 3);
+    assert.deepEqual(notifications, ["Synchronous task failure", "Asynchronous task failure"]);
+    assert.deepEqual(events, ["closed", "disposed", "afterClose"]);
+});
+
 test("settings screen saves standalone web search mode", async () => {
     initTheme(undefined, false);
     const ctx = makeSettingsContext({
@@ -410,6 +474,11 @@ test("settings screen renders a description for every setting", async () => {
             "Use OpenAI Codex responses compaction checkpoints when available.",
             "Automatically run native Codex compaction between turns.",
             "Context usage percentage that triggers native auto-compaction.",
+            "Resume transiently failed Codex turns after Pi exhausts its own retries.",
+            "Hold text follow-ups during a Codex turn and deliver them together after it settles.",
+            "Additional delayed resume attempts after Pi's provider retries fail.",
+            "Initial outage cooldown; later recovery attempts back off exponentially.",
+            "Maximum cooldown between automatic recovery attempts.",
         ],
         tools: [
             "Codex web.run / web_run search tool.",
@@ -455,12 +524,18 @@ test("settings screen renders a description for every setting", async () => {
             onChange: () => ({ ok: false }),
         });
 
-        const rendered = renderedSelections.join("\n");
-        for (const description of descriptionsByTab[tab]) {
+        for (const [index, description] of descriptionsByTab[tab].entries()) {
+            const rendered = renderedSelections[index];
+            assert.ok(rendered, `${tab} selection ${index} was not rendered`);
             assert.ok(
                 rendered.includes(description),
-                `${tab} description was not rendered: ${description}`,
+                `${tab} selection ${index} did not render its description: ${description}`,
             );
+            for (const otherDescription of descriptionsByTab[tab]) {
+                if (otherDescription !== description) {
+                    assert.equal(rendered.includes(otherDescription), false);
+                }
+            }
         }
     }
 });
@@ -505,6 +580,86 @@ test("settings screen cancels owned reset work when the custom UI closes", async
     });
 
     assert.equal(resetTaskCancelled, true);
+});
+
+test("settings screen aborts its default reset HTTP request when closed", async () => {
+    let receiveRequest: (() => void) | undefined;
+    const requestReceived = new Promise<void>((resolve) => {
+        receiveRequest = resolve;
+    });
+    let observeDisconnect: (() => void) | undefined;
+    const disconnected = new Promise<void>((resolve) => {
+        observeDisconnect = resolve;
+    });
+    const requests: Array<{ method: string | undefined; url: string | undefined; body: string }> =
+        [];
+    const server = createServer((request, response) => {
+        let body = "";
+        request.setEncoding("utf8");
+        request.on("data", (chunk: string) => {
+            body += chunk;
+        });
+        request.on("end", () => {
+            requests.push({ method: request.method, url: request.url, body });
+            receiveRequest?.();
+        });
+        response.on("close", () => observeDisconnect?.());
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+        const address = server.address();
+        assert.ok(address && typeof address !== "string");
+        const ctx = makeSettingsContext({
+            model: {
+                ...DEFAULT_TEST_EXTENSION_MODEL,
+                baseUrl: `http://127.0.0.1:${address.port}/backend-api`,
+            },
+            async run(factory) {
+                const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
+                component.handleInput?.("\x1b[B");
+                component.handleInput?.(" ");
+                component.handleInput?.("y");
+                await requestReceived;
+            },
+        });
+        Object.defineProperty(ctx, "modelRegistry", {
+            value: {
+                getApiKeyAndHeaders: async () => ({
+                    ok: true,
+                    apiKey: "local-reset-test",
+                    headers: { "chatgpt-account-id": "settings-default-reset" },
+                }),
+            },
+        });
+
+        await openCodexSettingsScreen(ctx, {
+            initialConfig: DEFAULT_CODEX_CORE_CONFIG,
+            initialTab: "usage",
+            initialUsage: {
+                limits: [],
+                resetCredits: { availableCount: 1, credits: [], raw: {} },
+                raw: {},
+            },
+            onChange: () => ({ ok: false }),
+        });
+        await disconnected;
+        assert.equal(requests.length, 1);
+        assert.equal(requests[0]?.method, "POST");
+        assert.equal(requests[0]?.url, "/backend-api/wham/rate-limit-reset-credits/consume");
+        const body = JsonObjectDecoder.Parse(JSON.parse(requests[0]?.body ?? ""));
+        assert.deepEqual(Object.keys(body), ["redeem_request_id"]);
+        assert.equal(typeof body.redeem_request_id, "string");
+        assert.ok(body.redeem_request_id.length > 0);
+    } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) => {
+            server.close((cause) => {
+                if (cause) reject(cause);
+                else resolve();
+            });
+        });
+    }
 });
 
 type SettingsScreenComponent = {

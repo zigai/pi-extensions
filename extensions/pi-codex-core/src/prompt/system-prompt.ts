@@ -352,7 +352,6 @@ function buildPiGuidelinesSection(options: BuildSystemPromptOptions): string {
     addGuideline("Be concise in your responses");
     addGuideline("Show file paths clearly when working with files");
 
-    if (guidelines.length === 0) return "";
     return ["Guidelines:", ...guidelines.map((guideline) => `- ${guideline}`)].join("\n");
 }
 
