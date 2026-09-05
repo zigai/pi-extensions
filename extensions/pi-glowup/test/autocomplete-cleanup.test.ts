@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { configureAutocompleteCleanupPatch } from "../src/patches/autocomplete-cleanup.ts";
 
-function installAutocompleteCleanupPatch(prototype: object): void {
+function installAutocompleteCleanupPatch(prototype: FakePrototype): void {
     configureAutocompleteCleanupPatch(true, prototype);
 }
 
@@ -94,33 +94,30 @@ describe("autocomplete cleanup patch", () => {
 
     it("restores the original autocomplete cleanup method when disabled", () => {
         const prototype = createPrototype();
-        const originalClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
+        const originalClearAutocompleteUi = prototype.clearAutocompleteUi;
 
         configureAutocompleteCleanupPatch(true, prototype);
         configureAutocompleteCleanupPatch(false, prototype);
 
-        expect(Reflect.get(prototype, "clearAutocompleteUi")).toBe(originalClearAutocompleteUi);
+        expect(prototype.clearAutocompleteUi).toBe(originalClearAutocompleteUi);
     });
 
     it("does not clobber autocomplete cleanup wrappers installed later", () => {
         const prototype = createPrototype();
         configureAutocompleteCleanupPatch(true, prototype);
-        const originalClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
-        if (typeof originalClearAutocompleteUi !== "function") {
-            throw new Error("expected Glowup autocomplete wrapper");
-        }
+        const originalClearAutocompleteUi = prototype.clearAutocompleteUi;
         prototype.clearAutocompleteUi = function clearAutocompleteUiWithLaterWrapper(
             this: FakeEditor,
         ): void {
             originalClearAutocompleteUi.call(this);
         };
-        const laterClearAutocompleteUi = Reflect.get(prototype, "clearAutocompleteUi");
+        const laterClearAutocompleteUi = prototype.clearAutocompleteUi;
         const editor = createEditor({ prefix: "/set", active: true, clearOnShrink: true });
 
         configureAutocompleteCleanupPatch(false, prototype);
         prototype.clearAutocompleteUi.call(editor);
 
-        expect(Reflect.get(prototype, "clearAutocompleteUi")).toBe(laterClearAutocompleteUi);
+        expect(prototype.clearAutocompleteUi).toBe(laterClearAutocompleteUi);
         expect(editor.active).toBe(false);
         expect(editor.tui.requestRender).not.toHaveBeenCalled();
     });

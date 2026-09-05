@@ -2,7 +2,9 @@ import { Container, Loader, Spacer, Text, type TUI } from "@earendil-works/pi-tu
 import { describe, expect, it } from "vitest";
 import { configureWorkingWidgetSpacingPatch } from "../src/patches/working-widget-spacing.ts";
 
-function installWorkingWidgetSpacingPatch(prototype: object = Container.prototype): void {
+function installWorkingWidgetSpacingPatch(
+    prototype: typeof Container.prototype = Container.prototype,
+): void {
     configureWorkingWidgetSpacingPatch(true, prototype);
 }
 
@@ -63,46 +65,56 @@ describe("working widget spacing patch", () => {
 
     it("is idempotent for a patched prototype", () => {
         installWorkingWidgetSpacingPatch();
-        const patchedRender = Reflect.get(Container.prototype, "render");
+        const patchedRenderDescriptor = Object.getOwnPropertyDescriptor(
+            Container.prototype,
+            "render",
+        );
 
         installWorkingWidgetSpacingPatch();
 
-        expect(Reflect.get(Container.prototype, "render")).toBe(patchedRender);
+        expect(Object.getOwnPropertyDescriptor(Container.prototype, "render")).toEqual(
+            patchedRenderDescriptor,
+        );
     });
 
     it("restores the original container render method when disabled", () => {
-        const prototype = {
-            render(): string[] {
-                return ["original"];
-            },
+        const prototype: typeof Container.prototype = Object.create(Container.prototype);
+        prototype.render = function render(): string[] {
+            return ["original"];
         };
-        const originalRender = Reflect.get(prototype, "render");
+        const originalRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
 
         configureWorkingWidgetSpacingPatch(true, prototype);
         configureWorkingWidgetSpacingPatch(false, prototype);
 
-        expect(Reflect.get(prototype, "render")).toBe(originalRender);
+        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(
+            originalRenderDescriptor,
+        );
     });
 
     it("does not clobber container render wrappers installed later", () => {
-        const prototype = {
-            render(_width: number): string[] {
-                return ["original"];
-            },
+        const prototype: typeof Container.prototype = Object.create(Container.prototype);
+        prototype.render = function render(_width: number): string[] {
+            return ["original"];
         };
         configureWorkingWidgetSpacingPatch(true, prototype);
-        const originalRender = Reflect.get(prototype, "render");
-        if (typeof originalRender !== "function") {
-            throw new Error("expected Glowup working-widget wrapper");
+        const patchedPrototype: typeof Container.prototype = Object.create(prototype);
+        const patchedRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
+        if (patchedRenderDescriptor === undefined) {
+            throw new Error("expected Glowup container render wrapper");
         }
-        prototype.render = function renderWithLaterWrapper(width: number): string[] {
-            return originalRender.call(this, width);
+        Object.defineProperty(patchedPrototype, "render", patchedRenderDescriptor);
+        prototype.render = function renderWithLaterWrapper(
+            this: Container,
+            width: number,
+        ): string[] {
+            return patchedPrototype.render.call(this, width);
         };
-        const laterRender = Reflect.get(prototype, "render");
+        const laterRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
 
         configureWorkingWidgetSpacingPatch(false, prototype);
 
-        expect(Reflect.get(prototype, "render")).toBe(laterRender);
+        expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(laterRenderDescriptor);
         expect(prototype.render(80)).toEqual(["original"]);
     });
 });

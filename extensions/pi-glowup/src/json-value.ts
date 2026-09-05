@@ -1,4 +1,4 @@
-import Type, { type Static } from "typebox";
+import Type from "typebox";
 import { Value } from "typebox/value";
 
 export const jsonValueSchema = Type.Cyclic(
@@ -17,13 +17,21 @@ export const jsonValueSchema = Type.Cyclic(
 
 export const jsonObjectSchema = Type.Record(Type.String(), jsonValueSchema);
 
-export type JsonValue = Static<typeof jsonValueSchema>;
-export type JsonObject = Static<typeof jsonObjectSchema>;
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonArray = ReadonlyArray<JsonValue>;
+export interface JsonObject {
+    readonly [key: string]: JsonValue;
+}
+export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
 
 export const jsonValueParser = {
     parse(value: unknown): JsonValue | undefined {
         try {
-            return Value.Parse(jsonValueSchema, value);
+            if (value === undefined || value === null || !Value.Check(jsonValueSchema, value))
+                return undefined;
+            const val: unknown = value;
+            // SAFETY: Value.Check proves value conforms to jsonValueSchema.
+            return val as JsonValue;
         } catch {
             return undefined;
         }
@@ -32,10 +40,10 @@ export const jsonValueParser = {
 
 export const jsonObjectParser = {
     parse(value: unknown): JsonObject | undefined {
-        try {
-            return Value.Parse(jsonObjectSchema, value);
-        } catch {
+        if (value === undefined || value === null || !Value.Check(jsonObjectSchema, value))
             return undefined;
-        }
+        const val: unknown = value;
+        // SAFETY: Value.Check proves value conforms to jsonObjectSchema.
+        return val as JsonObject;
     },
 };

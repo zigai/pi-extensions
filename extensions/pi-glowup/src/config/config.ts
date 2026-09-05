@@ -174,7 +174,7 @@ function isNodeErrorWithCode(cause: unknown, code: string): boolean {
     return nodeErrorParser.parse(cause)?.code === code;
 }
 
-function serializeJson(value: unknown): string {
+function serializeJson(value: JsonValue): string {
     return `${JSON.stringify(value, null, 2)}\n`;
 }
 

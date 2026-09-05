@@ -1,75 +1,29 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import Type, { type Static } from "typebox";
+import { Value } from "typebox/value";
+import { jsonValueSchema } from "../src/json-value.js";
 
-type PackageJson = {
-    readonly exports: Readonly<Record<string, unknown>> | undefined;
-    readonly dependencies: Readonly<Record<string, string>> | undefined;
-    readonly devDependencies: Readonly<Record<string, string>> | undefined;
-    readonly peerDependencies: Readonly<Record<string, string>> | undefined;
-    readonly peerDependenciesMeta:
-        | Readonly<Record<string, { readonly optional?: boolean }>>
-        | undefined;
-};
+const packageJsonSchema = Type.Object({
+    exports: Type.Optional(Type.Record(Type.String(), jsonValueSchema)),
+    dependencies: Type.Optional(Type.Record(Type.String(), Type.String())),
+    devDependencies: Type.Optional(Type.Record(Type.String(), Type.String())),
+    peerDependencies: Type.Optional(Type.Record(Type.String(), Type.String())),
+    peerDependenciesMeta: Type.Optional(
+        Type.Record(
+            Type.String(),
+            Type.Object({
+                optional: Type.Optional(Type.Boolean()),
+            }),
+        ),
+    ),
+});
+
+type PackageJson = Static<typeof packageJsonSchema>;
 
 function readPackageJson(): PackageJson {
-    const value: unknown = JSON.parse(readFileSync("package.json", "utf8"));
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw new Error("package.json must contain an object");
-    }
-
-    return {
-        exports: parseUnknownRecord(Reflect.get(value, "exports")),
-        dependencies: parseStringRecord(Reflect.get(value, "dependencies")),
-        devDependencies: parseStringRecord(Reflect.get(value, "devDependencies")),
-        peerDependencies: parseStringRecord(Reflect.get(value, "peerDependencies")),
-        peerDependenciesMeta: parseOptionalPeerMetaRecord(
-            Reflect.get(value, "peerDependenciesMeta"),
-        ),
-    };
-}
-
-function parseUnknownRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return undefined;
-    }
-    const record: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value)) {
-        record[key] = item;
-    }
-    return record;
-}
-
-function parseStringRecord(value: unknown): Readonly<Record<string, string>> | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return undefined;
-    }
-
-    const record: Record<string, string> = {};
-    for (const [key, item] of Object.entries(value)) {
-        if (typeof item !== "string") {
-            return undefined;
-        }
-        record[key] = item;
-    }
-    return record;
-}
-
-function parseOptionalPeerMetaRecord(
-    value: unknown,
-): Readonly<Record<string, { readonly optional?: boolean }>> | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return undefined;
-    }
-
-    const record: Record<string, { readonly optional?: boolean }> = {};
-    for (const [key, item] of Object.entries(value)) {
-        if (typeof item !== "object" || item === null || Array.isArray(item)) {
-            return undefined;
-        }
-        const optional = Reflect.get(item, "optional");
-        record[key] = typeof optional === "boolean" ? { optional } : {};
-    }
-    return record;
+    const raw: unknown = JSON.parse(readFileSync("package.json", "utf8"));
+    return Value.Parse(packageJsonSchema, raw);
 }
 
 describe("package manifest", () => {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import { call, text } from "../src/tool-rendering/protocol.ts";
+import type { JsonValue } from "../src/json-value.js";
 import type {
-    ThirdPartyToolRenderer,
     ThirdPartyToolRendererPlugin,
     ThirdPartyToolResult,
 } from "../src/third-party-tools/renderers.ts";
@@ -11,6 +11,7 @@ import {
     configureCompletedLineCache,
     configureThirdPartyToolRendererPatch,
     toolRendererPatchStats,
+    type BuiltInToolRenderContext,
 } from "../src/patches/tool-execution-patch.ts";
 
 function installBuiltInToolRendererPatch(
@@ -44,19 +45,23 @@ type FakeComponent = {
     invalidate(): void;
 };
 
-type FakeCallRenderer = ThirdPartyToolRenderer["renderCall"];
-type FakeResultRenderer = ThirdPartyToolRenderer["renderResult"];
+type FakeCallRenderer = (
+    args: BuiltInToolRenderContext["args"],
+    theme: GlowupRenderTheme,
+    context: FakeRenderContext,
+) => FakeComponent;
+type FakeResultRenderer = (
+    result: ThirdPartyToolResult,
+    options: { readonly expanded: boolean; readonly isPartial: boolean },
+    theme: GlowupRenderTheme,
+    context: FakeRenderContext,
+) => FakeComponent;
 
-type FakeRenderContext = {
-    readonly args: unknown;
-    readonly toolCallId: string;
-    readonly executionStarted: boolean;
-    readonly argsComplete: boolean;
-    readonly isPartial: boolean;
-    readonly expanded: boolean;
-    readonly showImages: boolean;
-    readonly isError: boolean;
-};
+type FakeRenderContext = Omit<
+    BuiltInToolRenderContext,
+    "cwd" | "state" | "invalidate" | "lastComponent"
+> &
+    Partial<Pick<BuiltInToolRenderContext, "cwd" | "state" | "invalidate" | "lastComponent">>;
 
 type FakeToolExecutionInstance = {
     readonly toolName: string;
@@ -66,11 +71,17 @@ type FakeToolExecutionInstance = {
     readonly result?: unknown;
 };
 
+type FakeToolExecutionComponent = {
+    readonly toolName?: string;
+    readonly toolDefinition?: unknown;
+    readonly builtInToolDefinition?: unknown;
+};
+
 type FakeToolExecutionPrototype = {
-    getCallRenderer(this: object): FakeCallRenderer | undefined;
-    getResultRenderer(this: object): FakeResultRenderer | undefined;
-    getRenderShell(this: object): "default" | "self";
-    hasRendererDefinition(this: object): boolean;
+    getCallRenderer(this: FakeToolExecutionComponent): FakeCallRenderer | undefined;
+    getResultRenderer(this: FakeToolExecutionComponent): FakeResultRenderer | undefined;
+    getRenderShell(this: FakeToolExecutionComponent): "default" | "self";
+    hasRendererDefinition(this: FakeToolExecutionComponent): boolean;
 };
 
 function noop(): void {}
@@ -113,6 +124,50 @@ function createPrototype(): FakeToolExecutionPrototype {
 }
 
 describe("tool execution patches", () => {
+    it.each([
+        { name: "JSON arguments", args: { query: "select 1" }, expected: { query: "select 1" } },
+        { name: "non-JSON arguments", args: { query: () => "select 1" }, expected: undefined },
+        {
+            name: "unreadable arguments",
+            args: {
+                get query(): string {
+                    throw new Error("unreadable host property");
+                },
+            },
+            expected: undefined,
+        },
+    ])("decodes $name before third-party dispatch", ({ args, expected }) => {
+        const prototype = createPrototype();
+        const received: Array<JsonValue | undefined> = [];
+        installThirdPartyToolRendererPatch(
+            {
+                renderers: [
+                    {
+                        name: "boundary-test",
+                        matches: (name) => name === "boundary_test",
+                        createRenderer: () => ({
+                            renderCall(value, _theme, context) {
+                                received.push(value, context.args);
+                                return { render: () => ["rendered"], invalidate: noop };
+                            },
+                            renderResult: () => ({ render: () => [], invalidate: noop }),
+                        }),
+                    },
+                ],
+            },
+            prototype,
+        );
+        const instance: FakeToolExecutionInstance = {
+            toolName: "boundary_test",
+            toolDefinition: {},
+        };
+        const renderer = prototype.getCallRenderer.call(instance);
+        expect(renderer?.(args, plainTheme, { ...renderContext, args }).render(80)).toEqual([
+            "rendered",
+        ]);
+        expect(received).toEqual([expected, expected]);
+    });
+
     it("renders built-in names with Pi's resolved tool definition and no legacy field", () => {
         const prototype = createPrototype();
         installBuiltInToolRendererPatch(
@@ -265,10 +320,7 @@ describe("tool execution patches", () => {
 
     it("restores built-in tool renderers when disabled", () => {
         const prototype = createPrototype();
-        const originalGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
-        const originalGetResultRenderer = Reflect.get(prototype, "getResultRenderer");
-        const originalGetRenderShell = Reflect.get(prototype, "getRenderShell");
-        const originalHasRendererDefinition = Reflect.get(prototype, "hasRendererDefinition");
+        const originalDescriptors = Object.getOwnPropertyDescriptors(prototype);
         const readInstance: FakeToolExecutionInstance = {
             toolName: "read",
             builtInToolDefinition: {},
@@ -292,10 +344,7 @@ describe("tool execution patches", () => {
 
         configureBuiltInToolRendererPatch(false, undefined, prototype);
 
-        expect(Reflect.get(prototype, "getCallRenderer")).toBe(originalGetCallRenderer);
-        expect(Reflect.get(prototype, "getResultRenderer")).toBe(originalGetResultRenderer);
-        expect(Reflect.get(prototype, "getRenderShell")).toBe(originalGetRenderShell);
-        expect(Reflect.get(prototype, "hasRendererDefinition")).toBe(originalHasRendererDefinition);
+        expect(Object.getOwnPropertyDescriptors(prototype)).toMatchObject(originalDescriptors);
         expect(prototype.getRenderShell.call(readInstance)).toBe("default");
     });
 
@@ -443,7 +492,7 @@ describe("tool execution patches", () => {
                 renderCall: () => ({ render: () => [], invalidate: noop }),
                 glowupRendering: {
                     version: 3,
-                    parseArgs(value: unknown) {
+                    parseArgs(value: JsonValue) {
                         return value;
                     },
                     renderCall: () => call({ static: "DB Query" }, { body: text("select 1") }),
@@ -469,7 +518,7 @@ describe("tool execution patches", () => {
             toolDefinition: {
                 glowupRendering: {
                     version: 3,
-                    parseArgs(value: unknown) {
+                    parseArgs(value: JsonValue) {
                         return value;
                     },
                     renderCall: () => call({ static: label }),
@@ -509,10 +558,7 @@ describe("tool execution patches", () => {
 
     it("restores third-party renderers when disabled", () => {
         const prototype = createPrototype();
-        const originalGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
-        const originalGetResultRenderer = Reflect.get(prototype, "getResultRenderer");
-        const originalGetRenderShell = Reflect.get(prototype, "getRenderShell");
-        const originalHasRendererDefinition = Reflect.get(prototype, "hasRendererDefinition");
+        const originalDescriptors = Object.getOwnPropertyDescriptors(prototype);
         const instance: FakeToolExecutionInstance = {
             toolName: "custom_tool",
             toolDefinition: {},
@@ -523,10 +569,7 @@ describe("tool execution patches", () => {
 
         configureThirdPartyToolRendererPatch(false, undefined, prototype);
 
-        expect(Reflect.get(prototype, "getCallRenderer")).toBe(originalGetCallRenderer);
-        expect(Reflect.get(prototype, "getResultRenderer")).toBe(originalGetResultRenderer);
-        expect(Reflect.get(prototype, "getRenderShell")).toBe(originalGetRenderShell);
-        expect(Reflect.get(prototype, "hasRendererDefinition")).toBe(originalHasRendererDefinition);
+        expect(Object.getOwnPropertyDescriptors(prototype)).toMatchObject(originalDescriptors);
         expect(prototype.getRenderShell.call(instance)).toBe("default");
     });
 
@@ -538,18 +581,30 @@ describe("tool execution patches", () => {
         };
 
         configureThirdPartyToolRendererPatch(true, undefined, prototype);
-        const originalGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
-        if (typeof originalGetCallRenderer !== "function") {
+        const patchedPrototype: FakeToolExecutionPrototype = Object.create(prototype);
+        const patchedRendererDescriptor = Object.getOwnPropertyDescriptor(
+            prototype,
+            "getCallRenderer",
+        );
+        if (patchedRendererDescriptor === undefined) {
             throw new Error("expected Glowup call renderer wrapper");
         }
-        prototype.getCallRenderer = function getLaterCallRenderer(this: object) {
-            return originalGetCallRenderer.call(this);
+        Object.defineProperty(patchedPrototype, "getCallRenderer", patchedRendererDescriptor);
+        prototype.getCallRenderer = function getLaterCallRenderer(
+            this: FakeToolExecutionComponent,
+        ) {
+            return patchedPrototype.getCallRenderer.call(this);
         };
-        const laterGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+        const laterRendererDescriptor = Object.getOwnPropertyDescriptor(
+            prototype,
+            "getCallRenderer",
+        );
 
         configureThirdPartyToolRendererPatch(false, undefined, prototype);
 
-        expect(Reflect.get(prototype, "getCallRenderer")).toBe(laterGetCallRenderer);
+        expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
+            laterRendererDescriptor,
+        );
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["existing renderer"]);
@@ -621,10 +676,15 @@ describe("tool execution patches", () => {
         const prototype = createPrototype();
 
         installThirdPartyToolRendererPatch(undefined, prototype);
-        const patchedGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+        const patchedGetCallRendererDescriptor = Object.getOwnPropertyDescriptor(
+            prototype,
+            "getCallRenderer",
+        );
         installThirdPartyToolRendererPatch(undefined, prototype);
 
-        expect(Reflect.get(prototype, "getCallRenderer")).toBe(patchedGetCallRenderer);
+        expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
+            patchedGetCallRendererDescriptor,
+        );
     });
 
     it("refreshes preserve-tool options on repeat installs without stacking wrappers", () => {
@@ -635,12 +695,17 @@ describe("tool execution patches", () => {
         };
 
         installThirdPartyToolRendererPatch(undefined, prototype);
-        const patchedGetCallRenderer = Reflect.get(prototype, "getCallRenderer");
+        const patchedGetCallRendererDescriptor = Object.getOwnPropertyDescriptor(
+            prototype,
+            "getCallRenderer",
+        );
         expect(prototype.getRenderShell.call(instance)).toBe("self");
 
         installThirdPartyToolRendererPatch({ preserveTools: ["custom_tool"] }, prototype);
 
-        expect(Reflect.get(prototype, "getCallRenderer")).toBe(patchedGetCallRenderer);
+        expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
+            patchedGetCallRendererDescriptor,
+        );
         expect(prototype.getRenderShell.call(instance)).toBe("default");
         expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
         expect(

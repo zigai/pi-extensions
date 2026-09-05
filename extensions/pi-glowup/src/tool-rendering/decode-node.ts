@@ -1,14 +1,6 @@
-import type {
-    GlowupCallLabels,
-    GlowupInline,
-    GlowupMutationFile,
-    GlowupMutationLine,
-    GlowupNode,
-    GlowupPreview,
-    GlowupSyntax,
-    GlowupTone,
-} from "./protocol.js";
-import { isRecord } from "../unknown-values.js";
+import Type, { type Static } from "typebox";
+import { Value } from "typebox/value";
+import type { GlowupInline, GlowupNode } from "./protocol.js";
 
 export type GlowupNodeDecodeLimits = {
     readonly maxDepth: number;
@@ -24,435 +16,257 @@ export const DEFAULT_GLOWUP_NODE_DECODE_LIMITS: GlowupNodeDecodeLimits = {
     maxTextCharacters: 1_000_000,
 };
 
+const stringSchema = Type.String();
+const toneSchema = Type.Union([
+    Type.Literal("default"),
+    Type.Literal("muted"),
+    Type.Literal("dim"),
+    Type.Literal("accent"),
+    Type.Literal("success"),
+    Type.Literal("error"),
+    Type.Literal("path"),
+    Type.Literal("url"),
+    Type.Literal("code"),
+]);
+const inlineSchema = Type.Union([
+    Type.String(),
+    Type.Object({
+        kind: Type.Literal("text"),
+        text: Type.String(),
+        tone: Type.Optional(toneSchema),
+        bold: Type.Optional(Type.Boolean()),
+    }),
+]);
+const syntaxSchema = Type.Object({
+    language: Type.Optional(Type.String()),
+    path: Type.Optional(Type.String()),
+});
+const previewSchema = Type.Object({
+    mode: Type.Optional(
+        Type.Union([Type.Literal("head"), Type.Literal("headTail"), Type.Literal("hidden")]),
+    ),
+    collapsedLines: Type.Optional(Type.Number({ minimum: 1 })),
+    expandedLines: Type.Optional(Type.Number({ minimum: 1 })),
+    expandable: Type.Optional(Type.Boolean()),
+});
+const labelsSchema = Type.Object({
+    static: Type.String({ minLength: 1 }),
+    running: Type.Optional(Type.String()),
+    completed: Type.Optional(Type.String()),
+    failed: Type.Optional(Type.String()),
+});
+const mutationLineSchema = Type.Object({
+    kind: Type.Union([
+        Type.Literal("context"),
+        Type.Literal("addition"),
+        Type.Literal("deletion"),
+        Type.Literal("metadata"),
+        Type.Literal("omission"),
+    ]),
+    text: Type.String(),
+    oldLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+    newLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+});
+const mutationFileSchema = Type.Object({
+    path: Type.String({ minLength: 1 }),
+    previousPath: Type.Optional(Type.String({ minLength: 1 })),
+    lines: Type.Array(mutationLineSchema),
+    added: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    removed: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    countsKnown: Type.Optional(Type.Boolean()),
+});
+const glowupNodeSchema = Type.Cyclic(
+    {
+        Node: Type.Union([
+            Type.Object({ kind: Type.Literal("empty") }),
+            Type.Object({ kind: Type.Literal("text"), text: inlineSchema }),
+            Type.Object({
+                kind: Type.Literal("summary"),
+                rows: Type.Array(Type.Object({ label: inlineSchema, value: inlineSchema })),
+            }),
+            Type.Object({
+                kind: Type.Literal("code"),
+                text: Type.String(),
+                title: Type.Optional(inlineSchema),
+                syntax: Type.Optional(syntaxSchema),
+                preview: Type.Optional(previewSchema),
+            }),
+            Type.Object({
+                kind: Type.Literal("list"),
+                items: Type.Array(Type.Union([inlineSchema, Type.Ref("Node")])),
+                preview: Type.Optional(previewSchema),
+            }),
+            Type.Object({
+                kind: Type.Literal("call"),
+                labels: labelsSchema,
+                body: Type.Optional(Type.Ref("Node")),
+                preview: Type.Optional(previewSchema),
+            }),
+            Type.Object({
+                kind: Type.Literal("output"),
+                text: Type.Optional(Type.String()),
+                syntax: Type.Optional(syntaxSchema),
+                preview: Type.Optional(previewSchema),
+                noOutputLabel: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+            }),
+            Type.Object({
+                kind: Type.Literal("mutation"),
+                labels: labelsSchema,
+                files: Type.Array(mutationFileSchema, { minItems: 1 }),
+                patch: Type.Optional(Type.String()),
+            }),
+            Type.Object({ kind: Type.Literal("stack"), children: Type.Array(Type.Ref("Node")) }),
+        ]),
+    },
+    "Node",
+);
+type ParsedNode = Static<typeof glowupNodeSchema>;
+
 type DecodeState = {
     readonly limits: GlowupNodeDecodeLimits;
     nodes: number;
     textCharacters: number;
 };
-
-function field(record: Record<string, unknown>, key: string): unknown {
-    try {
-        return Reflect.get(record, key);
-    } catch {
-        return undefined;
-    }
-}
-
 function countText(state: DecodeState, value: string): boolean {
     state.textCharacters += value.length;
     return state.textCharacters <= state.limits.maxTextCharacters;
 }
-
-function parseTone(value: unknown): GlowupTone | undefined {
-    switch (value) {
-        case "default":
-        case "muted":
-        case "dim":
-        case "accent":
-        case "success":
-        case "error":
-        case "path":
-        case "url":
-        case "code":
-            return value;
-        default:
-            return undefined;
-    }
+function inline(value: GlowupInline, state: DecodeState): GlowupInline | undefined {
+    const text = Value.Check(stringSchema, value) ? Value.Parse(stringSchema, value) : value.text;
+    return countText(state, text) ? value : undefined;
 }
-
-function parseInline(value: unknown, state: DecodeState): GlowupInline | undefined {
-    if (typeof value === "string") {
-        return countText(state, value) ? value : undefined;
-    }
-    if (!isRecord(value) || field(value, "kind") !== "text") return undefined;
-    const valueText = field(value, "text");
-    if (typeof valueText !== "string" || !countText(state, valueText)) return undefined;
-    const rawTone = field(value, "tone");
-    const tone = rawTone === undefined ? undefined : parseTone(rawTone);
-    if (rawTone !== undefined && tone === undefined) return undefined;
-    const rawBold = field(value, "bold");
-    if (rawBold !== undefined && typeof rawBold !== "boolean") return undefined;
-    let inline: GlowupInline = { kind: "text", text: valueText };
-    if (tone !== undefined) {
-        inline = { ...inline, tone };
-    }
-    if (rawBold !== undefined) {
-        inline = { ...inline, bold: rawBold };
-    }
-    return inline;
+function countSyntax(
+    value: { readonly language?: string; readonly path?: string },
+    state: DecodeState,
+): boolean {
+    return (
+        (value.language === undefined || countText(state, value.language)) &&
+        (value.path === undefined || countText(state, value.path))
+    );
 }
-
-function parseSyntax(value: unknown, state: DecodeState): GlowupSyntax | undefined {
-    if (!isRecord(value)) return undefined;
-    const language = field(value, "language");
-    const path = field(value, "path");
-    if (language !== undefined && typeof language !== "string") return undefined;
-    if (path !== undefined && typeof path !== "string") return undefined;
-    if (typeof language === "string" && !countText(state, language)) return undefined;
-    if (typeof path === "string" && !countText(state, path)) return undefined;
-    let syntax: GlowupSyntax = {};
-    if (language !== undefined) {
-        syntax = { ...syntax, language };
-    }
-    if (path !== undefined) {
-        syntax = { ...syntax, path };
-    }
-    return syntax;
+function countLabels(
+    value: {
+        readonly static: string;
+        readonly running?: string;
+        readonly completed?: string;
+        readonly failed?: string;
+    },
+    state: DecodeState,
+): boolean {
+    return [value.static, value.running, value.completed, value.failed].every(
+        (label) => label === undefined || countText(state, label),
+    );
 }
-
-function parsePreview(value: unknown): GlowupPreview | undefined {
-    if (!isRecord(value)) return undefined;
-    const mode = field(value, "mode");
-    if (mode !== undefined && mode !== "head" && mode !== "headTail" && mode !== "hidden") {
-        return undefined;
-    }
-    const collapsedLines = field(value, "collapsedLines");
-    const expandedLines = field(value, "expandedLines");
-    const expandable = field(value, "expandable");
-    const parseLimit = (limit: unknown): number | undefined =>
-        typeof limit === "number" && Number.isFinite(limit) && limit >= 1
-            ? Math.trunc(limit)
-            : undefined;
-    const parsedCollapsedLines = parseLimit(collapsedLines);
-    const parsedExpandedLines = parseLimit(expandedLines);
-    if (
-        (collapsedLines !== undefined && parsedCollapsedLines === undefined) ||
-        (expandedLines !== undefined && parsedExpandedLines === undefined)
-    ) {
-        return undefined;
-    }
-    if (expandable !== undefined && typeof expandable !== "boolean") return undefined;
-    let preview: GlowupPreview = {};
-    if (mode !== undefined) {
-        preview = { ...preview, mode };
-    }
-    if (parsedCollapsedLines !== undefined) {
-        preview = { ...preview, collapsedLines: parsedCollapsedLines };
-    }
-    if (parsedExpandedLines !== undefined) {
-        preview = { ...preview, expandedLines: parsedExpandedLines };
-    }
-    if (expandable !== undefined) {
-        preview = { ...preview, expandable };
-    }
-    return preview;
-}
-
-function parseLabels(value: unknown, state: DecodeState): GlowupCallLabels | undefined {
-    if (!isRecord(value)) return undefined;
-    const staticLabel = field(value, "static");
-    if (
-        typeof staticLabel !== "string" ||
-        staticLabel.length === 0 ||
-        !countText(state, staticLabel)
-    ) {
-        return undefined;
-    }
-    const running = field(value, "running");
-    const completed = field(value, "completed");
-    const failed = field(value, "failed");
-    const parseOptionalLabel = (label: unknown): string | undefined =>
-        label === undefined ? undefined : typeof label === "string" ? label : undefined;
-    const parsedRunning = parseOptionalLabel(running);
-    const parsedCompleted = parseOptionalLabel(completed);
-    const parsedFailed = parseOptionalLabel(failed);
-    if (
-        (running !== undefined && parsedRunning === undefined) ||
-        (completed !== undefined && parsedCompleted === undefined) ||
-        (failed !== undefined && parsedFailed === undefined)
-    ) {
-        return undefined;
-    }
-    for (const label of [parsedRunning, parsedCompleted, parsedFailed]) {
-        if (label !== undefined && !countText(state, label)) return undefined;
-    }
-    let labels: GlowupCallLabels = { static: staticLabel };
-    if (parsedRunning !== undefined) {
-        labels = { ...labels, running: parsedRunning };
-    }
-    if (parsedCompleted !== undefined) {
-        labels = { ...labels, completed: parsedCompleted };
-    }
-    if (parsedFailed !== undefined) {
-        labels = { ...labels, failed: parsedFailed };
-    }
-    return labels;
-}
-
-function parseNonNegativeInteger(value: unknown): number | undefined {
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-        ? value
-        : undefined;
-}
-
-function parsePositiveInteger(value: unknown): number | undefined {
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= 1
-        ? value
-        : undefined;
-}
-
-function parseMutationLine(value: unknown, state: DecodeState): GlowupMutationLine | undefined {
-    if (!isRecord(value)) return undefined;
-    const kind = field(value, "kind");
-    if (
-        kind !== "context" &&
-        kind !== "addition" &&
-        kind !== "deletion" &&
-        kind !== "metadata" &&
-        kind !== "omission"
-    ) {
-        return undefined;
-    }
-    const text = field(value, "text");
-    if (typeof text !== "string" || !countText(state, text)) return undefined;
-    const rawOldLine = field(value, "oldLine");
-    const rawNewLine = field(value, "newLine");
-    const oldLine = rawOldLine === undefined ? undefined : parsePositiveInteger(rawOldLine);
-    const newLine = rawNewLine === undefined ? undefined : parsePositiveInteger(rawNewLine);
-    if (
-        (rawOldLine !== undefined && oldLine === undefined) ||
-        (rawNewLine !== undefined && newLine === undefined)
-    ) {
-        return undefined;
-    }
-    let line: GlowupMutationLine = { kind, text };
-    if (oldLine !== undefined) {
-        line = { ...line, oldLine };
-    }
-    if (newLine !== undefined) {
-        line = { ...line, newLine };
-    }
-    return line;
-}
-
-function parseMutationFile(value: unknown, state: DecodeState): GlowupMutationFile | undefined {
-    if (!isRecord(value)) return undefined;
-    const path = field(value, "path");
-    if (typeof path !== "string" || path.length === 0 || !countText(state, path)) return undefined;
-    const rawPreviousPath = field(value, "previousPath");
-    if (
-        rawPreviousPath !== undefined &&
-        (typeof rawPreviousPath !== "string" ||
-            rawPreviousPath.length === 0 ||
-            !countText(state, rawPreviousPath))
-    ) {
-        return undefined;
-    }
-    const rawLines = field(value, "lines");
-    if (!Array.isArray(rawLines) || rawLines.length > state.limits.maxCollectionItems) {
-        return undefined;
-    }
-    const lines: GlowupMutationLine[] = [];
-    for (const rawLine of rawLines) {
-        const line = parseMutationLine(rawLine, state);
-        if (line === undefined) return undefined;
-        lines.push(line);
-    }
-    const added = parseNonNegativeInteger(field(value, "added"));
-    const removed = parseNonNegativeInteger(field(value, "removed"));
-    if (added === undefined || removed === undefined) return undefined;
-    const countsKnown = field(value, "countsKnown");
-    if (countsKnown !== undefined && typeof countsKnown !== "boolean") return undefined;
-    if (rawPreviousPath === undefined) {
-        return countsKnown === undefined
-            ? { path, lines, added, removed }
-            : { path, lines, added, removed, countsKnown };
-    }
-    return countsKnown === undefined
-        ? { path, previousPath: rawPreviousPath, lines, added, removed }
-        : { path, previousPath: rawPreviousPath, lines, added, removed, countsKnown };
-}
-
-function parseNode(value: unknown, state: DecodeState, depth: number): GlowupNode | undefined {
-    if (!isRecord(value) || depth > state.limits.maxDepth) return undefined;
-    state.nodes += 1;
-    if (state.nodes > state.limits.maxNodes) return undefined;
-
-    switch (field(value, "kind")) {
+function decodeParsedNode(
+    value: ParsedNode,
+    state: DecodeState,
+    depth: number,
+): GlowupNode | undefined {
+    if (depth > state.limits.maxDepth || ++state.nodes > state.limits.maxNodes) return undefined;
+    switch (value.kind) {
         case "empty":
             return { kind: "empty" };
         case "text": {
-            const rawText = field(value, "text");
-            const parsed = parseInline(rawText, state);
-            return parsed === undefined ? undefined : { kind: "text", text: parsed };
+            const text = Value.Parse(inlineSchema, value.text);
+            return inline(text, state) === undefined ? undefined : { kind: "text", text };
         }
-        case "summary": {
-            const rawRows = field(value, "rows");
-            if (!Array.isArray(rawRows) || rawRows.length > state.limits.maxCollectionItems) {
-                return undefined;
-            }
-            const rows: Array<{ readonly label: GlowupInline; readonly value: GlowupInline }> = [];
-            for (const rawRow of rawRows) {
-                if (!isRecord(rawRow)) return undefined;
-                const label = parseInline(field(rawRow, "label"), state);
-                const rowValue = parseInline(field(rawRow, "value"), state);
-                if (label === undefined || rowValue === undefined) return undefined;
-                rows.push({ label, value: rowValue });
-            }
-            return { kind: "summary", rows };
-        }
-        case "code": {
-            const rawText = field(value, "text");
-            if (typeof rawText !== "string" || !countText(state, rawText)) return undefined;
-            const rawTitle = field(value, "title");
-            const title = rawTitle === undefined ? undefined : parseInline(rawTitle, state);
-            const rawSyntax = field(value, "syntax");
-            const syntax = rawSyntax === undefined ? undefined : parseSyntax(rawSyntax, state);
-            const rawPreview = field(value, "preview");
-            const preview = rawPreview === undefined ? undefined : parsePreview(rawPreview);
+        case "summary":
+            if (value.rows.length > state.limits.maxCollectionItems) return undefined;
+            for (const row of value.rows)
+                if (
+                    inline(row.label, state) === undefined ||
+                    inline(row.value, state) === undefined
+                )
+                    return undefined;
+            return value;
+        case "code":
             if (
-                (rawTitle !== undefined && title === undefined) ||
-                (rawSyntax !== undefined && syntax === undefined) ||
-                (rawPreview !== undefined && preview === undefined)
-            ) {
+                !countText(state, value.text) ||
+                (value.title !== undefined && inline(value.title, state) === undefined) ||
+                (value.syntax !== undefined && !countSyntax(value.syntax, state))
+            )
                 return undefined;
-            }
-            let node: GlowupNode = { kind: "code", text: rawText };
-            if (title !== undefined) {
-                node = { ...node, title };
-            }
-            if (syntax !== undefined) {
-                node = { ...node, syntax };
-            }
-            if (preview !== undefined) {
-                node = { ...node, preview };
-            }
-            return node;
-        }
+            return value.preview === undefined
+                ? value
+                : { ...value, preview: normalizePreview(value.preview) };
         case "list": {
-            const rawItems = field(value, "items");
-            if (!Array.isArray(rawItems) || rawItems.length > state.limits.maxCollectionItems) {
-                return undefined;
-            }
+            if (value.items.length > state.limits.maxCollectionItems) return undefined;
             const items: Array<GlowupInline | GlowupNode> = [];
-            for (const rawItem of rawItems) {
-                const beforeInlineText = state.textCharacters;
-                const inline = parseInline(rawItem, state);
-                if (inline !== undefined) {
-                    items.push(inline);
-                    continue;
+            for (const item of value.items) {
+                if (Value.Check(inlineSchema, item)) {
+                    const parsedInline = Value.Parse(inlineSchema, item);
+                    if (inline(parsedInline, state) === undefined) return undefined;
+                    items.push(parsedInline);
+                } else {
+                    const child = decodeParsedNode(item, state, depth + 1);
+                    if (child === undefined) return undefined;
+                    items.push(child);
                 }
-                state.textCharacters = beforeInlineText;
-                const node = parseNode(rawItem, state, depth + 1);
-                if (node === undefined) return undefined;
-                items.push(node);
             }
-            const rawPreview = field(value, "preview");
-            const preview = rawPreview === undefined ? undefined : parsePreview(rawPreview);
-            if (rawPreview !== undefined && preview === undefined) return undefined;
-            let node: GlowupNode = { kind: "list", items };
-            if (preview !== undefined) {
-                node = { ...node, preview };
-            }
-            return node;
+            return value.preview === undefined
+                ? { ...value, items }
+                : { ...value, items, preview: normalizePreview(value.preview) };
         }
         case "call": {
-            const labels = parseLabels(field(value, "labels"), state);
-            if (labels === undefined) return undefined;
-            const rawBody = field(value, "body");
-            const body = rawBody === undefined ? undefined : parseNode(rawBody, state, depth + 1);
-            const rawPreview = field(value, "preview");
-            const preview = rawPreview === undefined ? undefined : parsePreview(rawPreview);
-            if (
-                (rawBody !== undefined && body === undefined) ||
-                (rawPreview !== undefined && preview === undefined)
-            ) {
-                return undefined;
-            }
-            let node: GlowupNode = { kind: "call", labels };
-            if (body !== undefined) {
-                node = { ...node, body };
-            }
-            if (preview !== undefined) {
-                node = { ...node, preview };
-            }
+            if (!countLabels(value.labels, state)) return undefined;
+            const body =
+                value.body === undefined
+                    ? undefined
+                    : decodeParsedNode(value.body, state, depth + 1);
+            if (value.body !== undefined && body === undefined) return undefined;
+            let node: GlowupNode = { kind: "call", labels: value.labels };
+            if (body !== undefined) node = { ...node, body };
+            if (value.preview !== undefined)
+                node = { ...node, preview: normalizePreview(value.preview) };
             return node;
         }
-        case "output": {
-            const rawText = field(value, "text");
-            const rawSyntax = field(value, "syntax");
-            const rawPreview = field(value, "preview");
-            const rawNoOutputLabel = field(value, "noOutputLabel");
-            const syntax = rawSyntax === undefined ? undefined : parseSyntax(rawSyntax, state);
-            const preview = rawPreview === undefined ? undefined : parsePreview(rawPreview);
+        case "output":
             if (
-                (rawText !== undefined &&
-                    (typeof rawText !== "string" || !countText(state, rawText))) ||
-                (rawSyntax !== undefined && syntax === undefined) ||
-                (rawPreview !== undefined && preview === undefined) ||
-                (rawNoOutputLabel !== undefined &&
-                    rawNoOutputLabel !== null &&
-                    (typeof rawNoOutputLabel !== "string" || !countText(state, rawNoOutputLabel)))
-            ) {
+                (value.text !== undefined && !countText(state, value.text)) ||
+                (value.noOutputLabel !== undefined &&
+                    value.noOutputLabel !== null &&
+                    !countText(state, value.noOutputLabel)) ||
+                (value.syntax !== undefined && !countSyntax(value.syntax, state))
+            )
                 return undefined;
-            }
-            let node: GlowupNode = { kind: "output" };
-            if (rawText !== undefined) {
-                node = { ...node, text: rawText };
-            }
-            if (syntax !== undefined) {
-                node = { ...node, syntax };
-            }
-            if (preview !== undefined) {
-                node = { ...node, preview };
-            }
-            if (rawNoOutputLabel !== undefined) {
-                node = { ...node, noOutputLabel: rawNoOutputLabel };
-            }
-            return node;
-        }
+            return value.preview === undefined
+                ? value
+                : { ...value, preview: normalizePreview(value.preview) };
         case "mutation": {
-            const labels = parseLabels(field(value, "labels"), state);
-            const rawFiles = field(value, "files");
-            if (
-                labels === undefined ||
-                !Array.isArray(rawFiles) ||
-                rawFiles.length === 0 ||
-                rawFiles.length > state.limits.maxCollectionItems
-            ) {
-                return undefined;
+            if (!countLabels(value.labels, state)) return undefined;
+            let itemCount = value.files.length;
+            if (itemCount > state.limits.maxCollectionItems) return undefined;
+            for (const file of value.files) {
+                itemCount += file.lines.length;
+                if (
+                    itemCount > state.limits.maxCollectionItems ||
+                    !countText(state, file.path) ||
+                    (file.previousPath !== undefined && !countText(state, file.previousPath))
+                )
+                    return undefined;
+                for (const line of file.lines) if (!countText(state, line.text)) return undefined;
             }
-            const files: GlowupMutationFile[] = [];
-            let collectionItems = rawFiles.length;
-            for (const rawFile of rawFiles) {
-                const file = parseMutationFile(rawFile, state);
-                if (file === undefined) return undefined;
-                collectionItems += file.lines.length;
-                if (collectionItems > state.limits.maxCollectionItems) return undefined;
-                files.push(file);
-            }
-            const rawPatch = field(value, "patch");
-            if (
-                rawPatch !== undefined &&
-                (typeof rawPatch !== "string" || !countText(state, rawPatch))
-            ) {
-                return undefined;
-            }
-            let node: GlowupNode = { kind: "mutation", labels, files };
-            if (rawPatch !== undefined) {
-                node = { ...node, patch: rawPatch };
-            }
-            return node;
+            return value.patch !== undefined && !countText(state, value.patch) ? undefined : value;
         }
         case "stack": {
-            const rawChildren = field(value, "children");
-            if (
-                !Array.isArray(rawChildren) ||
-                rawChildren.length > state.limits.maxCollectionItems
-            ) {
-                return undefined;
-            }
+            if (value.children.length > state.limits.maxCollectionItems) return undefined;
             const children: GlowupNode[] = [];
-            for (const rawChild of rawChildren) {
-                const child = parseNode(rawChild, state, depth + 1);
+            for (const item of value.children) {
+                const child = decodeParsedNode(item, state, depth + 1);
                 if (child === undefined) return undefined;
                 children.push(child);
             }
             return { kind: "stack", children };
         }
-        default:
-            return undefined;
     }
+}
+function normalizePreview(value: Static<typeof previewSchema>): Static<typeof previewSchema> {
+    let preview: Static<typeof previewSchema> = value;
+    if (value.collapsedLines !== undefined)
+        preview = { ...preview, collapsedLines: Math.trunc(value.collapsedLines) };
+    if (value.expandedLines !== undefined)
+        preview = { ...preview, expandedLines: Math.trunc(value.expandedLines) };
+    return preview;
 }
 
 /** Decodes and bounds a semantic node returned across the tool-definition boundary. */
@@ -469,8 +283,12 @@ export function decodeGlowupNode(
         limits.maxNodes < 1 ||
         limits.maxCollectionItems < 1 ||
         limits.maxTextCharacters < 1
-    ) {
+    )
+        return undefined;
+    try {
+        const parsed = Value.Parse(glowupNodeSchema, value);
+        return decodeParsedNode(parsed, { limits, nodes: 0, textCharacters: 0 }, 0);
+    } catch {
         return undefined;
     }
-    return parseNode(value, { limits, nodes: 0, textCharacters: 0 }, 0);
 }

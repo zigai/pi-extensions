@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { jsonValueParser } from "../src/json-value.ts";
 import {
     call,
     decodeGlowupNode,
@@ -15,8 +16,8 @@ describe("Glowup tool-rendering protocol", () => {
         const definition = { name: "demo" };
         const rendering = {
             version: 3,
-            parseArgs(value: unknown) {
-                return value;
+            parseArgs<Value>(value: Value) {
+                return jsonValueParser.parse(value);
             },
             renderCall() {
                 return call({ static: "Demo" });

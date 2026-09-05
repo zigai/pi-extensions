@@ -5,7 +5,10 @@ import {
     initTheme,
     ToolExecutionComponent,
     type ExtensionAPI,
+    type ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
+import Type, { type Static } from "typebox";
+import { Value } from "typebox/value";
 import type { TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getGlowupGlobalConfigPath } from "../src/config/config.ts";
@@ -39,10 +42,18 @@ type SessionStartHandler = (
     context: SessionStartContext,
 ) => Promise<void> | void;
 
+type ToolInputValue = string | ReadonlyArray<EditOperation>;
+type ToolInput = Readonly<Record<string, ToolInputValue>>;
+
+type EditOperation = {
+    readonly oldText: string;
+    readonly newText: string;
+};
+
 type ToolCallEvent = {
     readonly toolName: string;
     readonly toolCallId: string;
-    readonly input: Readonly<Record<string, unknown>>;
+    readonly input: ToolInput;
 };
 
 type ToolCallContext = {
@@ -50,18 +61,42 @@ type ToolCallContext = {
     readonly signal?: AbortSignal;
 };
 
-type ToolCallHandler = (event: ToolCallEvent, context: ToolCallContext) => unknown;
+type ToolCallHandler = (
+    event: ToolCallEvent,
+    context: ToolCallContext,
+) => Promise<ToolCallEventResult | void> | ToolCallEventResult | void;
 
 type ToolResultEvent = {
     readonly toolName: string;
     readonly toolCallId: string;
-    readonly input: Readonly<Record<string, unknown>>;
+    readonly input: ToolInput;
     readonly content: ReadonlyArray<{ readonly type: "text"; readonly text: string }>;
-    readonly details: unknown;
+    readonly details: Readonly<Record<string, string>>;
     readonly isError: boolean;
 };
 
-type ToolResultHandler = (event: ToolResultEvent, context: ToolCallContext) => unknown;
+type RenderedToolDetails = {
+    readonly diff?: string;
+    readonly pierreDiff?: {
+        readonly kind: string;
+        readonly path: string;
+        readonly stats: { readonly added: number; readonly removed: number };
+    };
+};
+
+type ToolResultHandlerResult = { readonly details?: RenderedToolDetails } | void;
+
+type ToolResultHandler = (
+    event: ToolResultEvent,
+    context: ToolCallContext,
+) => Promise<ToolResultHandlerResult> | ToolResultHandlerResult;
+
+type RegisteredHandler =
+    | SessionStartHandler
+    | SessionShutdownHandler
+    | ToolCallHandler
+    | ToolResultHandler
+    | TurnHandler;
 
 type TurnHandler = () => Promise<void> | void;
 
@@ -86,31 +121,34 @@ class FakeExtensionApi {
         this.registeredToolCount += 1;
     }
 
-    on(eventName: string, handler: unknown): void {
-        if (typeof handler !== "function") {
-            throw new Error(`${eventName} handler must be a function`);
-        }
+    on(eventName: string, handler: RegisteredHandler): void {
         if (eventName === "session_start") {
+            // SAFETY: The extension API overload associates session_start with SessionStartHandler.
             this.sessionStartHandlers.push(handler as SessionStartHandler);
             return;
         }
         if (eventName === "tool_call") {
+            // SAFETY: The extension API overload associates tool_call with ToolCallHandler.
             this.toolCallHandlers.push(handler as ToolCallHandler);
             return;
         }
         if (eventName === "tool_result") {
+            // SAFETY: The extension API overload associates tool_result with ToolResultHandler.
             this.toolResultHandlers.push(handler as ToolResultHandler);
             return;
         }
         if (eventName === "turn_start") {
+            // SAFETY: The extension API overload associates turn_start with TurnHandler.
             this.turnStartHandlers.push(handler as TurnHandler);
             return;
         }
         if (eventName === "turn_end") {
+            // SAFETY: The extension API overload associates turn_end with TurnHandler.
             this.turnEndHandlers.push(handler as TurnHandler);
             return;
         }
         if (eventName === "session_shutdown") {
+            // SAFETY: The extension API overload associates session_shutdown with SessionShutdownHandler.
             this.sessionShutdownHandlers.push(handler as SessionShutdownHandler);
         }
     }
@@ -147,8 +185,11 @@ class FakeExtensionApi {
         }
     }
 
-    runToolCall(event: ToolCallEvent, cwd: string): ReadonlyArray<unknown> {
-        return this.toolCallHandlers.map((handler) =>
+    runToolCall(
+        event: ToolCallEvent,
+        cwd: string,
+    ): ReadonlyArray<Promise<ToolCallEventResult | void>> {
+        return this.toolCallHandlers.map(async (handler) =>
             handler(event, {
                 cwd,
             }),
@@ -166,8 +207,8 @@ class FakeExtensionApi {
         );
     }
 
-    async runToolResult(event: ToolResultEvent, cwd: string): Promise<unknown[]> {
-        const results: unknown[] = [];
+    async runToolResult(event: ToolResultEvent, cwd: string): Promise<ToolResultHandlerResult[]> {
+        const results: ToolResultHandlerResult[] = [];
         for (const handler of this.toolResultHandlers) {
             results.push(await handler(event, { cwd }));
         }
@@ -204,6 +245,13 @@ class FakeExtensionApi {
     }
 }
 
+function installGlowup(pi: FakeExtensionApi): void {
+    // SAFETY: FakeExtensionApi retains exactly the lifecycle handlers registered by glowupExtension;
+    // its invocation methods supply the matching concrete event and context contracts.
+    const on = pi.on.bind(pi) as ExtensionAPI["on"];
+    glowupExtension({ on });
+}
+
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 const SCRIPT_FORMATTERS_ENV = "PI_GLOWUP_SCRIPT_FORMATTERS";
 
@@ -233,7 +281,7 @@ describe("extension lifecycle", () => {
         process.env[AGENT_DIR_ENV] = agentDir;
         const pi = new FakeExtensionApi();
 
-        glowupExtension(pi as unknown as ExtensionAPI);
+        installGlowup(pi);
 
         expect(pi.registeredToolCount).toBe(0);
         expect(vi.getTimerCount()).toBe(0);
@@ -263,7 +311,7 @@ describe("extension lifecycle", () => {
         writeFileSync(configPath, JSON.stringify({ debugLog: { enabled: true } }));
         const pi = new FakeExtensionApi();
 
-        glowupExtension(pi as unknown as ExtensionAPI);
+        installGlowup(pi);
         await pi.startSession(join(root, "project"), false);
         await vi.advanceTimersByTimeAsync(5_000);
         await initializeSyntaxHighlighting();
@@ -288,7 +336,7 @@ describe("extension lifecycle", () => {
         );
         const pi = new FakeExtensionApi();
 
-        glowupExtension(pi as unknown as ExtensionAPI);
+        installGlowup(pi);
         await pi.startSession(join(root, "project"), false);
         pi.runBashToolCall("printf hello");
         await initializeSyntaxHighlighting();
@@ -328,7 +376,7 @@ describe("extension lifecycle", () => {
         writeFileSync(filePath, "export const value = 1;\n");
         const pi = new FakeExtensionApi();
 
-        glowupExtension(pi as unknown as ExtensionAPI);
+        installGlowup(pi);
         await pi.startSession(project, false);
         await Promise.all(
             pi.runToolCall(
@@ -392,7 +440,7 @@ describe("extension lifecycle", () => {
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
 
-        glowupExtension(pi as unknown as ExtensionAPI);
+        installGlowup(pi);
         await pi.startSession(join(root, "project"), false);
         pi.runBashToolCall("true");
         await initializeSyntaxHighlighting();
@@ -406,7 +454,7 @@ describe("extension lifecycle", () => {
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
 
-        glowupExtension(pi as unknown as ExtensionAPI);
+        installGlowup(pi);
         await pi.startSession(join(root, "project"), false, "tui");
 
         expect(pi.toolExpansionRefreshes).toBe(1);
@@ -423,9 +471,11 @@ describe("extension lifecycle", () => {
         });
         const pi = new FakeExtensionApi();
 
-        glowupExtension(pi as unknown as ExtensionAPI);
+        installGlowup(pi);
 
-        expect(pi.runBashToolCall("python - <<'PY'\nprint('hi')\nPY")).toEqual([undefined]);
+        await expect(
+            Promise.all(pi.runBashToolCall("python - <<'PY'\nprint('hi')\nPY")),
+        ).resolves.toEqual([undefined]);
 
         await pi.shutdownSession();
     });
@@ -434,12 +484,15 @@ describe("extension lifecycle", () => {
         const root = mkdtempSync(join(tmpdir(), "pi-glowup-lifecycle-"));
         process.env[AGENT_DIR_ENV] = join(root, "agent");
         const pi = new FakeExtensionApi();
-        glowupExtension(pi as unknown as ExtensionAPI);
+        installGlowup(pi);
         initTheme("dark");
 
         // SAFETY: ToolExecutionComponent only calls requestRender() on this boundary in the
         // exercised lifecycle. The concrete TUI contract is otherwise irrelevant to rendering.
-        const tui = { requestRender(): void {} } as unknown as TUI;
+        const tuiBoundary = { requestRender(): void {} };
+        // SAFETY: ToolExecutionComponent only calls requestRender() on this boundary in the
+        // exercised lifecycle. The concrete TUI contract is otherwise irrelevant to rendering.
+        const tui = tuiBoundary as TUI;
         const command = "cd /tmp && sleep 300";
         const completedArgs = new ToolExecutionComponent(
             "bash",
@@ -475,24 +528,35 @@ describe("extension lifecycle", () => {
     });
 });
 
+const logEntrySchema = Type.Object(
+    {
+        event: Type.String(),
+        fields: Type.Optional(
+            Type.Object(
+                {
+                    toolName: Type.Optional(Type.String()),
+                    toolCallId: Type.Optional(Type.String()),
+                    outputTextBytes: Type.Optional(Type.Number()),
+                    scheduledFormattedPreview: Type.Optional(Type.Boolean()),
+                },
+                { additionalProperties: true },
+            ),
+        ),
+    },
+    { additionalProperties: true },
+);
+
+type LogEntry = Static<typeof logEntrySchema>;
+
 function readLogEvents(filePath: string): string[] {
-    return readLogEntries(filePath).flatMap((entry) =>
-        typeof entry.event === "string" ? [entry.event] : [],
-    );
+    return readLogEntries(filePath).map((entry) => entry.event);
 }
 
-function readLogEntries(filePath: string): Record<string, unknown>[] {
+function readLogEntries(filePath: string): LogEntry[] {
     return readFileSync(filePath, "utf8")
         .trim()
         .split("\n")
-        .flatMap((line) => {
-            const entry: unknown = JSON.parse(line);
-            return isRecord(entry) ? [entry] : [];
-        });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+        .map((line) => Value.Parse(logEntrySchema, JSON.parse(line)));
 }
 
 function stripAnsi(text: string): string {

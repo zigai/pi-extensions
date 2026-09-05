@@ -25,6 +25,7 @@ import {
     type JsonValue,
 } from "../../tool-values.ts";
 import { jsonValueParser } from "../../../json-value.ts";
+import { stringParser } from "../../../json-scalar.ts";
 
 const CHROME_DEVTOOLS_PREFIX_PATTERN = /(?:^|__)chrome[-_]?devtools(?:__|_|$)/i;
 
@@ -75,9 +76,10 @@ function countLabel(count: number, singular: string, plural = `${singular}s`): s
 }
 
 function parseStructuredArgs(value: JsonValue): JsonValue {
-    if (typeof value !== "string") return value;
+    const text = stringParser.parse(value);
+    if (text === undefined) return value;
     try {
-        return jsonValueParser.parse(JSON.parse(value)) ?? value;
+        return jsonValueParser.parse(JSON.parse(text)) ?? value;
     } catch {
         return value;
     }
@@ -168,9 +170,9 @@ function summarizeChromeArgs(
         case "handle_dialog":
             return getNonEmptyString(record, "action");
         case "wait_for": {
-            const values = getArray(record, "text")?.filter(
-                (value): value is string => typeof value === "string",
-            );
+            const values = getArray(record, "text")
+                ?.map((value) => stringParser.parse(value))
+                .filter(isDefined);
             return values === undefined ? undefined : values.slice(0, 3).join(" · ");
         }
         case "performance_analyze_insight":
@@ -208,7 +210,7 @@ type McpGatewayArgsSummary = {
 };
 
 function summarizeMcpGatewayArgs(
-    args: unknown,
+    args: JsonValue | undefined,
     context: ThirdPartyToolRenderContext,
 ): McpGatewayArgsSummary {
     const record = jsonObjectParser.parse(args);
@@ -307,7 +309,7 @@ export function createMcpGatewayRenderer(
     return {
         renderCall(args, theme, context) {
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
-            const summary = summarizeMcpGatewayArgs(args, context);
+            const summary = summarizeMcpGatewayArgs(jsonValueParser.parse(args), context);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(

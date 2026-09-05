@@ -31,7 +31,7 @@ import type { ThirdPartyToolRenderContext } from "./types.ts";
 const DEFAULT_EXPANDED_PREVIEW_LINES = 500;
 
 function toneText(theme: GlowupRenderTheme, value: GlowupInline): string {
-    if (typeof value === "string") return value;
+    if (!(value instanceof Object) || !("kind" in value)) return value;
 
     const token: Parameters<GlowupRenderTheme["fg"]>[0] = (() => {
         switch (value.tone) {
@@ -102,7 +102,11 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                 .join("\n");
         case "list":
             return node.items
-                .map((item) => `• ${typeof item === "string" ? item : nodeText(item, theme)}`)
+                .map((item) =>
+                    item instanceof Object && "kind" in item
+                        ? `• ${nodeText(item, theme)}`
+                        : `• ${item}`,
+                )
                 .join("\n");
         case "output":
             return node.text ?? "";

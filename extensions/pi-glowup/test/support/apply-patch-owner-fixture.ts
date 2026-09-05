@@ -6,6 +6,7 @@ import {
     type GlowupMutationFile,
 } from "../../src/tool-rendering/protocol.ts";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 
 const labels = {
     static: "Patch",
@@ -14,9 +15,24 @@ const labels = {
     failed: "Failed to patch",
 } as const;
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const patchArgsSchema = Type.Object({ patch: Type.String() });
+const patchResultSchema = Type.Object({
+    details: Type.Object({
+        patch: Type.String(),
+        inputPatch: Type.Optional(Type.String()),
+        lineSummary: Type.Optional(
+            Type.Object({
+                files: Type.Array(
+                    Type.Object({
+                        path: Type.String(),
+                        addedLines: Type.Optional(Type.Number()),
+                        removedLines: Type.Optional(Type.Number()),
+                    }),
+                ),
+            }),
+        ),
+    }),
+});
 
 function removeUnpairedSurrogates(value: string): string {
     let normalized = "";
@@ -65,44 +81,44 @@ function filesFromPatch(patch: string): GlowupMutationFile[] {
     return files;
 }
 
-function parseArgs(value: unknown) {
-    if (!isRecord(value) || typeof value.patch !== "string") return undefined;
-    const files = filesFromPatch(value.patch);
-    return files.length === 0 ? undefined : { patch: value.patch, files };
+function parseArgs<Value>(value: Value) {
+    const parsed = Value.Parse(patchArgsSchema, value);
+    if (parsed === undefined) return undefined;
+    const files = filesFromPatch(parsed.patch);
+    return files.length === 0 ? undefined : { patch: parsed.patch, files };
 }
 
-function parseResult(value: unknown) {
-    if (!isRecord(value) || !isRecord(value.details) || typeof value.details.patch !== "string") {
-        return undefined;
-    }
-    const files = filesFromPatch(
-        typeof value.details.inputPatch === "string"
-            ? value.details.inputPatch
-            : value.details.patch,
-    );
-    if (
-        files.length === 0 &&
-        isRecord(value.details.lineSummary) &&
-        Array.isArray(value.details.lineSummary.files)
-    ) {
-        for (const rawFile of value.details.lineSummary.files) {
-            if (!isRecord(rawFile) || typeof rawFile.path !== "string") return undefined;
-            const added = typeof rawFile.addedLines === "number" ? rawFile.addedLines : 0;
-            const removed = typeof rawFile.removedLines === "number" ? rawFile.removedLines : 0;
-            files.push({ path: rawFile.path, lines: [], added, removed });
+function parseResult<Value>(value: Value) {
+    const parsed = Value.Parse(patchResultSchema, value);
+    if (parsed === undefined) return undefined;
+    const files = filesFromPatch(parsed.details.inputPatch ?? parsed.details.patch);
+    if (files.length === 0 && parsed.details.lineSummary !== undefined) {
+        for (const file of parsed.details.lineSummary.files) {
+            files.push({
+                path: file.path,
+                lines: [],
+                added: file.addedLines ?? 0,
+                removed: file.removedLines ?? 0,
+            });
         }
     }
-    return files.length === 0 ? undefined : { patch: value.details.patch, files };
+    return files.length === 0 ? undefined : { patch: parsed.details.patch, files };
 }
 
 export const applyPatchOwnerRendering = {
     version: 3,
     parseArgs,
     parseResult,
-    renderPartialCall(value: unknown) {
-        if (!isRecord(value) || typeof value.patch !== "string")
+    renderPartialCall<Value>(value: Value) {
+        let parsed;
+        try {
+            parsed = Value.Parse(patchArgsSchema, value);
+        } catch {
             return mutation(labels, [{ path: "…", lines: [], added: 0, removed: 0 }]);
-        const files = filesFromPatch(value.patch);
+        }
+        if (parsed === undefined)
+            return mutation(labels, [{ path: "…", lines: [], added: 0, removed: 0 }]);
+        const files = filesFromPatch(parsed.patch);
         return files.length === 0
             ? mutation(labels, [{ path: "…", lines: [], added: 0, removed: 0 }])
             : mutation(labels, files);

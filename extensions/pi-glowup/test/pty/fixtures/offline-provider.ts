@@ -394,7 +394,7 @@ function latestUserText(context: Context): string {
     for (let index = context.messages.length - 1; index >= 0; index -= 1) {
         const message = context.messages[index];
         if (message?.role !== "user") continue;
-        if (typeof message.content === "string") return message.content;
+        if (!Array.isArray(message.content)) return message.content;
         return message.content
             .filter((content) => content.type === "text")
             .map((content) => content.text)

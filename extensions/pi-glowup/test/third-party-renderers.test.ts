@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+import { jsonValueParser, type JsonValue } from "../src/json-value.ts";
 import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import {
     call,
@@ -34,6 +37,36 @@ const plainTheme: GlowupRenderTheme = {
     },
 };
 
+const dbQueryArgsSchema = Type.Object({ sql: Type.String() });
+const dbQueryResultSchema = Type.Object({
+    details: Type.Optional(Type.Object({ rowCount: Type.Optional(Type.Number()) })),
+});
+const fixtureObjectSchema = Type.Object({});
+
+type DbQueryArgs = Static<typeof dbQueryArgsSchema>;
+type DbQueryResult = Static<typeof dbQueryResultSchema>;
+
+function parseDbQueryArgs<Value>(value: Value): DbQueryArgs | undefined {
+    try {
+        return Value.Parse(dbQueryArgsSchema, value);
+    } catch {
+        return undefined;
+    }
+}
+
+function parseDbQueryResult<Value>(value: Value): DbQueryResult | undefined {
+    try {
+        Value.Parse(fixtureObjectSchema, value);
+    } catch {
+        return undefined;
+    }
+    try {
+        return Value.Parse(dbQueryResultSchema, value);
+    } catch {
+        return {};
+    }
+}
+
 const renderContext = {
     args: {},
     toolCallId: "call-1",
@@ -65,7 +98,7 @@ function expectWellFormedLines(lines: readonly string[]): void {
 
 describe("third-party tool renderers", () => {
     it("keeps every renderer family within tiny terminal widths", () => {
-        const cases: ReadonlyArray<{ readonly toolName: string; readonly args: unknown }> = [
+        const cases: ReadonlyArray<{ readonly toolName: string; readonly args: JsonValue }> = [
             { toolName: "agent_browser", args: { args: ["open", "https://example.com"] } },
             { toolName: "mcp", args: { connect: "chrome-devtools" } },
             { toolName: "finalize_plan", args: { markdown: "# Plan\n\nLong plan body" } },
@@ -111,8 +144,12 @@ describe("third-party tool renderers", () => {
     it("renders owner-provided semantic mutations as separate responsive file blocks", () => {
         const glowupRendering = {
             version: 3,
-            parseArgs(value: unknown) {
-                return typeof value === "object" && value !== null ? {} : undefined;
+            parseArgs<Value>(value: Value) {
+                try {
+                    return Value.Parse(Type.Object({}), value);
+                } catch {
+                    return undefined;
+                }
             },
             renderCall() {
                 return mutation(
@@ -178,31 +215,10 @@ describe("third-party tool renderers", () => {
     });
 
     it("uses passive glowupRendering adapters when present", () => {
-        type DbQueryArgs = {
-            readonly sql: string;
-        };
-        type DbQueryResult = {
-            readonly details?: {
-                readonly rowCount?: number;
-            };
-        };
         const rendering = {
             version: 3,
-            parseArgs(value: unknown): DbQueryArgs | undefined {
-                if (typeof value !== "object" || value === null || !("sql" in value)) {
-                    return undefined;
-                }
-                return typeof value.sql === "string" ? { sql: value.sql } : undefined;
-            },
-            parseResult(value: unknown): DbQueryResult | undefined {
-                if (typeof value !== "object" || value === null) return undefined;
-                if (!("details" in value) || typeof value.details !== "object") return {};
-                const details = value.details;
-                if (details === null || !("rowCount" in details)) return { details: {} };
-                return typeof details.rowCount === "number"
-                    ? { details: { rowCount: details.rowCount } }
-                    : { details: {} };
-            },
+            parseArgs: parseDbQueryArgs,
+            parseResult: parseDbQueryResult,
             renderCall(args) {
                 return call({ static: "DB Query" }, { body: text(args.sql) });
             },
@@ -239,11 +255,15 @@ describe("third-party tool renderers", () => {
     it("renders the complete public protocol composition through an owner adapter", () => {
         const rendering = {
             version: 3,
-            parseArgs(value: unknown) {
-                return value;
+            parseArgs<Value>(value: Value) {
+                return jsonValueParser.parse(value);
             },
-            parseResult(value: unknown) {
-                return typeof value === "object" && value !== null ? value : undefined;
+            parseResult<Value>(value: Value) {
+                try {
+                    return Value.Parse(fixtureObjectSchema, value);
+                } catch {
+                    return undefined;
+                }
             },
             renderCall() {
                 return call(
@@ -323,8 +343,8 @@ describe("third-party tool renderers", () => {
         const renderer = createThirdPartyToolRenderer("custom_tool", undefined, {
             [GLOWUP_RENDERING_PROPERTY]: {
                 version: 3,
-                parseArgs(value: unknown) {
-                    return value;
+                parseArgs<Value>(value: Value) {
+                    return jsonValueParser.parse(value);
                 },
                 renderCall() {
                     return { kind: "text", text: 42 };
@@ -356,8 +376,8 @@ describe("third-party tool renderers", () => {
         const resultRenderer = createThirdPartyToolRenderer("result_parser_tool", undefined, {
             [GLOWUP_RENDERING_PROPERTY]: {
                 version: 3,
-                parseArgs(value: unknown) {
-                    return value;
+                parseArgs<Value>(value: Value) {
+                    return jsonValueParser.parse(value);
                 },
                 parseResult() {
                     throw new Error("invalid result");
@@ -396,8 +416,8 @@ describe("third-party tool renderers", () => {
         const renderer = createThirdPartyToolRenderer("deep_tool", undefined, {
             [GLOWUP_RENDERING_PROPERTY]: {
                 version: 3,
-                parseArgs(value: unknown) {
-                    return value;
+                parseArgs<Value>(value: Value) {
+                    return jsonValueParser.parse(value);
                 },
                 renderCall() {
                     return nestedNode;
@@ -416,7 +436,10 @@ describe("third-party tool renderers", () => {
     });
 
     it("treats throwing rendering properties as absent", () => {
-        const toolDefinition: Record<string, unknown> = {};
+        interface FixtureToolDefinition {
+            glowupRendering?: GlowupRenderer;
+        }
+        const toolDefinition: FixtureToolDefinition = {};
         Object.defineProperty(toolDefinition, GLOWUP_RENDERING_PROPERTY, {
             get() {
                 throw new Error("property access failed");
@@ -441,8 +464,8 @@ describe("third-party tool renderers", () => {
     it("uses adapter-specific lifecycle labels when configured", () => {
         const rendering = {
             version: 3,
-            parseArgs(value: unknown) {
-                return value;
+            parseArgs<Value>(value: Value) {
+                return jsonValueParser.parse(value);
             },
             renderCall() {
                 return call({
@@ -477,12 +500,7 @@ describe("third-party tool renderers", () => {
         const renderer = createThirdPartyToolRenderer("db_query", undefined, {
             glowupRendering: {
                 version: 3,
-                parseArgs(value: unknown) {
-                    if (typeof value !== "object" || value === null || !("sql" in value)) {
-                        return undefined;
-                    }
-                    return typeof value.sql === "string" ? { sql: value.sql } : undefined;
-                },
+                parseArgs: parseDbQueryArgs,
                 renderPartialCall() {
                     return call({ static: "DB Query", running: "Querying DB" });
                 },
@@ -531,8 +549,8 @@ describe("third-party tool renderers", () => {
         const renderer = createThirdPartyToolRenderer("agent_browser", undefined, {
             glowupRendering: {
                 version: 3,
-                parseArgs(value: unknown) {
-                    return value;
+                parseArgs<Value>(value: Value) {
+                    return jsonValueParser.parse(value);
                 },
                 renderCall: () => call({ static: "Owner Browser Renderer" }),
             },
@@ -555,8 +573,8 @@ describe("third-party tool renderers", () => {
         const owned = createThirdPartyToolRenderer("web_run", undefined, {
             glowupRendering: {
                 version: 3,
-                parseArgs(value: unknown) {
-                    return value;
+                parseArgs<Value>(value: Value) {
+                    return jsonValueParser.parse(value);
                 },
                 renderCall: () => call({ static: "Owner Web Search" }),
             },

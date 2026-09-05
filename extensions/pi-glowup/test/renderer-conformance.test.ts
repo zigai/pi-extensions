@@ -1,4 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
+import type { JsonValue } from "../src/json-value.ts";
 import { describe, expect, it } from "vitest";
 import type { GlowupRenderTheme } from "../src/rendering/core.ts";
 import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
@@ -7,7 +8,7 @@ import type { ThirdPartyToolResult } from "../src/third-party-tools/types.ts";
 type RendererConformanceCase = {
     readonly family: string;
     readonly toolName: string;
-    readonly args: unknown;
+    readonly args: JsonValue;
     readonly callText: string;
     readonly result?: ThirdPartyToolResult;
 };

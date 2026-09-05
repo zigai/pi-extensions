@@ -10,6 +10,7 @@ import {
     parseGlowupConfig,
     readGlowupConfig,
 } from "../src/config/config.ts";
+import { jsonValueParser, type JsonValue } from "../src/json-value.ts";
 
 describe("glowup config", () => {
     const agentDirEnvironmentVariable = "PI_CODING_AGENT_DIR";
@@ -27,8 +28,12 @@ describe("glowup config", () => {
         process.env[agentDirEnvironmentVariable] = agentDir;
     }
 
-    function bundledSchema(): unknown {
-        return JSON.parse(readFileSync("config.schema.json", "utf8"));
+    function bundledSchema(): JsonValue {
+        const schema = jsonValueParser.parse(
+            JSON.parse(readFileSync("config.schema.json", "utf8")),
+        );
+        if (schema === undefined) throw new Error("bundled config schema must be valid JSON");
+        return schema;
     }
 
     it("parses optional config with safe defaults", () => {

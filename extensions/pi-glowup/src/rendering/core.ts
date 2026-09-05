@@ -2608,7 +2608,7 @@ export function formatFindAction(theme: GlowupRenderTheme, args: FindActionArgs)
     if (args.path !== undefined && args.path.length > 0) {
         parts.push(`in ${pathText(theme, collapseHome(args.path))}`);
     }
-    if (typeof args.limit === "number") {
+    if (args.limit !== undefined) {
         parts.push(muted(theme, `limit ${args.limit}`));
     }
     return parts.join(" ");
@@ -2622,7 +2622,7 @@ export function formatGrepAction(theme: GlowupRenderTheme, args: GrepActionArgs)
     if (args.glob !== undefined && args.glob.length > 0) {
         parts.push(muted(theme, `(${args.glob})`));
     }
-    if (typeof args.limit === "number") {
+    if (args.limit !== undefined) {
         parts.push(muted(theme, `limit ${args.limit}`));
     }
     return parts.join(" ");
@@ -2632,7 +2632,7 @@ export function formatLsAction(theme: GlowupRenderTheme, args: LsActionArgs): st
     const parts = [
         `${actionText(theme, "List")} ${pathText(theme, collapseHome(args.path ?? "."))}`,
     ];
-    if (typeof args.limit === "number") {
+    if (args.limit !== undefined) {
         parts.push(muted(theme, `limit ${args.limit}`));
     }
     return parts.join(" ");

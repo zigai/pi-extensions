@@ -7,6 +7,19 @@ import {
     withGlowupRendering,
 } from "@zigai/pi-glowup/protocol";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
+
+const demoArgsSchema = Type.Object({
+    query: Type.String(),
+});
+
+const demoResultSchema = Type.Object({
+    details: Type.Optional(
+        Type.Object({
+            matches: Type.Optional(Type.Number()),
+        }),
+    ),
+});
 
 type DemoArgs = {
     readonly query: string;
@@ -21,14 +34,18 @@ type DemoResult = {
 const rendering = defineGlowupRenderer<DemoArgs, DemoResult>({
     version: 3,
     parseArgs(value) {
-        if (typeof value !== "object" || value === null || !("query" in value)) return undefined;
-        return typeof value.query === "string" ? { query: value.query } : undefined;
+        try {
+            return Value.Parse(demoArgsSchema, value);
+        } catch {
+            return undefined;
+        }
     },
     parseResult(value) {
-        if (typeof value !== "object" || value === null || !("details" in value)) return {};
-        if (typeof value.details !== "object" || value.details === null) return {};
-        const matches = "matches" in value.details ? value.details.matches : undefined;
-        return typeof matches === "number" ? { details: { matches } } : { details: {} };
+        try {
+            return Value.Parse(demoResultSchema, value);
+        } catch {
+            return { details: {} };
+        }
     },
     renderPartialCall() {
         return call({ static: "Demo Search", running: "Searching", completed: "Searched" });

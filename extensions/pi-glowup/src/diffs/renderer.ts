@@ -1,5 +1,6 @@
 import { keyHint } from "@earendil-works/pi-coding-agent";
-import { isRecord } from "../unknown-values.ts";
+import Type from "typebox";
+import { Value } from "typebox/value";
 import {
     sliceByColumn,
     truncateToWidth,
@@ -60,6 +61,7 @@ const MAX_VIEWPORT_DIFF_RENDER_LINES = 5_000;
 const MAX_CACHED_DIFF_HIGHLIGHTS = 100;
 const DISABLE_INITIAL_DEFER_ENV = "PI_GLOWUP_DISABLE_INITIAL_SYNTAX_DEFER";
 const moduleLoadedAtMs = Date.now();
+const pierreDiffDetailsSchema = Type.Object({ pierreDiff: Type.Unknown() });
 
 type HighlightState =
     | { readonly status: "idle" }
@@ -159,7 +161,7 @@ class DiffHighlightScheduler {
             this.cached.set(task.key, result);
             while (this.cached.size > MAX_CACHED_DIFF_HIGHLIGHTS) {
                 const oldest = this.cached.keys().next().value;
-                if (typeof oldest !== "string") break;
+                if (oldest === undefined) break;
                 this.cached.delete(oldest);
             }
         }
@@ -455,10 +457,12 @@ export function getPierreDiffPayloadFromDetails(
     details: unknown,
     limits?: DiffRenderLimits,
 ): PierreDiffPayload | undefined {
-    if (!isRecord(details)) {
+    try {
+        const parsedDetails = Value.Parse(pierreDiffDetailsSchema, details);
+        return normalizePierreDiffPayload(parsedDetails.pierreDiff, limits);
+    } catch {
         return undefined;
     }
-    return normalizePierreDiffPayload(details.pierreDiff, limits);
 }
 
 export type PierreDiffHighlightStats = {
@@ -624,7 +628,7 @@ class PierreDiffComponent implements Component {
         this.cachedLinesByWidth.set(width, lines);
         while (this.cachedLinesByWidth.size > 2) {
             const oldest = this.cachedLinesByWidth.keys().next().value;
-            if (typeof oldest !== "number") break;
+            if (oldest === undefined) break;
             this.cachedLinesByWidth.delete(oldest);
         }
         return lines;
@@ -1424,7 +1428,7 @@ function pierrePalettesEqual(left: PierreTerminalPalette, right: PierreTerminalP
 }
 
 function maxVisibleDiffLines(expanded: boolean): number {
-    const terminalRows = typeof process.stdout.rows === "number" ? process.stdout.rows : 40;
+    const terminalRows = process.stdout.rows ?? 40;
     const expandedLimit = Math.min(
         MAX_VIEWPORT_DIFF_RENDER_LINES,
         Math.max(24, Math.floor(terminalRows * 0.65)),

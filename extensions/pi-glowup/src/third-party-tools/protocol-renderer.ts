@@ -1,4 +1,7 @@
 import type { Component } from "@earendil-works/pi-tui";
+import Type, { type Static } from "typebox";
+import { Value } from "typebox/value";
+import { jsonValueParser, type JsonValue } from "../json-value.ts";
 import type { MutationSettings } from "../mutations/settings.ts";
 import type { GlowupRenderTheme } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
@@ -11,7 +14,11 @@ import {
     type GlowupResultContext,
 } from "../tool-rendering/protocol.ts";
 import { renderProtocolNode } from "./protocol-node-renderer.ts";
-import type { ThirdPartyToolRenderContext, ThirdPartyToolRenderer } from "./types.ts";
+import type {
+    ThirdPartyToolRenderContext,
+    ThirdPartyToolRenderer,
+    ThirdPartyToolResult,
+} from "./types.ts";
 
 const MAX_MUTATION_CALL_SLOTS = 500;
 const mutationCallSlots = new Map<string, ProtocolMutationCallSlot>();
@@ -74,9 +81,9 @@ function renderProtocolCallNode(
     mutationCallSlots.delete(context.toolCallId);
     mutationCallSlots.set(context.toolCallId, slot);
     while (mutationCallSlots.size > MAX_MUTATION_CALL_SLOTS) {
-        const oldest = mutationCallSlots.keys().next().value;
-        if (typeof oldest !== "string") break;
-        mutationCallSlots.delete(oldest);
+        const oldest = mutationCallSlots.keys().next();
+        if (oldest.done === true) break;
+        mutationCallSlots.delete(oldest.value);
     }
     return slot;
 }
@@ -85,20 +92,22 @@ function hideMutationCallSlot(toolCallId: string): void {
     mutationCallSlots.get(toolCallId)?.hide();
 }
 
-type UnknownGlowupRenderer = {
-    readonly version: 3;
-    readonly parseArgs: (value: unknown) => unknown;
-    readonly parseResult?: (value: unknown) => unknown;
-    readonly renderPartialCall?: (
-        value: unknown,
-        context: GlowupCallContext,
-    ) => GlowupNode | undefined;
-    readonly renderCall?: (args: unknown, context: GlowupCallContext) => GlowupNode | undefined;
-    readonly renderResult?: (
-        result: unknown,
-        context: GlowupResultContext<unknown>,
-    ) => GlowupNode | undefined;
-};
+const parserSchema = Type.Function([Type.Unknown()], Type.Unknown());
+const rendererSchema = Type.Function([Type.Unknown(), Type.Unknown()], Type.Unknown());
+const renderingAdapterSchema = Type.Object(
+    {
+        version: Type.Literal(3),
+        parseArgs: parserSchema,
+        parseResult: Type.Optional(parserSchema),
+        renderPartialCall: Type.Optional(rendererSchema),
+        renderCall: Type.Optional(rendererSchema),
+        renderResult: Type.Optional(rendererSchema),
+    },
+    { additionalProperties: true },
+);
+type UnknownGlowupRenderer = Static<typeof renderingAdapterSchema>;
+
+type ProtocolValue = JsonValue;
 
 function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallContext {
     const phase: GlowupExecutionPhase =
@@ -123,22 +132,25 @@ function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallCont
 
 function publicResultContext(
     context: ThirdPartyToolRenderContext,
-    args: unknown,
-): GlowupResultContext<unknown> {
+    args: ProtocolValue,
+): GlowupResultContext<ProtocolValue> {
     return { ...publicCallContext(context), args };
 }
 
-function safelyParse(parser: (value: unknown) => unknown, value: unknown): unknown {
+function safelyParse(
+    parser: UnknownGlowupRenderer["parseArgs"],
+    value: JsonValue | ThirdPartyToolResult | undefined,
+): ProtocolValue | undefined {
     try {
-        return parser(value);
+        return value === undefined ? undefined : jsonValueParser.parse(parser(value));
     } catch {
         return undefined;
     }
 }
 
-function safelyRender(render: () => unknown): GlowupNode | undefined {
+function safelyRender(render: () => GlowupNode | undefined): GlowupNode | undefined {
     try {
-        return decodeGlowupNode(render());
+        return render();
     } catch {
         return undefined;
     }
@@ -155,7 +167,7 @@ export function createProtocolRenderer(
         renderCall(args, theme, context) {
             if (context.argsComplete === false && adapter.renderPartialCall !== undefined) {
                 const partialNode = safelyRender(() =>
-                    adapter.renderPartialCall?.(args, publicCallContext(context)),
+                    decodeGlowupNode(adapter.renderPartialCall?.(args, publicCallContext(context))),
                 );
                 return partialNode === undefined
                     ? fallback.renderCall(args, theme, context)
@@ -175,7 +187,7 @@ export function createProtocolRenderer(
                 return fallback.renderCall(args, theme, context);
             }
             const node = safelyRender(() =>
-                adapter.renderCall?.(parsedArgs, publicCallContext(context)),
+                decodeGlowupNode(adapter.renderCall?.(parsedArgs, publicCallContext(context))),
             );
             return node === undefined
                 ? fallback.renderCall(args, theme, context)
@@ -192,9 +204,11 @@ export function createProtocolRenderer(
             }
             const resultContext = { ...context, args: parsedArgs, result };
             const node = safelyRender(() =>
-                adapter.renderResult?.(
-                    parsedResult,
-                    publicResultContext(resultContext, parsedArgs),
+                decodeGlowupNode(
+                    adapter.renderResult?.(
+                        parsedResult,
+                        publicResultContext(resultContext, parsedArgs),
+                    ),
                 ),
             );
             if (node === undefined) {
@@ -206,47 +220,32 @@ export function createProtocolRenderer(
     };
 }
 
-/** Runtime guard for values crossing the tool-definition boundary. */
-function isGlowupRenderingAdapter(value: unknown): value is UnknownGlowupRenderer {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-    try {
-        if (Reflect.get(value, "version") !== 3) return false;
-        if (typeof Reflect.get(value, "parseArgs") !== "function") return false;
-        const parseResult = Reflect.get(value, "parseResult");
-        const renderPartialCall = Reflect.get(value, "renderPartialCall");
-        const renderCall = Reflect.get(value, "renderCall");
-        const renderResult = Reflect.get(value, "renderResult");
-        if (renderPartialCall !== undefined && typeof renderPartialCall !== "function")
-            return false;
-        if (renderCall !== undefined && typeof renderCall !== "function") return false;
-        if (renderResult !== undefined && typeof renderResult !== "function") return false;
-        if (typeof renderPartialCall === "function" && typeof renderCall !== "function")
-            return false;
-        if (typeof renderResult === "function" && typeof parseResult !== "function") return false;
-        return typeof renderCall === "function" || typeof renderResult === "function";
-    } catch {
-        return false;
-    }
-}
+const renderingAdapterParser = {
+    parse(toolDefinition: unknown, propertyName: string): UnknownGlowupRenderer | undefined {
+        const definitionSchema = Type.Object({ [propertyName]: renderingAdapterSchema });
+        try {
+            if (!Value.Check(definitionSchema, toolDefinition)) return undefined;
+            const adapter = Value.Parse(definitionSchema, toolDefinition)[propertyName];
+            if (adapter === undefined) return undefined;
+            if (adapter.renderPartialCall !== undefined && adapter.renderCall === undefined)
+                return undefined;
+            if (adapter.renderResult !== undefined && adapter.parseResult === undefined)
+                return undefined;
+            return adapter.renderCall === undefined && adapter.renderResult === undefined
+                ? undefined
+                : adapter;
+        } catch {
+            return undefined;
+        }
+    },
+};
 
 /** Extracts a public adapter from an unknown tool definition. */
 export function glowupRenderingAdapter(
     toolDefinition: unknown,
     propertyName = "glowupRendering",
 ): UnknownGlowupRenderer | undefined {
-    if (
-        typeof toolDefinition !== "object" ||
-        toolDefinition === null ||
-        Array.isArray(toolDefinition)
-    ) {
-        return undefined;
-    }
-    try {
-        const value = Reflect.get(toolDefinition, propertyName);
-        return isGlowupRenderingAdapter(value) ? value : undefined;
-    } catch {
-        return undefined;
-    }
+    return renderingAdapterParser.parse(toolDefinition, propertyName);
 }
 
 export type { GlowupRenderer };

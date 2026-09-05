@@ -1,4 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
+import type { JsonValue } from "../json-value.ts";
 import type { GlowupRenderTheme } from "../rendering/core.ts";
 import type { ToolLabelMode } from "../rendering/status-labels.ts";
 import type { MutationSettings } from "../mutations/settings.ts";
@@ -8,14 +9,16 @@ import type {
     GlowupToolResult,
 } from "../tool-rendering/protocol.ts";
 
-/** Matcher used to preserve selected tools' original Pi renderers. */
-export type ToolNameMatcher = string | RegExp | ((toolName: string) => boolean);
+/** Programmatic matching policy for preserving original Pi renderers. */
+export type ToolNameMatcher =
+    | { readonly kind: "pattern"; readonly pattern: RegExp }
+    | { readonly kind: "predicate"; readonly matches: (toolName: string) => boolean };
 
 /** Internal context translated from Pi's ToolExecutionComponent. */
 export type ThirdPartyToolRenderContext = Omit<GlowupCallContext, "toolName" | "phase"> & {
     readonly toolName?: string;
     readonly phase?: GlowupExecutionPhase;
-    readonly args: unknown;
+    readonly args: JsonValue | undefined;
     readonly executionStarted?: boolean;
     readonly cwd?: string;
     readonly invalidate?: () => void;
@@ -29,7 +32,7 @@ export type ThirdPartyToolResult = GlowupToolResult;
 /** Pi-facing renderer produced by the private Glowup rendering engine. */
 export type ThirdPartyToolRenderer = {
     readonly renderCall: (
-        args: unknown,
+        args: JsonValue | undefined,
         theme: GlowupRenderTheme,
         context: ThirdPartyToolRenderContext,
     ) => Component;
@@ -54,7 +57,10 @@ export type ThirdPartyToolRendererPlugin = {
 /** Policy for third-party and generic compatibility rendering. */
 export type ThirdPartyToolRenderingOptions = {
     readonly enabled?: boolean;
-    readonly preserveTools?: ReadonlyArray<ToolNameMatcher>;
+    /** Exact full or base tool names, also supported by JSON configuration. */
+    readonly preserveTools?: ReadonlyArray<string>;
+    /** Programmatic policies, evaluated after exact-name preservation. */
+    readonly preserveMatchers?: ReadonlyArray<ToolNameMatcher>;
     readonly renderers?: ReadonlyArray<ThirdPartyToolRendererPlugin>;
     readonly labelMode?: ToolLabelMode;
     readonly mutationSettings?: MutationSettings;

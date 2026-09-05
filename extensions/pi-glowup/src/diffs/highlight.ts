@@ -8,6 +8,7 @@ import {
 import type {
     DiffSpan,
     HighlightedDiffCode,
+    HighlightedDiffNode,
     HighlightedDiffSet,
     PierreAppearance,
 } from "./types.ts";
@@ -18,7 +19,9 @@ import {
     type LoadedSyntaxHighlighter,
 } from "../syntax/highlighter.ts";
 import { expandTerminalTabs } from "../text-boundaries.ts";
-import { isRecord } from "../unknown-values.ts";
+import type { Properties } from "hast";
+import Type from "typebox";
+import { Value } from "typebox/value";
 
 const PIERRE_RENDER_OPTIONS = {
     useTokenTransformer: false,
@@ -28,6 +31,8 @@ const PIERRE_RENDER_OPTIONS = {
 } as const;
 
 const MAX_STYLE_CACHE_ENTRIES = 256;
+const styleValueSchema = Type.String();
+const fallbackTextFactorySchema = Type.Function([], Type.String());
 const flattenedLineCache = new WeakMap<object, Map<string, ReadonlyArray<DiffSpan>>>();
 const parsedStyleCache = new Map<string, ReadonlyMap<string, string>>();
 const highlightedMetadataCache = new WeakMap<
@@ -121,7 +126,7 @@ async function loadHighlightedDiffUncached(
 
 /** Flattens Pierre's HAST-ish highlighted line tree into terminal spans. */
 export function flattenHighlightedLine(
-    node: unknown,
+    node: HighlightedDiffNode | undefined,
     appearance: PierreAppearance,
     emphasisBg: string,
     fallbackText: string | (() => string),
@@ -129,7 +134,7 @@ export function flattenHighlightedLine(
     options: { readonly boldEmphasized?: boolean; readonly dimUnchanged?: boolean } = {},
 ): ReadonlyArray<DiffSpan> {
     const cacheKey = `${appearance}\u0000${emphasisBg}\u0000${language ?? ""}\u0000${options.boldEmphasized === true ? 1 : 0}\u0000${options.dimUnchanged === true ? 1 : 0}\u0000${syntaxHighlightingVersion()}`;
-    const cacheTarget = typeof node === "object" && node !== null ? node : undefined;
+    const cacheTarget = node;
     const cached = cacheTarget === undefined ? undefined : flattenedLineCache.get(cacheTarget);
     const cachedSpans = cached?.get(cacheKey);
     if (cachedSpans !== undefined) {
@@ -140,14 +145,9 @@ export function flattenHighlightedLine(
     const colorVariable = appearance === "light" ? "--diffs-token-light" : "--diffs-token-dark";
     let displayColumn = 0;
 
-    function visit(current: unknown, inherited: SpanStyle): void {
-        if (!isRecord(current)) {
-            return;
-        }
-
+    function visit(current: HighlightedDiffNode, inherited: SpanStyle): void {
         if (current.type === "text") {
-            const value = typeof current.value === "string" ? current.value : "";
-            const expanded = expandTerminalTabs(value, 4, displayColumn);
+            const expanded = expandTerminalTabs(current.value, 4, displayColumn);
             displayColumn = expanded.finalDisplayColumn;
             mergeSpan(spans, makeDiffSpan(expanded.text, inherited));
             return;
@@ -157,7 +157,7 @@ export function flattenHighlightedLine(
             return;
         }
 
-        const properties = isRecord(current.properties) ? current.properties : {};
+        const properties = current.properties;
         const styles = parseStyleValue(properties.style);
         const emphasized =
             Object.prototype.hasOwnProperty.call(properties, "data-diff-span") ||
@@ -169,19 +169,19 @@ export function flattenHighlightedLine(
             boldEmphasized: inherited.boldEmphasized,
             dimUnchanged: inherited.dimUnchanged,
         };
-        const children = Array.isArray(current.children) ? current.children : [];
-        for (const child of children) {
+        for (const child of current.children) {
             visit(child, nextStyle);
         }
     }
 
-    visit(node, {
-        fg: undefined,
-        bg: undefined,
-        emphasized: false,
-        boldEmphasized: options.boldEmphasized === true,
-        dimUnchanged: options.dimUnchanged === true,
-    });
+    if (node !== undefined)
+        visit(node, {
+            fg: undefined,
+            bg: undefined,
+            emphasized: false,
+            boldEmphasized: options.boldEmphasized === true,
+            dimUnchanged: options.dimUnchanged === true,
+        });
 
     if (spans.length > 0) {
         const enhanced = enhanceSyntaxSegments(spans, language);
@@ -192,7 +192,9 @@ export function flattenHighlightedLine(
         }
         return enhanced;
     }
-    const resolvedFallback = typeof fallbackText === "function" ? fallbackText() : fallbackText;
+    const resolvedFallback = Value.Check(fallbackTextFactorySchema, fallbackText)
+        ? fallbackText()
+        : fallbackText;
     return resolvedFallback.length > 0
         ? enhanceSyntaxSegments(
               [
@@ -235,7 +237,7 @@ function renderHighlightedDiffCode(
             // SAFETY: Pierre's DiffsHighlighter generic type is narrower than Shiki's runtime highlighter
             // because it models Pierre's bundled theme-name set. This highlighter is the same Shiki
             // implementation and is already loaded with syntax.themeName before renderDiffWithHighlighter runs.
-            syntax.highlighter as unknown as DiffsHighlighter,
+            syntax.highlighter as DiffsHighlighter,
             {
                 ...PIERRE_RENDER_OPTIONS,
                 theme: syntax.themeName,
@@ -251,18 +253,21 @@ function renderHighlightedDiffCode(
     }
 }
 
-function parseStyleValue(styleValue: unknown): ReadonlyMap<string, string> {
-    if (typeof styleValue !== "string") {
+function parseStyleValue(styleValue: Properties["style"]): ReadonlyMap<string, string> {
+    let parsedStyle: string;
+    try {
+        parsedStyle = Value.Parse(styleValueSchema, styleValue);
+    } catch {
         return new Map();
     }
-    const cached = parsedStyleCache.get(styleValue);
+    const cached = parsedStyleCache.get(parsedStyle);
     if (cached !== undefined) {
         return cached;
     }
 
     const styles = new Map<string, string>();
 
-    for (const segment of styleValue.split(";")) {
+    for (const segment of parsedStyle.split(";")) {
         const separator = segment.indexOf(":");
         if (separator <= 0) {
             continue;
@@ -275,10 +280,10 @@ function parseStyleValue(styleValue: unknown): ReadonlyMap<string, string> {
         }
     }
 
-    parsedStyleCache.set(styleValue, styles);
+    parsedStyleCache.set(parsedStyle, styles);
     while (parsedStyleCache.size > MAX_STYLE_CACHE_ENTRIES) {
         const oldest = parsedStyleCache.keys().next().value;
-        if (typeof oldest !== "string") break;
+        if (oldest === undefined) break;
         parsedStyleCache.delete(oldest);
     }
     return styles;

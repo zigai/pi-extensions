@@ -57,7 +57,7 @@ type AssistantRenderPrototype = {
 
 type ChatComponentKind = "assistant" | "tool" | "user";
 
-type ChatContainerInstance = object;
+type ChatContainerInstance = Container;
 
 type ChatTransitionPatchState = {
     enabled: boolean;
@@ -70,6 +70,11 @@ type ChatContainerPrototype = {
     [CHAT_TRANSITION_PATCH_KEY]?: true;
     [CHAT_TRANSITION_PATCH_STATE_KEY]?: ChatTransitionPatchState;
 };
+
+type AssistantPrototypeOwner =
+    | typeof AssistantMessageComponent.prototype
+    | AssistantRenderPrototype;
+type ChatContainerPrototypeOwner = typeof Container.prototype | ChatContainerPrototype;
 
 function renderSeparator(width: number): string {
     return `${ansiStyles.modifier.dim.open}${"─".repeat(Math.max(1, Math.floor(width)))}${ansiStyles.modifier.reset.open}`;
@@ -87,16 +92,14 @@ function linesWithSeparatorSpacing(lines: readonly string[], width: number): str
 
 function isVisibleTextContent(content: AssistantContent): boolean {
     return (
-        content.type === "text" &&
-        typeof content.text === "string" &&
-        hasNonWhitespaceText(content.text)
+        content.type === "text" && content.text !== undefined && hasNonWhitespaceText(content.text)
     );
 }
 
 function isVisibleThinkingContent(content: AssistantContent): boolean {
     return (
         content.type === "thinking" &&
-        typeof content.thinking === "string" &&
+        content.thinking !== undefined &&
         hasNonWhitespaceText(content.thinking)
     );
 }
@@ -262,21 +265,17 @@ function createThinkingBlockSpacingWrapper(
     };
 }
 
-// SAFETY: Pi exposes the component class, but private fields hide the prototype shape from structural typing; the installer still guards every patched method at runtime.
-const assistantMessagePrototype =
-    AssistantMessageComponent.prototype as unknown as AssistantRenderPrototype;
-
-const chatContainerPrototype = Container.prototype as unknown as ChatContainerPrototype;
-
 /** Enables or disables the assistant separator prototype patches. */
 export function configureAssistantSeparatorPatch(
     enabled: boolean,
-    prototype: object = assistantMessagePrototype,
-    containerPrototype: object = chatContainerPrototype,
+    prototype: AssistantPrototypeOwner = AssistantMessageComponent.prototype,
+    containerPrototype: ChatContainerPrototypeOwner = Container.prototype,
 ): void {
-    // SAFETY: This installer accepts test doubles and Pi's concrete prototype. All patched
-    // members are runtime-guarded before use, and the symbol marker is local to this module.
+    // SAFETY: Each owner union admits Pi's concrete prototype or the full test-double patch
+    // contract. These adapters preserve object and method identity.
     const assistantPrototype = prototype as AssistantRenderPrototype;
+    // SAFETY: ChatContainerPrototypeOwner likewise admits only Container's prototype or the
+    // complete patch contract, so this preserves the exact owner identity.
     const container = containerPrototype as ChatContainerPrototype;
 
     if (!enabled) {
@@ -300,7 +299,7 @@ function installAssistantPrototypePatch(assistantPrototype: AssistantRenderProto
     const originalUpdateContent = assistantPrototype.updateContent;
     let nextState: AssistantSeparatorPatchState;
     const wrapperRender =
-        typeof originalRender === "function"
+        originalRender !== undefined
             ? function renderWithAssistantSeparator(
                   this: AssistantRenderInstance,
                   width: number,
@@ -317,7 +316,7 @@ function installAssistantPrototypePatch(assistantPrototype: AssistantRenderProto
               }
             : undefined;
     const wrapperUpdateContent =
-        typeof originalUpdateContent === "function"
+        originalUpdateContent !== undefined
             ? createThinkingBlockSpacingWrapper(originalUpdateContent, () => nextState.enabled)
             : undefined;
 
@@ -353,7 +352,7 @@ function installChatPrototypePatch(container: ChatContainerPrototype): void {
     const originalAddChild = container.addChild;
     let nextState: ChatTransitionPatchState;
     const wrapperAddChild =
-        typeof originalAddChild === "function"
+        originalAddChild !== undefined
             ? createChatTransitionSeparatorWrapper(originalAddChild, () => nextState.enabled)
             : undefined;
     if (wrapperAddChild !== undefined) {

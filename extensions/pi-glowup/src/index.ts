@@ -122,6 +122,8 @@ import { StreamingScriptIdentityStore } from "./script-preview/streaming-identit
 import type { MutationSettings } from "./mutations/settings.ts";
 import { hasNonWhitespaceText } from "./text-boundaries.ts";
 import { isRecord, stringField } from "./unknown-values.ts";
+import { jsonValueParser, type JsonValue } from "./json-value.ts";
+import { numberParser, stringParser } from "./json-scalar.ts";
 
 type TextResult = {
     readonly content?: unknown;
@@ -177,7 +179,7 @@ function rememberBashRenderInvalidation(
     bashRenderInvalidations.set(toolCallId, invalidate);
     while (bashRenderInvalidations.size > MAX_BASH_RENDER_INVALIDATIONS) {
         const oldest = bashRenderInvalidations.keys().next().value;
-        if (typeof oldest !== "string") return;
+        if (oldest === undefined) return;
         bashRenderInvalidations.delete(oldest);
     }
 }
@@ -306,13 +308,14 @@ function configDiagnostics(config: GlowupConfig): DebugLogFields {
 }
 
 function textOutput(result: TextResult): string | undefined {
-    if (!Array.isArray(result.content)) {
-        return undefined;
+    const content = jsonValueParser.parse(result.content);
+    if (!Array.isArray(content)) return undefined;
+    for (const item of content) {
+        if (!isRecord(item) || item.type !== "text") continue;
+        const text = stringParser.parse(item.text);
+        if (text !== undefined) return text;
     }
-    const content = result.content.find(
-        (item) => isRecord(item) && item.type === "text" && typeof item.text === "string",
-    );
-    return isRecord(content) && typeof content.text === "string" ? content.text : undefined;
+    return undefined;
 }
 
 function syntaxPathFromToolArg(path: string | undefined): string | undefined {
@@ -443,21 +446,22 @@ function diffRenderLimits(settings: MutationSettings): DiffRenderLimits {
 }
 
 function stringFieldFrom(args: unknown, keys: readonly string[]): string | undefined {
+    const value = jsonValueParser.parse(args);
     for (const key of keys) {
-        const value = stringField(args, key);
-        if (value !== undefined) {
-            return value;
+        const field = stringField(value, key);
+        if (field !== undefined) {
+            return field;
         }
     }
     return undefined;
 }
 
 function pathField(args: unknown): string | undefined {
-    return stringFieldFrom(args, ["path", "file_path"]);
+    return stringFieldFrom(jsonValueParser.parse(args), ["path", "file_path"]);
 }
 
 function commandField(args: unknown): string | undefined {
-    return stringFieldFrom(args, ["command", "cmd"]);
+    return stringFieldFrom(jsonValueParser.parse(args), ["command", "cmd"]);
 }
 
 function partialBashCommandPreview(command: string): string {
@@ -468,16 +472,17 @@ function partialBashCommandPreview(command: string): string {
 }
 
 function numberField(args: unknown, key: string): number | undefined {
-    if (!isRecord(args)) {
+    const parsed = jsonValueParser.parse(args);
+    if (!isRecord(parsed)) {
         return undefined;
     }
-    const value = args[key];
-    return typeof value === "number" ? value : undefined;
+    return numberParser.parse(parsed[key]);
 }
 
 function normalizedWriteArgs(args: unknown): WriteCallArgs {
-    const path = pathField(args);
-    const content = stringFieldFrom(args, ["content", "contents"]);
+    const parsed = jsonValueParser.parse(args);
+    const path = pathField(parsed);
+    const content = stringFieldFrom(parsed, ["content", "contents"]);
     let normalized: WriteCallArgs = {};
     if (path !== undefined) normalized = { ...normalized, path };
     if (content !== undefined) normalized = { ...normalized, content };
@@ -485,15 +490,17 @@ function normalizedWriteArgs(args: unknown): WriteCallArgs {
 }
 
 function editTextPair(value: unknown): EditTextPair | null {
-    if (!isRecord(value)) return null;
-    const oldText = stringFieldFrom(value, ["oldText", "old_string"]);
-    const newText = stringFieldFrom(value, ["newText", "new_string"]);
+    const parsed = jsonValueParser.parse(value);
+    if (!isRecord(parsed)) return null;
+    const oldText = stringFieldFrom(parsed, ["oldText", "old_string"]);
+    const newText = stringFieldFrom(parsed, ["newText", "new_string"]);
     return oldText === undefined || newText === undefined ? null : { oldText, newText };
 }
 
 function replacementEditFromArgs(args: unknown): ReadonlyArray<EditTextPair> | undefined {
-    const oldText = stringFieldFrom(args, ["oldText", "old_string"]);
-    const newText = stringFieldFrom(args, ["newText", "new_string"]);
+    const parsed = jsonValueParser.parse(args);
+    const oldText = stringFieldFrom(parsed, ["oldText", "old_string"]);
+    const newText = stringFieldFrom(parsed, ["newText", "new_string"]);
     if (oldText === undefined || newText === undefined) {
         return undefined;
     }
@@ -501,9 +508,11 @@ function replacementEditFromArgs(args: unknown): ReadonlyArray<EditTextPair> | u
 }
 
 function normalizedEditArgs(args: unknown): EditCallArgs {
-    const path = pathField(args);
-    const existingEdits = isRecord(args) && Array.isArray(args.edits) ? args.edits : undefined;
-    const edits = existingEdits?.map(editTextPair) ?? replacementEditFromArgs(args);
+    const parsed = jsonValueParser.parse(args);
+    const path = pathField(parsed);
+    const existingEdits =
+        isRecord(parsed) && Array.isArray(parsed.edits) ? parsed.edits : undefined;
+    const edits = existingEdits?.map(editTextPair) ?? replacementEditFromArgs(parsed);
     let normalized: EditCallArgs = {};
     if (path !== undefined) normalized = { ...normalized, path };
     if (edits !== undefined) normalized = { ...normalized, edits };
@@ -511,9 +520,10 @@ function normalizedEditArgs(args: unknown): EditCallArgs {
 }
 
 function readActionArgs(args: unknown): ReadActionArgs {
-    const path = pathField(args);
-    const offset = numberField(args, "offset");
-    const limit = numberField(args, "limit");
+    const parsed = jsonValueParser.parse(args);
+    const path = pathField(parsed);
+    const offset = numberField(parsed, "offset");
+    const limit = numberField(parsed, "limit");
     let action: ReadActionArgs = {};
     if (path !== undefined) action = { ...action, path };
     if (offset !== undefined) action = { ...action, offset };
@@ -522,9 +532,10 @@ function readActionArgs(args: unknown): ReadActionArgs {
 }
 
 function findActionArgs(args: unknown): FindActionArgs {
-    const pattern = stringFieldFrom(args, ["pattern", "glob"]);
-    const path = pathField(args);
-    const limit = numberField(args, "limit");
+    const parsed = jsonValueParser.parse(args);
+    const pattern = stringFieldFrom(parsed, ["pattern", "glob"]);
+    const path = pathField(parsed);
+    const limit = numberField(parsed, "limit");
     let action: FindActionArgs = {};
     if (pattern !== undefined) action = { ...action, pattern };
     if (path !== undefined) action = { ...action, path };
@@ -533,10 +544,11 @@ function findActionArgs(args: unknown): FindActionArgs {
 }
 
 function grepActionArgs(args: unknown): GrepActionArgs {
-    const pattern = stringFieldFrom(args, ["pattern", "query"]);
-    const path = pathField(args);
-    const glob = stringFieldFrom(args, ["glob", "include", "glob_filter"]);
-    const limit = numberField(args, "limit");
+    const parsed = jsonValueParser.parse(args);
+    const pattern = stringFieldFrom(parsed, ["pattern", "query"]);
+    const path = pathField(parsed);
+    const glob = stringFieldFrom(parsed, ["glob", "include", "glob_filter"]);
+    const limit = numberField(parsed, "limit");
     let action: GrepActionArgs = {};
     if (pattern !== undefined) action = { ...action, pattern };
     if (path !== undefined) action = { ...action, path };
@@ -546,8 +558,9 @@ function grepActionArgs(args: unknown): GrepActionArgs {
 }
 
 function lsActionArgs(args: unknown): LsActionArgs {
-    const path = pathField(args);
-    const limit = numberField(args, "limit");
+    const parsed = jsonValueParser.parse(args);
+    const path = pathField(parsed);
+    const limit = numberField(parsed, "limit");
     let action: LsActionArgs = {};
     if (path !== undefined) action = { ...action, path };
     if (limit !== undefined) action = { ...action, limit };
@@ -555,7 +568,7 @@ function lsActionArgs(args: unknown): LsActionArgs {
 }
 
 function webSearchQuery(args: unknown): string | undefined {
-    return stringFieldFrom(args, ["query", "search_term"]);
+    return stringFieldFrom(jsonValueParser.parse(args), ["query", "search_term"]);
 }
 
 function hasImageContent(result: TextResult): boolean {
@@ -640,7 +653,7 @@ function renderBuiltInToolCall(options: {
                 );
             case "bash":
                 return renderBashCall(
-                    args,
+                    jsonValueParser.parse(args),
                     theme,
                     context,
                     options.headerLayout,
@@ -650,23 +663,33 @@ function renderBuiltInToolCall(options: {
                     options.shellOperatorPosition,
                 );
             case "write":
-                return renderWriteCall(args, theme, context, {
+                return renderWriteCall(jsonValueParser.parse(args), theme, context, {
                     labelMode: options.labelMode,
                     movingViewport: options.movingWriteViewport,
                     mutationSettings: options.mutationSettings,
                 });
             case "edit":
-                return renderEditCall(args, theme, context, options.labelMode);
+                return renderEditCall(
+                    jsonValueParser.parse(args),
+                    theme,
+                    context,
+                    options.labelMode,
+                );
             case "delete":
                 return renderDeleteCall(
-                    args,
+                    jsonValueParser.parse(args),
                     theme,
                     context,
                     options.labelMode,
                     options.mutationSettings,
                 );
             case "webSearch":
-                return renderWebSearchCall(args, theme, context, options.labelMode);
+                return renderWebSearchCall(
+                    jsonValueParser.parse(args),
+                    theme,
+                    context,
+                    options.labelMode,
+                );
         }
     };
 }
@@ -769,9 +792,7 @@ async function finishNativeEditSnapshot(
 function trimOldestMapEntries<T>(entries: Map<string, T>, limit: number): void {
     while (entries.size > limit) {
         const oldest = entries.keys().next().value;
-        if (typeof oldest !== "string") {
-            return;
-        }
+        if (oldest === undefined) return;
         entries.delete(oldest);
     }
 }
@@ -785,8 +806,8 @@ function persistedDeletePreview(
     filePath: string | undefined,
 ): DeletedTextPreview | undefined {
     if (filePath === undefined || !isRecord(result?.details)) return undefined;
-    const diff = result.details.diff;
-    if (typeof diff !== "string" || !hasNonWhitespaceText(diff)) return undefined;
+    const diff = stringParser.parse(result.details.diff);
+    if (diff === undefined || !hasNonWhitespaceText(diff)) return undefined;
     const normalized = diff.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
     const pathHeader = `${filePath}\n`;
     const body = normalized.startsWith(pathHeader)
@@ -815,16 +836,14 @@ async function captureNativeDeletePreview(
         nativeDeletePreviews.set(toolCallId, preview);
         while (nativeDeletePreviews.size > 300) {
             const oldest = nativeDeletePreviews.keys().next().value;
-            if (typeof oldest !== "string") {
-                break;
-            }
+            if (oldest === undefined) break;
             nativeDeletePreviews.delete(oldest);
         }
     }
 }
 
 function renderDeleteCall(
-    args: unknown,
+    args: JsonValue | undefined,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     labelMode: ToolLabelMode,
@@ -858,7 +877,7 @@ function renderDeleteCall(
 }
 
 function renderWebSearchCall(
-    args: unknown,
+    args: JsonValue | undefined,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     labelMode: ToolLabelMode,
@@ -884,7 +903,7 @@ function renderWebSearchCall(
 }
 
 function renderBashCall(
-    args: unknown,
+    args: JsonValue | undefined,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     headerLayout: () => ScriptPreviewHeaderLayout,
@@ -972,7 +991,7 @@ function renderBashResult(
 }
 
 function renderWriteCall(
-    args: unknown,
+    args: JsonValue | undefined,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     options: {
@@ -1037,7 +1056,7 @@ function renderWriteResult(
 }
 
 function renderEditCall(
-    args: unknown,
+    args: JsonValue | undefined,
     theme: BuiltInRenderTheme,
     context: BuiltInRenderContext,
     labelMode: ToolLabelMode,
@@ -1049,11 +1068,11 @@ function renderEditCall(
     const preview =
         cachedPreview ??
         (isRecord(resultDetails) &&
-        typeof resultDetails.diff === "string" &&
-        hasNonWhitespaceText(resultDetails.diff)
+        stringParser.parse(resultDetails.diff) !== undefined &&
+        hasNonWhitespaceText(stringParser.parse(resultDetails.diff) ?? "")
             ? buildEditPreview({
                   path: pathField(args) ?? "",
-                  diff: resultDetails.diff,
+                  diff: stringParser.parse(resultDetails.diff) ?? "",
               })
             : undefined);
     if (!isActiveToolCall(context) && preview) {
@@ -1123,14 +1142,14 @@ function renderEditResult(
     if (
         !context.isError &&
         isRecord(result.details) &&
-        typeof result.details.diff === "string" &&
-        hasNonWhitespaceText(result.details.diff)
+        stringParser.parse(result.details.diff) !== undefined &&
+        hasNonWhitespaceText(stringParser.parse(result.details.diff) ?? "")
     ) {
         const path = pathField(context.args);
         const summaryPayload = buildLargeDiffSummaryPayload(
             {
                 path: path ?? "",
-                diffText: result.details.diff,
+                diffText: stringParser.parse(result.details.diff) ?? "",
             },
             diffRenderLimits(mutationSettings),
         );
@@ -1142,7 +1161,7 @@ function renderEditResult(
                 context,
             );
         }
-        const sections = parseDiffSections(result.details.diff, path);
+        const sections = parseDiffSections(stringParser.parse(result.details.diff) ?? "", path);
         const showAllRows = options.expanded || mutationSettings.defaultView === "full";
         let diffOptions: GlowupDiffRenderOptions = {
             collapsedLineBudget: mutationSettings.previewLines,
@@ -1211,11 +1230,14 @@ function clearSessionState(): void {
     clearQueuedDiffHighlights();
 }
 
-function valueKind(value: unknown): string {
-    if (Array.isArray(value)) {
-        return "array";
-    }
-    return value === null ? "null" : typeof value;
+function valueKind(value: JsonValue | undefined): string {
+    if (value === undefined) return "undefined";
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "array";
+    if (stringParser.parse(value) !== undefined) return "string";
+    if (numberParser.parse(value) !== undefined) return "number";
+    if (value === true || value === false) return "boolean";
+    return "object";
 }
 
 function textByteLength(text: string | undefined): number | undefined {
@@ -1223,19 +1245,20 @@ function textByteLength(text: string | undefined): number | undefined {
 }
 
 function detailsDiagnostics(details: unknown): DebugLogFields {
-    if (!isRecord(details)) {
-        return { detailsKind: valueKind(details) };
+    const parsed = jsonValueParser.parse(details);
+    if (!isRecord(parsed)) {
+        return { detailsKind: valueKind(parsed) };
     }
-    const diff = details.diff;
-    const pierreDiff = details.pierreDiff;
+    const diff = parsed.diff;
+    const pierreDiff = parsed.pierreDiff;
     return {
         detailsKind: "object",
-        detailKeyCount: Object.keys(details).length,
-        detailsDiffBytes: typeof diff === "string" ? Buffer.byteLength(diff, "utf8") : undefined,
-        pierreDiffKind:
-            isRecord(pierreDiff) && typeof pierreDiff.kind === "string"
-                ? pierreDiff.kind
-                : undefined,
+        detailKeyCount: Object.keys(parsed).length,
+        detailsDiffBytes:
+            stringParser.parse(diff) === undefined
+                ? undefined
+                : Buffer.byteLength(stringParser.parse(diff) ?? "", "utf8"),
+        pierreDiffKind: isRecord(pierreDiff) ? stringParser.parse(pierreDiff.kind) : undefined,
     };
 }
 
@@ -1260,8 +1283,8 @@ function restoreExplorationGroupStarts(entries: readonly unknown[]): void {
         let previousWasExploration = false;
         for (const content of entry.message.content) {
             if (!isRecord(content) || content.type !== "toolCall") continue;
-            const toolName = typeof content.name === "string" ? content.name : undefined;
-            const toolCallId = typeof content.id === "string" ? content.id : undefined;
+            const toolName = stringParser.parse(content.name);
+            const toolCallId = stringParser.parse(content.id);
             const exploration = toolName !== undefined && isExplorationToolName(toolName);
             if (exploration && !previousWasExploration && toolCallId !== undefined) {
                 explorationGroups.registerGroupStart(toolCallId);
@@ -1272,16 +1295,16 @@ function restoreExplorationGroupStarts(entries: readonly unknown[]): void {
 }
 
 function hasVisibleAssistantText(message: unknown): boolean {
-    if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content)) {
+    const parsed = jsonValueParser.parse(message);
+    if (!isRecord(parsed) || parsed.role !== "assistant" || !Array.isArray(parsed.content)) {
         return false;
     }
 
-    return message.content.some(
+    return parsed.content.some(
         (content) =>
             isRecord(content) &&
             content.type === "text" &&
-            typeof content.text === "string" &&
-            content.text.trim().length > 0,
+            stringParser.parse(content.text)?.trim().length !== 0,
     );
 }
 
@@ -1291,10 +1314,12 @@ function refreshToolRows(context: Pick<ExtensionContext, "mode" | "ui">): void {
     }
 }
 
-export default function glowupExtension(pi: ExtensionAPI): void {
+export default function glowupExtension(pi: Pick<ExtensionAPI, "on">): void {
     // SAFETY: The symbol property is extension-private metadata on the concrete
     // ExtensionAPI object. It does not alter Pi's public API or handler semantics.
-    const guardedPi = pi as ExtensionAPI & { [key: symbol]: boolean | undefined };
+    const guardedPi = pi as Pick<ExtensionAPI, "on"> & {
+        [key: symbol]: boolean | undefined;
+    };
     if (guardedPi[EXTENSION_LOADED_KEY] === true) {
         return;
     }
@@ -1436,7 +1461,7 @@ export default function glowupExtension(pi: ExtensionAPI): void {
             toolName: event.toolName,
             builtInToolName: diagnosticBuiltInToolName(event.toolName),
             toolCallId: event.toolCallId,
-            inputKind: valueKind(event.input),
+            inputKind: valueKind(jsonValueParser.parse(event.input)),
             commandBytes: textByteLength(command),
             ...diagnosticSnapshot(),
         }));
@@ -1504,13 +1529,13 @@ export default function glowupExtension(pi: ExtensionAPI): void {
             rendersAsEdit &&
             !event.isError &&
             isRecord(event.details) &&
-            typeof event.details.diff === "string"
+            stringParser.parse(event.details.diff) !== undefined
         ) {
             editPreviews.set(
                 event.toolCallId,
                 buildEditPreview({
                     path: pathField(event.input) ?? "",
-                    diff: event.details.diff,
+                    diff: stringParser.parse(event.details.diff) ?? "",
                 }),
             );
             storedEditPreview = true;

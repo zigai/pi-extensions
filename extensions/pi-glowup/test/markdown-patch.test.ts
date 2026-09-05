@@ -21,61 +21,45 @@ function makeMarkdownTheme(): MarkdownTheme {
     };
 }
 
-function isMarkdownThemeWithHighlight(value: unknown): value is MarkdownTheme & {
-    readonly highlightCode: NonNullable<MarkdownTheme["highlightCode"]>;
-} {
-    return (
-        typeof value === "object" &&
-        value !== null &&
-        typeof Reflect.get(value, "highlightCode") === "function"
-    );
-}
+type FakeMarkdownInstance = {
+    readonly theme?: MarkdownTheme;
+};
 
 describe("markdown syntax patch", () => {
     it("restores the original render method when disabled", () => {
         const prototype = {
-            render(): string[] {
-                return ["original"];
-            },
+            render: (): string[] => ["original"],
         };
-        const originalRender = Reflect.get(prototype, "render");
+        const originalRender = prototype.render;
 
         configureMarkdownSyntaxPatch(true, prototype);
         configureMarkdownSyntaxPatch(false, prototype);
 
-        expect(Reflect.get(prototype, "render")).toBe(originalRender);
+        expect(prototype.render).toBe(originalRender);
     });
 
     it("does not clobber render wrappers installed later", () => {
         const prototype = {
-            render(_width: number): string[] {
-                return ["original"];
-            },
+            render: (_width: number): string[] => ["original"],
         };
         configureMarkdownSyntaxPatch(true, prototype);
-        const originalRender = Reflect.get(prototype, "render");
-        if (typeof originalRender !== "function") {
-            throw new Error("expected Glowup markdown wrapper");
-        }
-        prototype.render = function renderWithLaterWrapper(width: number): string[] {
-            return originalRender.call(this, width);
-        };
-        const laterRender = Reflect.get(prototype, "render");
+        const originalRender = prototype.render;
+        prototype.render = (width: number): string[] => originalRender(width);
+        const laterRender = prototype.render;
 
         configureMarkdownSyntaxPatch(false, prototype);
 
-        expect(Reflect.get(prototype, "render")).toBe(laterRender);
+        expect(prototype.render).toBe(laterRender);
         expect(prototype.render(80)).toEqual(["original"]);
     });
 
     it("temporarily injects one shared highlighter into fresh Markdown theme objects", () => {
         const highlightedFunctions: Array<NonNullable<MarkdownTheme["highlightCode"]>> = [];
         const prototype = {
-            render(this: object, _width: number): string[] {
-                const theme = Reflect.get(this, "theme");
-                if (isMarkdownThemeWithHighlight(theme)) {
-                    highlightedFunctions.push(theme.highlightCode);
-                }
+            render(this: FakeMarkdownInstance, _width: number): string[] {
+                const highlightCode = this.theme?.highlightCode;
+                if (highlightCode === undefined) throw new Error("expected injected highlighter");
+                highlightedFunctions.push(highlightCode);
                 return ["rendered"];
             },
         };
@@ -101,12 +85,10 @@ describe("markdown syntax patch", () => {
             highlightCode: originalHighlight,
         };
         const prototype = {
-            render(this: object, _width: number): string[] {
-                const renderTheme = Reflect.get(this, "theme");
-                if (!isMarkdownThemeWithHighlight(renderTheme)) {
-                    return ["missing highlighter"];
-                }
-                return renderTheme.highlightCode("code", "ts");
+            render(this: FakeMarkdownInstance, _width: number): string[] {
+                const highlightCode = this.theme?.highlightCode;
+                if (highlightCode === undefined) return ["missing highlighter"];
+                return highlightCode("code", "ts");
             },
         };
 

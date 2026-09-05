@@ -13,7 +13,10 @@ let markdownThemePatchFailures = 0;
 let markdownThinkingThemeSuppressions = 0;
 let markdownThinkingThemeSuppressionFailures = 0;
 
-type MarkdownInstance = object;
+type MarkdownInstance = {
+    readonly theme?: MarkdownTheme;
+    readonly defaultTextStyle?: { readonly italic?: boolean };
+};
 
 type MarkdownPatchState = {
     enabled: boolean;
@@ -45,7 +48,8 @@ function highlightMarkdownCode(code: string, lang?: string): string[] {
 
 /** Returns Markdown syntax patch counters for debug diagnostics. */
 export function markdownSyntaxPatchStats(
-    prototype: MarkdownPrototype = Markdown.prototype as unknown as MarkdownPrototype,
+    // SAFETY: The patch contract models the optional render method and symbol-owned state added to Markdown.prototype.
+    prototype: MarkdownPrototype = Markdown.prototype as MarkdownPrototype,
 ): MarkdownSyntaxPatchStats {
     return {
         highlightingEnabled: markdownSyntaxEnabled,
@@ -63,7 +67,8 @@ export function markdownSyntaxPatchStats(
 /** Enables or disables the Markdown syntax prototype patch. */
 export function configureMarkdownSyntaxPatch(
     enabled: boolean,
-    prototype: MarkdownPrototype = Markdown.prototype as unknown as MarkdownPrototype,
+    // SAFETY: The patch contract models the optional render method and symbol-owned state added to Markdown.prototype.
+    prototype: MarkdownPrototype = Markdown.prototype as MarkdownPrototype,
 ): void {
     const state = prototype[MARKDOWN_PATCH_STATE_KEY];
 
@@ -121,8 +126,8 @@ function restoreMarkdownRender(
 }
 
 function prepareSyntaxTheme(instance: MarkdownInstance): (() => void) | undefined {
-    const theme = Reflect.get(instance, "theme");
-    if (!isMarkdownTheme(theme)) {
+    const theme = instance.theme;
+    if (theme === undefined) {
         return undefined;
     }
 
@@ -194,18 +199,5 @@ function patchSyntaxMarkdownTheme(theme: MarkdownTheme): void {
 }
 
 function isThinkingMarkdown(instance: MarkdownInstance): boolean {
-    const defaultTextStyle = Reflect.get(instance, "defaultTextStyle");
-    return (
-        typeof defaultTextStyle === "object" &&
-        defaultTextStyle !== null &&
-        Reflect.get(defaultTextStyle, "italic") === true
-    );
-}
-
-function isMarkdownTheme(value: unknown): value is MarkdownTheme {
-    return (
-        typeof value === "object" &&
-        value !== null &&
-        typeof Reflect.get(value, "codeBlock") === "function"
-    );
+    return instance.defaultTextStyle?.italic === true;
 }

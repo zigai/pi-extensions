@@ -1,3 +1,5 @@
+import type { JsonValue } from "../json-value.js";
+
 /** Property read from a Pi tool definition when Glowup is installed. */
 export const GLOWUP_RENDERING_PROPERTY = "glowupRendering" as const;
 
@@ -36,8 +38,8 @@ export type GlowupToolResult = {
     readonly details?: unknown;
 };
 
-/** Parses an unknown runtime value into an adapter-owned value. */
-export type GlowupParser<Value> = (value: unknown) => Value | undefined;
+/** Parses a serialized runtime value into an adapter-owned value. */
+export type GlowupParser<Value> = (value: JsonValue) => Value | undefined;
 
 /** Semantic tones understood by the Glowup style engine. */
 export type GlowupTone =
@@ -190,11 +192,11 @@ type GlowupRendererBase<Args> = {
 
 type GlowupCallRendering<Args> = {
     /**
-     * Optional renderer for incomplete streaming arguments. It receives the raw value because the
-     * complete argument parser is not expected to accept an unfinished object.
+     * Optional renderer for incomplete streaming arguments. It receives serialized partial data
+     * because the complete argument parser is not expected to accept an unfinished object.
      */
     readonly renderPartialCall?: (
-        value: unknown,
+        value: JsonValue,
         context: GlowupCallContext,
     ) => GlowupNode | undefined;
     readonly renderCall: (args: Args, context: GlowupCallContext) => GlowupNode | undefined;

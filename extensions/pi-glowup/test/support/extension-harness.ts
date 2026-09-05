@@ -1,7 +1,23 @@
 import type { ExtensionAPI, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import glowupExtension from "../../src/index.ts";
 
-type ExtensionHandler = (...args: unknown[]) => unknown;
+type HarnessEvent =
+    | ToolCallEvent
+    | { readonly type: "session_start"; readonly reason: "startup" }
+    | { readonly type: "session_shutdown"; readonly reason: "quit" | "reload" };
+
+type HarnessContext = {
+    readonly cwd?: string;
+    readonly mode?: "tui";
+    readonly ui?: {
+        readonly getToolsExpanded: () => boolean;
+        readonly setToolsExpanded: () => void;
+    };
+    readonly sessionManager?: { readonly getBranch: () => readonly unknown[] };
+    readonly isProjectTrusted?: () => boolean;
+};
+
+type ExtensionHandler = (event: HarnessEvent, context: HarnessContext) => void | Promise<void>;
 
 export class GlowupExtensionHarness {
     private readonly handlersByEvent = new Map<string, ExtensionHandler[]>();
@@ -9,20 +25,16 @@ export class GlowupExtensionHarness {
 
     constructor() {
         const apiBoundary = {
-            on: (eventName: string, handler: unknown): void => {
-                if (typeof handler !== "function") {
-                    throw new TypeError(`${eventName} extension handler must be callable`);
-                }
+            on: (eventName: string, handler: ExtensionHandler): void => {
                 const handlers = this.handlersByEvent.get(eventName) ?? [];
-                // SAFETY: The runtime check above establishes a callable value. The extension
-                // runner intentionally erases each event's distinct parameter tuple here.
-                handlers.push(handler as ExtensionHandler);
+                handlers.push(handler);
                 this.handlersByEvent.set(eventName, handlers);
             },
         };
-        // SAFETY: pi-glowup only consumes ExtensionAPI.on during registration. Tests drive
-        // every registered callback through the representative event context below.
-        this.extensionApi = apiBoundary as unknown as ExtensionAPI;
+        // SAFETY: pi-glowup only consumes ExtensionAPI.on during registration. Object.assign
+        // installs that tested seam before the fixture is exposed to the extension.
+        const extensionApiFixture = {} as ExtensionAPI;
+        this.extensionApi = Object.assign(extensionApiFixture, apiBoundary);
     }
 
     async install(cwd: string, branch: readonly unknown[] = []): Promise<void> {
@@ -53,7 +65,11 @@ export class GlowupExtensionHarness {
         await this.emit("tool_call", event, { cwd });
     }
 
-    private async emit(eventName: string, event: unknown, context: unknown): Promise<void> {
+    private async emit(
+        eventName: string,
+        event: HarnessEvent,
+        context: HarnessContext,
+    ): Promise<void> {
         for (const handler of this.handlersByEvent.get(eventName) ?? []) {
             await handler(event, context);
         }

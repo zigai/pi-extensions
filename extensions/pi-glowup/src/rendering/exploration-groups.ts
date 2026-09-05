@@ -98,9 +98,9 @@ export class ExplorationGroupStore {
     registerGroupStart(toolCallId: string): void {
         this.groupStartToolCallIds.add(toolCallId);
         while (this.groupStartToolCallIds.size > this.maxRetainedToolCalls) {
-            const oldest = this.groupStartToolCallIds.values().next().value;
-            if (typeof oldest !== "string") break;
-            this.groupStartToolCallIds.delete(oldest);
+            const oldest = this.groupStartToolCallIds.values().next();
+            if (oldest.done === true) break;
+            this.groupStartToolCallIds.delete(oldest.value);
         }
     }
 

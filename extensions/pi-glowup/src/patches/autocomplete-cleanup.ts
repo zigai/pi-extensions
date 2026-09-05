@@ -17,17 +17,24 @@ type PatchableEditorPrototype = {
     clearAutocompleteUi?: (this: RuntimeEditor) => void;
 };
 
+type EditorPrototypeOwner =
+    | typeof Editor.prototype
+    | {
+          clearAutocompleteUi?: (...args: never[]) => void;
+          [AUTOCOMPLETE_CLEANUP_PATCH_KEY]?: true;
+          [AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY]?: AutocompleteCleanupPatchState;
+      };
+
 type RuntimeEditor = {
     readonly tui?: TUI;
-    readonly autocompletePrefix?: unknown;
+    readonly autocompletePrefix?: string;
     isShowingAutocomplete?: () => boolean;
 };
 
 function isSlashAutocompleteClosing(editor: RuntimeEditor): boolean {
     return (
         editor.isShowingAutocomplete?.() === true &&
-        typeof editor.autocompletePrefix === "string" &&
-        editor.autocompletePrefix.startsWith("/")
+        editor.autocompletePrefix?.startsWith("/") === true
     );
 }
 
@@ -38,8 +45,10 @@ function shouldForceCleanupRender(editor: RuntimeEditor): boolean {
 /** Enables or disables the autocomplete cleanup prototype patch. */
 export function configureAutocompleteCleanupPatch(
     enabled: boolean,
-    prototype: object = Editor.prototype as unknown as object,
+    prototype: EditorPrototypeOwner = Editor.prototype,
 ): void {
+    // SAFETY: The owner union admits Pi's concrete prototype or a callable cleanup-method
+    // prototype. This adapter preserves the exact prototype and method identities.
     const editorPrototype = prototype as PatchableEditorPrototype;
     const state = editorPrototype[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY];
 

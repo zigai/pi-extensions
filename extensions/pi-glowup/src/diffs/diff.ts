@@ -1,5 +1,7 @@
 import { stat, readFile } from "node:fs/promises";
 import path from "node:path";
+import Type, { type Static } from "typebox";
+import { Value } from "typebox/value";
 import {
     getFiletypeFromFileName,
     parsePatchFiles,
@@ -25,7 +27,6 @@ import type {
 import type { PierreTerminalPalette } from "./theme.ts";
 import { syntaxLanguageFromFile } from "../syntax/language.ts";
 import { countContentLines } from "../text-boundaries.ts";
-import { isRecord } from "../unknown-values.ts";
 import { replacementFocusColumns } from "./intraline.ts";
 
 const MAX_DIFF_RENDER_BYTES = 512 * 1024;
@@ -42,6 +43,97 @@ const DEFAULT_DIFF_RENDER_LIMITS: DiffRenderLimits = {
 };
 
 const normalizedPayloads = new WeakMap<object, Map<string, PierreDiffPayload | undefined>>();
+
+const nodeErrorCodeSchema = Type.Object({ code: Type.String() });
+const nonNegativeNumberSchema = Type.Number({ minimum: 0 });
+const pierreLineIndexSchema = Type.Number({ minimum: -1 });
+const hunkContentSchema = Type.Union([
+    Type.Object({
+        type: Type.Literal("context"),
+        lines: nonNegativeNumberSchema,
+        additionLineIndex: pierreLineIndexSchema,
+        deletionLineIndex: pierreLineIndexSchema,
+    }),
+    Type.Object({
+        type: Type.Literal("change"),
+        additions: nonNegativeNumberSchema,
+        deletions: nonNegativeNumberSchema,
+        additionLineIndex: pierreLineIndexSchema,
+        deletionLineIndex: pierreLineIndexSchema,
+    }),
+]);
+const hunkSchema = Type.Object({
+    collapsedBefore: nonNegativeNumberSchema,
+    additionStart: nonNegativeNumberSchema,
+    additionCount: nonNegativeNumberSchema,
+    additionLines: nonNegativeNumberSchema,
+    additionLineIndex: pierreLineIndexSchema,
+    deletionStart: nonNegativeNumberSchema,
+    deletionCount: nonNegativeNumberSchema,
+    deletionLines: nonNegativeNumberSchema,
+    deletionLineIndex: pierreLineIndexSchema,
+    splitLineStart: nonNegativeNumberSchema,
+    splitLineCount: nonNegativeNumberSchema,
+    unifiedLineStart: nonNegativeNumberSchema,
+    unifiedLineCount: nonNegativeNumberSchema,
+    noEOFCRDeletions: Type.Boolean(),
+    noEOFCRAdditions: Type.Boolean(),
+    hunkContent: Type.Array(hunkContentSchema),
+    hunkContext: Type.Optional(Type.String()),
+    hunkSpecs: Type.Optional(Type.String()),
+});
+const fileDiffMetadataSchema = Type.Object({
+    name: Type.String(),
+    prevName: Type.Optional(Type.String()),
+    lang: Type.Optional(Type.String()),
+    newObjectId: Type.Optional(Type.String()),
+    prevObjectId: Type.Optional(Type.String()),
+    mode: Type.Optional(Type.String()),
+    prevMode: Type.Optional(Type.String()),
+    cacheKey: Type.Optional(Type.String()),
+    type: Type.Union([
+        Type.Literal("change"),
+        Type.Literal("rename-pure"),
+        Type.Literal("rename-changed"),
+        Type.Literal("new"),
+        Type.Literal("deleted"),
+    ]),
+    hunks: Type.Array(hunkSchema),
+    splitLineCount: nonNegativeNumberSchema,
+    unifiedLineCount: nonNegativeNumberSchema,
+    isPartial: Type.Boolean(),
+    deletionLines: Type.Array(Type.String()),
+    additionLines: Type.Array(Type.String()),
+});
+const restoredPayloadSchema = Type.Object({
+    version: Type.Literal(1),
+    path: Type.String(),
+    kind: Type.Union([Type.Literal("summary"), Type.Literal("renderable")]),
+    stats: Type.Object({
+        added: nonNegativeNumberSchema,
+        removed: nonNegativeNumberSchema,
+        lineCount: nonNegativeNumberSchema,
+        sizeBytes: nonNegativeNumberSchema,
+    }),
+    summary: Type.Optional(
+        Type.Object({
+            reason: Type.Union([
+                Type.Literal("too-large"),
+                Type.Literal("not-readable"),
+                Type.Literal("metadata-invalid"),
+                Type.Literal("metadata-too-large"),
+            ]),
+            maxLines: Type.Union([Type.Null(), nonNegativeNumberSchema]),
+            maxBytes: Type.Union([Type.Null(), nonNegativeNumberSchema]),
+        }),
+    ),
+    metadata: Type.Optional(fileDiffMetadataSchema),
+});
+type RestoredPayload = Static<typeof restoredPayloadSchema>;
+type RestoredSummary = NonNullable<RestoredPayload["summary"]>;
+type RestoredStats = RestoredPayload["stats"];
+type RestoredMetadata = NonNullable<RestoredPayload["metadata"]>;
+type RestoredHunk = RestoredMetadata["hunks"][number];
 
 type FileSnapshot = {
     readonly exists: boolean;
@@ -208,66 +300,75 @@ export function normalizePierreDiffPayload(
     payload: unknown,
     limits: DiffRenderLimits = DEFAULT_DIFF_RENDER_LIMITS,
 ): PierreDiffPayload | undefined {
-    if (!isRecord(payload) || payload.version !== 1 || typeof payload.path !== "string") {
+    const restored = parseRestoredPayload(payload);
+    if (restored === undefined) {
         return undefined;
     }
 
     const limitsKey = `${limits.maxLines ?? "none"}:${limits.maxBytes ?? "none"}`;
-    const cachedByLimits = normalizedPayloads.get(payload);
+    const cachedByLimits = normalizedPayloads.get(restored);
     if (cachedByLimits?.has(limitsKey) === true) {
         return cachedByLimits.get(limitsKey);
     }
 
-    const normalized = normalizePierreDiffPayloadUncached(payload, payload.path, limits);
+    const normalized = normalizePierreDiffPayloadUncached(restored, limits);
     const nextCache = cachedByLimits ?? new Map<string, PierreDiffPayload | undefined>();
     nextCache.set(limitsKey, normalized);
-    normalizedPayloads.set(payload, nextCache);
+    normalizedPayloads.set(restored, nextCache);
     return normalized;
 }
 
-function normalizePierreDiffPayloadUncached(
-    payload: Record<string, unknown>,
-    pathValue: string,
-    limits: DiffRenderLimits,
-): PierreDiffPayload | undefined {
-    const stats = isRecord(payload.stats) ? normalizeStats(payload.stats) : undefined;
-    if (!stats) {
+function parseRestoredPayload(payload: unknown): RestoredPayload | undefined {
+    try {
+        return Value.Parse(restoredPayloadSchema, payload);
+    } catch {
         return undefined;
     }
+}
+
+function normalizePierreDiffPayloadUncached(
+    payload: RestoredPayload,
+    limits: DiffRenderLimits,
+): PierreDiffPayload | undefined {
+    const stats = normalizeStats(payload.stats);
 
     if (payload.kind === "summary") {
-        const summary = isRecord(payload.summary) ? normalizeSummary(payload.summary) : undefined;
-        return summary === undefined
+        return payload.summary === undefined
             ? undefined
             : {
                   version: 1,
                   kind: "summary",
-                  path: pathValue,
+                  path: payload.path,
                   stats,
-                  summary,
+                  summary: normalizeSummary(payload.summary),
               };
     }
 
-    if (payload.kind !== "renderable" || !isRecord(payload.metadata)) {
+    if (payload.metadata === undefined) {
         return undefined;
     }
 
     const metadata = parseFileDiffMetadata(payload.metadata);
     if (!metadata) {
-        return buildPierreSummaryPayload(pathValue, stats, "metadata-invalid", limits);
+        return buildPierreSummaryPayload(payload.path, stats, "metadata-invalid", limits);
     }
     const validatedStats = partialMetadataStats(metadata);
     if (exceedsDiffRenderLimits(validatedStats, limits)) {
-        return buildPierreSummaryPayload(pathValue, validatedStats, "too-large", limits);
+        return buildPierreSummaryPayload(payload.path, validatedStats, "too-large", limits);
     }
     if (exceedsMetadataRenderLimit(metadata, limits)) {
-        return buildPierreSummaryPayload(pathValue, validatedStats, "metadata-too-large", limits);
+        return buildPierreSummaryPayload(
+            payload.path,
+            validatedStats,
+            "metadata-too-large",
+            limits,
+        );
     }
 
-    const languageMetadata = normalizeDiffMetadataLanguage(metadata, pathValue);
+    const languageMetadata = normalizeDiffMetadataLanguage(metadata, payload.path);
     const metadataIdentity = diffMetadataDigest({ ...languageMetadata, cacheKey: undefined });
     if (metadataIdentity === undefined) {
-        return buildPierreSummaryPayload(pathValue, validatedStats, "metadata-invalid", limits);
+        return buildPierreSummaryPayload(payload.path, validatedStats, "metadata-invalid", limits);
     }
     const normalizedMetadata = {
         ...languageMetadata,
@@ -277,7 +378,7 @@ function normalizePierreDiffPayloadUncached(
     return {
         version: 1,
         kind: "renderable",
-        path: pathValue,
+        path: payload.path,
         modelKey: normalizedMetadata.cacheKey,
         metadata: normalizedMetadata,
         stats: validatedStats,
@@ -294,17 +395,29 @@ export function buildUnifiedDiffRows(
     const rows: UnifiedDiffRow[] = [];
     let sourceRowIndex = 0;
     const lastIncludedRow = maximumSetValue(options.includedRowIndices);
-    const pushRow = (row: UnifiedDiffRow | (() => UnifiedDiffRow)): boolean => {
+    const pushRow = (row: UnifiedDiffRow): boolean => {
         const currentIndex = sourceRowIndex;
         sourceRowIndex += 1;
-        const included =
-            options.includedRowIndices === undefined ||
-            options.includedRowIndices.has(currentIndex);
         let budgetReached = false;
-        if (included) {
-            const resolvedRow = typeof row === "function" ? row() : row;
+        if (
+            options.includedRowIndices === undefined ||
+            options.includedRowIndices.has(currentIndex)
+        ) {
             options.onRowBuilt?.();
-            budgetReached = pushBudgetedRow(rows, resolvedRow, options.maxRows);
+            budgetReached = pushBudgetedRow(rows, row, options.maxRows);
+        }
+        return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
+    };
+    const pushLazyRow = (createRow: () => UnifiedDiffRow): boolean => {
+        const currentIndex = sourceRowIndex;
+        sourceRowIndex += 1;
+        let budgetReached = false;
+        if (
+            options.includedRowIndices === undefined ||
+            options.includedRowIndices.has(currentIndex)
+        ) {
+            options.onRowBuilt?.();
+            budgetReached = pushBudgetedRow(rows, createRow(), options.maxRows);
         }
         return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
     };
@@ -332,7 +445,7 @@ export function buildUnifiedDiffRows(
             if (content.type === "context") {
                 for (let offset = 0; offset < content.lines; offset += 1) {
                     if (
-                        pushRow(() =>
+                        pushLazyRow(() =>
                             makeUnifiedLine({
                                 lineType: "context",
                                 oldLineNumber: deletionLineNumber + offset,
@@ -398,12 +511,12 @@ export function buildUnifiedDiffRows(
             const narrowLayout = options.narrowLayout ?? "traditional";
             if (narrowLayout === "traditional" || content.deletions * content.additions > 256) {
                 for (let offset = 0; offset < content.deletions; offset += 1) {
-                    if (pushRow(() => makeDeletionRow(offset))) {
+                    if (pushLazyRow(() => makeDeletionRow(offset))) {
                         return trimEdgeCollapsedRows(rows);
                     }
                 }
                 for (let offset = 0; offset < content.additions; offset += 1) {
-                    if (pushRow(() => makeAdditionRow(offset))) {
+                    if (pushLazyRow(() => makeAdditionRow(offset))) {
                         return trimEdgeCollapsedRows(rows);
                     }
                 }
@@ -474,17 +587,29 @@ export function buildSplitDiffRows(
     const rows: SplitDiffRow[] = [];
     let sourceRowIndex = 0;
     const lastIncludedRow = maximumSetValue(options.includedRowIndices);
-    const pushRow = (row: SplitDiffRow | (() => SplitDiffRow)): boolean => {
+    const pushRow = (row: SplitDiffRow): boolean => {
         const currentIndex = sourceRowIndex;
         sourceRowIndex += 1;
-        const included =
-            options.includedRowIndices === undefined ||
-            options.includedRowIndices.has(currentIndex);
         let budgetReached = false;
-        if (included) {
-            const resolvedRow = typeof row === "function" ? row() : row;
+        if (
+            options.includedRowIndices === undefined ||
+            options.includedRowIndices.has(currentIndex)
+        ) {
             options.onRowBuilt?.();
-            budgetReached = pushBudgetedRow(rows, resolvedRow, options.maxRows);
+            budgetReached = pushBudgetedRow(rows, row, options.maxRows);
+        }
+        return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
+    };
+    const pushLazyRow = (createRow: () => SplitDiffRow): boolean => {
+        const currentIndex = sourceRowIndex;
+        sourceRowIndex += 1;
+        let budgetReached = false;
+        if (
+            options.includedRowIndices === undefined ||
+            options.includedRowIndices.has(currentIndex)
+        ) {
+            options.onRowBuilt?.();
+            budgetReached = pushBudgetedRow(rows, createRow(), options.maxRows);
         }
         return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
     };
@@ -512,7 +637,7 @@ export function buildSplitDiffRows(
             if (content.type === "context") {
                 for (let offset = 0; offset < content.lines; offset += 1) {
                     if (
-                        pushRow(() => {
+                        pushLazyRow(() => {
                             const spans = flattenHighlightedLine(
                                 highlighted.additionLines[additionLineIndex + offset],
                                 palette.appearance,
@@ -553,7 +678,7 @@ export function buildSplitDiffRows(
             const rowCount = Math.max(content.deletions, content.additions);
             for (let offset = 0; offset < rowCount; offset += 1) {
                 if (
-                    pushRow(() => ({
+                    pushLazyRow(() => ({
                         kind: "line",
                         deletion:
                             offset < content.deletions
@@ -813,7 +938,11 @@ function summaryReasonForSnapshots(
 }
 
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
-    return typeof cause === "object" && cause !== null && Reflect.get(cause, "code") === code;
+    try {
+        return Value.Parse(nodeErrorCodeSchema, cause).code === code;
+    } catch {
+        return false;
+    }
 }
 
 export function buildLargeDiffSummaryPayload(
@@ -950,27 +1079,11 @@ function exceedsMetadataRenderLimit(metadata: FileDiffMetadata, limits: DiffRend
     return limits.maxBytes !== null && metadataSizeBytes(metadata) > limits.maxBytes;
 }
 
-function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-    const deletionLines = stringArray(value.deletionLines);
-    const additionLines = stringArray(value.additionLines);
-    const splitLineCount = finiteNonNegativeInteger(value.splitLineCount);
-    const unifiedLineCount = finiteNonNegativeInteger(value.unifiedLineCount);
-    const type = parseChangeType(value.type);
-    if (
-        typeof value.name !== "string" ||
-        !Array.isArray(value.hunks) ||
-        deletionLines === undefined ||
-        additionLines === undefined ||
-        splitLineCount === undefined ||
-        unifiedLineCount === undefined ||
-        type === undefined ||
-        typeof value.isPartial !== "boolean"
-    ) {
-        return undefined;
-    }
+function parseFileDiffMetadata(value: RestoredMetadata): FileDiffMetadata | undefined {
+    const deletionLines = [...value.deletionLines];
+    const additionLines = [...value.additionLines];
+    const splitLineCount = Math.floor(value.splitLineCount);
+    const unifiedLineCount = Math.floor(value.unifiedLineCount);
 
     const hunks: Hunk[] = [];
     for (const rawHunk of value.hunks) {
@@ -981,13 +1094,7 @@ function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
         hunks.push(hunk);
     }
 
-    const prevName = optionalString(value.prevName);
-    const lang = optionalString(value.lang);
-    const newObjectId = optionalString(value.newObjectId);
-    const prevObjectId = optionalString(value.prevObjectId);
-    const mode = optionalString(value.mode);
-    const prevMode = optionalString(value.prevMode);
-    const cacheKey = optionalString(value.cacheKey);
+    const { prevName, lang, newObjectId, prevObjectId, mode, prevMode, cacheKey } = value;
 
     const withPrevName =
         prevName === undefined ? { name: value.name } : { name: value.name, prevName };
@@ -1000,7 +1107,7 @@ function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
     const withPreviousMode = prevMode === undefined ? withMode : { ...withMode, prevMode };
     const metadata: FileDiffMetadata = {
         ...withPreviousMode,
-        type,
+        type: value.type,
         hunks,
         splitLineCount,
         unifiedLineCount,
@@ -1012,13 +1119,10 @@ function parseFileDiffMetadata(value: unknown): FileDiffMetadata | undefined {
 }
 
 function parseHunk(
-    value: unknown,
+    value: RestoredHunk,
     deletionLineCount: number,
     additionLineCount: number,
 ): Hunk | undefined {
-    if (!isRecord(value) || !Array.isArray(value.hunkContent)) {
-        return undefined;
-    }
     const nonNegativeIntegerKeys = [
         "collapsedBefore",
         "additionStart",
@@ -1034,17 +1138,11 @@ function parseHunk(
     ] as const;
     const integers = new Map<string, number>();
     for (const key of nonNegativeIntegerKeys) {
-        const parsed = finiteNonNegativeInteger(value[key]);
-        if (parsed === undefined) return undefined;
-        integers.set(key, parsed);
+        integers.set(key, Math.floor(value[key]));
     }
-    const additionLineIndex = finitePierreLineIndex(value.additionLineIndex);
-    const deletionLineIndex = finitePierreLineIndex(value.deletionLineIndex);
-    if (additionLineIndex === undefined || deletionLineIndex === undefined) return undefined;
-    if (
-        typeof value.noEOFCRDeletions !== "boolean" ||
-        typeof value.noEOFCRAdditions !== "boolean"
-    ) {
+    const additionLineIndex = value.additionLineIndex;
+    const deletionLineIndex = value.deletionLineIndex;
+    if (!Number.isSafeInteger(additionLineIndex) || !Number.isSafeInteger(deletionLineIndex)) {
         return undefined;
     }
 
@@ -1063,16 +1161,17 @@ function parseHunk(
     let addedLines = 0;
     let deletedLines = 0;
     for (const rawContent of value.hunkContent) {
-        if (!isRecord(rawContent)) return undefined;
-        const contentAdditionIndex = finitePierreLineIndex(rawContent.additionLineIndex);
-        const contentDeletionIndex = finitePierreLineIndex(rawContent.deletionLineIndex);
-        if (contentAdditionIndex === undefined || contentDeletionIndex === undefined) {
+        const contentAdditionIndex = rawContent.additionLineIndex;
+        const contentDeletionIndex = rawContent.deletionLineIndex;
+        if (
+            !Number.isSafeInteger(contentAdditionIndex) ||
+            !Number.isSafeInteger(contentDeletionIndex)
+        ) {
             return undefined;
         }
         if (rawContent.type === "context") {
-            const lines = finiteNonNegativeInteger(rawContent.lines);
+            const lines = Math.floor(rawContent.lines);
             if (
-                lines === undefined ||
                 !isValidPierreLineRange(contentAdditionIndex, lines, additionLineCount) ||
                 !isValidPierreLineRange(contentDeletionIndex, lines, deletionLineCount)
             ) {
@@ -1088,12 +1187,9 @@ function parseHunk(
             });
             continue;
         }
-        if (rawContent.type !== "change") return undefined;
-        const additions = finiteNonNegativeInteger(rawContent.additions);
-        const deletions = finiteNonNegativeInteger(rawContent.deletions);
+        const additions = Math.floor(rawContent.additions);
+        const deletions = Math.floor(rawContent.deletions);
         if (
-            additions === undefined ||
-            deletions === undefined ||
             !isValidPierreLineRange(contentAdditionIndex, additions, additionLineCount) ||
             !isValidPierreLineRange(contentDeletionIndex, deletions, deletionLineCount)
         ) {
@@ -1120,8 +1216,7 @@ function parseHunk(
         return undefined;
     }
 
-    const hunkContext = optionalString(value.hunkContext);
-    const hunkSpecs = optionalString(value.hunkSpecs);
+    const { hunkContext, hunkSpecs } = value;
 
     const hunkPrefix = {
         collapsedBefore: integers.get("collapsedBefore") ?? 0,
@@ -1150,73 +1245,21 @@ function parseHunk(
     };
 }
 
-function stringArray(value: unknown): string[] | undefined {
-    return Array.isArray(value) && value.every((line) => typeof line === "string")
-        ? [...value]
-        : undefined;
+function normalizeSummary(summary: RestoredSummary): PierreDiffSummary {
+    return {
+        reason: summary.reason,
+        maxLines: summary.maxLines === null ? null : Math.floor(summary.maxLines),
+        maxBytes: summary.maxBytes === null ? null : Math.floor(summary.maxBytes),
+    };
 }
 
-function optionalString(value: unknown): string | undefined {
-    return typeof value === "string" ? value : undefined;
-}
-
-function parseChangeType(value: unknown): FileDiffMetadata["type"] | undefined {
-    return value === "change" ||
-        value === "rename-pure" ||
-        value === "rename-changed" ||
-        value === "new" ||
-        value === "deleted"
-        ? value
-        : undefined;
-}
-
-function normalizeSummary(summary: Record<string, unknown>): PierreDiffSummary | undefined {
-    const reason = summary.reason;
-    const maxLines = nullableFiniteNonNegativeInteger(summary.maxLines);
-    const maxBytes = nullableFiniteNonNegativeInteger(summary.maxBytes);
-    if (
-        (reason !== "too-large" &&
-            reason !== "not-readable" &&
-            reason !== "metadata-invalid" &&
-            reason !== "metadata-too-large") ||
-        maxLines === undefined ||
-        maxBytes === undefined
-    ) {
-        return undefined;
-    }
-    return { reason, maxLines, maxBytes };
-}
-
-function nullableFiniteNonNegativeInteger(value: unknown): number | null | undefined {
-    return value === null ? null : finiteNonNegativeInteger(value);
-}
-
-function normalizeStats(stats: Record<string, unknown>): PierreDiffStats | undefined {
-    const added = finiteNonNegativeInteger(stats.added);
-    const removed = finiteNonNegativeInteger(stats.removed);
-    const lineCount = finiteNonNegativeInteger(stats.lineCount);
-    const sizeBytes = finiteNonNegativeInteger(stats.sizeBytes);
-    if (
-        added === undefined ||
-        removed === undefined ||
-        lineCount === undefined ||
-        sizeBytes === undefined
-    ) {
-        return undefined;
-    }
-    return { added, removed, lineCount, sizeBytes };
-}
-
-function finiteNonNegativeInteger(value: unknown): number | undefined {
-    return typeof value === "number" && Number.isFinite(value) && value >= 0
-        ? Math.floor(value)
-        : undefined;
-}
-
-function finitePierreLineIndex(value: unknown): number | undefined {
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= -1
-        ? value
-        : undefined;
+function normalizeStats(stats: RestoredStats): PierreDiffStats {
+    return {
+        added: Math.floor(stats.added),
+        removed: Math.floor(stats.removed),
+        lineCount: Math.floor(stats.lineCount),
+        sizeBytes: Math.floor(stats.sizeBytes),
+    };
 }
 
 function isValidPierreLineRange(index: number, count: number, lineCount: number): boolean {

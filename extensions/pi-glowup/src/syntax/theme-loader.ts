@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import type { ThemeRegistration } from "shiki";
 import { bundledSyntaxThemePath, SYNTAX_THEME_NAME } from "./theme-assets.ts";
-import { isRecord, type UnknownRecord } from "../unknown-values.ts";
+import { jsonObjectParser, type JsonObject } from "../json-value.ts";
+import { previewValueDecoder } from "../third-party-tools/previews.ts";
 
 export { SYNTAX_THEME_NAME } from "./theme-assets.ts";
 
@@ -67,32 +68,36 @@ function defaultThemePath(): string {
 }
 
 function parseThemeRegistration(value: unknown, themeName: string): ThemeRegistration {
-    if (!isRecord(value)) {
+    const record = jsonObjectParser.parse(value);
+    if (record === undefined) {
         throw new Error("Syntax theme JSON must be an object");
     }
 
-    const colors = isRecord(value.colors) ? stringRecord(value.colors) : undefined;
-    const tokenColors = Array.isArray(value.tokenColors) ? value.tokenColors : undefined;
+    const colorsRecord = jsonObjectParser.parse(record.colors);
+    const colors = colorsRecord !== undefined ? stringRecord(colorsRecord) : undefined;
+    const tokenColors = Array.isArray(record.tokenColors) ? record.tokenColors : undefined;
     if (tokenColors === undefined) {
         throw new Error("Syntax theme JSON must include tokenColors");
     }
 
     const registration =
         colors === undefined
-            ? { ...value, name: themeName }
-            : { ...value, name: themeName, colors };
-    return { ...registration, tokenColors } satisfies ThemeRegistration;
+            ? { ...record, name: themeName }
+            : { ...record, name: themeName, colors };
+    // SAFETY: Record parsing proves the structure of ThemeRegistration for Shiki.
+    return { ...registration, tokenColors } as ThemeRegistration;
 }
 
 interface ThemeColors {
     readonly [key: string]: string;
 }
 
-function stringRecord(record: UnknownRecord): ThemeColors {
+function stringRecord(record: JsonObject): ThemeColors {
     const output: Record<string, string> = {};
     for (const [key, value] of Object.entries(record)) {
-        if (typeof value === "string") {
-            output[key] = value;
+        const str = previewValueDecoder.parseString(value);
+        if (str !== undefined) {
+            output[key] = str;
         }
     }
     return output;

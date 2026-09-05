@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Component } from "@earendil-works/pi-tui";
 import type { Highlighter } from "shiki";
+import Type from "typebox";
+import { Value } from "typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderScriptCall, type GlowupRenderTheme } from "../src/rendering/core.ts";
 import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
@@ -42,10 +44,7 @@ type FakeHighlighterOptions = {
 };
 
 function fakeHighlighter(options: FakeHighlighterOptions = {}): Highlighter {
-    // SAFETY: These lifecycle tests exercise only the Highlighter methods called by
-    // initializeSyntaxHighlighting(), disposeSyntaxHighlighting(), and
-    // getSyntaxHighlighterForLanguage(). The unsupported methods are never reached.
-    return {
+    const highlighterFixture = {
         dispose() {
             options.dispose?.();
         },
@@ -57,17 +56,21 @@ function fakeHighlighter(options: FakeHighlighterOptions = {}): Highlighter {
                 await options.loadLanguage?.(language);
             }
         },
-    } as unknown as Highlighter;
+    };
+    // SAFETY: These lifecycle tests exercise only the Highlighter methods called by
+    // initializeSyntaxHighlighting(), disposeSyntaxHighlighting(), and
+    // getSyntaxHighlighterForLanguage(). The unsupported methods are never reached.
+    return highlighterFixture as Highlighter;
 }
 
+const languageNameSchema = Type.String();
+const languageNamesSchema = Type.Array(languageNameSchema);
+
 function stringLanguageNames(languages: ReadonlyArray<unknown> | undefined): string[] {
-    const names: string[] = [];
-    for (const language of languages ?? []) {
-        if (typeof language === "string") {
-            names.push(language);
-        }
-    }
-    return names;
+    return Value.Parse(
+        languageNamesSchema,
+        (languages ?? []).filter((language) => Value.Check(languageNameSchema, language)),
+    );
 }
 
 async function waitForCondition(condition: () => boolean): Promise<void> {

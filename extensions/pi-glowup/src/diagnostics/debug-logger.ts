@@ -64,7 +64,7 @@ export class DebugFileLogger {
             return;
         }
 
-        const resolvedFields = typeof fields === "function" ? fields() : fields;
+        const resolvedFields = fields instanceof Function ? fields() : fields;
 
         const line = `${JSON.stringify({
             timestamp: new Date().toISOString(),
@@ -184,5 +184,8 @@ function errorMessage(cause: unknown): string {
 }
 
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
-    return typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;
+    if (!(cause instanceof Error)) return false;
+    // SAFETY: cause is proven to be an Error instance above; inspect optional Node.js code property.
+    const errorWithCode = cause as Error & { code?: unknown };
+    return errorWithCode.code === code;
 }

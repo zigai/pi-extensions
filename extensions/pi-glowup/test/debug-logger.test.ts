@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DebugFileLogger } from "../src/diagnostics/debug-logger.ts";
+import { jsonValueSchema, type JsonValue } from "../src/json-value.js";
+import { Value } from "typebox/value";
 
 describe("debug file logger", () => {
     afterEach(() => {
@@ -227,10 +229,10 @@ describe("debug file logger", () => {
     });
 });
 
-function readJsonLines(filePath: string): unknown[] {
+function readJsonLines(filePath: string): JsonValue[] {
     return readFileSync(filePath, "utf8").trim().split("\n").map(parseJsonLine);
 }
 
-function parseJsonLine(line: string): unknown {
-    return JSON.parse(line);
+function parseJsonLine(line: string): JsonValue {
+    return Value.Parse(jsonValueSchema, JSON.parse(line));
 }

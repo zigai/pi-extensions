@@ -5,6 +5,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { emptyComponent } from "../rendering/core.ts";
+import { jsonValueParser } from "../json-value.ts";
 import {
     createThirdPartyToolRenderer,
     hasGlowupRenderingAdapter,
@@ -33,6 +34,8 @@ type PiRendererDefinition = {
     readonly renderCall?: (...args: never[]) => Component;
     readonly renderResult?: (...args: never[]) => Component;
 };
+
+type ToolExecutionPrototypeOwner = typeof ToolExecutionComponent.prototype | ToolExecutionPrototype;
 
 type ToolExecutionInstance = {
     readonly toolName?: string;
@@ -74,8 +77,10 @@ export type BuiltInToolRenderContext = PiToolRenderContext & {
     readonly cwd: string;
 };
 
+type ToolCallArguments = PiToolRenderContext["args"];
+
 type ToolCallRenderer = (
-    args: unknown,
+    args: ToolCallArguments,
     theme: Theme,
     context: BuiltInToolRenderContext,
 ) => Component;
@@ -89,7 +94,7 @@ type ToolResultRenderer = (
 export type BuiltInToolRendererOptions = {
     readonly renderCall: (
         toolName: BuiltInToolName,
-        args: unknown,
+        args: ToolCallArguments,
         theme: Theme,
         context: BuiltInToolRenderContext,
     ) => Component | undefined;
@@ -414,7 +419,7 @@ function retainCompletedLines(
         completedLineCacheLru.size >= completedLineCacheLimitEntries
     ) {
         const oldest = completedLineCacheLru.keys().next();
-        if (oldest.done) return;
+        if (oldest.done === true) return;
         releaseCompletedLineCache(oldest.value);
         completedLineCacheEvictions += 1;
     }
@@ -525,7 +530,7 @@ function renderCompletedSlot(options: {
 }
 
 function completedCallSignature(
-    args: unknown,
+    args: ToolCallArguments,
     theme: Theme,
     context: PiToolRenderContext,
 ): readonly unknown[] | undefined {
@@ -616,7 +621,7 @@ function thirdPartyRenderContext(
         toolName,
         toolCallId: context.toolCallId,
         phase: executionPhase(context),
-        args: context.args,
+        args: jsonValueParser.parse(context.args),
         executionStarted: context.executionStarted,
         argsComplete: context.argsComplete,
         isPartial: context.isPartial,
@@ -736,8 +741,11 @@ export function configureCompletedLineCache(limits: CompletedLineCacheLimits): v
 export function configureBuiltInToolRendererPatch(
     enabled: boolean,
     options?: BuiltInToolRendererOptions,
-    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
+    prototypeOwner: ToolExecutionPrototypeOwner = ToolExecutionComponent.prototype,
 ): void {
+    // SAFETY: The owner union admits Pi's concrete prototype or the complete patch contract;
+    // adapting it preserves the exact prototype and method identities.
+    const prototype = prototypeOwner as ToolExecutionPrototype;
     const existingState = prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
     if (!enabled) {
         if (existingState !== undefined) {
@@ -884,8 +892,10 @@ export type ToolRendererPatchStats = {
 
 /** Returns renderer patch state sizes for memory diagnostics. */
 export function toolRendererPatchStats(
-    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
+    prototypeOwner: ToolExecutionPrototypeOwner = ToolExecutionComponent.prototype,
 ): ToolRendererPatchStats {
+    // SAFETY: See configureBuiltInToolRendererPatch; this read-only adapter preserves identity.
+    const prototype = prototypeOwner as ToolExecutionPrototype;
     const builtInState = prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
     const thirdPartyState = prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
     return {
@@ -984,8 +994,10 @@ function restoreBuiltInRendererPatch(
 export function configureThirdPartyToolRendererPatch(
     enabled: boolean,
     options?: ThirdPartyToolRenderingOptions,
-    prototype: ToolExecutionPrototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype,
+    prototypeOwner: ToolExecutionPrototypeOwner = ToolExecutionComponent.prototype,
 ): void {
+    // SAFETY: See configureBuiltInToolRendererPatch; this adapter preserves identity.
+    const prototype = prototypeOwner as ToolExecutionPrototype;
     const existingState = prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
     if (!enabled) {
         if (existingState !== undefined) {
@@ -1028,7 +1040,11 @@ export function configureThirdPartyToolRendererPatch(
                 if (renderer !== undefined) {
                     const result = currentToolResult(this);
                     const toolName = instanceToolName(this) ?? "tool";
-                    return (args: unknown, theme: Theme, context: BuiltInToolRenderContext) => {
+                    return (
+                        args: ToolCallArguments,
+                        theme: Theme,
+                        context: BuiltInToolRenderContext,
+                    ) => {
                         const restoredContext = restoredCallRenderContext(context, result);
                         return renderCompletedSlot({
                             cache: state.completedRenders,
@@ -1039,7 +1055,7 @@ export function configureThirdPartyToolRendererPatch(
                             cacheLines: shouldCacheThirdPartyCompletedLines(toolName),
                             render(invalidate) {
                                 return renderer.renderCall(
-                                    args,
+                                    jsonValueParser.parse(args),
                                     theme,
                                     thirdPartyRenderContext(toolName, {
                                         ...restoredContext,

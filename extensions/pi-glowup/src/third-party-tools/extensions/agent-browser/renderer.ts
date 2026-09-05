@@ -20,6 +20,7 @@ import {
     type JsonObject,
 } from "../../tool-values.ts";
 import { stringParser } from "../../../json-scalar.ts";
+import { jsonValueParser, type JsonValue } from "../../../json-value.ts";
 
 const AGENT_BROWSER_COMMAND_LABELS = new Map<string, string>([
     ["open", "Browser Open"],
@@ -121,7 +122,7 @@ function summarizeSourceLookup(value: JsonObject): string | undefined {
 }
 
 function summarizeAgentBrowserArgs(
-    args: unknown,
+    args: JsonValue | undefined,
     context: ThirdPartyToolRenderContext,
 ): CallSummary {
     const record = jsonObjectParser.parse(args);
@@ -229,7 +230,7 @@ export function createAgentBrowserRenderer(
             if (!hasEvolvingContent && shouldDeferSimpleToolCall(context)) {
                 return emptyComponent();
             }
-            const summary = summarizeAgentBrowserArgs(args, context);
+            const summary = summarizeAgentBrowserArgs(jsonValueParser.parse(args), context);
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(

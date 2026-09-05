@@ -46,9 +46,9 @@ export class StreamingScriptIdentityStore {
 
     private evictOldest(): void {
         while (this.identities.size > this.maxEntries) {
-            const oldest = this.identities.keys().next().value;
-            if (typeof oldest !== "string") return;
-            this.identities.delete(oldest);
+            const oldest = this.identities.keys().next();
+            if (oldest.done === true) return;
+            this.identities.delete(oldest.value);
         }
     }
 }

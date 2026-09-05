@@ -21,6 +21,8 @@ import {
     thirdPartyStatusLabel,
 } from "../../call-rendering.ts";
 import { previewArgsForContext, textOutput } from "../../previews.ts";
+import { jsonValueParser, type JsonValue } from "../../../json-value.ts";
+import { stringParser } from "../../../json-scalar.ts";
 import {
     getArray,
     getBoolean,
@@ -139,7 +141,7 @@ function formatAskUserQuestionOptions(
 }
 
 function summarizeAskUserQuestionArgs(
-    args: unknown,
+    args: JsonValue | undefined,
     theme: GlowupRenderTheme,
     expanded: boolean,
     context: ThirdPartyToolRenderContext,
@@ -170,8 +172,8 @@ const ASK_USER_QUESTION_ANSWER_PATTERN =
 
 function decodeAskUserQuotedText(rawText: string): string {
     try {
-        const parsed: unknown = JSON.parse(`"${rawText}"`);
-        if (typeof parsed === "string") {
+        const parsed = stringParser.parse(JSON.parse(`"${rawText}"`));
+        if (parsed !== undefined) {
             return parsed;
         }
     } catch {
@@ -208,7 +210,7 @@ function findAskUserQuestionItem(
 
 function summarizeAskUserQuestionResult(
     result: ThirdPartyToolResult,
-    args: unknown,
+    args: JsonValue | undefined,
     theme: GlowupRenderTheme,
     expanded: boolean,
 ): string | undefined {
@@ -248,7 +250,12 @@ export function createAskUserQuestionRenderer(
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: thirdPartyStatusLabel(labelMode, context, labels),
-                body: summarizeAskUserQuestionArgs(args, theme, context.expanded, context),
+                body: summarizeAskUserQuestionArgs(
+                    jsonValueParser.parse(args),
+                    theme,
+                    context.expanded,
+                    context,
+                ),
                 maxRenderedLines: DEFAULT_TOOL_CALL_PREVIEW_LINES,
                 expanded: context.expanded,
             });
@@ -256,7 +263,7 @@ export function createAskUserQuestionRenderer(
         renderResult(result, options, theme, context) {
             const summary = summarizeAskUserQuestionResult(
                 result,
-                context.args,
+                jsonValueParser.parse(context.args),
                 theme,
                 options.expanded,
             );

@@ -2,6 +2,8 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import type { ScriptInvocation } from "../rendering/core.ts";
+import { jsonObjectParser, type JsonValue } from "../json-value.ts";
+import { jsonArrayParser, stringParser } from "../json-scalar.ts";
 
 export type ScriptBlockFormatterInput = {
     readonly label: string;
@@ -52,12 +54,17 @@ function formatterSource(options: ScriptFormatterParseOptions): string {
     return options.source ?? "script formatter config";
 }
 
-function isSafeFormatterCommandPart(value: unknown): value is string {
-    return typeof value === "string" && value.trim().length > 0 && !value.includes("\0");
+function isSafeFormatterCommandPart(value: JsonValue): value is string {
+    const text = stringParser.parse(value);
+    return text !== undefined && text.trim().length > 0 && !text.includes("\0");
 }
 
-function isFormatterCommand(value: unknown): value is readonly string[] {
-    return Array.isArray(value) && value.length > 0 && value.every(isSafeFormatterCommandPart);
+function formatterCommand(value: JsonValue): readonly string[] | undefined {
+    const parts = jsonArrayParser.parse(value);
+    if (parts === undefined || parts.length === 0 || !parts.every(isSafeFormatterCommandPart)) {
+        return undefined;
+    }
+    return parts;
 }
 
 function normalizeCode(code: string): string {
@@ -68,7 +75,8 @@ export function parseScriptFormatterCommandsValue(
     value: unknown,
     options: ScriptFormatterParseOptions = {},
 ): ScriptFormatterCommands {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    const record = jsonObjectParser.parse(value);
+    if (record === undefined) {
         reportFormatterWarning(
             options,
             `Ignoring invalid ${formatterSource(options)}: expected object`,
@@ -78,12 +86,13 @@ export function parseScriptFormatterCommandsValue(
 
     const commands = new Map<string, readonly string[]>();
     const invalidEntries: string[] = [];
-    for (const [language, command] of Object.entries(value)) {
+    for (const [language, value] of Object.entries(record)) {
         if (language.trim().length === 0) {
             invalidEntries.push("<blank>");
             continue;
         }
-        if (!isFormatterCommand(command)) {
+        const command = formatterCommand(value);
+        if (command === undefined) {
             invalidEntries.push(language);
             continue;
         }
@@ -264,7 +273,7 @@ export function createCommandScriptFormatter(
         cacheBytes += bytes;
         while (cache.size > MAX_FORMATTER_CACHE_ENTRIES || cacheBytes > MAX_FORMATTER_CACHE_BYTES) {
             const oldest = cache.keys().next().value;
-            if (typeof oldest !== "string") break;
+            if (oldest === undefined) break;
             const removed = cache.get(oldest);
             cache.delete(oldest);
             cacheBytes = Math.max(0, cacheBytes - (removed?.bytes ?? 0));

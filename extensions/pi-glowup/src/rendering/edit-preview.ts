@@ -41,9 +41,9 @@ export class PreviewStore<TPreview> {
 
     constructor(maxEntriesOrOptions: number | PreviewStoreOptions<TPreview>) {
         const options =
-            typeof maxEntriesOrOptions === "number"
-                ? { maxEntries: maxEntriesOrOptions }
-                : maxEntriesOrOptions;
+            maxEntriesOrOptions instanceof Object && "maxEntries" in maxEntriesOrOptions
+                ? maxEntriesOrOptions
+                : { maxEntries: maxEntriesOrOptions };
         this.maxEntries = Math.max(1, Math.floor(options.maxEntries));
         this.maxBytes =
             options.maxBytes === undefined ? undefined : Math.max(1, Math.floor(options.maxBytes));
@@ -89,11 +89,11 @@ export class PreviewStore<TPreview> {
             this.previewsByToolCallId.size > this.maxEntries ||
             (this.maxBytes !== undefined && this.totalBytes > this.maxBytes)
         ) {
-            const oldestKey = this.previewsByToolCallId.keys().next().value;
-            if (typeof oldestKey !== "string") {
+            const oldest = this.previewsByToolCallId.keys().next();
+            if (oldest.done === true) {
                 return;
             }
-            this.delete(oldestKey);
+            this.delete(oldest.value);
         }
     }
 }

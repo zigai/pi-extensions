@@ -1,4 +1,5 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
+import type { ElementContent, Properties } from "hast";
 
 /** Terminal appearance used for Pierre-highlighted diffs. */
 export type PierreAppearance = "dark" | "light";
@@ -41,10 +42,20 @@ export type PierreDiffSummary = {
     readonly maxBytes: number | null;
 };
 
+/** HAST subset consumed by terminal diff flattening (tag names are irrelevant here). */
+export type HighlightedDiffNode =
+    | Exclude<ElementContent, { readonly type: "element" }>
+    | {
+          readonly type: "element";
+          readonly tagName?: string;
+          readonly properties: Properties;
+          readonly children: ReadonlyArray<HighlightedDiffNode>;
+      };
+
 /** Highlighted line trees returned by Pierre/Shiki, kept only in renderer state. */
 export type HighlightedDiffCode = {
-    readonly deletionLines: ReadonlyArray<unknown>;
-    readonly additionLines: ReadonlyArray<unknown>;
+    readonly deletionLines: ReadonlyArray<HighlightedDiffNode | undefined>;
+    readonly additionLines: ReadonlyArray<HighlightedDiffNode | undefined>;
 };
 
 /** Highlighted line trees for both Pi light and dark themes. */

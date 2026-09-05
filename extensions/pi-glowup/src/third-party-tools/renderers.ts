@@ -38,14 +38,24 @@ const toolDefinitionViewSchema = Type.Object(
     },
     { additionalProperties: true },
 );
-type ToolDefinitionView = Static<typeof toolDefinitionViewSchema>;
+type ToolDefinitionView = {
+    readonly label: Static<typeof toolDefinitionViewSchema>["label"];
+    readonly preserve: boolean;
+    readonly adapter: ReturnType<typeof glowupRenderingAdapter>;
+};
 
 const toolDefinitionViewParser = {
-    parse(value: unknown): ToolDefinitionView | undefined {
+    parse(value: unknown): ToolDefinitionView {
+        const adapter = glowupRenderingAdapter(value);
         try {
-            return Value.Parse(toolDefinitionViewSchema, value);
+            const definition = Value.Parse(toolDefinitionViewSchema, value);
+            return {
+                label: definition.label,
+                preserve: definition[GLOWUP_RENDERING_PROPERTY] === "preserve",
+                adapter,
+            };
         } catch {
-            return undefined;
+            return { label: undefined, preserve: false, adapter };
         }
     },
 };
@@ -91,34 +101,33 @@ export function hasThirdPartyToolRendererPlugin(
 }
 
 function matcherMatches(toolName: string, matcher: ToolNameMatcher): boolean {
-    if (typeof matcher === "string") {
-        return matcher === toolName || matcher === baseToolName(toolName);
+    switch (matcher.kind) {
+        case "pattern": {
+            const { pattern } = matcher;
+            pattern.lastIndex = 0;
+            const matchesToolName = pattern.test(toolName);
+            pattern.lastIndex = 0;
+            const matchesBaseName = pattern.test(baseToolName(toolName));
+            pattern.lastIndex = 0;
+            return matchesToolName || matchesBaseName;
+        }
+        case "predicate":
+            return matcher.matches(toolName);
     }
-    if (matcher instanceof RegExp) {
-        matcher.lastIndex = 0;
-        const matchesToolName = matcher.test(toolName);
-        matcher.lastIndex = 0;
-        const matchesBaseName = matcher.test(baseToolName(toolName));
-        matcher.lastIndex = 0;
-        return matchesToolName || matchesBaseName;
-    }
-    return matcher(toolName);
 }
 
 function hasPreservePreference(toolDefinition: unknown): boolean {
-    return (
-        toolDefinitionViewParser.parse(toolDefinition)?.[GLOWUP_RENDERING_PROPERTY] === "preserve"
-    );
+    return toolDefinitionViewParser.parse(toolDefinition)?.preserve === true;
 }
 
-function toolDefinitionLabel(toolDefinition: unknown): string | undefined {
-    const label = toolDefinitionViewParser.parse(toolDefinition)?.label;
+function toolDefinitionLabel(definition: ToolDefinitionView | undefined): string | undefined {
+    const label = definition?.label;
     return label === undefined || label.length === 0 ? undefined : label;
 }
 
 /** Returns whether a tool definition carries a valid public Glowup adapter. */
 export function hasGlowupRenderingAdapter(toolDefinition: unknown): boolean {
-    return glowupRenderingAdapter(toolDefinition) !== undefined;
+    return toolDefinitionViewParser.parse(toolDefinition)?.adapter !== undefined;
 }
 
 /** Parses comma-separated tool names for `PI_GLOWUP_PRESERVE_TOOLS`. */
@@ -146,7 +155,16 @@ export function shouldPreserveThirdPartyToolRenderer(options: {
     }
 
     const preserveTools = options.renderingOptions?.preserveTools ?? [];
-    return preserveTools.some((matcher) => matcherMatches(options.toolName, matcher));
+    if (
+        preserveTools.some(
+            (name) => name === options.toolName || name === baseToolName(options.toolName),
+        )
+    ) {
+        return true;
+    }
+    return (options.renderingOptions?.preserveMatchers ?? []).some((matcher) =>
+        matcherMatches(options.toolName, matcher),
+    );
 }
 
 /** Creates the owner adapter, transitional renderer, or generic compatibility renderer. */
@@ -155,11 +173,12 @@ export function createThirdPartyToolRenderer(
     options?: ThirdPartyToolRenderingOptions,
     toolDefinition?: unknown,
 ): ThirdPartyToolRenderer {
+    const definition = toolDefinitionViewParser.parse(toolDefinition);
     const plugin = rendererPlugins(options).find((candidate) => candidate.matches(toolName));
     const fallback =
         plugin?.createRenderer(toolName, options) ??
-        createGenericRenderer(toolName, toolDefinitionLabel(toolDefinition), options?.labelMode);
-    const adapter = glowupRenderingAdapter(toolDefinition);
+        createGenericRenderer(toolName, toolDefinitionLabel(definition), options?.labelMode);
+    const adapter = definition?.adapter;
     return adapter === undefined
         ? fallback
         : createProtocolRenderer(adapter, fallback, options?.labelMode, options?.mutationSettings);

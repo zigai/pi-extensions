@@ -52,9 +52,9 @@ function isLoaderContainer(component: Component | undefined): boolean {
 /** Enables or disables the working-widget spacing prototype patch. */
 export function configureWorkingWidgetSpacingPatch(
     enabled: boolean,
-    prototype: object = Container.prototype,
+    prototype: PatchableContainerPrototype = Container.prototype,
 ): void {
-    const containerPrototype = prototype as PatchableContainerPrototype;
+    const containerPrototype = prototype;
     const state = containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
 
     if (!enabled) {
@@ -74,10 +74,7 @@ export function configureWorkingWidgetSpacingPatch(
         return;
     }
 
-    const originalRender = Reflect.get(containerPrototype, "render");
-    if (typeof originalRender !== "function") {
-        return;
-    }
+    const originalRender = containerPrototype["render"];
 
     let nextState: WorkingWidgetSpacingPatchState;
     const wrapperRender = function renderWithWorkingWidgetSpacing(
