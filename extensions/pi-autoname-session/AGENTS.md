@@ -24,7 +24,7 @@ The check validates generated settings, formatting, lint, strict TypeScript, and
 - `src/index.ts` owns Pi composition and session lifecycle: settings application, state restoration, event registration, naming attempts, cancellation, diagnostic presentation, and cleanup.
 - `src/session-naming.ts` owns pure naming rules: persisted-state parsing, metrics, trigger decisions, prompt/context construction, repository summaries, and output normalization.
 - `src/picker-request.ts` owns the narrow provider-payload compatibility boundary. Parse payloads from `unknown`; return no replacement when the model or payload does not require the compatibility shape.
-- `src/settings.ts` currently owns the legacy settings definition, semantic validation, model-reference parsing, and package-facing loader. Do not move unrelated naming logic into it.
+- `src/settings-input.ts` owns the build-safe settings definition. `src/settings.ts` hydrates the generated prevalidation artifact and owns semantic validation, model-reference parsing, and the package-facing loader. Do not move unrelated naming logic into it.
 - Keep the source root flat while these capabilities remain cohesive. Do not add generic `utils.ts`, `helpers.ts`, `services.ts`, or one-file directories.
 - Keep Pi-provided packages in optional `peerDependencies` with `"*"` and in `devDependencies` for local checks. Put other runtime libraries in `dependencies`.
 
@@ -52,8 +52,7 @@ The check validates generated settings, formatting, lint, strict TypeScript, and
 
 ## Extension settings
 
-- This repository currently uses the legacy `@zigai/pi-extension-settings` 0.4.2 single-file definition in `src/settings.ts`, and its npm package bundles that dependency. Keep ordinary feature changes truthful to that current layout unless the task explicitly includes the settings-runtime migration.
-- The target settings architecture is the current prevalidated runtime. Migrate atomically: use the exact supported `@zigai/pi-extension-settings` version as a normal runtime dependency, remove it from `bundleDependencies`, move the build-safe TypeBox definition to `src/settings-input.ts`, generate `src/settings.prevalidated.ts`, hydrate it with `definePrevalidatedExtensionSettings` in `src/settings.ts`, derive decoded values with `StaticDecode`, update `piExtensionSettings` and `files`, regenerate artifacts, and verify the packed npm topology. Do not leave a half-migrated combination of old and new APIs.
+- This repository uses the current prevalidated settings runtime. Keep the exact supported `@zigai/pi-extension-settings` version as a normal runtime dependency, never a `bundleDependency`. Keep the build-safe TypeBox definition in `src/settings-input.ts`, generate `src/settings.prevalidated.ts`, hydrate it with `definePrevalidatedExtensionSettings` in `src/settings.ts`, derive decoded values with `StaticDecode`, and keep `piExtensionSettings`, `files`, generated artifacts, and packed npm topology synchronized.
 - Keep the root settings object closed with `additionalProperties: false`. Every option needs a valid default and a user-facing description. Use TypeBox codecs for encoded-to-decoded transformations instead of unchecked casts.
 - Define `exampleSettings` only when structured or interacting options need one focused, realistic advanced example. Give complex array-item and record-value schemas concise PascalCase titles so generated tables stay readable.
 - Resolution applies defaults, global settings, then trusted-project settings. Objects merge recursively; arrays and scalar values replace earlier values.

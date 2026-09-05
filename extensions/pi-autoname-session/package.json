@@ -44,7 +44,7 @@
     "config:check": "pi-extension-settings check"
   },
   "dependencies": {
-    "@zigai/pi-extension-settings": "0.4.2"
+    "@zigai/pi-extension-settings": "0.5.3"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.83.0",
@@ -75,9 +75,6 @@
       "optional": true
     }
   },
-  "bundleDependencies": [
-    "@zigai/pi-extension-settings"
-  ],
   "engines": {
     "node": ">=22.19.0 <27"
   },
@@ -88,7 +85,8 @@
     ]
   },
   "piExtensionSettings": {
-    "definition": "./src/settings.ts",
+    "definition": "./src/settings-input.ts",
+    "prevalidation": "./src/settings.prevalidated.ts",
     "schema": "./config.schema.json",
     "readme": "./README.md"
   }
