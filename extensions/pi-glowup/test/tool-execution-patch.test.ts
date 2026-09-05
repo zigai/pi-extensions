@@ -113,7 +113,7 @@ function createPrototype(): FakeToolExecutionPrototype {
 }
 
 describe("tool execution patches", () => {
-    it("renders built-in tool names through a render-only patch", () => {
+    it("renders built-in names with Pi's resolved tool definition and no legacy field", () => {
         const prototype = createPrototype();
         installBuiltInToolRendererPatch(
             {
@@ -131,7 +131,7 @@ describe("tool execution patches", () => {
 
         const readInstance: FakeToolExecutionInstance = {
             toolName: "read",
-            builtInToolDefinition: {},
+            toolDefinition: {},
         };
         const customInstance: FakeToolExecutionInstance = {
             toolName: "custom_tool",

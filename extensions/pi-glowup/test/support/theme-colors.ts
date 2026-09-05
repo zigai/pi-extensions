@@ -14,6 +14,9 @@ export const TEST_THEME_COLORS = {
     dim: "#777777",
     text: "#dddddd",
     thinkingText: "#bbbbbb",
+    scrollbarTrack: "#555555",
+    scrollbarThumb: "#888888",
+    searchMatchText: "#ffffff",
     userMessageText: "#ffffff",
     customMessageText: "#dddddd",
     customMessageLabel: "#8ab4f8",
@@ -53,6 +56,7 @@ export const TEST_THEME_COLORS = {
 
 export const TEST_THEME_BACKGROUND_COLORS = {
     selectedBg: "#333333",
+    searchMatchBg: "#555555",
     userMessageBg: "#1E1E2E",
     customMessageBg: "#242436",
     toolPendingBg: "#222222",

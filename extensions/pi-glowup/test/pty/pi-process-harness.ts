@@ -1,6 +1,6 @@
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { spawn, type IPty } from "node-pty";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 const SYNCHRONIZED_OUTPUT_END = "\u001b[?2026l";
@@ -114,7 +114,7 @@ export class PiPtyProcess {
             rows: options.rows,
             scrollback: 4_000,
         });
-        const cliPath = resolve("node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
+        const cliPath = realpathSync(resolve("node_modules/.bin/pi"));
         const args = [
             cliPath,
             "--provider",
