@@ -1,26 +1,16 @@
-import { defineExtensionSettings } from "@zigai/pi-extension-settings";
 import { loadPiExtensionSettings, type PiSettingsContext } from "@zigai/pi-extension-settings/pi";
-import { Type, type Static } from "typebox";
+import { definePrevalidatedExtensionSettings } from "@zigai/pi-extension-settings/runtime";
+import type { StaticDecode } from "typebox";
 
-const settingsSchema = Type.Object(
-    {
-        projectOverrides: Type.Boolean({
-            default: true,
-            description: "Let trusted projects have their own extension settings.",
-        }),
-    },
-    { additionalProperties: false },
+import prevalidatedSettings from "./settings.prevalidated.ts";
+import settingsInput, { settingsSchema } from "./settings-input.ts";
+
+export type ExtensionSettings = StaticDecode<typeof settingsSchema>;
+
+export const extensionSettingsDefinition = definePrevalidatedExtensionSettings(
+    settingsInput,
+    prevalidatedSettings,
 );
-
-export type ExtensionSettings = Static<typeof settingsSchema>;
-
-export const extensionSettingsDefinition = defineExtensionSettings({
-    id: "pi-settings-ui",
-    title: "Pi Settings UI",
-    description: "Settings for Pi Settings UI.",
-    schemaId: "https://raw.githubusercontent.com/zigai/pi-settings-ui/HEAD/config.schema.json",
-    schema: settingsSchema,
-});
 
 export function loadSettingsUiSettings(ctx: PiSettingsContext) {
     return loadPiExtensionSettings(extensionSettingsDefinition, ctx, {
