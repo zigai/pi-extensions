@@ -19,7 +19,7 @@ pi install npm:@zigai/pi-codex-core
 
 ### System Prompt
 
-Model-aware Codex prompt mode uses the matching bundled GPT-5.6 Sol/Terra/Luna or GPT-5.5 system prompt, adapted to Pi's active tools and runtime context.
+Model-aware Codex prompt mode uses the matching bundled GPT-6-Astra, GPT-5.6 Sol/Terra/Luna, or GPT-5.5 system prompt, adapted to Pi's active tools and runtime context.
 
 ### Compaction
 
@@ -37,7 +37,7 @@ In TUI and RPC sessions, transient Codex failures can resume after a bounded coo
 
 ### Other
 
-- GPT-5.6 Responses Lite compatibility for ordinary Pi turns, image descriptions, and native compaction.
+- GPT-6-Astra and GPT-5.6 Responses Lite compatibility for ordinary Pi turns, image descriptions, and native compaction.
 - Optional GPT-only reasoning trace suppression without disabling hidden model reasoning.
 - Fast mode.
 
@@ -76,7 +76,7 @@ When Pi Toggles is active, Codex Core submits these tool settings as defaults in
 | `openai.compactionModel`       | `"current"`     | Model for compaction; `"current"` uses the active Codex model.                               |
 | `openai.compactionReasoning`   | `"medium"`      | Model-supported reasoning effort; also accepts `"current"`, `"max"`, and `"ultra"`.          |
 | `openai.verbosity`             | `"low"`         | Verbosity for Codex-backed requests.                                                         |
-| `openai.fast`                  | `false`         | Prioritize speed; credit usage is higher and varies by model and current pricing.      |
+| `openai.fast`                  | `false`         | Prioritize speed; credit usage is higher and varies by model and current pricing.            |
 | `openai.showReasoningTraces`   | `true`          | Show streamed reasoning summaries for GPT Responses models.                                  |
 
 ```json
