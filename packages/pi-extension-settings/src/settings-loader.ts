@@ -193,8 +193,7 @@ export function loadSettings<const Schema extends TObject>(
         if (schemaStatus !== "unavailable") {
             try {
                 scaffoldedGlobalConfig =
-                    writeTextIfMissing(
-                        globalPaths.configPath,
+                    writeTextIfMissing(globalPaths.configPath, () =>
                         formatJson(createDefaultSettingsDocument(definition)),
                     ) === "created";
             } catch {

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -57,6 +57,39 @@ describe("settings loader failure isolation", () => {
         expect(loaded.schemaStatus).toBe("unchanged");
         expect(loaded.scaffoldedGlobalConfig).toBe(false);
     });
+
+    it.each([
+        { content: '{"enabled":false}\n', enabled: false, codes: [] },
+        { content: "{ malformed\n", enabled: true, codes: ["config-malformed"] },
+    ])(
+        "does not report a scaffold failure for a read-only existing config: %j",
+        async (testCase) => {
+            const agentDir = await temporaryDirectory();
+            const options = {
+                agentDir,
+                bundledSchema: { kind: "content" as const, content: schemaContent() },
+            };
+            const initial = loadSettings(testDefinition(), options);
+            const configDirectory = join(agentDir, "extension-settings");
+            await writeFile(initial.globalConfigPath, testCase.content);
+            await chmod(configDirectory, 0o500);
+            try {
+                const loaded = loadSettings(testDefinition(), options);
+
+                expect(loaded.schemaStatus).toBe("unchanged");
+                expect(loaded.scaffoldedGlobalConfig).toBe(false);
+                expect(loaded.settings.enabled).toBe(testCase.enabled);
+                expect(loaded.usedGlobalConfig).toBe(testCase.codes.length === 0);
+                expect(loaded.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+                    testCase.codes,
+                );
+                expect(await readFile(initial.globalConfigPath, "utf8")).toBe(testCase.content);
+                expect(await readdir(configDirectory)).toEqual(["pi-example.json", "schemas"]);
+            } finally {
+                await chmod(configDirectory, 0o700);
+            }
+        },
+    );
 
     it("loads a verified bundled schema from a file URL", async () => {
         const root = await temporaryDirectory();

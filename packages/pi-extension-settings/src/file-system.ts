@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+    linkSync,
+    lstatSync,
+    mkdirSync,
+    readFileSync,
+    renameSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
@@ -31,14 +39,22 @@ export async function readTextIfPresentAsync(path: string): Promise<string | und
     }
 }
 
-/** Atomically publish complete content only when the destination does not already exist. */
-export function writeTextIfMissing(path: string, content: string, mode = 0o600): WriteStatus {
+/** Produce content only for a missing destination, then atomically publish without clobbering. */
+export function writeTextIfMissing(
+    path: string,
+    produceContent: () => string,
+    mode = 0o600,
+): WriteStatus {
+    // Avoid directory writes for existing entries, including dangling symlinks. The hard link
+    // below still provides no-clobber publication if another writer wins after this check.
+    if (lstatSync(path, { throwIfNoEntry: false }) !== undefined) return "unchanged";
+
     const directory = dirname(path);
     const temporaryPath = join(directory, `.${basename(path)}.${randomUUID()}.tmp`);
 
     try {
         mkdirSync(directory, { recursive: true });
-        writeFileSync(temporaryPath, content, { encoding: "utf8", flag: "wx", mode });
+        writeFileSync(temporaryPath, produceContent(), { encoding: "utf8", flag: "wx", mode });
         try {
             linkSync(temporaryPath, path);
             return "created";
