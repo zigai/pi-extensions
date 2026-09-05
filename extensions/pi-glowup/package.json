@@ -69,7 +69,7 @@
   },
   "dependencies": {
     "@pierre/diffs": "1.2.12",
-    "@zigai/pi-extension-settings": "0.5.1",
+    "@zigai/pi-extension-settings": "0.5.3",
     "ansi-styles": "^6.2.3",
     "shiki": "4.3.0",
     "unbash": "4.0.10"
