@@ -23,14 +23,6 @@ Then follow [Add settings to an existing Pi extension](docs/manual-setup.md).
 - Safe diagnostics that do not expose setting values
 - Locked, validated, atomic settings updates when an extension needs to write configuration
 
-## How settings work
-
-Extensions provide defaults, so users only need to configure what they want to change. Global settings apply across projects. A trusted project can have its own settings—for example, to enable a feature just for that project.
-
-For each option, the package uses the project's value if set, otherwise the global value, otherwise the extension's default. See [runtime details](docs/runtime.md) for validation and how more complex settings are combined.
-
-To keep startup fast, load settings once per session, when the extension first needs them. To disable an extension without loading it, disable its package in Pi's configuration.
-
 ## Documentation
 
 - [Add settings to an existing Pi extension](docs/manual-setup.md)
