@@ -45,8 +45,6 @@ The initial version of this extension was based on [Igor Warzocha's `pi-codex-co
 
 Use global config at `~/.pi/agent/pi-codex-core/config.json`.
 
-When Pi Toggles is active, Codex Core submits these tool settings as defaults instead of changing Pi's active tools directly. Explicit Pi Toggles policy remains authoritative; without Pi Toggles, the same settings are applied standalone.
-
 | Option                         | Default         | Purpose                                                                                      |
 | ------------------------------ | --------------- | -------------------------------------------------------------------------------------------- |
 | `scope.tools`                  | `"codex"`       | Show Codex tools only for Codex-like models; use `"all"` to expose them for every model.     |
