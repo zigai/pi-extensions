@@ -1,5 +1,5 @@
 import Type, { type Static } from "typebox";
-import { DEFAULT_MUTATION_SETTINGS } from "./mutations/settings.ts";
+import { DEFAULT_MUTATION_SETTINGS } from "./rendering/preview-settings.ts";
 
 const DEFAULT_APPEARANCE = {
     diffBackgroundStyle: "two-tone",

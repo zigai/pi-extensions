@@ -83,7 +83,7 @@ export class VirtualTerminal implements Terminal {
     write(data: string): void {
         this.writes.push(data);
         this.pendingWrites = this.pendingWrites.then(
-            () =>
+            async () =>
                 new Promise<void>((resolve) => {
                     this.terminal.write(data, resolve);
                 }),

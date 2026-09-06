@@ -27,10 +27,10 @@ describe("VirtualTerminal query and invariant support", () => {
         const globalPattern = /beta/g;
         expect(terminal.rowsMatching(globalPattern)).toHaveLength(2);
         expect(globalPattern.lastIndex).toBe(0);
-        expect(() => terminal.requireRowContaining("missing")).toThrowError(
+        expect(() => terminal.requireRowContaining("missing")).toThrow(
             /expected exactly one terminal row.*found 0.*Screen:.*alpha/s,
         );
-        expect(() => terminal.requireRowMatching(/beta/)).toThrowError(
+        expect(() => terminal.requireRowMatching(/beta/)).toThrow(
             /expected exactly one terminal row.*found 2.*rows: 1, 2/,
         );
     });
@@ -41,15 +41,15 @@ describe("VirtualTerminal query and invariant support", () => {
 
         expect(terminal.countOccurrences("aa")).toBe(2);
         expect(terminal.rowRange(0, 2).map((row) => row.text)).toEqual(["aaaa", "marker"]);
-        expect(() => terminal.countOccurrences("")).toThrowError(/must not be empty/);
-        expect(() => terminal.rowRange(0, 7)).toThrowError(/exceeds 6 terminal rows/);
+        expect(() => terminal.countOccurrences("")).toThrow(/must not be empty/);
+        expect(() => terminal.rowRange(0, 7)).toThrow(/exceeds 6 terminal rows/);
     });
 
     it("validates and preserves exact RGB provenance", async () => {
         expect(rgbFromHex("#16351E")).toBe(0x16351e);
         expect(rgbFromHex("#abcdef")).toBe(0xabcdef);
-        expect(() => rgbFromHex("16351E")).toThrowError(/six-digit #RRGGBB/);
-        expect(() => rgbFromHex("#12345G")).toThrowError(/six-digit #RRGGBB/);
+        expect(() => rgbFromHex("16351E")).toThrow(/six-digit #RRGGBB/);
+        expect(() => rgbFromHex("#12345G")).toThrow(/six-digit #RRGGBB/);
 
         const terminal = createTerminal(8, 2);
         await writeAndSettle(terminal, "\u001b[48;2;22;53;30m        \u001b[0m");
@@ -57,7 +57,7 @@ describe("VirtualTerminal query and invariant support", () => {
         if (row === undefined) throw new Error("missing RGB test row");
         expect(row.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
         terminal.assertFullRowBackground(row, rgbFromHex("#16351E"));
-        expect(() => terminal.assertFullRowBackground(row, rgbFromHex("#16351F"))).toThrowError(
+        expect(() => terminal.assertFullRowBackground(row, rgbFromHex("#16351F"))).toThrow(
             /expected every cell background must be RGB #16351F.*bg=rgb:1455390/s,
         );
     });
@@ -72,7 +72,7 @@ describe("VirtualTerminal query and invariant support", () => {
             const terminal = createTerminal();
             await writeAndSettle(terminal, ansi);
             const row = terminal.requireRowContaining("X");
-            expect(() => terminal.assertNeutralRange(row, 0, 1)).toThrowError(detail);
+            expect(() => terminal.assertNeutralRange(row, 0, 1)).toThrow(detail);
         }
     });
 
@@ -81,16 +81,14 @@ describe("VirtualTerminal query and invariant support", () => {
         await writeAndSettle(terminal, "\u001b[3mX");
 
         const row = terminal.requireRowContaining("X");
-        expect(() => terminal.assertNeutralRange(row, 0, 1)).toThrowError(
-            /attributesDefault=false/,
-        );
+        expect(() => terminal.assertNeutralRange(row, 0, 1)).toThrow(/attributesDefault=false/);
     });
 
     it("reports the offending wrapped row and screen", async () => {
         const terminal = createTerminal(5, 3);
         await writeAndSettle(terminal, "123456");
 
-        expect(() => terminal.assertNoWrappedRows()).toThrowError(
+        expect(() => terminal.assertNoWrappedRows()).toThrow(
             /terminal row 1: expected row must not be wrapped; actual isWrapped=true[\s\S]*Screen:[\s\S]*12345/,
         );
     });
@@ -101,13 +99,13 @@ describe("VirtualTerminal query and invariant support", () => {
 
         terminal.assertRowsFitWidth();
         terminal.assertUniqueTranscriptMarkers("HEADER", "BEFORE", "AFTER");
-        expect(() =>
-            terminal.assertUniqueTranscriptMarkers("HEADER", "BEFORE", "missing"),
-        ).toThrowError(/after sentinel.*must occur exactly once; found 0 \(rows: none\)/);
+        expect(() => terminal.assertUniqueTranscriptMarkers("HEADER", "BEFORE", "missing")).toThrow(
+            /after sentinel.*must occur exactly once; found 0 \(rows: none\)/,
+        );
         const duplicate = createTerminal(30, 5);
         await writeAndSettle(duplicate, "HEADER\r\nBEFORE\r\nBEFORE\r\nAFTER");
-        expect(() =>
-            duplicate.assertUniqueTranscriptMarkers("HEADER", "BEFORE", "AFTER"),
-        ).toThrowError(/before sentinel.*found 2 \(rows: 1, 2\)/);
+        expect(() => duplicate.assertUniqueTranscriptMarkers("HEADER", "BEFORE", "AFTER")).toThrow(
+            /before sentinel.*found 2 \(rows: 1, 2\)/,
+        );
     });
 });

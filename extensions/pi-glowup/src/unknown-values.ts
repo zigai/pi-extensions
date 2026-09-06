@@ -1,45 +1,27 @@
-import Type from "typebox";
+import Type, { type Static } from "typebox";
 import { Value } from "typebox/value";
+import { jsonObjectParser, type JsonObject, type JsonValue } from "./json-value.ts";
 
-const hostRecordSchema = Type.Object({});
-
-export type HostValue =
-    | string
-    | number
-    | boolean
-    | bigint
-    | symbol
-    | null
-    | undefined
-    | HostRecord
-    | ReadonlyArray<HostValue>
-    | ((...args: ReadonlyArray<HostValue>) => HostValue);
-
-export interface HostRecord {
-    readonly [key: string]: HostValue;
+/** Narrows an already validated JSON value without widening its fields. */
+export function isRecord(value: JsonValue | undefined): value is JsonObject {
+    return jsonObjectParser.parse(value) !== undefined;
 }
 
-export const hostRecordParser = {
-    parse(value: unknown): HostRecord | undefined {
-        if (!Value.Check(hostRecordSchema, value) || Array.isArray(value)) return undefined;
-        const record: unknown = value;
-        // SAFETY: Value.Check proves an object with string-keyed host-owned values; arrays are excluded.
-        return record as HostRecord;
+export function stringField(value: JsonValue | undefined, key: string): string | undefined {
+    if (!isRecord(value)) return undefined;
+    const field = value[key];
+    return Value.Check(Type.String(), field) ? field : undefined;
+}
+
+const diffDetailsSchema = Type.Object({ diff: Type.String() });
+
+/** Other host metadata is opaque and does not affect the diff fallback. */
+export const diffDetailsParser = {
+    parse(value: unknown): Static<typeof diffDetailsSchema> | undefined {
+        try {
+            return Value.Parse(diffDetailsSchema, value);
+        } catch {
+            return undefined;
+        }
     },
 };
-
-export function isRecord<T>(value: T): value is T & HostRecord {
-    return hostRecordParser.parse(value) !== undefined;
-}
-
-const stringSchema = Type.String();
-
-export function getString(record: HostRecord, key: string): string | undefined {
-    const value = record[key];
-    return Value.Check(stringSchema, value) ? value : undefined;
-}
-
-export function stringField(value: HostValue, key: string): string | undefined {
-    const record = hostRecordParser.parse(value);
-    return record === undefined ? undefined : getString(record, key);
-}

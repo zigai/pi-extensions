@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import { checkProtocolPackage } from "./check-protocol-package.mjs";
 
 const packageManifestSchema = Type.Object({
   files: Type.Array(Type.String()),
@@ -30,9 +31,11 @@ for (const configuredPath of [
   packageManifest.piExtensionSettings.definition,
   packageManifest.piExtensionSettings.prevalidation,
   "./src/unknown-values.ts",
-  "./src/mutations/settings.ts",
-  "./src/tool-rendering/decode-node.ts",
-  "./src/tool-rendering/protocol.ts",
+  "./src/rendering/preview-settings.ts",
+  "./src/tools/protocol/decode.ts",
+  "./src/tools/protocol/contract.ts",
+  "./src/tools/protocol/nodes.ts",
+  "./src/json-value.ts",
 ]) {
   const packagePath = configuredPath.replace(/^\.\//u, "");
   assert.equal(
@@ -81,4 +84,5 @@ for (const forbidden of [
 ]) {
   assert.equal(output.includes(forbidden), false, `bundle must externalize ${forbidden}`);
 }
+await checkProtocolPackage(packageRoot);
 console.log("glowup package check passed");

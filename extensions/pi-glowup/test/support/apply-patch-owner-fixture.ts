@@ -1,10 +1,11 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import type { JsonValue } from "../../src/json-value.ts";
 import {
     empty,
     mutation,
     withGlowupRendering,
     type GlowupMutationFile,
-} from "../../src/tool-rendering/protocol.ts";
+} from "../../src/tools/protocol/contract.ts";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
@@ -81,13 +82,13 @@ function filesFromPatch(patch: string): GlowupMutationFile[] {
     return files;
 }
 
-function parseArgs<Value>(value: Value) {
+function parseArgs(value: JsonValue) {
     const parsed = Value.Parse(patchArgsSchema, value);
     const files = filesFromPatch(parsed.patch);
     return files.length === 0 ? undefined : { patch: parsed.patch, files };
 }
 
-function parseResult<Value>(value: Value) {
+function parseResult(value: JsonValue) {
     const parsed = Value.Parse(patchResultSchema, value);
     const files = filesFromPatch(parsed.details.inputPatch ?? parsed.details.patch);
     if (files.length === 0 && parsed.details.lineSummary !== undefined) {
@@ -107,7 +108,7 @@ export const applyPatchOwnerRendering = {
     version: 3,
     parseArgs,
     parseResult,
-    renderPartialCall<Value>(value: Value) {
+    renderPartialCall(value: JsonValue) {
         let parsed;
         try {
             parsed = Value.Parse(patchArgsSchema, value);

@@ -1,0 +1,416 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import {
+    AssistantMessageComponent,
+    BashExecutionComponent,
+    SkillInvocationMessageComponent,
+    ToolExecutionComponent,
+    UserMessageComponent,
+} from "@earendil-works/pi-coding-agent";
+import { Container, Spacer, type Component, visibleWidth } from "@earendil-works/pi-tui";
+import ansiStyles from "ansi-styles";
+import { hasNonWhitespaceText } from "../../text-boundaries.ts";
+
+const ASSISTANT_SEPARATOR_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.state");
+const CHAT_TRANSITION_PATCH_STATE_KEY = Symbol.for(
+    "zigai.pi-glowup.chat-transition-separator.state",
+);
+const ASSISTANT_SEPARATOR_RENDER_KEY = Symbol.for("zigai.pi-glowup.assistant-separator.render");
+
+type AssistantContent = {
+    readonly type: string;
+    readonly text?: string;
+    readonly thinking?: string;
+};
+
+type AssistantMessageLike = Pick<AssistantMessage, "content">;
+
+type AssistantContentKind = "text" | "thinking";
+
+type AssistantAddChildCall = AssistantContentKind | "other";
+
+type AssistantRenderInstance = {
+    readonly contentContainer?: unknown;
+    [ASSISTANT_SEPARATOR_RENDER_KEY]?: boolean;
+};
+
+type AssistantSeparatorPatchState = {
+    enabled: boolean;
+    readonly originalRender: AssistantRenderPrototype["render"];
+    readonly originalUpdateContent: AssistantRenderPrototype["updateContent"];
+    readonly wrapperRender?: NonNullable<AssistantRenderPrototype["render"]>;
+    readonly wrapperUpdateContent?: NonNullable<AssistantRenderPrototype["updateContent"]>;
+};
+
+type AssistantRenderPrototype = {
+    render?: AssistantMessageComponent["render"];
+    updateContent?: AssistantMessageComponent["updateContent"];
+    [ASSISTANT_SEPARATOR_PATCH_STATE_KEY]?: AssistantSeparatorPatchState;
+};
+
+type ChatComponentKind = "assistant" | "tool" | "user";
+
+type ChatContainerInstance = Container;
+
+type ChatTransitionPatchState = {
+    enabled: boolean;
+    readonly originalAddChild: ChatContainerPrototype["addChild"];
+    readonly wrapperAddChild?: NonNullable<ChatContainerPrototype["addChild"]>;
+};
+
+type ChatContainerPrototype = {
+    addChild?: (this: ChatContainerInstance, component: Component) => void;
+    [CHAT_TRANSITION_PATCH_STATE_KEY]?: ChatTransitionPatchState;
+};
+
+type AssistantPrototypeOwner =
+    | typeof AssistantMessageComponent.prototype
+    | AssistantRenderPrototype;
+type ChatContainerPrototypeOwner = typeof Container.prototype | ChatContainerPrototype;
+
+function renderSeparator(width: number): string {
+    return `${ansiStyles.modifier.dim.open}${"─".repeat(Math.max(1, Math.floor(width)))}${ansiStyles.modifier.reset.open}`;
+}
+
+function startsWithBlankLine(lines: readonly string[]): boolean {
+    const [firstLine] = lines;
+    return firstLine !== undefined && visibleWidth(firstLine.trim()) === 0;
+}
+
+function linesWithSeparatorSpacing(lines: readonly string[], width: number): string[] {
+    const contentLines = startsWithBlankLine(lines) ? [...lines] : ["", ...lines];
+    return ["", renderSeparator(width), ...contentLines];
+}
+
+function isVisibleTextContent(content: AssistantContent): boolean {
+    return (
+        content.type === "text" && content.text !== undefined && hasNonWhitespaceText(content.text)
+    );
+}
+
+function isVisibleThinkingContent(content: AssistantContent): boolean {
+    return (
+        content.type === "thinking" &&
+        content.thinking !== undefined &&
+        hasNonWhitespaceText(content.thinking)
+    );
+}
+
+function visibleContentKind(content: AssistantContent): AssistantContentKind | undefined {
+    if (isVisibleTextContent(content)) {
+        return "text";
+    }
+    if (isVisibleThinkingContent(content)) {
+        return "thinking";
+    }
+    return undefined;
+}
+
+function visibleContentKinds(
+    contentItems: ReadonlyArray<AssistantContent>,
+): ReadonlyArray<AssistantContentKind | undefined> {
+    return contentItems.map(visibleContentKind);
+}
+
+function hasVisibleContentAfterByIndex(
+    kinds: ReadonlyArray<AssistantContentKind | undefined>,
+): ReadonlyArray<boolean> {
+    const hasVisibleAfter = Array.from({ length: kinds.length }, () => false);
+    let hasLaterVisibleContent = false;
+    for (let index = kinds.length - 1; index >= 0; index -= 1) {
+        hasVisibleAfter[index] = hasLaterVisibleContent;
+        if (kinds[index] !== undefined) {
+            hasLaterVisibleContent = true;
+        }
+    }
+    return hasVisibleAfter;
+}
+
+function assistantAddChildCalls(message: AssistantMessageLike): AssistantAddChildCall[] {
+    const calls: AssistantAddChildCall[] = [];
+    const kinds = visibleContentKinds(message.content);
+    const hasVisibleContent = kinds.some((kind) => kind !== undefined);
+    const hasVisibleAfter = hasVisibleContentAfterByIndex(kinds);
+    if (hasVisibleContent) {
+        calls.push("other");
+    }
+
+    for (let index = 0; index < kinds.length; index += 1) {
+        if (message.content[index]?.type === "thinking") {
+            let visibleRun = kinds[index] === "thinking";
+            while (message.content[index + 1]?.type === "thinking") {
+                index += 1;
+                visibleRun ||= kinds[index] === "thinking";
+            }
+            if (visibleRun) {
+                calls.push("thinking");
+                if (hasVisibleAfter[index] === true) calls.push("other");
+            }
+        } else if (kinds[index] === "text") {
+            calls.push("text");
+        }
+    }
+    return calls;
+}
+
+const chatComponentKinds = new WeakMap<ChatContainerInstance, ChatComponentKind>();
+
+function shouldRenderAssistantSeparator(previousKind: ChatComponentKind | undefined): boolean {
+    return previousKind === "tool";
+}
+
+function componentKind(component: Component): ChatComponentKind | undefined {
+    if (component instanceof AssistantMessageComponent) {
+        return "assistant";
+    }
+    if (
+        component instanceof ToolExecutionComponent ||
+        component instanceof BashExecutionComponent
+    ) {
+        return "tool";
+    }
+    if (
+        component instanceof UserMessageComponent ||
+        component instanceof SkillInvocationMessageComponent
+    ) {
+        return "user";
+    }
+    return undefined;
+}
+
+function markAssistantSeparator(component: Component, shouldRender: boolean): void {
+    Reflect.set(component, ASSISTANT_SEPARATOR_RENDER_KEY, shouldRender);
+}
+
+function createChatTransitionSeparatorWrapper(
+    originalAddChild: (this: ChatContainerInstance, component: Component) => void,
+    isEnabled: () => boolean,
+): NonNullable<ChatContainerPrototype["addChild"]> {
+    return function addChildWithChatTransitionSeparator(
+        this: ChatContainerInstance,
+        component: Component,
+    ): void {
+        if (!isEnabled()) {
+            originalAddChild.call(this, component);
+            return;
+        }
+
+        const kind = componentKind(component);
+        if (kind === "assistant") {
+            markAssistantSeparator(
+                component,
+                shouldRenderAssistantSeparator(chatComponentKinds.get(this)),
+            );
+        }
+
+        originalAddChild.call(this, component);
+
+        if (kind !== undefined) {
+            chatComponentKinds.set(this, kind);
+        }
+    };
+}
+
+function createThinkingBlockSpacingWrapper(
+    originalUpdateContent: NonNullable<AssistantRenderPrototype["updateContent"]>,
+    isEnabled: () => boolean,
+): NonNullable<AssistantRenderPrototype["updateContent"]> {
+    return function updateContentWithThinkingSpacing(
+        this: AssistantRenderInstance,
+        message: AssistantMessage,
+        isStreaming?: boolean,
+    ): void {
+        if (!isEnabled()) {
+            originalUpdateContent.call(this, message, isStreaming);
+            return;
+        }
+
+        const contentContainer = this.contentContainer;
+        if (!(contentContainer instanceof Container)) {
+            originalUpdateContent.call(this, message, isStreaming);
+            return;
+        }
+
+        // oxlint-disable-next-line typescript/unbound-method -- SAFETY: The original method is restored after the temporary wrapper and is only invoked with contentContainer as this.
+        const originalAddChild = contentContainer.addChild;
+        const addChildBeforePatch = (component: Component): void => {
+            originalAddChild.call(contentContainer, component);
+        };
+        const calls = assistantAddChildCalls(message);
+        let callIndex = 0;
+        let previousVisibleKind: AssistantContentKind | undefined;
+
+        contentContainer.addChild = function addChildWithThinkingSpacing(
+            this: Container,
+            component: Component,
+        ): void {
+            const call = calls[callIndex];
+            callIndex += 1;
+            if (call === "thinking" && previousVisibleKind === "text") {
+                addChildBeforePatch(new Spacer(1));
+            }
+            addChildBeforePatch(component);
+            if (call === "text" || call === "thinking") {
+                previousVisibleKind = call;
+            }
+        };
+
+        try {
+            originalUpdateContent.call(this, message, isStreaming);
+        } finally {
+            contentContainer.addChild = originalAddChild;
+        }
+    };
+}
+
+/** Enables or disables the assistant separator prototype patches. */
+export function configureAssistantSeparatorPatch(
+    enabled: boolean,
+    prototype: AssistantPrototypeOwner = AssistantMessageComponent.prototype,
+    containerPrototype: ChatContainerPrototypeOwner = Container.prototype,
+): void {
+    const assistantPrototype: AssistantRenderPrototype = prototype;
+    const container: ChatContainerPrototype = containerPrototype;
+
+    if (!enabled) {
+        restoreAssistantSeparatorPatch(assistantPrototype);
+        restoreChatTransitionPatch(container);
+        return;
+    }
+
+    installAssistantPrototypePatch(assistantPrototype);
+    installChatPrototypePatch(container);
+}
+
+function installAssistantPrototypePatch(assistantPrototype: AssistantRenderPrototype): void {
+    const existingState = assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
+    if (existingState !== undefined) {
+        existingState.enabled = true;
+        return;
+    }
+
+    const originalRender = assistantPrototype.render;
+    const originalUpdateContent = assistantPrototype.updateContent;
+    let nextState: AssistantSeparatorPatchState;
+    const wrapperRender =
+        originalRender !== undefined
+            ? function renderWithAssistantSeparator(
+                  this: AssistantRenderInstance,
+                  width: number,
+              ): string[] {
+                  const lines = originalRender.call(this, width);
+                  if (
+                      !nextState.enabled ||
+                      lines.length === 0 ||
+                      this[ASSISTANT_SEPARATOR_RENDER_KEY] !== true
+                  ) {
+                      return lines;
+                  }
+                  return linesWithSeparatorSpacing(lines, width);
+              }
+            : undefined;
+    const wrapperUpdateContent =
+        originalUpdateContent !== undefined
+            ? createThinkingBlockSpacingWrapper(originalUpdateContent, () => nextState.enabled)
+            : undefined;
+
+    if (wrapperRender !== undefined) {
+        assistantPrototype.render = wrapperRender;
+    }
+    if (wrapperUpdateContent !== undefined) {
+        assistantPrototype.updateContent = wrapperUpdateContent;
+    }
+
+    nextState = {
+        enabled: true,
+        originalRender,
+        originalUpdateContent,
+    };
+    if (wrapperRender !== undefined) {
+        nextState = { ...nextState, wrapperRender };
+    }
+    if (wrapperUpdateContent !== undefined) {
+        nextState = { ...nextState, wrapperUpdateContent };
+    }
+    assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] = nextState;
+}
+
+function installChatPrototypePatch(container: ChatContainerPrototype): void {
+    const existingState = container[CHAT_TRANSITION_PATCH_STATE_KEY];
+    if (existingState !== undefined) {
+        existingState.enabled = true;
+        return;
+    }
+
+    const originalAddChild = container.addChild;
+    let nextState: ChatTransitionPatchState;
+    const wrapperAddChild =
+        originalAddChild !== undefined
+            ? createChatTransitionSeparatorWrapper(originalAddChild, () => nextState.enabled)
+            : undefined;
+    if (wrapperAddChild !== undefined) {
+        container.addChild = wrapperAddChild;
+    }
+    nextState = {
+        enabled: true,
+        originalAddChild,
+    };
+    if (wrapperAddChild !== undefined) {
+        nextState = { ...nextState, wrapperAddChild };
+    }
+    container[CHAT_TRANSITION_PATCH_STATE_KEY] = nextState;
+}
+
+function restoreAssistantSeparatorPatch(assistantPrototype: AssistantRenderPrototype): void {
+    const state = assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
+    if (state === undefined) {
+        return;
+    }
+
+    state.enabled = false;
+    if (
+        (state.wrapperRender !== undefined && assistantPrototype.render !== state.wrapperRender) ||
+        (state.wrapperUpdateContent !== undefined &&
+            assistantPrototype.updateContent !== state.wrapperUpdateContent)
+    )
+        return;
+
+    if (state.wrapperRender !== undefined) {
+        restoreAssistantMethod(assistantPrototype, "render", state.originalRender);
+    }
+    if (state.wrapperUpdateContent !== undefined) {
+        restoreAssistantMethod(assistantPrototype, "updateContent", state.originalUpdateContent);
+    }
+    delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
+}
+
+function restoreChatTransitionPatch(container: ChatContainerPrototype): void {
+    const state = container[CHAT_TRANSITION_PATCH_STATE_KEY];
+    if (state === undefined) {
+        return;
+    }
+
+    state.enabled = false;
+    if (state.wrapperAddChild !== undefined) {
+        if (container.addChild !== state.wrapperAddChild) {
+            return;
+        }
+        if (state.originalAddChild === undefined) {
+            delete container.addChild;
+        } else {
+            container.addChild = state.originalAddChild;
+        }
+    }
+    delete container[CHAT_TRANSITION_PATCH_STATE_KEY];
+}
+
+function restoreAssistantMethod<TName extends "render" | "updateContent">(
+    prototype: AssistantRenderPrototype,
+    methodName: TName,
+    method: AssistantRenderPrototype[TName],
+): void {
+    if (method === undefined) {
+        delete prototype[methodName];
+        return;
+    }
+    prototype[methodName] = method;
+}

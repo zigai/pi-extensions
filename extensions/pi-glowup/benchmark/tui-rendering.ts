@@ -3,29 +3,27 @@ import type { Component } from "@earendil-works/pi-tui";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { buildPierreDiffPayload, buildUnifiedDiffRows } from "../src/diffs/diff.ts";
+import { buildPierreDiffPayload } from "../src/rendering/diff/payload.ts";
+import { buildUnifiedDiffRows } from "../src/rendering/diff/rows.ts";
 import {
     clearQueuedDiffHighlights,
     getPierreDiffPayloadFromDetails,
     renderPierreDiff,
-} from "../src/diffs/renderer.ts";
-import { emptyHighlightedDiffSet, loadHighlightedDiff } from "../src/diffs/highlight.ts";
-import { getPierrePalette } from "../src/diffs/theme.ts";
+} from "../src/rendering/diff/pierre-renderer.ts";
+import { emptyHighlightedDiffSet, loadHighlightedDiff } from "../src/rendering/diff/highlight.ts";
+import { getPierrePalette } from "../src/rendering/diff/theme.ts";
 import { applyPatchOwnerToolDefinition } from "../test/support/apply-patch-owner-fixture.ts";
-import {
-    configureRenderingAppearance,
-    renderGlowupDiff,
-    type GlowupRenderTheme,
-} from "../src/rendering/core.ts";
-import { renderWriteCallPreview } from "../src/rendering/write-rendering.ts";
+import { configureRenderingAppearance, type GlowupRenderTheme } from "../src/rendering/theme.ts";
+import { renderGlowupDiff } from "../src/rendering/diff/text-renderer.ts";
+import { renderWriteCallPreview } from "../src/tools/built-in/write-preview.ts";
 import {
     clearSyntaxHighlightCache,
     disposeSyntaxHighlighting,
     highlightSyntaxCode,
     initializeSyntaxHighlighting,
     syntaxHighlightCacheStats,
-} from "../src/syntax/highlighter.ts";
-import { createThirdPartyToolRenderer } from "../src/third-party-tools/renderers.ts";
+} from "../src/rendering/syntax/highlighter.ts";
+import { createThirdPartyToolRenderer } from "../src/tools/renderers.ts";
 
 type BenchmarkOptions = {
     readonly quick: boolean;
@@ -163,7 +161,7 @@ function parseOptions(args: readonly string[]): BenchmarkOptions {
             continue;
         }
         if (argument === "--output") {
-            const value = args[index + 1];
+            const value = args.at(index + 1);
             if (value === undefined || value.length === 0) {
                 throw new Error("--output requires a path");
             }
@@ -326,7 +324,11 @@ function resizeTimings(cycles: number): readonly number[] {
     );
     const timings: number[] = [];
     for (let cycle = 0; cycle < cycles; cycle += 1) {
-        timings.push(measure(() => component.render(cycle % 2 === 0 ? 180 : 70)));
+        timings.push(
+            measure(() => {
+                component.render(cycle % 2 === 0 ? 180 : 70);
+            }),
+        );
     }
     clearQueuedDiffHighlights();
     return timings;
@@ -390,15 +392,21 @@ async function syntaxAdoptionTimings(): Promise<Readonly<Record<string, readonly
         { length: 120 },
         (_value, index) => `export const syntaxValue${index}: number = ${index};`,
     ).join("\n");
-    const beforeInitialization = measure(() => highlightSyntaxCode(code, "typescript"));
+    const beforeInitialization = measure(() => {
+        highlightSyntaxCode(code, "typescript");
+    });
     const initialization = await measureAsync(async () => {
         await initializeSyntaxHighlighting(process.env, {
             preloadLanguages: ["typescript"],
             projectLanguageDetection: { enabled: false },
         });
     });
-    const firstHighlightedRender = measure(() => highlightSyntaxCode(code, "typescript"));
-    const cachedHighlightedRender = measure(() => highlightSyntaxCode(code, "typescript"));
+    const firstHighlightedRender = measure(() => {
+        highlightSyntaxCode(code, "typescript");
+    });
+    const cachedHighlightedRender = measure(() => {
+        highlightSyntaxCode(code, "typescript");
+    });
     return {
         "syntax-before-initialization": [beforeInitialization],
         "syntax-initialization": [initialization],
@@ -460,7 +468,7 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
         canBuildPierreDiff: true,
     });
     if (basePayload?.kind !== "renderable") throw new Error("expected replacement payload");
-    const baseHunk = basePayload.metadata.hunks[0];
+    const baseHunk = basePayload.metadata.hunks.at(0);
     if (baseHunk === undefined) throw new Error("expected replacement hunk");
     const replacementMetadata = {
         ...basePayload.metadata,
@@ -552,7 +560,9 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
         { expanded: false },
         { lastComponent: undefined, toolCallId: "benchmark-loaded-first-render" },
     );
-    const firstRender = measure(() => firstRenderComponent.render(120));
+    const firstRender = measure(() => {
+        firstRenderComponent.render(120);
+    });
     clearQueuedDiffHighlights();
 
     return {

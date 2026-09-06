@@ -24,14 +24,16 @@ export interface JsonObject {
 }
 export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
 
+export function isJsonArray(value: JsonValue | undefined): value is JsonArray {
+    return Array.isArray(value);
+}
+
 export const jsonValueParser = {
     parse(value: unknown): JsonValue | undefined {
         try {
             if (value === undefined || value === null || !Value.Check(jsonValueSchema, value))
                 return undefined;
-            const val: unknown = value;
-            // SAFETY: Value.Check proves value conforms to jsonValueSchema.
-            return val as JsonValue;
+            return value;
         } catch {
             return undefined;
         }
@@ -42,8 +44,6 @@ export const jsonObjectParser = {
     parse(value: unknown): JsonObject | undefined {
         if (value === undefined || value === null || !Value.Check(jsonObjectSchema, value))
             return undefined;
-        const val: unknown = value;
-        // SAFETY: Value.Check proves value conforms to jsonObjectSchema.
-        return val as JsonObject;
+        return value;
     },
 };

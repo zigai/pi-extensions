@@ -1,77 +1,46 @@
-import type { ExtensionAPI, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import {
+    SessionManager,
+    type SessionEntry,
+    type ToolCallEvent,
+} from "@earendil-works/pi-coding-agent";
 import glowupExtension from "../../src/index.ts";
-
-type HarnessEvent =
-    | ToolCallEvent
-    | { readonly type: "session_start"; readonly reason: "startup" }
-    | { readonly type: "session_shutdown"; readonly reason: "quit" | "reload" };
-
-type HarnessContext = {
-    readonly cwd?: string;
-    readonly mode?: "tui";
-    readonly ui?: {
-        readonly getToolsExpanded: () => boolean;
-        readonly setToolsExpanded: () => void;
-    };
-    readonly sessionManager?: { readonly getBranch: () => readonly unknown[] };
-    readonly isProjectTrusted?: () => boolean;
-};
-
-type ExtensionHandler = (event: HarnessEvent, context: HarnessContext) => void | Promise<void>;
+import { createExtensionContext, ExtensionRegistrationFixture } from "./sdk-extension-fixture.ts";
 
 export class GlowupExtensionHarness {
-    private readonly handlersByEvent = new Map<string, ExtensionHandler[]>();
-    private readonly extensionApi: ExtensionAPI;
+    private readonly api = new ExtensionRegistrationFixture();
+    private cwd = process.cwd();
 
-    constructor() {
-        const apiBoundary = {
-            on: (eventName: string, handler: ExtensionHandler): void => {
-                const handlers = this.handlersByEvent.get(eventName) ?? [];
-                handlers.push(handler);
-                this.handlersByEvent.set(eventName, handlers);
-            },
-        };
-        // SAFETY: pi-glowup only consumes ExtensionAPI.on during registration. Object.assign
-        // installs that tested seam before the fixture is exposed to the extension.
-        const extensionApiFixture = {} as ExtensionAPI;
-        this.extensionApi = Object.assign(extensionApiFixture, apiBoundary);
-    }
-
-    async install(cwd: string, branch: readonly unknown[] = []): Promise<void> {
-        glowupExtension(this.extensionApi);
-        await this.emit(
-            "session_start",
-            { type: "session_start", reason: "startup" },
-            {
-                cwd,
-                mode: "tui",
-                ui: {
-                    getToolsExpanded: () => false,
-                    setToolsExpanded() {},
-                },
-                sessionManager: {
-                    getBranch: () => branch,
-                },
-                isProjectTrusted: () => true,
-            },
-        );
+    async install(cwd: string, branch: readonly SessionEntry[] = []): Promise<void> {
+        this.cwd = cwd;
+        glowupExtension(this.api);
+        const sessionManager = SessionManager.inMemory(cwd);
+        const context = createExtensionContext(cwd, {
+            mode: "tui",
+            sessionManager: Object.assign(sessionManager, { getBranch: () => [...branch] }),
+        });
+        for (const registration of this.api.registrations) {
+            if (registration[0] === "session_start") {
+                await registration[1]({ type: "session_start", reason: "startup" }, context);
+            }
+        }
     }
 
     async shutdown(reason: "quit" | "reload" = "quit"): Promise<void> {
-        await this.emit("session_shutdown", { type: "session_shutdown", reason }, {});
+        for (const registration of this.api.registrations) {
+            if (registration[0] === "session_shutdown") {
+                await registration[1](
+                    { type: "session_shutdown", reason },
+                    createExtensionContext(this.cwd),
+                );
+            }
+        }
     }
 
     async emitToolCall(event: ToolCallEvent, cwd: string): Promise<void> {
-        await this.emit("tool_call", event, { cwd });
-    }
-
-    private async emit(
-        eventName: string,
-        event: HarnessEvent,
-        context: HarnessContext,
-    ): Promise<void> {
-        for (const handler of this.handlersByEvent.get(eventName) ?? []) {
-            await handler(event, context);
+        for (const registration of this.api.registrations) {
+            if (registration[0] === "tool_call") {
+                await registration[1](event, createExtensionContext(cwd));
+            }
         }
     }
 }

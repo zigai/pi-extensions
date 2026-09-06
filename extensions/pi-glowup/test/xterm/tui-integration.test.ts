@@ -11,9 +11,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getGlowupGlobalConfigPath } from "../../src/config/config.ts";
-import { buildPierreDiffPayload } from "../../src/diffs/diff.ts";
-import { configureAutocompleteCleanupPatch } from "../../src/patches/autocomplete-cleanup.ts";
+import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
+import { buildPierreDiffPayload } from "../../src/rendering/diff/payload.ts";
+import { configureAutocompleteCleanupPatch } from "../../src/pi/patches/autocomplete-cleanup.ts";
 import { GlowupExtensionHarness } from "../support/extension-harness.ts";
 import { applyPatchOwnerToolDefinition } from "../support/apply-patch-owner-fixture.ts";
 import {
@@ -1315,11 +1315,8 @@ export const grownWriteTwelve = 12;
         pendingTerminal.resize(180, 30);
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).toBe(firstWide);
-        if (mode === "regular") {
-            expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[2J\u001b[H\u001b[3J");
-        } else {
-            expect(pendingTerminal.rawWrites().join("")).toContain("\u001b[?1049h");
-        }
+        const expectedRedraw = mode === "regular" ? "\u001b[2J\u001b[H\u001b[3J" : "\u001b[?1049h";
+        expect(pendingTerminal.rawWrites().join("")).toContain(expectedRedraw);
     });
 
     it("renders completed apply_patch details side-by-side and preserves every row", async () => {
@@ -1536,11 +1533,13 @@ export const grownWriteTwelve = 12;
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).toBe(collapsed);
         expect(assertAdjacentTranscript()).toBe(collapsedAfter);
-        for (const row of pendingTerminal.interpretedRows()) {
-            if (row.index > collapsedAfter && row.index <= expandedAfter) {
-                expect(row.text.trim()).toBe("");
-                pendingTerminal.assertNeutralRange(row);
-            }
+        const clearedRows = pendingTerminal
+            .interpretedRows()
+            .filter((row) => row.index > collapsedAfter && row.index <= expandedAfter);
+        expect(clearedRows.length).toBe(expandedAfter - collapsedAfter);
+        for (const row of clearedRows) {
+            expect(row.text.trim()).toBe("");
+            pendingTerminal.assertNeutralRange(row);
         }
     });
 
@@ -1780,11 +1779,9 @@ export const grownWriteTwelve = 12;
         expect(running.terminal.screenText().trimEnd()).toBe("EDITOR_PROMPT");
         expect(running.terminal.screenText()).not.toContain("stale completion");
         const cleanupWrites = running.terminal.rawWrites().slice(writesBeforeCleanup).join("");
-        if (mode === "regular") {
-            expect(cleanupWrites).toContain("\u001b[2J\u001b[H\u001b[3J");
-        } else {
-            expect(cleanupWrites).toContain("\u001b[1;1H\u001b[2K");
-        }
+        const expectedCleanup =
+            mode === "regular" ? "\u001b[2J\u001b[H\u001b[3J" : "\u001b[1;1H\u001b[2K";
+        expect(cleanupWrites).toContain(expectedCleanup);
         running.terminal.assertRowsFitWidth();
     });
 });

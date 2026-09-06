@@ -255,7 +255,7 @@ export class PiPtyProcess {
 
     private enqueueAnsi(data: string): void {
         this.parseQueue = this.parseQueue.then(
-            () =>
+            async () =>
                 new Promise<void>((resolveWrite) => {
                     this.terminal.write(data, () => {
                         this.captureFrame();

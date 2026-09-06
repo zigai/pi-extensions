@@ -8,7 +8,7 @@ import {
     type ToolCall,
 } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { withGlowupRendering } from "../../../src/tool-rendering/protocol.ts";
+import { withGlowupRendering } from "../../../src/tools/protocol/contract.ts";
 import { Type } from "typebox";
 import { applyPatchOwnerRendering } from "../../support/apply-patch-owner-fixture.ts";
 
@@ -424,7 +424,7 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
                 label: "apply_patch",
                 description: "Deterministic no-op patch tool for PTY renderer verification.",
                 parameters: Type.Object({ patch: Type.String() }),
-                execute(_toolCallId, params) {
+                async execute(_toolCallId, params) {
                     const addedLineCount = params.patch
                         .split(/\r?\n/gu)
                         .filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;

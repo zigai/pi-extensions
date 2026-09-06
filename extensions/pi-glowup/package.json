@@ -25,9 +25,11 @@
     "src/settings-input.ts",
     "src/settings.prevalidated.ts",
     "src/unknown-values.ts",
-    "src/mutations/settings.ts",
-    "src/tool-rendering/decode-node.ts",
-    "src/tool-rendering/protocol.ts",
+    "src/rendering/preview-settings.ts",
+    "src/tools/protocol/decode.ts",
+    "src/tools/protocol/contract.ts",
+    "src/tools/protocol/nodes.ts",
+    "src/json-value.ts",
     "docs",
     "themes",
     "config.schema.json",
@@ -38,7 +40,7 @@
   "main": "dist/src/index.ts",
   "exports": {
     ".": "./dist/src/index.ts",
-    "./protocol": "./src/tool-rendering/protocol.ts"
+    "./protocol": "./src/tools/protocol/contract.ts"
   },
   "publishConfig": {
     "access": "public"
@@ -54,7 +56,7 @@
     "test:vitest": "vitest run --exclude=test/pty/**",
     "test:xterm": "vitest run test/xterm/tui-integration.test.ts",
     "test:pty": "vitest run test/pty/pi-cli.test.ts",
-    "test:properties": "vitest run test/streaming-render-properties.test.ts",
+    "test:properties": "vitest run test/tools/built-in/streaming-render-properties.test.ts",
     "test:package": "npm run build && node scripts/package-check.mjs",
     "benchmark:tui": "node --expose-gc --import tsx benchmark/tui-rendering.ts",
     "language-catalog:generate": "node scripts/generate-language-catalog.mjs",

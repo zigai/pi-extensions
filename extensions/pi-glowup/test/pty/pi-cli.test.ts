@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getGlowupGlobalConfigPath } from "../../src/config/config.ts";
+import { getGlowupGlobalConfigPath } from "../../src/config/load.ts";
 import { PiPtyProcess, type PiProcessOptions, type PtyScreenFrame } from "./pi-process-harness.ts";
 
 const CTRL_O = "\u000f";
