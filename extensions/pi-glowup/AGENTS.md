@@ -39,7 +39,7 @@
 - Preserve rich syntax highlighting for code-bearing tool calls, including streaming mutations. Thinking blocks and user messages remain plain.
 - Render compact semantic layouts for known third-party tools and avoid raw argument JSON, internal artifact paths, redundant attachment rows, and fake expansion affordances.
 - New third-party tool-specific renderers, parsers, and state belong in the tool's parent library or companion extension. Existing compatibility renderers remain in this repository until their owning package ships and verifies an equivalent protocol adapter; migrate and remove them one family at a time, never preemptively.
-- External tool owners must import `@zigai/pi-glowup/protocol`; they must not import `src/rendering`, `src/third-party-tools`, Pi TUI components, Glowup themes, or ANSI helpers through this repository.
+- External tool owners must import `@zigai/pi-glowup/protocol`; they must not import `src/rendering`, `src/tools`, Pi TUI components, Glowup themes, or ANSI helpers through this repository.
 - Do not add external tool-name registries or family-specific fallback branches to `pi-glowup`. A tool-owned `glowupRendering` adapter is the supported customization seam.
 - Components must react to width changes. Pierre-backed native edits and completed `apply_patch` diffs use side-by-side layout whenever the current width meets the threshold and unified layout otherwise; never freeze the initial-width decision.
 - Never perform blocking subprocess or filesystem work from `render()`. Keep replay, syntax, snapshot, and component state bounded so large calls and restored sessions remain responsive.
@@ -61,11 +61,17 @@
 
 ## Pi Extension Configuration
 
-- If the extension needs user-configurable behavior, define it in `src/settings.ts` with `@zigai/pi-extension-settings`; do not store it in Pi core `settings.json` or YAML/TOML/TypeScript config.
-- Declare the definition, checked-in schema, and README in `package.json.piExtensionSettings` and keep `@zigai/pi-extension-settings` bundled as a runtime dependency.
+- Define settings in `src/settings-input.ts`; keep it safe to import at generation time. Use a closed root object, useful descriptions and valid defaults; use codecs for transformations and `StaticDecode` for resolved types. Add realistic partial examples when structured options warrant them and PascalCase titles for complex array-item and record-value objects.
+- Use the package root for definitions, `/runtime` for hydration in `src/settings.ts`, and `/pi` for loading and updates. Keep `@zigai/pi-extension-settings` a normal runtime dependency, not a bundled dependency. Do not hardcode Pi paths or write settings files directly.
+- Declare `src/settings-input.ts`, `src/settings.prevalidated.ts`, `config.schema.json`, and the README in `package.json.piExtensionSettings`; keep all four artifacts in the package.
 - Use `loadPiExtensionSettings()` at the composition boundary. It owns JSON parsing, defaults, global/project paths, trust gating, schema installation, and safe handling of malformed layers.
 - Keep the resolved settings type as the source for runtime adapters; do not duplicate the persisted schema or hand-roll config scaffolding and schema writes.
-- Run `npm run config:generate` after changing `src/settings.ts`; run `npm run config:check` to verify generated `config.schema.json` and the marked README section.
-- Never hand-edit `config.schema.json` or README text between the `pi-extension-settings` markers.
+- Run `npm run config:generate` after changing `src/settings-input.ts`; run `npm run config:check` to verify generated artifacts.
+- Never hand-edit `src/settings.prevalidated.ts`, `config.schema.json`, or README text between the `pi-extension-settings` markers.
+- Defaults are overlaid by global settings, then trusted-project settings. Objects merge; arrays and scalars replace. Loading creates missing global settings and refreshes stale schemas. It never overwrites settings files or creates project settings. Invalid layers are ignored and reported. Never expose raw setting values or secrets in diagnostics.
+- For settings editors, load first, then use `updatePiExtensionSettings()`. Its synchronous callback runs once under lock on the latest encoded layer; the package validates the result and writes atomically. Updates preserve invalid files and may create missing project settings only in trusted projects. Handle every typed outcome, use `expectedRevision` for snapshot edits, and do not add another mutation queue.
+- Cache the full load result, including disabled or rejected settings where supported; no separate activation flag is needed. Reset the cache at session boundaries. Add cancellation, stale-result rejection, and disposal only for actual async work or resources; dispose those resources before clearing session state. Do not add a generic lifecycle framework.
+- Deferred loading moves synchronous work from startup to first use; it does not remove the cost. Keep settings loading at session setup when rendering needs it there; never move it into renderers. `pi config` prevents import and registration entirely.
+- Tool renderers receive `ToolRenderContext`, not `ExtensionContext`. Render from arguments, results, and renderer state without settings I/O or a retained execution context. Renderers must return a component even before execution or settings activation, including when displaying history.
 - The shared settings runtime uses `~/.pi/agent/extension-settings/<extension-id>.json` globally and trusted `<cwd>/.pi/extension-settings/<extension-id>.json` project overrides.
 - Use environment variables only for secrets, CI/session overrides, or explicit config-path overrides.
