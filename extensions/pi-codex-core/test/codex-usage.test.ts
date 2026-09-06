@@ -70,6 +70,50 @@ test("formats codex usage payloads", () => {
     assert.doesNotMatch(formatted, /\b300m\b|\b10080m\b/);
 });
 
+test("labels weekly-only Pro usage by duration while preserving Spark windows", () => {
+    const snapshot = parseCodexUsagePayload({
+        plan_type: "pro",
+        rate_limit: {
+            primary_window: { used_percent: 99, limit_window_seconds: 604_800 },
+        },
+        additional_rate_limits: [
+            {
+                metered_feature: "gpt-5.3-codex-spark",
+                limit_name: "gpt-5.3-codex-spark",
+                rate_limit: {
+                    primary_window: { used_percent: 0, limit_window_seconds: 18_000 },
+                    secondary_window: { used_percent: 0, window_minutes: 10_080 },
+                },
+            },
+        ],
+    });
+
+    const lines = formatCodexUsage(snapshot, FIXED_CLOCK).split("\n");
+    assert.equal(lines[1], "- Codex:               weekly: 1% left   (reset unknown)");
+    assert.equal(
+        lines[2],
+        "- GPT-5.3-Codex-Spark: 5h: 100% left (reset unknown); weekly: 100% left (reset unknown)",
+    );
+});
+
+test.each([
+    [60, "1h"],
+    [1440, "1d"],
+    [90, "90m"],
+    [undefined, "usage"],
+    [0, "usage"],
+])("labels either usage window with duration %s as %s", (minutes, label) => {
+    for (const slot of ["primary_window", "secondary_window"]) {
+        const snapshot = parseCodexUsagePayload({
+            rate_limit: { [slot]: { used_percent: 25, window_minutes: minutes } },
+        });
+        assert.equal(
+            formatCodexUsage(snapshot, FIXED_CLOCK),
+            `Codex usage:\n- Codex: ${label}: 75% left  (reset unknown)`,
+        );
+    }
+});
+
 test("formats Codex reset credit expiration metadata", () => {
     const explicitExpiration = new Date(FIXED_NOW_MS + 5 * 24 * 60 * 60 * 1000).toISOString();
     const grantedAt = new Date(FIXED_NOW_MS).toISOString();

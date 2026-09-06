@@ -592,19 +592,22 @@ function parseWindow(value: JsonValue | undefined): CodexUsageWindow | undefined
 }
 
 function formatLimitUsage(limit: CodexUsageLimit, clock: Clock): string {
-    const parts = [
-        formatWindow("5h", limit.primary, clock),
-        formatWindow("weekly", limit.secondary, clock),
-    ].filter((item): item is string => Boolean(item));
+    const parts = [formatWindow(limit.primary, clock), formatWindow(limit.secondary, clock)].filter(
+        (item): item is string => Boolean(item),
+    );
     return parts.length > 0 ? parts.join("; ") : "no usage data";
 }
 
-function formatWindow(
-    label: string,
-    window: CodexUsageWindow | undefined,
-    clock: Clock,
-): string | undefined {
+function formatWindow(window: CodexUsageWindow | undefined, clock: Clock): string | undefined {
     if (!window) return undefined;
+    const minutes = window.windowMinutes;
+    let label = "usage";
+    if (minutes !== undefined && minutes > 0) {
+        if (minutes === 10_080) label = "weekly";
+        else if (minutes % 1440 === 0) label = `${minutes / 1440}d`;
+        else if (minutes % 60 === 0) label = `${minutes / 60}h`;
+        else label = `${minutes}m`;
+    }
     const remainingPercent =
         window.usedPercent === undefined
             ? undefined
