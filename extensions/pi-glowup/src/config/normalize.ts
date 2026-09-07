@@ -13,16 +13,19 @@ export type GlowupConfig = {
     readonly preserveTools: readonly string[];
     readonly mutations: MutationSettings;
     readonly appearance: RenderingAppearance;
+
     readonly debugLog: {
         readonly enabled: boolean;
         readonly path: string;
         readonly maxBytes: number | null;
         readonly memorySampleIntervalMs: number;
     };
+
     readonly renderCache: {
         readonly maxBytes: number;
         readonly maxEntries: number;
     };
+
     readonly scriptFormatters: ScriptFormatterCommands;
     readonly scriptHeaderLayout: ScriptPreviewHeaderLayout;
     readonly scriptMaxCodePreviewLines: number;
@@ -30,19 +33,24 @@ export type GlowupConfig = {
     readonly shellLayout: ShellLayout;
     readonly shellOperatorPosition: ShellOperatorPosition;
     readonly toolCallIndicator: ToolCallIndicator;
+
     readonly toolLabels: {
         readonly mode: ToolLabelMode;
     };
+
     readonly writePreview: {
         readonly movingViewport: boolean;
     };
+
     readonly syntax: {
         readonly preloadLanguages: readonly string[];
         readonly bracketPairColoring: boolean;
+
         readonly projectLanguageDetection: {
             readonly enabled: boolean;
         };
     };
+
     readonly patches: {
         readonly assistantSeparator: boolean;
         readonly workingWidgetSpacing: boolean;

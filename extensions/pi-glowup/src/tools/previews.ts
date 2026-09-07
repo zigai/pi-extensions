@@ -86,9 +86,11 @@ function boundedPreviewValue(
         if (seen.has(objectTarget)) {
             return "[Circular]";
         }
+
         if (depth >= MAX_PREVIEW_DEPTH) {
             return "[Object]";
         }
+
         seen.add(objectTarget);
     }
 
@@ -98,9 +100,11 @@ function boundedPreviewValue(
         for (let index = 0; index < limit; index += 1) {
             output.push(boundedPreviewValue(value[index], seen, depth + 1));
         }
+
         if (value.length > limit) {
             output.push(`… +${itemCount(value.length - limit)}`);
         }
+
         return output;
     }
 
@@ -117,9 +121,11 @@ function boundedPreviewValue(
             omitted += 1;
             continue;
         }
+
         output[keyName] = boundedPreviewValue(record[keyName], seen, depth + 1, keyName);
         copied += 1;
     }
+
     if (omitted > 0) {
         output["…"] = `+${omitted} properties`;
     }
@@ -130,18 +136,22 @@ function stringifyPreview(value: JsonValue | undefined): string | undefined {
     if (value === undefined) {
         return undefined;
     }
+
     const str = previewValueDecoder.parseString(value);
     if (str !== undefined) {
         return str;
     }
+
     const num = previewValueDecoder.parseNumber(value);
     if (num !== undefined) {
         return String(num);
     }
+
     const bool = previewValueDecoder.parseBoolean(value);
     if (bool !== undefined) {
         return String(bool);
     }
+
     if (value === null) {
         return String(value);
     }
@@ -158,6 +168,7 @@ export function compactWhitespaceText(text: string, maxCharacters: number): stri
     if (compact.length === 0) {
         return undefined;
     }
+
     return truncateGraphemeText(compact, maxCharacters);
 }
 
@@ -169,10 +180,12 @@ function previewValue(value: JsonValue | undefined): string | undefined {
             MAX_PREVIEW_CHARACTERS,
         );
     }
+
     const preview = stringifyPreview(value)?.trim();
     if (preview === undefined || preview.length === 0 || preview === "{}" || preview === "[]") {
         return undefined;
     }
+
     return truncateGraphemeText(preview, MAX_PREVIEW_CHARACTERS);
 }
 
@@ -180,19 +193,23 @@ function compactValue(value: JsonValue | undefined, key: string): string | undef
     if (SENSITIVE_KEY_PATTERN.test(key)) {
         return `${key}: [redacted]`;
     }
+
     const str = previewValueDecoder.parseString(value);
     if (str !== undefined) {
         const preview = compactWhitespaceText(takeGraphemePrefix(str, 192), 96);
         return preview === undefined ? key : `${key}: ${preview}`;
     }
+
     const num = previewValueDecoder.parseNumber(value);
     if (num !== undefined) {
         return `${key}: ${num}`;
     }
+
     const bool = previewValueDecoder.parseBoolean(value);
     if (bool !== undefined) {
         return `${key}: ${bool}`;
     }
+
     if (value === null) {
         return `${key}: null`;
     }
@@ -202,6 +219,7 @@ function compactValue(value: JsonValue | undefined, key: string): string | undef
     if (isRecord(value)) {
         return `${key}: object`;
     }
+
     return value === undefined ? undefined : key;
 }
 
@@ -213,14 +231,17 @@ function compactObjectPreview(value: JsonObject): string | undefined {
             omitted = true;
             break;
         }
+
         const part = compactValue(value[key], key);
         if (part !== undefined) {
             parts.push(part);
         }
     }
+
     if (parts.length === 0) {
         return undefined;
     }
+
     return truncateGraphemeText(
         `${parts.join(" • ")}${omitted ? " • more fields" : ""}`,
         MAX_PREVIEW_CHARACTERS,
@@ -231,6 +252,7 @@ function previewPartialArgs(args: JsonValue | undefined, fallback?: string): str
     if (fallback !== undefined) {
         return fallback;
     }
+
     const str = previewValueDecoder.parseString(args);
     if (str !== undefined) {
         return compactWhitespaceText(
@@ -238,20 +260,24 @@ function previewPartialArgs(args: JsonValue | undefined, fallback?: string): str
             MAX_PREVIEW_CHARACTERS,
         );
     }
+
     const num = previewValueDecoder.parseNumber(args);
     if (num !== undefined) {
         return String(num);
     }
+
     const bool = previewValueDecoder.parseBoolean(args);
     if (bool !== undefined) {
         return String(bool);
     }
+
     if (args === null) {
         return String(args);
     }
     if (Array.isArray(args)) {
         return args.length === 0 ? undefined : itemCount(args.length);
     }
+
     const record = jsonObjectParser.parse(args);
     return record === undefined ? undefined : compactObjectPreview(record);
 }
@@ -272,6 +298,7 @@ export function previewArgsForContext(
     if (context.isPartial || !context.argsComplete) {
         return previewPartialArgs(jsonVal, fallback);
     }
+
     return previewArgs(jsonVal, fallback);
 }
 
@@ -291,8 +318,10 @@ export function textOutput(result: ThirdPartyToolResult): string | undefined {
         if (typeStr !== "text" || textStr === undefined) {
             continue;
         }
+
         texts.push(textStr);
     }
+
     return texts.length === 0 ? undefined : texts.join("\n");
 }
 
@@ -300,13 +329,16 @@ function compactDetailsPreview(value: JsonObject): string | undefined {
     const parts: string[] = [];
     for (const key of Object.keys(value)) {
         if (INTERNAL_DETAIL_PATH_KEY_PATTERN.test(key)) continue;
+
         if (parts.length >= MAX_PARTIAL_PREVIEW_PROPERTIES) {
             parts.push("more fields");
             break;
         }
+
         const part = compactValue(value[key], key);
         if (part !== undefined) parts.push(part);
     }
+
     return parts.length === 0
         ? undefined
         : truncateGraphemeText(parts.join(" • "), MAX_PREVIEW_CHARACTERS);
@@ -318,9 +350,11 @@ export function detailsOutput(result: ThirdPartyToolResult): string | undefined 
     if (details === undefined || details === null) {
         return undefined;
     }
+
     const record = jsonObjectParser.parse(details);
     if (record === undefined) {
         return undefined;
     }
+
     return compactDetailsPreview(record);
 }

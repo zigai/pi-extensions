@@ -53,10 +53,10 @@ export function configureAutocompleteCleanupPatch(
 ): void {
     const metadata: EditorPatchMetadata = prototype;
     const state = metadata[AUTOCOMPLETE_CLEANUP_PATCH_STATE_KEY];
-
     if (!enabled) {
         if (state !== undefined) {
             state.enabled = false;
+
             if (Value.Check(cleanupPrototypeSchema, prototype)) {
                 const editorPrototype = Value.Parse(cleanupPrototypeSchema, prototype);
                 if (editorPrototype.clearAutocompleteUi === state.wrapperClearAutocompleteUi) {
@@ -65,6 +65,7 @@ export function configureAutocompleteCleanupPatch(
                 }
             }
         }
+
         return;
     }
 

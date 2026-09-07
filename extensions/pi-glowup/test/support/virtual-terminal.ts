@@ -35,6 +35,7 @@ export function rgbFromHex(color: string): number {
             `expected a six-digit #RRGGBB color, received ${JSON.stringify(color)}`,
         );
     }
+
     return Number.parseInt(color.slice(1), 16);
 }
 
@@ -48,6 +49,7 @@ function countExactOccurrences(text: string, search: string): number {
         count += 1;
         offset = match + search.length;
     }
+
     return count;
 }
 
@@ -163,6 +165,7 @@ export class VirtualTerminal implements Terminal {
                 rows.push({ index: viewportRow, text: "", isWrapped: false, cells: [] });
                 continue;
             }
+
             const cells: InterpretedCell[] = [];
             for (let column = 0; column < this.columns; column += 1) {
                 const cell = line.getCell(column);
@@ -181,6 +184,7 @@ export class VirtualTerminal implements Terminal {
                     isAttributeDefault: cell.isAttributeDefault(),
                 });
             }
+
             rows.push({
                 index: viewportRow,
                 text: line.translateToString(true),
@@ -188,12 +192,14 @@ export class VirtualTerminal implements Terminal {
                 cells,
             });
         }
+
         return rows;
     }
 
     screenText(): string {
         const rows = this.interpretedRows().map((row) => row.text);
         while (rows.at(-1) === "") rows.pop();
+
         return rows.join("\n");
     }
 
@@ -231,6 +237,7 @@ export class VirtualTerminal implements Terminal {
         if (end > this.rows) {
             throw new RangeError(`row range [${start}, ${end}) exceeds ${this.rows} terminal rows`);
         }
+
         return this.interpretedRows().slice(start, end);
     }
 
@@ -252,6 +259,7 @@ export class VirtualTerminal implements Terminal {
 
     assertFullRowBackground(row: InterpretedRow, expectedRgb: number): void {
         validateRgbValue(expectedRgb);
+
         if (row.cells.length !== this.columns) {
             throw this.invariantError(
                 row.index,
@@ -259,6 +267,7 @@ export class VirtualTerminal implements Terminal {
                 `cells=${row.cells.length}`,
             );
         }
+
         const failingColumn = row.cells.findIndex(
             (cell) => !cell.isBackgroundRgb || cell.background !== expectedRgb,
         );
@@ -280,6 +289,7 @@ export class VirtualTerminal implements Terminal {
         ) {
             throw new RangeError(`cell range [${start}, ${end}) is outside row ${row.index}`);
         }
+
         const offset = row.cells
             .slice(start, end)
             .findIndex(
@@ -328,6 +338,7 @@ export class VirtualTerminal implements Terminal {
         if (matches.length === 1 && match !== undefined) return match;
         const matchingRows =
             matches.length === 0 ? "none" : matches.map((row) => row.index).join(", ");
+
         throw new Error(
             `expected exactly one terminal row ${description}; found ${matches.length} (rows: ${matchingRows})\nScreen:\n${this.screenText()}`,
         );

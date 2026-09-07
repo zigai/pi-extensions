@@ -32,7 +32,6 @@ import { formatMutationStats } from "../tool-header.ts";
 import { collapseHome } from "../path.ts";
 
 const ANSI_SEQUENCE_PREFIX = ansiStyles.modifier.reset.open.slice(0, 2);
-
 const ROW_BACKGROUND_SAFE_RESET = `${ansiStyles.modifier.bold.close}${ansiStyles.modifier.italic.close}${ansiStyles.modifier.underline.close}${ansiStyles.modifier.strikethrough.close}${ansiStyles.color.close}`;
 
 function formatDiffLineNumber(lineNumber: string | number, width: number): string {
@@ -40,6 +39,7 @@ function formatDiffLineNumber(lineNumber: string | number, width: number): strin
     if (normalized.length === 0) {
         return " ".repeat(Math.max(0, width));
     }
+
     return normalized.padStart(Math.max(normalized.length, width), " ");
 }
 
@@ -53,14 +53,18 @@ function diffLineNumberWidth(
         if (parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission") {
             continue;
         }
+
         width = Math.max(width, normalizedDiffLineNumber(parsed.lineNumber).length);
+
         const rowCoordinates = coordinates?.[index];
+
         width = Math.max(
             width,
             rowCoordinates?.oldLine === undefined ? 0 : String(rowCoordinates.oldLine).length,
             rowCoordinates?.newLine === undefined ? 0 : String(rowCoordinates.newLine).length,
         );
     }
+
     return width;
 }
 
@@ -100,6 +104,7 @@ function changedRangesForDiffLines(
                 ranges[insertion.index] = changed.after;
             }
         }
+
         deletions = [];
         insertions = [];
     };
@@ -110,17 +115,22 @@ function changedRangesForDiffLines(
             flush();
             continue;
         }
+
         if (parsed.kind === "delete") {
             deletions.push({ index, content: parsed.content });
             continue;
         }
+
         if (parsed.kind === "insert") {
             insertions.push({ index, content: parsed.content });
             continue;
         }
+
         flush();
     }
+
     flush();
+
     return ranges;
 }
 
@@ -140,7 +150,6 @@ function wrapDiffText(text: string, width: number, maxWrappedRows: number | unde
     if (maxWrappedRows === undefined) {
         return wrapStyledText(text, width);
     }
-
     const boundedText = truncateToWidth(text, Math.max(1, width * maxWrappedRows), "…");
     return wrapStyledText(boundedText, width).slice(0, maxWrappedRows);
 }
@@ -165,7 +174,6 @@ function renderDiffRow(
     const rowWidth = Math.max(1, width);
     const prefixWidth = visibleWidth(leftPrefix);
     const contentWidth = Math.max(1, rowWidth - prefixWidth);
-
     if (!parsed) {
         return wrapDiffText(muted(theme, line), contentWidth, options?.maxWrappedRows).map((row) =>
             truncateToWidth(`${leftPrefix}${row}`, rowWidth, ""),
@@ -175,6 +183,7 @@ function renderDiffRow(
     if (parsed.kind === "ellipsis") {
         return [truncateToWidth(`${leftPrefix}${muted(theme, "⋮")}`, rowWidth, "")];
     }
+
     if (parsed.kind === "omission") {
         return wrapDiffText(
             muted(theme, parsed.content),
@@ -187,6 +196,7 @@ function renderDiffRow(
     if (parsed.kind === "insert") {
         sign = "+";
     }
+
     if (parsed.kind === "delete") {
         sign = "-";
     }
@@ -211,6 +221,7 @@ function renderDiffRow(
         background === undefined || options?.changedRanges === undefined
             ? baseContent
             : applyBackgroundToTextRanges(baseContent, options.changedRanges, background);
+
     if (parsed.content.length === 0) {
         const styledGutter = styleDiffGutter(parsed.kind, lineNumber, sign, theme);
         const row = truncateToWidth(`${leftPrefix}${styledGutter}`, rowWidth, "");
@@ -242,6 +253,7 @@ function diffSpanBackground(
     if (kind === "context" || style === "full-row") {
         return undefined;
     }
+
     const rowBackground = diffRowBackgroundAnsi(kind, theme);
     const configuredBackground =
         style === "two-tone" ? configuredDiffContentBackgroundAnsi(kind) : rowBackground;
@@ -254,6 +266,7 @@ function diffSpanBackground(
                     : ansiStyles.bgColor.close,
         };
     }
+
     if (style === "two-tone" && rowBackground !== undefined) {
         const semanticForeground = diffSemanticForegroundAnsi(kind, theme);
         const stronger =
@@ -264,6 +277,7 @@ function diffSpanBackground(
             return { open: stronger, close: rowBackground };
         }
     }
+
     return rowBackground === undefined
         ? undefined
         : { open: rowBackground, close: ansiStyles.bgColor.close };
@@ -279,11 +293,13 @@ function paintDiffRowBackground(
     if (kind === "context" || (style !== "full-row" && style !== "two-tone")) {
         return row;
     }
+
     const padding = " ".repeat(Math.max(0, rowWidth - visibleWidth(row)));
     const background = diffRowBackgroundAnsi(kind, theme);
     if (background === undefined) {
         return row;
     }
+
     return `${background}${row}${padding}${ansiStyles.bgColor.close}`;
 }
 
@@ -295,6 +311,7 @@ function diffRowBackgroundAnsi(
     if (configured !== undefined) {
         return configured;
     }
+
     const token = kind === "insert" ? "toolSuccessBg" : "toolErrorBg";
     return theme.getBgAnsi?.(token) ?? extractStyledAnsi(theme.bg, token);
 }
@@ -314,12 +331,14 @@ function extractStyledAnsi<TToken extends string>(
     if (style === undefined) {
         return undefined;
     }
+
     const sentinel = "__PI_GLOWUP_STYLE__";
     const wrapped = style(token, sentinel);
     const sentinelIndex = wrapped.indexOf(sentinel);
     if (sentinelIndex <= 0) {
         return undefined;
     }
+
     return wrapped.slice(0, sentinelIndex);
 }
 
@@ -331,12 +350,14 @@ function styleDiffContent(
     if (hasAnsi(content)) {
         return content;
     }
+
     if (kind === "insert") {
         return theme.fg("toolOutput", content);
     }
     if (kind === "delete") {
         return muted(theme, content);
     }
+
     return dim(theme, content);
 }
 
@@ -347,6 +368,7 @@ function highlightDiffContents(
     if (filePath === undefined) {
         return [];
     }
+
     const syntaxPath = filePath;
     const highlightedByLine = new Map<number, string>();
     let run: Array<{ readonly index: number; readonly content: string }> = [];
@@ -376,12 +398,15 @@ function highlightDiffContents(
         if (parsed === null) {
             continue;
         }
+
         if (parsed.kind === "ellipsis" || parsed.kind === "omission") {
             flushRun();
             continue;
         }
+
         run.push({ index, content: parsed.content });
     }
+
     flushRun();
 
     return lines.map((_line, index) => highlightedByLine.get(index));
@@ -469,6 +494,7 @@ export function renderGlowupDiff(
         const renderOmission = (): void => {
             const omitted = allDiffLineCount - collapsedIndices.length;
             const hint = toolExpandHint();
+
             rendered.push(
                 truncateToWidth(
                     `${dim(theme, "    ")} ${muted(theme, `… +${omitted} lines (`)}${hint}${muted(theme, ")")}`,
@@ -486,6 +512,7 @@ export function renderGlowupDiff(
                     visibleLines.push({ line, index: lineIndex });
                 }
             }
+
             sectionOffset += section.lines.length;
 
             if (visibleLines.length === 0) {
@@ -495,6 +522,7 @@ export function renderGlowupDiff(
             if (renderedSection) {
                 rendered.push("");
             }
+
             if (sections.length > 1) {
                 const stats = formatMutationStats(
                     theme,
@@ -509,6 +537,7 @@ export function renderGlowupDiff(
                 const header = `${dim(theme, "  └ ")}${pathText(theme, collapseHome(section.path ?? "file"))}${stats.length === 0 ? "" : ` ${stats}`}`;
                 rendered.push(...wrapPrefixedLine(header, width, "", "    "));
             }
+
             renderedSection = true;
 
             const sectionLineNumberWidth = diffLineNumberWidth(
@@ -525,6 +554,7 @@ export function renderGlowupDiff(
                     if (isUnchangedReplacementSide(line, changedRanges[index])) {
                         continue;
                     }
+
                     let rowOptions: DiffRowRenderOptions = {};
                     if (section.path !== undefined) {
                         rowOptions = { ...rowOptions, path: section.path };
@@ -534,23 +564,28 @@ export function renderGlowupDiff(
                     if (lineCoordinates !== undefined) {
                         rowOptions = { ...rowOptions, lineCoordinates };
                     }
+
                     const highlightedContent = highlightedContents[index];
                     if (highlightedContent !== undefined) {
                         rowOptions = { ...rowOptions, highlightedContent };
                     }
+
                     const lineChangedRanges = changedRanges[index];
                     if (lineChangedRanges !== undefined) {
                         rowOptions = { ...rowOptions, changedRanges: lineChangedRanges };
                     }
+
                     if (maxWrappedRows !== undefined) {
                         rowOptions = { ...rowOptions, maxWrappedRows };
                     }
+
                     rendered.push(...renderDiffRow(line, width, "    ", theme, rowOptions));
                 }
             };
 
             renderLines(visibleLines);
         }
+
         if (shouldCollapse) {
             renderOmission();
         }

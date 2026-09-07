@@ -46,6 +46,7 @@ function shellText(theme: GlowupRenderTheme, text: string): string {
     if (text.length === 0) {
         return "";
     }
+
     return theme.fg("toolTitle", text);
 }
 
@@ -211,6 +212,7 @@ function highlightShellLine(theme: GlowupRenderTheme, line: string): string {
             return result.styled;
         })
         .join("");
+
     return `${highlightedShell}${commentPart.length === 0 ? "" : dim(theme, commentPart)}`;
 }
 
@@ -231,8 +233,8 @@ function embeddedInlineHighlightRows(
     for (let index = 0; index < source.length; index += 1) {
         if (source[index] === "\n") lineStarts.push(index + 1);
     }
-    const rows = new Map<number, EmbeddedInlineHighlightRow[]>();
 
+    const rows = new Map<number, EmbeddedInlineHighlightRow[]>();
     for (const script of scripts) {
         const code = source.slice(script.start, script.end);
         const highlightedLines = highlightSyntaxCode(code, script.language);
@@ -245,6 +247,7 @@ function embeddedInlineHighlightRows(
             ) {
                 lineIndex += 1;
             }
+
             const lineStart = lineStarts[lineIndex];
             if (lineStart === undefined) break;
             const newline = source.indexOf("\n", absoluteStart);
@@ -276,7 +279,9 @@ function highlightShellLineWithEmbeddedCode(
         highlighted.push(row.highlighted);
         cursor = row.end;
     }
+
     highlighted.push(highlightShellLine(theme, line.slice(cursor)));
+
     return highlighted.join("");
 }
 
@@ -293,6 +298,7 @@ function highlightBashScriptPreviewLines(
         if (heredoc === undefined || heredocBody.length === 0) {
             return;
         }
+
         highlighted.push(...highlightSyntaxCode(heredocBody.join("\n"), heredoc.language));
         heredocBody = [];
     }
@@ -313,6 +319,7 @@ function highlightBashScriptPreviewLines(
             }
 
             heredocBody.push(line);
+
             continue;
         }
 
@@ -351,6 +358,7 @@ function scriptPreviewSyntaxLanguages(invocation: ScriptInvocation): readonly st
             languages.add(heredoc.language);
         }
     }
+
     for (const script of embeddedInlineScripts(invocation.code)) {
         languages.add(script.language);
     }
@@ -375,6 +383,7 @@ function collapsedScriptPreview(
     if (trimEdgeBlankLines(invocation.code.split("\n")).length <= maxCodePreviewLines) {
         return { code: invocation.code };
     }
+
     const omission = omitLeadingImportPrologue(
         invocation.code,
         invocation.language,
@@ -397,6 +406,7 @@ function scriptPreviewForRender(
     if (expanded) {
         return { code: invocation.code };
     }
+
     return collapsedScriptPreview(invocation, maxCodePreviewLines, showPrologueOmission);
 }
 
@@ -462,6 +472,7 @@ function resolveScriptHeaderLayout(
     if (layout !== "auto") {
         return layout;
     }
+
     if (scriptHasMultiplePhysicalLines(invocation.code)) {
         return "block";
     }
@@ -470,6 +481,7 @@ function resolveScriptHeaderLayout(
     if (firstCodeLine === undefined) {
         return "block";
     }
+
     return "inline";
 }
 
@@ -500,6 +512,7 @@ export function renderScriptCall(
     );
     const omittedHint = options.omittedHint ?? toolExpandHint();
     const headerLayoutOption = options.headerLayout ?? "auto";
+
     scheduleScriptPreviewSyntaxLoads(retained, options.invalidate);
 
     return makeComponent((width) => {
@@ -528,7 +541,6 @@ export function renderScriptCall(
         const highlighted = highlightScriptPreviewLines(visible, retained.language, theme);
         const rendered: string[] = [];
         const headerLayout = resolveScriptHeaderLayout(headerLayoutOption, retained, highlighted);
-
         if (headerLayout === "block") {
             rendered.push(...wrapPrefixedLine("", width, header, "  "));
         }
@@ -545,12 +557,14 @@ export function renderScriptCall(
                 rendered.push(...wrapped);
                 continue;
             }
+
             const remainingRows = Math.max(0, maxCodePreviewLines - contentRows);
             if (wrapped.length <= remainingRows) {
                 rendered.push(...wrapped);
                 contentRows += wrapped.length;
                 continue;
             }
+
             rendered.push(...wrapped.slice(0, remainingRows));
             softWrapTruncated = true;
             break;
@@ -575,6 +589,7 @@ function tokenizeShellLine(line: string): string[] {
     if (line.length === 0) {
         return [];
     }
+
     return (
         line.match(
             /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|&&|\|\||2>>|2>|>>|\[\[|\]\]|[|;&<>{}!]|\s+|[^\s|;&<>{}!]+/g,
@@ -585,27 +600,31 @@ function tokenizeShellLine(line: string): string[] {
 function shellCommentStart(line: string): number | undefined {
     let quote: '"' | "'" | undefined;
     let escaped = false;
-
     for (let index = 0; index < line.length; index += 1) {
         const char = line[index];
+
         if (escaped) {
             escaped = false;
             continue;
         }
+
         if (char === "\\" && quote !== "'") {
             escaped = true;
             continue;
         }
+
         if (quote !== undefined) {
             if (char === quote) {
                 quote = undefined;
             }
             continue;
         }
+
         if (char === '"' || char === "'") {
             quote = char;
             continue;
         }
+
         if (char === "#" && (index === 0 || /\s/.test(line[index - 1] ?? ""))) {
             return index;
         }
@@ -627,9 +646,11 @@ function shellCommandKind(token: string): ShellCommandKind {
     if (SUBCOMMAND_SHELL_COMMANDS.has(commandName)) {
         return "subcommands";
     }
+
     if (isScriptLikeShellWord(token)) {
         return "script";
     }
+
     return "generic";
 }
 
@@ -674,6 +695,7 @@ function styleShellFlagToken(theme: GlowupRenderTheme, token: string): string {
         const value = token.slice(equalsIndex + 1);
         return `${shellFlag(theme, token.slice(0, equalsIndex))}${shellOperator(theme, "=")}${shellValue(theme, value)}`;
     }
+
     return shellFlag(theme, token);
 }
 
@@ -685,14 +707,17 @@ function shellFlagConsumesValue(token: string): boolean {
     if (token.includes("=")) {
         return false;
     }
+
     const longFlag = /^--(?<name>[A-Za-z0-9][\w-]*)$/u.exec(token)?.groups?.name;
     if (longFlag !== undefined) {
         return !BOOLEAN_LONG_FLAGS.has(longFlag);
     }
+
     const singleDashLongFlag = /^-(?<name>[A-Za-z][\w-]{1,})$/u.exec(token)?.groups?.name;
     if (singleDashLongFlag !== undefined) {
         return VALUE_SINGLE_DASH_LONG_FLAGS.has(singleDashLongFlag);
     }
+
     const shortFlag = /^-(?<name>[A-Za-z])$/u.exec(token)?.groups?.name;
     return shortFlag !== undefined && VALUE_SHORT_FLAGS.has(shortFlag);
 }
@@ -713,6 +738,7 @@ function shouldStyleShellSubcommand(state: ShellHighlightState, token: string): 
     if (state.commandKind === "interpreter") {
         return state.sawScriptOperand;
     }
+
     return state.commandKind === "script" || state.commandKind === "subcommands";
 }
 
@@ -755,7 +781,6 @@ function styleShellToken(
                 : { ...initialShellHighlightState, expectsCommand: false },
         };
     }
-
     if (isShellFlagToken(token)) {
         return {
             styled: styleShellFlagToken(theme, token),
@@ -776,7 +801,6 @@ function styleShellToken(
     if (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token)) {
         return { styled: shellString(theme, token), state };
     }
-
     if (isQuotedShellString(token)) {
         return { styled: shellString(theme, token), state: shellStateAfterOperand(state) };
     }
@@ -785,6 +809,7 @@ function styleShellToken(
         if (isShellWrapperCommand(token)) {
             return { styled: shellCommand(theme, token), state: initialShellHighlightState };
         }
+
         return {
             styled: shellCommand(theme, token),
             state: {
@@ -803,7 +828,6 @@ function styleShellToken(
             state: { ...state, expectingFlagValue: false, subcommandSeen: true },
         };
     }
-
     if (isPathLikeShellWord(token)) {
         return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };
     }

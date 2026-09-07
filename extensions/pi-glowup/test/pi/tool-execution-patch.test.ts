@@ -194,6 +194,7 @@ describe("tool execution patches", () => {
         });
         const definition: PiRendererDefinition = { renderCall, renderResult, renderShell: "self" };
         const row: ToolExecutionInstance = { toolName: "schema_tool", toolDefinition: definition };
+
         // These are genuinely dynamic private getter results: no schema claims to
         // validate callback parameters/returns merely by finding a function.
         const gettersSchema = Type.Object({
@@ -230,6 +231,7 @@ describe("tool execution patches", () => {
         } finally {
             configureThirdPartyToolRendererPatch(false);
         }
+
         expect(Object.getOwnPropertyDescriptors(prototype)).toEqual(before);
     });
 
@@ -288,6 +290,7 @@ describe("tool execution patches", () => {
                         createRenderer: () => ({
                             renderCall(value, _theme, context) {
                                 received.push(value, context.args);
+
                                 return { render: () => ["rendered"], invalidate: noop };
                             },
                             renderResult: () => ({ render: () => [], invalidate: noop }),
@@ -362,6 +365,7 @@ describe("tool execution patches", () => {
                 renderCall: (_toolName, _args, _theme, context) => {
                     receivedResult = context.result;
                     receivedArgsComplete = context.argsComplete;
+
                     return { render: () => ["restored"], invalidate: noop };
                 },
                 renderResult: () => undefined,
@@ -393,6 +397,7 @@ describe("tool execution patches", () => {
             {
                 renderCall: (_toolName, _args, _theme, context) => {
                     receivedResult = context.result;
+
                     return { render: () => ["live"], invalidate: noop };
                 },
                 renderResult: () => undefined,
@@ -765,6 +770,7 @@ describe("tool execution patches", () => {
         if (patchedRendererDescriptor === undefined) {
             throw new Error("expected Glowup call renderer wrapper");
         }
+
         Object.defineProperty(patchedPrototype, "getCallRenderer", patchedRendererDescriptor);
         prototype.getCallRenderer = function getLaterCallRenderer(
             this: FakeToolExecutionComponent,
@@ -818,6 +824,7 @@ describe("tool execution patches", () => {
             matches: (toolName) => toolName === "recorded_tool",
             createRenderer: (toolName) => {
                 createdRenderers += 1;
+
                 return {
                     renderCall: () => ({
                         render: () => [`called ${toolName}`],
@@ -905,6 +912,7 @@ describe("tool execution patches", () => {
             matches: () => true,
             createRenderer: (toolName) => {
                 createdRenderers += 1;
+
                 return {
                     renderCall: () => ({
                         render: () => [`called ${toolName}`],
@@ -925,6 +933,7 @@ describe("tool execution patches", () => {
                 toolDefinition: {},
             })?.({}, plainTheme, renderContext);
         }
+
         prototype.getCallRenderer.call({ toolName: "tool_0", toolDefinition: {} })?.(
             {},
             plainTheme,
@@ -991,6 +1000,7 @@ describe("tool execution patches", () => {
             {
                 renderCall: () => {
                     callRenders += 1;
+
                     return {
                         render: (width) => {
                             callLineRenders += 1;
@@ -1001,6 +1011,7 @@ describe("tool execution patches", () => {
                 },
                 renderResult: () => {
                     resultRenders += 1;
+
                     return {
                         render: (width) => {
                             resultLineRenders += 1;
@@ -1036,6 +1047,7 @@ describe("tool execution patches", () => {
         if (firstCall === undefined || firstResult === undefined) {
             throw new Error("expected completed renderers");
         }
+
         expect(firstCall.render(80)).toEqual(["call:80"]);
         expect(firstResult.render(80)).toEqual(["result:80"]);
         firstCall.invalidate();
@@ -1076,6 +1088,7 @@ describe("tool execution patches", () => {
                 renderCall: (_toolName, _args, _theme, context) => {
                     callRenders += 1;
                     invalidateRenderedCall = context.invalidate;
+
                     return {
                         render: () => [`call:${context.expanded ? "expanded" : "collapsed"}`],
                         invalidate: noop,
@@ -1147,6 +1160,7 @@ describe("tool execution patches", () => {
             {
                 renderCall: () => {
                     callRenders += 1;
+
                     return { render: () => ["streaming"], invalidate: noop };
                 },
                 renderResult: () => undefined,
@@ -1184,6 +1198,7 @@ describe("tool execution patches", () => {
             createRenderer: () => ({
                 renderCall: () => {
                     callRenders += 1;
+
                     return {
                         render: (width) => [`completed:${width}`],
                         invalidate: noop,
@@ -1227,6 +1242,7 @@ describe("tool execution patches", () => {
                 const index = rendererIndex;
                 rendererIndex += 1;
                 lineRenderCounts[index] = 0;
+
                 return {
                     render: () => {
                         lineRenderCounts[index] = (lineRenderCounts[index] ?? 0) + 1;
@@ -1311,6 +1327,7 @@ describe("tool execution patches", () => {
                 if (name === undefined) {
                     throw new Error("expected named fixture arguments");
                 }
+
                 return {
                     render: () => {
                         if (name === "A") renderCountA += 1;

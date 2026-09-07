@@ -21,11 +21,13 @@ export function diffTextStats(diffText: string): DiffTextStats {
         }
 
         lineCount += 1;
+
         if (matchesDiffStatLine(diffText, lineStart, index, 43)) {
             added += 1;
         } else if (matchesDiffStatLine(diffText, lineStart, index, 45)) {
             removed += 1;
         }
+
         lineStart = index + 1;
     }
 
@@ -58,6 +60,7 @@ function matchesDiffStatLine(
     }
 
     const digitStart = index;
+
     while (index < end && isDigit(text.charCodeAt(index))) {
         index += 1;
     }

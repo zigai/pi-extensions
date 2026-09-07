@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 type OrdinaryEvent = Exclude<ExtensionEvent, ProjectTrustEvent>;
+
 export type Registration =
     | {
           [Name in OrdinaryEvent["type"]]: readonly [
@@ -21,6 +22,7 @@ export type Registration =
 
 export class ExtensionRegistrationFixture implements Pick<ExtensionAPI, "on"> {
     readonly registrations: Registration[] = [];
+
     on(...registration: Registration): void {
         this.registrations.push(registration);
     }
@@ -71,6 +73,7 @@ export function createExtensionContext(
         getToolsExpanded: () => false,
         setToolsExpanded: options.setToolsExpanded ?? (() => {}),
     };
+
     return {
         cwd,
         ui,

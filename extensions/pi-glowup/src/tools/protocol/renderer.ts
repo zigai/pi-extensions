@@ -73,11 +73,13 @@ function renderProtocolCallNode(
     slot.update(component);
     mutationCallSlots.delete(context.toolCallId);
     mutationCallSlots.set(context.toolCallId, slot);
+
     while (mutationCallSlots.size > MAX_MUTATION_CALL_SLOTS) {
         const oldest = mutationCallSlots.keys().next();
         if (oldest.done === true) break;
         mutationCallSlots.delete(oldest.value);
     }
+
     return slot;
 }
 
@@ -94,6 +96,7 @@ const renderingAdapterSchema = Type.Object(
     },
     { additionalProperties: true },
 );
+
 type UnknownGlowupRenderer = Static<typeof renderingAdapterSchema>;
 
 function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallContext {
@@ -104,6 +107,7 @@ function publicCallContext(context: ThirdPartyToolRenderContext): GlowupCallCont
                 ? "running"
                 : "pending"
             : "complete");
+
     return {
         toolName: context.toolName ?? "tool",
         toolCallId: context.toolCallId,
@@ -148,9 +152,11 @@ export function createProtocolRenderer(
                           mutationSettings,
                       );
             }
+
             if (adapter.renderCall === undefined) {
                 return fallback.renderCall(args, theme, context);
             }
+
             const node = safelyRender(() => {
                 if (args === undefined) return undefined;
                 const parsedArgs = adapter.parseArgs(args);
@@ -160,6 +166,7 @@ export function createProtocolRenderer(
                           adapter.renderCall?.(parsedArgs, publicCallContext(context)),
                       );
             });
+
             return node === undefined
                 ? fallback.renderCall(args, theme, context)
                 : renderProtocolCallNode(node, theme, context, labelMode, mutationSettings);
@@ -168,6 +175,7 @@ export function createProtocolRenderer(
             if (adapter.renderResult === undefined || adapter.parseResult === undefined) {
                 return fallback.renderResult(result, options, theme, context);
             }
+
             const resultContext = { ...context, result };
             const node = safelyRender(() => {
                 if (context.args === undefined) return undefined;
@@ -184,6 +192,7 @@ export function createProtocolRenderer(
             if (node === undefined) {
                 return fallback.renderResult(result, options, theme, context);
             }
+
             if (node.kind === "mutation") mutationCallSlots.get(context.toolCallId)?.hide();
             return renderProtocolNode(node, theme, resultContext, labelMode, mutationSettings);
         },
@@ -193,6 +202,7 @@ export function createProtocolRenderer(
 const renderingAdapterParser = {
     parse(toolDefinition: unknown, propertyName: string): UnknownGlowupRenderer | undefined {
         const definitionSchema = Type.Object({ [propertyName]: renderingAdapterSchema });
+
         try {
             if (!Value.Check(definitionSchema, toolDefinition)) return undefined;
             const adapter = Value.Parse(definitionSchema, toolDefinition)[propertyName];
@@ -201,6 +211,7 @@ const renderingAdapterParser = {
                 return undefined;
             if (adapter.renderResult !== undefined && adapter.parseResult === undefined)
                 return undefined;
+
             return adapter.renderCall === undefined && adapter.renderResult === undefined
                 ? undefined
                 : adapter;

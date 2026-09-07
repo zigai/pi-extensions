@@ -61,28 +61,33 @@ export class ExplorationGroupStore {
             if (existingGroup.ownerToolCallId === context.toolCallId) {
                 existingGroup.ownerInvalidate = context.invalidate;
             }
+
             const entryChanged = this.updateEntry(existingGroup, context, action);
             if (entryChanged && existingGroup.ownerToolCallId !== context.toolCallId) {
                 existingGroup.ownerInvalidate?.();
             }
+
             this.trimRetainedGroups();
+
             return this.decisionFor(context.toolCallId, existingGroup);
         }
 
         this.advanceSourcePosition(context.toolCallId);
+
         if (this.groupStartToolCallIds.has(context.toolCallId)) {
             this.closeActiveGroup();
         }
 
         const group = this.activeGroup ?? this.createGroup(context);
         this.groupsByToolCallId.set(context.toolCallId, group);
-        const entryChanged = this.updateEntry(group, context, action);
 
+        const entryChanged = this.updateEntry(group, context, action);
         if (entryChanged && group.ownerToolCallId !== context.toolCallId) {
             group.ownerInvalidate?.();
         }
 
         this.trimRetainedGroups();
+
         return this.decisionFor(context.toolCallId, group);
     }
 
@@ -90,6 +95,7 @@ export class ExplorationGroupStore {
         if (this.activeGroup !== undefined) {
             this.activeGroup.ownerInvalidate = undefined;
         }
+
         this.activeGroup = undefined;
     }
 
@@ -97,10 +103,12 @@ export class ExplorationGroupStore {
     observeRow(row: ToolExecutionInstance, toolCallId: string, exploration: boolean): void {
         if (this.observedRows.has(row)) return;
         this.observedRows.add(row);
+
         if (exploration) {
             this.advanceSourcePosition(toolCallId);
             return;
         }
+
         this.observeBoundary(toolCallId, "row");
     }
 
@@ -123,16 +131,19 @@ export class ExplorationGroupStore {
         // close a newer live group. Row identity alone cannot establish that fact.
         const advanced = this.advanceSourcePosition(toolCallId);
         if (advanced === false) return;
+
         if (advanced === undefined) {
             // Detached/synthetic rows may have no transcript source yet. This is only
             // a bounded handoff, not a permanent second index of the session's IDs.
             this.pendingBoundaries.set(toolCallId, source);
+
             while (this.pendingBoundaries.size > this.maxRetainedToolCalls) {
                 const oldest = this.pendingBoundaries.keys().next();
                 if (oldest.done === true) break;
                 this.pendingBoundaries.delete(oldest.value);
             }
         }
+
         this.closeActiveGroup();
     }
 
@@ -145,6 +156,7 @@ export class ExplorationGroupStore {
             (position[0] < latest[0] || (position[0] === latest[0] && position[1] <= latest[1]))
         )
             return false;
+
         this.latestSourcePosition = position;
         return true;
     }
@@ -152,6 +164,7 @@ export class ExplorationGroupStore {
     /** Marks the first exploration call in a historical assistant tool-call run. */
     registerGroupStart(toolCallId: string): void {
         this.groupStartToolCallIds.add(toolCallId);
+
         while (this.groupStartToolCallIds.size > this.maxRetainedToolCalls) {
             const oldest = this.groupStartToolCallIds.values().next();
             if (oldest.done === true) break;
@@ -187,6 +200,7 @@ export class ExplorationGroupStore {
         };
         this.activeGroup = group;
         this.groupsInInsertionOrder.push(group);
+
         return group;
     }
 
@@ -204,6 +218,7 @@ export class ExplorationGroupStore {
 
     private evictGroup(group: ExplorationGroup): void {
         group.ownerInvalidate = undefined;
+
         for (const toolCallId of group.actionsByToolCallId.keys()) {
             this.groupsByToolCallId.delete(toolCallId);
         }
@@ -229,8 +244,10 @@ export class ExplorationGroupStore {
         if (previousAction === undefined) {
             group.orderedToolCallIds.push(context.toolCallId);
         }
+
         group.actionsByToolCallId.set(context.toolCallId, action);
         group.activeByToolCallId.set(context.toolCallId, active);
+
         return true;
     }
 
@@ -243,6 +260,7 @@ export class ExplorationGroupStore {
             const action = group.actionsByToolCallId.get(orderedToolCallId);
             return action === undefined ? [] : [action];
         });
+
         return {
             kind: "owner",
             actions,

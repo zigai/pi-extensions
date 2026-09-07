@@ -104,6 +104,7 @@ function renderCallLines(testCase: RendererConformanceCase, width: number): stri
     const renderer = createThirdPartyToolRenderer(testCase.toolName, {
         labelMode: "lifecycle",
     });
+
     return renderer.renderCall(testCase.args, theme, context).render(width);
 }
 
@@ -112,6 +113,7 @@ function renderResultLines(testCase: RendererConformanceCase, width: number): st
     const renderer = createThirdPartyToolRenderer(testCase.toolName, {
         labelMode: "lifecycle",
     });
+
     return renderer
         .renderResult(testCase.result, { expanded: false, isPartial: false }, theme, context)
         .render(width);
@@ -140,6 +142,7 @@ describe("renderer family conformance", () => {
             expect(call.join("\n"), `${testCase.family} call at width ${width}`).toContain(
                 testCase.callText,
             );
+
             for (const line of [...call, ...res]) {
                 expect(
                     visibleWidth(line),

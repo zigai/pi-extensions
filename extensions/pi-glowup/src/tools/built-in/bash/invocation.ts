@@ -30,6 +30,7 @@ function stripShellQuotedValue(value: string): string {
     if (first === "'") {
         return inner.replace(/'\\''/g, "'");
     }
+
     return inner.replace(/\\(["\\$`])/g, "$1");
 }
 
@@ -41,6 +42,7 @@ function stripShellWrapper(command: string | undefined): string {
     if (!wrapperMatch) {
         return normalized;
     }
+
     return stripShellQuotedValue(wrapperMatch[1] ?? "");
 }
 
@@ -48,7 +50,6 @@ function decodeShellWord(word: string): string {
     let decoded = "";
     let quote: "'" | '"' | undefined;
     let escaped = false;
-
     for (const char of word) {
         if (quote === "'") {
             if (char === "'") {
@@ -65,10 +66,12 @@ function decodeShellWord(word: string): string {
                 escaped = false;
                 continue;
             }
+
             if (char === "\\") {
                 escaped = true;
                 continue;
             }
+
             if (char === '"') {
                 quote = undefined;
             } else {
@@ -82,10 +85,12 @@ function decodeShellWord(word: string): string {
             escaped = false;
             continue;
         }
+
         if (char === "\\") {
             escaped = true;
             continue;
         }
+
         if (char === "'" || char === '"') {
             quote = char;
         } else {
@@ -96,7 +101,6 @@ function decodeShellWord(word: string): string {
     if (escaped) {
         decoded += "\\";
     }
-
     return decoded;
 }
 
@@ -106,7 +110,6 @@ function unquoteCommandWord(word: string): string {
 
 function scriptInterpreterForWord(word: string): ScriptInterpreter | undefined {
     const basename = commandBasename(word);
-
     if (basename === "py" || /^python(?:\d+(?:\.\d+)?)?$/.test(basename)) {
         return { displayName: "Python", language: "python" };
     }
@@ -206,6 +209,7 @@ function firstLineEndIndex(text: string): number {
             return index;
         }
     }
+
     return text.length;
 }
 
@@ -216,23 +220,25 @@ function nextLineStartIndex(text: string, lineEnd: number): number {
     if (text.charCodeAt(lineEnd) === 13 && text.charCodeAt(lineEnd + 1) === 10) {
         return lineEnd + 2;
     }
+
     return lineEnd + 1;
 }
 
 function hasShellControlOperator(text: string): boolean {
     let quote: "'" | '"' | undefined;
     let escaped = false;
-
     for (const char of text) {
         if (quote !== undefined) {
             if (quote === '"' && escaped) {
                 escaped = false;
                 continue;
             }
+
             if (quote === '"' && char === "\\") {
                 escaped = true;
                 continue;
             }
+
             if (char === quote) {
                 quote = undefined;
             }
@@ -243,14 +249,17 @@ function hasShellControlOperator(text: string): boolean {
             escaped = false;
             continue;
         }
+
         if (char === "\\") {
             escaped = true;
             continue;
         }
+
         if (char === "'" || char === '"') {
             quote = char;
             continue;
         }
+
         if (["|", ";", "&", "<", ">"].includes(char)) {
             return true;
         }
@@ -282,11 +291,13 @@ function findHeredocClosing(
             if (hasNonWhitespaceText(body.slice(trailingStart))) {
                 return { hasTrailingShell: true };
             }
+
             return {
                 code: body.slice(0, heredocCodeEndIndex(body, lineStart)),
                 hasTrailingShell: false,
             };
         }
+
         if (
             index < body.length &&
             body.charCodeAt(index) === 13 &&
@@ -294,6 +305,7 @@ function findHeredocClosing(
         ) {
             index += 1;
         }
+
         lineStart = index + 1;
     }
 
@@ -307,6 +319,7 @@ function heredocCodeEndIndex(body: string, closingLineStart: number): number {
     if (body.charCodeAt(closingLineStart - 2) === 13) {
         return closingLineStart - 2;
     }
+
     return closingLineStart - 1;
 }
 
@@ -318,6 +331,7 @@ function heredocDelimiterMatches(
     stripLeadingTabs: boolean,
 ): boolean {
     let markerStart = start;
+
     if (stripLeadingTabs) {
         while (markerStart < end && text.charCodeAt(markerStart) === 9) {
             markerStart += 1;
@@ -327,11 +341,13 @@ function heredocDelimiterMatches(
     if (end - markerStart !== expected.length) {
         return false;
     }
+
     for (let index = 0; index < expected.length; index += 1) {
         if (text.charCodeAt(markerStart + index) !== expected.charCodeAt(index)) {
             return false;
         }
     }
+
     return true;
 }
 
@@ -387,10 +403,12 @@ function tokenizeShellLexemes(command: string): ShellLexeme[] {
                 escaped = false;
                 continue;
             }
+
             if (quote === '"' && char === "\\") {
                 escaped = true;
                 continue;
             }
+
             if (char === quote) {
                 quote = undefined;
             }
@@ -401,23 +419,28 @@ function tokenizeShellLexemes(command: string): ShellLexeme[] {
             escaped = false;
             continue;
         }
+
         if (char === "\\") {
             wordStart ??= index;
             escaped = true;
             continue;
         }
+
         if (char === "'" || char === '"') {
             wordStart ??= index;
             quote = char;
             continue;
         }
+
         if (/\s/u.test(char)) {
             pushWord(index);
+
             if (char === "\n" || char === "\r") {
                 lexemes.push({ kind: "separator", source: char, start: index, end: index + 1 });
             }
             continue;
         }
+
         if (["|", ";", "&", "<", ">", "(", ")"].includes(char)) {
             pushWord(index);
             lexemes.push({
@@ -428,10 +451,12 @@ function tokenizeShellLexemes(command: string): ShellLexeme[] {
             });
             continue;
         }
+
         wordStart ??= index;
     }
 
     pushWord(command.length);
+
     return lexemes;
 }
 
@@ -444,21 +469,23 @@ function tokenizeShellWords(command: string): string[] {
 function hasDynamicShellExpansion(command: string): boolean {
     let quote: "'" | '"' | undefined;
     let escaped = false;
-
     for (const char of command) {
         if (escaped) {
             escaped = false;
             continue;
         }
+
         if (char === "\\" && quote !== "'") {
             escaped = true;
             continue;
         }
+
         if (char === "'" || char === '"') {
             if (quote === undefined) quote = char;
             else if (quote === char) quote = undefined;
             continue;
         }
+
         if (quote !== "'" && (char === "$" || char === "`")) return true;
     }
 
@@ -514,15 +541,19 @@ function commandIndexAfterOptions(words: readonly string[], start: number): numb
     let index = start;
     while (index < words.length) {
         const value = decodeShellWord(words[index] ?? "");
+
         if (isEnvironmentAssignment(words[index] ?? "")) {
             index += 1;
             continue;
         }
+
         if (value === "--") return words[index + 1] === undefined ? undefined : index + 1;
         if (!value.startsWith("-") || value === "-") return index;
+
         if (!value.includes("=") && wrapperOptionsWithValues.has(value)) index += 2;
         else index += 1;
     }
+
     return undefined;
 }
 
@@ -554,6 +585,7 @@ function directScriptInterpreterFrom(
         );
         if (execIndex >= 0) commandIndex = commandIndexAfterOptions(words, execIndex + 1);
     }
+
     if (commandIndex === undefined) return undefined;
     return directScriptInterpreterFrom(words, commandIndex, depth + 1);
 }
@@ -575,6 +607,7 @@ function inlineScriptFlagsForInterpreter(interpreter: ScriptInterpreter): Readon
     if (interpreter.displayName === "Bun" || interpreter.displayName === "TypeScript") {
         return new Set(["-e", "--eval"]);
     }
+
     return new Set();
 }
 
@@ -614,14 +647,18 @@ function inlineScriptCodeForInterpreter(
                 index += 2;
                 continue;
             }
+
             if (value.startsWith("-") && !isQuotedShellWord(words[index] ?? "")) {
                 index += 1;
                 continue;
             }
+
             return { code: value, wordIndex: index };
         }
+
         return undefined;
     }
+
     const flags = inlineScriptFlagsForInterpreter(interpreter);
     if (flags.size === 0) {
         return undefined;
@@ -635,11 +672,13 @@ function inlineScriptCodeForInterpreter(
                 if (codeWord === undefined) {
                     return undefined;
                 }
+
                 const code = decodeShellWord(codeWord);
                 return isUnquotedFlagLikeScriptCode(codeWord, code)
                     ? undefined
                     : { code, wordIndex: index + 1 };
             }
+
             const assignmentPrefix = `${flag}=`;
             if (value.startsWith(assignmentPrefix)) {
                 const code = value.slice(assignmentPrefix.length);
@@ -685,6 +724,7 @@ export function embeddedInlineScripts(command: string): EmbeddedInlineScript[] {
             segment = [];
             return;
         }
+
         const inlineScript = inlineScriptCodeForInterpreter(
             direct.interpreter,
             words.map((word) => word.source),
@@ -702,6 +742,7 @@ export function embeddedInlineScripts(command: string): EmbeddedInlineScript[] {
                 language: direct.interpreter.language,
             });
         }
+
         segment = [];
     };
 
@@ -709,7 +750,9 @@ export function embeddedInlineScripts(command: string): EmbeddedInlineScript[] {
         if (lexeme.kind === "separator") collectSegment();
         else segment.push(lexeme);
     }
+
     collectSegment();
+
     return scripts;
 }
 

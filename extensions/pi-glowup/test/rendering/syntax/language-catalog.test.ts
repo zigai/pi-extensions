@@ -15,6 +15,7 @@ describe("startup-safe Shiki language catalog", () => {
             ...Object.keys(bundledLanguagesAlias),
         ]);
         expect(sorted(BUNDLED_SYNTAX_LANGUAGE_NAMES)).toEqual(sorted(expected));
+
         for (const name of expected) expect(isBundledSyntaxLanguage(name)).toBe(true);
         expect(isBundledSyntaxLanguage("not-a-shiki-language")).toBe(false);
     });

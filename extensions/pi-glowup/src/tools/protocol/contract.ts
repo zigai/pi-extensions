@@ -1,5 +1,6 @@
 import type { JsonValue } from "../../json-value.js";
 import type { GlowupNode } from "./nodes.js";
+
 export {
     type GlowupTone,
     type GlowupInline,
@@ -51,6 +52,7 @@ export type GlowupCallContext = {
     readonly expanded: boolean;
     readonly showImages: boolean;
     readonly isError: boolean;
+
     /** True when the settled or restored call has an associated tool result. */
     readonly hasResult?: boolean;
 };
@@ -84,6 +86,7 @@ type GlowupCallRendering<Args> = {
         value: JsonValue,
         context: GlowupCallContext,
     ) => GlowupNode | undefined;
+
     readonly renderCall: (args: Args, context: GlowupCallContext) => GlowupNode | undefined;
 };
 
@@ -96,6 +99,7 @@ type GlowupCallRenderer<Args> = GlowupRendererBase<Args> &
 type GlowupResultRenderer<Args, Result> = GlowupRendererBase<Args> & {
     readonly renderCall?: never;
     readonly parseResult: GlowupParser<Result>;
+
     readonly renderResult: (
         result: Result,
         context: GlowupResultContext<Args>,
@@ -105,6 +109,7 @@ type GlowupResultRenderer<Args, Result> = GlowupRendererBase<Args> & {
 type GlowupCallAndResultRenderer<Args, Result> = GlowupRendererBase<Args> &
     GlowupCallRendering<Args> & {
         readonly parseResult: GlowupParser<Result>;
+
         readonly renderResult: (
             result: Result,
             context: GlowupResultContext<Args>,

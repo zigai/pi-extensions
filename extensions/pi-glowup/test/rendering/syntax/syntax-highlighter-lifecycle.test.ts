@@ -62,8 +62,10 @@ async function fakeHighlighter(
         for (const language of stringLanguageNames(languages)) {
             await options.loadLanguage?.(language);
         }
+
         await loadLanguage(...languages);
     };
+
     return highlighter;
 }
 
@@ -83,6 +85,7 @@ async function waitForCondition(condition: () => boolean): Promise<void> {
         if (Date.now() > deadline) {
             throw new Error("timed out waiting for condition");
         }
+
         await new Promise((resolve) => {
             setTimeout(resolve, 10);
         });
@@ -97,9 +100,11 @@ describe("syntax highlighter lifecycle", () => {
     it("owns custom registered names and rejects unsupported names through Shiki", async () => {
         const state = await initializeSyntaxHighlighting({}, { preloadLanguages: [] });
         expect(state.status).toBe("ready");
+
         if (state.status !== "ready") {
             throw new Error("expected the real shared highlighter");
         }
+
         const { highlighter } = state;
         await highlighter.loadLanguage({
             name: "glowup-custom-language",
@@ -136,6 +141,7 @@ describe("syntax highlighter lifecycle", () => {
                 theme: "glowup-missing-theme",
             }),
         ).toThrow(/not found|not loaded/);
+
         // Bundle resolution throws synchronously; own any unexpected returned promise too.
         const pendingLoads: Promise<void>[] = [];
         try {
@@ -148,6 +154,7 @@ describe("syntax highlighter lifecycle", () => {
         } finally {
             await Promise.allSettled(pendingLoads);
         }
+
         await expect(
             createSyntaxHighlighter({
                 langs: ["glowup-missing-language"],
@@ -174,6 +181,7 @@ describe("syntax highlighter lifecycle", () => {
             await new Promise<void>((resolveFactory) => {
                 releaseFactory = resolveFactory;
             });
+
             return fakeHighlighter({
                 loadedLanguages: ["typescript"],
                 dispose() {
@@ -220,6 +228,7 @@ describe("syntax highlighter lifecycle", () => {
                     await new Promise<void>((resolve) => {
                         releaseReplacement = resolve;
                     });
+
                     return newHighlighter;
                 },
                 preloadLanguages: ["typescript", "python"],
@@ -293,6 +302,7 @@ describe("syntax highlighter lifecycle", () => {
                 const state = await initialize(env, options);
 
                 expect(state.status).toBe("ready");
+
                 if (state.status !== "ready") throw new Error("theme snapshot was not installed");
                 expect(state.theme.path).toBe(path);
                 expect(state.theme.registration.colors?.["editor.foreground"]).toBe("#123456");
@@ -325,11 +335,13 @@ describe("syntax highlighter lifecycle", () => {
             writeFileSync(path, theme("#123456"));
             const first = await initializeSyntaxHighlighting(env, options);
             expect(first.status).toBe("ready");
+
             if (first.status !== "ready") throw new Error("initial theme was not installed");
             expect(first.theme.registration.colors?.["editor.foreground"]).toBe("#123456");
 
             const second = await refreshSyntaxHighlighting(env, options);
             expect(second.status).toBe("ready");
+
             if (second.status !== "ready") throw new Error("replacement theme was not installed");
             expect(second.theme.registration.colors?.["editor.foreground"]).toBe("#abcdef");
             expect(second).not.toBe(first);

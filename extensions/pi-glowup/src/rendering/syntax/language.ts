@@ -135,6 +135,7 @@ export function normalizeSyntaxLanguage(
     if (normalized === "text") {
         return "text";
     }
+
     return isBundledSyntaxLanguage(normalized) ? normalized : undefined;
 }
 
@@ -187,6 +188,7 @@ export function syntaxLanguageFromShebang(
     if (interpreterName === "uv" && command[1] === "run" && command.includes("--script")) {
         return "python";
     }
+
     const language = normalizeSyntaxLanguage(SHEBANG_INTERPRETER_LANGUAGES.get(interpreterName));
     return language === "text" ? undefined : language;
 }
@@ -198,10 +200,12 @@ function environmentShebangCommand(arguments_: ReadonlyArray<string>): ReadonlyA
         if (argument === undefined) {
             return [];
         }
+
         if (argument === "-u" || argument === "--unset") {
             commandIndex += 2;
             continue;
         }
+
         if (
             argument === "-S" ||
             argument === "-i" ||
@@ -214,6 +218,7 @@ function environmentShebangCommand(arguments_: ReadonlyArray<string>): ReadonlyA
         }
         break;
     }
+
     return arguments_.slice(commandIndex);
 }
 

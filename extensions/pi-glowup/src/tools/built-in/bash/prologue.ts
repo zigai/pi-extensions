@@ -24,7 +24,9 @@ function lexicalBalance(lines: readonly string[], start: number): LexicalBalance
         for (let index = 0; index < line.length; index += 1) {
             const character = line[index];
             const next = line[index + 1];
+
             if (character === undefined) continue;
+
             if (blockComment) {
                 if (character === "*" && next === "/") {
                     blockComment = false;
@@ -32,29 +34,36 @@ function lexicalBalance(lines: readonly string[], start: number): LexicalBalance
                 }
                 continue;
             }
+
             if (quote !== undefined) {
                 if (escaped) escaped = false;
                 else if (character === "\\") escaped = true;
                 else if (character === quote) quote = undefined;
                 continue;
             }
+
             if (character === "#") break;
             if (character === "/" && next === "/") break;
+
             if (character === "/" && next === "*") {
                 blockComment = true;
                 index += 1;
                 continue;
             }
+
             // Comments and whitespace after a terminal semicolon are still setup-only.
             if (sawTopLevelSemicolon && /\S/u.test(character)) hasTrailingStatement = true;
             if (character === ";" && stack.length === 0) sawTopLevelSemicolon = true;
+
             if (character === "'" || character === '"' || character === "`") {
                 quote = character;
                 continue;
             }
+
             if (["(", "[", "{"].includes(character)) stack.push(character);
             else if ([")", "]", "}"].includes(character) && stack.length > 0) stack.pop();
         }
+
         continued = /\\\s*$/u.test(line) || stack.length > 0 || quote !== undefined || blockComment;
         if (!continued) break;
     }
@@ -87,6 +96,7 @@ function javascriptImportEnd(lines: readonly string[], start: number): number | 
     const balance = lexicalBalance(lines, start);
     if (balance.delimiters !== 0 || balance.continued || balance.hasTrailingStatement)
         return undefined;
+
     const statement = lines.slice(start, balance.end).join("\n");
     if (/^\s*import(?!\s*\()/u.test(statement)) return balance.end;
     if (/^\s*export\s+(?:type\s+)?(?:\{|\*)[\s\S]*?\sfrom\s/u.test(statement)) {
@@ -95,6 +105,7 @@ function javascriptImportEnd(lines: readonly string[], start: number): number | 
     if (/^\s*(?:const|let|var)\s+[\s\S]*?=\s*require\s*\(/u.test(statement)) {
         return balance.end;
     }
+
     return undefined;
 }
 
@@ -107,6 +118,7 @@ function importStatementEnd(
     if (language === "javascript" || language === "typescript") {
         return javascriptImportEnd(lines, start);
     }
+
     return undefined;
 }
 
@@ -123,6 +135,7 @@ export function omitLeadingImportPrologue(
     while (cursor < lines.length && (lines[cursor] ?? "").trim().length === 0) cursor += 1;
     let sawImport = false;
     let prologueEnd = cursor;
+
     while (cursor < lines.length) {
         const statementEnd = importStatementEnd(lines, cursor, language);
         if (statementEnd === undefined) break;
@@ -131,9 +144,11 @@ export function omitLeadingImportPrologue(
         while (cursor < lines.length && (lines[cursor] ?? "").trim().length === 0) cursor += 1;
         prologueEnd = cursor;
     }
+
     if (!sawImport || !lines.slice(prologueEnd).some((line) => line.trim().length > 0)) {
         return undefined;
     }
+
     return {
         code: lines.slice(prologueEnd).join("\n"),
         omittedLines: prologueEnd,

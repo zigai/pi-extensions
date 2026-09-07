@@ -21,7 +21,6 @@ export type ScriptBlockFormatter = (
 ) => Promise<string | undefined>;
 
 export type ScriptFormatterCommands = ReadonlyMap<string, readonly string[]>;
-
 export type ScriptFormatterWarningReporter = (message: string) => void;
 
 export type ScriptFormatterParseOptions = {
@@ -65,6 +64,7 @@ function formatterCommand(value: JsonValue): readonly string[] | undefined {
     if (parts === undefined || parts.length === 0 || !parts.every(isSafeFormatterCommandPart)) {
         return undefined;
     }
+
     return parts;
 }
 
@@ -92,11 +92,13 @@ export function parseScriptFormatterCommandsValue(
             invalidEntries.push("<blank>");
             continue;
         }
+
         const command = formatterCommand(value);
         if (command === undefined) {
             invalidEntries.push(language);
             continue;
         }
+
         commands.set(language, command);
     }
 
@@ -165,6 +167,7 @@ async function runFormatterCommand(
             resolve(undefined);
             return;
         }
+
         const finish = (value: string | undefined): void => {
             if (settled) return;
             settled = true;
@@ -174,9 +177,11 @@ async function runFormatterCommand(
         };
         const fail = (): void => {
             finish(undefined);
+
             if (terminating) return;
             terminating = true;
             child.kill();
+
             // SIGTERM can be ignored. Cleanup stays owned even after preview fallback.
             escalation = setTimeout(() => {
                 child.kill("SIGKILL");
@@ -194,6 +199,7 @@ async function runFormatterCommand(
                 fail();
                 return;
             }
+
             stdout += chunk;
         });
         child.stdin.on("error", fail);
@@ -225,10 +231,12 @@ async function acquireFormatterSlot(
     if (options.signal?.aborted === true) {
         return Promise.resolve(undefined);
     }
+
     if (activeFormatterCount < MAX_CONCURRENT_FORMATTERS) {
         activeFormatterCount += 1;
         return Promise.resolve(releaseFormatterSlot);
     }
+
     if (queuedFormatters.length >= MAX_QUEUED_FORMATTERS) {
         return Promise.resolve(undefined);
     }
@@ -244,8 +252,10 @@ async function acquireFormatterSlot(
             if (index >= 0) {
                 queuedFormatters.splice(index, 1);
             }
+
             resolve(undefined);
         };
+
         entry.abort = abort;
         options.signal?.addEventListener("abort", abort, { once: true });
         queuedFormatters.push(entry);
@@ -263,13 +273,16 @@ function startQueuedFormatters(): void {
         if (entry === undefined) {
             return;
         }
+
         if (entry.abort !== undefined) {
             entry.signal?.removeEventListener("abort", entry.abort);
         }
+
         if (entry.signal?.aborted === true) {
             entry.resolve(undefined);
             continue;
         }
+
         activeFormatterCount += 1;
         entry.resolve(releaseFormatterSlot);
     }
@@ -295,6 +308,7 @@ export function createCommandScriptFormatter(
             const oldest = cache.keys().next().value;
             if (oldest === undefined) break;
             const removed = cache.get(oldest);
+
             cache.delete(oldest);
             cacheBytes = Math.max(0, cacheBytes - (removed?.bytes ?? 0));
         }
@@ -306,11 +320,13 @@ export function createCommandScriptFormatter(
         if (command === undefined) {
             return undefined;
         }
+
         if (Buffer.byteLength(input.code, "utf8") > FORMATTER_MAX_INPUT_BYTES) {
             return undefined;
         }
 
         const [executable, ...args] = command;
+
         if (executable === undefined) {
             return undefined;
         }
@@ -336,6 +352,7 @@ export function createCommandScriptFormatter(
         const formatted = normalizeCode(output);
         if (formatted.trim().length === 0) return undefined;
         remember(cacheKey, formatted);
+
         return formatted;
     };
 }

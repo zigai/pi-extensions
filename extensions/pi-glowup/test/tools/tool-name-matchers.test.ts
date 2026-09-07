@@ -41,6 +41,7 @@ describe("tool preservation policies", () => {
                     kind: "predicate",
                     matches: (name) => {
                         received.push(name);
+
                         return name === "owner__rich_tool";
                     },
                 },

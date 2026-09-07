@@ -45,7 +45,6 @@ export function createExplorationFeature() {
     type ExplorationMessage = Extract<ExplorationSessionEntry, { type: "message" }>["message"];
 
     let explorationSourceEntries: (() => readonly ExplorationSessionEntry[]) | undefined;
-
     let streamingExplorationMessage: ExplorationMessage | undefined;
 
     function explorationSourcePosition(toolCallId: string): ExplorationSourcePosition | undefined {
@@ -56,6 +55,7 @@ export function createExplorationFeature() {
                 (content) => content.type === "toolCall" && content.id === toolCallId,
             );
         };
+
         // Borrow the host-owned branch rather than building an unbounded ID index.
         // Persisted source takes precedence over the latest streaming snapshot.
         for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -64,6 +64,7 @@ export function createExplorationFeature() {
             const found = contentIndex(entry.message);
             if (found !== -1) return [index, found];
         }
+
         const streamingIndex = contentIndex(streamingExplorationMessage);
         return streamingIndex === -1 ? undefined : [entries.length, streamingIndex];
     }
@@ -80,6 +81,7 @@ export function createExplorationFeature() {
         if (output === undefined) {
             return emptyComponent();
         }
+
         let renderOptions: GlowupOutputRenderOptions = {
             expanded,
             mode: "hidden",
@@ -90,6 +92,7 @@ export function createExplorationFeature() {
         if (options?.syntaxPath !== undefined) {
             renderOptions = { ...renderOptions, syntax: { path: options.syntaxPath } };
         }
+
         return renderGlowupOutput(theme, output, renderOptions);
     }
 
@@ -103,6 +106,7 @@ export function createExplorationFeature() {
         if (decision.kind === "child") {
             return emptyComponent();
         }
+
         return renderGlowupExplore(theme, decision.actions, {
             statusText: toolStatusLabel(
                 labelMode,
@@ -125,6 +129,7 @@ export function createExplorationFeature() {
                 if (exploration && !previousWasExploration && toolCallId !== undefined) {
                     explorationGroups.registerGroupStart(toolCallId);
                 }
+
                 previousWasExploration = exploration;
             }
         }
@@ -133,14 +138,17 @@ export function createExplorationFeature() {
     function setSource(source: () => readonly ExplorationSessionEntry[]): void {
         explorationSourceEntries = source;
     }
+
     function setMessage(message: ExplorationMessage): void {
         streamingExplorationMessage = message;
     }
+
     function clear(): void {
         explorationGroups.clear();
         explorationSourceEntries = undefined;
         streamingExplorationMessage = undefined;
     }
+
     return {
         explorationGroups,
         renderExplorationResult,
@@ -151,9 +159,11 @@ export function createExplorationFeature() {
         clear,
     };
 }
+
 export function syntaxPathFromToolArg(path: string | undefined): string | undefined {
     return path === undefined || path.length === 0 ? undefined : path;
 }
+
 export function isExplorationToolName(toolName: string): boolean {
     const builtInToolName = canonicalBuiltInToolName(toolName);
     return (
@@ -163,6 +173,7 @@ export function isExplorationToolName(toolName: string): boolean {
         builtInToolName === "ls"
     );
 }
+
 export function hasVisibleAssistantText(message: unknown): boolean {
     const parsed = jsonValueParser.parse(message);
     if (!isRecord(parsed) || parsed.role !== "assistant" || !isJsonArray(parsed.content)) {
@@ -176,6 +187,7 @@ export function hasVisibleAssistantText(message: unknown): boolean {
             stringParser.parse(content.text)?.trim().length !== 0,
     );
 }
+
 export function renderWebSearchCall(
     args: JsonValue | undefined,
     theme: BuiltInRenderTheme,
@@ -198,5 +210,6 @@ export function renderWebSearchCall(
             body: labelMode === "lifecycle" && !active ? `for ${query}` : query,
         };
     }
+
     return renderGlowupCall(theme, callOptions);
 }

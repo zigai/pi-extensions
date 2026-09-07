@@ -41,9 +41,7 @@ import { type MutationSettings } from "../../rendering/preview-settings.ts";
 
 export function createNativeEditFeature() {
     const editPreviews = new EditPreviewStore(300);
-
     const nativeEditSnapshots = new Map<string, EditSnapshotState>();
-
     const nativeEditPierrePayloads = new Map<string, PierreDiffPayload>();
 
     async function captureNativeEditSnapshot(
@@ -59,6 +57,7 @@ export function createNativeEditFeature() {
         ) {
             return;
         }
+
         const snapshot = await createEditSnapshot(
             cwd,
             filePath,
@@ -75,9 +74,11 @@ export function createNativeEditFeature() {
     ): Promise<PierreDiffPayload | undefined> {
         const snapshot = nativeEditSnapshots.get(toolCallId);
         nativeEditSnapshots.delete(toolCallId);
+
         if (snapshot === undefined || isError) {
             return undefined;
         }
+
         const payload = buildPierreDiffPayload(
             await snapshot.finish(),
             diffRenderLimits(mutationSettings),
@@ -86,6 +87,7 @@ export function createNativeEditFeature() {
             nativeEditPierrePayloads.set(toolCallId, payload);
             trimOldestMapEntries(nativeEditPierrePayloads, 300);
         }
+
         return payload;
     }
 
@@ -190,6 +192,7 @@ export function createNativeEditFeature() {
                     context,
                 );
             }
+
             const sections = parseDiffSections(details.diff, path);
             const showAllRows = options.expanded || mutationSettings.defaultView === "full";
             let diffOptions: GlowupDiffRenderOptions = {
@@ -198,8 +201,10 @@ export function createNativeEditFeature() {
             if (!showAllRows) {
                 diffOptions = { ...diffOptions, maxWrappedRows: 1 };
             }
+
             return renderGlowupDiff(theme, sections, showAllRows, diffOptions);
         }
+
         return renderGlowupOutput(theme, textOutput(result), {
             expanded:
                 options.expanded || (!context.isError && mutationSettings.defaultView === "full"),
@@ -207,11 +212,13 @@ export function createNativeEditFeature() {
             maxPreviewLines: 5,
         });
     }
+
     function clear(): void {
         editPreviews.clear();
         nativeEditSnapshots.clear();
         nativeEditPierrePayloads.clear();
     }
+
     function stats() {
         return {
             ...editPreviews.stats(),
@@ -219,12 +226,14 @@ export function createNativeEditFeature() {
             nativeEditPierrePayloads: nativeEditPierrePayloads.size,
         };
     }
+
     function rememberCompletedPreview(
         toolCallId: string,
         preview: { readonly path: string; readonly diff: string },
     ): void {
         editPreviews.set(toolCallId, buildEditPreview(preview));
     }
+
     return {
         stats,
         rememberCompletedPreview,

@@ -76,6 +76,7 @@ const mutationLineSchema = Type.Object({
     oldLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
     newLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
 });
+
 // Child fields stay unknown here: only the bounded traversal may inspect them.
 const nodeSchemas = {
     empty: Type.Object({ kind: Type.Literal("empty") }),
@@ -142,7 +143,9 @@ function countText(state: DecodeState, value: string): void {
     if (state.textCharacters > state.limits.maxTextCharacters) reject();
 }
 
-// oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unknown-returns -- readField is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+// Decoding reads each producer field once, checks traversal budgets, and rejects cycles.
+// Helpers validate captured fields before returning a detached semantic snapshot.
+// oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unknown-returns -- Cached producer fields remain unvalidated until consumed by a decoder.
 function readField(value: unknown, key: string, state: DecodeState): unknown {
     if (!Guard.IsObject(value)) return reject();
     let fields = state.fields.get(value);
@@ -150,13 +153,14 @@ function readField(value: unknown, key: string, state: DecodeState): unknown {
         fields = new Map();
         state.fields.set(value, fields);
     }
+
     if (!fields.has(key)) fields.set(key, value[key]);
     return fields.get(key);
 }
 
 function capture<Properties extends TProperties>(
     schema: TObject<Properties>,
-    // oxlint-disable-next-line antislop/no-unknown-parameters -- capture is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+    // oxlint-disable-next-line antislop/no-unknown-parameters -- Producer fields must be captured before schema validation.
     value: unknown,
     state: DecodeState,
     textFields: readonly string[] = [],
@@ -166,49 +170,55 @@ function capture<Properties extends TProperties>(
     for (const key of Object.keys(schema.properties)) {
         const field = readField(value, key, state);
         if (textFields.includes(key) && Value.Check(stringSchema, field)) countText(state, field);
+
         // Omit undefined optional fields, preserving exact optional public types.
         if (field !== undefined) entries.push([key, field]);
     }
+
     const captured: unknown = Object.fromEntries(entries);
     if (!Value.Check(schema, captured)) return reject();
     return captured;
 }
 
-// oxlint-disable-next-line antislop/no-unknown-parameters -- collection is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+// oxlint-disable-next-line antislop/no-unknown-parameters -- Array length must be checked before traversing producer input.
 function collection(value: unknown, maximum: number, state: DecodeState) {
     if (!Guard.IsArray(value)) return reject();
     const length = readField(value, "length", state);
     if (!Value.Check(collectionLengthSchema, length) || length > maximum) return reject();
+
     // Never invoke a producer iterator or copy an array before checking its length.
     return { values: value, length };
 }
 
-// oxlint-disable-next-line antislop/no-unknown-parameters -- decodeInline is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+// oxlint-disable-next-line antislop/no-unknown-parameters -- Raw inline values require validation and text-budget checks.
 function decodeInline(value: unknown, state: DecodeState): GlowupInline {
     if (Value.Check(stringSchema, value)) {
         countText(state, value);
         return value;
     }
+
     return capture(inlineObjectSchema, value, state, ["text"]);
 }
 
-// oxlint-disable-next-line antislop/no-unknown-parameters -- decodePreview is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+// oxlint-disable-next-line antislop/no-unknown-parameters -- Raw preview fields require capture and schema validation.
 function decodePreview(value: unknown, state: DecodeState): GlowupPreview {
     const preview = capture(previewSchema, value, state);
     if (preview.collapsedLines !== undefined)
         preview.collapsedLines = Math.trunc(preview.collapsedLines);
     if (preview.expandedLines !== undefined)
         preview.expandedLines = Math.trunc(preview.expandedLines);
+
     return preview;
 }
 
 function decodeListItem(
-    // oxlint-disable-next-line antislop/no-unknown-parameters -- decodeListItem is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+    // oxlint-disable-next-line antislop/no-unknown-parameters -- Raw list items need dispatch to inline or node validation.
     value: unknown,
     state: DecodeState,
     depth: number,
 ): GlowupInline | GlowupNode {
     if (Value.Check(stringSchema, value)) return decodeInline(value, state);
+
     // A text node contains an inline; a styled inline contains a string. Capture the
     // discriminator and text once even when this falls through to node decoding.
     if (
@@ -217,10 +227,11 @@ function decodeListItem(
     ) {
         return decodeInline(value, state);
     }
+
     return decodeNode(value, state, depth);
 }
 
-// oxlint-disable-next-line antislop/no-unknown-parameters -- decodeNode is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+// oxlint-disable-next-line antislop/no-unknown-parameters -- Raw nodes require cycle and budget checks before variant validation.
 function decodeNode(value: unknown, state: DecodeState, depth: number): GlowupNode {
     if (depth > state.limits.maxDepth || ++state.nodes > state.limits.maxNodes) return reject();
     if (!Guard.IsObjectNotArray(value) || state.active.has(value)) return reject();
@@ -232,7 +243,7 @@ function decodeNode(value: unknown, state: DecodeState, depth: number): GlowupNo
     }
 }
 
-// oxlint-disable-next-line antislop/no-unknown-parameters -- decodeVariant is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+// oxlint-disable-next-line antislop/no-unknown-parameters -- The raw discriminator selects the schema for field validation.
 function decodeVariant(value: unknown, state: DecodeState, depth: number): GlowupNode {
     switch (readField(value, "kind", state)) {
         case "empty":
@@ -260,6 +271,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                     value: decodeInline(row.value, state),
                 });
             }
+
             return { kind: "summary", rows };
         }
         case "code": {
@@ -274,6 +286,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 };
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
+
             return node;
         }
         case "list": {
@@ -288,6 +301,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 items.push(
                     decodeListItem(readField(values, String(index), state), state, depth + 1),
                 );
+
             let node: GlowupListNode = { kind: "list", items };
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
@@ -308,6 +322,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 node = { ...node, body: decodeNode(source.body, state, depth + 1) };
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
+
             return node;
         }
         case "output": {
@@ -323,6 +338,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 };
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
+
             return node;
         }
         case "mutation": {
@@ -338,6 +354,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 state.limits.maxCollectionItems,
                 state,
             );
+
             if (length === 0) return reject();
             let remaining = state.limits.maxCollectionItems - length;
             const files: GlowupMutationFile[] = [];
@@ -357,8 +374,10 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                             "text",
                         ]),
                     );
+
                 files.push({ ...file, lines });
             }
+
             let node: GlowupMutationNode = { kind: "mutation", labels, files };
             if (source.patch !== undefined) node = { ...node, patch: source.patch };
             return node;
@@ -375,6 +394,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 children.push(
                     decodeNode(readField(values, String(index), state), state, depth + 1),
                 );
+
             return { kind: "stack", children };
         }
         default:
@@ -384,7 +404,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
 /** Decodes a bounded, detached semantic snapshot; malformed or over-budget input returns undefined. */
 export function decodeGlowupNode(
-    // oxlint-disable-next-line antislop/no-unknown-parameters -- decodeGlowupNode is part of the bounded semantic decoder; capture-once, oversized-input, cycle and snapshot-isolation tests cover this untrusted traversal seam.
+    // oxlint-disable-next-line antislop/no-unknown-parameters -- Public decoder accepts untrusted input for bounded snapshot validation.
     value: unknown,
     limits: GlowupNodeDecodeLimits = DEFAULT_GLOWUP_NODE_DECODE_LIMITS,
 ): GlowupNode | undefined {
@@ -407,6 +427,7 @@ export function decodeGlowupNode(
             budget.maxTextCharacters < 1
         )
             return undefined;
+
         return decodeNode(
             value,
             {

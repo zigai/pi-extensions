@@ -51,6 +51,7 @@ export type GlowupTextNode = {
 /** Structured label/value row. */
 export type GlowupSummaryNode = {
     readonly kind: "summary";
+
     readonly rows: ReadonlyArray<{
         readonly label: GlowupInline;
         readonly value: GlowupInline;
@@ -103,9 +104,11 @@ export type GlowupMutationFile = {
     readonly path: string;
     readonly previousPath?: string;
     readonly lines: ReadonlyArray<GlowupMutationLine>;
+
     /** Complete mutation statistics, which may exceed the bounded preview rows. */
     readonly added: number;
     readonly removed: number;
+
     /** False when a producer cannot determine a deletion's removed-line count. */
     readonly countsKnown?: boolean;
 };
@@ -115,6 +118,7 @@ export type GlowupMutationNode = {
     readonly kind: "mutation";
     readonly labels: GlowupCallLabels;
     readonly files: ReadonlyArray<GlowupMutationFile>;
+
     /** Optional complete unified diff used for high-fidelity replay after execution. */
     readonly patch?: string;
 };
@@ -167,12 +171,15 @@ export function code(
     if (options.title !== undefined) {
         node = { ...node, title: options.title };
     }
+
     if (options.syntax !== undefined) {
         node = { ...node, syntax: options.syntax };
     }
+
     if (options.preview !== undefined) {
         node = { ...node, preview: options.preview };
     }
+
     return node;
 }
 
@@ -197,9 +204,11 @@ export function call(
     if (options.body !== undefined) {
         node = { ...node, body: options.body };
     }
+
     if (options.preview !== undefined) {
         node = { ...node, preview: options.preview };
     }
+
     return node;
 }
 
@@ -216,15 +225,19 @@ export function output(
     if (value !== undefined) {
         node = { ...node, text: value };
     }
+
     if (options.syntax !== undefined) {
         node = { ...node, syntax: options.syntax };
     }
+
     if (options.preview !== undefined) {
         node = { ...node, preview: options.preview };
     }
+
     if (options.noOutputLabel !== undefined) {
         node = { ...node, noOutputLabel: options.noOutputLabel };
     }
+
     return node;
 }
 

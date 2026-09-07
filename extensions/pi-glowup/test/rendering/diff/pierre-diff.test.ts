@@ -46,6 +46,7 @@ async function interpretedDiffRows(
     try {
         terminal.write(lines.join("\r\n"));
         await terminal.settle(0);
+
         return terminal.interpretedRows();
     } finally {
         terminal.dispose();
@@ -67,11 +68,13 @@ function createReadCountingArray(lines: string[]) {
             if (stringParser.parse(prop) !== undefined && !Number.isNaN(Number(prop))) {
                 count += 1;
             }
-            // oxlint-disable-next-line antislop/no-reflect-get -- Transparent array probe forwards arbitrary keys, symbols and accessor receivers; the probe transparency test covers each behavior.
+
+            // oxlint-disable-next-line antislop/no-reflect-get -- Transparent proxy must preserve symbol keys and accessor receivers.
             const value: unknown = Reflect.get(target, prop, receiver);
             return value;
         },
     });
+
     return { array: proxy, accessCount: () => count };
 }
 
@@ -121,6 +124,7 @@ describe("Pierre diff rendering", () => {
         Object.defineProperty(source, "0", {
             get(this: string[]) {
                 receivers.push(this);
+
                 return "value";
             },
         });
@@ -279,9 +283,11 @@ describe("Pierre diff rendering", () => {
         const payload = buildPierreDiffPayload(await snapshot.finish());
 
         expect(payload?.kind).toBe("renderable");
+
         if (payload?.kind !== "renderable") {
             throw new Error("expected renderable edit snapshot");
         }
+
         expect(payload.stats).toMatchObject({ added: 1, removed: 1 });
         expect(payload.metadata.deletionLines).toContain("const limit = 2000;\n");
         expect(payload.metadata.additionLines).toContain("const limit = 4000;\n");
@@ -460,6 +466,7 @@ describe("Pierre diff rendering", () => {
             diffText: "+1 value\n".repeat(5_001),
         });
         if (summary === undefined) throw new Error("expected summary payload");
+
         for (const width of [1, 8, 23]) {
             expectLinesWithinWidth(
                 renderPierreDiff(
@@ -686,6 +693,7 @@ describe("Pierre diff rendering", () => {
         if (firstPayload?.kind !== "renderable" || secondPayload?.kind !== "renderable") {
             throw new Error("expected renderable Pierre payloads");
         }
+
         await loadHighlightedDiff(firstPayload.metadata);
         const component = renderPierreDiff(
             firstPayload,

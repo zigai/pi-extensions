@@ -17,7 +17,6 @@ export interface DebugLogFields {
 }
 
 type DebugLogFieldsSupplier = () => DebugLogFields;
-
 type DebugLogConfig = GlowupConfig["debugLog"];
 
 type ResolvedDebugLogConfig = {
@@ -97,6 +96,7 @@ export class DebugFileLogger {
     private restartMemorySampleTimer(): void {
         this.clearMemorySampleTimer();
         const config = this.config;
+
         if (
             config === undefined ||
             this.memorySnapshotFields === undefined ||
@@ -116,6 +116,7 @@ export class DebugFileLogger {
         if (fields === undefined) {
             return {};
         }
+
         try {
             return fields();
         } catch {
@@ -127,6 +128,7 @@ export class DebugFileLogger {
         if (this.memorySampleTimer === undefined) {
             return;
         }
+
         clearInterval(this.memorySampleTimer);
         this.memorySampleTimer = undefined;
     }
@@ -135,6 +137,7 @@ export class DebugFileLogger {
         if (this.writeFailureReported) {
             return;
         }
+
         this.writeFailureReported = true;
         this.reportWarning(
             `[pi-glowup] Failed to write debug log ${filePath}: ${errorMessage(cause)}`,
@@ -160,6 +163,7 @@ function rotateDebugLogIfNeeded(
         if (!existsSync(filePath) || statSync(filePath).size + nextLineBytes <= maxBytes) {
             return;
         }
+
         const rotatedPath = `${filePath}.1`;
         rmSync(rotatedPath, { force: true });
         renameSync(filePath, rotatedPath);
@@ -177,6 +181,7 @@ function compactFields(fields: DebugLogFields): DebugLogFields {
             compacted[key] = value;
         }
     }
+
     return compacted;
 }
 
@@ -186,6 +191,7 @@ function errorMessage(cause: unknown): string {
 
 function hasNodeErrorCode(cause: unknown, code: string): boolean {
     if (!(cause instanceof Error)) return false;
+
     // SAFETY: cause is proven to be an Error instance above; inspect optional Node.js code property.
     const errorWithCode = cause as Error & { code?: unknown };
     return errorWithCode.code === code;

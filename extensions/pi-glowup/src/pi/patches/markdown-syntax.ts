@@ -1,10 +1,9 @@
-import { normalizedCodeLines } from "../../text-boundaries.ts";
 import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { highlightSyntaxCode } from "../../rendering/syntax/highlighter.ts";
+import { normalizedCodeLines } from "../../text-boundaries.ts";
 
 const MARKDOWN_PATCH_KEY = Symbol.for("zigai.pi-glowup.syntax-markdown");
 const MARKDOWN_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.syntax-markdown.state");
-
 let markdownSyntaxEnabled = false;
 let markdownRenderInjections = 0;
 let markdownThemePatchAttempts = 0;
@@ -72,17 +71,19 @@ export function configureMarkdownSyntaxPatch(
     prototype: MarkdownPrototype = Markdown.prototype,
 ): void {
     const state = prototype[MARKDOWN_PATCH_STATE_KEY];
-
     if (!enabled) {
         markdownSyntaxEnabled = false;
+
         if (state !== undefined) {
             state.enabled = false;
+
             if (prototype.render === state.wrapperRender) {
                 restoreMarkdownRender(prototype, state.originalRender);
                 delete prototype[MARKDOWN_PATCH_STATE_KEY];
                 delete prototype[MARKDOWN_PATCH_KEY];
             }
         }
+
         return;
     }
 
@@ -99,12 +100,14 @@ export function configureMarkdownSyntaxPatch(
             prototype[MARKDOWN_PATCH_STATE_KEY]?.enabled !== false
                 ? prepareSyntaxTheme(this)
                 : undefined;
+
         try {
             return originalRender?.call(this, width) ?? [];
         } finally {
             restoreSyntaxTheme?.();
         }
     };
+
     prototype.render = wrapperRender;
     prototype[MARKDOWN_PATCH_STATE_KEY] = { enabled: true, originalRender, wrapperRender };
     prototype[MARKDOWN_PATCH_KEY] = true;
@@ -134,6 +137,7 @@ function prepareSyntaxTheme(instance: MarkdownInstance): (() => void) | undefine
     markdownRenderInjections += 1;
     const originalHighlightDescriptor = Object.getOwnPropertyDescriptor(theme, "highlightCode");
     patchSyntaxMarkdownTheme(theme);
+
     return () => restoreSyntaxMarkdownTheme(theme, originalHighlightDescriptor);
 }
 
@@ -146,6 +150,7 @@ function restoreSyntaxMarkdownTheme(
             Reflect.deleteProperty(theme, "highlightCode");
             return;
         }
+
         Reflect.defineProperty(theme, "highlightCode", originalHighlightDescriptor);
     } catch {
         markdownThemePatchFailures += 1;
@@ -159,6 +164,7 @@ function suppressSyntaxMarkdownTheme(theme: MarkdownTheme): (() => void) | undef
     }
 
     markdownThinkingThemeSuppressions += 1;
+
     if (!Reflect.deleteProperty(theme, "highlightCode")) {
         markdownThinkingThemeSuppressionFailures += 1;
         return undefined;
@@ -180,6 +186,7 @@ function patchSyntaxMarkdownTheme(theme: MarkdownTheme): void {
     }
 
     markdownThemePatchAttempts += 1;
+
     try {
         theme.highlightCode = highlightMarkdownCode;
     } catch {

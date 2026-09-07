@@ -59,6 +59,7 @@ export function getPierrePalette(theme: GlowupRenderTheme): PierreTerminalPalett
               ) ??
               deletionBackground)
             : deletionBackground;
+
     return {
         appearance: getPierreAppearance(theme),
         contextFg: themeFgAnsi(theme, "toolDiffContext"),

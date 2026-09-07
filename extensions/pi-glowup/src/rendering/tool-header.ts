@@ -175,6 +175,7 @@ export function formatMutationStats(
     if (summary.added <= 0) {
         return summary.removed <= 0 ? "" : `(${removed})`;
     }
+
     return summary.removed <= 0 ? `(${added})` : `(${added} ${removed})`;
 }
 
@@ -188,6 +189,7 @@ export function formatReadAction(
     if (range !== undefined) {
         return `${actionText(theme, "Read")} ${target}${muted(theme, range)}`;
     }
+
     return `${actionText(theme, "Read")} ${target}`;
 }
 
@@ -196,9 +198,11 @@ export function formatFindAction(theme: GlowupRenderTheme, args: FindActionArgs)
     if (args.path !== undefined && args.path.length > 0) {
         parts.push(`in ${pathText(theme, collapseHome(args.path))}`);
     }
+
     if (args.limit !== undefined) {
         parts.push(muted(theme, `limit ${args.limit}`));
     }
+
     return parts.join(" ");
 }
 
@@ -207,12 +211,15 @@ export function formatGrepAction(theme: GlowupRenderTheme, args: GrepActionArgs)
     if (args.path !== undefined && args.path.length > 0) {
         parts.push(`in ${pathText(theme, collapseHome(args.path))}`);
     }
+
     if (args.glob !== undefined && args.glob.length > 0) {
         parts.push(muted(theme, `(${args.glob})`));
     }
+
     if (args.limit !== undefined) {
         parts.push(muted(theme, `limit ${args.limit}`));
     }
+
     return parts.join(" ");
 }
 
@@ -223,6 +230,7 @@ export function formatLsAction(theme: GlowupRenderTheme, args: LsActionArgs): st
     if (args.limit !== undefined) {
         parts.push(muted(theme, `limit ${args.limit}`));
     }
+
     return parts.join(" ");
 }
 
@@ -230,9 +238,11 @@ function formatLineRange(offset?: number, limit?: number): string | undefined {
     if (offset === undefined && limit === undefined) {
         return undefined;
     }
+
     const start = offset ?? 1;
     if (limit === undefined) {
         return `:${start}`;
     }
+
     return `:${start}-${start + limit - 1}`;
 }

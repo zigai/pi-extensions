@@ -55,6 +55,7 @@ export function createNativeDeleteFeature() {
         ) {
             return;
         }
+
         const preview = await captureDeletedTextPreview(
             cwd,
             filePath,
@@ -89,6 +90,7 @@ export function createNativeDeleteFeature() {
         if (preview === undefined || preview.section.lines.length === 0) {
             return header;
         }
+
         const showAllRows = context.expanded || mutationSettings.defaultView === "full";
         let diffOptions: GlowupDiffRenderOptions = {
             collapsedLineBudget: mutationSettings.previewLines,
@@ -96,11 +98,15 @@ export function createNativeDeleteFeature() {
         if (!showAllRows) {
             diffOptions = { ...diffOptions, maxWrappedRows: 1 };
         }
+
         const body = renderGlowupDiff(theme, [preview.section], showAllRows, diffOptions);
+
         return makeComponent((width) => [...header.render(width), ...body.render(width)]);
     }
+
     function clear(): void {
         nativeDeletePreviews.clear();
     }
+
     return { captureNativeDeletePreview, renderDeleteCall, clear };
 }

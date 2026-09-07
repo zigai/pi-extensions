@@ -12,6 +12,7 @@ export type PierreRenderableDiffPayload = {
     readonly version: 1;
     readonly kind: "renderable";
     readonly path: string;
+
     /** Stable content-derived identity used by renderer and scheduler caches. */
     readonly modelKey: string;
     readonly metadata: FileDiffMetadata;
@@ -68,6 +69,7 @@ export type DiffSpan = {
     readonly bg?: string;
     readonly bold?: boolean;
     readonly dim?: boolean;
+
     /** True when Pierre identified this text as the changed part of a replacement. */
     readonly emphasized?: boolean;
 };
@@ -89,6 +91,7 @@ export type UnifiedDiffRow =
           readonly rowFg: string;
           readonly rowBg: string;
           readonly lineNumberFg: string;
+
           /** Display column to keep visible before asynchronous HAST is ready. */
           readonly focusColumn?: number;
       };

@@ -37,6 +37,7 @@ function mutationPath(file: GlowupMutationFile): string {
     ) {
         return file.path;
     }
+
     return `${file.previousPath} → ${file.path}`;
 }
 
@@ -63,9 +64,11 @@ function lineCoordinates(line: GlowupMutationLine): DiffLineCoordinates | undefi
     if (line.oldLine !== undefined) {
         coordinates = { ...coordinates, oldLine: line.oldLine };
     }
+
     if (line.newLine !== undefined) {
         coordinates = { ...coordinates, newLine: line.newLine };
     }
+
     return coordinates;
 }
 
@@ -86,6 +89,7 @@ function payloadPaths(payload: PierreDiffPayload): readonly string[] {
                   (path): path is string => path !== undefined,
               )
             : payload.path.split(" → ");
+
     return paths.flatMap((path) => path.split(" → ").map(normalizedPatchPath));
 }
 
@@ -119,6 +123,7 @@ function consumePayload(
             }
         }
     }
+
     return undefined;
 }
 
@@ -133,6 +138,7 @@ function mutationPayloads(
     });
     const byPath = payloadsByPath(payloads);
     const consumed = new Set<PierreDiffPayload>();
+
     return node.files.map((file) => consumePayload(byPath, consumed, file));
 }
 
@@ -180,6 +186,7 @@ class ProtocolMutationComponent implements Component {
             const path = mutationPath(file);
             const occurrence = pathOccurrences.get(path) ?? 0;
             pathOccurrences.set(path, occurrence + 1);
+
             const componentKey = `${path}\u0000${occurrence}`;
             const previousDiff = this.diffComponents.get(componentKey);
             const payload = payloads[index];
@@ -190,6 +197,7 @@ class ProtocolMutationComponent implements Component {
             if (!update.context.expanded) {
                 diffOptions = { ...diffOptions, maxWrappedRows: 4 };
             }
+
             let pierreContext: PierreDiffRenderContext = {
                 lastComponent: previousDiff,
                 toolCallId: `${this.toolCallId}:${componentKey}`,
@@ -197,6 +205,7 @@ class ProtocolMutationComponent implements Component {
             if (update.context.invalidate !== undefined) {
                 pierreContext = { ...pierreContext, invalidate: update.context.invalidate };
             }
+
             const diff =
                 payload === undefined
                     ? renderGlowupDiff(update.theme, [diffSection(file)], expanded, diffOptions)
@@ -210,7 +219,9 @@ class ProtocolMutationComponent implements Component {
                           },
                           pierreContext,
                       );
+
             nextDiffComponents.set(componentKey, diff);
+
             const showStats = update.state !== "running" && file.countsKnown !== false;
             const header = renderMutationCall(
                 update.theme,
@@ -222,12 +233,15 @@ class ProtocolMutationComponent implements Component {
                 },
                 { state: update.state },
             );
+
             return makeComponent((width) => [
                 ...header.render(width),
                 ...(file.lines.length === 0 && payload === undefined ? [] : diff.render(width)),
             ]);
         });
+
         this.diffComponents = nextDiffComponents;
+
         return makeComponent((width) =>
             sections.flatMap((section, index) => [
                 ...(index === 0 ? [] : [""]),
@@ -265,5 +279,6 @@ export function renderProtocolMutation(
         context.lastComponent.update(update);
         return context.lastComponent;
     }
+
     return new ProtocolMutationComponent(context.toolCallId, update);
 }

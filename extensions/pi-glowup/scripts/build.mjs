@@ -8,6 +8,7 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const outputRoot = path.join(packageRoot, "dist");
 const outfile = path.join(outputRoot, "src", "index.ts");
 const pierreDiffsRuntime = path.join(packageRoot, "scripts", "pierre-diffs-runtime.mjs");
+
 const external = [
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-agent-core/*",
@@ -30,6 +31,7 @@ const external = [
 
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(path.dirname(outfile), { recursive: true });
+
 const result = await esbuild.build({
   absWorkingDir: packageRoot,
   entryPoints: ["src/index.ts"],
@@ -56,6 +58,7 @@ const result = await esbuild.build({
   ],
   metafile: true,
 });
+
 await copyFile(
   path.join(packageRoot, "config.schema.json"),
   path.join(outputRoot, "config.schema.json"),
@@ -69,5 +72,6 @@ if (bundledHostInputs.length > 0) {
     `Host or lazy syntax modules entered the bundle: ${bundledHostInputs.join(", ")}`,
   );
 }
+
 const output = await readFile(outfile, "utf8");
 if (output.includes(packageRoot)) throw new Error("Bundle contains an absolute workspace path");

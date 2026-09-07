@@ -27,6 +27,7 @@ const toolDefinitionViewSchema = Type.Object(
     },
     { additionalProperties: true },
 );
+
 type ToolDefinitionView = {
     readonly label: Static<typeof toolDefinitionViewSchema>["label"];
     readonly preserve: boolean;
@@ -36,6 +37,7 @@ type ToolDefinitionView = {
 const toolDefinitionViewParser = {
     parse(value: unknown): ToolDefinitionView {
         const adapter = glowupRenderingAdapter(value);
+
         try {
             const definition = Value.Parse(toolDefinitionViewSchema, value);
             return {
@@ -93,9 +95,13 @@ function matcherMatches(toolName: string, matcher: ToolNameMatcher): boolean {
     if (matcher.kind === "predicate") return matcher.matches(toolName);
     const { pattern } = matcher;
     pattern.lastIndex = 0;
+
     const matchesToolName = pattern.test(toolName);
+
     pattern.lastIndex = 0;
+
     const matchesBaseName = pattern.test(baseToolName(toolName));
+
     pattern.lastIndex = 0;
     return matchesToolName || matchesBaseName;
 }
@@ -119,6 +125,7 @@ export function parsePreservedThirdPartyToolNames(value: string | undefined): st
     if (value === undefined || value.length === 0) {
         return [];
     }
+
     return value
         .split(",")
         .map((name) => name.trim())
@@ -146,6 +153,7 @@ export function shouldPreserveThirdPartyToolRenderer(options: {
     ) {
         return true;
     }
+
     return (options.renderingOptions?.preserveMatchers ?? []).some((matcher) =>
         matcherMatches(options.toolName, matcher),
     );

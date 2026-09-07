@@ -221,18 +221,23 @@ describe("exploration groups", () => {
             for (const [index, row] of rows.entries()) {
                 if (order === "event-first") store.registerBoundary(String(index));
                 else store.observeRow(row, String(index), false);
+
                 expect(store.stats().pendingBoundaries).toBeLessThanOrEqual(300);
             }
+
             expect(store.stats().pendingBoundaries).toBe(300);
 
             sourceAvailable = true;
             store.register({ toolCallId: "351", invalidate: noop }, "Read current.ts");
+
             for (const [index, row] of rows.entries()) {
                 if (order === "event-first") store.observeRow(row, String(index), false);
                 else store.registerBoundary(String(index));
+
                 // Repainting retained rows is independent of pending-ID eviction.
                 store.observeRow(row, String(index), false);
             }
+
             expect(store.stats().pendingBoundaries).toBe(0);
             expect(
                 store.register({ toolCallId: "352", invalidate: noop }, "Read child.ts"),

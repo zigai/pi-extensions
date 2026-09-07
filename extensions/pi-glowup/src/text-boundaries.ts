@@ -8,6 +8,7 @@ function normalizedBudget(maxCharacters: number): number {
     if (!Number.isFinite(maxCharacters)) {
         return maxCharacters > 0 ? Number.MAX_SAFE_INTEGER : 0;
     }
+
     return Math.max(0, Math.floor(maxCharacters));
 }
 
@@ -23,6 +24,7 @@ function sgrSequenceEnd(text: string, start: number): number | undefined {
     if (text.charCodeAt(start) !== ESCAPE_CODE || text.charAt(start + 1) !== "[") {
         return undefined;
     }
+
     let index = start + 2;
     while (
         index < text.length &&
@@ -31,6 +33,7 @@ function sgrSequenceEnd(text: string, start: number): number | undefined {
     ) {
         index += 1;
     }
+
     return text.charAt(index) === "m" ? index + 1 : undefined;
 }
 
@@ -41,6 +44,7 @@ function visibleControl(codeUnit: number): string {
     if (codeUnit === 0x7f) {
         return "␡";
     }
+
     return `‹${codeUnit.toString(16).toUpperCase().padStart(2, "0")}›`;
 }
 
@@ -64,6 +68,7 @@ export function neutralizeTerminalControls(text: string): string {
         output += codeUnit === 0x09 ? "\t" : visibleControl(codeUnit);
         runStart = index + 1;
     }
+
     const neutralized = runStart === 0 ? text : `${output}${text.slice(runStart)}`;
     return neutralized.includes("\t") ? expandTerminalTabs(neutralized, 4, 0).text : neutralized;
 }
@@ -83,11 +88,13 @@ export function expandTerminalTabs(
     let displayColumn = Math.max(0, Math.floor(initialDisplayColumn));
     let output = "";
     let runStart = 0;
+
     for (let index = 0; index < text.length; index += 1) {
         const character = text.charAt(index);
         if (character !== "\t" && character !== "\n" && character !== "\r") {
             continue;
         }
+
         const run = text.slice(runStart, index);
         output += run;
         displayColumn += visibleWidth(run);
@@ -99,8 +106,10 @@ export function expandTerminalTabs(
             output += character;
             displayColumn = 0;
         }
+
         runStart = index + 1;
     }
+
     const tail = text.slice(runStart);
     output += tail;
     displayColumn += visibleWidth(tail);
@@ -125,6 +134,7 @@ export function countContentLines(content: string): number {
             lineCount += 1;
         }
     }
+
     return lineCount;
 }
 
@@ -145,9 +155,11 @@ export function truncateUtf8ByGrapheme(text: string, maxBytes: number): string {
         if (byteLength + segmentBytes > budget) {
             break;
         }
+
         byteLength += segmentBytes;
         endIndex += segment.length;
     }
+
     return text.slice(0, endIndex);
 }
 
@@ -184,6 +196,7 @@ export function takeGraphemeSuffix(text: string, maxCharacters: number): string 
     if (containing === undefined) {
         return "";
     }
+
     const start =
         containing.index < boundary
             ? containing.index + containing.segment.length
@@ -201,6 +214,7 @@ export function appendGraphemeEllipsis(
     if (budget === 0) {
         return "";
     }
+
     const boundedEllipsis = takeGraphemePrefix(ellipsis, budget);
     return `${takeGraphemePrefix(text, budget - boundedEllipsis.length)}${boundedEllipsis}`;
 }

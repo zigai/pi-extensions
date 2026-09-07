@@ -47,18 +47,23 @@ describe("module ownership", () => {
         const complete = new Set<string>();
         const stack: string[] = [];
         const cycles: string[][] = [];
+
         function visit(file: string): void {
             const active = stack.indexOf(file);
             if (active !== -1) {
                 cycles.push([...stack.slice(active), file]);
+
                 return;
             }
+
             if (complete.has(file)) return;
             stack.push(file);
+
             for (const edge of edges) if (edge.from === file) visit(edge.to);
             stack.pop();
             complete.add(file);
         }
+
         for (const file of graph.files) visit(modulePath(file));
         expect(cycles).toEqual([]);
     });

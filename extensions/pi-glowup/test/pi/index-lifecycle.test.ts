@@ -66,6 +66,7 @@ class FakeExtensionApi extends ExtensionRegistrationFixture {
         const sessionManager = SessionManager.inMemory(cwd);
         for (const entry of this.branch)
             sessionManager.appendMessage(assistantMessage(entry.message));
+
         this.context = createExtensionContext(cwd, {
             mode,
             trusted,
@@ -129,6 +130,7 @@ class FakeExtensionApi extends ExtensionRegistrationFixture {
                 results.push(invoke());
             }
         }
+
         return results;
     }
 
@@ -151,6 +153,7 @@ class FakeExtensionApi extends ExtensionRegistrationFixture {
                 );
             }
         }
+
         return results;
     }
 
@@ -177,6 +180,7 @@ class FakeExtensionApi extends ExtensionRegistrationFixture {
                 );
             }
         }
+
         for (const registration of this.registrations) {
             if (registration[0] === "turn_end") {
                 await registration[1](
@@ -212,6 +216,7 @@ function createTui(): TuiMainScreen {
         tui.stop();
         terminal.dispose();
     });
+
     return tui;
 }
 
@@ -224,6 +229,7 @@ describe("extension lifecycle", () => {
         const observed: string[] = [];
         pi.on("tool_call", () => {
             observed.push("handler");
+
             throw new Error("fixture handler failure");
         });
         const results = pi.runBashToolCall("true");
@@ -240,11 +246,13 @@ describe("extension lifecycle", () => {
         } else {
             process.env[AGENT_DIR_ENV] = originalAgentDir;
         }
+
         if (originalScriptFormatters === undefined) {
             delete process.env[SCRIPT_FORMATTERS_ENV];
         } else {
             process.env[SCRIPT_FORMATTERS_ENV] = originalScriptFormatters;
         }
+
         vi.useRealTimers();
         await disposeSyntaxHighlighting();
     });
@@ -524,9 +532,11 @@ describe("extension lifecycle", () => {
                 },
                 { type: "toolCall", id: "next", name: "read", arguments: { path: "next.ts" } },
             ];
+
             const message: AssistantSourceMessage = { role: "assistant", content: calls };
             if (order === "restored") pi.branch = [{ type: "message", message }];
             await pi.startSession(root, false, "tui");
+
             if (order !== "restored") await pi.updateAssistant(message);
             const tui = createTui();
             const makeRow = (call: AssistantSourceMessage["content"][number]) =>
@@ -555,9 +565,11 @@ describe("extension lifecycle", () => {
             const childCall = calls[352];
             const liveBoundaryCall = calls[353];
             const nextCall = calls[354];
+
             if (!firstCall || !afterCall || !childCall || !liveBoundaryCall || !nextCall) {
                 throw new Error("missing boundary fixture calls");
             }
+
             const before = makeRow(firstCall);
             ready(before);
             const boundaryCalls = calls.slice(1, 351);
@@ -571,6 +583,7 @@ describe("extension lifecycle", () => {
                     boundaries.push(row);
                 }
             }
+
             const after = makeRow(afterCall);
             ready(after);
             expect(stripAnsi(after.render(100).join("\n"))).toContain("after.ts");
@@ -587,12 +600,14 @@ describe("extension lifecycle", () => {
             } else if (order === "row-first") {
                 for (const call of boundaryCalls) await pi.startExecution(call.name, call.id);
             }
+
             for (const row of boundaries) {
                 row.setExpanded(true);
                 expect(stripAnsi(row.render(100).join("\n"))).toContain(
                     "external renderer unchanged",
                 );
             }
+
             const child = makeRow(childCall);
             ready(child);
             expect(child.render(100)).toEqual([]);
@@ -601,6 +616,7 @@ describe("extension lifecycle", () => {
             // Old-event suppression must never suppress a genuinely new boundary.
             if (order !== "restored")
                 await pi.startExecution(liveBoundaryCall.name, liveBoundaryCall.id);
+
             const liveBoundary = makeRow(liveBoundaryCall);
             ready(liveBoundary);
             const next = makeRow(nextCall);

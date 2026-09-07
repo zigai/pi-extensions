@@ -207,6 +207,7 @@ describe("Glowup rendering helpers", () => {
         let renderCount = 0;
         const component = makeComponent(() => {
             renderCount += 1;
+
             return Array.from({ length: 301 }, (_value, index) => `line ${index + 1}`);
         });
 
@@ -891,6 +892,7 @@ describe("Glowup rendering helpers", () => {
             language: "python",
             code: "print('hi')",
         });
+
         if (!invocation) {
             throw new Error("expected script invocation");
         }
@@ -1606,6 +1608,7 @@ describe("Glowup rendering helpers", () => {
                 if (index === 0) {
                     return line.slice(line.indexOf("+") + 1).trimEnd();
                 }
+
                 return line.trim();
             })
             .join("");

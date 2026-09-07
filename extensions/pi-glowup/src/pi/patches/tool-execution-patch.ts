@@ -1,28 +1,28 @@
+import {
+    ToolExecutionComponent,
+    type AgentToolResult,
+    type Theme,
+    type ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 import Type from "typebox";
 import { Value } from "typebox/value";
+import { jsonValueParser } from "../../json-value.ts";
+import { emptyComponent } from "../../rendering/component.ts";
+import type {
+    BuiltInToolRenderContext,
+    BuiltInToolRendererOptions,
+    PiRendererDefinition,
+    PiToolRenderContext,
+    ToolCallArguments,
+    ToolExecutionInstance,
+} from "../../tools/built-in/context.ts";
 import {
     canonicalBuiltInToolName,
     compatBuiltInToolName,
     nativeBuiltInToolName,
     type BuiltInToolName,
 } from "../../tools/built-in/names.ts";
-import type {
-    PiToolRenderContext,
-    PiRendererDefinition,
-    ToolExecutionInstance,
-    BuiltInToolRenderContext,
-    ToolCallArguments,
-    BuiltInToolRendererOptions,
-} from "../../tools/built-in/context.ts";
-import {
-    ToolExecutionComponent,
-    type Theme,
-    type ToolRenderResultOptions,
-    type AgentToolResult,
-} from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
-import { emptyComponent } from "../../rendering/component.ts";
-import { jsonValueParser } from "../../json-value.ts";
 import {
     createThirdPartyToolRenderer,
     hasGlowupRenderingAdapter,
@@ -30,11 +30,11 @@ import {
     shouldPreserveThirdPartyToolRenderer,
 } from "../../tools/renderers.ts";
 import {
-    type ThirdPartyToolRenderer,
+    executionPhase,
     type ThirdPartyToolRenderContext,
+    type ThirdPartyToolRenderer,
     type ThirdPartyToolRenderingOptions,
     type ThirdPartyToolResult,
-    executionPhase,
 } from "../../tools/types.ts";
 
 const BUILT_IN_RENDERER_PATCH_STATE_KEY = Symbol.for("zigai.pi-glowup.built-in-renderer-state");
@@ -46,9 +46,7 @@ const MAX_THIRD_PARTY_RENDERERS = 100;
 type RenderShellMode = NonNullable<PiRendererDefinition["renderShell"]>;
 type ThemeForeground = Parameters<Theme["fg"]>[0];
 type ThemeBackground = Parameters<Theme["bg"]>[0];
-
 type ToolExecutionPrototypeOwner = typeof ToolExecutionComponent.prototype | ToolExecutionPrototype;
-
 type ToolCallRenderer = NonNullable<PiRendererDefinition["renderCall"]>;
 type ToolResultRenderer = NonNullable<PiRendererDefinition["renderResult"]>;
 
@@ -88,10 +86,12 @@ type ThirdPartyRendererPatchState = {
     enabled: boolean;
     renderingOptions: ThirdPartyToolRenderingOptions | undefined;
     completedRenders: CompletedRenderCache;
+
     readonly rendererCache: Map<
         string,
         { readonly definition: unknown; readonly renderer: ThirdPartyToolRenderer }
     >;
+
     readonly originalGetCallRenderer: ToolExecutionPrototype["getCallRenderer"];
     readonly originalGetResultRenderer: ToolExecutionPrototype["getResultRenderer"];
     readonly originalGetRenderShell: ToolExecutionPrototype["getRenderShell"];
@@ -144,7 +144,7 @@ function checkedToolExecutionPrototype(owner: ToolExecutionPrototypeOwner): Tool
     // Symbol state belongs exclusively to the two installers below; never clone the owner
     // or wrap its methods, since restoration and completed-render caching use identity.
     // Optional owned metadata needs no assertion; only the four erased methods do.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Checked callable slots follow the SDK constructor's renderer contract; Pi erases these private signatures. Real-getter, invalid-owner, and exact-restoration tests cover this bridge.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: Pi erases private renderer signatures; checked slots follow the SDK constructor contract.
     return owner as ToolExecutionPrototypeMethods;
 }
 
@@ -227,11 +227,14 @@ function renderThemeFingerprint(theme: Theme): string {
     for (const color of THEME_FOREGROUNDS) {
         parts.push(theme.fg(color, "x"));
     }
+
     for (const color of THEME_BACKGROUNDS) {
         parts.push(theme.bg(color, "x"));
     }
+
     const fingerprint = parts.join("\u0000");
     currentRenderTheme = { theme, fingerprint };
+
     if (!renderThemeResetQueued) {
         renderThemeResetQueued = true;
         queueMicrotask(() => {
@@ -239,6 +242,7 @@ function renderThemeFingerprint(theme: Theme): string {
             renderThemeResetQueued = false;
         });
     }
+
     return fingerprint;
 }
 
@@ -264,6 +268,7 @@ type CompletedComponentState = {
 const completedComponentBases = new WeakMap<Component, Component>();
 const completedComponentStates = new WeakMap<Component, CompletedComponentState>();
 const completedLineCacheLru = new Map<Component, number>();
+
 let completedLineCacheBytes = 0;
 let completedLineCacheLimitBytes = DEFAULT_COMPLETED_LINE_CACHE_BYTES;
 let completedLineCacheLimitEntries = DEFAULT_COMPLETED_LINE_CACHE_ENTRIES;
@@ -285,6 +290,7 @@ function releaseCompletedLineCache(component: Component): void {
         completedLineCacheLru.delete(component);
         completedLineCacheBytes -= retainedBytes;
     }
+
     const state = completedComponentStates.get(component);
     if (state !== undefined) {
         state.cachedWidth = undefined;
@@ -319,6 +325,7 @@ function retainCompletedLines(
 ): void {
     releaseCompletedLineCache(component);
     const bytes = completedLinesSize(lines);
+
     if (bytes > completedLineCacheLimitBytes) return;
 
     while (
@@ -350,9 +357,12 @@ function cacheCompletedComponent(component: Component): Component {
                 touchCompletedLineCache(wrapper);
                 return state.cachedLines;
             }
+
             completedLineCacheMisses += 1;
+
             const lines = base.render(width);
             retainCompletedLines(wrapper, state, width, lines);
+
             return lines;
         },
         invalidate() {
@@ -360,8 +370,10 @@ function cacheCompletedComponent(component: Component): Component {
             // changes replace this wrapper, while renderer invalidations clear its cache slot.
         },
     };
+
     completedComponentBases.set(wrapper, base);
     completedComponentStates.set(wrapper, state);
+
     return wrapper;
 }
 
@@ -391,6 +403,7 @@ function clearCompletedRender(
     if (slots === undefined) return;
     releaseCompletedRender(slots[slot]);
     delete slots[slot];
+
     if (slots.call === undefined && slots.result === undefined) {
         cache.delete(instance);
     }
@@ -415,12 +428,14 @@ function renderCompletedSlot(options: {
     }
 
     clearCompletedRender(options.cache, options.instance, options.slot);
+
     let rendered: Component | undefined;
     const invalidate = (): void => {
         clearCompletedRendersForInstance(options.cache, options.instance);
         rendered?.invalidate();
         options.invalidate();
     };
+
     rendered = options.render(invalidate);
     if (options.signature === undefined) {
         return rendered;
@@ -430,9 +445,11 @@ function renderCompletedSlot(options: {
     if (options.cacheLines === true) {
         component = cacheCompletedComponent(rendered);
     }
+
     const slots = options.cache.get(options.instance) ?? {};
     slots[options.slot] = { component, signature: options.signature };
     options.cache.set(options.instance, slots);
+
     return component;
 }
 
@@ -535,6 +552,7 @@ function thirdPartyRenderContext(
     if (context.cwd !== undefined) {
         renderContext = { ...renderContext, cwd: context.cwd };
     }
+
     if (context.invalidate !== undefined) {
         renderContext = { ...renderContext, invalidate: context.invalidate };
     }
@@ -544,6 +562,7 @@ function thirdPartyRenderContext(
     if (context.result !== undefined) {
         renderContext = { ...renderContext, result: context.result };
     }
+
     return renderContext;
 }
 
@@ -572,11 +591,9 @@ function shouldUseThirdPartyRenderer(
     if (shouldPreserveThirdPartyToolRenderer(preserveInput)) {
         return false;
     }
-
     if (hasGlowupRenderingAdapter(definition)) {
         return true;
     }
-
     if (hasThirdPartyToolRendererPlugin(toolName, options)) {
         return true;
     }
@@ -606,6 +623,7 @@ function rendererForInstance(
     const renderer = createThirdPartyToolRenderer(toolName, options, definition);
     cache?.set(toolName, { definition, renderer });
     trimRendererCache(cache);
+
     return renderer;
 }
 
@@ -635,6 +653,7 @@ export function configureCompletedLineCache(limits: CompletedLineCacheLimits): v
     ) {
         return;
     }
+
     clearCompletedLineCache();
     completedLineCacheLimitBytes = limits.maxBytes;
     completedLineCacheLimitEntries = limits.maxEntries;
@@ -687,14 +706,17 @@ export function configureBuiltInToolRendererPatch(
     const getCallRenderer: RendererPatchWrappers["getCallRenderer"] =
         function getGlowupBuiltInCallRenderer(this: ToolExecutionInstance) {
             observeRow(this);
+
             const toolName = builtInToolName(this);
             const originalRenderer = originalGetCallRenderer?.call(this);
             if (!state.enabled || toolName === undefined) {
                 return originalRenderer;
             }
+
             const result = currentToolResult(this);
             return (args: ToolCallArguments, theme: Theme, context: BuiltInToolRenderContext) => {
                 const restoredContext = restoredCallRenderContext(context, result);
+
                 return renderCompletedSlot({
                     cache: state.completedRenders,
                     instance: this,
@@ -725,9 +747,11 @@ export function configureBuiltInToolRendererPatch(
         function getGlowupBuiltInResultRenderer(this: ToolExecutionInstance) {
             const toolName = builtInToolName(this);
             const originalRenderer = originalGetResultRenderer?.call(this);
+
             if (!state.enabled || toolName === undefined) {
                 return originalRenderer;
             }
+
             return (
                 result: AgentToolResult<unknown>,
                 renderOptions: ToolRenderResultOptions,
@@ -815,6 +839,7 @@ export function toolRendererPatchStats(
     const prototype = checkedToolExecutionPrototype(prototypeOwner);
     const builtInState = prototype[BUILT_IN_RENDERER_PATCH_STATE_KEY];
     const thirdPartyState = prototype[THIRD_PARTY_RENDERER_PATCH_STATE_KEY];
+
     return {
         builtInPatchEnabled: builtInState?.enabled === true,
         thirdPartyPatchEnabled: thirdPartyState?.enabled === true,
@@ -837,6 +862,7 @@ function restoreGetCallRenderer(
         delete prototype.getCallRenderer;
         return;
     }
+
     prototype.getCallRenderer = method;
 }
 
@@ -879,6 +905,7 @@ function restoreBuiltInRendererPatch(
 ): void {
     state.enabled = false;
     clearCompletedLineCache();
+
     if (
         prototype.getCallRenderer !== state.wrappers.getCallRenderer ||
         prototype.getResultRenderer !== state.wrappers.getResultRenderer ||
@@ -886,6 +913,7 @@ function restoreBuiltInRendererPatch(
         prototype.hasRendererDefinition !== state.wrappers.hasRendererDefinition
     )
         return;
+
     restoreGetCallRenderer(prototype, state.originalGetCallRenderer);
     restoreGetResultRenderer(prototype, state.originalGetResultRenderer);
     restoreGetRenderShell(prototype, state.originalGetRenderShell);
@@ -942,12 +970,14 @@ export function configureThirdPartyToolRendererPatch(
                 if (renderer !== undefined) {
                     const result = currentToolResult(this);
                     const toolName = instanceToolName(this) ?? "tool";
+
                     return (
                         args: ToolCallArguments,
                         theme: Theme,
                         context: BuiltInToolRenderContext,
                     ) => {
                         const restoredContext = restoredCallRenderContext(context, result);
+
                         return renderCompletedSlot({
                             cache: state.completedRenders,
                             instance: this,
@@ -969,6 +999,7 @@ export function configureThirdPartyToolRendererPatch(
                     };
                 }
             }
+
             return originalGetCallRenderer?.call(this);
         };
 
@@ -992,6 +1023,7 @@ export function configureThirdPartyToolRendererPatch(
                 if (renderer === undefined || toolName === undefined) {
                     return undefined;
                 }
+
                 return (
                     result: ThirdPartyToolResult,
                     renderOptions: ToolRenderResultOptions,
@@ -1015,6 +1047,7 @@ export function configureThirdPartyToolRendererPatch(
                         },
                     });
             }
+
             return originalGetResultRenderer?.call(this);
         };
 
@@ -1028,6 +1061,7 @@ export function configureThirdPartyToolRendererPatch(
         ) {
             return "self";
         }
+
         return originalGetRenderShell?.call(this) ?? "default";
     };
 
@@ -1077,6 +1111,7 @@ function restoreThirdPartyRendererPatch(
     state.enabled = false;
     clearCompletedLineCache();
     state.rendererCache.clear();
+
     if (
         prototype.getCallRenderer !== state.wrappers.getCallRenderer ||
         prototype.getResultRenderer !== state.wrappers.getResultRenderer ||
@@ -1084,6 +1119,7 @@ function restoreThirdPartyRendererPatch(
         prototype.hasRendererDefinition !== state.wrappers.hasRendererDefinition
     )
         return;
+
     restoreGetCallRenderer(prototype, state.originalGetCallRenderer);
     restoreGetResultRenderer(prototype, state.originalGetResultRenderer);
     restoreGetRenderShell(prototype, state.originalGetRenderShell);

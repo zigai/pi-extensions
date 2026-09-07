@@ -37,6 +37,7 @@ type FakeAssistantInstance = {
 
 type FakeAssistantPrototype = {
     render(this: FakeAssistantInstance, width: number): string[];
+
     updateContent?(
         this: FakeAssistantInstance,
         message: AssistantMessage,
@@ -74,9 +75,11 @@ function isVisibleContent(content: FakeAssistantContent): boolean {
     if (content.type === "text") {
         return content.text.trim() !== "";
     }
+
     if (content.type === "thinking") {
         return content.thinking.trim() !== "";
     }
+
     return false;
 }
 
@@ -93,6 +96,7 @@ function createPrototypeWithContentUpdates(): FakeAssistantPrototype {
             for (const [index, content] of message.content.entries()) {
                 if (content.type === "text" && content.text.trim() !== "") {
                     this.contentContainer?.addChild(new LabelComponent(`text:${content.text}`));
+
                     continue;
                 }
 
@@ -100,6 +104,7 @@ function createPrototypeWithContentUpdates(): FakeAssistantPrototype {
                     this.contentContainer?.addChild(
                         new LabelComponent(`thinking:${content.thinking}`),
                     );
+
                     if (message.content.slice(index + 1).some(isVisibleContent)) {
                         this.contentContainer?.addChild(
                             new LabelComponent("after-thinking-spacer"),
@@ -218,6 +223,7 @@ describe("assistant separator patch", () => {
                 stopReason: "stop",
                 timestamp: Date.now(),
             });
+
             const expected = [
                 "",
                 "text A",
@@ -263,6 +269,7 @@ describe("assistant separator patch", () => {
         const message = assistantMessage([]);
         prototype.updateContent?.call(instance, message, true);
         prototype.updateContent?.call({}, message, false);
+
         // Retain the wrapper to exercise another extension's captured delegation after disable.
         const wrapped = prototype.updateContent?.bind(instance);
         configureAssistantSeparatorPatch(false, prototype);
@@ -302,6 +309,7 @@ describe("assistant separator patch", () => {
             updateContent(this: typeof instance, _message: AssistantMessage): void {
                 expect(this).toBe(instance);
                 this.contentContainer.addChild(new LabelComponent("before failure"));
+
                 throw failure;
             },
         };
@@ -380,6 +388,7 @@ describe("assistant separator patch", () => {
         if (patchedRenderDescriptor === undefined || patchedAddChildDescriptor === undefined) {
             throw new Error("expected Glowup assistant wrappers");
         }
+
         Object.defineProperty(patchedPrototype, "render", patchedRenderDescriptor);
         Object.defineProperty(patchedContainerPrototype, "addChild", patchedAddChildDescriptor);
         prototype.render = function renderWithLaterWrapper(

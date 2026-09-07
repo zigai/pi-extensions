@@ -52,9 +52,11 @@ describe("Glowup tool-rendering protocol", () => {
             text: "mutable label",
             tone: "accent" as const,
         };
+
         const rows: Array<{ label: GlowupInline; value: GlowupInline }> = [
             { label: mutableInline, value: "val" },
         ];
+
         const summaryNode = summary(rows);
         const decodedSummary = decodeGlowupNode(summaryNode);
         rows.push({ label: "extra", value: "extraVal" });
@@ -96,6 +98,7 @@ describe("Glowup tool-rendering protocol", () => {
                 string
             >[Key];
         };
+
         const label: MutableInline = {
             kind: "text",
             text: "Rows",
@@ -129,6 +132,7 @@ describe("Glowup tool-rendering protocol", () => {
             expandedLines: 4,
             expandable: true,
         };
+
         const children: GlowupNode[] = [
             summary(rows),
             mutation(labels, files),
@@ -136,6 +140,7 @@ describe("Glowup tool-rendering protocol", () => {
             output("output body", { syntax, preview }),
             list([value], preview),
         ];
+
         const source = call(labels, { body: stack(children), preview });
         const limits = {
             maxDepth: 8,
@@ -145,6 +150,7 @@ describe("Glowup tool-rendering protocol", () => {
         };
         const decoded = decodeGlowupNode(source, limits);
         expect(decoded).toBeDefined();
+
         if (decoded === undefined) throw new Error("Valid snapshot rejected");
         const accepted = structuredClone(source);
         const theme: GlowupRenderTheme = {
@@ -207,6 +213,7 @@ describe("Glowup tool-rendering protocol", () => {
 
         expect(decodeGlowupNode(source, limits)).toBeUndefined();
         expect(decoded).toEqual(accepted);
+
         // Construct a fresh component so renderer memoization cannot mask attached producer data.
         expect(renderSnapshot()).toBe(transcript);
     });
@@ -337,6 +344,7 @@ describe("bounded protocol snapshot traversal", () => {
                 throw new Error("must not iterate");
             },
         });
+
         for (const node of [
             { kind: "stack", children: oversized },
             { kind: "list", items: oversized },
@@ -349,6 +357,7 @@ describe("bounded protocol snapshot traversal", () => {
             },
         ])
             expect(decodeGlowupNode(node, limits)).toBeUndefined();
+
         expect(elementReads).toBe(0);
     });
 
@@ -383,12 +392,15 @@ describe("bounded protocol snapshot traversal", () => {
 
     it("validates the first captured getter values, ignores unknown fields, and detaches shared metadata", () => {
         const reads = new Map<string, number>();
+
         function first<Value>(key: string, value: Value): Value {
             const count = (reads.get(key) ?? 0) + 1;
             reads.set(key, count);
+
             if (count !== 1) throw new Error(`Repeated ${key} read`);
             return value;
         }
+
         const inline = {
             get kind() {
                 return first("kind", "text");
@@ -454,10 +466,12 @@ describe("bounded protocol snapshot traversal", () => {
         const items = new Proxy(["accepted"], {
             get(target, key) {
                 if (key === "length") return ++lengthReads === 1 ? 1 : 1000;
+
                 if (key === "0") {
                     itemReads++;
                     return target[0];
                 }
+
                 throw new Error(`Unexpected array access: ${String(key)}`);
             },
         });

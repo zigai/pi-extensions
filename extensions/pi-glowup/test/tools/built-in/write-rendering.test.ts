@@ -242,6 +242,7 @@ describe("write rendering", () => {
                     if (index === 0) {
                         return line.slice(line.indexOf("+") + 1).trimEnd();
                     }
+
                     return line.trim();
                 })
                 .join("");

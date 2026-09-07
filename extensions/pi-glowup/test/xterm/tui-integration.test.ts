@@ -22,6 +22,7 @@ import {
     type InterpretedRow,
     VirtualTerminal,
 } from "../support/virtual-terminal.ts";
+
 const originalTerminalCapabilities = getCapabilities();
 
 const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
@@ -63,6 +64,7 @@ type CleanupPrototype = {
 
 type ExtensionProfile = {
     readonly theme?: "dark" | "light";
+
     readonly appearance?:
         | "default"
         | {
@@ -72,6 +74,7 @@ type ExtensionProfile = {
               readonly addedContentBackground: string;
               readonly deletedContentBackground: string;
           };
+
     readonly mutations?: {
         readonly defaultView?: "full" | "preview";
     };
@@ -156,6 +159,7 @@ function requireDisplayCellSpan(row: InterpretedRow, text: string): CellSpan {
             if (!text.startsWith(candidate)) break;
         }
     }
+
     throw new Error(
         `expected terminal row ${row.index} to contain display-cell span ${JSON.stringify(text)}; row=${JSON.stringify(row.text)}`,
     );
@@ -187,6 +191,7 @@ function expectDefaultBackgroundWithoutDiffAttributes(row: InterpretedRow): void
     expect(row.cells.every((cell) => cell.isBackgroundDefault)).toBe(true);
     expect(row.cells.every((cell) => !cell.isBold && !cell.isDim)).toBe(true);
 }
+
 const DARK_THEME_DIM_FOREGROUND = rgbFromHex("#666666");
 const DARK_THEME_ADDED_FOREGROUND = rgbFromHex("#B5BD68");
 const DARK_THEME_DELETED_FOREGROUND = rgbFromHex("#CC6666");
@@ -247,6 +252,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
                         initTheme("dark");
                     } finally {
                         rmSync(root, { recursive: true, force: true });
+
                         if (originalAgentDir === undefined) {
                             delete process.env[AGENT_DIR_ENV];
                         } else {
@@ -263,6 +269,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
     async function shutdownExtension(reason: "quit" | "reload" = "quit"): Promise<void> {
         const installedExtension = extension;
         extension = undefined;
+
         if (installedExtension !== undefined) await installedExtension.shutdown(reason);
     }
 
@@ -292,9 +299,11 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         terminal = new VirtualTerminal(columns, rows);
         tui = createTui(terminal);
         tui.setClearOnShrink(true);
+
         for (const component of components) tui.addChild(component);
         tui.start();
         await terminal.settle();
+
         return { terminal, tui };
     }
 
@@ -433,12 +442,14 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             beforeSentinel,
             afterSentinel,
         );
+
         for (const token of ["retainedWrite", "staleWriteOne", "staleWriteTwo"]) {
             pendingTerminal.assertFullRowBackground(
                 pendingTerminal.requireRowContaining(token),
                 rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
             );
         }
+
         pendingTerminal.assertNeutralRange(
             pendingTerminal.requireRowContaining(beforeSentinel),
             0,
@@ -502,6 +513,7 @@ export const grownWriteTwelve = 12;
         screen = pendingTerminal.screenText();
         expect(screen).toContain("Writing src/streaming-write.ts (+2)");
         expect(screen).toContain("replacementWrite");
+
         for (const obsoleteToken of [
             "staleWriteOne",
             "staleWriteTwo",
@@ -517,17 +529,20 @@ export const grownWriteTwelve = 12;
         ]) {
             expect(screen).not.toContain(obsoleteToken);
         }
+
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Writing src/streaming-write.ts",
             beforeSentinel,
             afterSentinel,
         );
+
         for (const token of ["retainedWrite", "replacementWrite"]) {
             pendingTerminal.assertFullRowBackground(
                 pendingTerminal.requireRowContaining(token),
                 rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
             );
         }
+
         pendingTerminal.assertNeutralRange(
             pendingTerminal.requireRowContaining(beforeSentinel),
             0,
@@ -535,12 +550,14 @@ export const grownWriteTwelve = 12;
         );
         const shrunkAfterSentinelRow = pendingTerminal.requireRowContaining(afterSentinel);
         pendingTerminal.assertNeutralRange(shrunkAfterSentinelRow);
+
         for (const vacatedRow of pendingTerminal.rowRange(
             shrunkAfterSentinelRow.index + 1,
             grownAfterSentinelRow.index + 1,
         )) {
             pendingTerminal.assertNeutralRange(vacatedRow);
         }
+
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
 
@@ -554,6 +571,7 @@ export const grownWriteTwelve = 12;
         expect(screen).toContain("Writing src/final-write.ts (+3)");
         expect(screen).toContain("finalWriteAlpha");
         expect(screen).toContain("finalWriteGamma");
+
         for (const obsoleteToken of [
             "src/streaming-write.ts",
             "retainedWrite",
@@ -572,17 +590,20 @@ export const grownWriteTwelve = 12;
         ]) {
             expect(screen).not.toContain(obsoleteToken);
         }
+
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Writing src/final-write.ts",
             beforeSentinel,
             afterSentinel,
         );
+
         for (const token of ["finalWriteAlpha", "finalWriteBeta", "finalWriteGamma"]) {
             pendingTerminal.assertFullRowBackground(
                 pendingTerminal.requireRowContaining(token),
                 rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
             );
         }
+
         pendingTerminal.assertNeutralRange(
             pendingTerminal.requireRowContaining(beforeSentinel),
             0,
@@ -637,6 +658,7 @@ export const grownWriteTwelve = 12;
         expect(screen).toContain("finalWriteBeta");
         expect(screen).toContain("finalWriteGamma");
         expect(screen).not.toContain(successText);
+
         for (const obsoleteToken of [
             "src/streaming-write.ts",
             "retainedWrite",
@@ -655,6 +677,7 @@ export const grownWriteTwelve = 12;
         ]) {
             expect(screen).not.toContain(obsoleteToken);
         }
+
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Wrote src/final-write.ts",
             beforeSentinel,
@@ -665,12 +688,14 @@ export const grownWriteTwelve = 12;
             0,
             pendingTerminal.columns,
         );
+
         for (const token of ["finalWriteAlpha", "finalWriteBeta", "finalWriteGamma"]) {
             pendingTerminal.assertFullRowBackground(
                 pendingTerminal.requireRowContaining(token),
                 rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
             );
         }
+
         const completedHeaderRow = pendingTerminal.requireRowContaining(
             "Wrote src/final-write.ts (+3)",
         );
@@ -760,6 +785,7 @@ export const grownWriteTwelve = 12;
         expect(screen).not.toContain("invalid");
         expect(screen).not.toContain("obsoleteEditOld");
         expect(screen).not.toContain("obsoleteEditNew");
+
         for (const rawToken of [
             '"edits"',
             '"oldText"',
@@ -771,6 +797,7 @@ export const grownWriteTwelve = 12;
         ]) {
             expect(screen).not.toContain(rawToken);
         }
+
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Editing src/obsolete-edit.ts (2 edits)",
             beforeSentinel,
@@ -788,6 +815,7 @@ export const grownWriteTwelve = 12;
         const singleEditHeader = pendingTerminal.requireRowContaining("Editing src/final-edit.ts");
         expect(singleEditHeader.text.trimEnd()).toBe("• Editing src/final-edit.ts");
         expect(screen).not.toContain("(2 edits)");
+
         for (const obsoleteToken of [
             "src/obsolete-edit.ts",
             "obsoleteEditOld",
@@ -801,6 +829,7 @@ export const grownWriteTwelve = 12;
         ]) {
             expect(screen).not.toContain(obsoleteToken);
         }
+
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Editing src/final-edit.ts",
             beforeSentinel,
@@ -813,9 +842,11 @@ export const grownWriteTwelve = 12;
         screen = pendingTerminal.screenText();
         expect(screen).toContain("Editing src/final-edit.ts");
         expect(screen).not.toContain("Edited src/final-edit.ts");
+
         for (const rawKey of ['"path"', '"edits"', '"oldText"', '"newText"']) {
             expect(screen).not.toContain(rawKey);
         }
+
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Editing src/final-edit.ts",
             beforeSentinel,
@@ -857,6 +888,7 @@ export const grownWriteTwelve = 12;
         expect(screen).not.toContain(successText);
         expect(screen).not.toContain("+0");
         expect(screen).not.toContain("-0");
+
         for (const obsoleteToken of [
             "src/obsolete-edit.ts",
             "obsoleteEditOld",
@@ -866,6 +898,7 @@ export const grownWriteTwelve = 12;
         ]) {
             expect(screen).not.toContain(obsoleteToken);
         }
+
         pendingTerminal.assertUniqueTranscriptMarkers(
             "Edited src/final-edit.ts",
             beforeSentinel,
@@ -1047,6 +1080,7 @@ export const grownWriteTwelve = 12;
             "Deleted src/final-delete.ts (-3)",
         );
         expectDefaultBackgroundWithoutDiffAttributes(completedDeleteHeader);
+
         for (const [lineNumber, token] of [
             [1, "deletedAlpha"],
             [2, "deletedBeta"],
@@ -1066,6 +1100,7 @@ export const grownWriteTwelve = 12;
             expect(row.cells[8]?.chars).toBe("-");
             expect(row.cells[8]?.foreground).toBe(DARK_THEME_DELETED_FOREGROUND);
         }
+
         const deletionRows = pendingTerminal.rowsMatching(/deleted(?:Alpha|Beta|Gamma)/);
         expect(deletionRows).toHaveLength(3);
         expect(
@@ -1138,6 +1173,7 @@ export const grownWriteTwelve = 12;
             "Deleted src/restored-delete.ts (-2)",
         );
         expectDefaultBackgroundWithoutDiffAttributes(restoredHeader);
+
         for (const [lineNumber, token] of [
             [1, "restoredDeletedAlpha"],
             [2, "restoredDeletedBeta"],
@@ -1163,6 +1199,7 @@ export const grownWriteTwelve = 12;
                 ),
             ).toBe(true);
         }
+
         pendingTerminal.assertNeutralRange(
             pendingTerminal.requireRowContaining(beforeSentinel),
             0,
@@ -1512,6 +1549,7 @@ export const grownWriteTwelve = 12;
             expect(header.index).toBeLessThan(after.index);
             pendingTerminal.assertNeutralRange(before);
             pendingTerminal.assertNeutralRange(after);
+
             return after.index;
         };
         const collapsed = pendingTerminal.screenText();
@@ -1537,6 +1575,7 @@ export const grownWriteTwelve = 12;
             .interpretedRows()
             .filter((row) => row.index > collapsedAfter && row.index <= expandedAfter);
         expect(clearedRows.length).toBe(expandedAfter - collapsedAfter);
+
         for (const row of clearedRows) {
             expect(row.text.trim()).toBe("");
             pendingTerminal.assertNeutralRange(row);
@@ -1569,6 +1608,7 @@ export const grownWriteTwelve = 12;
             });
             if (payload?.kind !== "renderable")
                 throw new Error("expected renderable Pierre payload");
+
             const patch = `*** Begin Patch
 *** Update File: src/colors.ts
 @@
@@ -1644,6 +1684,7 @@ export const grownWriteTwelve = 12;
             if (blankAddition === undefined || tabOnlyAddition === undefined) {
                 throw new Error("expected blank and tab-only addition rows");
             }
+
             const tabAddition = pendingTerminal.requireRowContaining("tabIndentedValue");
             const context = pendingTerminal.requireRowContaining("unchangedA");
             const header = pendingTerminal.requireRowContaining("Patched src/colors.ts");
@@ -1732,8 +1773,10 @@ export const grownWriteTwelve = 12;
             pendingTerminal.assertNeutralRange(sentinel, 0, pendingTerminal.columns);
             const paddingRow = pendingTerminal.rowRange(sentinel.index + 1, sentinel.index + 2)[0];
             expect(paddingRow?.text).toBe("");
+
             if (paddingRow === undefined)
                 throw new Error("expected blank padding after style sentinel");
+
             pendingTerminal.assertNeutralRange(paddingRow, 0, pendingTerminal.columns);
 
             for (const neutralRow of [context, header, sentinel, paddingRow]) {
@@ -1747,6 +1790,7 @@ export const grownWriteTwelve = 12;
                     ),
                 ).toBe(true);
             }
+
             pendingTerminal.assertNoWrappedRows();
             pendingTerminal.assertRowsFitWidth();
         },

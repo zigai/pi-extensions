@@ -52,7 +52,9 @@ export class PreviewStore<TPreview> {
 
     set(toolCallId: string, preview: TPreview): void {
         this.delete(toolCallId);
+
         const previewBytes = this.measureBytes?.(preview) ?? 0;
+
         this.previewsByToolCallId.set(toolCallId, preview);
         this.previewBytesByToolCallId.set(toolCallId, previewBytes);
         this.totalBytes += previewBytes;
@@ -80,6 +82,7 @@ export class PreviewStore<TPreview> {
         if (!this.previewsByToolCallId.delete(toolCallId)) {
             return;
         }
+
         this.totalBytes -= this.previewBytesByToolCallId.get(toolCallId) ?? 0;
         this.previewBytesByToolCallId.delete(toolCallId);
     }

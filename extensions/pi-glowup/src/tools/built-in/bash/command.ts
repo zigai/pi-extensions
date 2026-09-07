@@ -61,6 +61,7 @@ class BashLayoutCollector {
         ) {
             return;
         }
+
         const normalizedIndent = Math.max(0, Math.min(MAX_LAYOUT_DEPTH, indent));
         const existing = this.#breakpoints.get(index);
         this.#breakpoints.set(
@@ -79,6 +80,7 @@ class BashLayoutCollector {
 
     walkScript(script: ParsedScript): void {
         if (script.commands.length > 1) this.#structurallyComplex = true;
+
         for (const [index, statement] of script.commands.entries()) {
             if (index > 0) this.add(statement.pos, 0);
             this.walkNode(statement, 0, 0);
@@ -87,6 +89,7 @@ class BashLayoutCollector {
 
     walkCompoundList(list: CompoundList, indent: number, depth: number): void {
         if (depth > MAX_LAYOUT_DEPTH) return;
+
         for (const [index, statement] of list.commands.entries()) {
             if (index > 0) this.add(statement.pos, indent);
             this.walkNode(statement, indent, depth + 1);
@@ -112,6 +115,7 @@ class BashLayoutCollector {
             this.walkCompoundList(node.else, indent + 1, depth + 1);
             closingSearchStart = node.else.end;
         }
+
         const closingIndex = keywordIndex(this.#source, closingSearchStart, node.end, "fi");
         if (closingIndex !== undefined) this.add(closingIndex, indent);
     }
@@ -124,12 +128,14 @@ class BashLayoutCollector {
     ): void {
         this.add(node.body.pos, indent + 1);
         this.walkCompoundList(node.body, indent + 1, depth + 1);
+
         const closingIndex = keywordIndex(this.#source, node.body.end, node.end, closingKeyword);
         if (closingIndex !== undefined) this.add(closingIndex, indent);
     }
 
     walkNode(node: Node, indent: number, depth: number): void {
         if (depth > MAX_LAYOUT_DEPTH) return;
+
         switch (node.type) {
             case "Statement":
                 this.walkNode(node.command, indent, depth + 1);
@@ -139,6 +145,7 @@ class BashLayoutCollector {
                 if (node.commands.length >= 3 && hasStepBoundary) {
                     this.#structurallyComplex = true;
                 }
+
                 for (const [index, command] of node.commands.entries()) {
                     if (index > 0) {
                         const previous = node.commands[index - 1];
@@ -155,14 +162,17 @@ class BashLayoutCollector {
                             }
                         }
                     }
+
                     this.walkNode(command, indent, depth + 1);
                 }
+
                 return;
             }
             case "Pipeline":
                 for (const command of node.commands) {
                     this.walkNode(command, indent, depth + 1);
                 }
+
                 return;
             case "If":
                 this.#structurallyComplex = true;
@@ -177,10 +187,12 @@ class BashLayoutCollector {
                 return;
             case "Case": {
                 this.#structurallyComplex = true;
+
                 for (const item of node.items) {
                     this.add(item.pos, indent + 1);
                     this.add(item.body.pos, indent + 2);
                     this.walkCompoundList(item.body, indent + 2, depth + 1);
+
                     if (item.terminator !== undefined) {
                         const terminator = operatorIndex(
                             this.#source,
@@ -193,6 +205,7 @@ class BashLayoutCollector {
                         }
                     }
                 }
+
                 const finalItemEnd = node.items.at(-1)?.end ?? node.word.end;
                 const closingIndex = keywordIndex(this.#source, finalItemEnd, node.end, "esac");
                 if (closingIndex !== undefined) this.add(closingIndex, indent);
@@ -207,6 +220,7 @@ class BashLayoutCollector {
                 this.#structurallyComplex = true;
                 this.add(node.body.pos, indent + 1);
                 this.walkCompoundList(node.body, indent + 1, depth + 1);
+
                 const closingIndex = this.#source.lastIndexOf("}", node.end - 1);
                 if (closingIndex >= node.body.end) this.add(closingIndex, indent);
                 return;
@@ -215,6 +229,7 @@ class BashLayoutCollector {
                 this.#structurallyComplex = true;
                 this.add(node.body.pos, indent + 1);
                 this.walkCompoundList(node.body, indent + 1, depth + 1);
+
                 const closingIndex = this.#source.lastIndexOf(")", node.end - 1);
                 if (closingIndex >= node.body.end) this.add(closingIndex, indent);
                 return;
@@ -244,6 +259,7 @@ class BashLayoutCollector {
             start = breakpoint.index;
             indent = breakpoint.indent;
         }
+
         const tail = this.#source.slice(start).trim();
         if (tail.length > 0) lines.push(`${INDENT.repeat(indent)}${tail}`);
         return lines.length > 1 ? lines.join("\n") : undefined;
@@ -274,10 +290,12 @@ function analyzeBashLayout(
     } catch {
         return unchanged;
     }
+
     if ((script.errors?.length ?? 0) > 0) return unchanged;
 
     const collector = new BashLayoutCollector(command, operatorPosition);
     collector.walkScript(script);
+
     return {
         reflowedCommand: collector.render(),
         structurallyComplex: collector.structurallyComplex,

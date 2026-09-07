@@ -7,5 +7,6 @@ export function parseScriptPreviewHeaderLayout(
     if (normalized === "inline" || normalized === "block") {
         return normalized;
     }
+
     return "auto";
 }

@@ -8,7 +8,6 @@ import { neutralizeTerminalControls } from "../text-boundaries.ts";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 
 const MAX_COMPONENT_CACHE_LINES = 300;
-
 const MAX_COMPONENT_CACHE_BYTES = 128 * 1024;
 
 export function makeComponent(renderLines: (width: number) => string[]): Component {
@@ -32,6 +31,7 @@ export function makeComponent(renderLines: (width: number) => string[]): Compone
                 cachedWidth = undefined;
                 cachedLines = undefined;
             }
+
             return rendered;
         },
         invalidate(): void {
@@ -53,6 +53,7 @@ function shouldCacheRenderedLines(lines: ReadonlyArray<string>): boolean {
             return false;
         }
     }
+
     return true;
 }
 
@@ -66,6 +67,7 @@ export function wrapStyledText(text: string, width: number): string[] {
     if (wrapped.length === 0) {
         return [""];
     }
+
     return wrapped.map((line) => truncateToWidth(line, safeWidth, ""));
 }
 
@@ -81,12 +83,10 @@ export function wrapSinglePhysicalLineWithContinuation(
     );
     const segments = wrapStyledText(line, contentWidth);
     const rendered: string[] = [];
-
     for (const [index, segment] of segments.entries()) {
         const prefix = index === 0 ? firstPrefix : continuationPrefix;
         rendered.push(truncateToWidth(`${prefix}${segment}`, width, ""));
     }
-
     return rendered;
 }
 
@@ -99,14 +99,12 @@ export function wrapPrefixedLine(
     const normalized = (text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     const physicalLines = normalized.split("\n");
     const rendered: string[] = [];
-
     for (const physicalLine of physicalLines) {
         const prefix = rendered.length === 0 ? firstPrefix : restPrefix;
         rendered.push(
             ...wrapSinglePhysicalLineWithContinuation(physicalLine, width, prefix, restPrefix),
         );
     }
-
     return rendered;
 }
 

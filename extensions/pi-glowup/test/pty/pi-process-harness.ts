@@ -82,6 +82,7 @@ function screenRows(terminal: HeadlessTerminal): readonly PtyScreenRow[] {
 function rowsText(rows: readonly PtyScreenRow[]): string {
     const texts = rows.map((row) => row.text);
     while (texts.at(-1) === "") texts.pop();
+
     return texts.join("\n");
 }
 
@@ -111,7 +112,9 @@ export class PiPtyProcess {
             rows: options.rows,
             scrollback: 4_000,
         });
+
         const cliPath = realpathSync(resolve("node_modules/.bin/pi"));
+
         const args = [
             cliPath,
             "--provider",
@@ -128,6 +131,7 @@ export class PiPtyProcess {
             ...(options.sessionPath === undefined ? [] : ["--session", options.sessionPath]),
             ...(options.initialPrompt === undefined ? [] : [options.initialPrompt]),
         ];
+
         this.command = [process.execPath, ...args];
         this.process = spawn(process.execPath, args, {
             name: "xterm-256color",
@@ -163,17 +167,21 @@ export class PiPtyProcess {
         const deadline = performance.now() + timeoutMs;
         while (performance.now() < deadline) {
             await this.parseQueue;
+
             const match = this.capturedFrames.find(
                 (frame) => frame.sequence >= startSequence && predicate(frame),
             );
             if (match !== undefined) return match;
+
             if (this.exitState !== undefined) {
                 throw new Error(
                     `Pi exited before the requested screen appeared (${this.exitState.exitCode})`,
                 );
             }
+
             await delay(20);
         }
+
         throw new Error(`Timed out after ${timeoutMs}ms waiting for a Pi screen transition`);
     }
 
@@ -193,21 +201,28 @@ export class PiPtyProcess {
     async stop(): Promise<ProcessExit> {
         if (this.exitState !== undefined) return this.exitState;
         this.process.write("\u0004");
+
         const graceful = await Promise.race([this.exitPromise, delay(1_500).then(() => undefined)]);
         if (graceful !== undefined) {
             await this.parseQueue;
             return graceful;
         }
+
         this.process.kill();
+
         const exit = await this.exitPromise;
+
         await this.parseQueue;
+
         return exit;
     }
 
     async writeFailureArtifacts(testName: string, cause: unknown): Promise<void> {
         await this.parseQueue;
+
         const artifactDirectory = resolve("artifacts/pty");
         mkdirSync(artifactDirectory, { recursive: true });
+
         const artifactBase = resolve(artifactDirectory, testName.replace(/[^a-z0-9-]+/giu, "-"));
         writeFileSync(`${artifactBase}.ansi`, this.rawOutput);
         writeFileSync(
@@ -234,8 +249,10 @@ export class PiPtyProcess {
             this.process.kill();
             throw new Error(`Pi PTY output exceeded ${MAX_RAW_OUTPUT_BYTES} bytes`);
         }
+
         this.rawOutput += data;
         this.pendingAnsi += data;
+
         let frameEnd = this.pendingAnsi.indexOf(SYNCHRONIZED_OUTPUT_END);
         while (frameEnd >= 0) {
             const boundary = frameEnd + SYNCHRONIZED_OUTPUT_END.length;
@@ -249,6 +266,7 @@ export class PiPtyProcess {
     private flushTrailingAnsi(): void {
         if (this.pendingAnsi.length === 0) return;
         const trailing = this.pendingAnsi;
+
         this.pendingAnsi = "";
         this.enqueueAnsi(trailing);
     }
@@ -267,6 +285,7 @@ export class PiPtyProcess {
 
     private captureFrame(): void {
         const rows = screenRows(this.terminal);
+
         this.capturedFrames.push({
             sequence: this.capturedFrames.length,
             elapsedMs: Math.round(performance.now() - this.startedAt),

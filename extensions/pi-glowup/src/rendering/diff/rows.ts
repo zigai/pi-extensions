@@ -35,6 +35,7 @@ export function buildUnifiedDiffRows(
             options.onRowBuilt?.();
             budgetReached = pushBudgetedRow(rows, row, options.maxRows);
         }
+
         return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
     };
     const pushLazyRow = (createRow: () => UnifiedDiffRow): boolean => {
@@ -48,6 +49,7 @@ export function buildUnifiedDiffRows(
             options.onRowBuilt?.();
             budgetReached = pushBudgetedRow(rows, createRow(), options.maxRows);
         }
+
         return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
     };
 
@@ -96,6 +98,7 @@ export function buildUnifiedDiffRows(
                         return trimEdgeCollapsedRows(rows);
                     }
                 }
+
                 deletionLineIndex += content.lines;
                 additionLineIndex += content.lines;
                 deletionLineNumber += content.lines;
@@ -149,6 +152,7 @@ export function buildUnifiedDiffRows(
                         return trimEdgeCollapsedRows(rows);
                     }
                 }
+
                 for (let offset = 0; offset < content.additions; offset += 1) {
                     if (pushLazyRow(() => makeAdditionRow(offset))) {
                         return trimEdgeCollapsedRows(rows);
@@ -232,6 +236,7 @@ export function buildSplitDiffRows(
             options.onRowBuilt?.();
             budgetReached = pushBudgetedRow(rows, row, options.maxRows);
         }
+
         return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
     };
     const pushLazyRow = (createRow: () => SplitDiffRow): boolean => {
@@ -245,6 +250,7 @@ export function buildSplitDiffRows(
             options.onRowBuilt?.();
             budgetReached = pushBudgetedRow(rows, createRow(), options.maxRows);
         }
+
         return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
     };
 
@@ -282,6 +288,7 @@ export function buildSplitDiffRows(
                                     ),
                                 metadata.lang,
                             );
+
                             return {
                                 kind: "line",
                                 deletion: makeSplitCell({
@@ -302,6 +309,7 @@ export function buildSplitDiffRows(
                         return trimEdgeCollapsedRows(rows);
                     }
                 }
+
                 deletionLineIndex += content.lines;
                 additionLineIndex += content.lines;
                 deletionLineNumber += content.lines;
@@ -424,6 +432,7 @@ function orderUnifiedReplacementRows(
         ) {
             return focusedReplacementRows(deletion, addition);
         }
+
         return [...deletions, ...additions];
     }
 
@@ -433,6 +442,7 @@ function orderUnifiedReplacementRows(
     for (const pair of pairs) {
         rows.push(...deletions.slice(deletionIndex, pair.deletionIndex));
         rows.push(...additions.slice(additionIndex, pair.additionIndex));
+
         const deletion = deletions[pair.deletionIndex];
         const addition = additions[pair.additionIndex];
         if (deletion !== undefined && addition !== undefined) {
@@ -441,11 +451,14 @@ function orderUnifiedReplacementRows(
             if (deletion !== undefined) rows.push(deletion);
             if (addition !== undefined) rows.push(addition);
         }
+
         deletionIndex = pair.deletionIndex + 1;
         additionIndex = pair.additionIndex + 1;
     }
+
     rows.push(...deletions.slice(deletionIndex));
     rows.push(...additions.slice(additionIndex));
+
     return rows;
 }
 
@@ -454,6 +467,7 @@ function focusedReplacementRows(
     addition: UnifiedLineRow,
 ): readonly [UnifiedLineRow, UnifiedLineRow] {
     const focus = replacementFocusColumns(unifiedRowText(deletion), unifiedRowText(addition));
+
     return [
         focus.before === undefined ? deletion : { ...deletion, focusColumn: focus.before },
         focus.after === undefined ? addition : { ...addition, focusColumn: focus.after },
@@ -468,16 +482,20 @@ function pushBudgetedRow<TRow>(rows: TRow[], row: TRow, maxRows: number | undefi
     if (maxRows !== undefined && rows.length >= Math.max(1, Math.floor(maxRows))) {
         return true;
     }
+
     rows.push(row);
+
     return maxRows !== undefined && rows.length >= Math.max(1, Math.floor(maxRows));
 }
 
 function maximumSetValue(values: ReadonlySet<number> | undefined): number | undefined {
     let maximum: number | undefined;
     if (values === undefined) return maximum;
+
     for (const value of values) {
         maximum = maximum === undefined ? value : Math.max(maximum, value);
     }
+
     return maximum;
 }
 
@@ -486,12 +504,14 @@ function trimEdgeCollapsedRows<TRow extends { readonly kind: string }>(
 ): ReadonlyArray<TRow> {
     let start = 0;
     let end = rows.length;
+
     while (rows[start]?.kind === "collapsed") {
         start += 1;
     }
     while (end > start && rows[end - 1]?.kind === "collapsed") {
         end -= 1;
     }
+
     return rows.slice(start, end);
 }
 
@@ -499,11 +519,13 @@ function makeUnifiedLine(options: {
     readonly lineType: "context" | "addition" | "deletion";
     readonly oldLineNumber?: number;
     readonly newLineNumber?: number;
+
     readonly spans: ReadonlyArray<{
         readonly text: string;
         readonly fg?: string;
         readonly bg?: string;
     }>;
+
     readonly palette: PierreTerminalPalette;
 }): UnifiedLineRow {
     const colors = colorsForLineType(options.lineType, options.palette);
@@ -528,14 +550,17 @@ function makeUnifiedLine(options: {
 function makeSplitCell(options: {
     readonly lineType: "context" | "addition" | "deletion";
     readonly lineNumber: number;
+
     readonly spans: ReadonlyArray<{
         readonly text: string;
         readonly fg?: string;
         readonly bg?: string;
     }>;
+
     readonly palette: PierreTerminalPalette;
 }): SplitDiffCell {
     const colors = colorsForLineType(options.lineType, options.palette);
+
     return {
         lineType: options.lineType,
         lineNumber: options.lineNumber,
@@ -571,6 +596,7 @@ function colorsForLineType(
     if (lineType === "deletion") {
         return { fg: palette.deletionFg, bg: palette.deletionRowBg };
     }
+
     return { fg: palette.contextFg, bg: palette.contextRowBg };
 }
 
@@ -584,6 +610,5 @@ export function hasTrailingCollapsedLines(metadata: FileDiffMetadata): boolean {
         metadata.additionLines.length - (lastHunk.additionLineIndex + lastHunk.additionCount);
     const deletionRemaining =
         metadata.deletionLines.length - (lastHunk.deletionLineIndex + lastHunk.deletionCount);
-
     return additionRemaining === deletionRemaining && Math.max(additionRemaining, 0) > 0;
 }

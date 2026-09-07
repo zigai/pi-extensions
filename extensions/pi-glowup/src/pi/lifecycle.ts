@@ -69,11 +69,8 @@ const opaqueObjectParser = {
 };
 
 const EXTENSION_LOADED_KEY = Symbol.for("zigai.pi-glowup.extension-loaded");
-
 const PRESERVE_TOOLS_ENV = "PI_GLOWUP_PRESERVE_TOOLS";
-
 const SCRIPT_FORMATTERS_ENV = "PI_GLOWUP_SCRIPT_FORMATTERS";
-
 const SCRIPT_HEADER_LAYOUT_ENV = "PI_GLOWUP_SCRIPT_HEADER_LAYOUT";
 
 function thirdPartyToolRenderingOptions(config: GlowupConfig): ThirdPartyToolRenderingOptions {
@@ -124,6 +121,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     if (guardedPi[EXTENSION_LOADED_KEY] === true) {
         return;
     }
+
     guardedPi[EXTENSION_LOADED_KEY] = true;
 
     const edit = createNativeEditFeature();
@@ -158,6 +156,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         reportWarning,
     });
     debugLogger.configure(config.debugLog);
+
     let formatter = scriptBlockFormatter(config, reportWarning);
     let headerLayout = scriptPreviewHeaderLayout(config);
     let sessionGeneration = 0;
@@ -222,6 +221,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
     // Only mutation calls wait for asynchronous preimage capture.
     pi.on("tool_call", (event, ctx): Promise<void> | undefined => {
         startPendingSyntaxHighlighting();
+
         const command = commandField(event.input);
         const builtInToolName = canonicalBuiltInToolName(event.toolName);
         const preimageCapture =
@@ -240,6 +240,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                         config.mutations,
                     )
                   : undefined;
+
         debugLogger.record("tool_call", () => ({
             toolName: event.toolName,
             builtInToolName: canonicalBuiltInToolName(event.toolName),
@@ -248,12 +249,14 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             commandBytes: textByteLength(command),
             ...diagnosticSnapshot(),
         }));
+
         if (
             !isToolCallEventType("bash", event) &&
             compatBuiltInToolName(event.toolName) !== "bash"
         ) {
             return preimageCapture;
         }
+
         if (command !== undefined) {
             bash.remember(event.toolCallId, command);
             debugLogger.record("script_preview_remembered", () => ({
@@ -262,6 +265,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                 ...diagnosticSnapshot(),
             }));
         }
+
         return preimageCapture;
     });
 
@@ -269,10 +273,12 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         let scheduledFormattedPreview = false;
         let storedEditPreview = false;
         let persistedEditPierrePayload: PierreDiffPayload | undefined;
+
         if (event.toolName === "bash" || compatBuiltInToolName(event.toolName) === "bash") {
             const command = commandField(event.input);
             if (command !== undefined) {
                 const formatterGeneration = sessionGeneration;
+
                 scheduledFormattedPreview = bash.schedule({
                     toolCallId: event.toolCallId,
                     command,
@@ -294,6 +300,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                 config.mutations,
             );
         }
+
         const completedDiff =
             rendersAsEdit && !event.isError ? diffDetailsParser.parse(event.details) : undefined;
         if (completedDiff !== undefined) {
@@ -305,6 +312,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }
 
         const output = textOutput(event);
+
         debugLogger.record("tool_result", () => ({
             toolName: event.toolName,
             builtInToolName: canonicalBuiltInToolName(event.toolName),
@@ -316,6 +324,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             ...detailsDiagnostics(event.details),
             ...diagnosticSnapshot(),
         }));
+
         if (persistedEditPierrePayload !== undefined) {
             const details = {
                 ...opaqueObjectParser.parse(event.details),
@@ -323,11 +332,13 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             };
             return { details };
         }
+
         return undefined;
     });
 
     pi.on("session_start", async (_event, ctx) => {
         sessionGeneration += 1;
+
         const nextConfig = readGlowupConfig(
             { cwd: ctx.cwd, reportWarning },
             { includeProjectConfig: ctx.isProjectTrusted() },
@@ -383,9 +394,11 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         configureThirdPartyToolRendererPatch(false);
         configureBuiltInToolRendererPatch(false);
         await syntax.settle();
+
         if (event.reason === "quit") {
             await disposeSyntaxHighlighting();
         }
+
         debugLogger.record("session_shutdown", () => ({
             phase: "after_reset",
             ...diagnosticSnapshot(),

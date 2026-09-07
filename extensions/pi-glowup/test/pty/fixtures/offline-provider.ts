@@ -93,6 +93,7 @@ function streamCompletedToolCall(
     stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
     stream.push({ type: "done", reason: "toolUse", message: output });
     stream.end();
+
     return stream;
 }
 
@@ -107,6 +108,7 @@ function streamTextResponse(model: Model<string>): AssistantMessageEventStream {
     stream.push({ type: "text_end", contentIndex: 0, content: text, partial: output });
     stream.push({ type: "done", reason: "stop", message: output });
     stream.end();
+
     return stream;
 }
 
@@ -150,10 +152,12 @@ function streamPatchResponse(
     const abort = (): void => fail(options?.signal?.reason ?? new Error("offline stream aborted"));
     const emitNext = (): void => {
         if (finished) return;
+
         if (options?.signal?.aborted === true) {
             abort();
             return;
         }
+
         const snapshot = snapshots[snapshotIndex];
         if (snapshotIndex < snapshots.length) {
             toolCall.arguments = snapshot === undefined ? {} : { patch: snapshot };
@@ -204,6 +208,7 @@ function streamWrappingEditResponse(model: Model<string>): AssistantMessageEvent
             edits: [{ oldText: wrappingEditOldText, newText: wrappingEditNewText }],
         },
     };
+
     return streamCompletedToolCall(model, toolCall);
 }
 
@@ -220,6 +225,7 @@ function streamBashLayoutResponse(model: Model<string>): AssistantMessageEventSt
                 `*) printf '%s\\n' 'platform:other';; esac`,
         },
     };
+
     return streamCompletedToolCall(model, toolCall);
 }
 
@@ -264,10 +270,12 @@ function streamReclassifiedBashResponse(
     const abort = (): void => fail(options?.signal?.reason ?? new Error("offline stream aborted"));
     const emitNext = (): void => {
         if (finished) return;
+
         if (options?.signal?.aborted === true) {
             abort();
             return;
         }
+
         const snapshot = snapshots[snapshotIndex];
         if (snapshot !== undefined) {
             toolCall.arguments = { command: snapshot };
@@ -362,6 +370,7 @@ function latestUserText(context: Context): string {
             .map((content) => content.text)
             .join("\n");
     }
+
     return "";
 }
 
@@ -393,6 +402,7 @@ function streamOfflineProvider(
     if (prompt.includes("deterministic inline python pipeline")) {
         return streamInlinePythonPipelineResponse(model);
     }
+
     return streamPatchResponse(model, options);
 }
 
@@ -428,6 +438,7 @@ export default function offlinePtyProvider(pi: ExtensionAPI): void {
                     const addedLineCount = params.patch
                         .split(/\r?\n/gu)
                         .filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
+
                     return Promise.resolve({
                         content: [{ type: "text" as const, text: "Done!" }],
                         details: {

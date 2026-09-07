@@ -45,6 +45,7 @@ function toneText(theme: GlowupRenderTheme, value: GlowupInline): string {
             case undefined:
                 return "toolTitle";
         }
+
         return "toolTitle";
     })();
     const styled = theme.fg(token, value.text);
@@ -59,11 +60,13 @@ function statusLabel(
     if (mode === "lifecycle" && context.isError && labels.failed !== undefined) {
         return labels.failed;
     }
+
     const lifecycle = {
         static: labels.static,
         active: labels.running ?? `Calling ${labels.static}`,
         completed: labels.completed ?? `Called ${labels.static}`,
     };
+
     return toolStatusLabel(mode, context, lifecycle);
 }
 
@@ -99,6 +102,7 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                     if (item.kind === "text" && ("tone" in item || "bold" in item)) {
                         return `• ${toneText(theme, item)}`;
                     }
+
                     return `• ${nodeText(item, theme)}`;
                 })
                 .join("\n");
@@ -158,9 +162,11 @@ export function renderProtocolNode(
             if (node.syntax !== undefined) {
                 outputOptions = { ...outputOptions, syntax: node.syntax };
             }
+
             const content = renderGlowupOutput(theme, node.text, outputOptions);
             if (node.title === undefined) return content;
             const title = renderGlowupBody(toneText(theme, node.title));
+
             return makeComponent((width) => [...title.render(width), ...content.render(width)]);
         }
         case "list":
@@ -180,6 +186,7 @@ export function renderProtocolNode(
             if (node.syntax !== undefined) {
                 outputOptions = { ...outputOptions, syntax: node.syntax };
             }
+
             return renderGlowupOutput(theme, node.text, outputOptions);
         }
         case "mutation": {
@@ -190,6 +197,7 @@ export function renderProtocolNode(
             if (mutationSettings !== undefined) {
                 mutationOptions = { ...mutationOptions, mutationSettings };
             }
+
             return renderProtocolMutation(node, theme, context, mutationOptions);
         }
         case "call": {
@@ -205,14 +213,17 @@ export function renderProtocolNode(
             } else if (node.preview?.expandable !== undefined) {
                 headerOptions = { ...headerOptions, expandable: node.preview.expandable };
             }
+
             if (node.body === undefined || node.body.kind === "text") {
                 return renderThirdPartyCall(theme, {
                     ...headerOptions,
                     body: node.body === undefined ? undefined : nodeText(node.body, theme),
                 });
             }
+
             const header = renderThirdPartyCall(theme, headerOptions);
             const body = renderProtocolNode(node.body, theme, context, labelMode, mutationSettings);
+
             return makeComponent((width) => [...header.render(width), ...body.render(width)]);
         }
         case "stack": {
@@ -230,10 +241,12 @@ export function renderProtocolNode(
             const rendered = makeComponent((width) =>
                 children.flatMap((child) => child.render(width)),
             );
+
             return {
                 render: (width) => rendered.render(width),
                 invalidate() {
                     for (const child of children) child.invalidate();
+
                     // Text and headers bake theme colors when constructed.
                     children = buildChildren();
                     rendered.invalidate();

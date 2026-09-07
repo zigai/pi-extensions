@@ -57,9 +57,11 @@ export function canonicalBuiltInToolName(toolName: string): BuiltInToolName | un
     if (nativeName !== undefined) {
         return nativeName;
     }
+
     const compatibleName = compatBuiltInToolName(toolName);
     if (compatibleName !== undefined) {
         return compatibleName;
     }
+
     return toolName === "delete" || toolName === "webSearch" ? toolName : undefined;
 }

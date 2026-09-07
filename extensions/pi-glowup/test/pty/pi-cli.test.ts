@@ -45,6 +45,7 @@ function createFixtureWorkspace(workspaceName = "workspace"): FixtureWorkspace {
         "utf8",
     ).replace("/deterministic/pty-fixture", () => JSON.stringify(cwd).slice(1, -1));
     writeFileSync(sessionPath, sessionFixture);
+
     return { root, cwd, agentDir, sessionPath };
 }
 
@@ -88,10 +89,12 @@ function expectTerminalInvariants(frame: PtyScreenFrame, internalPaths: readonly
     expect(frame.text).not.toContain("�");
     expect(frame.text).not.toMatch(/"patch"\s*:/u);
     expect(frame.text).not.toContain("artifacts/pty");
+
     for (const internalPath of internalPaths) expect(frame.text).not.toContain(internalPath);
     expect(
         countMatches(frame.text, /\b(?:Patching|Patched|Failed to patch)\b/gu),
     ).toBeLessThanOrEqual(1);
+
     for (const row of frame.rows) {
         expect(visibleWidth(row.text)).toBeLessThanOrEqual(frame.columns);
         expect(row.isWrapped).toBe(false);
@@ -105,15 +108,18 @@ function trailingBlankRowsBefore(frame: PtyScreenFrame, text: string): number {
     for (let index = end - 1; index >= 0 && frame.rows[index]?.text.trim() === ""; index -= 1) {
         blanks += 1;
     }
+
     return blanks;
 }
 
 function lifecycleState(frame: PtyScreenFrame): string | undefined {
     if (frame.text.includes("Patched src/current.ts")) return "completed";
     if (frame.text.includes("Patching src/current.ts")) return "rewritten";
+
     if (frame.text.includes("Patching src/obsolete.ts") && !frame.text.includes("staleTailTwo")) {
         return "shrunk";
     }
+
     if (frame.text.includes("Patching src/obsolete.ts")) return "obsolete";
     if (/\bPatching\b/u.test(frame.text)) return "header";
     return undefined;
@@ -125,6 +131,7 @@ function compressedLifecycle(frames: readonly PtyScreenFrame[]): readonly string
         const state = lifecycleState(frame);
         if (state !== undefined && states.at(-1) !== state) states.push(state);
     }
+
     return states;
 }
 
@@ -611,17 +618,20 @@ describe("actual Pi CLI in a real PTY", () => {
                 (frame) => lifecycleState(frame) === "rewritten",
             );
             expect(rewrittenIndex).toBeGreaterThanOrEqual(0);
+
             for (const frame of lifecycleFrames.slice(rewrittenIndex)) {
                 expect(frame.text).not.toContain("src/obsolete.ts");
                 expect(frame.text).not.toContain("OBSOLETE_STREAM_MARKER");
                 expect(frame.text).not.toContain("staleTailTwo");
             }
+
             for (const frame of lifecycleFrames) {
                 expectTerminalInvariants(frame, [
                     resolve("test/pty/fixtures/offline-provider.ts"),
                     resolve("artifacts/pty"),
                 ]);
             }
+
             expect(countMatches(completed.text, /Patched src\/current\.ts/gu)).toBe(1);
             expect(completed.text).toContain("CURRENT_STREAM_MARKER");
             expect(completed.text).toContain("🧪");

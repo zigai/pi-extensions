@@ -46,6 +46,7 @@ describe("package manifest", () => {
         for (const external of externalImports) {
             expect(external.startsWith("@earendil-works")).toBe(false);
         }
+
         const publishedFiles = readPackageJson().files;
         for (const file of visitedFiles) {
             expect(publishedFiles, `Public dependency must be shipped: ${file}`).toContain(
@@ -60,6 +61,7 @@ describe("package manifest", () => {
 
     it("keeps Pi core packages as peers instead of bundled runtime dependencies", () => {
         const manifest = readPackageJson();
+
         const piCorePackages = [
             "@earendil-works/pi-coding-agent",
             "@earendil-works/pi-tui",
@@ -71,6 +73,7 @@ describe("package manifest", () => {
             expect(manifest.peerDependencies?.[packageName]).toBe("*");
             expect(manifest.peerDependenciesMeta?.[packageName]?.optional).toBe(true);
         }
+
         expect(manifest.devDependencies?.typebox).toBeDefined();
     });
 });

@@ -6,6 +6,7 @@ const terminals: VirtualTerminal[] = [];
 function createTerminal(columns = 20, rows = 6): VirtualTerminal {
     const terminal = new VirtualTerminal(columns, rows);
     terminals.push(terminal);
+
     return terminal;
 }
 

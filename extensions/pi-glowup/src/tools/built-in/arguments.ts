@@ -16,11 +16,13 @@ import { type WriteCallArgs } from "./write-preview.ts";
 export function textOutput(result: TextResult): string | undefined {
     const content = jsonValueParser.parse(result.content);
     if (!isJsonArray(content)) return undefined;
+
     for (const item of content) {
         if (!isRecord(item) || item.type !== "text") continue;
         const text = stringParser.parse(item.text);
         if (text !== undefined) return text;
     }
+
     return undefined;
 }
 
@@ -32,6 +34,7 @@ function stringFieldFrom(args: unknown, keys: readonly string[]): string | undef
             return field;
         }
     }
+
     return undefined;
 }
 
@@ -48,6 +51,7 @@ function numberField(args: unknown, key: string): number | undefined {
     if (!isRecord(parsed)) {
         return undefined;
     }
+
     return numberParser.parse(parsed[key]);
 }
 
@@ -76,6 +80,7 @@ function replacementEditFromArgs(args: unknown): ReadonlyArray<EditTextPair> | u
     if (oldText === undefined || newText === undefined) {
         return undefined;
     }
+
     return [{ oldText, newText }];
 }
 

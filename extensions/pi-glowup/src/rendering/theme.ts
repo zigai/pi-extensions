@@ -149,6 +149,7 @@ export function instructionPathText(theme: GlowupRenderTheme, text: string): str
     if (renderingAppearance.instructionPathColor !== null) {
         return `${trueColorOpen(renderingAppearance.instructionPathColor, false)}${text}${ansiStyles.color.close}`;
     }
+
     return theme.fg("customMessageLabel", text);
 }
 
@@ -177,5 +178,6 @@ export function renderBullet(theme: GlowupRenderTheme, state: GlowupCallState): 
     if (state === "muted") {
         return dim(theme, indicator);
     }
+
     return muted(theme, indicator);
 }

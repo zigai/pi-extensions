@@ -621,6 +621,7 @@ describe("central syntax highlighting", () => {
             canBuildPierreDiff: true,
         });
         expect(payload).toBeDefined();
+
         if (payload?.kind !== "renderable") {
             throw new Error("expected renderable Pierre diff payload");
         }

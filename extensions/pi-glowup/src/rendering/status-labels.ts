@@ -24,6 +24,7 @@ export function shouldDeferSimpleToolCall(context: ToolLifecycleContext): boolea
     if (context.result !== undefined || context.executionStarted === true) {
         return false;
     }
+
     return context.argsComplete === false;
 }
 
@@ -36,5 +37,6 @@ export function toolStatusLabel(
     if (mode === "static") {
         return labels.static;
     }
+
     return isActiveToolCall(context) ? labels.active : labels.completed;
 }

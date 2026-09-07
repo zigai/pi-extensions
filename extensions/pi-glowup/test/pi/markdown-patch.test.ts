@@ -60,12 +60,14 @@ describe("markdown syntax patch", () => {
                 const highlightCode = this.theme?.highlightCode;
                 if (highlightCode === undefined) throw new Error("expected injected highlighter");
                 highlightedFunctions.push(highlightCode);
+
                 return ["rendered"];
             },
         };
         const themes = Array.from({ length: 20 }, () => makeMarkdownTheme());
 
         configureMarkdownSyntaxPatch(true, prototype);
+
         for (const theme of themes) {
             prototype.render.call({ theme }, 80);
         }
@@ -75,6 +77,7 @@ describe("markdown syntax patch", () => {
         if (firstHighlight === undefined) {
             throw new Error("expected Markdown themes to receive a shared highlight function");
         }
+
         expect(themes.every((theme) => theme.highlightCode === undefined)).toBe(true);
     });
 

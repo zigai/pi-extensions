@@ -13,6 +13,7 @@ export class GlowupExtensionHarness {
     async install(cwd: string, branch: readonly SessionEntry[] = []): Promise<void> {
         this.cwd = cwd;
         glowupExtension(this.api);
+
         const sessionManager = SessionManager.inMemory(cwd);
         const context = createExtensionContext(cwd, {
             mode: "tui",

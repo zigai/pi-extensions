@@ -6,7 +6,7 @@ import {
     ToolExecutionComponent,
     UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Spacer, type Component, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Spacer, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import ansiStyles from "ansi-styles";
 import { hasNonWhitespaceText } from "../../text-boundaries.ts";
 
@@ -23,9 +23,7 @@ type AssistantContent = {
 };
 
 type AssistantMessageLike = Pick<AssistantMessage, "content">;
-
 type AssistantContentKind = "text" | "thinking";
-
 type AssistantAddChildCall = AssistantContentKind | "other";
 
 type AssistantRenderInstance = {
@@ -48,7 +46,6 @@ type AssistantRenderPrototype = {
 };
 
 type ChatComponentKind = "assistant" | "tool" | "user";
-
 type ChatContainerInstance = Container;
 
 type ChatTransitionPatchState = {
@@ -65,6 +62,7 @@ type ChatContainerPrototype = {
 type AssistantPrototypeOwner =
     | typeof AssistantMessageComponent.prototype
     | AssistantRenderPrototype;
+
 type ChatContainerPrototypeOwner = typeof Container.prototype | ChatContainerPrototype;
 
 function renderSeparator(width: number): string {
@@ -102,6 +100,7 @@ function visibleContentKind(content: AssistantContent): AssistantContentKind | u
     if (isVisibleThinkingContent(content)) {
         return "thinking";
     }
+
     return undefined;
 }
 
@@ -118,10 +117,12 @@ function hasVisibleContentAfterByIndex(
     let hasLaterVisibleContent = false;
     for (let index = kinds.length - 1; index >= 0; index -= 1) {
         hasVisibleAfter[index] = hasLaterVisibleContent;
+
         if (kinds[index] !== undefined) {
             hasLaterVisibleContent = true;
         }
     }
+
     return hasVisibleAfter;
 }
 
@@ -130,6 +131,7 @@ function assistantAddChildCalls(message: AssistantMessageLike): AssistantAddChil
     const kinds = visibleContentKinds(message.content);
     const hasVisibleContent = kinds.some((kind) => kind !== undefined);
     const hasVisibleAfter = hasVisibleContentAfterByIndex(kinds);
+
     if (hasVisibleContent) {
         calls.push("other");
     }
@@ -141,14 +143,17 @@ function assistantAddChildCalls(message: AssistantMessageLike): AssistantAddChil
                 index += 1;
                 visibleRun ||= kinds[index] === "thinking";
             }
+
             if (visibleRun) {
                 calls.push("thinking");
+
                 if (hasVisibleAfter[index] === true) calls.push("other");
             }
         } else if (kinds[index] === "text") {
             calls.push("text");
         }
     }
+
     return calls;
 }
 
@@ -174,6 +179,7 @@ function componentKind(component: Component): ChatComponentKind | undefined {
     ) {
         return "user";
     }
+
     return undefined;
 }
 
@@ -203,7 +209,6 @@ function createChatTransitionSeparatorWrapper(
         }
 
         originalAddChild.call(this, component);
-
         if (kind !== undefined) {
             chatComponentKinds.set(this, kind);
         }
@@ -230,7 +235,7 @@ function createThinkingBlockSpacingWrapper(
             return;
         }
 
-        // oxlint-disable-next-line typescript/unbound-method -- SAFETY: The original method is restored after the temporary wrapper and is only invoked with contentContainer as this.
+        // oxlint-disable-next-line typescript/unbound-method -- SAFETY: Saved for restoration and called only with contentContainer as this.
         const originalAddChild = contentContainer.addChild;
         const addChildBeforePatch = (component: Component): void => {
             originalAddChild.call(contentContainer, component);
@@ -245,10 +250,13 @@ function createThinkingBlockSpacingWrapper(
         ): void {
             const call = calls[callIndex];
             callIndex += 1;
+
             if (call === "thinking" && previousVisibleKind === "text") {
                 addChildBeforePatch(new Spacer(1));
             }
+
             addChildBeforePatch(component);
+
             if (call === "text" || call === "thinking") {
                 previousVisibleKind = call;
             }
@@ -305,6 +313,7 @@ function installAssistantPrototypePatch(assistantPrototype: AssistantRenderProto
                   ) {
                       return lines;
                   }
+
                   return linesWithSeparatorSpacing(lines, width);
               }
             : undefined;
@@ -316,6 +325,7 @@ function installAssistantPrototypePatch(assistantPrototype: AssistantRenderProto
     if (wrapperRender !== undefined) {
         assistantPrototype.render = wrapperRender;
     }
+
     if (wrapperUpdateContent !== undefined) {
         assistantPrototype.updateContent = wrapperUpdateContent;
     }
@@ -328,9 +338,11 @@ function installAssistantPrototypePatch(assistantPrototype: AssistantRenderProto
     if (wrapperRender !== undefined) {
         nextState = { ...nextState, wrapperRender };
     }
+
     if (wrapperUpdateContent !== undefined) {
         nextState = { ...nextState, wrapperUpdateContent };
     }
+
     assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY] = nextState;
 }
 
@@ -350,6 +362,7 @@ function installChatPrototypePatch(container: ChatContainerPrototype): void {
     if (wrapperAddChild !== undefined) {
         container.addChild = wrapperAddChild;
     }
+
     nextState = {
         enabled: true,
         originalAddChild,
@@ -357,6 +370,7 @@ function installChatPrototypePatch(container: ChatContainerPrototype): void {
     if (wrapperAddChild !== undefined) {
         nextState = { ...nextState, wrapperAddChild };
     }
+
     container[CHAT_TRANSITION_PATCH_STATE_KEY] = nextState;
 }
 
@@ -373,13 +387,13 @@ function restoreAssistantSeparatorPatch(assistantPrototype: AssistantRenderProto
             assistantPrototype.updateContent !== state.wrapperUpdateContent)
     )
         return;
-
     if (state.wrapperRender !== undefined) {
         restoreAssistantMethod(assistantPrototype, "render", state.originalRender);
     }
     if (state.wrapperUpdateContent !== undefined) {
         restoreAssistantMethod(assistantPrototype, "updateContent", state.originalUpdateContent);
     }
+
     delete assistantPrototype[ASSISTANT_SEPARATOR_PATCH_STATE_KEY];
 }
 
@@ -394,12 +408,14 @@ function restoreChatTransitionPatch(container: ChatContainerPrototype): void {
         if (container.addChild !== state.wrapperAddChild) {
             return;
         }
+
         if (state.originalAddChild === undefined) {
             delete container.addChild;
         } else {
             container.addChild = state.originalAddChild;
         }
     }
+
     delete container[CHAT_TRANSITION_PATCH_STATE_KEY];
 }
 
@@ -412,5 +428,6 @@ function restoreAssistantMethod<TName extends "render" | "updateContent">(
         delete prototype[methodName];
         return;
     }
+
     prototype[methodName] = method;
 }

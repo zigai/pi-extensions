@@ -54,6 +54,7 @@ export function replacementFocusColumns(before: string, after: string): Replacem
     if (before === after) {
         return { before: undefined, after: undefined };
     }
+
     let offset = 0;
     const limit = Math.min(before.length, after.length);
     while (offset < limit) {
@@ -62,6 +63,7 @@ export function replacementFocusColumns(before: string, after: string): Replacem
         if (beforeCodePoint === undefined || beforeCodePoint !== afterCodePoint) break;
         offset += beforeCodePoint > 0xffff ? 2 : 1;
     }
+
     const column = visibleWidth(before.slice(0, offset));
     return { before: column, after: column };
 }
@@ -100,11 +102,11 @@ export function applyBackgroundToTextRanges(
         if (codePoint === undefined) {
             break;
         }
+
         const character = String.fromCodePoint(codePoint);
         output += character;
         index += character.length;
         sourceOffset += character.length;
-
         if (backgroundOpen && range !== undefined && sourceOffset >= range.end) {
             output += background.close;
             backgroundOpen = false;
@@ -121,6 +123,7 @@ export function applyBackgroundToTextRanges(
 function tokenize(text: string): DiffToken[] {
     const tokens: DiffToken[] = [];
     tokenPattern.lastIndex = 0;
+
     for (const match of text.matchAll(tokenPattern)) {
         const start = match.index;
         const value = match[0];
@@ -154,6 +157,7 @@ function longestCommonTokenSubsequence(
     const matchedAfter = new Set<number>();
     let beforeIndex = 0;
     let afterIndex = 0;
+
     while (beforeIndex < before.length && afterIndex < after.length) {
         if (before[beforeIndex]?.text === after[afterIndex]?.text) {
             matchedBefore.add(beforeIndex);
@@ -162,6 +166,7 @@ function longestCommonTokenSubsequence(
             afterIndex += 1;
             continue;
         }
+
         if (
             (lengths[cell(beforeIndex + 1, afterIndex)] ?? 0) >=
             (lengths[cell(beforeIndex, afterIndex + 1)] ?? 0)
@@ -184,6 +189,7 @@ function unmatchedTokenRanges(
         if (matched.has(index)) {
             continue;
         }
+
         const previous = ranges.at(-1);
         if (previous !== undefined && previous.end === token.start) {
             ranges[ranges.length - 1] = { start: previous.start, end: token.end };
@@ -191,6 +197,7 @@ function unmatchedTokenRanges(
             ranges.push({ start: token.start, end: token.end });
         }
     }
+
     return ranges;
 }
 
@@ -202,6 +209,7 @@ function ansiEscapeEnd(text: string, index: number): number | undefined {
     if (text.charCodeAt(index) !== 0x1b) {
         return undefined;
     }
+
     const introducer = text.charCodeAt(index + 1);
     if (introducer === 0x5b) {
         for (let cursor = index + 2; cursor < text.length; cursor += 1) {
@@ -210,8 +218,10 @@ function ansiEscapeEnd(text: string, index: number): number | undefined {
                 return cursor + 1;
             }
         }
+
         return text.length;
     }
+
     if (introducer === 0x5d) {
         for (let cursor = index + 2; cursor < text.length; cursor += 1) {
             if (text.charCodeAt(cursor) === 0x07) {
@@ -221,7 +231,9 @@ function ansiEscapeEnd(text: string, index: number): number | undefined {
                 return cursor + 2;
             }
         }
+
         return text.length;
     }
+
     return Math.min(text.length, index + 2);
 }

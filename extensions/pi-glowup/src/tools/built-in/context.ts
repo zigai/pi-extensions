@@ -61,12 +61,14 @@ export type BuiltInToolRendererOptions = {
         toolCallId: string,
         toolName: string,
     ) => void;
+
     readonly renderCall: (
         toolName: BuiltInToolName,
         args: ToolCallArguments,
         theme: Theme,
         context: BuiltInToolRenderContext,
     ) => Component | undefined;
+
     readonly renderResult: (
         toolName: BuiltInToolName,
         result: ThirdPartyToolResult,
@@ -82,15 +84,11 @@ export type TextResult = {
 };
 
 export type BuiltInRenderTheme = Parameters<BuiltInToolRendererOptions["renderCall"]>[2];
-
 export type BuiltInRenderContext = Parameters<BuiltInToolRendererOptions["renderCall"]>[3];
-
 export type BuiltInResultOptions = Parameters<BuiltInToolRendererOptions["renderResult"]>[2];
 
 const MUTATION_LABEL_COLUMN_WIDTH = "Writing".length;
-
 const ACTIVE_MUTATION_ALIGNMENT_KEY = "glowupActiveMutationAlignment";
-
 const MUTATION_RESULT_RENDERED_KEY = "glowupMutationResultRendered";
 
 const mutableRenderStateSchema = Type.Object(

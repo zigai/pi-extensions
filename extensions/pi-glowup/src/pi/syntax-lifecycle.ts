@@ -21,6 +21,7 @@ async function loadSyntaxHighlighting(options: SyntaxHighlightingLifecycleOption
                       enabled: options.config.syntax.projectLanguageDetection.enabled,
                       cwd: options.cwd,
                   };
+
         await refreshSyntaxHighlighting(process.env, {
             preloadLanguages: options.config.syntax.preloadLanguages,
             projectLanguageDetection,
@@ -56,15 +57,18 @@ export function createSyntaxLifecycle(options: {
         const pending = pendingSyntaxStart;
         if (pending === undefined) return;
         pendingSyntaxStart = undefined;
+
         if (syntaxTimer !== undefined) {
             clearTimeout(syntaxTimer);
             syntaxTimer = undefined;
         }
+
         const syntaxTask = loadSyntaxHighlighting(pending.options);
         pendingSyntaxTasks.add(syntaxTask);
         void syntaxTask
             .then(() => {
                 pendingSyntaxTasks.delete(syntaxTask);
+
                 if (generation() !== pending.generation) return;
                 refreshToolRows(pending.context);
                 debugLogger.record("session_start", () => ({
@@ -94,14 +98,17 @@ export function createSyntaxLifecycle(options: {
 
     function cancel(): void {
         pendingSyntaxStart = undefined;
+
         if (syntaxTimer !== undefined) {
             clearTimeout(syntaxTimer);
             syntaxTimer = undefined;
         }
     }
+
     async function settle(): Promise<void> {
         await Promise.allSettled(pendingSyntaxTasks);
         pendingSyntaxTasks.clear();
     }
+
     return { startPendingSyntaxHighlighting, scheduleSyntaxHighlighting, cancel, settle };
 }

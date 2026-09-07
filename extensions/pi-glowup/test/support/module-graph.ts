@@ -15,12 +15,14 @@ export function readModuleGraph(entries: readonly string[]) {
         const from = resolve(file);
         if (visited.has(from)) return;
         visited.add(from);
+
         const source = ts.createSourceFile(
             from,
             readFileSync(from, "utf8"),
             ts.ScriptTarget.Latest,
             true,
         );
+
         function visitNode(node: ts.Node): void {
             let argument: ts.Node | undefined;
             if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
@@ -39,6 +41,7 @@ export function readModuleGraph(entries: readonly string[]) {
                     );
                 }
             }
+
             if (argument !== undefined && ts.isStringLiteralLike(argument)) {
                 const specifier = argument.text;
                 const resolved = ts.resolveModuleName(
@@ -55,6 +58,7 @@ export function readModuleGraph(entries: readonly string[]) {
                     if (specifier.startsWith(".") || isAbsolute(specifier)) {
                         throw new Error(`Unresolved local dependency ${specifier} in ${from}`);
                     }
+
                     externalImports.add(specifier);
                 } else {
                     const to = resolve(resolved.resolvedFileName);
@@ -65,10 +69,14 @@ export function readModuleGraph(entries: readonly string[]) {
                     } else externalImports.add(specifier);
                 }
             }
+
             ts.forEachChild(node, visitNode);
         }
+
         visitNode(source);
     }
+
     for (const entry of entries) visit(entry);
+
     return { files: [...visited], edges, externalImports: [...externalImports] };
 }

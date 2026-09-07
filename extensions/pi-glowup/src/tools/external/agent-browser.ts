@@ -61,6 +61,7 @@ function summarizeSemanticAction(value: JsonObject): string | undefined {
         getNonEmptyString(value, "selector");
     const text = getNonEmptyString(value, "text");
     const values = getArray(value, "values");
+
     return [
         action,
         locator === undefined ? target : `${locator}${target === undefined ? "" : `: ${target}`}`,
@@ -82,6 +83,7 @@ function summarizeJob(value: JsonObject): string | undefined {
         })
         .filter(isDefined);
     const omitted = steps.length - actions.length;
+
     return `${countLabel(steps.length, "step")}${
         actions.length === 0
             ? ""
@@ -98,6 +100,7 @@ function summarizeQa(value: JsonObject): string | undefined {
         value.checkErrors === true ? "errors" : undefined,
         value.checkNetwork === true ? "network" : undefined,
     ].filter(isDefined);
+
     return [target, checks.length === 0 ? undefined : `check ${checks.join(", ")}`]
         .filter(isDefined)
         .join(" · ");
@@ -197,6 +200,7 @@ function summarizeAgentBrowserArgs(
             })
             .filter(isDefined)
             .join(" ");
+
         return {
             label:
                 AGENT_BROWSER_COMMAND_LABELS.get(nonEmptyCommand) ?? `Browser ${nonEmptyCommand}`,
@@ -224,7 +228,9 @@ export function createAgentBrowserRenderer(
             if (!hasEvolvingContent && shouldDeferSimpleToolCall(context)) {
                 return emptyComponent();
             }
+
             const summary = summarizeAgentBrowserArgs(jsonValueParser.parse(args), context);
+
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: toolStatusLabel(

@@ -27,6 +27,7 @@ const [output, schema, sourceSchema, theme, packageManifest] = await Promise.all
 ]);
 
 assert.equal(schema, sourceSchema);
+
 for (const configuredPath of [
   packageManifest.piExtensionSettings.definition,
   packageManifest.piExtensionSettings.prevalidation,
@@ -44,8 +45,10 @@ for (const configuredPath of [
     `published files must include ${packagePath}`,
   );
 }
+
 assert.doesNotThrow(() => JSON.parse(theme));
 assert.equal(output.includes(packageRoot), false, "bundle must not contain workspace paths");
+
 for (const requiredExternal of [
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-tui",
@@ -59,6 +62,7 @@ for (const requiredExternal of [
     `bundle must retain ${requiredExternal} as an external`,
   );
 }
+
 assert.equal(
   output.includes('import("shiki")'),
   true,
@@ -69,6 +73,7 @@ assert.equal(
   false,
   "Shiki must not be imported eagerly",
 );
+
 for (const inlinedDependency of ["@pierre/diffs", "ansi-styles", "unbash"]) {
   assert.equal(
     new RegExp(`(?:from|import\\()\\s*["']${inlinedDependency.replace("/", "\\/")}`).test(output),
@@ -76,6 +81,7 @@ for (const inlinedDependency of ["@pierre/diffs", "ansi-styles", "unbash"]) {
     `bundle must inline ${inlinedDependency}`,
   );
 }
+
 for (const forbidden of [
   "node_modules/@earendil-works/pi-coding-agent",
   "node_modules/@earendil-works/pi-tui",
@@ -84,5 +90,6 @@ for (const forbidden of [
 ]) {
   assert.equal(output.includes(forbidden), false, `bundle must externalize ${forbidden}`);
 }
+
 await checkProtocolPackage(packageRoot);
 console.log("glowup package check passed");

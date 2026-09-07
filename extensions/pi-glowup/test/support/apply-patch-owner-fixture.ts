@@ -47,9 +47,11 @@ function removeUnpairedSurrogates(value: string): string {
             }
             continue;
         }
+
         if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) continue;
         normalized += value[index] ?? "";
     }
+
     return normalized;
 }
 
@@ -68,7 +70,9 @@ function filesFromPatch(patch: string): GlowupMutationFile[] {
             files.push(current);
             continue;
         }
+
         if (current === undefined) continue;
+
         if (line.startsWith("+")) {
             current.lines.push({ kind: "addition", text: line.slice(1) });
             current.added += 1;
@@ -79,6 +83,7 @@ function filesFromPatch(patch: string): GlowupMutationFile[] {
             current.lines.push({ kind: "context", text: line.slice(1) });
         }
     }
+
     return files;
 }
 
@@ -101,6 +106,7 @@ function parseResult(value: JsonValue) {
             });
         }
     }
+
     return files.length === 0 ? undefined : { patch: parsed.details.patch, files };
 }
 
@@ -115,6 +121,7 @@ export const applyPatchOwnerRendering = {
         } catch {
             return mutation(labels, [{ path: "…", lines: [], added: 0, removed: 0 }]);
         }
+
         const files = filesFromPatch(parsed.patch);
         return files.length === 0
             ? mutation(labels, [{ path: "…", lines: [], added: 0, removed: 0 }])

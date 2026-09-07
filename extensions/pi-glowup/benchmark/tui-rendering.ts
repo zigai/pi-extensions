@@ -43,19 +43,24 @@ type BenchmarkReport = {
     readonly schemaVersion: 1;
     readonly generatedAt: string;
     readonly mode: "full" | "quick";
+
     readonly runtime: {
         readonly node: string;
         readonly platform: NodeJS.Platform;
         readonly architecture: string;
     };
+
     readonly comparisonPolicy: {
         readonly status: "informational";
+
         readonly futureGate: {
             readonly operator: "and";
             readonly requires: readonly ["relative-regression", "absolute-regression"];
         };
     };
+
     readonly timings: Readonly<Record<string, TimingSummary>>;
+
     readonly retained: {
         readonly heapBytes: number;
         readonly syntaxCacheEntries: number;
@@ -160,17 +165,21 @@ function parseOptions(args: readonly string[]): BenchmarkOptions {
             quick = true;
             continue;
         }
+
         if (argument === "--output") {
             const value = args.at(index + 1);
             if (value === undefined || value.length === 0) {
                 throw new Error("--output requires a path");
             }
+
             outputPath = value;
             index += 1;
             continue;
         }
+
         throw new Error(`Unknown benchmark option: ${argument}`);
     }
+
     return { quick, outputPath };
 }
 
@@ -182,6 +191,7 @@ function percentile(sorted: readonly number[], ratio: number): number {
 
 function timingSummary(samples: readonly number[]): TimingSummary {
     const sorted = [...samples].sort((left, right) => left - right);
+
     return {
         unit: "ms",
         samples: sorted.length,
@@ -236,6 +246,7 @@ function renderColdLargeDiff(samples: number): readonly number[] {
             }),
         );
     }
+
     return timings;
 }
 
@@ -244,6 +255,7 @@ function writeStreamTimings(updates: number, rounds: number): readonly number[] 
     for (let round = 0; round < rounds; round += 1) {
         let content = "";
         let lastComponent: Component | undefined;
+
         for (let index = 1; index <= updates; index += 1) {
             content += `export const generatedValue${index} = ${index};\n`;
             timings.push(
@@ -264,6 +276,7 @@ function writeStreamTimings(updates: number, rounds: number): readonly number[] 
             );
         }
     }
+
     return timings;
 }
 
@@ -277,6 +290,7 @@ function patchStreamTimings(updates: number, rounds: number): readonly number[] 
         );
         let patch = "*** Begin Patch\n*** Add File: src/generated.ts\n";
         let lastComponent: Component | undefined;
+
         for (let index = 1; index <= updates; index += 1) {
             patch += `+export const generatedValue${index} = ${index};\n`;
             timings.push(
@@ -297,6 +311,7 @@ function patchStreamTimings(updates: number, rounds: number): readonly number[] 
             );
         }
     }
+
     return timings;
 }
 
@@ -330,7 +345,9 @@ function resizeTimings(cycles: number): readonly number[] {
             }),
         );
     }
+
     clearQueuedDiffHighlights();
+
     return timings;
 }
 
@@ -382,12 +399,14 @@ function restoredSessionTimings(samples: number): readonly number[] {
             }),
         );
     }
+
     return timings;
 }
 
 async function syntaxAdoptionTimings(): Promise<Readonly<Record<string, readonly number[]>>> {
     await disposeSyntaxHighlighting();
     clearSyntaxHighlightCache();
+
     const code = Array.from(
         { length: 120 },
         (_value, index) => `export const syntaxValue${index}: number = ${index};`,
@@ -457,6 +476,7 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
             }),
         );
     }
+
     clearQueuedDiffHighlights();
 
     const basePayload = buildPierreDiffPayload({
@@ -563,6 +583,7 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
     const firstRender = measure(() => {
         firstRenderComponent.render(120);
     });
+
     clearQueuedDiffHighlights();
 
     return {
@@ -576,6 +597,7 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
 async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport> {
     configureRenderingAppearance(defaultAppearance);
     globalThis.gc?.();
+
     const startingHeap = process.memoryUsage().heapUsed;
     const rounds = options.quick ? 1 : 3;
     const timings: Record<string, readonly number[]> = {};
@@ -586,19 +608,25 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
     timings["apply-patch-stream-1000"] = patchStreamTimings(1_000, rounds);
     timings["wide-narrow-resize"] = resizeTimings(options.quick ? 12 : 60);
     timings["restored-session-render"] = restoredSessionTimings(options.quick ? 12 : 80);
+
     for (const [name, samples] of Object.entries(await syntaxAdoptionTimings())) {
         timings[name] = samples;
     }
+
     globalThis.gc?.();
+
     const retainedHeapBytes = Math.max(0, process.memoryUsage().heapUsed - startingHeap);
     const cache = syntaxHighlightCacheStats();
+
     for (const [name, samples] of Object.entries(await reviewFindingTimings())) {
         timings[name] = samples;
     }
+
     const summaries: Record<string, TimingSummary> = {};
     for (const [name, samples] of Object.entries(timings)) {
         summaries[name] = timingSummary(samples);
     }
+
     return {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
@@ -632,5 +660,6 @@ if (options.outputPath !== undefined) {
     mkdirSync(dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, serialized);
 }
+
 process.stdout.write(serialized);
 await disposeSyntaxHighlighting();

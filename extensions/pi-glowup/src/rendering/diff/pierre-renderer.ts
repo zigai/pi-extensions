@@ -101,22 +101,27 @@ class DiffHighlightScheduler {
             if (insertionIndex < 0) this.queued.push(task);
             else this.queued.splice(insertionIndex, 0, task);
         });
+
         this.pending.set(key, promise);
         this.scheduleNext(this.running ? 100 : initialDiffHighlightDelayMs());
+
         return promise;
     }
 
     dispose(): void {
         this.disposed = true;
+
         if (this.timer !== undefined) {
             clearTimeout(this.timer);
             this.timer = undefined;
         }
+
         const fallback = { value: emptyHighlightedDiffSet(), failed: true } as const;
         for (const task of this.queued.splice(0)) {
             this.pending.delete(task.key);
             task.resolve(fallback);
         }
+
         this.cached.clear();
     }
 
@@ -132,6 +137,7 @@ class DiffHighlightScheduler {
         if (this.disposed || this.running || this.timer !== undefined || this.queued.length === 0) {
             return;
         }
+
         this.timer = setTimeout(() => {
             this.timer = undefined;
             void this.processNext();
@@ -145,22 +151,27 @@ class DiffHighlightScheduler {
         const task = this.queued.shift();
         if (task === undefined) return;
         this.running = true;
+
         let result: HighlightedDiffLoadResult;
         try {
             result = await task.run();
         } catch {
             result = { value: emptyHighlightedDiffSet(), failed: true };
         }
+
         this.pending.delete(task.key);
+
         if (!this.disposed) {
             this.cached.delete(task.key);
             this.cached.set(task.key, result);
+
             while (this.cached.size > MAX_CACHED_DIFF_HIGHLIGHTS) {
                 const oldest = this.cached.keys().next().value;
                 if (oldest === undefined) break;
                 this.cached.delete(oldest);
             }
         }
+
         task.resolve(result);
         this.running = false;
         this.scheduleNext(0);
@@ -205,6 +216,7 @@ function semanticUnifiedSourceRows(
                 additionIndex += content.lines;
                 continue;
             }
+
             if (layout === "traditional" || content.deletions * content.additions > 256) {
                 for (let index = 0; index < content.deletions; index += 1) push("delete");
                 for (let index = 0; index < content.additions; index += 1) push("insert");
@@ -216,11 +228,14 @@ function semanticUnifiedSourceRows(
                 );
                 for (const kind of kinds) push(kind);
             }
+
             deletionIndex += content.deletions;
             additionIndex += content.additions;
         }
+
         if (hunk.noEOFCRDeletions || hunk.noEOFCRAdditions) push("meta");
     }
+
     if (hasTrailingCollapsedLines(metadata)) push("meta", true);
     return trimSemanticEdgeCollapsedRows(rows);
 }
@@ -236,6 +251,7 @@ function orderedReplacementKinds(
             ...additions.map((): SemanticDiffRowKind => "insert"),
         ];
     }
+
     const pairs = pairReplacementLines(deletions.map(cleanDiffLine), additions.map(cleanDiffLine));
     if (pairs === undefined) {
         return [
@@ -243,6 +259,7 @@ function orderedReplacementKinds(
             ...additions.map((): SemanticDiffRowKind => "insert"),
         ];
     }
+
     const kinds: SemanticDiffRowKind[] = [];
     let deletionIndex = 0;
     let additionIndex = 0;
@@ -251,18 +268,22 @@ function orderedReplacementKinds(
             kinds.push("delete");
             deletionIndex += 1;
         }
+
         while (additionIndex < pair.additionIndex) {
             kinds.push("insert");
             additionIndex += 1;
         }
+
         kinds.push("delete", "insert");
         deletionIndex += 1;
         additionIndex += 1;
     }
+
     while (deletionIndex < deletions.length) {
         kinds.push("delete");
         deletionIndex += 1;
     }
+
     while (additionIndex < additions.length) {
         kinds.push("insert");
         additionIndex += 1;
@@ -279,11 +300,13 @@ function semanticSplitSourceRows(
     };
     for (const hunk of metadata.hunks) {
         if (hunk.collapsedBefore > 0) push("meta", true);
+
         for (const content of hunk.hunkContent) {
             if (content.type === "context") {
                 for (let index = 0; index < content.lines; index += 1) push("context");
                 continue;
             }
+
             const kind: SemanticDiffRowKind = content.additions > 0 ? "insert" : "delete";
             for (
                 let index = 0;
@@ -293,8 +316,10 @@ function semanticSplitSourceRows(
                 push(kind);
             }
         }
+
         if (hunk.noEOFCRDeletions || hunk.noEOFCRAdditions) push("meta");
     }
+
     if (hasTrailingCollapsedLines(metadata)) push("meta", true);
     return trimSemanticEdgeCollapsedRows(rows);
 }
@@ -304,8 +329,10 @@ function trimSemanticEdgeCollapsedRows(
 ): readonly SemanticSourceRow[] {
     let start = 0;
     let end = rows.length;
+
     while (rows[start]?.edgeCollapsed === true) start += 1;
     while (end > start && rows[end - 1]?.edgeCollapsed === true) end -= 1;
+
     return rows.slice(start, end);
 }
 
@@ -322,6 +349,7 @@ function semanticPreviewSelection(
         rows.map((row) => row.kind),
         Math.max(1, rowBudget - 1),
     );
+
     return {
         sourceIndices: new Set(
             selected.flatMap((index) => {
@@ -347,6 +375,7 @@ export type PierreDiffRenderContext = {
 export type PierreDiffRenderOptions = {
     readonly expanded: boolean;
     readonly mutationSettings?: MutationSettings;
+
     /** Preserve apply_patch's previous behavior of showing every row when expanded. */
     readonly expandedRows?: "viewport" | "full";
 };
@@ -370,6 +399,7 @@ function pierreRowPolicy(
             maxVisibleLines: undefined,
         };
     }
+
     if (options.expanded) {
         const maxVisibleLines = maxVisibleDiffLines();
         return {
@@ -378,6 +408,7 @@ function pierreRowPolicy(
             maxVisibleLines,
         };
     }
+
     return {
         collapseSemantically: true,
         maxSourceRows: settings.limits.maxDiffLines ?? undefined,
@@ -433,6 +464,7 @@ export function renderPierreDiff(
               );
 
     component.update(payload, theme, rowPolicy, options.expanded, context.invalidate);
+
     return component;
 }
 
@@ -535,15 +567,18 @@ class PierreDiffComponent implements Component {
         this.appearanceVersion = nextAppearanceVersion;
         this.syntaxVersion = nextSyntaxVersion;
         this.requestRender = requestRender;
+
         if (!canReuseRenderedCache) {
             this.invalidate();
         }
+
         if (previousKey !== nextKey) {
             this.highlighted = emptyHighlightedDiffSet();
             this.highlightState = { status: "idle" };
         } else if (syntaxChanged) {
             this.highlightState = { status: "idle" };
         }
+
         this.maybeRefreshHighlightedDiff();
     }
 
@@ -556,6 +591,7 @@ class PierreDiffComponent implements Component {
             this.invalidate();
             this.maybeRefreshHighlightedDiff();
         }
+
         const cachedLines = this.cachedLinesByWidth.get(safeWidth);
         if (cachedLines !== undefined) return cachedLines;
 
@@ -568,7 +604,6 @@ class PierreDiffComponent implements Component {
             ? this.renderSplitBody(safeWidth, highlighted)
             : this.renderUnifiedBody(safeWidth, highlighted);
         const lines = bodyLines;
-
         if (
             this.rowPolicy.maxVisibleLines === undefined ||
             lines.length <= this.rowPolicy.maxVisibleLines
@@ -582,6 +617,7 @@ class PierreDiffComponent implements Component {
         }
 
         const visible = Math.max(1, this.rowPolicy.maxVisibleLines - 1);
+
         return this.cacheRenderedLines(
             safeWidth,
             [
@@ -610,11 +646,13 @@ class PierreDiffComponent implements Component {
     private cacheRenderedLines(width: number, lines: string[]): string[] {
         this.cachedLinesByWidth.delete(width);
         this.cachedLinesByWidth.set(width, lines);
+
         while (this.cachedLinesByWidth.size > 2) {
             const oldest = this.cachedLinesByWidth.keys().next().value;
             if (oldest === undefined) break;
             this.cachedLinesByWidth.delete(oldest);
         }
+
         return lines;
     }
 
@@ -661,6 +699,7 @@ class PierreDiffComponent implements Component {
                 rowOptions,
             );
         }
+
         const selection = semanticPreviewSelection(
             semanticUnifiedSourceRows(this.payload.metadata, narrowLayout),
             this.rowPolicy.maxVisibleLines ?? 1,
@@ -669,6 +708,7 @@ class PierreDiffComponent implements Component {
             includedRowIndices: selection.sourceIndices,
             narrowLayout,
         });
+
         return selection.omitted === 0
             ? visible
             : [
@@ -693,6 +733,7 @@ class PierreDiffComponent implements Component {
                     : { maxRows: this.rowPolicy.maxSourceRows },
             );
         }
+
         const selection = semanticPreviewSelection(
             semanticSplitSourceRows(this.payload.metadata),
             this.rowPolicy.maxVisibleLines ?? 1,
@@ -700,6 +741,7 @@ class PierreDiffComponent implements Component {
         const visible = buildSplitDiffRows(this.payload.metadata, highlighted, this.palette, {
             includedRowIndices: selection.sourceIndices,
         });
+
         return selection.omitted === 0
             ? visible
             : [
@@ -718,17 +760,22 @@ class PierreDiffComponent implements Component {
         if (this.highlightState.status !== "idle" && this.highlightState.key === nextKey) {
             return;
         }
+
         const cached = getCachedHighlightedDiff(this.payload.metadata);
         if (cached !== undefined) {
             this.highlighted = cached.value;
             this.highlightState = cached.failed
                 ? { status: "failed", key: nextKey, fallback: cached.value }
                 : { status: "ready", key: nextKey, value: cached.value };
+
             return;
         }
+
         this.highlightState = { status: "pending", key: nextKey };
+
         const metadata = this.payload.metadata;
         const scheduler = diffHighlightScheduler;
+
         void scheduler
             .schedule(
                 nextKey,
@@ -743,6 +790,7 @@ class PierreDiffComponent implements Component {
                 ) {
                     return;
                 }
+
                 this.highlighted = result.value;
                 this.highlightState = result.failed
                     ? { status: "failed", key: nextKey, fallback: result.value }
@@ -763,6 +811,7 @@ function renderPierreDiffSummary(
             const changeStats = `${payload.stats.added.toLocaleString("en-US")} + / ${payload.stats.removed.toLocaleString("en-US")} -`;
             const headline = `${theme.fg("toolDiffContext", payload.path)} ${theme.fg("muted", changeStats)}`;
             const hint = "Use git diff or read the file directly to inspect the full change.";
+
             return [
                 truncateToWidth(neutralizeTerminalControls(headline), safeWidth, ""),
                 truncateToWidth(
@@ -811,6 +860,7 @@ function summaryDetail(payload: PierreSummaryDiffPayload): string {
     if (payload.summary.reason === "metadata-invalid") {
         return "Diff omitted: generated diff metadata was invalid.";
     }
+
     const limits = [
         payload.summary.maxBytes === null ? undefined : formatDiffSize(payload.summary.maxBytes),
         payload.summary.maxLines === null
@@ -828,6 +878,7 @@ function formatDiffSize(bytes: number): string {
     if (bytes < 1024 * 1024) {
         return `${(bytes / 1024).toFixed(1)}KB`;
     }
+
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
@@ -845,6 +896,7 @@ function initialDiffHighlightDelayMs(): number {
     ) {
         return 0;
     }
+
     return Math.max(0, INITIAL_TTY_DIFF_HIGHLIGHT_DEFER_MS - (Date.now() - moduleLoadedAtMs));
 }
 
@@ -878,6 +930,7 @@ function renderUnifiedRows(
             break;
         }
     }
+
     return rendered;
 }
 
@@ -914,6 +967,7 @@ function renderSplitRows(
             break;
         }
     }
+
     return rendered;
 }
 
@@ -932,6 +986,7 @@ function limitDiffRowLines(
     if (lastLine === undefined) {
         return visible;
     }
+
     visible[lastIndex] = `${truncateToWidth(lastLine, Math.max(1, width - 1), "")}…`;
     return visible;
 }
@@ -945,6 +1000,7 @@ function appendBudgetedRenderedLines(
         target.push(...lines);
         return false;
     }
+
     if (target.length + lines.length <= maxRenderedLines) {
         target.push(...lines);
         return target.length >= maxRenderedLines;
@@ -952,6 +1008,7 @@ function appendBudgetedRenderedLines(
 
     const remaining = Math.max(0, maxRenderedLines - target.length);
     target.push(...lines.slice(0, remaining));
+
     return true;
 }
 
@@ -967,6 +1024,7 @@ function renderUnifiedRow(
                 ? lineNumberWidth * 2 + 3
                 : lineNumberWidth + 1;
         const text = row.kind === "collapsed" ? `${" ".repeat(gutterWidth)} ${row.text}` : row.text;
+
         return [
             renderFullWidthLine(
                 [{ text, fg: row.fg, bg: row.bg }],
@@ -996,6 +1054,7 @@ function renderUnifiedRow(
         if (row.lineType === "context") {
             return [`${prefix}${DIFF_STYLE_RESET}`];
         }
+
         const rowStyle = baseStyle({ fg: row.rowFg, bg: row.rowBg });
         return [padRenderedLine(prefix, width, rowStyle)];
     }
@@ -1018,6 +1077,7 @@ function renderUnifiedRow(
                       [{ text: prefix, fg: row.lineNumberFg, bg: row.rowBg }],
                       baseStyle({ fg: row.lineNumberFg, bg: row.rowBg }),
                   );
+
         return padRenderedLine(
             `${currentPrefixAnsi}${segment}`,
             width,
@@ -1035,6 +1095,7 @@ function unifiedDiffPrefix(
         const lineNumber = row.lineType === "deletion" ? row.oldLineNumber : row.newLineNumber;
         return `${marker}${formatLineNumber(lineNumber, lineNumberWidth)} `;
     }
+
     return `${formatLineNumber(row.oldLineNumber, lineNumberWidth)} ${formatLineNumber(row.newLineNumber, lineNumberWidth)} ${marker} `;
 }
 
@@ -1050,6 +1111,7 @@ function renderSplitRow(
     if (row.kind !== "line") {
         const text =
             row.kind === "collapsed" ? ` ${" ".repeat(lineNumberWidth)} ${row.text}` : row.text;
+
         return [
             renderFullWidthLine(
                 [{ text, fg: row.fg, bg: row.bg }],
@@ -1085,7 +1147,6 @@ function renderSplitRow(
         const additionLine = additionLines[index] ?? emptyPane(rightWidth, row.addition);
         rendered.push(`${deletionLine}${divider}${additionLine}`);
     }
-
     return rendered;
 }
 
@@ -1150,6 +1211,7 @@ function renderSplitDiffPrefix(
     if (configuredDiffLineNumberStyle() === "single") {
         return renderDiffPrefix(prefix, markerFg, lineNumberFg, rowBg);
     }
+
     return renderDiffPrefixAtMarker(prefix, lineNumberWidth + 1, markerFg, lineNumberFg, rowBg);
 }
 
@@ -1178,6 +1240,7 @@ function renderUnifiedDiffPrefix(
     if (configuredDiffLineNumberStyle() === "single") {
         return renderDiffPrefix(prefix, markerFg, lineNumberFg, rowBg);
     }
+
     return renderDiffPrefixAtMarker(prefix, lineNumberWidth * 2 + 2, markerFg, lineNumberFg, rowBg);
 }
 
@@ -1202,6 +1265,7 @@ function renderContent(spans: ReadonlyArray<DiffSpan>, base: AnsiStyle): string 
     if (spans.length === 0) {
         return "";
     }
+
     return renderSegments(spans, base);
 }
 
@@ -1217,8 +1281,10 @@ function changedPreviewSpans(
         if (emphasizedStart === undefined && span.emphasized === true) {
             emphasizedStart = totalWidth;
         }
+
         totalWidth += visibleWidth(span.text);
     }
+
     const focus = emphasizedStart ?? fallbackFocus;
     if (focus === undefined || totalWidth <= contentWidth) return spans;
 
@@ -1251,9 +1317,11 @@ function sliceDiffSpans(
             const text = sliceByColumn(span.text, visibleStart - column, visibleEnd - visibleStart);
             if (text.length > 0) sliced.push({ ...span, text });
         }
+
         column = spanEnd;
         if (column >= end) break;
     }
+
     return sliced;
 }
 
@@ -1288,10 +1356,12 @@ function renderSegments(segments: ReadonlyArray<RenderSegment>, base: AnsiStyle)
             bold: segment.bold ?? base.bold,
             dim: segment.dim ?? base.dim,
         });
+
         output += ansiTransition(current, next);
         current = next;
         output += neutralizeTerminalControls(segment.text.replace(/[\r\n]/gu, ""));
     }
+
     output += ansiTransition(current, base);
     return output;
 }
@@ -1307,9 +1377,11 @@ function ansiTransition(previous: AnsiStyle | undefined, next: AnsiStyle): strin
     if (previous === undefined || previous.bold !== next.bold || previous.dim !== next.dim) {
         // Bold and dim share the SGR 22 reset; enabling one does not clear the other.
         transitions.push(ansiStyles.modifier.bold.close);
+
         if (next.bold === true) transitions.push(ansiStyles.modifier.bold.open);
         if (next.dim === true) transitions.push(ansiStyles.modifier.dim.open);
     }
+
     if (previous === undefined || previous.fg !== next.fg) {
         transitions.push(
             isAnsiStyle(next.fg)
@@ -1319,6 +1391,7 @@ function ansiTransition(previous: AnsiStyle | undefined, next: AnsiStyle): strin
                   : ansiStyles.color.ansi16m(fg.red, fg.green, fg.blue),
         );
     }
+
     if (previous === undefined || previous.bg !== next.bg) {
         transitions.push(
             isAnsiStyle(next.bg)
@@ -1328,6 +1401,7 @@ function ansiTransition(previous: AnsiStyle | undefined, next: AnsiStyle): strin
                   : ansiStyles.bgColor.ansi16m(bg.red, bg.green, bg.blue),
         );
     }
+
     return transitions.join("");
 }
 
@@ -1379,6 +1453,7 @@ function markerForLineType(lineType: SplitDiffCell["lineType"] | UnifiedDiffRowL
     if (lineType === "deletion") {
         return "-";
     }
+
     return " ";
 }
 

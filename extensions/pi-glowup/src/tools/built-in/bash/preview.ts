@@ -26,13 +26,9 @@ import { StreamingScriptIdentityStore } from "./streaming-identity.ts";
 
 export function createNativeBashFeature() {
     const scriptPreviews = createScriptPreviewStore();
-
     const PARTIAL_BASH_COMMAND_PREVIEW_CHARS = 4_000;
-
     const streamingScriptIdentities = new StreamingScriptIdentityStore();
-
     const bashRenderInvalidations = new Map<string, () => void>();
-
     const MAX_BASH_RENDER_INVALIDATIONS = 300;
 
     function rememberBashRenderInvalidation(
@@ -49,6 +45,7 @@ export function createNativeBashFeature() {
         if (command.length <= PARTIAL_BASH_COMMAND_PREVIEW_CHARS) {
             return command;
         }
+
         return `${command.slice(0, PARTIAL_BASH_COMMAND_PREVIEW_CHARS)}\n… command preview truncated while streaming`;
     }
 
@@ -63,6 +60,7 @@ export function createNativeBashFeature() {
         shellOperatorPosition: () => ShellOperatorPosition,
     ) {
         rememberBashRenderInvalidation(context.toolCallId, context.invalidate);
+
         const state = context.isError ? "error" : context.isPartial ? "running" : "success";
         const command = commandField(args) ?? "";
         if (
@@ -76,6 +74,7 @@ export function createNativeBashFeature() {
             if (partialScript === undefined) {
                 return emptyComponent();
             }
+
             return renderScriptCall(theme, partialScript, {
                 state,
                 expanded: false,
@@ -85,6 +84,7 @@ export function createNativeBashFeature() {
                 invalidate: context.invalidate,
             });
         }
+
         const displayCommand = context.argsComplete ? command : partialBashCommandPreview(command);
         const parsedScript = parseScriptInvocation(displayCommand);
         const script =
@@ -106,6 +106,7 @@ export function createNativeBashFeature() {
         if (stableScript !== undefined) {
             bashOptions = { ...bashOptions, pureScriptOverride: stableScript };
         }
+
         return renderBashCommandCall(theme, displayCommand, bashOptions);
     }
 
@@ -131,19 +132,24 @@ export function createNativeBashFeature() {
                 prefixRest: "    ",
             };
         }
+
         if (language !== undefined) {
             outputOptions = { ...outputOptions, syntax: { language } };
         }
+
         return renderGlowupOutput(theme, output, outputOptions);
     }
+
     function clear(): void {
         scriptPreviews.clear();
         bashRenderInvalidations.clear();
         streamingScriptIdentities.clear();
     }
+
     function remember(toolCallId: string, command: string): void {
         rememberRawScriptPreview(scriptPreviews, toolCallId, command);
     }
+
     function schedule(options: {
         readonly toolCallId: string;
         readonly command: string;
@@ -153,6 +159,7 @@ export function createNativeBashFeature() {
         readonly invalidate: () => void;
     }): boolean {
         remember(options.toolCallId, options.command);
+
         let formatOptions: FormatScriptPreviewOptions = {
             sink: scriptPreviews,
             toolCallId: options.toolCallId,
@@ -161,6 +168,7 @@ export function createNativeBashFeature() {
         };
         if (options.signal !== undefined)
             formatOptions = { ...formatOptions, signal: options.signal };
+
         formatOptions = {
             ...formatOptions,
             isCurrent: options.isCurrent,
@@ -170,8 +178,10 @@ export function createNativeBashFeature() {
             },
         };
         scheduleFormattedScriptPreview(formatOptions);
+
         return options.formatter !== undefined;
     }
+
     return {
         stats: () => scriptPreviews.stats(),
         remember,

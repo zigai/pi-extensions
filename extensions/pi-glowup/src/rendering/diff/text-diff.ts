@@ -12,19 +12,14 @@ export type DiffLineCoordinates = {
 };
 
 const diffLinePattern = /^([+\- ])(\s*\d*)\s(.*)$/;
-
 const ellipsisLinePattern = /^\s+\.\.\.$/;
-
 const omissionLinePattern = /^\s+…(?:\s+.*)?$/u;
-
 const addCountPattern = /^\+\s*\d+\s/;
-
 const removeCountPattern = /^-\s*\d+\s/;
 
 export function parseDiffSections(diffText: string, fallbackPath?: string): DiffSection[] {
     const normalized = diffText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     const rawLines = normalized.split("\n");
-
     if (!rawLines.some((line) => line.startsWith("File: "))) {
         const lines = rawLines.filter((line) => line.length > 0);
         return [makeDiffSection(fallbackPath, lines)];
@@ -38,6 +33,7 @@ export function parseDiffSections(diffText: string, fallbackPath?: string): Diff
         if (currentPath === undefined && currentLines.length === 0) {
             return;
         }
+
         const lines = currentLines.filter((line) => line.length > 0);
         sections.push(makeDiffSection(currentPath, lines));
     }
@@ -49,8 +45,10 @@ export function parseDiffSections(diffText: string, fallbackPath?: string): Diff
             currentLines = [];
             continue;
         }
+
         currentLines.push(line);
     }
+
     flush();
 
     return sections;
@@ -70,6 +68,7 @@ export function changedOnlyDiffSections(sections: ReadonlyArray<DiffSection>): D
         const lines = retainedIndices.map((index) => section.lines[index] ?? "");
         const lineCoordinates = section.lineCoordinates;
         const changedSection: DiffSection = { ...section, lines };
+
         return lineCoordinates === undefined
             ? [changedSection]
             : [
@@ -93,6 +92,7 @@ function makeDiffSection(path: string | undefined, lines: ReadonlyArray<string>)
     if (path === undefined) {
         return section;
     }
+
     return { ...section, path };
 }
 
@@ -100,23 +100,28 @@ function deriveDiffLineCoordinates(
     lines: ReadonlyArray<string>,
 ): ReadonlyArray<DiffLineCoordinates | undefined> {
     let lineDelta = 0;
+
     return lines.map((line) => {
         const parsed = parseDiffLine(line);
         if (parsed === null || parsed.kind === "ellipsis" || parsed.kind === "omission") {
             return undefined;
         }
+
         const lineNumber = Number(normalizedDiffLineNumber(parsed.lineNumber));
         if (!Number.isSafeInteger(lineNumber) || lineNumber < 1) {
             return undefined;
         }
+
         if (parsed.kind === "delete") {
             lineDelta -= 1;
             return { oldLine: lineNumber };
         }
+
         if (parsed.kind === "insert") {
             lineDelta += 1;
             return { newLine: lineNumber };
         }
+
         return { oldLine: lineNumber, newLine: lineNumber + lineDelta };
     });
 }
@@ -124,12 +129,14 @@ function deriveDiffLineCoordinates(
 function trimEdgeEllipsisLines(lines: ReadonlyArray<string>): string[] {
     let start = 0;
     let end = lines.length;
+
     while (ellipsisLinePattern.test(lines[start] ?? "")) {
         start += 1;
     }
     while (end > start && ellipsisLinePattern.test(lines[end - 1] ?? "")) {
         end -= 1;
     }
+
     return lines.slice(start, end);
 }
 
@@ -158,6 +165,7 @@ export function parseDiffLine(line: string):
     if (match[1] === "+") {
         kind = "insert";
     }
+
     if (match[1] === "-") {
         kind = "delete";
     }

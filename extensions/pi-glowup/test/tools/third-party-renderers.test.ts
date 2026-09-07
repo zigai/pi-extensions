@@ -64,10 +64,12 @@ describe("opaque owner parser values", () => {
                 parseResult: () => parsed,
                 renderCall(args) {
                     received.push(args);
+
                     return text("opaque call");
                 },
                 renderResult(result, context) {
                     received.push(result, context.args);
+
                     return text("opaque result");
                 },
             };
@@ -89,6 +91,7 @@ describe("opaque owner parser values", () => {
                     .join("\n"),
             ).toContain("opaque result");
             expect(received).toHaveLength(3);
+
             for (const value of received) expect(value).toBe(parsed);
         },
     );
@@ -101,6 +104,7 @@ it("retains stack child rendering across widths and rebuilds themed children on 
         ...plainTheme,
         fg(_token, value) {
             colored.push(value);
+
             return `${palette}:${value}`;
         },
     };
@@ -152,6 +156,7 @@ function parseDbQueryResult(value: JsonValue): DbQueryResult | undefined {
     } catch {
         return undefined;
     }
+
     try {
         return Value.Parse(dbQueryResultSchema, value);
     } catch {
@@ -228,6 +233,7 @@ describe("third-party tool renderers", () => {
                         `${testCase.toolName} exceeded width ${width}`,
                     ).toBeLessThanOrEqual(width);
                 }
+
                 expectWellFormedLines(lines);
             }
         }
@@ -296,10 +302,12 @@ describe("third-party tool renderers", () => {
             const rendered = stripAccentStyle(lines.join("\n"));
             expect(rendered.match(/Patch(?:ing|ed)/gu)).toHaveLength(2);
             expect(rendered).not.toContain('{"files"');
+
             for (const line of lines) {
                 expect(visibleWidth(stripAccentStyle(line))).toBeLessThanOrEqual(width);
             }
         }
+
         for (const width of [80, 180]) {
             const rendered = stripAccentStyle(
                 renderer.renderCall({}, plainTheme, renderContext).render(width).join("\n"),
@@ -460,6 +468,7 @@ describe("third-party tool renderers", () => {
         expect(callText).toContain("<accent>second row</accent>");
         expect(callText).toContain("<b><error>third row</error></b>");
         expect(resultText).toContain("No additional output");
+
         for (const width of [1, 20, 100]) {
             const lines = renderer.renderCall({}, styledTheme, renderContext).render(width);
             for (const line of lines) {
@@ -570,6 +579,7 @@ describe("third-party tool renderers", () => {
         for (let depth = 0; depth < 10; depth += 1) {
             nestedNode = stack([nestedNode]);
         }
+
         const renderer = createThirdPartyToolRenderer("deep_tool", undefined, {
             [GLOWUP_RENDERING_PROPERTY]: {
                 version: 3,
@@ -596,6 +606,7 @@ describe("third-party tool renderers", () => {
         interface FixtureToolDefinition {
             glowupRendering?: GlowupRenderer;
         }
+
         const toolDefinition: FixtureToolDefinition = {};
         Object.defineProperty(toolDefinition, GLOWUP_RENDERING_PROPERTY, {
             get() {
@@ -1104,6 +1115,7 @@ describe("third-party tool renderers", () => {
                 command,
                 headingMatches: true,
             });
+
             for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(100);
         }
     });

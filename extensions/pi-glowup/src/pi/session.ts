@@ -18,11 +18,13 @@ export function restoreExplorationSession(
     exploration.setSource(() => sessionManager.getBranch());
     exploration.restoreExplorationGroupStarts(sessionManager.getBranch());
 }
+
 export function installExplorationSession(
     pi: Pick<ExtensionAPI, "on">,
     exploration: ReturnType<typeof createExplorationFeature>,
 ): void {
     const { explorationGroups, restoreExplorationGroupStarts } = exploration;
+
     // Pi emits these extension events before constructing/updating transcript rows.
     // Keep only the current host message; persisted chronology is read from getBranch().
     pi.on("message_start", (event) => {
@@ -42,13 +44,16 @@ export function installExplorationSession(
         // Tree navigation can shorten/change the branch without session_start.
         // Source offsets and row markers belong to the old transcript lifetime.
         exploration.clear();
+
         const sessionManager = ctx.sessionManager;
+
         exploration.setSource(() => sessionManager.getBranch());
         restoreExplorationGroupStarts(sessionManager.getBranch());
     });
 
     pi.on("message_end", (event) => {
         if (event.message.role === "assistant") exploration.setMessage(event.message);
+
         if (hasVisibleAssistantText(event.message)) {
             explorationGroups.closeActiveGroup();
         }

@@ -26,6 +26,7 @@ export function rememberRawScriptPreview(
     if (script === undefined) {
         return;
     }
+
     sink.set(toolCallId, boundedScriptPreview(script));
 }
 

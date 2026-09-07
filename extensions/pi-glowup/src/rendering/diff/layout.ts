@@ -30,6 +30,7 @@ export function shouldRenderSideBySide(
     if (layout === "fixed") {
         return width >= FIXED_SIDE_BY_SIDE_MIN_WIDTH;
     }
+
     if (width < CONTENT_AWARE_SIDE_BY_SIDE_MIN_WIDTH) {
         return false;
     }
@@ -54,7 +55,6 @@ export function shouldRenderSideBySide(
     for (const hunk of metadata.hunks) {
         let deletionLineIndex = hunk.deletionLineIndex;
         let additionLineIndex = hunk.additionLineIndex;
-
         for (const content of hunk.hunkContent) {
             if (content.type === "context") {
                 for (let offset = 0; offset < content.lines; offset += 1) {
@@ -71,6 +71,7 @@ export function shouldRenderSideBySide(
                         return false;
                     }
                 }
+
                 splitRows += content.lines;
                 unifiedRows += content.lines;
                 deletionLineIndex += content.lines;
@@ -94,6 +95,7 @@ export function shouldRenderSideBySide(
             if (content.deletions > 0 && content.additions > 0) {
                 comparableRuns += 1;
             }
+
             if (
                 deletionWraps.some((count) => count > 1) ||
                 additionWraps.some((count) => count > 1)
@@ -105,6 +107,7 @@ export function shouldRenderSideBySide(
             for (let offset = 0; offset < rowCount; offset += 1) {
                 splitRows += Math.max(deletionWraps[offset] ?? 1, additionWraps[offset] ?? 1);
             }
+
             for (let offset = 0; offset < content.deletions; offset += 1) {
                 unifiedRows += wrappedLineCount(
                     metadata.deletionLines[deletionLineIndex + offset],
@@ -207,6 +210,7 @@ export function diffLineNumberWidth(metadata: FileDiffMetadata): number {
             hunk.additionStart + Math.max(0, hunk.additionCount - 1),
         );
     }
+
     return String(maxLineNumber).length;
 }
 
@@ -245,5 +249,6 @@ function lineSimilarity(before: string, after: string): number {
 
 function tokenizeLine(line: string): readonly string[] {
     tokenPattern.lastIndex = 0;
+
     return Array.from(line.trim().matchAll(tokenPattern), (match) => match[0]);
 }

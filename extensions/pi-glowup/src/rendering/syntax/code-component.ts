@@ -21,8 +21,10 @@ onSyntaxHighlightingStateChange((status) => {
         for (const language of pendingCodeOutputSyntaxLoads.keys()) {
             requestPendingCodeOutputSyntaxLoad(language);
         }
+
         return;
     }
+
     if (status === "disabled" || status === "failed") {
         pendingCodeOutputSyntaxLoads.clear();
         activeCodeOutputSyntaxLoads.clear();
@@ -44,6 +46,7 @@ export function scheduleCodeOutputSyntaxLoad(
     if (invalidate === undefined) {
         return;
     }
+
     const language = syntax?.language ?? syntaxLanguageFromFile(syntax?.path, content);
     const normalizedLanguage = normalizeSyntaxLanguage(language);
     if (normalizedLanguage === undefined || normalizedLanguage === "text") {
@@ -52,6 +55,7 @@ export function scheduleCodeOutputSyntaxLoad(
     if (getLoadedSyntaxHighlighterForLanguage(normalizedLanguage) !== undefined) {
         return;
     }
+
     const pendingInvalidations = pendingCodeOutputSyntaxLoads.get(normalizedLanguage);
     if (pendingInvalidations !== undefined) {
         pendingInvalidations.add(invalidate);
@@ -68,16 +72,20 @@ function requestPendingCodeOutputSyntaxLoad(language: string): void {
     if (activeCodeOutputSyntaxLoads.has(language)) {
         return;
     }
+
     const invalidations = pendingCodeOutputSyntaxLoads.get(language);
     if (invalidations === undefined) {
         return;
     }
+
     const loaded = getLoadedSyntaxHighlighterForLanguage(language);
     if (loaded !== undefined) {
         pendingCodeOutputSyntaxLoads.delete(language);
+
         for (const invalidate of invalidations) {
             invalidate();
         }
+
         return;
     }
 
@@ -86,6 +94,7 @@ function requestPendingCodeOutputSyntaxLoad(language: string): void {
         .then((loaded) => {
             if (loaded) {
                 pendingCodeOutputSyntaxLoads.delete(language);
+
                 for (const invalidatePendingPreview of invalidations) {
                     invalidatePendingPreview();
                 }
@@ -109,7 +118,6 @@ export function detectStructuredOutputLanguage(text: string | undefined): string
     if (trimmed.length === 0) {
         return undefined;
     }
-
     if (looksLikeJson(trimmed)) {
         return "json";
     }
@@ -119,6 +127,7 @@ export function detectStructuredOutputLanguage(text: string | undefined): string
     if (looksLikeShellSnippet(trimmed)) {
         return "bash";
     }
+
     return undefined;
 }
 

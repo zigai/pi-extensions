@@ -27,6 +27,7 @@ function parseDefaultSettingsInput(): JsonValue {
     if (parsed === undefined) {
         throw new Error("Generated default settings must be valid JSON");
     }
+
     return parsed;
 }
 
@@ -36,6 +37,7 @@ const nodeErrorSchema = Type.Object(
     { code: Type.Optional(Type.String()) },
     { additionalProperties: true },
 );
+
 type NodeError = Static<typeof nodeErrorSchema>;
 
 const nodeErrorParser = {
@@ -72,6 +74,7 @@ function mergeConfigInputs(base: JsonValue, override: JsonValue): JsonValue {
     for (const [key, value] of Object.entries(overrideRecord)) {
         merged[key] = mergeConfigInputs(merged[key] ?? null, value);
     }
+
     return merged;
 }
 
@@ -104,6 +107,7 @@ function migrateLegacySettingsFile(
         reportWarning?.(`[pi-glowup] Legacy settings at ${legacyPath} were not migrated.`);
         return;
     }
+
     if (raw === undefined) {
         reportWarning?.(`[pi-glowup] Legacy settings at ${legacyPath} were not migrated.`);
         return;
@@ -121,6 +125,7 @@ function migrateLegacySettingsFile(
         $schema: `./schemas/${GLOWUP_CONFIG_SCHEMA_BASENAME}`,
         ...settings,
     };
+
     try {
         mkdirSync(dirname(settingsPath), { recursive: true });
         writeFileSync(settingsPath, serializeJson(migrated), {
@@ -143,6 +148,7 @@ function configSchemaErrorSummary(input: JsonValue): string {
     if (errors.length > messages.length) {
         messages.push(`+${errors.length - messages.length} more`);
     }
+
     return messages.join("; ") || "invalid settings shape";
 }
 
@@ -195,11 +201,13 @@ export function readGlowupConfig(
 ): GlowupConfig {
     const reportWarning = options.reportWarning;
     const cwd = options.cwd ?? process.cwd();
+
     migrateLegacySettingsFile(
         join(getAgentDir(), GLOWUP_DIAGNOSTICS_DIRECTORY, LEGACY_CONFIG_BASENAME),
         getGlowupGlobalConfigPath(),
         reportWarning,
     );
+
     if (policy.includeProjectConfig === true) {
         migrateLegacySettingsFile(
             join(cwd, CONFIG_DIR_NAME, GLOWUP_DIAGNOSTICS_DIRECTORY, LEGACY_CONFIG_BASENAME),
@@ -207,6 +215,7 @@ export function readGlowupConfig(
             reportWarning,
         );
     }
+
     const context: PiSettingsContext = {
         cwd,
         isProjectTrusted: () => policy.includeProjectConfig === true,
@@ -215,5 +224,6 @@ export function readGlowupConfig(
     if (reportWarning !== undefined) {
         reportLoadedDiagnostics(loaded.diagnostics, reportWarning);
     }
+
     return normalizeGlowupConfig(loaded.settings, reportWarning);
 }

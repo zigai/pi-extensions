@@ -11,6 +11,7 @@ export class StreamingScriptIdentityStore {
         if (parsed === undefined || parsed.label === "Bash") {
             return undefined;
         }
+
         return this.lock(toolCallId, parsed);
     }
 
@@ -20,9 +21,11 @@ export class StreamingScriptIdentityStore {
         script: ScriptInvocation | undefined,
     ): ScriptInvocation | undefined {
         this.identities.delete(toolCallId);
+
         if (script === undefined || script.label === "Bash") return undefined;
         this.identities.set(toolCallId, { label: script.label, language: script.language });
         this.evictOldest();
+
         return script;
     }
 
@@ -33,6 +36,7 @@ export class StreamingScriptIdentityStore {
             this.identities.set(toolCallId, identity);
             this.evictOldest();
         }
+
         return { ...script, ...identity };
     }
 

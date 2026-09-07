@@ -54,6 +54,7 @@ export async function createEditSnapshot(
                 newLineCount: after.lineCount,
                 canBuildPierreDiff: canDiffSnapshots(before, after),
             };
+
             return summaryReason === undefined ? snapshot : { ...snapshot, summaryReason };
         },
     };
@@ -70,6 +71,7 @@ async function readTextSnapshot(
         if (hasNodeErrorCode(cause, "ENOENT")) {
             return { content: "", sizeBytes: 0, lineCount: 0 };
         }
+
         return {
             content: "",
             sizeBytes: 0,
@@ -127,6 +129,7 @@ function summaryReasonForSnapshots(
     if (reason === "too-large") {
         return "too-large";
     }
+
     return undefined;
 }
 

@@ -28,6 +28,7 @@ function truncatePlainTextToWidth(text: string, maxWidth: number): string {
         content += grapheme;
         contentWidth += graphemeWidth;
     }
+
     return `${content}${suffix}`;
 }
 
@@ -77,6 +78,7 @@ function renderFullShellCommand(
                 (options.shellLayout === "auto" &&
                     (analysis.structurallyComplex || unsplitLines.length > unsplitBaselineLines)));
         if (!shouldReflow) return unsplitLines;
+
         if (splitComponent === undefined || splitWidth !== width) {
             const reflowedCode = options.expanded
                 ? analysis.reflowedCommand
@@ -84,11 +86,14 @@ function renderFullShellCommand(
                       .split("\n")
                       .map((line) => truncatePlainTextToWidth(line, Math.max(1, (width - 6) * 2)))
                       .join("\n");
+
             splitComponent = renderInvocation(reflowedCode);
             splitWidth = width;
         }
+
         return splitComponent.render(width);
     });
+
     return {
         render(width) {
             return component.render(width);
@@ -128,5 +133,6 @@ export function renderBashCommandCall(
             scriptCallRenderOptions(options, options.headerLayout),
         );
     }
+
     return renderFullShellCommand(theme, command, analysis, options);
 }

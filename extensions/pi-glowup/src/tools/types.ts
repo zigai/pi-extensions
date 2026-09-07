@@ -36,6 +36,7 @@ export type ThirdPartyToolRenderer = {
         theme: GlowupRenderTheme,
         context: ThirdPartyToolRenderContext,
     ) => Component;
+
     readonly renderResult: (
         result: ThirdPartyToolResult,
         options: { readonly expanded: boolean; readonly isPartial: boolean },
@@ -48,6 +49,7 @@ export type ThirdPartyToolRenderer = {
 export type ThirdPartyToolRendererPlugin = {
     readonly name: string;
     readonly matches: (toolName: string) => boolean;
+
     readonly createRenderer: (
         toolName: string,
         options?: ThirdPartyToolRenderingOptions,
@@ -57,8 +59,10 @@ export type ThirdPartyToolRendererPlugin = {
 /** Policy for third-party and generic compatibility rendering. */
 export type ThirdPartyToolRenderingOptions = {
     readonly enabled?: boolean;
+
     /** Exact full or base tool names, also supported by JSON configuration. */
     readonly preserveTools?: ReadonlyArray<string>;
+
     /** Programmatic policies, evaluated after exact-name preservation. */
     readonly preserveMatchers?: ReadonlyArray<ToolNameMatcher>;
     readonly renderers?: ReadonlyArray<ThirdPartyToolRendererPlugin>;
@@ -75,5 +79,6 @@ export function executionPhase(context: {
     if (context.isPartial || !context.argsComplete) {
         return context.executionStarted ? "running" : "pending";
     }
+
     return "complete";
 }

@@ -43,6 +43,7 @@ export function callState(context: ThirdPartyToolRenderContext): GlowupCallState
     if (context.isPartial || !context.argsComplete) {
         return "running";
     }
+
     return "success";
 }
 
@@ -81,6 +82,7 @@ export function renderSimpleResult(
     if (language !== undefined) {
         renderOptions = { ...renderOptions, syntax: { language } };
     }
+
     return renderGlowupOutput(theme, output, renderOptions);
 }
 
@@ -97,6 +99,7 @@ export function renderThirdPartyCall(
                 statusText: options.statusText,
             });
         }
+
         return renderGlowupCall(theme, {
             state: options.state,
             statusText: options.statusText,
@@ -112,6 +115,7 @@ export function renderThirdPartyCall(
             body: options.body,
         });
     }
+
     return renderGlowupCall(theme, {
         state: options.state,
         statusText: options.statusText,
@@ -131,7 +135,9 @@ export function createGenericRenderer(
             if (shouldDeferSimpleToolCall(context)) {
                 return emptyComponent();
             }
+
             const staticLabel = label ?? displayToolName(toolName);
+
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: toolStatusLabel(labelMode, context, {

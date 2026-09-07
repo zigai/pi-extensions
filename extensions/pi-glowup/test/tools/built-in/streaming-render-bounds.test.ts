@@ -32,6 +32,7 @@ function renderedCharacters(lines: ReadonlyArray<string>): number {
     for (const line of lines) {
         characters += line.length;
     }
+
     return characters;
 }
 

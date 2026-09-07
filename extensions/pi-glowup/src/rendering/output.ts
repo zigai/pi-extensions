@@ -5,9 +5,7 @@ import { type CodeOutputSyntax, highlightCodeOutput } from "./syntax/code-compon
 import { toolExpandHint, emptyComponent, makeComponent, wrapPrefixedLine } from "./component.ts";
 
 const MAX_COLLAPSED_OUTPUT_PREVIEW_BYTES = 64 * 1024;
-
 const MAX_COLLAPSED_OUTPUT_LINE_BYTES = 4 * 1024;
-
 const MIN_COLLAPSED_OUTPUT_LINE_BYTES = 256;
 
 const MAX_COLLAPSED_OUTPUT_PREVIEW_LINES = Math.max(
@@ -16,7 +14,6 @@ const MAX_COLLAPSED_OUTPUT_PREVIEW_LINES = Math.max(
 );
 
 const UTF8_TRUNCATION_SUFFIX = "…";
-
 const RETAINED_OUTPUT_LOG_ENV = "PI_GLOWUP_RETAINED_OUTPUT_LOG";
 
 export function trimEdgeBlankLines(lines: ReadonlyArray<string>): string[] {
@@ -28,6 +25,7 @@ export function trimEdgeBlankLines(lines: ReadonlyArray<string>): string[] {
     while (end > start && (lines[end - 1] ?? "").trim() === "") {
         end -= 1;
     }
+
     return start < end ? lines.slice(start, end) : [""];
 }
 
@@ -86,17 +84,22 @@ export function collapsedPreviewLinesFromText(
     const consumeLine = (line: string): void => {
         const previewLine = detachedPreviewLine(line, lineByteBudget);
         lineCount += 1;
+
         if (headLines.length < headCount) {
             headLines.push(previewLine);
         }
+
         if (tailCount > 0) {
             tailLines.push(previewLine);
+
             if (tailLines.length > tailCount) {
                 tailLines.shift();
             }
         }
+
         if (allLines !== undefined) {
             allLines.push(previewLine);
+
             if (allLines.length > lineBudget) {
                 allLines = undefined;
             }
@@ -107,6 +110,7 @@ export function collapsedPreviewLinesFromText(
         for (let index = 0; index < pendingBlankLineCount; index += 1) {
             consumeLine(pendingBlankLineSamples[index] ?? "");
         }
+
         pendingBlankLineCount = 0;
         pendingBlankLineSamples = [];
     };
@@ -115,20 +119,24 @@ export function collapsedPreviewLinesFromText(
         if (!hasNonWhitespaceText(line)) {
             if (sawContent) {
                 pendingBlankLineCount += 1;
+
                 if (pendingBlankLineSamples.length < lineBudget) {
                     pendingBlankLineSamples.push(line);
                 }
             }
+
             return;
         }
 
         sawContent = true;
+
         if (isCommandExitStatusLine(line)) {
             pendingBlankLineCount = 0;
             pendingBlankLineSamples = [];
         } else {
             flushPendingBlankLines();
         }
+
         consumeLine(line);
     });
 
@@ -138,6 +146,7 @@ export function collapsedPreviewLinesFromText(
     if (lineCount <= lineBudget) {
         return { isEmpty: false, lines: allLines };
     }
+
     if (mode === "head") {
         return {
             isEmpty: false,
@@ -159,7 +168,6 @@ function normalizeOutputText(text: string): string {
     const normalizedLineEndings = text.replace(/\r\n/g, "\n");
     let output = "";
     let lineStart = 0;
-
     for (let index = 0; index < normalizedLineEndings.length; index += 1) {
         const charCode = normalizedLineEndings.charCodeAt(index);
         if (charCode === 10) {
@@ -167,6 +175,7 @@ function normalizeOutputText(text: string): string {
             lineStart = index + 1;
             continue;
         }
+
         if (charCode === 13) {
             lineStart = index + 1;
         }
@@ -181,6 +190,7 @@ function isCommandExitStatusLine(line: string): boolean {
 
 function detachedPreviewLine(line: string, maxBytes: number): string {
     const suffixBytes = Buffer.byteLength(UTF8_TRUNCATION_SUFFIX, "utf8");
+
     if (Buffer.byteLength(line, "utf8") <= maxBytes) {
         return detachString(line);
     }
@@ -211,6 +221,7 @@ export function highlightCodePreviewRuns(
         if (run.length === 0) {
             return;
         }
+
         highlighted.push(...highlightRun(run.join("\n")));
         run = [];
     }
@@ -221,10 +232,12 @@ export function highlightCodePreviewRuns(
             highlighted.push(line);
             continue;
         }
+
         run.push(line);
     }
 
     flushRun();
+
     return highlighted;
 }
 
@@ -244,6 +257,7 @@ function retainedOutputBytes(retained: RetainedOutput): number {
     if (retained.preview.isEmpty) {
         return 0;
     }
+
     return retained.preview.lines.reduce(
         (total, line) => total + Buffer.byteLength(line, "utf8"),
         0,
@@ -258,6 +272,7 @@ function reportRetainedOutput(
     if (!shouldReportRetainedOutput()) {
         return;
     }
+
     console.warn(
         `[pi-glowup] renderGlowupOutput retained ${JSON.stringify({
             expanded: retained.kind === "expanded",
@@ -279,6 +294,7 @@ function visitPhysicalLines(text: string, visit: (line: string) => void): void {
         }
 
         visit(text.slice(lineStart, index));
+
         if (
             index < text.length &&
             text.charCodeAt(index) === 13 &&
@@ -286,6 +302,7 @@ function visitPhysicalLines(text: string, visit: (line: string) => void): void {
         ) {
             index += 1;
         }
+
         lineStart = index + 1;
     }
 }
@@ -395,6 +412,7 @@ export function renderGlowupOutput(
                   omittedHint,
               ),
           };
+
     reportRetainedOutput(retained, text, mode);
 
     return makeComponent((width) => {
@@ -428,6 +446,7 @@ export function renderGlowupOutput(
         for (const [index, line] of displayLines.entries()) {
             const prefix = index === 0 ? prefixFirst : prefixRest;
             let styled = line;
+
             if (isPreviewMetaLine(line)) {
                 styled = muted(theme, line);
             } else if (dimContent) {
@@ -444,6 +463,7 @@ export function renderGlowupOutput(
         if (retained.kind === "expanded") {
             return flattenWrappedRows(wrappedLines);
         }
+
         return renderCollapsedWrappedPreview(wrappedLines, {
             mode,
             rowBudget: Math.max(1, Math.floor(maxPreviewLines)),

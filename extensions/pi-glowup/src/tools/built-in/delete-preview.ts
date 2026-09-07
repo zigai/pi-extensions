@@ -38,21 +38,25 @@ export async function captureTextFilePreimage(
     if (leavesCwd && options.allowOutsideCwd !== true) {
         return undefined;
     }
+
     try {
         const stats = await stat(resolvedPath);
         if (!stats.isFile() || (maxBytes !== null && stats.size > maxBytes)) {
             return undefined;
         }
+
         const data = await readFile(resolvedPath);
         if (data.includes(0)) {
             return undefined;
         }
+
         const normalized = data.toString("utf8").replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
         const endsWithNewline = normalized.endsWith("\n");
         const lines = normalized.split("\n");
         if (lines.at(-1) === "") {
             lines.pop();
         }
+
         return { lines, endsWithNewline };
     } catch {
         return undefined;
@@ -69,6 +73,7 @@ export async function captureDeletedTextPreview(
     if (preimage === undefined) {
         return undefined;
     }
+
     return {
         section: {
             path: filePath,

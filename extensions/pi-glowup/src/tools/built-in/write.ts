@@ -33,6 +33,7 @@ export function renderWriteCall(
     },
 ) {
     const labelColumnWidth = mutationLabelColumnWidth(context, options.labelMode);
+
     const writeContext: WriteCallContext =
         labelColumnWidth === undefined
             ? {
@@ -48,6 +49,7 @@ export function renderWriteCall(
                   mutationSettings: options.mutationSettings,
                   mutationLabelColumnWidth: labelColumnWidth,
               };
+
     return renderWriteCallPreview(normalizedWriteArgs(args), theme, writeContext);
 }
 
@@ -73,12 +75,14 @@ export function renderWriteResult(
             context,
         );
     }
+
     if (!context.isError) {
         const fallback = renderSuccessfulWriteResultFallback(normalizedWriteArgs(context.args));
         if (fallback !== undefined) {
             return fallback;
         }
     }
+
     return renderGlowupOutput(theme, textOutput(result), {
         expanded: options.expanded || (!context.isError && mutationSettings.defaultView === "full"),
         mode: "head",

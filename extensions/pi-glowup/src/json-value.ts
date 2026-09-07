@@ -19,10 +19,11 @@ export const jsonObjectSchema = Type.Record(Type.String(), jsonValueSchema);
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonArray = ReadonlyArray<JsonValue>;
+export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
+
 export interface JsonObject {
     readonly [key: string]: JsonValue;
 }
-export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
 
 export function isJsonArray(value: JsonValue | undefined): value is JsonArray {
     return Array.isArray(value);
@@ -33,6 +34,7 @@ export const jsonValueParser = {
         try {
             if (value === undefined || value === null || !Value.Check(jsonValueSchema, value))
                 return undefined;
+
             return value;
         } catch {
             return undefined;
@@ -44,6 +46,7 @@ export const jsonObjectParser = {
     parse(value: unknown): JsonObject | undefined {
         if (value === undefined || value === null || !Value.Check(jsonObjectSchema, value))
             return undefined;
+
         return value;
     },
 };

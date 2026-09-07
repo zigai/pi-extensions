@@ -89,8 +89,10 @@ export function detailsDiagnostics(details: unknown): DebugLogFields {
     if (!isRecord(parsed)) {
         return { detailsKind: valueKind(parsed) };
     }
+
     const diff = parsed.diff;
     const pierreDiff = parsed.pierreDiff;
+
     return {
         detailsKind: "object",
         detailKeyCount: Object.keys(parsed).length,
@@ -109,10 +111,12 @@ export function createDiagnosticSnapshot(features: {
 }) {
     const builtInRenderCallCounts: Record<string, number> = {};
     const builtInRenderResultCounts: Record<string, number> = {};
+
     function recordBuiltInRender(kind: "call" | "result", toolName: BuiltInToolName): void {
         const counts = kind === "call" ? builtInRenderCallCounts : builtInRenderResultCounts;
         counts[toolName] = (counts[toolName] ?? 0) + 1;
     }
+
     function diagnosticSnapshot(): DebugLogFields {
         const memory = process.memoryUsage();
         const editStats = features.edit.stats();
@@ -122,6 +126,7 @@ export function createDiagnosticSnapshot(features: {
         const syntaxStats = syntaxHighlighterDiagnostics();
         const markdownStats = markdownSyntaxPatchStats();
         const rendererStats = toolRendererPatchStats();
+
         return {
             memory: {
                 rssBytes: memory.rss,
@@ -176,5 +181,6 @@ export function createDiagnosticSnapshot(features: {
             },
         };
     }
+
     return { diagnosticSnapshot, recordBuiltInRender };
 }

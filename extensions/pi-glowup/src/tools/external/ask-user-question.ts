@@ -107,6 +107,7 @@ function formatAskUserQuestionHeadline(
     if (header === undefined) {
         return item.question;
     }
+
     return `${theme.fg("accent", header)} ${theme.fg("dim", "·")} ${item.question}`;
 }
 
@@ -157,6 +158,7 @@ function summarizeAskUserQuestionArgs(
         if (index > 0) {
             lines.push("");
         }
+
         lines.push(formatAskUserQuestionHeadline(theme, item, index, questions.length));
         lines.push(...formatAskUserQuestionOptions(theme, item, expanded));
     }
@@ -176,6 +178,7 @@ function decodeAskUserQuotedText(rawText: string): string {
     } catch {
         return rawText.replace(/\\"/gu, '"').replace(/\\\\/gu, "\\");
     }
+
     return rawText;
 }
 
@@ -226,9 +229,11 @@ function summarizeAskUserQuestionResult(
     for (const [index, answer] of answers.entries()) {
         const item = findAskUserQuestionItem(questions, answer, index);
         const header = item?.header ?? (answers.length > 1 ? `Question ${index + 1}` : "Answer");
+
         lines.push(
             `${theme.fg("success", "✓")} ${theme.fg("accent", header)} ${theme.fg("muted", "→")} ${answer.answer}`,
         );
+
         if (expanded || answers.length === 1) {
             lines.push(theme.fg("dim", answer.question));
         }
@@ -273,6 +278,7 @@ export function createAskUserQuestionRenderer(
                     noOutputLabel: null,
                 });
             }
+
             return renderSimpleResult(theme, result, options);
         },
     };

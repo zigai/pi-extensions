@@ -29,7 +29,6 @@ export function tokensToAnsiLines(
 function tokensToAnsiLine(tokens: ReadonlyArray<ThemedToken>): string {
     let active = EMPTY_STYLE;
     let rendered = "";
-
     for (const token of tokens) {
         const next = styleFromToken(token);
         rendered += transitionAnsi(active, next);
@@ -40,11 +39,13 @@ function tokensToAnsiLine(tokens: ReadonlyArray<ThemedToken>): string {
     if (rendered.length === 0) {
         return "";
     }
+
     return `${rendered}${resetAnsi(active)}`;
 }
 
 function styleFromToken(token: ThemedToken): AnsiTokenStyle {
     const fontStyle = token.fontStyle ?? 0;
+
     return {
         color: normalizeHexColor(token.color),
         bold: (fontStyle & 2) !== 0,
@@ -60,23 +61,26 @@ function resetAnsi(style: AnsiTokenStyle): string {
 
 function transitionAnsi(previous: AnsiTokenStyle, next: AnsiTokenStyle): string {
     let ansi = "";
-
     if (previous.bold !== next.bold) {
         ansi += next.bold ? ansiStyles.modifier.bold.open : ansiStyles.modifier.bold.close;
     }
+
     if (previous.italic !== next.italic) {
         ansi += next.italic ? ansiStyles.modifier.italic.open : ansiStyles.modifier.italic.close;
     }
+
     if (previous.underline !== next.underline) {
         ansi += next.underline
             ? ansiStyles.modifier.underline.open
             : ansiStyles.modifier.underline.close;
     }
+
     if (previous.strikethrough !== next.strikethrough) {
         ansi += next.strikethrough
             ? ansiStyles.modifier.strikethrough.open
             : ansiStyles.modifier.strikethrough.close;
     }
+
     if (previous.color !== next.color) {
         ansi += next.color === undefined ? ansiStyles.color.close : fgAnsi(next.color);
     }
@@ -101,9 +105,11 @@ function normalizeHexColor(color: string | undefined): string | undefined {
     if (/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/iu.test(hex)) {
         return hex.slice(0, 7);
     }
+
     if (/^#[0-9a-f]{3}$/iu.test(hex)) {
         const [, red = "", green = "", blue = ""] = hex;
         return `#${red}${red}${green}${green}${blue}${blue}`;
     }
+
     return undefined;
 }

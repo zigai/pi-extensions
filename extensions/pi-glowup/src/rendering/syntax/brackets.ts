@@ -9,6 +9,7 @@ const PYTHON_VARIABLE_IDENTIFIER_COLOR = SYNTAX_ACCENT_COLORS.pythonVariableIden
 const PYTHON_FUNCTION_IDENTIFIER_COLOR = SYNTAX_ACCENT_COLORS.pythonFunctionIdentifier;
 const OPEN_BRACKETS = new Set(["(", "[", "{"]);
 const CLOSE_BRACKETS = new Set([")", "]", "}"]);
+
 let bracketPairColoringEnabled = true;
 
 type BracketState = {
@@ -25,6 +26,7 @@ export function configureBracketPairColoring(enabled: boolean): boolean {
     if (bracketPairColoringEnabled === enabled) {
         return false;
     }
+
     bracketPairColoringEnabled = enabled;
     return true;
 }
@@ -35,6 +37,7 @@ export function colorBracketPairsInTokenRows(
     language?: string,
 ): ThemedToken[][] {
     const state: BracketState = { depth: 0 };
+
     return rows.map((row) =>
         colorPythonIdentifiersInTokens(row, language).flatMap((token) =>
             splitBracketText(token.content, token.color, state).map((part) => {
@@ -53,6 +56,7 @@ export function enhanceSyntaxSegments<TSegment extends TextSegment>(
     language?: string,
 ): TSegment[] {
     const state: BracketState = { depth: 0 };
+
     return colorPythonIdentifiersInSegments(segments, language).flatMap((segment) =>
         splitBracketText(segment.text, segment.fg, state).map((part) => {
             const coloredSegment = { ...segment, text: part.text };
@@ -70,7 +74,9 @@ function colorPythonIdentifiersInTokens(
     if (language !== "python") {
         return [...row];
     }
+
     const line = row.map((token) => token.content).join("");
+
     return row.flatMap((token) =>
         splitPythonIdentifiers(token.content, token.color, line).map((part) => {
             const coloredToken = { ...token, content: part.text };
@@ -86,7 +92,9 @@ function colorPythonIdentifiersInSegments<TSegment extends TextSegment>(
     if (language !== "python") {
         return [...segments];
     }
+
     const line = segments.map((segment) => segment.text).join("");
+
     return segments.flatMap((segment) =>
         splitPythonIdentifiers(segment.text, segment.fg, line).map((part) => {
             const coloredSegment = { ...segment, text: part.text };
@@ -105,24 +113,29 @@ function splitPythonIdentifiers(
     if (!isBracketColorableForeground(foreground)) {
         return [{ text }];
     }
+
     const importLine = isPythonImportLine(line);
     const parts: Array<{ readonly text: string; readonly color?: string }> = [];
     let index = 0;
     for (const match of text.matchAll(/[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*/gu)) {
         const start = match.index;
         const value = match[0];
+
         if (start > index) {
             parts.push({ text: text.slice(index, start) });
         }
+
         parts.push({
             text: value,
             color: pythonIdentifierColor(value, text.slice(start + value.length), importLine),
         });
         index = start + value.length;
     }
+
     if (index < text.length) {
         parts.push({ text: text.slice(index) });
     }
+
     return parts.length > 0 ? parts : [{ text }];
 }
 
@@ -130,12 +143,15 @@ function pythonIdentifierColor(value: string, suffix: string, importLine: boolea
     if (importLine) {
         return PYTHON_IMPORT_IDENTIFIER_COLOR;
     }
+
     if (/^[A-Z_][A-Z0-9_]*$/u.test(value)) {
         return PYTHON_CONSTANT_IDENTIFIER_COLOR;
     }
+
     if (/^\s*\(/u.test(suffix)) {
         return PYTHON_FUNCTION_IDENTIFIER_COLOR;
     }
+
     return PYTHON_VARIABLE_IDENTIFIER_COLOR;
 }
 
@@ -161,7 +177,6 @@ function splitBracketText(
 
     const parts: Array<{ readonly text: string; readonly color?: string }> = [];
     let plain = "";
-
     for (const char of text) {
         if (!isBracket(char)) {
             plain += char;
@@ -172,6 +187,7 @@ function splitBracketText(
             parts.push({ text: plain });
             plain = "";
         }
+
         parts.push({ text: char, color: bracketColor(char, state) });
     }
 
@@ -192,9 +208,11 @@ function bracketColor(char: string, state: BracketState): string {
 
     const color =
         BRACKET_PAIR_COLORS[state.depth % BRACKET_PAIR_COLORS.length] ?? BRACKET_PAIR_COLORS[0];
+
     if (OPEN_BRACKETS.has(char)) {
         state.depth += 1;
     }
+
     return color;
 }
 
@@ -210,5 +228,6 @@ function isBracketColorableForeground(foreground: string | undefined): boolean {
     if (foreground === undefined) {
         return true;
     }
+
     return BRACKET_COLORABLE_FOREGROUNDS.has(foreground.toLowerCase());
 }

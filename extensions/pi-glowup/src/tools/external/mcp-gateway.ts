@@ -211,6 +211,7 @@ function summarizeMcpGatewayArgs(
     if (tool !== undefined) {
         const toolArgs = parseStructuredArgs(record.args ?? null);
         const command = tool.replace(/^chrome[-_]?devtools(?:__|[_-])?/iu, "");
+
         return {
             label: MCP_COMMAND_LABELS.get(command) ?? `MCP ${baseToolName(tool)}`,
             body: MCP_COMMAND_LABELS.has(command)
@@ -251,6 +252,7 @@ function mcpLifecycleLabels(staticLabel: string): ToolLifecycleLabels {
     if (staticLabel.startsWith("Browser ")) {
         return browserLifecycleLabels(staticLabel);
     }
+
     switch (staticLabel) {
         case "MCP Connect":
             return { static: staticLabel, active: "Connecting MCP", completed: "Connected MCP" };
@@ -299,6 +301,7 @@ export function createMcpGatewayRenderer(
         renderCall(args, theme, context) {
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
             const summary = summarizeMcpGatewayArgs(jsonValueParser.parse(args), context);
+
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: toolStatusLabel(labelMode, context, mcpLifecycleLabels(summary.label)),
@@ -323,6 +326,7 @@ export function createChromeDevtoolsMcpRenderer(
             const command = baseToolName(toolName).replace(/^chrome[-_]?devtools(?:__|[_-])?/i, "");
             const label = MCP_COMMAND_LABELS.get(command) ?? `MCP ${baseToolName(toolName)}`;
             const parsedArgs = jsonValueParser.parse(args);
+
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: toolStatusLabel(labelMode, context, mcpLifecycleLabels(label)),

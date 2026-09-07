@@ -17,11 +17,14 @@ export function selectSemanticDiffIndices(
         if (kind === undefined || kind === "meta") {
             continue;
         }
+
         contentIndices.push(index);
+
         if (kind === "insert" || kind === "delete") {
             changed.push(index);
         }
     }
+
     if (contentIndices.length <= lineBudget) {
         return contentIndices;
     }
@@ -38,6 +41,7 @@ export function selectSemanticDiffIndices(
     const selected = new Set<number>();
     const changedHeadCount = Math.ceil(Math.min(lineBudget, changed.length) / 2);
     const changedTailCount = Math.min(lineBudget, changed.length) - changedHeadCount;
+
     for (const index of changed.slice(0, changedHeadCount)) {
         selected.add(index);
     }
@@ -57,11 +61,13 @@ export function selectSemanticDiffIndices(
                 !selected.has(index)
             ) {
                 selected.add(index);
+
                 if (selected.size >= lineBudget) {
                     break;
                 }
             }
         }
+
         distance += 1;
     }
 

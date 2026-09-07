@@ -59,6 +59,7 @@ function rotatedAtomicLines(rotation: number): readonly string[] {
 
 function expectBoundedFrame(lines: readonly string[], width: number): void {
     expect(lines.length).toBeLessThanOrEqual(MAX_STREAMING_ROWS);
+
     for (const line of lines) {
         expect(visibleWidth(line)).toBeLessThanOrEqual(width);
         expect(Buffer.from(line, "utf8").toString("utf8")).toBe(line);
@@ -90,12 +91,14 @@ test("keeps append-truncate-rewrite write previews cache-equivalent across width
                     const width =
                         scenario.widthSequence[updateIndex % scenario.widthSequence.length] ?? 80;
                     updateIndex += 1;
+
                     // Compare before another update can mutate the reused component.
                     for (const frameWidth of [width, Math.max(100, width)]) {
                         const frame = cached.render(frameWidth);
                         expect(frame).toEqual(cold.render(frameWidth));
                         expectBoundedFrame(frame, frameWidth);
                     }
+
                     lastComponent = cached;
                     return cached;
                 };
@@ -130,6 +133,7 @@ test("keeps append-truncate-rewrite write previews cache-equivalent across width
                 const rewrittenText = rewritten.render(100).join("\n");
                 expect(rewrittenText).toContain("src/rewritten.ts");
                 expect(rewrittenText).toContain(scenario.rewrittenSuffix);
+
                 for (const removedLine of sourceLines.slice(scenario.truncateAt)) {
                     expect(rewrittenText).not.toContain(removedLine);
                 }
@@ -147,6 +151,7 @@ test("preserves every generated top-level shell-chain segment and operator", () 
                     if (index === 0) return part;
                     const operator =
                         scenario.operators[(index - 1) % scenario.operators.length] ?? "&&";
+
                     return `${operator} ${part}`;
                 })
                 .join(" ");
@@ -160,6 +165,7 @@ test("preserves every generated top-level shell-chain segment and operator", () 
                     expectedLines[expectedLines.length - 1] += ` ${operator} ${part}`;
                 }
             }
+
             const expected = expectedLines.length > 1 ? expectedLines.join("\n") : undefined;
             expect(reflowBashCommand(command)).toBe(expected);
         }),

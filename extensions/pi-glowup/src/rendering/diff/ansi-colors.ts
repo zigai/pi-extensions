@@ -33,11 +33,13 @@ export function strongerDiffBackgroundAnsi(
     if (rowBackgroundAnsi.includes("48;5;")) {
         return ansiStyles.bgColor.ansi256(closestDistinctAnsi256(strongest, row));
     }
+
     return ansiStyles.bgColor.ansi16m(strongest.red, strongest.green, strongest.blue);
 }
 
 function contrastingBlend(front: Rgb, back: Rgb, comparison: Rgb = back): Rgb {
     let strongest = back;
+
     for (
         let amount = DIFF_SHADE_BLEND_STEP;
         amount <= MAX_DIFF_SHADE_BLEND;
@@ -48,6 +50,7 @@ function contrastingBlend(front: Rgb, back: Rgb, comparison: Rgb = back): Rgb {
             break;
         }
     }
+
     return strongest;
 }
 
@@ -100,14 +103,17 @@ function ansi256Rgb(index: number): Rgb {
         const [red, green, blue] = basic[index] ?? basic[0];
         return { red, green, blue };
     }
+
     if (index < 232) {
         const cube = index - 16;
+
         return {
             red: ANSI_256_CUBE_LEVELS[Math.floor(cube / 36)] ?? 0,
             green: ANSI_256_CUBE_LEVELS[Math.floor((cube % 36) / 6)] ?? 0,
             blue: ANSI_256_CUBE_LEVELS[cube % 6] ?? 0,
         };
     }
+
     const gray = 8 + (index - 232) * 10;
     return { red: gray, green: gray, blue: gray };
 }
@@ -120,18 +126,21 @@ function closestDistinctAnsi256(target: Rgb, row: Rgb): number {
         if (rgbDistance(candidate, row) < MIN_DIFF_SHADE_DISTANCE) {
             continue;
         }
+
         const distance = rgbDistance(candidate, target);
         if (distance < closestDistance) {
             closestDistance = distance;
             closestIndex = index;
         }
     }
+
     return closestIndex;
 }
 
 function blendRgb(front: Rgb, back: Rgb, amount: number): Rgb {
     const blend = (frontChannel: number, backChannel: number): number =>
         Math.round(backChannel + (frontChannel - backChannel) * amount);
+
     return {
         red: blend(front.red, back.red),
         green: blend(front.green, back.green),

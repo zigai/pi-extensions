@@ -24,6 +24,7 @@ function createStaticLoader(message = "Working..."): Loader {
         ui.stop();
         terminal.dispose();
     });
+
     return loader;
 }
 
@@ -90,6 +91,7 @@ describe("working widget spacing patch", () => {
                 return ["original"];
             }
         }
+
         const prototype = TestContainer.prototype;
         const originalRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
 
@@ -107,14 +109,17 @@ describe("working widget spacing patch", () => {
                 return ["original"];
             }
         }
+
         const prototype = TestContainer.prototype;
         configureWorkingWidgetSpacingPatch(true, prototype);
         class PatchedContainer extends TestContainer {}
+
         const patchedPrototype = PatchedContainer.prototype;
         const patchedRenderDescriptor = Object.getOwnPropertyDescriptor(prototype, "render");
         if (patchedRenderDescriptor === undefined) {
             throw new Error("expected Glowup container render wrapper");
         }
+
         Object.defineProperty(patchedPrototype, "render", patchedRenderDescriptor);
         prototype.render = function renderWithLaterWrapper(
             this: Container,

@@ -78,6 +78,7 @@ export async function loadHighlightedDiffResult(
     if (cached?.syntaxVersion === syntaxVersion) {
         return cached.result;
     }
+
     const pending = pendingMetadataHighlights.get(metadata);
     if (pending?.syntaxVersion === syntaxVersion) {
         return pending.promise;
@@ -87,9 +88,12 @@ export async function loadHighlightedDiffResult(
         if (syntaxHighlightingVersion() === syntaxVersion) {
             highlightedMetadataCache.set(metadata, { syntaxVersion, result });
         }
+
         return result;
     });
+
     pendingMetadataHighlights.set(metadata, { syntaxVersion, promise });
+
     return promise.finally(() => {
         if (pendingMetadataHighlights.get(metadata)?.promise === promise) {
             pendingMetadataHighlights.delete(metadata);
@@ -120,6 +124,7 @@ async function loadHighlightedDiffUncached(
     if (!highlighted) {
         return { value: emptyHighlightedDiffSet(), failed: true };
     }
+
     return { value: { dark: highlighted, light: highlighted }, failed: false };
 }
 
@@ -189,11 +194,14 @@ export function flattenHighlightedLine(
             nextCache.set(cacheKey, enhanced);
             flattenedLineCache.set(cacheTarget, nextCache);
         }
+
         return enhanced;
     }
+
     const resolvedFallback = Value.Check(fallbackTextFactorySchema, fallbackText)
         ? fallbackText()
         : fallbackText;
+
     return resolvedFallback.length > 0
         ? enhanceSyntaxSegments(
               [
@@ -223,6 +231,7 @@ function renderHighlightedDiffCodeWithTextFallback(
     if (highlighted !== undefined || (metadata.lang ?? "text") === "text") {
         return highlighted;
     }
+
     return renderHighlightedDiffCode(setLanguageOverride(metadata, "text"), syntax);
 }
 
@@ -235,7 +244,6 @@ function renderHighlightedDiffCode(
             ...PIERRE_RENDER_OPTIONS,
             theme: syntax.themeName,
         });
-
         return {
             deletionLines: highlighted.code.deletionLines,
             additionLines: highlighted.code.additionLines,
@@ -252,13 +260,13 @@ function parseStyleValue(styleValue: Properties["style"]): ReadonlyMap<string, s
     } catch {
         return new Map();
     }
+
     const cached = parsedStyleCache.get(parsedStyle);
     if (cached !== undefined) {
         return cached;
     }
 
     const styles = new Map<string, string>();
-
     for (const segment of parsedStyle.split(";")) {
         const separator = segment.indexOf(":");
         if (separator <= 0) {
@@ -273,11 +281,13 @@ function parseStyleValue(styleValue: Properties["style"]): ReadonlyMap<string, s
     }
 
     parsedStyleCache.set(parsedStyle, styles);
+
     while (parsedStyleCache.size > MAX_STYLE_CACHE_ENTRIES) {
         const oldest = parsedStyleCache.keys().next().value;
         if (oldest === undefined) break;
         parsedStyleCache.delete(oldest);
     }
+
     return styles;
 }
 
@@ -286,18 +296,23 @@ function makeDiffSpan(text: string, style: SpanStyle): DiffSpan {
     if (style.fg !== undefined) {
         span = { ...span, fg: style.fg };
     }
+
     if (style.bg !== undefined) {
         span = { ...span, bg: style.bg };
     }
+
     if (style.emphasized && style.boldEmphasized) {
         span = { ...span, bold: true };
     }
+
     if (style.dimUnchanged && !style.emphasized) {
         span = { ...span, dim: true };
     }
+
     if (style.emphasized) {
         span = { ...span, emphasized: true };
     }
+
     return span;
 }
 

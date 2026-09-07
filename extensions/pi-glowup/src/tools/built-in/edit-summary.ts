@@ -33,6 +33,7 @@ function formatEditCount(validEdits: number): string {
     if (validEdits <= 1) {
         return "";
     }
+
     return ` (${validEdits} edits)`;
 }
 

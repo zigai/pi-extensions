@@ -56,7 +56,6 @@ export type SyntaxHighlighterDiagnostics = {
 
 type SyntaxStateStatus = "disabled" | "failed" | "ready" | "uninitialized";
 type SyntaxStateListener = (status: SyntaxStateStatus) => void;
-
 type SyntaxWarningReporter = (message: string) => void;
 
 type SyntaxProjectLanguageDetectionOptions = {
@@ -110,8 +109,10 @@ const highlightedCodeCache = new Map<
     string,
     { readonly lines: string[]; readonly bytes: number }
 >();
+
 let highlightedCodeCacheBytes = 0;
 const syntaxStateListeners = new Set<SyntaxStateListener>();
+
 let syntaxRenderingVersion = 0;
 let activeConfigurationKey: string | undefined;
 
@@ -121,6 +122,7 @@ export type SyntaxHighlighterFactory = CreateHighlighterFactory<string, string>;
 export const createSyntaxHighlighter: SyntaxHighlighterFactory = async (options) => {
     const { createBundledHighlighter, bundledLanguages, bundledThemes, createOnigurumaEngine } =
         await import("shiki");
+
     // Shiki resolves bundled names and rejects missing names itself; registrations can
     // introduce arbitrary names used by synchronous tokenization (including Pierre).
     const createHighlighter = createBundledHighlighter<string, string>({
@@ -148,19 +150,24 @@ export async function initializeSyntaxHighlighting(
     }
 
     const generation = syntaxGeneration;
+
     initializationPromise = prepareSyntaxSource(env, options).then(async (source) => {
         const state = await initializeSyntaxHighlightingOnce(source, options);
         const configurationKey = source.configurationKey;
+
         if (generation !== syntaxGeneration) {
             disposeReadySyntaxState(state);
             return disposedSyntaxState(state.config);
         }
+
         syntaxState = state;
         activeConfigurationKey = configurationKey;
         syntaxRenderingVersion += 1;
         notifySyntaxStateListeners(state.status);
+
         return state;
     });
+
     return initializationPromise;
 }
 
@@ -182,18 +189,22 @@ async function replaceSyntaxHighlighting(
     const replacement = sourcePromise.then(async (source) => {
         const state = await initializeSyntaxHighlightingOnce(source, options);
         const configurationKey = source.configurationKey;
+
         if (generation !== syntaxGeneration) {
             disposeReadySyntaxState(state);
             return disposedSyntaxState(state.config);
         }
+
         clearSyntaxHighlightCache();
         syntaxState = state;
         activeConfigurationKey = configurationKey;
         disposeReadySyntaxState(previousState);
         syntaxRenderingVersion += 1;
         notifySyntaxStateListeners(state.status);
+
         return state;
     });
+
     initializationPromise = replacement;
     return replacement;
 }
@@ -217,9 +228,11 @@ async function refreshSyntaxHighlightingOnce(
     if (generation !== syntaxGeneration) {
         return disposedSyntaxState(source.config);
     }
+
     if (syntaxState !== undefined && activeConfigurationKey === source.configurationKey) {
         return syntaxState;
     }
+
     return replaceSyntaxHighlighting(Promise.resolve(source), options);
 }
 
@@ -238,6 +251,7 @@ export function configureSyntaxBracketPairColoring(enabled: boolean): void {
     if (!configureBracketPairColoring(enabled)) {
         return;
     }
+
     clearSyntaxHighlightCache();
     syntaxRenderingVersion += 1;
 }
@@ -245,6 +259,7 @@ export function configureSyntaxBracketPairColoring(enabled: boolean): void {
 /** Subscribes to central highlighter state changes for render-cache invalidation. */
 export function onSyntaxHighlightingStateChange(listener: SyntaxStateListener): () => void {
     syntaxStateListeners.add(listener);
+
     return () => {
         syntaxStateListeners.delete(listener);
     };
@@ -301,6 +316,7 @@ export function highlightSyntaxCode(
         if (cacheKey !== undefined) {
             rememberHighlightedCode(cacheKey, highlighted);
         }
+
         return highlighted;
     } catch {
         return plainLines;
@@ -354,15 +370,18 @@ export async function getSyntaxHighlighterForLanguage(
         if (!isBundledSyntaxLanguage(normalizedLanguage)) {
             return undefined;
         }
+
         try {
             await state.highlighter.loadLanguage(normalizedLanguage);
         } catch (cause: unknown) {
             if (generation !== syntaxGeneration) return undefined;
             throw cause;
         }
+
         if (generation !== syntaxGeneration) {
             return undefined;
         }
+
         state.loadedLanguages.add(normalizedLanguage);
         state.dynamicLanguages.add(normalizedLanguage);
         notifySyntaxStateListeners(state.status);
@@ -400,12 +419,15 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
         if (generation !== syntaxGeneration || syntaxState !== state) return false;
         throw cause;
     }
+
     if (generation !== syntaxGeneration || syntaxState !== state) {
         return false;
     }
+
     state.loadedLanguages.add(normalizedLanguage);
     state.dynamicLanguages.add(normalizedLanguage);
     notifySyntaxStateListeners(state.status);
+
     return true;
 }
 
@@ -440,6 +462,7 @@ export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
             projectLanguageDetectionEnabled: diagnostics.projectDetectionEnabled,
         };
     }
+
     if (diagnostics?.projectDetection !== undefined) {
         result = {
             ...result,
@@ -458,6 +481,7 @@ export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
             };
         }
     }
+
     if (state?.status === "ready") {
         result = {
             ...result,
@@ -465,6 +489,7 @@ export function syntaxHighlighterDiagnostics(): SyntaxHighlighterDiagnostics {
             dynamicLanguages: [...state.dynamicLanguages].sort(),
         };
     }
+
     return result;
 }
 
@@ -474,6 +499,7 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     syntaxGeneration += 1;
 
     const state = syntaxState;
+
     syntaxState = undefined;
     initializationPromise = undefined;
     syntaxPreloadDiagnostics = undefined;
@@ -511,6 +537,7 @@ async function prepareSyntaxSource(
                 cause instanceof Error ? `${cause.name}:${cause.message}` : String(cause);
         }
     }
+
     const configurationKey = createHash("sha256")
         .update(
             JSON.stringify({
@@ -521,6 +548,7 @@ async function prepareSyntaxSource(
             }),
         )
         .digest("hex");
+
     return { config, theme, configurationKey };
 }
 
@@ -560,7 +588,6 @@ async function initializeSyntaxHighlightingOnce(
 
     try {
         const theme = parseSyntaxTheme(config, source.theme.contents);
-
         const preloadSelection = selectSyntaxPreloadLanguages(options);
         syntaxPreloadDiagnostics = preloadSelection.diagnostics;
 
@@ -569,7 +596,6 @@ async function initializeSyntaxHighlightingOnce(
             themes: [theme.registration],
             langs: [...preloadSelection.languages],
         });
-
         return {
             status: "ready",
             config,
@@ -593,7 +619,6 @@ function selectSyntaxPreloadLanguages(
     const configuredLanguages = [...(options.preloadLanguages ?? PRELOADED_SYNTAX_LANGUAGES)];
     const ignoredConfiguredLanguages: string[] = [];
     const preloadLanguages = new Set<BundledLanguage>();
-
     for (const configuredLanguage of configuredLanguages) {
         const normalizedLanguage = normalizeSyntaxLanguage(configuredLanguage);
         if (normalizedLanguage === undefined || normalizedLanguage === "text") {
@@ -603,6 +628,7 @@ function selectSyntaxPreloadLanguages(
             );
             continue;
         }
+
         preloadLanguages.add(normalizedLanguage);
     }
 
@@ -633,6 +659,7 @@ function selectSyntaxPreloadLanguages(
     if (projectDetection !== undefined) {
         diagnostics = { ...diagnostics, projectDetection };
     }
+
     return {
         languages: [...preloadLanguages],
         diagnostics,
@@ -652,6 +679,7 @@ function normalizeHighlightedLineCount(lines: string[], expectedCount: number): 
     if (lines.length > expectedCount) {
         return lines.slice(0, expectedCount);
     }
+
     return [...lines, ...Array.from({ length: expectedCount - lines.length }, () => "")];
 }
 
@@ -678,11 +706,14 @@ function deleteOldestHighlightedCode(): boolean {
     if (oldestKey === undefined) {
         return false;
     }
+
     const oldest = highlightedCodeCache.get(oldestKey);
     if (oldest !== undefined) {
         highlightedCodeCacheBytes = Math.max(0, highlightedCodeCacheBytes - oldest.bytes);
     }
+
     highlightedCodeCache.delete(oldestKey);
+
     return true;
 }
 
@@ -691,6 +722,7 @@ function rememberHighlightedCode(cacheKey: string, lines: string[]): void {
     if (bytes > MAX_CACHE_BYTES) {
         return;
     }
+
     while (
         highlightedCodeCache.size >= CACHE_LIMIT ||
         highlightedCodeCacheBytes + bytes > MAX_CACHE_BYTES
@@ -699,6 +731,7 @@ function rememberHighlightedCode(cacheKey: string, lines: string[]): void {
             break;
         }
     }
+
     highlightedCodeCache.set(cacheKey, { lines, bytes });
     highlightedCodeCacheBytes += bytes;
 }

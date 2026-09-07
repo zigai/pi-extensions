@@ -75,8 +75,10 @@ function writeMutationCallOptions(
     if (labelColumnWidth !== undefined) {
         options = { ...options, labelColumnWidth };
     }
+
     return { ...options, body, state };
 }
+
 const PARTIAL_WRITE_HEAD_LINES = PARTIAL_WRITE_PREVIEW_LINES;
 const PARTIAL_WRITE_MOVING_TAIL_LINES = PARTIAL_WRITE_PREVIEW_LINES;
 const MAX_PARTIAL_WRITE_LINE_CHARS = 2_000;
@@ -102,18 +104,22 @@ function writeDiffSection(path: string, preview: string, totalLines: number): Di
     if (previewLines.length > totalLines && previewLines.at(-1) === "") {
         previewLines.pop();
     }
+
     const contentLineCount = previewLines.filter((line) => !line.startsWith("… ")).length;
     let lineNumber =
         previewLines[0]?.startsWith("… ") === true
             ? Math.max(1, totalLines - contentLineCount + 1)
             : 1;
+
     return {
         path,
         lines: previewLines.map((line) => {
             if (line.startsWith("… ")) {
                 return `  ${line}`;
             }
+
             const rendered = `+${lineNumber} ${line}`;
+
             lineNumber += 1;
             return rendered;
         }),
@@ -144,6 +150,7 @@ class PartialWriteContentPreview {
         if (this.scannedLength === 0) {
             return 0;
         }
+
         return this.newlineCount + (this.endsWithLineBreak ? 0 : 1);
     }
 
@@ -152,9 +159,11 @@ class PartialWriteContentPreview {
         if (snapshot.lineCount === 0) {
             return "";
         }
+
         if (!options.movingViewport) {
             return this.headPreviewText(snapshot);
         }
+
         return this.movingPreviewText(snapshot);
     }
 
@@ -163,6 +172,7 @@ class PartialWriteContentPreview {
         if (snapshot.lineCount <= lines.length) {
             return lines.join("\n");
         }
+
         return [
             ...lines,
             `… +${snapshot.lineCount - lines.length} lines (${toolExpandHint()})`,
@@ -196,10 +206,12 @@ class PartialWriteContentPreview {
     private consume(content: string, start: number): void {
         let lineStart = start;
         let index = start;
+
         if (start > 0 && content.charCodeAt(start - 1) === 13 && content.charCodeAt(start) === 10) {
             lineStart = start + 1;
             index = start + 1;
         }
+
         for (; index < content.length; index += 1) {
             const charCode = content.charCodeAt(index);
             if (charCode !== 10 && charCode !== 13) {
@@ -211,9 +223,11 @@ class PartialWriteContentPreview {
             this.currentLine = "";
             this.newlineCount += 1;
             this.endsWithLineBreak = true;
+
             if (charCode === 13 && content.charCodeAt(index + 1) === 10) {
                 index += 1;
             }
+
             lineStart = index + 1;
         }
 
@@ -229,10 +243,12 @@ class PartialWriteContentPreview {
         if (!hasNonWhitespaceText(boundedLine)) {
             if (this.sawContent) {
                 this.pendingBlankLineCount += 1;
+
                 if (this.pendingBlankLineSamples.length < PARTIAL_WRITE_HEAD_LINES) {
                     this.pendingBlankLineSamples.push(boundedLine);
                 }
             }
+
             return;
         }
 
@@ -245,20 +261,24 @@ class PartialWriteContentPreview {
         for (let index = 0; index < this.pendingBlankLineCount; index += 1) {
             this.appendDisplayLine(this.pendingBlankLineSamples[index] ?? "");
         }
+
         this.pendingBlankLineCount = 0;
         this.pendingBlankLineSamples.length = 0;
     }
 
     private appendDisplayLine(line: string): void {
         this.displayLineCount += 1;
+
         if (this.headLines.length < PARTIAL_WRITE_PREVIEW_LINES) {
             this.headLines.push(line);
         }
+
         this.appendTailLine(line);
     }
 
     private appendTailLine(line: string): void {
         this.tailLines.push(line);
+
         if (this.tailLines.length > PARTIAL_WRITE_MOVING_TAIL_LINES) {
             this.tailLines.shift();
         }
@@ -270,10 +290,13 @@ class PartialWriteContentPreview {
         let lineCount = this.displayLineCount;
         const appendLine = (line: string): void => {
             lineCount += 1;
+
             if (headLines.length < PARTIAL_WRITE_PREVIEW_LINES) {
                 headLines.push(line);
             }
+
             tailLines.push(line);
+
             if (tailLines.length > PARTIAL_WRITE_MOVING_TAIL_LINES) {
                 tailLines.shift();
             }
@@ -288,7 +311,9 @@ class PartialWriteContentPreview {
                 appendLine(this.pendingBlankLineSamples[index] ?? "");
             }
         }
+
         appendLine(currentLine);
+
         return { headLines, tailLines, lineCount };
     }
 }
@@ -378,6 +403,7 @@ class PartialWriteCallPreviewComponent implements Component {
             writeMutationCallOptions(this.mutationLabelColumnWidth, body, "running"),
         );
         const lines = component.render(width);
+
         this.cachedWidth = width;
         this.cachedLines = lines;
         return lines;
@@ -393,7 +419,6 @@ function boundedWriteContentPreview(content: string, maxBytes: number | null): s
     if (maxBytes === null || Buffer.byteLength(content, "utf8") <= maxBytes) {
         return content;
     }
-
     const maxContentBytes = Math.max(
         0,
         maxBytes - Buffer.byteLength(WRITE_PREVIEW_TRUNCATION_SUFFIX, "utf8"),
@@ -416,9 +441,11 @@ export function renderWriteCallPreview(
         active: "Writing",
         completed: "Wrote",
     });
+
     if (content === undefined && isActiveToolCall(context)) {
         return emptyComponent();
     }
+
     if (content === undefined || context.isError) {
         return renderGlowupCall(theme, {
             state: context.isError ? "error" : "success",
@@ -426,6 +453,7 @@ export function renderWriteCallPreview(
             body: formatPathTarget(theme, path),
         });
     }
+
     scheduleCodeOutputSyntaxLoad({ path }, context.invalidate, content);
 
     if (context.isPartial) {
@@ -447,6 +475,7 @@ export function renderWriteCallPreview(
             context.lastComponent.update(update);
             return context.lastComponent;
         }
+
         return new PartialWriteCallPreviewComponent(update);
     }
 
@@ -470,6 +499,7 @@ export function renderWriteCallPreview(
                   showAllRows,
                   writeDiffRenderOptions(mutationSettings.previewLines, showAllRows),
               );
+
     return renderMutationCall(
         theme,
         {

@@ -9,6 +9,7 @@ export function collapseHome(path: string): string {
     ) {
         return `~${path.slice(home.length)}`;
     }
+
     return path;
 }
 
@@ -51,5 +52,6 @@ export function formatPathTarget(
     if (options.isPartial === true) {
         return muted(theme, displayPath);
     }
+
     return pathText(theme, displayPath);
 }

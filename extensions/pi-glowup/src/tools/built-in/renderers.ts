@@ -1,17 +1,14 @@
-import type { ShellLayout, ShellOperatorPosition } from "./bash/command.ts";
 import { jsonValueParser } from "../../json-value.ts";
-import { type BuiltInToolName } from "./names.ts";
-import { type BuiltInToolRendererOptions } from "./context.ts";
 import { emptyComponent } from "../../rendering/component.ts";
+import { renderGlowupOutput } from "../../rendering/output.ts";
+import { type MutationSettings } from "../../rendering/preview-settings.ts";
+import { shouldDeferSimpleToolCall, type ToolLabelMode } from "../../rendering/status-labels.ts";
 import {
     formatFindAction,
     formatGrepAction,
     formatLsAction,
     formatReadAction,
 } from "../../rendering/tool-header.ts";
-import { renderGlowupOutput } from "../../rendering/output.ts";
-import { type ScriptPreviewHeaderLayout } from "./bash/script-renderer.ts";
-import { shouldDeferSimpleToolCall, type ToolLabelMode } from "../../rendering/status-labels.ts";
 import {
     findActionArgs,
     grepActionArgs,
@@ -21,7 +18,10 @@ import {
     readActionArgs,
     textOutput,
 } from "./arguments.ts";
+import type { ShellLayout, ShellOperatorPosition } from "./bash/command.ts";
 import { createNativeBashFeature } from "./bash/preview.ts";
+import { type ScriptPreviewHeaderLayout } from "./bash/script-renderer.ts";
+import { type BuiltInToolRendererOptions } from "./context.ts";
 import { createNativeDeleteFeature } from "./delete.ts";
 import { createNativeEditFeature } from "./edit.ts";
 import {
@@ -29,7 +29,7 @@ import {
     renderWebSearchCall,
     syntaxPathFromToolArg,
 } from "./exploration.ts";
-import { type MutationSettings } from "../../rendering/preview-settings.ts";
+import { type BuiltInToolName } from "./names.ts";
 import { renderWriteCall, renderWriteResult } from "./write.ts";
 
 export function createNativeToolRenderers(features: {
@@ -42,6 +42,7 @@ export function createNativeToolRenderers(features: {
     const { renderEditCall, renderEditResult } = features.edit;
     const { renderDeleteCall } = features.deletion;
     const { renderExplorationCall, renderExplorationResult } = features.exploration;
+
     function renderBuiltInToolCall(options: {
         readonly headerLayout: () => ScriptPreviewHeaderLayout;
         readonly maxCodePreviewLines: () => number;
@@ -55,6 +56,7 @@ export function createNativeToolRenderers(features: {
     }): BuiltInToolRendererOptions["renderCall"] {
         return (toolName, args, theme, context) => {
             options.recordRender("call", toolName);
+
             switch (toolName) {
                 case "read":
                     if (shouldDeferSimpleToolCall(context)) return emptyComponent();
@@ -138,6 +140,7 @@ export function createNativeToolRenderers(features: {
     }): BuiltInToolRendererOptions["renderResult"] {
         return (toolName, result, options, theme, context) => {
             settings.recordRender("result", toolName);
+
             switch (toolName) {
                 case "read":
                     return hasImageContent(result)

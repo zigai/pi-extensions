@@ -18,7 +18,6 @@ function isSingleLineSpacer(component: Component): boolean {
     if (!(component instanceof Spacer)) {
         return false;
     }
-
     const lines = component.render(1);
     return lines.length === 1 && lines[0] === "";
 }
@@ -54,10 +53,10 @@ export function configureWorkingWidgetSpacingPatch(
 ): void {
     const containerPrototype = prototype;
     const state = containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
-
     if (!enabled) {
         if (state !== undefined) {
             state.enabled = false;
+
             if (containerPrototype.render === state.wrapperRender) {
                 containerPrototype.render = state.originalRender;
                 delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
@@ -72,7 +71,6 @@ export function configureWorkingWidgetSpacingPatch(
     }
 
     const originalRender = containerPrototype.render;
-
     let nextState: WorkingWidgetSpacingPatchState;
     const wrapperRender = function renderWithWorkingWidgetSpacing(
         this: Container,
@@ -84,7 +82,6 @@ export function configureWorkingWidgetSpacingPatch(
 
         const lines: string[] = [];
         let previousChild: Component | undefined;
-
         for (const child of this.children) {
             if (isLoaderContainer(previousChild) && isEmptySpacerContainer(child)) {
                 previousChild = child;

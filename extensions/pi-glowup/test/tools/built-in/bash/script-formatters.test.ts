@@ -281,11 +281,13 @@ describe("script formatter settings", () => {
                 { label: "Python", language: "python", code: "second" },
             ]);
             expect(getScriptFormatterWorkload()).toEqual({ active: 2, queued: 1 });
+
             // Escalation must close both SIGTERM-resistant children, not merely settle promises.
             // The third child may start after the first close, while the second still owns a slot.
             const results = await Promise.all(pending);
             expect(results[2]?.code).toBe("within limit");
             await vi.waitUntil(() => getScriptFormatterWorkload().active === 0);
+
             for (const name of ["first", "second"]) {
                 const pid = Number(readFileSync(join(dir, name), "utf8"));
                 expect(() => process.kill(pid, 0)).toThrow("ESRCH");
@@ -348,17 +350,20 @@ describe("script formatter settings", () => {
         const retained: Array<{ code: string; output: string }> = [];
         for (const code of ["one", "two", "three", "four"]) {
             const invocation = { label: "Python", language: "python", code };
+
             // Both misses happen before the first await; each caller retains independent work.
             const results = await Promise.all([
                 formatScriptInvocation(invocation, formatter),
                 formatScriptInvocation(invocation, formatter),
             ]);
             expect(results[0].code).not.toBe(results[1].code);
+
             for (const result of results) expect(result.code).toMatch(/^\d+:é+$/u);
             const cached = await formatScriptInvocation(invocation, formatter);
             expect(results.map((result) => result.code)).toContain(cached.code);
             retained.push({ code, output: cached.code });
         }
+
         // Four retained values consume about 2.8 MiB, not the 5.6 MiB of eight completions.
         for (const { code, output } of retained) {
             await expect(

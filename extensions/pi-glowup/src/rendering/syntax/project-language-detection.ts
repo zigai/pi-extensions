@@ -70,6 +70,7 @@ export function detectProjectSyntaxLanguages(
             stoppedReason = "time-limit";
             break;
         }
+
         if (scannedDirectories >= maxDirectories) {
             stoppedReason = "directory-limit";
             break;
@@ -79,6 +80,7 @@ export function detectProjectSyntaxLanguages(
         if (directory === undefined) {
             break;
         }
+
         scannedDirectories += 1;
 
         let entries: Dirent[];
@@ -98,10 +100,12 @@ export function detectProjectSyntaxLanguages(
             }
 
             scannedFiles += 1;
+
             const language = syntaxLanguageFromPath(entry.name);
             if (language !== undefined && language !== "text") {
                 languages.add(language);
             }
+
             if (scannedFiles >= maxFiles) {
                 stoppedReason = "file-limit";
                 break;

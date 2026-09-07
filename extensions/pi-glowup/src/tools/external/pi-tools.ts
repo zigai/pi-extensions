@@ -59,6 +59,7 @@ function createFinalizePlanRenderer(
             if (context.isError || options.isPartial) {
                 return renderSimpleResult(theme, result, options);
             }
+
             return emptyComponent();
         },
     };
@@ -71,5 +72,6 @@ export function createPiCoreRenderer(
     if (baseToolName(toolName) === "ask_user_question") {
         return createAskUserQuestionRenderer(piCoreCallLabels(toolName), labelMode);
     }
+
     return createFinalizePlanRenderer(toolName, labelMode);
 }
