@@ -349,7 +349,7 @@ function truncatePromptContext(text: string, maxCharacters: number): string {
 }
 
 function stringifyPromptValue(value: ToolCall["arguments"]): string {
-    const seen = new WeakSet<object>();
+    const seen = new WeakSet();
     try {
         return (
             JSON.stringify(value, (_key, nestedValue) => {

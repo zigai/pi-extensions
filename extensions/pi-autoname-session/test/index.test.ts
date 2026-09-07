@@ -62,7 +62,7 @@ class FakeModelRegistry {
         return model?.provider === provider && model?.id === modelId ? model : undefined;
     }
 
-    getApiKeyAndHeaders(): Promise<TestAuthResult> {
+    async getApiKeyAndHeaders(): Promise<TestAuthResult> {
         if (this.authenticationThrows) {
             throw new Error("authentication resolver failed");
         }
@@ -154,7 +154,7 @@ class FakePi {
         return this.sessionName;
     }
 
-    exec(
+    async exec(
         command: string,
         args: string[],
         options?: { readonly cwd?: string },
@@ -234,12 +234,12 @@ class Harness {
         }
     }
 
-    startSession(): Promise<void> {
+    async startSession(): Promise<void> {
         this.pi.sessionName = this.session.getSessionName();
         return this.pi.emit({ type: "session_start" }, this.ctx);
     }
 
-    beforeAgentStart(prompt: string): Promise<void> {
+    async beforeAgentStart(prompt: string): Promise<void> {
         return this.pi.emit(
             {
                 type: "before_agent_start",
@@ -251,7 +251,7 @@ class Harness {
         );
     }
 
-    settled(): Promise<void> {
+    async settled(): Promise<void> {
         return this.pi.emit({ type: "agent_settled" }, this.ctx);
     }
 
@@ -259,19 +259,19 @@ class Harness {
         this.pi.setSessionName(name);
     }
 
-    flushEvents(): Promise<void> {
+    async flushEvents(): Promise<void> {
         return this.pi.flushEvents();
     }
 
-    navigateTree(newLeafId: string | null, oldLeafId: string | null): Promise<void> {
+    async navigateTree(newLeafId: string | null, oldLeafId: string | null): Promise<void> {
         return this.pi.emit({ type: "session_tree", newLeafId, oldLeafId }, this.ctx);
     }
 
-    shutdown(): Promise<void> {
+    async shutdown(): Promise<void> {
         return this.pi.emit({ type: "session_shutdown" }, this.ctx);
     }
 
-    modelSelect(): Promise<void> {
+    async modelSelect(): Promise<void> {
         return this.pi.emit(
             { type: "model_select", model: this.model, previousModel: undefined, source: "set" },
             this.ctx,
@@ -378,7 +378,7 @@ describe("extension orchestration", () => {
             let capturedPrompt = "";
             const response = createDeferred<AssistantMessage>();
             harness.faux.setResponses([
-                (context) => {
+                async (context) => {
                     const content = context.messages[0]?.content;
                     const textBlock = Array.isArray(content)
                         ? content.find((block): block is TextContent => block.type === "text")
@@ -570,7 +570,7 @@ describe("extension orchestration", () => {
             appendUserMessage(harness.session, "Fix the parser", 1);
 
             const deferred = createDeferred<AssistantMessage>();
-            harness.faux.setResponses([() => deferred.promise]);
+            harness.faux.setResponses([async () => deferred.promise]);
             const settled = harness.settled();
 
             // The user renames while the picker request is in flight.
@@ -599,7 +599,7 @@ describe("extension orchestration", () => {
             const requestStarted = createDeferred<void>();
             let requestWasAborted = false;
             harness.faux.setResponses([
-                (context, options) =>
+                async (context, options) =>
                     new Promise<AssistantMessage>((resolve) => {
                         requestStarted.resolve(undefined);
                         options?.signal?.addEventListener(
@@ -635,7 +635,7 @@ describe("extension orchestration", () => {
             appendUserMessage(harness.session, "Fix the parser", 1);
 
             const deferred = createDeferred<AssistantMessage>();
-            harness.faux.setResponses([() => deferred.promise]);
+            harness.faux.setResponses([async () => deferred.promise]);
             const settled = harness.settled();
 
             harness.rename("user chosen name");
@@ -665,7 +665,7 @@ describe("extension orchestration", () => {
             appendUserMessage(harness.session, "Old branch work", 1);
 
             const deferred = createDeferred<AssistantMessage>();
-            harness.faux.setResponses([() => deferred.promise]);
+            harness.faux.setResponses([async () => deferred.promise]);
             const settled = harness.settled();
             const oldLeafId = harness.session.getLeafId();
 
@@ -694,7 +694,7 @@ describe("extension orchestration", () => {
             const requestStarted = createDeferred<void>();
             let requestWasAborted = false;
             harness.faux.setResponses([
-                (context, options) =>
+                async (context, options) =>
                     new Promise<AssistantMessage>((resolve) => {
                         requestStarted.resolve(undefined);
                         options?.signal?.addEventListener(
@@ -1078,7 +1078,7 @@ describe("extension orchestration", () => {
             appendUserMessage(harness.session, "Fix the parser", 1);
 
             harness.faux.setResponses([
-                (context, options) =>
+                async (context, options) =>
                     new Promise<AssistantMessage>((resolve) => {
                         options?.signal?.addEventListener(
                             "abort",
@@ -1141,7 +1141,7 @@ describe("extension orchestration", () => {
 
             const requestStarted = createDeferred<void>();
             harness.faux.setResponses([
-                (context, options) =>
+                async (context, options) =>
                     new Promise<AssistantMessage>((resolve) => {
                         requestStarted.resolve(undefined);
                         options?.signal?.addEventListener(
