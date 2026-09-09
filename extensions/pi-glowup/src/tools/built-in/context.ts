@@ -165,6 +165,7 @@ export function trimOldestMapEntries<T>(entries: Map<string, T>, limit: number):
     while (entries.size > limit) {
         const oldest = entries.keys().next().value;
         if (oldest === undefined) return;
+
         entries.delete(oldest);
     }
 }

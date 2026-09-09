@@ -1,7 +1,6 @@
 import { normalizeGlowupConfig, type GlowupConfig } from "./normalize.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { PiSettingsContext } from "@zigai/pi-extension-settings/pi";
 import Type, { type Static } from "typebox";
@@ -81,6 +80,7 @@ function mergeConfigInputs(base: JsonValue, override: JsonValue): JsonValue {
 function withoutSchemaMetadata(input: JsonValue): JsonValue {
     const record = jsonObjectParser.parse(input);
     if (record === undefined) return input;
+
     const { $schema: _schema, ...settings } = record;
     return settings;
 }
@@ -166,6 +166,7 @@ export function parseGlowupConfig(
         options.reportWarning?.(
             `[pi-glowup] Ignoring invalid ${options.source ?? "config"}: ${configSchemaErrorSummary(candidate)}`,
         );
+
         return normalizeGlowupConfig(
             Value.Decode(settingsSchema, extensionSettingsDefinition.defaultSettings),
             options.reportWarning,

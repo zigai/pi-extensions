@@ -45,6 +45,7 @@ export function selectSemanticDiffIndices(
     for (const index of changed.slice(0, changedHeadCount)) {
         selected.add(index);
     }
+
     for (const index of changed.slice(changed.length - changedTailCount)) {
         selected.add(index);
     }

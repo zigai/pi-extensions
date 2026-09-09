@@ -114,6 +114,7 @@ export function shouldRenderSideBySide(
                     unifiedContentWidth,
                 );
             }
+
             for (let offset = 0; offset < content.additions; offset += 1) {
                 unifiedRows += wrappedLineCount(
                     metadata.additionLines[additionLineIndex + offset],

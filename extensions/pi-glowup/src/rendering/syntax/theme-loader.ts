@@ -66,6 +66,7 @@ export async function loadSyntaxTheme(
     if (!config.enabled) {
         return undefined;
     }
+
     const raw = await readFile(config.themePath, "utf8");
     return parseSyntaxTheme(config, raw);
 }

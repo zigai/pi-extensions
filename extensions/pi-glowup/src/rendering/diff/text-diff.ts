@@ -133,6 +133,7 @@ function trimEdgeEllipsisLines(lines: ReadonlyArray<string>): string[] {
     while (ellipsisLinePattern.test(lines[start] ?? "")) {
         start += 1;
     }
+
     while (end > start && ellipsisLinePattern.test(lines[end - 1] ?? "")) {
         end -= 1;
     }
@@ -152,6 +153,7 @@ export function parseDiffLine(line: string):
     if (ellipsisLinePattern.test(line)) {
         return { kind: "ellipsis" };
     }
+
     if (omissionLinePattern.test(line)) {
         return { kind: "omission", content: line.trimStart() };
     }

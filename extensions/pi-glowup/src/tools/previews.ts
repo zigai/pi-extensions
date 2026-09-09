@@ -129,6 +129,7 @@ function boundedPreviewValue(
     if (omitted > 0) {
         output["…"] = `+${omitted} properties`;
     }
+
     return output;
 }
 
@@ -213,9 +214,11 @@ function compactValue(value: JsonValue | undefined, key: string): string | undef
     if (value === null) {
         return `${key}: null`;
     }
+
     if (Array.isArray(value)) {
         return `${key}: ${itemCount(value.length)}`;
     }
+
     if (isRecord(value)) {
         return `${key}: object`;
     }
@@ -274,6 +277,7 @@ function previewPartialArgs(args: JsonValue | undefined, fallback?: string): str
     if (args === null) {
         return String(args);
     }
+
     if (Array.isArray(args)) {
         return args.length === 0 ? undefined : itemCount(args.length);
     }
@@ -313,6 +317,7 @@ export function textOutput(result: ThirdPartyToolResult): string | undefined {
     for (const item of content) {
         const itemRecord = jsonObjectParser.parse(item);
         if (itemRecord === undefined) continue;
+
         const typeStr = previewValueDecoder.parseString(itemRecord.type);
         const textStr = previewValueDecoder.parseString(itemRecord.text);
         if (typeStr !== "text" || textStr === undefined) {

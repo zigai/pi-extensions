@@ -18,6 +18,7 @@ import { graphemes } from "../../../text-boundaries.ts";
 function truncatePlainTextToWidth(text: string, maxWidth: number): string {
     const width = Math.max(1, Math.floor(maxWidth));
     if (visibleWidth(text) <= width) return text;
+
     const suffix = "…";
     const contentBudget = Math.max(0, width - visibleWidth(suffix));
     let content = "";
@@ -25,6 +26,7 @@ function truncatePlainTextToWidth(text: string, maxWidth: number): string {
     for (const grapheme of graphemes(text)) {
         const graphemeWidth = visibleWidth(grapheme);
         if (contentWidth + graphemeWidth > contentBudget) break;
+
         content += grapheme;
         contentWidth += graphemeWidth;
     }
@@ -46,6 +48,7 @@ function scriptCallRenderOptions(
     if (options.invalidate !== undefined) {
         renderOptions = { ...renderOptions, invalidate: options.invalidate };
     }
+
     return renderOptions;
 }
 

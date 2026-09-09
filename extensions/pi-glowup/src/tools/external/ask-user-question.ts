@@ -249,6 +249,7 @@ export function createAskUserQuestionRenderer(
     return {
         renderCall(args, theme, context) {
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
+
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: toolStatusLabel(labelMode, context, labels),

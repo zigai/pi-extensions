@@ -31,6 +31,7 @@ const assistantEntrySchema = Type.Object({
     type: Type.Literal("message"),
     message: Type.Object({ role: Type.Literal("assistant"), content: Type.Array(Type.Unknown()) }),
 });
+
 const toolCallSchema = Type.Object({
     type: Type.Literal("toolCall"),
     name: Type.Optional(Type.Unknown()),
@@ -51,6 +52,7 @@ export function createExplorationFeature() {
         const entries = explorationSourceEntries?.() ?? [];
         const contentIndex = (message: ExplorationMessage | undefined): number => {
             if (message?.role !== "assistant") return -1;
+
             return message.content.findIndex(
                 (content) => content.type === "toolCall" && content.id === toolCallId,
             );
@@ -61,6 +63,7 @@ export function createExplorationFeature() {
         for (let index = entries.length - 1; index >= 0; index -= 1) {
             const entry = entries[index];
             if (entry?.type !== "message") continue;
+
             const found = contentIndex(entry.message);
             if (found !== -1) return [index, found];
         }
@@ -120,9 +123,11 @@ export function createExplorationFeature() {
     function restoreExplorationGroupStarts(entries: readonly unknown[]): void {
         for (const entry of entries) {
             if (!Value.Check(assistantEntrySchema, entry)) continue;
+
             let previousWasExploration = false;
             for (const content of entry.message.content) {
                 if (!Value.Check(toolCallSchema, content)) continue;
+
                 const toolName = stringParser.parse(content.name);
                 const toolCallId = stringParser.parse(content.id);
                 const exploration = toolName !== undefined && isExplorationToolName(toolName);

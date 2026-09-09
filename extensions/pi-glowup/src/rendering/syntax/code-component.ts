@@ -52,6 +52,7 @@ export function scheduleCodeOutputSyntaxLoad(
     if (normalizedLanguage === undefined || normalizedLanguage === "text") {
         return;
     }
+
     if (getLoadedSyntaxHighlighterForLanguage(normalizedLanguage) !== undefined) {
         return;
     }
@@ -118,12 +119,15 @@ export function detectStructuredOutputLanguage(text: string | undefined): string
     if (trimmed.length === 0) {
         return undefined;
     }
+
     if (looksLikeJson(trimmed)) {
         return "json";
     }
+
     if (looksLikeXml(trimmed)) {
         return trimmed.startsWith("<html") || trimmed.includes("<body") ? "html" : "xml";
     }
+
     if (looksLikeShellSnippet(trimmed)) {
         return "bash";
     }

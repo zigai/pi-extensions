@@ -9,6 +9,7 @@ export function isRecord(value: JsonValue | undefined): value is JsonObject {
 
 export function stringField(value: JsonValue | undefined, key: string): string | undefined {
     if (!isRecord(value)) return undefined;
+
     const field = value[key];
     return Value.Check(Type.String(), field) ? field : undefined;
 }

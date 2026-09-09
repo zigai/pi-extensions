@@ -60,6 +60,7 @@ function numberedDiffLine(line: GlowupMutationLine): string {
 
 function lineCoordinates(line: GlowupMutationLine): DiffLineCoordinates | undefined {
     if (line.oldLine === undefined && line.newLine === undefined) return undefined;
+
     let coordinates: DiffLineCoordinates = {};
     if (line.oldLine !== undefined) {
         coordinates = { ...coordinates, oldLine: line.oldLine };
@@ -102,6 +103,7 @@ function payloadsByPath(payloads: readonly PierreDiffPayload[]): Map<string, Pie
             byPath.set(path, queue);
         }
     }
+
     return byPath;
 }
 
@@ -132,6 +134,7 @@ function mutationPayloads(
     settings: MutationSettings,
 ): ReadonlyArray<PierreDiffPayload | undefined> {
     if (node.patch === undefined) return node.files.map(() => undefined);
+
     const payloads = buildPierreDiffPayloadsFromPatch(node.patch, {
         maxBytes: settings.limits.maxDiffBytes,
         maxLines: settings.limits.maxDiffLines,

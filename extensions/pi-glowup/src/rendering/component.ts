@@ -87,6 +87,7 @@ export function wrapSinglePhysicalLineWithContinuation(
         const prefix = index === 0 ? firstPrefix : continuationPrefix;
         rendered.push(truncateToWidth(`${prefix}${segment}`, width, ""));
     }
+
     return rendered;
 }
 
@@ -105,6 +106,7 @@ export function wrapPrefixedLine(
             ...wrapSinglePhysicalLineWithContinuation(physicalLine, width, prefix, restPrefix),
         );
     }
+
     return rendered;
 }
 

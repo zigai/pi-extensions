@@ -185,6 +185,7 @@ async function replaceSyntaxHighlighting(
 ): Promise<SyntaxState> {
     const generation = syntaxGeneration + 1;
     syntaxGeneration = generation;
+
     const previousState = syntaxState;
     const replacement = sourcePromise.then(async (source) => {
         const state = await initializeSyntaxHighlightingOnce(source, options);
@@ -375,6 +376,7 @@ export async function getSyntaxHighlighterForLanguage(
             await state.highlighter.loadLanguage(normalizedLanguage);
         } catch (cause: unknown) {
             if (generation !== syntaxGeneration) return undefined;
+
             throw cause;
         }
 
@@ -406,9 +408,11 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
     if (normalizedLanguage === "text") {
         return true;
     }
+
     if (state.loadedLanguages.has(normalizedLanguage)) {
         return true;
     }
+
     if (!isBundledSyntaxLanguage(normalizedLanguage)) {
         return false;
     }
@@ -417,6 +421,7 @@ export async function loadSyntaxLanguageIfReady(language: string | undefined): P
         await state.highlighter.loadLanguage(normalizedLanguage);
     } catch (cause: unknown) {
         if (generation !== syntaxGeneration || syntaxState !== state) return false;
+
         throw cause;
     }
 
@@ -499,7 +504,6 @@ export async function disposeSyntaxHighlighting(): Promise<void> {
     syntaxGeneration += 1;
 
     const state = syntaxState;
-
     syntaxState = undefined;
     initializationPromise = undefined;
     syntaxPreloadDiagnostics = undefined;
@@ -676,6 +680,7 @@ function normalizeHighlightedLineCount(lines: string[], expectedCount: number): 
     if (lines.length === expectedCount) {
         return lines;
     }
+
     if (lines.length > expectedCount) {
         return lines.slice(0, expectedCount);
     }
@@ -698,6 +703,7 @@ function cachedLineBytes(lines: ReadonlyArray<string>): number {
     for (const line of lines) {
         bytes += Buffer.byteLength(line, "utf8");
     }
+
     return bytes;
 }
 

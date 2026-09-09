@@ -46,6 +46,7 @@ function createFinalizePlanRenderer(
     return {
         renderCall(_args, theme, context) {
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
+
             return renderThirdPartyCall(theme, {
                 state: callState(context),
                 statusText: toolStatusLabel(labelMode, context, piCoreCallLabels(toolName)),

@@ -250,6 +250,7 @@ function embeddedInlineHighlightRows(
 
             const lineStart = lineStarts[lineIndex];
             if (lineStart === undefined) break;
+
             const newline = source.indexOf("\n", absoluteStart);
             const absoluteEnd = newline < 0 || newline > script.end ? script.end : newline;
             const lineRows = rows.get(lineIndex) ?? [];
@@ -272,6 +273,7 @@ function highlightShellLineWithEmbeddedCode(
     rows: ReadonlyArray<EmbeddedInlineHighlightRow> | undefined,
 ): string {
     if (rows === undefined || rows.length === 0) return highlightShellLine(theme, line);
+
     const highlighted: string[] = [];
     let cursor = 0;
     for (const row of rows) {
@@ -319,7 +321,6 @@ function highlightBashScriptPreviewLines(
             }
 
             heredocBody.push(line);
-
             continue;
         }
 
@@ -390,6 +391,7 @@ function collapsedScriptPreview(
         maxCodePreviewLines,
     );
     if (omission === undefined) return { code: invocation.code };
+
     return {
         code: showPrologueOmission
             ? `… ${omission.omittedLines} import/setup lines omitted\n${omission.code}`
@@ -643,6 +645,7 @@ function shellCommandKind(token: string): ShellCommandKind {
     if (INTERPRETER_SHELL_COMMANDS.has(commandName)) {
         return "interpreter";
     }
+
     if (SUBCOMMAND_SHELL_COMMANDS.has(commandName)) {
         return "subcommands";
     }
@@ -735,6 +738,7 @@ function shouldStyleShellSubcommand(state: ShellHighlightState, token: string): 
     if (state.subcommandSeen || isPathLikeShellWord(token) || isQuotedShellString(token)) {
         return false;
     }
+
     if (state.commandKind === "interpreter") {
         return state.sawScriptOperand;
     }
@@ -781,6 +785,7 @@ function styleShellToken(
                 : { ...initialShellHighlightState, expectsCommand: false },
         };
     }
+
     if (isShellFlagToken(token)) {
         return {
             styled: styleShellFlagToken(theme, token),
@@ -801,6 +806,7 @@ function styleShellToken(
     if (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token)) {
         return { styled: shellString(theme, token), state };
     }
+
     if (isQuotedShellString(token)) {
         return { styled: shellString(theme, token), state: shellStateAfterOperand(state) };
     }
@@ -828,6 +834,7 @@ function styleShellToken(
             state: { ...state, expectingFlagValue: false, subcommandSeen: true },
         };
     }
+
     if (isPathLikeShellWord(token)) {
         return { styled: shellText(theme, token), state: shellStateAfterOperand(state) };
     }

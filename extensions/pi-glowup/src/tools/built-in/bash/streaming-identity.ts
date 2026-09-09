@@ -23,6 +23,7 @@ export class StreamingScriptIdentityStore {
         this.identities.delete(toolCallId);
 
         if (script === undefined || script.label === "Bash") return undefined;
+
         this.identities.set(toolCallId, { label: script.label, language: script.language });
         this.evictOldest();
 
@@ -52,6 +53,7 @@ export class StreamingScriptIdentityStore {
         while (this.identities.size > this.maxEntries) {
             const oldest = this.identities.keys().next();
             if (oldest.done === true) return;
+
             this.identities.delete(oldest.value);
         }
     }

@@ -102,6 +102,7 @@ export class ExplorationGroupStore {
     /** Observe every row when its arguments or result become ready, including generic and preserved external rows. */
     observeRow(row: ToolExecutionInstance, toolCallId: string, exploration: boolean): void {
         if (this.observedRows.has(row)) return;
+
         this.observedRows.add(row);
 
         if (exploration) {
@@ -123,6 +124,7 @@ export class ExplorationGroupStore {
             if (pending !== source) {
                 this.pendingBoundaries.delete(toolCallId);
             }
+
             return;
         }
 
@@ -140,6 +142,7 @@ export class ExplorationGroupStore {
             while (this.pendingBoundaries.size > this.maxRetainedToolCalls) {
                 const oldest = this.pendingBoundaries.keys().next();
                 if (oldest.done === true) break;
+
                 this.pendingBoundaries.delete(oldest.value);
             }
         }
@@ -150,6 +153,7 @@ export class ExplorationGroupStore {
     private advanceSourcePosition(toolCallId: string): boolean | undefined {
         const position = this.sourcePosition?.(toolCallId);
         if (position === undefined) return undefined;
+
         const latest = this.latestSourcePosition;
         if (
             latest !== undefined &&
@@ -168,6 +172,7 @@ export class ExplorationGroupStore {
         while (this.groupStartToolCallIds.size > this.maxRetainedToolCalls) {
             const oldest = this.groupStartToolCallIds.values().next();
             if (oldest.done === true) break;
+
             this.groupStartToolCallIds.delete(oldest.value);
         }
     }
@@ -212,6 +217,7 @@ export class ExplorationGroupStore {
             if (evictedGroup === undefined) {
                 return;
             }
+
             this.evictGroup(evictedGroup);
         }
     }

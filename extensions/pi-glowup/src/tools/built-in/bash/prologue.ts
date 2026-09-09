@@ -79,6 +79,7 @@ function lexicalBalance(lines: readonly string[], start: number): LexicalBalance
 function pythonImportEnd(lines: readonly string[], start: number): number | undefined {
     const first = (lines[start] ?? "").trimStart();
     if (!/^(?:from\s+\S+\s+import(?:\s|$)|import(?:\s|$))/u.test(first)) return undefined;
+
     const balance = lexicalBalance(lines, start);
     return balance.delimiters === 0 && !balance.continued && !balance.hasTrailingStatement
         ? balance.end
@@ -99,9 +100,11 @@ function javascriptImportEnd(lines: readonly string[], start: number): number | 
 
     const statement = lines.slice(start, balance.end).join("\n");
     if (/^\s*import(?!\s*\()/u.test(statement)) return balance.end;
+
     if (/^\s*export\s+(?:type\s+)?(?:\{|\*)[\s\S]*?\sfrom\s/u.test(statement)) {
         return balance.end;
     }
+
     if (/^\s*(?:const|let|var)\s+[\s\S]*?=\s*require\s*\(/u.test(statement)) {
         return balance.end;
     }
@@ -115,6 +118,7 @@ function importStatementEnd(
     language: string,
 ): number | undefined {
     if (language === "python") return pythonImportEnd(lines, start);
+
     if (language === "javascript" || language === "typescript") {
         return javascriptImportEnd(lines, start);
     }
@@ -133,12 +137,14 @@ export function omitLeadingImportPrologue(
 
     let cursor = 0;
     while (cursor < lines.length && (lines[cursor] ?? "").trim().length === 0) cursor += 1;
+
     let sawImport = false;
     let prologueEnd = cursor;
 
     while (cursor < lines.length) {
         const statementEnd = importStatementEnd(lines, cursor, language);
         if (statementEnd === undefined) break;
+
         sawImport = true;
         cursor = statementEnd;
         while (cursor < lines.length && (lines[cursor] ?? "").trim().length === 0) cursor += 1;

@@ -18,6 +18,7 @@ function isSingleLineSpacer(component: Component): boolean {
     if (!(component instanceof Spacer)) {
         return false;
     }
+
     const lines = component.render(1);
     return lines.length === 1 && lines[0] === "";
 }
@@ -62,6 +63,7 @@ export function configureWorkingWidgetSpacingPatch(
                 delete containerPrototype[WORKING_WIDGET_SPACING_PATCH_STATE_KEY];
             }
         }
+
         return;
     }
 
@@ -92,6 +94,7 @@ export function configureWorkingWidgetSpacingPatch(
             for (const line of childLines) {
                 lines.push(line);
             }
+
             previousChild = child;
         }
 

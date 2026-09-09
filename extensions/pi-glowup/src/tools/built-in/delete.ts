@@ -29,8 +29,10 @@ export function createNativeDeleteFeature() {
         filePath: string | undefined,
     ): DeletedTextPreview | undefined {
         if (filePath === undefined) return undefined;
+
         const details = diffDetailsParser.parse(result?.details);
         if (details === undefined || !hasNonWhitespaceText(details.diff)) return undefined;
+
         const { diff } = details;
         const normalized = diff.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
         const pathHeader = `${filePath}\n`;
@@ -39,6 +41,7 @@ export function createNativeDeleteFeature() {
             : normalized;
         const section = parseDiffSections(body, filePath)[0];
         if (section === undefined || section.removed === 0) return undefined;
+
         return { section, removed: section.removed };
     }
 

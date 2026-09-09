@@ -97,6 +97,7 @@ function visibleContentKind(content: AssistantContent): AssistantContentKind | u
     if (isVisibleTextContent(content)) {
         return "text";
     }
+
     if (isVisibleThinkingContent(content)) {
         return "thinking";
     }
@@ -167,12 +168,14 @@ function componentKind(component: Component): ChatComponentKind | undefined {
     if (component instanceof AssistantMessageComponent) {
         return "assistant";
     }
+
     if (
         component instanceof ToolExecutionComponent ||
         component instanceof BashExecutionComponent
     ) {
         return "tool";
     }
+
     if (
         component instanceof UserMessageComponent ||
         component instanceof SkillInvocationMessageComponent
@@ -209,6 +212,7 @@ function createChatTransitionSeparatorWrapper(
         }
 
         originalAddChild.call(this, component);
+
         if (kind !== undefined) {
             chatComponentKinds.set(this, kind);
         }
@@ -240,6 +244,7 @@ function createThinkingBlockSpacingWrapper(
         const addChildBeforePatch = (component: Component): void => {
             originalAddChild.call(contentContainer, component);
         };
+
         const calls = assistantAddChildCalls(message);
         let callIndex = 0;
         let previousVisibleKind: AssistantContentKind | undefined;
@@ -387,9 +392,11 @@ function restoreAssistantSeparatorPatch(assistantPrototype: AssistantRenderProto
             assistantPrototype.updateContent !== state.wrapperUpdateContent)
     )
         return;
+
     if (state.wrapperRender !== undefined) {
         restoreAssistantMethod(assistantPrototype, "render", state.originalRender);
     }
+
     if (state.wrapperUpdateContent !== undefined) {
         restoreAssistantMethod(assistantPrototype, "updateContent", state.originalUpdateContent);
     }

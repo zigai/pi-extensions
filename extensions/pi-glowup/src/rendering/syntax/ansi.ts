@@ -102,6 +102,7 @@ function normalizeHexColor(color: string | undefined): string | undefined {
     if (hex.length === 0) {
         return undefined;
     }
+
     if (/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/iu.test(hex)) {
         return hex.slice(0, 7);
     }

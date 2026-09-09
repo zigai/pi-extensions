@@ -49,6 +49,7 @@ export function formatPathTarget(
     ) {
         return instructionPathText(theme, displayPath);
     }
+
     if (options.isPartial === true) {
         return muted(theme, displayPath);
     }

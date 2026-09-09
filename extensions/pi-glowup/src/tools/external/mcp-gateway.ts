@@ -67,6 +67,7 @@ export function hasChromeDevtoolsName(toolName: string): boolean {
 function parseStructuredArgs(value: JsonValue): JsonValue {
     const text = stringParser.parse(value);
     if (text === undefined) return value;
+
     try {
         return jsonValueParser.parse(JSON.parse(text)) ?? value;
     } catch {
@@ -81,28 +82,34 @@ function summarizeChromeArgs(
 ): string | undefined {
     const record = jsonObjectParser.parse(args);
     if (record === undefined) return previewArgsForContext(args, context);
+
     const uid = getNonEmptyString(record, "uid");
     const filePath =
         getNonEmptyString(record, "filePath") ??
         getNonEmptyString(record, "outputDirPath") ??
         getNonEmptyString(record, "requestFilePath") ??
         getNonEmptyString(record, "responseFilePath");
+
     switch (command) {
         case "navigate_page": {
             const navigationType = getNonEmptyString(record, "type") ?? "url";
             const url = getNonEmptyString(record, "url");
             return navigationType === "url" ? url : navigationType;
         }
+
         case "new_page":
             return getNonEmptyString(record, "url");
+
         case "click":
             return [uid, record.dblClick === true ? "double click" : undefined]
                 .filter(isDefined)
                 .join(" · ");
+
         case "drag":
             return [getNonEmptyString(record, "from_uid"), getNonEmptyString(record, "to_uid")]
                 .filter(isDefined)
                 .join(" → ");
+
         case "fill": {
             const value = getNonEmptyString(record, "value");
             return [
@@ -112,10 +119,12 @@ function summarizeChromeArgs(
                 .filter(isDefined)
                 .join(" · ");
         }
+
         case "fill_form": {
             const elements = getArray(record, "elements");
             return elements === undefined ? undefined : countLabel(elements.length, "field");
         }
+
         case "type_text": {
             const value = getNonEmptyString(record, "text");
             return [
@@ -125,26 +134,31 @@ function summarizeChromeArgs(
                 .filter(isDefined)
                 .join(" · ");
         }
+
         case "evaluate_script": {
             const script = getNonEmptyString(record, "function");
             return [script === undefined ? undefined : compactWhitespaceText(script, 220), filePath]
                 .filter(isDefined)
                 .join(" · ");
         }
+
         case "resize_page": {
             const width = getNumber(record, "width");
             const height = getNumber(record, "height");
             return width === undefined || height === undefined ? undefined : `${width}×${height}`;
         }
+
         case "select_page":
         case "close_page":
             return getNumber(record, "pageId") === undefined
                 ? undefined
                 : `page ${getNumber(record, "pageId")}`;
+
         case "get_console_message":
             return getNumber(record, "msgid") === undefined
                 ? undefined
                 : `message ${getNumber(record, "msgid")}`;
+
         case "get_network_request":
             return [
                 getNumber(record, "reqid") === undefined
@@ -154,16 +168,20 @@ function summarizeChromeArgs(
             ]
                 .filter(isDefined)
                 .join(" · ");
+
         case "press_key":
             return getNonEmptyString(record, "key");
+
         case "handle_dialog":
             return getNonEmptyString(record, "action");
+
         case "wait_for": {
             const values = getArray(record, "text")
                 ?.map((value) => stringParser.parse(value))
                 .filter(isDefined);
             return values === undefined ? undefined : values.slice(0, 3).join(" · ");
         }
+
         case "performance_analyze_insight":
             return [
                 getNonEmptyString(record, "insightName"),
@@ -171,6 +189,7 @@ function summarizeChromeArgs(
             ]
                 .filter(isDefined)
                 .join(" · ");
+
         case "emulate":
             return [
                 getNonEmptyString(record, "viewport"),
@@ -179,8 +198,10 @@ function summarizeChromeArgs(
             ]
                 .filter(isDefined)
                 .join(" · ");
+
         case "upload_file":
             return [uid, filePath].filter(isDefined).join(" · ");
+
         case "take_snapshot":
         case "take_screenshot":
         case "take_heapsnapshot":
@@ -188,6 +209,7 @@ function summarizeChromeArgs(
         case "performance_start_trace":
         case "performance_stop_trace":
             return filePath ?? previewArgsForContext(args, context);
+
         default:
             return uid ?? previewArgsForContext(args, context);
     }
@@ -245,6 +267,7 @@ function summarizeMcpGatewayArgs(
 
     const server = getNonEmptyString(record, "server");
     if (server !== undefined) return { label: "MCP Status", body: server };
+
     return { label: "MCP Status", body: undefined };
 }
 
@@ -256,34 +279,41 @@ function mcpLifecycleLabels(staticLabel: string): ToolLifecycleLabels {
     switch (staticLabel) {
         case "MCP Connect":
             return { static: staticLabel, active: "Connecting MCP", completed: "Connected MCP" };
+
         case "MCP Search":
             return { static: staticLabel, active: "Searching MCP", completed: "Searched MCP" };
+
         case "MCP Describe":
             return {
                 static: staticLabel,
                 active: "Describing MCP Tool",
                 completed: "Described MCP Tool",
             };
+
         case "MCP Instructions":
             return {
                 static: staticLabel,
                 active: "Reading MCP Instructions",
                 completed: "Read MCP Instructions",
             };
+
         case "MCP Authenticate":
             return {
                 static: staticLabel,
                 active: "Authenticating MCP",
                 completed: "Authenticated MCP",
             };
+
         case "MCP Messages":
             return {
                 static: staticLabel,
                 active: "Reading MCP Messages",
                 completed: "Read MCP Messages",
             };
+
         case "MCP Status":
             return { static: staticLabel, active: "Checking MCP", completed: "Checked MCP" };
+
         default:
             return {
                 static: staticLabel,
@@ -300,6 +330,7 @@ export function createMcpGatewayRenderer(
     return {
         renderCall(args, theme, context) {
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
+
             const summary = summarizeMcpGatewayArgs(jsonValueParser.parse(args), context);
 
             return renderThirdPartyCall(theme, {
@@ -323,6 +354,7 @@ export function createChromeDevtoolsMcpRenderer(
     return {
         renderCall(args, theme, context) {
             if (shouldDeferSimpleToolCall(context)) return emptyComponent();
+
             const command = baseToolName(toolName).replace(/^chrome[-_]?devtools(?:__|[_-])?/i, "");
             const label = MCP_COMMAND_LABELS.get(command) ?? `MCP ${baseToolName(toolName)}`;
             const parsedArgs = jsonValueParser.parse(args);

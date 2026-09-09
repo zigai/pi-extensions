@@ -134,6 +134,7 @@ function checkedToolExecutionPrototype(owner: ToolExecutionPrototypeOwner): Tool
     if (Value.Errors(prototypeMethodsSchema, owner).length !== 0) {
         throw new TypeError("Invalid Pi tool execution prototype methods");
     }
+
     // SAFETY: Explicit owners already implement ToolExecutionPrototype. The other union
     // member is Pi's concrete prototype: its private getters return the constructor's
     // renderer-pair fields. ToolExecutionInstance.toolDefinition derives from that same
@@ -281,6 +282,7 @@ function completedLinesSize(lines: readonly string[]): number {
     for (const line of lines) {
         bytes += Buffer.byteLength(line, "utf8");
     }
+
     return bytes;
 }
 
@@ -306,6 +308,7 @@ function clearCompletedLineCache(): void {
             state.cachedLines = undefined;
         }
     }
+
     completedLineCacheLru.clear();
     completedLineCacheBytes = 0;
 }
@@ -313,6 +316,7 @@ function clearCompletedLineCache(): void {
 function touchCompletedLineCache(component: Component): void {
     const bytes = completedLineCacheLru.get(component);
     if (bytes === undefined) return;
+
     completedLineCacheLru.delete(component);
     completedLineCacheLru.set(component, bytes);
 }
@@ -324,8 +328,8 @@ function retainCompletedLines(
     lines: string[],
 ): void {
     releaseCompletedLineCache(component);
-    const bytes = completedLinesSize(lines);
 
+    const bytes = completedLinesSize(lines);
     if (bytes > completedLineCacheLimitBytes) return;
 
     while (
@@ -334,6 +338,7 @@ function retainCompletedLines(
     ) {
         const oldest = completedLineCacheLru.keys().next();
         if (oldest.done === true) return;
+
         releaseCompletedLineCache(oldest.value);
         completedLineCacheEvictions += 1;
     }
@@ -389,6 +394,7 @@ function clearCompletedRendersForInstance(
 ): void {
     const slots = cache.get(instance);
     if (slots === undefined) return;
+
     releaseCompletedRender(slots.call);
     releaseCompletedRender(slots.result);
     cache.delete(instance);
@@ -401,6 +407,7 @@ function clearCompletedRender(
 ): void {
     const slots = cache.get(instance);
     if (slots === undefined) return;
+
     releaseCompletedRender(slots[slot]);
     delete slots[slot];
 
@@ -459,6 +466,7 @@ function completedCallSignature(
     context: PiToolRenderContext,
 ): readonly unknown[] | undefined {
     if (context.isPartial || !context.argsComplete) return undefined;
+
     return [
         args,
         renderThemeFingerprint(theme),
@@ -479,6 +487,7 @@ function completedResultSignature(
     context: PiToolRenderContext,
 ): readonly unknown[] | undefined {
     if (renderOptions.isPartial) return undefined;
+
     return [
         context.args,
         result.content,
@@ -556,9 +565,11 @@ function thirdPartyRenderContext(
     if (context.invalidate !== undefined) {
         renderContext = { ...renderContext, invalidate: context.invalidate };
     }
+
     if (context.lastComponent !== undefined) {
         renderContext = { ...renderContext, lastComponent: context.lastComponent };
     }
+
     if (context.result !== undefined) {
         renderContext = { ...renderContext, result: context.result };
     }
@@ -582,7 +593,6 @@ function shouldUseThirdPartyRenderer(
     }
 
     const definition = instance.toolDefinition;
-
     const preserveInput =
         options === undefined
             ? { toolName, toolDefinition: definition }
@@ -591,9 +601,11 @@ function shouldUseThirdPartyRenderer(
     if (shouldPreserveThirdPartyToolRenderer(preserveInput)) {
         return false;
     }
+
     if (hasGlowupRenderingAdapter(definition)) {
         return true;
     }
+
     if (hasThirdPartyToolRendererPlugin(toolName, options)) {
         return true;
     }
@@ -641,6 +653,7 @@ function trimRendererCache(
         if (oldestToolName.done === true) {
             return;
         }
+
         cache.delete(oldestToolName.value);
     }
 }
@@ -671,6 +684,7 @@ export function configureBuiltInToolRendererPatch(
         if (existingState !== undefined) {
             restoreBuiltInRendererPatch(prototype, existingState);
         }
+
         return;
     }
 
@@ -747,7 +761,6 @@ export function configureBuiltInToolRendererPatch(
         function getGlowupBuiltInResultRenderer(this: ToolExecutionInstance) {
             const toolName = builtInToolName(this);
             const originalRenderer = originalGetResultRenderer?.call(this);
-
             if (!state.enabled || toolName === undefined) {
                 return originalRenderer;
             }
@@ -874,6 +887,7 @@ function restoreGetResultRenderer(
         delete prototype.getResultRenderer;
         return;
     }
+
     prototype.getResultRenderer = method;
 }
 
@@ -885,6 +899,7 @@ function restoreGetRenderShell(
         delete prototype.getRenderShell;
         return;
     }
+
     prototype.getRenderShell = method;
 }
 
@@ -896,6 +911,7 @@ function restoreHasRendererDefinition(
         delete prototype.hasRendererDefinition;
         return;
     }
+
     prototype.hasRendererDefinition = method;
 }
 
@@ -933,6 +949,7 @@ export function configureThirdPartyToolRendererPatch(
         if (existingState !== undefined) {
             restoreThirdPartyRendererPatch(prototype, existingState);
         }
+
         return;
     }
 
@@ -1078,6 +1095,7 @@ export function configureThirdPartyToolRendererPatch(
             ) {
                 return true;
             }
+
             return originalHasRendererDefinition?.call(this) ?? false;
         };
 

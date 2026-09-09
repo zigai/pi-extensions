@@ -46,6 +46,7 @@ const hunkContentSchema = Type.Union([
         deletionLineIndex: pierreLineIndexSchema,
     }),
 ]);
+
 const hunkSchema = Type.Object({
     collapsedBefore: nonNegativeNumberSchema,
     additionStart: nonNegativeNumberSchema,
@@ -66,6 +67,7 @@ const hunkSchema = Type.Object({
     hunkContext: Type.Optional(Type.String()),
     hunkSpecs: Type.Optional(Type.String()),
 });
+
 const fileDiffMetadataSchema = Type.Object({
     name: Type.String(),
     prevName: Type.Optional(Type.String()),
@@ -89,6 +91,7 @@ const fileDiffMetadataSchema = Type.Object({
     deletionLines: Type.Array(Type.String()),
     additionLines: Type.Array(Type.String()),
 });
+
 const restoredPayloadSchema = Type.Object({
     version: Type.Literal(1),
     path: Type.String(),
@@ -164,6 +167,7 @@ export function buildPierreDiffPayload(
         if (exceedsDiffRenderLimits(stats, limits)) {
             return buildPierreSummaryPayload(snapshot.path, stats, "too-large", limits);
         }
+
         if (exceedsMetadataRenderLimit(metadata, limits)) {
             return buildPierreSummaryPayload(snapshot.path, stats, "metadata-too-large", limits);
         }
@@ -200,6 +204,7 @@ export function buildPierreDiffPayloadsFromPatch(
                 if (exceedsDiffRenderLimits(stats, limits)) {
                     return buildPierreSummaryPayload(pathValue, stats, "too-large", limits);
                 }
+
                 if (exceedsMetadataRenderLimit(metadata, limits)) {
                     return buildPierreSummaryPayload(
                         pathValue,
@@ -288,6 +293,7 @@ function normalizePierreDiffPayloadUncached(
     if (exceedsDiffRenderLimits(validatedStats, limits)) {
         return buildPierreSummaryPayload(payload.path, validatedStats, "too-large", limits);
     }
+
     if (exceedsMetadataRenderLimit(metadata, limits)) {
         return buildPierreSummaryPayload(
             payload.path,
@@ -460,11 +466,11 @@ function parseFileDiffMetadata(value: RestoredMetadata): FileDiffMetadata | unde
         if (hunk === undefined) {
             return undefined;
         }
+
         hunks.push(hunk);
     }
 
     const { prevName, lang, newObjectId, prevObjectId, mode, prevMode, cacheKey } = value;
-
     const withPrevName =
         prevName === undefined ? { name: value.name } : { name: value.name, prevName };
     const withLanguage = lang === undefined ? withPrevName : { ...withPrevName, lang };

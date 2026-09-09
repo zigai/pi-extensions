@@ -170,15 +170,18 @@ async function runFormatterCommand(
 
         const finish = (value: string | undefined): void => {
             if (settled) return;
+
             settled = true;
             clearTimeout(timeout);
             stdout = "";
             resolve(value);
         };
+
         const fail = (): void => {
             finish(undefined);
 
             if (terminating) return;
+
             terminating = true;
             child.kill();
 
@@ -188,12 +191,14 @@ async function runFormatterCommand(
             }, FORMATTER_TERMINATION_GRACE_MS);
             escalation.unref();
         };
+
         const timeout = setTimeout(fail, FORMATTER_TIMEOUT_MS);
         timeout.unref();
 
         child.stdout.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => {
             if (settled) return;
+
             stdoutBytes += Buffer.byteLength(chunk, "utf8");
             if (stdoutBytes > FORMATTER_MAX_BUFFER) {
                 fail();
@@ -202,15 +207,18 @@ async function runFormatterCommand(
 
             stdout += chunk;
         });
+
         child.stdin.on("error", fail);
         child.on("error", fail);
         options.signal?.addEventListener("abort", fail, { once: true });
+
         child.once("close", (code) => {
             options.signal?.removeEventListener("abort", fail);
             clearTimeout(escalation);
             finish(code === 0 ? stdout : undefined);
             release();
         });
+
         child.stdin.end(input);
     });
 }
@@ -301,14 +309,16 @@ export function createCommandScriptFormatter(
     const remember = (key: string, output: string): void => {
         const bytes = Buffer.byteLength(output, "utf8");
         if (bytes > MAX_FORMATTER_CACHE_BYTES) return;
+
         cacheBytes -= cache.get(key)?.bytes ?? 0;
         cache.set(key, { output, bytes });
         cacheBytes += bytes;
+
         while (cache.size > MAX_FORMATTER_CACHE_ENTRIES || cacheBytes > MAX_FORMATTER_CACHE_BYTES) {
             const oldest = cache.keys().next().value;
             if (oldest === undefined) break;
-            const removed = cache.get(oldest);
 
+            const removed = cache.get(oldest);
             cache.delete(oldest);
             cacheBytes = Math.max(0, cacheBytes - (removed?.bytes ?? 0));
         }
@@ -316,6 +326,7 @@ export function createCommandScriptFormatter(
 
     return async (input, options = {}) => {
         if (options.signal?.aborted === true) return undefined;
+
         const command = commands.get(input.language);
         if (command === undefined) {
             return undefined;
@@ -326,7 +337,6 @@ export function createCommandScriptFormatter(
         }
 
         const [executable, ...args] = command;
-
         if (executable === undefined) {
             return undefined;
         }
@@ -351,6 +361,7 @@ export function createCommandScriptFormatter(
 
         const formatted = normalizeCode(output);
         if (formatted.trim().length === 0) return undefined;
+
         remember(cacheKey, formatted);
 
         return formatted;

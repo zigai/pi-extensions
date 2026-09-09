@@ -61,6 +61,7 @@ export function replacementFocusColumns(before: string, after: string): Replacem
         const beforeCodePoint = before.codePointAt(offset);
         const afterCodePoint = after.codePointAt(offset);
         if (beforeCodePoint === undefined || beforeCodePoint !== afterCodePoint) break;
+
         offset += beforeCodePoint > 0xffff ? 2 : 1;
     }
 
@@ -107,6 +108,7 @@ export function applyBackgroundToTextRanges(
         output += character;
         index += character.length;
         sourceOffset += character.length;
+
         if (backgroundOpen && range !== undefined && sourceOffset >= range.end) {
             output += background.close;
             backgroundOpen = false;
@@ -117,6 +119,7 @@ export function applyBackgroundToTextRanges(
     if (backgroundOpen) {
         output += background.close;
     }
+
     return output;
 }
 
@@ -129,6 +132,7 @@ function tokenize(text: string): DiffToken[] {
         const value = match[0];
         tokens.push({ text: value, start, end: start + value.length });
     }
+
     return tokens;
 }
 
@@ -227,6 +231,7 @@ function ansiEscapeEnd(text: string, index: number): number | undefined {
             if (text.charCodeAt(cursor) === 0x07) {
                 return cursor + 1;
             }
+
             if (text.charCodeAt(cursor) === 0x1b && text.charCodeAt(cursor + 1) === 0x5c) {
                 return cursor + 2;
             }

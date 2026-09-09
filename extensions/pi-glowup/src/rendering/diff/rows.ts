@@ -24,6 +24,7 @@ export function buildUnifiedDiffRows(
     const rows: UnifiedDiffRow[] = [];
     let sourceRowIndex = 0;
     const lastIncludedRow = maximumSetValue(options.includedRowIndices);
+
     const pushRow = (row: UnifiedDiffRow): boolean => {
         const currentIndex = sourceRowIndex;
         sourceRowIndex += 1;
@@ -38,6 +39,7 @@ export function buildUnifiedDiffRows(
 
         return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
     };
+
     const pushLazyRow = (createRow: () => UnifiedDiffRow): boolean => {
         const currentIndex = sourceRowIndex;
         sourceRowIndex += 1;
@@ -123,6 +125,7 @@ export function buildUnifiedDiffRows(
                     ),
                     palette,
                 });
+
             const makeAdditionRow = (offset: number): UnifiedLineRow =>
                 makeUnifiedLine({
                     lineType: "addition",
@@ -140,6 +143,7 @@ export function buildUnifiedDiffRows(
                     ),
                     palette,
                 });
+
             const narrowLayout = options.narrowLayout ?? "traditional";
             if (
                 narrowLayout === "traditional" ||
@@ -225,6 +229,7 @@ export function buildSplitDiffRows(
     const rows: SplitDiffRow[] = [];
     let sourceRowIndex = 0;
     const lastIncludedRow = maximumSetValue(options.includedRowIndices);
+
     const pushRow = (row: SplitDiffRow): boolean => {
         const currentIndex = sourceRowIndex;
         sourceRowIndex += 1;
@@ -239,6 +244,7 @@ export function buildSplitDiffRows(
 
         return budgetReached || (lastIncludedRow !== undefined && currentIndex >= lastIncludedRow);
     };
+
     const pushLazyRow = (createRow: () => SplitDiffRow): boolean => {
         const currentIndex = sourceRowIndex;
         sourceRowIndex += 1;
@@ -508,6 +514,7 @@ function trimEdgeCollapsedRows<TRow extends { readonly kind: string }>(
     while (rows[start]?.kind === "collapsed") {
         start += 1;
     }
+
     while (end > start && rows[end - 1]?.kind === "collapsed") {
         end -= 1;
     }
@@ -593,6 +600,7 @@ function colorsForLineType(
     if (lineType === "addition") {
         return { fg: palette.additionFg, bg: palette.additionRowBg };
     }
+
     if (lineType === "deletion") {
         return { fg: palette.deletionFg, bg: palette.deletionRowBg };
     }

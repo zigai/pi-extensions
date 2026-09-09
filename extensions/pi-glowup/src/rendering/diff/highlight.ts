@@ -285,6 +285,7 @@ function parseStyleValue(styleValue: Properties["style"]): ReadonlyMap<string, s
     while (parsedStyleCache.size > MAX_STYLE_CACHE_ENTRIES) {
         const oldest = parsedStyleCache.keys().next().value;
         if (oldest === undefined) break;
+
         parsedStyleCache.delete(oldest);
     }
 

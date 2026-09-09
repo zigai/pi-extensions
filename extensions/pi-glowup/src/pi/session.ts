@@ -30,6 +30,7 @@ export function installExplorationSession(
     pi.on("message_start", (event) => {
         if (event.message.role === "assistant") exploration.setMessage(event.message);
     });
+
     pi.on("message_update", (event) => {
         if (event.message.role === "assistant") exploration.setMessage(event.message);
     });
@@ -46,7 +47,6 @@ export function installExplorationSession(
         exploration.clear();
 
         const sessionManager = ctx.sessionManager;
-
         exploration.setSource(() => sessionManager.getBranch());
         restoreExplorationGroupStarts(sessionManager.getBranch());
     });

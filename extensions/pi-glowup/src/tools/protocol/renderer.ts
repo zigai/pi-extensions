@@ -77,6 +77,7 @@ function renderProtocolCallNode(
     while (mutationCallSlots.size > MAX_MUTATION_CALL_SLOTS) {
         const oldest = mutationCallSlots.keys().next();
         if (oldest.done === true) break;
+
         mutationCallSlots.delete(oldest.value);
     }
 
@@ -159,6 +160,7 @@ export function createProtocolRenderer(
 
             const node = safelyRender(() => {
                 if (args === undefined) return undefined;
+
                 const parsedArgs = adapter.parseArgs(args);
                 return parsedArgs === undefined
                     ? undefined
@@ -179,9 +181,11 @@ export function createProtocolRenderer(
             const resultContext = { ...context, result };
             const node = safelyRender(() => {
                 if (context.args === undefined) return undefined;
+
                 const parsedArgs = adapter.parseArgs(context.args);
                 const parsedResult = adapter.parseResult?.(result);
                 if (parsedArgs === undefined || parsedResult === undefined) return undefined;
+
                 return decodeGlowupNode(
                     adapter.renderResult?.(parsedResult, {
                         ...publicCallContext(resultContext),
@@ -205,6 +209,7 @@ const renderingAdapterParser = {
 
         try {
             if (!Value.Check(definitionSchema, toolDefinition)) return undefined;
+
             const adapter = Value.Parse(definitionSchema, toolDefinition)[propertyName];
             if (adapter === undefined) return undefined;
             if (adapter.renderPartialCall !== undefined && adapter.renderCall === undefined)

@@ -88,6 +88,7 @@ async function readTextSnapshot(
             skippedReason: "not-readable",
         };
     }
+
     if (maxBytes !== null && info.size > maxBytes) {
         return {
             content: "",
@@ -126,6 +127,7 @@ function summaryReasonForSnapshots(
     if (reason === "not-readable") {
         return "not-readable";
     }
+
     if (reason === "too-large") {
         return "too-large";
     }

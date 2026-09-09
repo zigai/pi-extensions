@@ -167,6 +167,7 @@ function splitBracketText(
     if (text.length === 0) {
         return [];
     }
+
     if (
         !bracketPairColoringEnabled ||
         !isBracketColorableForeground(foreground) ||

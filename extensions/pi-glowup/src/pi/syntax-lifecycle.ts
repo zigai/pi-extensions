@@ -56,6 +56,7 @@ export function createSyntaxLifecycle(options: {
     const startPendingSyntaxHighlighting = (): void => {
         const pending = pendingSyntaxStart;
         if (pending === undefined) return;
+
         pendingSyntaxStart = undefined;
 
         if (syntaxTimer !== undefined) {
@@ -70,6 +71,7 @@ export function createSyntaxLifecycle(options: {
                 pendingSyntaxTasks.delete(syntaxTask);
 
                 if (generation() !== pending.generation) return;
+
                 refreshToolRows(pending.context);
                 debugLogger.record("session_start", () => ({
                     phase: "after_syntax",
@@ -87,6 +89,7 @@ export function createSyntaxLifecycle(options: {
         context: ExtensionContext,
     ): void => {
         if (syntaxTimer !== undefined) clearTimeout(syntaxTimer);
+
         pendingSyntaxStart = {
             generation: generation(),
             options,

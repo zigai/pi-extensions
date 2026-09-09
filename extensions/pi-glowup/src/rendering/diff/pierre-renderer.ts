@@ -92,6 +92,7 @@ class DiffHighlightScheduler {
     ): Promise<HighlightedDiffLoadResult> {
         const cached = this.cached.get(key);
         if (cached !== undefined) return Promise.resolve(cached);
+
         const pending = this.pending.get(key);
         if (pending !== undefined) return pending;
 
@@ -148,8 +149,10 @@ class DiffHighlightScheduler {
     private async processNext(): Promise<void> {
         const { disposed, running } = this;
         if (disposed || running) return;
+
         const task = this.queued.shift();
         if (task === undefined) return;
+
         this.running = true;
 
         let result: HighlightedDiffLoadResult;
@@ -168,6 +171,7 @@ class DiffHighlightScheduler {
             while (this.cached.size > MAX_CACHED_DIFF_HIGHLIGHTS) {
                 const oldest = this.cached.keys().next().value;
                 if (oldest === undefined) break;
+
                 this.cached.delete(oldest);
             }
         }
@@ -205,8 +209,10 @@ function semanticUnifiedSourceRows(
     const push = (kind: SemanticDiffRowKind, edgeCollapsed = false): void => {
         rows.push({ sourceIndex: rows.length, kind, edgeCollapsed });
     };
+
     for (const hunk of metadata.hunks) {
         if (hunk.collapsedBefore > 0) push("meta", true);
+
         let deletionIndex = hunk.deletionLineIndex;
         let additionIndex = hunk.additionLineIndex;
         for (const content of hunk.hunkContent) {
@@ -237,6 +243,7 @@ function semanticUnifiedSourceRows(
     }
 
     if (hasTrailingCollapsedLines(metadata)) push("meta", true);
+
     return trimSemanticEdgeCollapsedRows(rows);
 }
 
@@ -288,6 +295,7 @@ function orderedReplacementKinds(
         kinds.push("insert");
         additionIndex += 1;
     }
+
     return kinds;
 }
 
@@ -298,6 +306,7 @@ function semanticSplitSourceRows(
     const push = (kind: SemanticDiffRowKind, edgeCollapsed = false): void => {
         rows.push({ sourceIndex: rows.length, kind, edgeCollapsed });
     };
+
     for (const hunk of metadata.hunks) {
         if (hunk.collapsedBefore > 0) push("meta", true);
 
@@ -321,6 +330,7 @@ function semanticSplitSourceRows(
     }
 
     if (hasTrailingCollapsedLines(metadata)) push("meta", true);
+
     return trimSemanticEdgeCollapsedRows(rows);
 }
 
@@ -650,6 +660,7 @@ class PierreDiffComponent implements Component {
         while (this.cachedLinesByWidth.size > 2) {
             const oldest = this.cachedLinesByWidth.keys().next().value;
             if (oldest === undefined) break;
+
             this.cachedLinesByWidth.delete(oldest);
         }
 
@@ -775,7 +786,6 @@ class PierreDiffComponent implements Component {
 
         const metadata = this.payload.metadata;
         const scheduler = diffHighlightScheduler;
-
         void scheduler
             .schedule(
                 nextKey,
@@ -854,9 +864,11 @@ function summaryDetail(payload: PierreSummaryDiffPayload): string {
     if (payload.summary.reason === "not-readable") {
         return `Diff omitted: ${payload.path} could not be read safely.`;
     }
+
     if (payload.summary.reason === "metadata-too-large") {
         return "Diff omitted: generated diff metadata exceeded the render budget.";
     }
+
     if (payload.summary.reason === "metadata-invalid") {
         return "Diff omitted: generated diff metadata was invalid.";
     }
@@ -875,6 +887,7 @@ function formatDiffSize(bytes: number): string {
     if (bytes < 1024) {
         return `${bytes}B`;
     }
+
     if (bytes < 1024 * 1024) {
         return `${(bytes / 1024).toFixed(1)}KB`;
     }
@@ -1147,6 +1160,7 @@ function renderSplitRow(
         const additionLine = additionLines[index] ?? emptyPane(rightWidth, row.addition);
         rendered.push(`${deletionLine}${divider}${additionLine}`);
     }
+
     return rendered;
 }
 
@@ -1450,6 +1464,7 @@ function markerForLineType(lineType: SplitDiffCell["lineType"] | UnifiedDiffRowL
     if (lineType === "addition") {
         return "+";
     }
+
     if (lineType === "deletion") {
         return "-";
     }

@@ -65,7 +65,6 @@ export class DebugFileLogger {
         }
 
         const resolvedFields = fields instanceof Function ? fields() : fields;
-
         const line = `${JSON.stringify({
             timestamp: new Date().toISOString(),
             pid: process.pid,
@@ -95,8 +94,8 @@ export class DebugFileLogger {
 
     private restartMemorySampleTimer(): void {
         this.clearMemorySampleTimer();
-        const config = this.config;
 
+        const config = this.config;
         if (
             config === undefined ||
             this.memorySnapshotFields === undefined ||

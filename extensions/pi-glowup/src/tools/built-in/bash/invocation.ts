@@ -101,6 +101,7 @@ function decodeShellWord(word: string): string {
     if (escaped) {
         decoded += "\\";
     }
+
     return decoded;
 }
 
@@ -113,27 +114,35 @@ function scriptInterpreterForWord(word: string): ScriptInterpreter | undefined {
     if (basename === "py" || /^python(?:\d+(?:\.\d+)?)?$/.test(basename)) {
         return { displayName: "Python", language: "python" };
     }
+
     if (basename === "node" || basename === "nodejs") {
         return { displayName: "Node", language: "javascript" };
     }
+
     if (basename === "deno") {
         return { displayName: "Deno", language: "typescript" };
     }
+
     if (basename === "bun") {
         return { displayName: "Bun", language: "typescript" };
     }
+
     if (basename === "tsx" || basename === "ts-node") {
         return { displayName: "TypeScript", language: "typescript" };
     }
+
     if (basename === "ruby") {
         return { displayName: "Ruby", language: "ruby" };
     }
+
     if (basename === "perl") {
         return { displayName: "Perl", language: "perl" };
     }
+
     if (basename === "php") {
         return { displayName: "PHP", language: "php" };
     }
+
     if (basename === "bash" || basename === "sh" || basename === "zsh") {
         return { displayName: "Shell", language: "bash" };
     }
@@ -217,6 +226,7 @@ function nextLineStartIndex(text: string, lineEnd: number): number {
     if (lineEnd >= text.length) {
         return text.length;
     }
+
     if (text.charCodeAt(lineEnd) === 13 && text.charCodeAt(lineEnd + 1) === 10) {
         return lineEnd + 2;
     }
@@ -316,6 +326,7 @@ function heredocCodeEndIndex(body: string, closingLineStart: number): number {
     if (closingLineStart === 0) {
         return 0;
     }
+
     if (body.charCodeAt(closingLineStart - 2) === 13) {
         return closingLineStart - 2;
     }
@@ -563,8 +574,10 @@ function directScriptInterpreterFrom(
     depth: number,
 ): DirectScriptInterpreter | undefined {
     if (depth > 4) return undefined;
+
     let start = initialStart;
     while (isEnvironmentAssignment(words[start] ?? "")) start += 1;
+
     const executable = commandBasename(words[start] ?? "");
     const direct = scriptInterpreterForWord(words[start] ?? "");
     if (direct !== undefined) return { interpreter: direct, index: start };
@@ -587,6 +600,7 @@ function directScriptInterpreterFrom(
     }
 
     if (commandIndex === undefined) return undefined;
+
     return directScriptInterpreterFrom(words, commandIndex, depth + 1);
 }
 
@@ -598,12 +612,15 @@ function inlineScriptFlagsForInterpreter(interpreter: ScriptInterpreter): Readon
     if (interpreter.language === "python") {
         return new Set(["-c"]);
     }
+
     if (interpreter.displayName === "Node") {
         return new Set(["-e", "--eval", "-p", "--print"]);
     }
+
     if (interpreter.displayName === "Deno") {
         return new Set(["eval"]);
     }
+
     if (interpreter.displayName === "Bun" || interpreter.displayName === "TypeScript") {
         return new Set(["-e", "--eval"]);
     }
@@ -640,6 +657,7 @@ function inlineScriptCodeForInterpreter(
             (word, index) => index >= startIndex && decodeShellWord(word) === "eval",
         );
         if (evalIndex < 0) return undefined;
+
         let index = evalIndex + 1;
         while (index < words.length) {
             const value = decodeShellWord(words[index] ?? "");
@@ -692,9 +710,11 @@ function inlineScriptCodeForInterpreter(
 
 function parseInlineScriptInvocation(displayCommand: string): ScriptInvocation | undefined {
     if (hasComposedShellSyntax(displayCommand)) return undefined;
+
     const words = tokenizeShellWords(displayCommand);
     const direct = directScriptInterpreter(words);
     if (direct === undefined) return undefined;
+
     const inlineScript = inlineScriptCodeForInterpreter(
         direct.interpreter,
         words,
@@ -713,6 +733,7 @@ type EmbeddedInlineScript = {
 
 export function embeddedInlineScripts(command: string): EmbeddedInlineScript[] {
     if (heredocOpenPattern.test(command)) return [];
+
     const lexemes = tokenizeShellLexemes(command);
     const scripts: EmbeddedInlineScript[] = [];
     let segment: ShellLexeme[] = [];

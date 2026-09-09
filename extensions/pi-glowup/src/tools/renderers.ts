@@ -93,16 +93,15 @@ export function hasThirdPartyToolRendererPlugin(
 
 function matcherMatches(toolName: string, matcher: ToolNameMatcher): boolean {
     if (matcher.kind === "predicate") return matcher.matches(toolName);
+
     const { pattern } = matcher;
     pattern.lastIndex = 0;
-
     const matchesToolName = pattern.test(toolName);
 
     pattern.lastIndex = 0;
-
     const matchesBaseName = pattern.test(baseToolName(toolName));
-
     pattern.lastIndex = 0;
+
     return matchesToolName || matchesBaseName;
 }
 
@@ -141,6 +140,7 @@ export function shouldPreserveThirdPartyToolRenderer(options: {
     if (options.renderingOptions?.enabled === false) {
         return true;
     }
+
     if (hasPreservePreference(options.toolDefinition)) {
         return true;
     }

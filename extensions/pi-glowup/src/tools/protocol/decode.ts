@@ -40,16 +40,19 @@ const toneSchema = Type.Union([
     Type.Literal("url"),
     Type.Literal("code"),
 ]);
+
 const inlineObjectSchema = Type.Object({
     kind: Type.Literal("text"),
     text: Type.String(),
     tone: Type.Optional(toneSchema),
     bold: Type.Optional(Type.Boolean()),
 });
+
 const syntaxSchema = Type.Object({
     language: Type.Optional(Type.String()),
     path: Type.Optional(Type.String()),
 });
+
 const previewSchema = Type.Object({
     mode: Type.Optional(
         Type.Union([Type.Literal("head"), Type.Literal("headTail"), Type.Literal("hidden")]),
@@ -58,12 +61,14 @@ const previewSchema = Type.Object({
     expandedLines: Type.Optional(Type.Number({ minimum: 1 })),
     expandable: Type.Optional(Type.Boolean()),
 });
+
 const labelsSchema = Type.Object({
     static: Type.String({ minLength: 1 }),
     running: Type.Optional(Type.String()),
     completed: Type.Optional(Type.String()),
     failed: Type.Optional(Type.String()),
 });
+
 const mutationLineSchema = Type.Object({
     kind: Type.Union([
         Type.Literal("context"),
@@ -115,7 +120,9 @@ const nodeSchemas = {
     }),
     stack: Type.Object({ kind: Type.Literal("stack"), children: Type.Unknown() }),
 };
+
 const summaryRowSchema = Type.Object({ label: Type.Unknown(), value: Type.Unknown() });
+
 const mutationFileSchema = Type.Object({
     path: Type.String({ minLength: 1 }),
     previousPath: Type.Optional(Type.String({ minLength: 1 })),
@@ -148,6 +155,7 @@ function countText(state: DecodeState, value: string): void {
 // oxlint-disable-next-line antislop/no-unknown-parameters, antislop/no-unknown-returns -- Cached producer fields remain unvalidated until consumed by a decoder.
 function readField(value: unknown, key: string, state: DecodeState): unknown {
     if (!Guard.IsObject(value)) return reject();
+
     let fields = state.fields.get(value);
     if (fields === undefined) {
         fields = new Map();
@@ -166,6 +174,7 @@ function capture<Properties extends TProperties>(
     textFields: readonly string[] = [],
 ): Static<TObject<Properties>> {
     if (!Guard.IsObjectNotArray(value)) return reject();
+
     const entries: Array<[string, unknown]> = [];
     for (const key of Object.keys(schema.properties)) {
         const field = readField(value, key, state);
@@ -183,6 +192,7 @@ function capture<Properties extends TProperties>(
 // oxlint-disable-next-line antislop/no-unknown-parameters -- Array length must be checked before traversing producer input.
 function collection(value: unknown, maximum: number, state: DecodeState) {
     if (!Guard.IsArray(value)) return reject();
+
     const length = readField(value, "length", state);
     if (!Value.Check(collectionLengthSchema, length) || length > maximum) return reject();
 
@@ -205,6 +215,7 @@ function decodePreview(value: unknown, state: DecodeState): GlowupPreview {
     const preview = capture(previewSchema, value, state);
     if (preview.collapsedLines !== undefined)
         preview.collapsedLines = Math.trunc(preview.collapsedLines);
+
     if (preview.expandedLines !== undefined)
         preview.expandedLines = Math.trunc(preview.expandedLines);
 
@@ -235,6 +246,7 @@ function decodeListItem(
 function decodeNode(value: unknown, state: DecodeState, depth: number): GlowupNode {
     if (depth > state.limits.maxDepth || ++state.nodes > state.limits.maxNodes) return reject();
     if (!Guard.IsObjectNotArray(value) || state.active.has(value)) return reject();
+
     state.active.add(value);
     try {
         return decodeVariant(value, state, depth);
@@ -248,10 +260,12 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
     switch (readField(value, "kind", state)) {
         case "empty":
             return capture(nodeSchemas.empty, value, state);
+
         case "text": {
             const node = capture(nodeSchemas.text, value, state);
             return { kind: "text", text: decodeInline(node.text, state) };
         }
+
         case "summary": {
             const node = capture(nodeSchemas.summary, value, state);
             const { values, length } = collection(
@@ -274,21 +288,25 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return { kind: "summary", rows };
         }
+
         case "code": {
             const source = capture(nodeSchemas.code, value, state, ["text"]);
             let node: GlowupCodeNode = { kind: "code", text: source.text };
             if (source.title !== undefined)
                 node = { ...node, title: decodeInline(source.title, state) };
+
             if (source.syntax !== undefined)
                 node = {
                     ...node,
                     syntax: capture(syntaxSchema, source.syntax, state, ["language", "path"]),
                 };
+
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
 
             return node;
         }
+
         case "list": {
             const source = capture(nodeSchemas.list, value, state);
             const { values, length } = collection(
@@ -305,8 +323,10 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
             let node: GlowupListNode = { kind: "list", items };
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
+
             return node;
         }
+
         case "call": {
             const source = capture(nodeSchemas.call, value, state);
             let node: GlowupCallNode = {
@@ -320,27 +340,32 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
             };
             if (source.body !== undefined)
                 node = { ...node, body: decodeNode(source.body, state, depth + 1) };
+
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
 
             return node;
         }
+
         case "output": {
             const source = capture(nodeSchemas.output, value, state, ["text", "noOutputLabel"]);
             let node: GlowupOutputNode = { kind: "output" };
             if (source.text !== undefined) node = { ...node, text: source.text };
             if (source.noOutputLabel !== undefined)
                 node = { ...node, noOutputLabel: source.noOutputLabel };
+
             if (source.syntax !== undefined)
                 node = {
                     ...node,
                     syntax: capture(syntaxSchema, source.syntax, state, ["language", "path"]),
                 };
+
             if (source.preview !== undefined)
                 node = { ...node, preview: decodePreview(source.preview, state) };
 
             return node;
         }
+
         case "mutation": {
             const source = capture(nodeSchemas.mutation, value, state, ["patch"]);
             const labels = capture(labelsSchema, source.labels, state, [
@@ -356,6 +381,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
             );
 
             if (length === 0) return reject();
+
             let remaining = state.limits.maxCollectionItems - length;
             const files: GlowupMutationFile[] = [];
             for (let index = 0; index < length; index++) {
@@ -367,6 +393,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
                 );
                 const { values: rows, length: rowCount } = collection(file.lines, remaining, state);
                 remaining -= rowCount;
+
                 const lines = [];
                 for (let row = 0; row < rowCount; row++)
                     lines.push(
@@ -380,8 +407,10 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             let node: GlowupMutationNode = { kind: "mutation", labels, files };
             if (source.patch !== undefined) node = { ...node, patch: source.patch };
+
             return node;
         }
+
         case "stack": {
             const source = capture(nodeSchemas.stack, value, state);
             const { values, length } = collection(
@@ -397,6 +426,7 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return { kind: "stack", children };
         }
+
         default:
             return reject();
     }

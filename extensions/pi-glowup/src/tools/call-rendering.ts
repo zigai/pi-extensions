@@ -40,6 +40,7 @@ export function callState(context: ThirdPartyToolRenderContext): GlowupCallState
     if (context.isError) {
         return "error";
     }
+
     if (context.isPartial || !context.argsComplete) {
         return "running";
     }
@@ -49,6 +50,7 @@ export function callState(context: ThirdPartyToolRenderContext): GlowupCallState
 
 function boundedExpandedResult(output: string | undefined): string | undefined {
     if (output === undefined) return undefined;
+
     const halfCharacterBudget = Math.floor(MAX_EXPANDED_RESULT_CHARACTERS / 2);
     const characterBounded =
         output.length <= MAX_EXPANDED_RESULT_CHARACTERS
@@ -56,6 +58,7 @@ function boundedExpandedResult(output: string | undefined): string | undefined {
             : `${takeGraphemePrefix(output, halfCharacterBudget)}\n… output truncated …\n${takeGraphemeSuffix(output, halfCharacterBudget)}`;
     const lines = characterBounded.replace(/\r\n?/gu, "\n").split("\n");
     if (lines.length <= MAX_EXPANDED_RESULT_LINES) return characterBounded;
+
     const headCount = Math.ceil(MAX_EXPANDED_RESULT_LINES / 2);
     const tailCount = Math.floor(MAX_EXPANDED_RESULT_LINES / 2);
     return [

@@ -34,6 +34,7 @@ export function rememberRawScriptPreview(
 async function formatAndStoreScriptPreview(options: FormatScriptPreviewOptions): Promise<void> {
     const script = parseScriptInvocation(options.command);
     if (options.formatter === undefined || script === undefined) return;
+
     const formatterOptions = options.signal === undefined ? {} : { signal: options.signal };
     const formattedScript = await formatScriptInvocation(
         script,

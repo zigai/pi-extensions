@@ -16,6 +16,7 @@ function completeUnicodePrefix(text: string): string {
     if (text.length === 0) {
         return text;
     }
+
     const finalCodeUnit = text.charCodeAt(text.length - 1);
     return finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff ? text.slice(0, -1) : text;
 }
@@ -41,6 +42,7 @@ function visibleControl(codeUnit: number): string {
     if (codeUnit <= 0x1f) {
         return String.fromCharCode(0x2400 + codeUnit);
     }
+
     if (codeUnit === 0x7f) {
         return "␡";
     }
@@ -98,6 +100,7 @@ export function expandTerminalTabs(
         const run = text.slice(runStart, index);
         output += run;
         displayColumn += visibleWidth(run);
+
         if (character === "\t") {
             const spaces = width - (displayColumn % width);
             output += " ".repeat(spaces);
@@ -113,6 +116,7 @@ export function expandTerminalTabs(
     const tail = text.slice(runStart);
     output += tail;
     displayColumn += visibleWidth(tail);
+
     return {
         text: runStart === 0 ? text : output,
         finalDisplayColumn: displayColumn,
@@ -170,6 +174,7 @@ export function takeGraphemePrefix(text: string, maxCharacters: number): string 
     if (budget === 0 || source.length === 0) {
         return "";
     }
+
     if (source.length <= budget) {
         return source;
     }
@@ -187,6 +192,7 @@ export function takeGraphemeSuffix(text: string, maxCharacters: number): string 
     if (budget === 0 || source.length === 0) {
         return "";
     }
+
     if (source.length <= budget) {
         return source;
     }

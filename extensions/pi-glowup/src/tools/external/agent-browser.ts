@@ -75,6 +75,7 @@ function summarizeSemanticAction(value: JsonObject): string | undefined {
 function summarizeJob(value: JsonObject): string | undefined {
     const steps = getArray(value, "steps");
     if (steps === undefined) return undefined;
+
     const actions = steps
         .slice(0, 4)
         .map((step) => {

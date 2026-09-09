@@ -192,6 +192,7 @@ export function list(
     if (preview !== undefined) {
         node = { ...node, preview };
     }
+
     return node;
 }
 
@@ -251,6 +252,7 @@ export function mutation(
     if (options.patch !== undefined) {
         node = { ...node, patch: options.patch };
     }
+
     return node;
 }
 

@@ -16,6 +16,7 @@ export type ToolLifecycleContext = {
 /** Returns whether a tool call is still receiving arguments or executing. */
 export function isActiveToolCall(context: ToolLifecycleContext): boolean {
     if (context.result !== undefined) return false;
+
     return context.isPartial || context.argsComplete === false;
 }
 

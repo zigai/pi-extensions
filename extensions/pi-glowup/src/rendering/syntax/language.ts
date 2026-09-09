@@ -185,6 +185,7 @@ export function syntaxLanguageFromShebang(
     if (PYTHON_SHEBANG_INTERPRETER.test(interpreterName)) {
         return "python";
     }
+
     if (interpreterName === "uv" && command[1] === "run" && command.includes("--script")) {
         return "python";
     }

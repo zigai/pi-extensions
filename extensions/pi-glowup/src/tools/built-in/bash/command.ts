@@ -140,6 +140,7 @@ class BashLayoutCollector {
             case "Statement":
                 this.walkNode(node.command, indent, depth + 1);
                 return;
+
             case "AndOr": {
                 const hasStepBoundary = node.operators.includes("&&");
                 if (node.commands.length >= 3 && hasStepBoundary) {
@@ -168,16 +169,19 @@ class BashLayoutCollector {
 
                 return;
             }
+
             case "Pipeline":
                 for (const command of node.commands) {
                     this.walkNode(command, indent, depth + 1);
                 }
 
                 return;
+
             case "If":
                 this.#structurallyComplex = true;
                 this.walkIf(node, indent, depth + 1);
                 return;
+
             case "For":
             case "ArithmeticFor":
             case "Select":
@@ -185,6 +189,7 @@ class BashLayoutCollector {
                 this.#structurallyComplex = true;
                 this.walkBodyWithClosingKeyword(node, indent, depth + 1, "done");
                 return;
+
             case "Case": {
                 this.#structurallyComplex = true;
 
@@ -211,11 +216,13 @@ class BashLayoutCollector {
                 if (closingIndex !== undefined) this.add(closingIndex, indent);
                 return;
             }
+
             case "Function":
             case "Coproc":
                 this.#structurallyComplex = true;
                 this.walkNode(node.body, indent, depth + 1);
                 return;
+
             case "BraceGroup": {
                 this.#structurallyComplex = true;
                 this.add(node.body.pos, indent + 1);
@@ -225,6 +232,7 @@ class BashLayoutCollector {
                 if (closingIndex >= node.body.end) this.add(closingIndex, indent);
                 return;
             }
+
             case "Subshell": {
                 this.#structurallyComplex = true;
                 this.add(node.body.pos, indent + 1);
@@ -234,9 +242,11 @@ class BashLayoutCollector {
                 if (closingIndex >= node.body.end) this.add(closingIndex, indent);
                 return;
             }
+
             case "CompoundList":
                 this.walkCompoundList(node, indent, depth + 1);
                 return;
+
             case "Command":
             case "TestCommand":
             case "ArithmeticCommand":
@@ -262,6 +272,7 @@ class BashLayoutCollector {
 
         const tail = this.#source.slice(start).trim();
         if (tail.length > 0) lines.push(`${INDENT.repeat(indent)}${tail}`);
+
         return lines.length > 1 ? lines.join("\n") : undefined;
     }
 }

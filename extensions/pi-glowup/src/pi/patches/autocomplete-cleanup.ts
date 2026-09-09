@@ -86,6 +86,7 @@ export function configureAutocompleteCleanupPatch(
     ): void {
         const forceCleanupRender = nextState.enabled && shouldForceCleanupRender(this);
         originalClearAutocompleteUi.call(this);
+
         if (forceCleanupRender) {
             this.tui?.requestRender(true);
         }

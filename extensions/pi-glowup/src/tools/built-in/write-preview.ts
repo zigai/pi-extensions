@@ -63,6 +63,7 @@ function writeDiffRenderOptions(
     if (!showAllRows) {
         options = { ...options, maxWrappedRows: 1 };
     }
+
     return options;
 }
 
@@ -119,7 +120,6 @@ function writeDiffSection(path: string, preview: string, totalLines: number): Di
             }
 
             const rendered = `+${lineNumber} ${line}`;
-
             lineNumber += 1;
             return rendered;
         }),
@@ -183,6 +183,7 @@ class PartialWriteContentPreview {
         if (snapshot.lineCount <= PARTIAL_WRITE_PREVIEW_LINES) {
             return snapshot.headLines.slice(0, snapshot.lineCount).join("\n");
         }
+
         const tailLines = snapshot.tailLines.slice(-PARTIAL_WRITE_MOVING_TAIL_LINES);
         return [
             `… +${snapshot.lineCount - tailLines.length} lines (${toolExpandHint()})`,
@@ -301,6 +302,7 @@ class PartialWriteContentPreview {
                 tailLines.shift();
             }
         };
+
         const currentLine = boundedPartialWriteLine(this.currentLine);
         if (!hasNonWhitespaceText(currentLine)) {
             return { headLines, tailLines, lineCount };
@@ -419,6 +421,7 @@ function boundedWriteContentPreview(content: string, maxBytes: number | null): s
     if (maxBytes === null || Buffer.byteLength(content, "utf8") <= maxBytes) {
         return content;
     }
+
     const maxContentBytes = Math.max(
         0,
         maxBytes - Buffer.byteLength(WRITE_PREVIEW_TRUNCATION_SUFFIX, "utf8"),

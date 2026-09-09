@@ -22,6 +22,7 @@ export function trimEdgeBlankLines(lines: ReadonlyArray<string>): string[] {
     while (start < end && (lines[start] ?? "").trim() === "") {
         start += 1;
     }
+
     while (end > start && (lines[end - 1] ?? "").trim() === "") {
         end -= 1;
     }
@@ -59,7 +60,6 @@ export function collapsedPreviewLinesFromText(
     }
 
     const normalized = normalizeOutputText(text);
-
     const lineBudget = Math.max(
         1,
         Math.min(Math.floor(maxPreviewLines), MAX_COLLAPSED_OUTPUT_PREVIEW_LINES),
@@ -73,6 +73,7 @@ export function collapsedPreviewLinesFromText(
     );
     const headCount = mode === "headTail" ? Math.ceil(lineBudget / 2) : lineBudget;
     const tailCount = mode === "headTail" ? Math.floor(lineBudget / 2) : 0;
+
     const headLines: string[] = [];
     const tailLines: string[] = [];
     let allLines: string[] | undefined = [];
@@ -143,6 +144,7 @@ export function collapsedPreviewLinesFromText(
     if (lineCount === 0) {
         return { isEmpty: true };
     }
+
     if (lineCount <= lineBudget) {
         return { isEmpty: false, lines: allLines };
     }
@@ -254,6 +256,7 @@ function retainedOutputBytes(retained: RetainedOutput): number {
     if (retained.kind === "expanded") {
         return Buffer.byteLength(retained.text, "utf8");
     }
+
     if (retained.preview.isEmpty) {
         return 0;
     }
@@ -427,6 +430,7 @@ export function renderGlowupOutput(
             if (noOutputLabel === null) {
                 return [];
             }
+
             const label = noOutputLabel ?? "(no output)";
             return [truncateToWidth(`${prefixFirst}${muted(theme, label)}`, width, "")];
         }
@@ -442,6 +446,7 @@ export function renderGlowupOutput(
                 : retained.kind === "expanded"
                   ? [...trimEdgeBlankLines(highlightCodeOutput(retained.text, syntax))]
                   : highlightPreviewLines(visible, syntax);
+
         const wrappedLines: WrappedPreviewLine[] = [];
         for (const [index, line] of displayLines.entries()) {
             const prefix = index === 0 ? prefixFirst : prefixRest;

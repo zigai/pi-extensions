@@ -84,6 +84,7 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
     switch (node.kind) {
         case "text":
             return toneText(theme, node.text);
+
         case "summary":
             return node.rows
                 .map(
@@ -91,14 +92,17 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                         `${toneText(theme, row.label)} ${theme.fg("dim", "→")} ${toneText(theme, row.value)}`,
                 )
                 .join("\n");
+
         case "code":
             return [node.title === undefined ? undefined : toneText(theme, node.title), node.text]
                 .filter((value): value is string => value !== undefined)
                 .join("\n");
+
         case "list":
             return node.items
                 .map((item) => {
                     if (!(item instanceof Object)) return `• ${item}`;
+
                     if (item.kind === "text" && ("tone" in item || "bold" in item)) {
                         return `• ${toneText(theme, item)}`;
                     }
@@ -106,8 +110,10 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                     return `• ${nodeText(item, theme)}`;
                 })
                 .join("\n");
+
         case "output":
             return node.text ?? "";
+
         case "mutation":
             return node.files
                 .map((file) =>
@@ -116,13 +122,16 @@ function nodeText(node: GlowupNode, theme: GlowupRenderTheme): string {
                         : `${file.previousPath} → ${file.path}`,
                 )
                 .join("\n");
+
         case "stack":
             return node.children
                 .map((child) => nodeText(child, theme))
                 .filter(Boolean)
                 .join("\n");
+
         case "call":
             return node.body === undefined ? "" : nodeText(node.body, theme);
+
         case "empty":
             return "";
     }
@@ -148,10 +157,13 @@ export function renderProtocolNode(
     switch (node.kind) {
         case "empty":
             return emptyComponent();
+
         case "text":
             return renderGlowupBody(toneText(theme, node.text));
+
         case "summary":
             return renderSummary(node, theme);
+
         case "code": {
             let outputOptions: GlowupOutputRenderOptions = {
                 expanded: context.expanded,
@@ -165,10 +177,12 @@ export function renderProtocolNode(
 
             const content = renderGlowupOutput(theme, node.text, outputOptions);
             if (node.title === undefined) return content;
+
             const title = renderGlowupBody(toneText(theme, node.title));
 
             return makeComponent((width) => [...title.render(width), ...content.render(width)]);
         }
+
         case "list":
             return renderGlowupOutput(theme, nodeText(node, theme), {
                 expanded: context.expanded,
@@ -176,6 +190,7 @@ export function renderProtocolNode(
                 maxPreviewLines: previewLines(node.preview, context.expanded),
                 noOutputLabel: null,
             });
+
         case "output": {
             let outputOptions: GlowupOutputRenderOptions = {
                 expanded: context.expanded,
@@ -189,6 +204,7 @@ export function renderProtocolNode(
 
             return renderGlowupOutput(theme, node.text, outputOptions);
         }
+
         case "mutation": {
             let mutationOptions: ProtocolMutationRenderOptions = {
                 label: statusLabel(labelMode, context, node.labels),
@@ -200,6 +216,7 @@ export function renderProtocolNode(
 
             return renderProtocolMutation(node, theme, context, mutationOptions);
         }
+
         case "call": {
             let headerOptions: ThirdPartyCallOptions = {
                 state: callState(context),
@@ -226,6 +243,7 @@ export function renderProtocolNode(
 
             return makeComponent((width) => [...header.render(width), ...body.render(width)]);
         }
+
         case "stack": {
             const buildChildren = () =>
                 node.children.map((child) =>

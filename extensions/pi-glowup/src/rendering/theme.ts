@@ -172,9 +172,11 @@ export function renderBullet(theme: GlowupRenderTheme, state: GlowupCallState): 
     if (state === "success") {
         return success(theme, indicator);
     }
+
     if (state === "error") {
         return red(theme, indicator);
     }
+
     if (state === "muted") {
         return dim(theme, indicator);
     }

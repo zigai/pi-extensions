@@ -137,11 +137,13 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         deletion,
         exploration,
     });
+
     const { diagnosticSnapshot, recordBuiltInRender } = createDiagnosticSnapshot({
         edit,
         bash,
         exploration,
     });
+
     const clearSessionState = (): void => {
         edit.clear();
         bash.clear();
@@ -149,6 +151,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         exploration.clear();
         clearQueuedDiffHighlights();
     };
+
     const reportWarning = (message: string): void => console.warn(message);
     let config = readGlowupConfig({ reportWarning });
     const debugLogger = new DebugFileLogger({
@@ -167,6 +170,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         reportWarning,
     });
     const { startPendingSyntaxHighlighting, scheduleSyntaxHighlighting } = syntax;
+
     const applyConfig = (nextConfig: GlowupConfig): void => {
         config = nextConfig;
         configureRenderingAppearance(config.appearance);
@@ -174,18 +178,21 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         debugLogger.configure(config.debugLog);
         formatter = scriptBlockFormatter(config, reportWarning);
         headerLayout = scriptPreviewHeaderLayout(config);
+
         configureAssistantSeparatorPatch(config.patches.assistantSeparator);
         configureWorkingWidgetSpacingPatch(config.patches.workingWidgetSpacing);
         configureAutocompleteCleanupPatch(config.patches.autocompleteCleanup);
         configureSyntaxBracketPairColoring(config.syntax.bracketPairColoring);
         configureMarkdownSyntaxPatch(config.patches.markdownSyntax);
         configureCompletedLineCache(config.renderCache);
+
         configureThirdPartyToolRendererPatch(
             true,
             config.patches.thirdPartyToolRenderers
                 ? thirdPartyToolRenderingOptions(config)
                 : { enabled: false },
         );
+
         configureBuiltInToolRendererPatch(true, {
             observeRow: (row, toolCallId, toolName) => {
                 explorationGroups.observeRow(row, toolCallId, isExplorationToolName(toolName));
@@ -207,6 +214,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
                 recordRender: recordBuiltInRender,
             }),
         });
+
         debugLogger.record("config_applied", () => ({
             ...configDiagnostics(config),
             ...diagnosticSnapshot(),
@@ -278,7 +286,6 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             const command = commandField(event.input);
             if (command !== undefined) {
                 const formatterGeneration = sessionGeneration;
-
                 scheduledFormattedPreview = bash.schedule({
                     toolCallId: event.toolCallId,
                     command,
@@ -295,7 +302,6 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         if (rendersAsEdit) {
             persistedEditPierrePayload = await finishNativeEditSnapshot(
                 event.toolCallId,
-
                 event.isError,
                 config.mutations,
             );
@@ -312,7 +318,6 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }
 
         const output = textOutput(event);
-
         debugLogger.record("tool_result", () => ({
             toolName: event.toolName,
             builtInToolName: canonicalBuiltInToolName(event.toolName),
@@ -349,12 +354,14 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             phase: "before_reset",
             ...diagnosticSnapshot(),
         }));
+
         clearSessionState();
         restoreExplorationSession(exploration, ctx.sessionManager);
         debugLogger.record("session_start", () => ({
             phase: "after_reset",
             ...diagnosticSnapshot(),
         }));
+
         applyConfig(nextConfig);
         refreshToolRows(ctx);
 
@@ -385,6 +392,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             phase: "before_reset",
             ...diagnosticSnapshot(),
         }));
+
         clearSessionState();
         syntax.cancel();
         configureAssistantSeparatorPatch(false);

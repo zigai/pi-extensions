@@ -57,7 +57,6 @@ function diffLineNumberWidth(
         width = Math.max(width, normalizedDiffLineNumber(parsed.lineNumber).length);
 
         const rowCoordinates = coordinates?.[index];
-
         width = Math.max(
             width,
             rowCoordinates?.oldLine === undefined ? 0 : String(rowCoordinates.oldLine).length,
@@ -150,6 +149,7 @@ function wrapDiffText(text: string, width: number, maxWrappedRows: number | unde
     if (maxWrappedRows === undefined) {
         return wrapStyledText(text, width);
     }
+
     const boundedText = truncateToWidth(text, Math.max(1, width * maxWrappedRows), "…");
     return wrapStyledText(boundedText, width).slice(0, maxWrappedRows);
 }
@@ -354,6 +354,7 @@ function styleDiffContent(
     if (kind === "insert") {
         return theme.fg("toolOutput", content);
     }
+
     if (kind === "delete") {
         return muted(theme, content);
     }
@@ -416,6 +417,7 @@ function highlightDiffContent(content: string, filePath: string | undefined): st
     if (filePath === undefined) {
         return content;
     }
+
     const [highlighted] = highlightCodeOutput(content, { path: filePath });
     return highlighted === undefined ? content : preserveRowBackground(highlighted);
 }
@@ -559,7 +561,9 @@ export function renderGlowupDiff(
                     if (section.path !== undefined) {
                         rowOptions = { ...rowOptions, path: section.path };
                     }
+
                     rowOptions = { ...rowOptions, lineNumberWidth: sectionLineNumberWidth };
+
                     const lineCoordinates = section.lineCoordinates?.[index];
                     if (lineCoordinates !== undefined) {
                         rowOptions = { ...rowOptions, lineCoordinates };

@@ -36,6 +36,7 @@ export function createNativeBashFeature() {
         invalidate: (() => void) | undefined,
     ): void {
         if (invalidate === undefined) return;
+
         bashRenderInvalidations.delete(toolCallId);
         bashRenderInvalidations.set(toolCallId, invalidate);
         trimOldestMapEntries(bashRenderInvalidations, MAX_BASH_RENDER_INVALIDATIONS);

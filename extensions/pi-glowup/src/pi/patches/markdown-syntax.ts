@@ -121,6 +121,7 @@ function restoreMarkdownRender(
         delete prototype.render;
         return;
     }
+
     prototype.render = originalRender;
 }
 
@@ -198,6 +199,7 @@ function patchSyntaxMarkdownTheme(theme: MarkdownTheme): void {
         markdownThemePatches += 1;
         return;
     }
+
     markdownThemePatchFailures += 1;
 }
 

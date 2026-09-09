@@ -54,7 +54,6 @@ export class PreviewStore<TPreview> {
         this.delete(toolCallId);
 
         const previewBytes = this.measureBytes?.(preview) ?? 0;
-
         this.previewsByToolCallId.set(toolCallId, preview);
         this.previewBytesByToolCallId.set(toolCallId, previewBytes);
         this.totalBytes += previewBytes;
@@ -96,6 +95,7 @@ export class PreviewStore<TPreview> {
             if (oldest.done === true) {
                 return;
             }
+
             this.delete(oldest.value);
         }
     }

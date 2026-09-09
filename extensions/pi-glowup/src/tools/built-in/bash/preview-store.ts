@@ -21,6 +21,7 @@ export function boundedScriptPreview(preview: ScriptInvocation): ScriptInvocatio
     if (Buffer.byteLength(preview.code, "utf8") <= MAX_SCRIPT_PREVIEW_BYTES) {
         return preview;
     }
+
     const maxCodeBytes = Math.max(
         0,
         MAX_SCRIPT_PREVIEW_BYTES - Buffer.byteLength(SCRIPT_PREVIEW_TRUNCATION_SUFFIX, "utf8"),
