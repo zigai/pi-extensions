@@ -14,5 +14,5 @@
       "@earendil-works/pi-tui": ["./node_modules/@earendil-works/pi-tui/dist/index.d.ts"]
     }
   },
-  "include": ["index.ts"]
+  "include": ["index.ts", "scripts/package-smoke.ts"]
 }

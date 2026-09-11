@@ -8,11 +8,14 @@
 - Keep the package allowlist and package smoke test current when adding published files.
 - Validate changes with `just check` before handing off.
 
+## Settings and Session Lifecycle
+
+Keep the configuration owned by `index.ts`; this extension does not directly use `@zigai/pi-extension-settings`. Register `/branch` synchronously and load configuration in its command callback, not during import or registration. Preserve the existing reload boundary rather than adding a session cache.
+
+Guard dialogs/notifications with `ctx.hasUI` and terminal UI with `ctx.mode === "tui"`. Dispose owned session resources before clearing state; cancel async work and reject stale results when adding session-bound operations.
+
+Preserve the current configuration owner; these instructions do not require a settings-library migration. If adopting `@zigai/pi-extension-settings` as part of a requested change, follow its `docs/manual-setup.md` and `docs/runtime.md`.
+
 ## README Configuration Docs
 
-- When documenting extension configuration in `README.md`, show the full scaffolded default `config.json` rather than partial override examples.
-- Do not omit settings that have default values from README JSON config blocks.
-- Include `$schema` in README JSON config blocks when the scaffolded default config includes it, but do not explain `$schema` in prose.
-- Do not mention project-specific configuration overrides in `README.md`.
-- Option tables must list actual user-editable keys or dot paths.
-- If a setting has no default, document it in the option table but do not invent a value for it in README JSON config blocks.
+Document the global configuration with a table of actual editable keys and one complete default JSON example, including `$schema` when scaffolded. Include all defaults, invent none, and omit project overrides and schema implementation prose.

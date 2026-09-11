@@ -3,21 +3,33 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packDirectory = mkdtempSync(path.join(tmpdir(), "pi-branch-pack-"));
+const NpmPackResultSchema = Type.Object({ filename: Type.String() });
+const NpmPackOutputSchema = Type.Union([
+    Type.Array(NpmPackResultSchema),
+    Type.Record(Type.String(), NpmPackResultSchema),
+]);
+const DependencyManifestSchema = Type.Object({ name: Type.String() });
+
+type NpmPackOutput = Static<typeof NpmPackOutputSchema>;
+type DependencyManifest = Static<typeof DependencyManifestSchema>;
 
 function fail(message: string): never {
     throw new Error(`Package smoke test failed: ${message}`);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null;
+function parseNpmPackOutput(text: string): NpmPackOutput {
+    const parsed: unknown = JSON.parse(text);
+    return Value.Parse(NpmPackOutputSchema, parsed);
 }
 
-function parseJson(text: string): unknown {
+function parseDependencyManifest(text: string): DependencyManifest {
     const parsed: unknown = JSON.parse(text);
-    return parsed;
+    return Value.Parse(DependencyManifestSchema, parsed);
 }
 
 try {
@@ -25,21 +37,19 @@ try {
         cwd: projectRoot,
         encoding: "utf8",
     });
-    const parsed = parseJson(output);
-    let result: unknown;
+    const parsed = parseNpmPackOutput(output);
+    let result;
     if (Array.isArray(parsed)) {
         result = parsed[0];
-    } else if (isRecord(parsed)) {
+    } else {
         result = Object.values(parsed)[0];
     }
-    if (!isRecord(result)) {
+
+    if (result === undefined) {
         fail("npm pack returned no result");
     }
-    const filename = result.filename;
-    if (typeof filename !== "string") {
-        fail("npm pack did not report a filename");
-    }
 
+    const { filename } = result;
     const archive = path.join(packDirectory, filename);
     const files = new Set(
         execFileSync("tar", ["-tzf", archive], { encoding: "utf8" }).trim().split("\n"),
@@ -54,6 +64,7 @@ try {
     ]) {
         if (!files.has(required)) fail(`missing ${required}`);
     }
+
     for (const excluded of [
         "package/AGENTS.md",
         "package/Justfile",
@@ -64,12 +75,12 @@ try {
         if (files.has(excluded)) fail(`unexpectedly included ${excluded}`);
     }
 
-    const dependencyManifest = parseJson(
+    const dependencyManifest = parseDependencyManifest(
         execFileSync("tar", ["-xOf", archive, "package/node_modules/pi-typed-args/package.json"], {
             encoding: "utf8",
         }),
     );
-    if (!isRecord(dependencyManifest) || dependencyManifest.name !== "pi-typed-args") {
+    if (dependencyManifest.name !== "pi-typed-args") {
         fail("bundled dependency has the wrong package name");
     }
 

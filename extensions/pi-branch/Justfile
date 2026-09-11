@@ -11,8 +11,12 @@ setup:
     pre-commit install
     just check
 
+
+# Install the extension into Pi
+install:
+    pi install .
 # Format code
-fmt:
+format:
     npm run format
 
 # Check code for lint issues
@@ -22,6 +26,10 @@ lint:
 # Run tests
 test:
     npm test
+
+# Static type check with TypeScript
+typecheck:
+    npm run typecheck
 
 # Run tests with coverage
 coverage:
@@ -34,3 +42,10 @@ check:
 # Apply automatic fixes
 fix:
     npm run lint:fix
+# Remove coverage and temporary output
+clean:
+    rm -rf coverage dist
+
+alias cov := coverage
+alias fmt := format
+alias tsc := typecheck

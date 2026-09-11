@@ -30,6 +30,8 @@ const CONFIG_FILE_NAME = "config.json";
 const CONFIG_SCHEMA_FILE_NAME = "config.schema.json";
 const CONFIG_SCHEMA_REFERENCE = "./config.schema.json";
 export const CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-branch/config.schema.json";
+const CommandExitCodeSchema = Type.Number();
+const FileSystemErrorSchema = Type.Object({ code: Type.String() });
 
 function createWorktreeDirSchema() {
     return Type.Optional(
@@ -47,6 +49,7 @@ const BranchConfigSchema = Type.Object(
     },
     { additionalProperties: false },
 );
+
 type BranchConfig = Static<typeof BranchConfigSchema>;
 
 export const BranchConfigFileSchema = Type.Object(
@@ -61,6 +64,7 @@ export const BranchConfigFileSchema = Type.Object(
     },
     { additionalProperties: false, description: "pi-branch extension configuration." },
 );
+
 type BranchConfigFile = Static<typeof BranchConfigFileSchema>;
 
 const DEFAULT_BRANCH_CONFIG: BranchConfig = { worktreeDir: DEFAULT_WORKTREE_DIR_NAME };
@@ -79,6 +83,7 @@ end run`;
 
 type LaunchMode = "windows" | "panes" | "pane-window";
 export type ForkLayout = "separate" | "current-tab" | "new-tab";
+
 type LaunchTarget =
     | "tmux-window"
     | "tmux-current-panes"
@@ -162,16 +167,17 @@ type PreparedFork = {
     worktree?: WorktreeInfo;
 };
 
-function runCommand(command: string, args: string[], cwd?: string): Promise<CommandResult> {
+async function runCommand(command: string, args: string[], cwd?: string): Promise<CommandResult> {
     return new Promise((resolve) => {
         execFile(command, args, { encoding: "utf8", cwd }, (error, stdout, stderr) => {
             let code = 0;
             if (error !== null) {
                 code = 1;
-                if (typeof error.code === "number") {
-                    code = error.code;
+                if (Value.Check(CommandExitCodeSchema, error.code)) {
+                    code = Value.Decode(CommandExitCodeSchema, error.code);
                 }
             }
+
             resolve({ code, stdout, stderr });
         });
     });
@@ -365,12 +371,12 @@ function formatExecFailure(result: { code: number; stdout?: string; stderr?: str
     return `exit code ${result.code}`;
 }
 
-function formatUnknownError(error: unknown): string {
-    if (error instanceof Error && error.message.length > 0) {
-        return error.message;
+function formatUnknownError(cause: unknown): string {
+    if (cause instanceof Error && cause.message.length > 0) {
+        return cause.message;
     }
 
-    return String(error);
+    return String(cause);
 }
 
 function expandHomePath(value: string): string {
@@ -402,16 +408,20 @@ function getGlobalBranchConfigDir(): string {
     return path.join(getAgentDir(), EXTENSION_ID);
 }
 
-function isFileAlreadyPresentError(error: unknown): boolean {
-    return (
-        typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST"
-    );
+function isFileAlreadyPresentError(cause: unknown): boolean {
+    try {
+        return Value.Parse(FileSystemErrorSchema, cause).code === "EEXIST";
+    } catch {
+        return false;
+    }
 }
 
-function isFileMissingError(error: unknown): boolean {
-    return (
-        typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
-    );
+function isFileMissingError(cause: unknown): boolean {
+    try {
+        return Value.Parse(FileSystemErrorSchema, cause).code === "ENOENT";
+    } catch {
+        return false;
+    }
 }
 
 function getDefaultBranchConfigFileText(): string {
@@ -423,6 +433,7 @@ async function readInstalledBranchConfigSchemaText(): Promise<string | undefined
         path.dirname(fileURLToPath(import.meta.url)),
         CONFIG_SCHEMA_FILE_NAME,
     );
+
     try {
         return await fs.readFile(installedSchemaPath, "utf8");
     } catch (error: unknown) {
@@ -441,6 +452,7 @@ async function writeTextFileIfMissing(filePath: string, content: string): Promis
         if (isFileAlreadyPresentError(error)) {
             return;
         }
+
         console.error(`[pi-branch] Failed to scaffold ${filePath}: ${formatUnknownError(error)}`);
     }
 }
@@ -448,6 +460,7 @@ async function writeTextFileIfMissing(filePath: string, content: string): Promis
 async function refreshExtensionOwnedTextFile(filePath: string, content: string): Promise<void> {
     try {
         await fs.mkdir(path.dirname(filePath), { recursive: true });
+
         try {
             if ((await fs.readFile(filePath, "utf8")) === content) {
                 return;
@@ -459,6 +472,7 @@ async function refreshExtensionOwnedTextFile(filePath: string, content: string):
                 );
             }
         }
+
         await fs.writeFile(filePath, content, "utf8");
     } catch (error: unknown) {
         console.error(`[pi-branch] Failed to refresh ${filePath}: ${formatUnknownError(error)}`);
@@ -482,11 +496,7 @@ async function scaffoldGlobalBranchConfigFiles(): Promise<void> {
 }
 
 function parseBranchConfig(parsed: unknown): BranchConfigFile {
-    if (!Value.Check(BranchConfigFileSchema, parsed)) {
-        throw new Error("Config does not match config.schema.json");
-    }
-
-    return Value.Decode(BranchConfigFileSchema, parsed);
+    return Value.Parse(BranchConfigFileSchema, parsed);
 }
 
 function projectBranchConfig(fileConfig: BranchConfigFile): BranchConfig {
@@ -503,6 +513,7 @@ function getBranchConfigPaths(ctx: ExtensionCommandContext): Array<{
     label: string;
 }> {
     const agentDir = getAgentDir();
+
     const configPaths = [
         {
             file: path.join(agentDir, EXTENSION_ID, CONFIG_FILE_NAME),
@@ -518,6 +529,7 @@ function getBranchConfigPaths(ctx: ExtensionCommandContext): Array<{
             label: "project",
         });
     }
+
     return configPaths;
 }
 
@@ -546,9 +558,14 @@ async function readBranchConfigFile(input: {
 
     try {
         const parsed: unknown = JSON.parse(await fs.readFile(input.file, "utf8"));
-        const hasWorktreeDir =
-            typeof parsed === "object" && parsed !== null && Object.hasOwn(parsed, "worktreeDir");
-        const config = parseBranchConfig(parsed);
+        let config: BranchConfigFile;
+        try {
+            config = parseBranchConfig(parsed);
+        } catch {
+            throw new Error("Config does not match config.schema.json");
+        }
+
+        const hasWorktreeDir = Object.hasOwn(config, "worktreeDir");
         return {
             state: "loaded",
             config,
@@ -580,6 +597,7 @@ async function loadBranchConfig(ctx: ExtensionCommandContext): Promise<BranchCon
         }
 
         Object.assign(config, projectBranchConfig(result.config));
+
         if (result.hasWorktreeDir) {
             worktreeDirBaseDir = result.baseDir;
         }
@@ -772,12 +790,10 @@ async function createForkedSession(
     const sessionDir = path.dirname(sessionFile);
     const branchEntries = ctx.sessionManager.getBranch();
     const currentHeader = ctx.sessionManager.getHeader();
-
     const timestamp = new Date().toISOString();
     const fileTimestamp = timestamp.replaceAll(/[:.]/g, "-");
     const newSessionId = randomUUID();
     const newSessionFile = path.join(sessionDir, `${fileTimestamp}_${newSessionId}.jsonl`);
-
     let version = 3;
     if (currentHeader?.version !== undefined) {
         version = currentHeader.version;
@@ -837,6 +853,7 @@ async function launchForkedPi(
             if (tmuxWindowTarget !== undefined) {
                 tmuxArgs.push("-t", tmuxWindowTarget);
             }
+
             tmuxArgs.push(
                 "-n",
                 launchName,
@@ -844,6 +861,7 @@ async function launchForkedPi(
                 launchCwd,
                 buildPiShellCommand(sessionFile, prompt, modelArg, keepOpen),
             );
+
             return runCommand("tmux", tmuxArgs);
         }
         case "ghostty-window":
@@ -961,10 +979,12 @@ export function tmuxGridRowPaneCounts(paneCount: number): number[] {
     const rowCount = Math.ceil(paneCount / columnCount);
     const minimumPanesPerRow = Math.floor(paneCount / rowCount);
     const rowsWithExtraPane = paneCount % rowCount;
+
     return Array.from({ length: rowCount }, (_, rowIndex) => {
         if (rowIndex < rowsWithExtraPane) {
             return minimumPanesPerRow + 1;
         }
+
         return minimumPanesPerRow;
     });
 }
@@ -981,6 +1001,7 @@ async function launchTmuxCurrentPaneGroup(
     }
 
     const targetWindow = await getCurrentTmuxWindowTarget();
+
     for (const fork of forks) {
         const result = await runCommand("tmux", [
             "split-window",
@@ -1024,6 +1045,7 @@ async function launchTmuxNewWindowPaneGroup(
     if (tmuxWindowTarget !== undefined) {
         tmuxArgs.push("-t", tmuxWindowTarget);
     }
+
     tmuxArgs.push(
         "-n",
         launchName,
@@ -1057,10 +1079,12 @@ async function launchTmuxNewWindowPaneGroup(
         if (forkIndex === undefined) {
             return { code: 1, stderr: "Could not assign a fork to a tmux grid row." };
         }
+
         const fork = forks[forkIndex];
         if (fork === undefined) {
             return { code: 1, stderr: "Could not find the fork assigned to a tmux grid row." };
         }
+
         const remainingRowCount = rowPaneCounts.length - rowIndex + 1;
         const result = await runCommand("tmux", [
             "split-window",
@@ -1080,10 +1104,12 @@ async function launchTmuxNewWindowPaneGroup(
         if (result.code !== 0) {
             return result;
         }
+
         const paneId = result.stdout?.trim();
         if (paneId === undefined || paneId.length === 0) {
             return { code: 1, stderr: "tmux did not report the created row pane id." };
         }
+
         rowAnchorPaneIds.push(paneId);
         remainingRowsPaneId = paneId;
     }
@@ -1101,6 +1127,7 @@ async function launchTmuxNewWindowPaneGroup(
         }
 
         let remainingColumnsPaneId = rowAnchorPaneId;
+
         for (let columnIndex = 1; columnIndex < rowPaneCount; columnIndex += 1) {
             const fork = forks[rowStartIndex + columnIndex];
             if (fork === undefined) {
@@ -1109,6 +1136,7 @@ async function launchTmuxNewWindowPaneGroup(
                     stderr: "Could not find the fork assigned to a tmux grid column.",
                 };
             }
+
             const remainingColumnCount = rowPaneCount - columnIndex + 1;
             const result = await runCommand("tmux", [
                 "split-window",
@@ -1128,10 +1156,12 @@ async function launchTmuxNewWindowPaneGroup(
             if (result.code !== 0) {
                 return result;
             }
+
             const paneId = result.stdout?.trim();
             if (paneId === undefined || paneId.length === 0) {
                 return { code: 1, stderr: "tmux did not report the created column pane id." };
             }
+
             remainingColumnsPaneId = paneId;
         }
     }
@@ -1162,13 +1192,14 @@ function buildGhosttySplitScript(options: {
     if (options.mode === "current") {
         totalPanes = options.forkCount + 1;
     }
+
     const columns = gridColumnCount(totalPanes);
     const splitLines: string[] = [];
-
     let nextConfigIndex = 2;
     if (options.mode === "current") {
         nextConfigIndex = 1;
     }
+
     for (let cell = 1; cell < columns && nextConfigIndex <= options.forkCount; cell += 1) {
         splitLines.push(
             `set term${cell} to split term${cell - 1} direction right with configuration cfg${nextConfigIndex}`,
@@ -1177,6 +1208,7 @@ function buildGhosttySplitScript(options: {
     }
 
     let rowStart = columns;
+
     while (nextConfigIndex <= options.forkCount) {
         for (
             let column = 0;
@@ -1190,6 +1222,7 @@ function buildGhosttySplitScript(options: {
             );
             nextConfigIndex += 1;
         }
+
         rowStart += columns;
     }
 
@@ -1229,7 +1262,7 @@ function buildGhosttyPaneArgs(
     ]);
 }
 
-function launchGhosttyPaneGroup(
+async function launchGhosttyPaneGroup(
     target: "ghostty-current-panes" | "ghostty-new-window-panes",
     forks: PreparedFork[],
     prompt: string,
@@ -1240,6 +1273,7 @@ function launchGhosttyPaneGroup(
     if (target === "ghostty-current-panes") {
         mode = "current";
     }
+
     return runCommand("osascript", [
         "-e",
         buildGhosttySplitScript({ mode, forkCount: forks.length }),
@@ -1413,7 +1447,9 @@ async function handleParsedBranch(parsed: ParsedArgs, ctx: ExtensionCommandConte
         if (parsed.mode !== "windows") {
             message = "Pane modes require tmux or Ghostty on macOS.";
         }
+
         ctx.ui.notify(message, "warning");
+
         return;
     }
 
@@ -1427,6 +1463,7 @@ async function handleParsedBranch(parsed: ParsedArgs, ctx: ExtensionCommandConte
     if (worktreeConfig.enabled) {
         worktreeRoot = worktreeConfig.root;
     }
+
     let gitRepoInfo: GitRepoInfo | undefined;
     if (worktreeRoot !== undefined) {
         try {
@@ -1452,9 +1489,11 @@ async function handleParsedBranch(parsed: ParsedArgs, ctx: ExtensionCommandConte
         const forks: PreparedFork[] = [];
         for (let index = 0; index < parsed.count; index += 1) {
             const launchName = buildForkName(baseSessionName, index);
+
             try {
                 const fork = await prepareFork(ctx, launchName, worktreeRoot, gitRepoInfo);
                 forks.push(fork);
+
                 if (fork.worktree !== undefined) {
                     successfulWorktrees.push(fork.worktree);
                 }
@@ -1480,10 +1519,12 @@ async function handleParsedBranch(parsed: ParsedArgs, ctx: ExtensionCommandConte
         if (result.launchedVia === undefined) {
             const reason = result.failures.join("; ") || "no supported launcher available";
             failedReasons.push(reason);
+
             for (const fork of forks) {
                 if (fork.sessionFile !== undefined) {
                     ctx.ui.notify(`Forked session was created: ${fork.sessionFile}`, "info");
                 }
+
                 if (fork.worktree !== undefined) {
                     ctx.ui.notify(
                         `Worktree was created: ${fork.worktree.path} (${fork.worktree.branch})`,
@@ -1491,7 +1532,9 @@ async function handleParsedBranch(parsed: ParsedArgs, ctx: ExtensionCommandConte
                     );
                 }
             }
+
             ctx.ui.notify(`Failed to launch forked session: ${failedReasons.join("; ")}`, "error");
+
             return;
         }
 
@@ -1533,18 +1576,22 @@ async function handleParsedBranch(parsed: ParsedArgs, ctx: ExtensionCommandConte
             if (result.launchedVia !== undefined) {
                 launchedVia = result.launchedVia;
                 successfulLaunches += 1;
+
                 if (worktreeInfo !== undefined) {
                     successfulWorktrees.push(worktreeInfo);
                 }
+
                 if (result.tmuxWindowId !== undefined) {
                     tmuxWindowTarget = result.tmuxWindowId;
                 }
             } else {
                 const reason = result.failures.join("; ") || "no supported launcher available";
                 failedReasons.push(reason);
+
                 if (result.sessionFile !== undefined) {
                     ctx.ui.notify(`Forked session was created: ${result.sessionFile}`, "info");
                 }
+
                 if (worktreeInfo !== undefined) {
                     ctx.ui.notify(
                         `Worktree was created: ${worktreeInfo.path} (${worktreeInfo.branch})`,
