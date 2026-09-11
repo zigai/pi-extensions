@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 
 import {
   handleGoalCommand,
@@ -13,11 +15,21 @@ import {
 import { createThreadGoal } from "../src/state.js";
 import type { ThreadGoal } from "../src/types.js";
 
+function parseText<Value>(value: Value): string {
+  return Value.Parse(Type.String(), value);
+}
+
 function createHarness(initialGoal: ThreadGoal | null = null) {
   let goal = initialGoal;
   const notifications: Array<{ message: string; level?: string }> = [];
-  const sentMessages: Array<{ message: unknown; options: unknown }> = [];
-  const sentUserMessages: Array<{ content: unknown; options: unknown }> = [];
+  const sentMessages: Array<{
+    message: Parameters<GoalCommandPi["sendMessage"]>[0];
+    options: Parameters<GoalCommandPi["sendMessage"]>[1];
+  }> = [];
+  const sentUserMessages: Array<{
+    content: Parameters<GoalCommandPi["sendUserMessage"]>[0];
+    options: Parameters<GoalCommandPi["sendUserMessage"]>[1];
+  }> = [];
   let confirmResult = true;
   const cwd = mkdtempSync(join(tmpdir(), "pi-goal-command-test-"));
 
@@ -38,6 +50,7 @@ function createHarness(initialGoal: ThreadGoal | null = null) {
       if (goal?.goalId !== goalId || (goal.status !== "paused" && goal.status !== "blocked")) {
         return { ok: false, message: "Cannot resume.", goal };
       }
+
       goal = { ...goal, status: "active" };
       return { ok: true, message: "Goal marked active.", goal };
     },
@@ -105,12 +118,13 @@ test("default /goal task renders the creation prompt with form constraints", asy
     assert.equal(harness.goal, null);
     assert.equal(harness.sentMessages.length, 0);
     assert.equal(harness.sentUserMessages.length, 1);
-    const content = harness.sentUserMessages[0]?.content;
-    assert.equal(typeof content, "string");
-    assert.match(String(content), /Build &amp; verify the feature/);
-    assert.match(String(content), /minimum_time_minutes=15/);
-    assert.match(String(content), /maximum_time_minutes=60/);
-    assert.match(String(content), /replace_existing: true/);
+    const sentUserMessage = harness.sentUserMessages[0];
+    assert.ok(sentUserMessage);
+    const content = parseText(sentUserMessage.content);
+    assert.match(content, /Build &amp; verify the feature/);
+    assert.match(content, /minimum_time_minutes=15/);
+    assert.match(content, /maximum_time_minutes=60/);
+    assert.match(content, /replace_existing: true/);
   } finally {
     harness.cleanup();
   }
@@ -160,10 +174,9 @@ test("expanded goal adjustment preserves identity and usage while updating wordi
     assert.equal(harness.goal?.objective, "revised objective");
     assert.deepEqual(harness.goal?.usage, { tokensUsed: 25, activeSeconds: 30 });
     assert.equal(harness.sentMessages.length, 1);
-    assert.match(
-      String((harness.sentMessages[0]?.message as { content?: unknown })?.content),
-      /revised objective/,
-    );
+    const sentMessage = harness.sentMessages[0];
+    assert.ok(sentMessage);
+    assert.match(parseText(sentMessage.message.content), /revised objective/);
   } finally {
     harness.cleanup();
   }
@@ -182,7 +195,6 @@ test("adjusting a blocked goal preserves the blocked state without queuing work"
     assert.equal(harness.goal?.status, "blocked");
     assert.equal(harness.goal?.objective, "clarified objective");
     assert.equal(harness.sentMessages.length, 0);
-
     await handleGoalCommand(harness.pi, harness.host, { task: "resume" }, harness.ctx);
     assert.equal(harness.goal?.status, "active");
   } finally {
@@ -195,7 +207,6 @@ test("pause and resume are the only management task spellings", async () => {
   try {
     await handleGoalCommand(harness.pi, harness.host, { task: "pause" }, harness.ctx);
     assert.equal(harness.goal?.status, "paused");
-
     await handleGoalCommand(harness.pi, harness.host, { task: "resume" }, harness.ctx);
     assert.equal(harness.goal?.status, "active");
 
@@ -239,7 +250,6 @@ test("time constraints are rejected for management commands and empty tasks", as
     );
     assert.equal(harness.goal?.status, "active");
     assert.match(harness.notifications.at(-1)?.message ?? "", /only when creating/);
-
     await handleGoalCommand(harness.pi, harness.host, { maximumTimeMinutes: 10 }, harness.ctx);
     assert.match(harness.notifications.at(-1)?.message ?? "", /task or raw objective is required/i);
   } finally {

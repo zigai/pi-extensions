@@ -11,6 +11,7 @@ import {
   fireProviderLimitAutoResume,
   flushContinuationScheduler,
   queuedCustomMessage,
+  sentUserMessageText,
   sessionCompactEvent,
   sessionShutdownEvent,
 } from "./support/runtime-harness.js";
@@ -87,7 +88,6 @@ test("session resume at maximum time keeps a paused goal timeLimited without fol
   harness.sentUserMessages.length = 0;
 
   await harness.emit("session_start", { type: "session_start", reason: "resume" });
-
   assert.equal(harness.snapshot().goal?.status, "timeLimited");
   assert.equal(harness.sentUserMessages.length, 0);
 });
@@ -105,17 +105,13 @@ test("session resume prompt can reactivate a paused goal", async () => {
   harness.sentMessages.length = 0;
 
   await harness.emit("session_start", { type: "session_start", reason: "resume" });
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(harness.sentUserMessages.length, 1);
   const sentUserMessage = harness.sentUserMessages[0];
   assert.ok(sentUserMessage);
   assert.deepEqual(sentUserMessage.options, { deliverAs: "followUp" });
-  const content = sentUserMessage.content;
-  if (typeof content !== "string") {
-    assert.fail("Expected session resume to send a user continuation prompt.");
-  }
+  const content = sentUserMessageText(sentUserMessage);
   assert.match(content, /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/);
   assert.match(content, /<pi_goal_continuation goal_id="/);
 });
@@ -131,7 +127,6 @@ test("blocked goals remain stopped across session reload until explicit resume",
   assert.equal(harness.snapshot().goal?.status, "blocked");
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(harness.sentUserMessages.length, 0);
-
   await harness.runCommand("resume");
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length + harness.sentUserMessages.length, 1);
@@ -204,7 +199,6 @@ test("successful maximum-time crossing clears stale recovery footer attention", 
     await emitPersistentAssistantError(harness, 0, "websocket closed");
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
-
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
     now += 60_000;
     await harness.emit("turn_end", {
@@ -233,7 +227,6 @@ test("maximum-time crossing sends one hidden time-limit steering message", async
   try {
     const harness = createRuntimeHarness();
     await harness.runTool("create_goal", { objective: "ship it", maximum_time_minutes: 1 });
-
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
     now += 60_000;
     await harness.emit("turn_end", {
@@ -292,16 +285,13 @@ test("replacement during an in-flight turn does not charge old tokens to the new
 
 test("goal tools return goal, constraints, and usage details", async () => {
   const harness = createRuntimeHarness();
-  const created = (await harness.runTool("create_goal", {
+  const created = await harness.runTool("create_goal", {
     objective: "ship it",
     maximum_time_minutes: 2,
-  })) as { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
+  });
 
-  assert.equal((created.details.goal as { objective?: string }).objective, "ship it");
-  assert.equal(
-    (created.details.goal as { maximumActiveSeconds?: number }).maximumActiveSeconds,
-    120,
-  );
+  assert.equal(created.details.goal?.objective, "ship it");
+  assert.equal(created.details.goal?.maximumActiveSeconds, 120);
   assert.equal(created.details.minimumTimeRemainingSeconds, null);
   assert.equal(created.details.maximumTimeRemainingSeconds, 120);
   assert.equal(created.details.completionUsageReport, null);
@@ -312,28 +302,20 @@ test("goal tools return goal, constraints, and usage details", async () => {
     completionUsageReport: null,
   });
 
-  const completed = (await harness.runTool("update_goal", { status: "complete" })) as {
-    details: Record<string, unknown>;
-  };
+  const completed = await harness.runTool("update_goal", { status: "complete" });
   assert.equal(completed.details.completionUsageReport, null);
 });
 
 test("create_goal converts whole-minute minimum time and blocks premature completion", async () => {
   const harness = createRuntimeHarness();
-  const created = (await harness.runTool("create_goal", {
+  const created = await harness.runTool("create_goal", {
     objective: "ship it carefully",
     minimum_time_minutes: 1,
     maximum_time_minutes: 2,
-  })) as { details: Record<string, unknown> };
+  });
 
-  assert.equal(
-    (created.details.goal as { minimumActiveSeconds?: number }).minimumActiveSeconds,
-    60,
-  );
-  assert.equal(
-    (created.details.goal as { maximumActiveSeconds?: number }).maximumActiveSeconds,
-    120,
-  );
+  assert.equal(created.details.goal?.minimumActiveSeconds, 60);
+  assert.equal(created.details.goal?.maximumActiveSeconds, 120);
   assert.equal(created.details.minimumTimeRemainingSeconds, 60);
   assert.equal(created.details.maximumTimeRemainingSeconds, 120);
   await assert.rejects(
@@ -412,7 +394,6 @@ test("completing a goal cancels a scheduled continuation before it is sent", asy
       messages: [assistantMessage("stop", { input: 30, output: 12 })],
     });
     assert.equal(harness.sentMessages.length, 0);
-
     await harness.runTool("update_goal", { status: "complete" });
     const completeSetEntries = harness.entries.filter((entry) => {
       return (
@@ -427,7 +408,6 @@ test("completing a goal cancels a scheduled continuation before it is sent", asy
     harness.setIdle(true);
     harness.setPendingMessages(false);
     flushContinuationScheduler();
-
     assert.equal(harness.snapshot().goal?.status, "complete");
     assert.equal(harness.sentMessages.length, 0);
   } finally {
@@ -484,7 +464,6 @@ test("auto-queued continuations use the compact prompt", async () => {
   assert.ok(commandStart);
   const startPrompt = String(commandStart.message.content);
   assert.match(startPrompt, /<untrusted_objective>/);
-
   harness.sentMessages.length = 0;
   await harness.emit("before_agent_start", {
     type: "before_agent_start",
@@ -549,7 +528,6 @@ test("session compaction queues continuation for active goals after the compacti
     const goal = harness.snapshot().goal;
     assert.equal(goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     vi.advanceTimersByTime(1);
     assert.equal(harness.sentMessages.length, 1);
     assert.deepEqual(harness.sentMessages[0]?.message.details, {
@@ -583,7 +561,6 @@ test("session compaction accelerates an existing idle retry after length stops",
       toolResults: [],
     });
     assert.equal(harness.sentMessages.length, 0);
-
     harness.setIdle(true);
     harness.setPendingMessages(false);
     await harness.emit("session_compact", sessionCompactEvent());
@@ -661,6 +638,7 @@ test("repeated session_compact events before the deferred check queue at most on
       systemPrompt: "",
       systemPromptOptions: {},
     });
+
     for (let index = 0; index < 3; index += 1) {
       await harness.emit(
         "session_compact",
@@ -724,20 +702,17 @@ test("provider-limit pauses schedule auto-resume", async () => {
     assert.equal(paused?.status, "paused");
     assert.match(harness.footerStatuses.at(-1) ?? "", /Auto-resume will retry in about 5 minutes/);
     assert.equal(harness.sentUserMessages.length, 0);
-
     fireProviderLimitAutoResume();
 
     const resumed = harness.snapshot().goal;
     assert.equal(resumed?.goalId, paused?.goalId);
     assert.equal(resumed?.status, "active");
     assert.equal(harness.sentUserMessages.length, 1);
-    const content = harness.sentUserMessages[0]?.content;
-    assert.equal(typeof content, "string");
-    assert.match(String(content), /<pi_goal_continuation goal_id="/);
-    assert.match(
-      String(content),
-      /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/,
-    );
+    const sentUserMessage = harness.sentUserMessages[0];
+    assert.ok(sentUserMessage);
+    const content = sentUserMessageText(sentUserMessage);
+    assert.match(content, /<pi_goal_continuation goal_id="/);
+    assert.match(content, /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/);
   } finally {
     vi.useRealTimers();
   }
@@ -753,15 +728,12 @@ test("provider-limit auto-resume retries instead of resuming while busy", async 
 
     await emitPersistentAssistantError(harness, 0, "usage limit has been reached");
     fireProviderLimitAutoResume();
-
     assert.equal(harness.snapshot().goal?.status, "paused");
     assert.equal(harness.sentUserMessages.length, 0);
     assert.match(harness.footerStatuses.at(-1) ?? "", /Auto-resume will retry/);
-
     harness.setIdle(true);
     harness.setPendingMessages(false);
     flushContinuationScheduler();
-
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentUserMessages.length, 1);
   } finally {
@@ -778,7 +750,6 @@ test("non-limit non-retryable pauses do not schedule auto-resume", async () => {
 
     await emitPersistentAssistantError(harness, 0, "invalid api key");
     fireProviderLimitAutoResume();
-
     assert.equal(harness.snapshot().goal?.status, "paused");
     assert.equal(harness.sentUserMessages.length, 0);
     assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Auto-resume/);
@@ -799,7 +770,6 @@ test("manual resume clears provider-limit auto-resume", async () => {
     await harness.runCommand("resume");
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentUserMessages.length, 1);
-
     fireProviderLimitAutoResume();
     assert.equal(harness.sentUserMessages.length, 1);
   } finally {
@@ -823,7 +793,6 @@ test("user input and session shutdown clear provider-limit auto-resume", async (
     fireProviderLimitAutoResume();
     assert.equal(userInputHarness.snapshot().goal?.status, "paused");
     assert.equal(userInputHarness.sentUserMessages.length, 0);
-
     const shutdownHarness = createRuntimeHarness();
     await shutdownHarness.runCommand("ship it");
     shutdownHarness.sentMessages.length = 0;
@@ -848,13 +817,11 @@ test("a second provider-limit failure after auto-resume schedules one new retry"
     fireProviderLimitAutoResume();
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentUserMessages.length, 1);
-
     harness.sentUserMessages.length = 0;
     await emitPersistentAssistantError(harness, 1, "FreeUsageLimitError");
     assert.equal(harness.snapshot().goal?.status, "paused");
     assert.equal(harness.sentUserMessages.length, 0);
     fireProviderLimitAutoResume();
-
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentUserMessages.length, 1);
   } finally {

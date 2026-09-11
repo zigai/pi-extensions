@@ -33,7 +33,7 @@ export interface GoalRuntimeEventHandlers {
   onContext: ExtensionHandler<ContextEvent, ContextEventResult | undefined>;
   onSessionStart: ExtensionHandler<SessionStartEvent>;
   onSessionTree: ExtensionHandler<SessionTreeEvent>;
-  onBeforeAgentStart: ExtensionHandler<BeforeAgentStartEvent, undefined>;
+  onBeforeAgentStart: ExtensionHandler<BeforeAgentStartEvent>;
   onAgentStart: ExtensionHandler<AgentStartEvent>;
   onMessageStart: ExtensionHandler<MessageStartEvent>;
   onTurnStart: ExtensionHandler<TurnStartEvent>;
@@ -65,6 +65,7 @@ export interface GoalRuntimeContinuationPort {
   markContinuationQueued: (goalId: string) => void;
   maybeContinue: (ctx: ExtensionContext) => void;
   maybeContinueAfterCurrentEvent: (ctx: ExtensionContext) => void;
+
   maybeContinueAfterPostCompactFallback: (
     ctx: ExtensionContext,
     options: {
@@ -73,6 +74,7 @@ export interface GoalRuntimeContinuationPort {
       prepareContinuation?: () => boolean;
     },
   ) => void;
+
   notePassthroughContinuationInput: (input: string) => void;
 }
 
@@ -83,6 +85,7 @@ export interface GoalAccountingPort {
     completedTurnTokens: number,
     forceFlush?: boolean,
   ) => void;
+
   beginAccounting: () => void;
 }
 
@@ -92,6 +95,7 @@ export interface RecoveryRuntimePort {
     ctx: ExtensionContext,
     options: { continueGoal: boolean },
   ) => void;
+
   handlePersistentAssistantError: (message: AssistantErrorMessage, ctx: ExtensionContext) => void;
   handleSilentContextOverflow: (ctx: ExtensionContext) => void;
   onSessionCompact: () => void;
@@ -106,10 +110,12 @@ export interface StaleQueuedWorkEffectContext {
 
 export interface GoalRuntimeInputContextHandlerContext extends StaleQueuedWorkEffectContext {
   runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "staleQueuedWorkGuard">;
+
   stateController: Pick<
     GoalStateController,
     "getGoal" | "isCurrentActiveGoalId" | "persistHostOverflowUserReset"
   >;
+
   continuation: GoalRuntimeContinuationPort;
   recoveryRuntime: Pick<RecoveryRuntimePort, "onUserInput">;
   resetErrorRecovery: () => void;
@@ -117,6 +123,7 @@ export interface GoalRuntimeInputContextHandlerContext extends StaleQueuedWorkEf
 
 export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectContext {
   runtimeState: Pick<GoalRuntimeState, "currentTurnIndex" | "staleQueuedWorkGuard">;
+
   stateController: Pick<
     GoalStateController,
     | "beginOverflowRecovery"
@@ -124,6 +131,7 @@ export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectCont
     | "maybeFlushRuntimePersistence"
     | "pauseForAbort"
   >;
+
   continuation: Pick<GoalRuntimeContinuationPort, "bindPassthroughContinuationInputToTurn">;
   goalAccounting: GoalAccountingPort;
   recoveryRuntime: Pick<RecoveryRuntimePort, "finishSuccessfulAssistantTurn">;
@@ -131,19 +139,24 @@ export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectCont
 
 export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectContext {
   runtimeState: Pick<GoalRuntimeState, "agentRunSequence" | "staleQueuedWorkGuard">;
+
   stateController: Pick<
     GoalStateController,
     "beginOverflowRecovery" | "flushGoalPersistence" | "pauseForAbort"
   >;
+
   continuation: Pick<
     GoalRuntimeContinuationPort,
     "clearPassthroughContinuationInput" | "maybeContinue"
   >;
+
   goalAccounting: Pick<GoalAccountingPort, "accountProgress">;
+
   recoveryRuntime: Pick<
     RecoveryRuntimePort,
     "handlePersistentAssistantError" | "handleSilentContextOverflow"
   >;
+
   resetErrorRecovery: () => void;
 }
 
@@ -152,10 +165,12 @@ export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectC
     GoalRuntimeState,
     "agentRunSequence" | "currentTurnIndex" | "recoveryState" | "staleQueuedWorkGuard"
   >;
+
   stateController: Pick<
     GoalStateController,
     "applyGoalTransition" | "flushGoalPersistence" | "getGoal" | "reloadFromSession"
   >;
+
   continuation: Pick<
     GoalRuntimeContinuationPort,
     | "clearContinuationTimer"
@@ -165,9 +180,11 @@ export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectC
     | "maybeContinueAfterCurrentEvent"
     | "maybeContinueAfterPostCompactFallback"
   >;
+
   goalAccounting: GoalAccountingPort;
   recoveryRuntime: Pick<RecoveryRuntimePort, "onSessionCompact">;
   resetErrorRecovery: () => void;
+
   resumeGoalWithContinuation: (
     goalId: string,
     source: GoalEntrySource,
@@ -177,6 +194,7 @@ export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectC
 
 export interface GoalRuntimeOverflowRecoveryContext {
   stateController: Pick<GoalStateController, "beginOverflowRecovery">;
+
   recoveryRuntime: Pick<
     RecoveryRuntimePort,
     "handlePersistentAssistantError" | "handleSilentContextOverflow"
@@ -194,6 +212,7 @@ export interface GoalRuntimeEventContext {
   providerLimitAutoResume: ProviderLimitAutoResumePort;
   clearActiveAccounting: () => void;
   resetErrorRecovery: () => void;
+
   resumeGoalWithContinuation: (
     goalId: string,
     source: GoalEntrySource,

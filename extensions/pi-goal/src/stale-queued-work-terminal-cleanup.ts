@@ -39,6 +39,7 @@ export function resolveLifecycleAfterTerminalCleanup(
     if (hasPending) {
       return { ...observing, terminalCleanup: cleanup };
     }
+
     const { terminalCleanup: _removed, ...withoutCleanup } = observing;
     return withoutCleanup;
   }
@@ -49,14 +50,17 @@ export function resolveLifecycleAfterTerminalCleanup(
       terminalCleanup: cleanup,
     };
   }
+
   return { kind: "idle" };
 }
 
 export function awaitingFromCleanup(cleanup: TerminalCleanup): StaleQueuedWorkState {
   markAllObligationsOlder(cleanup);
+
   if (!terminalCleanupHasPending(cleanup)) {
     return { kind: "idle" };
   }
+
   return {
     kind: "awaitingTerminalCleanup",
     terminalCleanup: cleanup,
@@ -70,6 +74,8 @@ export function consumePendingStaleTurnEnd(
   if (turnIndex === null || !cleanup.pendingTurnEndIndexes.has(turnIndex)) {
     return false;
   }
+
   cleanup.pendingTurnEndIndexes.delete(turnIndex);
+
   return true;
 }

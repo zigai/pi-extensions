@@ -10,12 +10,16 @@ setup:
     npm install
     npm run check
 
+
+# Install the extension into Pi
+install:
+    pi install .
 # Type-check the extension
 typecheck:
     npm run typecheck
 
-# Format the project
-fmt:
+# Format code
+format:
     npm run format
 
 # Check code for lint issues
@@ -51,6 +55,12 @@ fix:
     npm run lint:fix
     npm run format
 
+# Remove coverage and temporary output
+clean:
+    rm -rf coverage dist
+
 alias cov := coverage
 alias verify := check
 alias smoke := platform-smoke
+alias fmt := format
+alias tsc := typecheck

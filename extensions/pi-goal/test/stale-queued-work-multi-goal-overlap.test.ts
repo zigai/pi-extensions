@@ -21,14 +21,12 @@ test("older multi-goal stale abort with active overlap keeps replacement active 
     const messageA = queuedCustomMessage(queuedA, 1);
     const goalAId = harness.snapshot().goal?.goalId;
     assert.ok(goalAId);
-
     await harness.runCommand("goal B");
     const queuedB = harness.sentMessages.at(-1);
     assert.ok(queuedB);
     const messageB = queuedCustomMessage(queuedB, 2);
     const goalBId = harness.snapshot().goal?.goalId;
     assert.ok(goalBId);
-
     await harness.runCommand("goal C");
     const replacement = harness.snapshot().goal;
     assert.equal(replacement?.objective, "goal C");
@@ -36,11 +34,9 @@ test("older multi-goal stale abort with active overlap keeps replacement active 
 
     await emitQueuedTurnThroughContext(harness, [messageA, messageB], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 3_000;
     await emitQueuedTurnThroughContext(harness, [messageB], 1);
     assert.equal(harness.abortCount, 2);
-
     now = 4_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -62,7 +58,6 @@ test("older multi-goal stale abort with active overlap keeps replacement active 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     now = 5_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -109,10 +104,8 @@ test("back-to-back stale aborts unblock continuation when active id-less agent_e
 
     await emitQueuedTurnThroughContext(harness, [messageA], 0);
     assert.equal(harness.abortCount, 1);
-
     await emitQueuedTurnThroughContext(harness, [messageB], 1);
     assert.equal(harness.abortCount, 2);
-
     now = 4_000;
     await harness.emit("turn_end", {
       type: "turn_end",
@@ -123,7 +116,6 @@ test("back-to-back stale aborts unblock continuation when active id-less agent_e
     assert.equal(harness.snapshot().goal?.goalId, replacement?.goalId);
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     now = 5_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -132,7 +124,6 @@ test("back-to-back stale aborts unblock continuation when active id-less agent_e
     assert.equal(harness.snapshot().goal?.goalId, replacement?.goalId);
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     harness.sentMessages.length = 0;
     await harness.emit("session_tree", { type: "session_tree" });
 
@@ -161,7 +152,6 @@ test("same-goal stale abort unblocks continuation when active agent_end arrives 
     const messageA = queuedCustomMessage(queuedA, 1);
     const goalAId = harness.snapshot().goal?.goalId;
     assert.ok(goalAId);
-
     await harness.runCommand("goal B");
     const replacement = harness.snapshot().goal;
     assert.equal(replacement?.objective, "goal B");
@@ -169,7 +159,6 @@ test("same-goal stale abort unblocks continuation when active agent_end arrives 
 
     await emitQueuedTurnThroughContext(harness, [messageA], 0);
     assert.equal(harness.abortCount, 1);
-
     await emitQueuedTurnThroughContext(harness, [messageA, messageA], 1);
     assert.equal(harness.abortCount, 2);
 
@@ -189,7 +178,6 @@ test("same-goal stale abort unblocks continuation when active agent_end arrives 
     assert.equal(harness.snapshot().goal?.goalId, replacement?.goalId);
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     now = 5_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -202,7 +190,6 @@ test("same-goal stale abort unblocks continuation when active agent_end arrives 
     assert.equal(harness.snapshot().goal?.goalId, replacement?.goalId);
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     harness.sentMessages.length = 0;
     await harness.emit("session_tree", { type: "session_tree" });
 

@@ -4,6 +4,16 @@ Pi extension: Codex-style `/goal` command and `get_goal` / `create_goal` / `upda
 
 Keep the passive Glowup protocol adapters for all three goal tools beside their owning contracts in this repository. Preserve native behavior when Glowup is not active, parse restored arguments/results at the adapter boundary, and never import Glowup internals or TUI implementation modules.
 
+## Settings and Session Lifecycle
+
+Keep `src/goal-settings.ts` and the runtime controller as the settings owners; Glowup’s dependency does not make this extension a direct settings-library consumer. Register tools and commands synchronously without settings I/O. Goal behavior begins at `session_start`: reset session state, then load settings there. Preserve explicit updates and reload behavior, and gate feature effects on resolved configuration.
+
+Cancel/dispose owned async work before clearing session state; preserve the existing recovery, stale-work rejection, and continuation lifecycle rather than introducing another framework. Report configuration failures without raw values or secrets. `pi config` prevents import and registration entirely.
+
+Native renderers receive `ToolRenderContext`, not `ExtensionContext`: return components even for history before activation, using arguments/results and renderer state without settings I/O or retained execution contexts. Keep passive Glowup adapters on their protocol contract. Guard dialogs/notifications with `ctx.hasUI` and terminal UI with `ctx.mode === "tui"`.
+
+Preserve the current configuration owner; these instructions do not require a settings-library migration. If adopting `@zigai/pi-extension-settings` as part of a requested change, follow its `docs/manual-setup.md` and `docs/runtime.md`.
+
 ## Local pi install policy
 
 On this machine, the canonical active install is the global/user package pointing at this local checkout:

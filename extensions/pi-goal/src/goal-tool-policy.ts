@@ -37,6 +37,7 @@ export function normalizeActiveGoalToolPolicy(
       normalized.add(trimmed);
     }
   }
+
   return {
     disabledTools: [...normalized].sort((left, right) => left.localeCompare(right)),
   };
@@ -46,16 +47,19 @@ export function validateActiveGoalToolPolicy(disabledTools: readonly string[]): 
   if (disabledTools.length > MAX_DISABLED_TOOLS) {
     return `disabledToolsWhileGoalActive may contain at most ${MAX_DISABLED_TOOLS} tool names.`;
   }
+
   for (const name of disabledTools) {
     if (name.trim().length === 0) {
       return "disabledToolsWhileGoalActive must not contain empty tool names.";
     }
   }
+
   const required =
     normalizeActiveGoalToolPolicy(disabledTools).disabledTools.find(isRequiredActiveGoalTool);
   if (required !== undefined) {
     return `${required} must remain available while a goal is active.`;
   }
+
   return null;
 }
 
@@ -78,12 +82,14 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
     if (setsEqual(new Set(currentNames), next)) {
       return;
     }
+
     const ordered = currentNames.filter((name) => next.has(name));
     for (const name of next) {
       if (!ordered.includes(name)) {
         ordered.push(name);
       }
     }
+
     host.setActiveTools(ordered);
   };
 
@@ -91,6 +97,7 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
     if (applied === null) {
       return;
     }
+
     const currentNames = host.getActiveTools();
     const next = new Set(currentNames);
     const available = new Set(host.getAllTools().map((tool) => tool.name));
@@ -98,12 +105,14 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
       if (wasActive === undefined || !available.has(name)) {
         continue;
       }
+
       if (wasActive) {
         next.add(name);
       } else {
         next.delete(name);
       }
     }
+
     applied = null;
     setActiveToolsIfChanged(currentNames, next);
   };
@@ -112,6 +121,7 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
     if (applied === null) {
       return;
     }
+
     const currentNames = host.getActiveTools();
     const next = new Set(currentNames);
     const available = new Set(host.getAllTools().map((tool) => tool.name));
@@ -119,8 +129,10 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
       if (applied.baseline.get(name) === undefined && available.has(name)) {
         applied.baseline.set(name, next.has(name));
       }
+
       next.delete(name);
     }
+
     setActiveToolsIfChanged(currentNames, next);
   };
 
@@ -133,18 +145,21 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
     const key = policyKey(goal, configured);
     if (applied?.key !== key) {
       release();
+
       const current = new Set(host.getActiveTools());
       const available = new Set(host.getAllTools().map((tool) => tool.name));
       const baseline = new Map<string, boolean | undefined>();
       for (const name of configured.disabledTools) {
         baseline.set(name, available.has(name) ? current.has(name) : undefined);
       }
+
       applied = {
         key,
         baseline,
         disabledTools: [...configured.disabledTools],
       };
     }
+
     enforceAppliedPolicy();
   };
 
@@ -156,6 +171,7 @@ export function createGoalToolPolicyController(host: ToolPolicyHost): GoalToolPo
     ) {
       return;
     }
+
     release();
     configured = next;
   };

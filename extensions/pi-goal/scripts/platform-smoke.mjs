@@ -13,12 +13,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
-
 let config;
 try {
   config = require(resolve(repoRoot, "platform-smoke.config.mjs"));
   if (config.default) config = config.default;
-} catch (error) {
+} catch {
   config = null;
 }
 
@@ -86,26 +85,32 @@ function parseArgs(argv) {
       parsed.command = "help";
       return parsed;
     }
+
     if (arg === "doctor" || arg === "run") {
       parsed.command = arg;
       continue;
     }
+
     if (arg === "--target" && argv[i + 1]) {
       parsed.target = argv[i + 1];
       i += 1;
       continue;
     }
+
     if (arg === "--suite" && argv[i + 1]) {
       parsed.suite = argv[i + 1];
       i += 1;
       continue;
     }
+
     if (arg === "--skip-windows-disposable-probe") {
       parsed.skipWindowsDisposableProbe = true;
       continue;
     }
+
     parsed.rest.push(arg);
   }
+
   return parsed;
 }
 
@@ -120,6 +125,7 @@ async function main() {
     printHelp();
     process.exit(args.command === "help" ? 0 : 1);
   }
+
   if (!config) throw new Error("platform-smoke.config.mjs not found or invalid");
 
   if (args.command === "doctor") {
@@ -147,6 +153,7 @@ async function main() {
     const supportedTargets = config.supportedTargets ?? config.requiredTargets;
     validateNames("target", targets, supportedTargets);
     validateNames("suite", suites, config.requiredSuites);
+
     const runs = targets.map(async (targetName) => {
       console.log(`\n=== Target: ${targetName} ===`);
       const result = args.suite
@@ -162,6 +169,7 @@ async function main() {
       );
       process.exitCode = 1;
     }
+
     return;
   }
 

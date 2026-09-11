@@ -6,10 +6,7 @@ import {
   createRuntimeHarness,
   emitProviderContext,
   emitQueuedTurnThroughContext,
-  goalUserContextMessage,
-  providerContextMessageAt,
   queuedCustomMessage,
-  requireProviderContextResult,
   sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
@@ -35,7 +32,6 @@ test("late stale turn_end after the next current follow-up starts is ignored", a
 
     await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 3_000;
     await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
 
@@ -49,7 +45,6 @@ test("late stale turn_end after the next current follow-up starts is ignored", a
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     now = 5_000;
     await harness.emit("turn_end", {
       type: "turn_end",
@@ -94,7 +89,6 @@ test("late stale turn_end with stop before next current context event is ignored
 
     await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 3_000;
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 4 });
     await harness.emit("message_start", { type: "message_start", message: currentMessage });
@@ -110,7 +104,6 @@ test("late stale turn_end with stop before next current context event is ignored
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     await emitProviderContext(harness, [currentMessage]);
 
     now = 5_000;
@@ -157,7 +150,6 @@ test("late stale turn_end before next current context event is ignored", async (
 
     await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 3_000;
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 4 });
     await harness.emit("message_start", { type: "message_start", message: currentMessage });
@@ -173,7 +165,6 @@ test("late stale turn_end before next current context event is ignored", async (
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     await emitProviderContext(harness, [currentMessage]);
 
     now = 5_000;
@@ -211,7 +202,6 @@ test("late stale agent_end with stop before next current context event is ignore
     const oldMessage = queuedCustomMessage(oldQueued, 1);
     const oldGoalId = harness.snapshot().goal?.goalId;
     assert.ok(oldGoalId);
-
     await harness.runCommand("new goal");
     const currentQueued = harness.sentMessages.at(-1);
     assert.ok(currentQueued);
@@ -222,7 +212,6 @@ test("late stale agent_end with stop before next current context event is ignore
 
     await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 3_000;
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 4 });
     await harness.emit("message_start", { type: "message_start", message: currentMessage });
@@ -243,7 +232,6 @@ test("late stale agent_end with stop before next current context event is ignore
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     await emitProviderContext(harness, [currentMessage]);
 
     now = 5_000;
@@ -291,7 +279,6 @@ for (const stopReason of ["aborted", "stop", "error"] as const) {
 
       await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
       assert.equal(harness.abortCount, 1);
-
       now = 3_000;
       await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 4 });
       await harness.emit("message_start", { type: "message_start", message: currentMessage });
@@ -307,7 +294,6 @@ for (const stopReason of ["aborted", "stop", "error"] as const) {
       assert.equal(harness.snapshot().goal?.status, "active");
       assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
       assert.equal(harness.sentMessages.length, 0);
-
       now = 4_500;
       await harness.emit("agent_end", {
         type: "agent_end",
@@ -316,7 +302,6 @@ for (const stopReason of ["aborted", "stop", "error"] as const) {
       assert.equal(harness.snapshot().goal?.status, "active");
       assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
       assert.equal(harness.sentMessages.length, 0);
-
       await emitProviderContext(harness, [currentMessage]);
 
       now = 5_000;
@@ -355,7 +340,6 @@ test("late stale agent_end before next current context event is ignored", async 
     const oldMessage = queuedCustomMessage(oldQueued, 1);
     const oldGoalId = harness.snapshot().goal?.goalId;
     assert.ok(oldGoalId);
-
     await harness.runCommand("new goal");
     const currentQueued = harness.sentMessages.at(-1);
     assert.ok(currentQueued);
@@ -366,7 +350,6 @@ test("late stale agent_end before next current context event is ignored", async 
 
     await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 3_000;
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 4 });
     await harness.emit("message_start", { type: "message_start", message: currentMessage });
@@ -387,7 +370,6 @@ test("late stale agent_end before next current context event is ignored", async 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     await emitProviderContext(harness, [currentMessage]);
 
     now = 5_000;
@@ -435,7 +417,6 @@ test("current id-less agent_end error after stale abort release and current cont
 
     await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 3_000;
     await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
 
@@ -456,7 +437,6 @@ test("current id-less agent_end error after stale abort release and current cont
     assert.equal(harness.snapshot().goal?.goalId, replacement?.goalId);
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     now = 6_000;
     await harness.emit("session_shutdown", sessionShutdownEvent());
 
@@ -490,7 +470,6 @@ test("current follow-up abort is not swallowed by a pending late stale turn_end"
 
     await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 3_000;
     await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
     now = 5_000;
@@ -507,7 +486,6 @@ test("current follow-up abort is not swallowed by a pending late stale turn_end"
     assert.equal(goal?.usage.tokensUsed, 42);
     assert.equal(goal?.usage.activeSeconds, 2);
     assert.equal(harness.sentMessages.length, 0);
-
     now = 6_000;
     await harness.emit("turn_end", {
       type: "turn_end",

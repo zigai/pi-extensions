@@ -58,9 +58,11 @@ export function reloadGoalRuntimeEffects(
   if (reconstructed?.status !== "active") {
     effects.push({ type: "clearActiveAccounting" });
   }
+
   if ((reconstructed?.goalId ?? null) !== previousGoalId) {
     effects.push({ type: "resetRecovery" });
   }
+
   return effects;
 }
 
@@ -70,13 +72,13 @@ function memoryEffectsFromGoalChange(
 ): GoalTransitionEffect[] {
   const effects: GoalTransitionEffect[] = [];
   const goalIdChanged = (previous?.goalId ?? null) !== next.goalId;
-
   if (goalIdChanged) {
     appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
     appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
     appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
     appendGoalTransitionEffectOnce(effects, { type: "clearTimeLimitWarning" });
   }
+
   if (next.status === "complete" || next.status === "blocked") {
     appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
     appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
@@ -89,9 +91,11 @@ function memoryEffectsFromGoalChange(
     appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
     appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
   }
+
   if (next.status !== "timeLimited") {
     appendGoalTransitionEffectOnce(effects, { type: "clearTimeLimitWarning" });
   }
+
   return effects;
 }
 
@@ -109,11 +113,13 @@ function commandAfterPersistEffects(
   if (nextGoal.status === "active") {
     effects.push({ type: "markContinuationQueued", goalId: nextGoal.goalId });
   }
+
   if (nextGoal.status === "paused" && !goalIdChanged) {
     effects.push({ type: "resetRecovery" });
   } else if (nextGoal.status === "active" && wasStoppedBefore && !goalIdChanged) {
     effects.push({ type: "resetRecovery" });
   }
+
   return effects;
 }
 
@@ -207,6 +213,7 @@ function requireNonDecreasingUsage(current: ThreadGoal, nextGoal: ThreadGoal, ki
   if (nextGoal.usage.tokensUsed < current.usage.tokensUsed) {
     throw transitionInvariantError(kind, "usage.tokensUsed must not decrease");
   }
+
   if (nextGoal.usage.activeSeconds < current.usage.activeSeconds) {
     throw transitionInvariantError(kind, "usage.activeSeconds must not decrease");
   }
@@ -219,6 +226,7 @@ function requireTimeLimitedUsageAtOrOverLimit(nextGoal: ThreadGoal, kind: string
       "maximumActiveSeconds must be set when next status is timeLimited",
     );
   }
+
   if (nextGoal.usage.activeSeconds < nextGoal.maximumActiveSeconds) {
     throw transitionInvariantError(
       kind,
@@ -244,8 +252,8 @@ function planDerivedActiveToPausedTransition(
 ): GoalTransitionPlan {
   requireCurrentGoal(current, kind);
   requireStatus(current, "active", kind);
-  const nextGoal = deriveGoalWithStatus(current, "paused");
 
+  const nextGoal = deriveGoalWithStatus(current, "paused");
   return {
     persist: "set",
     nextGoal,
@@ -261,12 +269,14 @@ function planDerivedActiveToPausedTransition(
 function planDerivedResumeActiveTransition(current: ThreadGoal | null): GoalTransitionPlan {
   const kind = "resume_active";
   requireCurrentGoal(current, kind);
+
   if (current.status !== "paused" && current.status !== "blocked") {
     throw transitionInvariantError(
       kind,
       `current status must be paused or blocked (got ${current.status})`,
     );
   }
+
   const nextGoal = deriveGoalWithStatus(current, "active");
 
   return {
@@ -285,30 +295,35 @@ function validateRuntimeAccounting(current: ThreadGoal | null, nextGoal: ThreadG
   const kind = "runtime_accounting";
   requireCurrentGoal(current, kind);
   requireSameGoalId(current, nextGoal, kind);
+
   if (!RUNTIME_ACCOUNTING_STATUSES.has(current.status)) {
     throw transitionInvariantError(
       kind,
       `current status must be active or timeLimited (got ${current.status})`,
     );
   }
+
   if (!RUNTIME_ACCOUNTING_STATUSES.has(nextGoal.status)) {
     throw transitionInvariantError(
       kind,
       `next status must be active or timeLimited (got ${nextGoal.status})`,
     );
   }
+
   if (current.status === "timeLimited" && nextGoal.status === "active") {
     throw transitionInvariantError(
       kind,
       "timeLimited goals cannot transition to active via runtime accounting",
     );
   }
+
   requireUnchangedObjective(current, nextGoal, kind);
   requireUnchangedTimeConstraints(current, nextGoal, kind);
   requireUnchangedCreatedAt(current, nextGoal, kind);
   requireNonRewindingUpdatedAt(current, nextGoal, kind);
   requireNonDecreasingUsage(current, nextGoal, kind);
   requireRuntimeAccountingChange(current, nextGoal, kind);
+
   if (nextGoal.status === "timeLimited") {
     requireTimeLimitedUsageAtOrOverLimit(nextGoal, kind);
   }
@@ -327,7 +342,6 @@ export function planGoalTransition(
         beforePersist: [...CLEAR_BEFORE_PERSIST],
         afterPersist: [{ type: "stopStatusRefresh" }],
       };
-
     case "abort_pause":
       return planDerivedActiveToPausedTransition("abort_pause", current, [
         { type: "clearContinuation" },
@@ -335,26 +349,23 @@ export function planGoalTransition(
         { type: "resetRecovery" },
         { type: "clearTimeLimitWarning" },
       ]);
-
     case "resume_active":
       return planDerivedResumeActiveTransition(current);
-
     case "recovery_pause":
       return planDerivedActiveToPausedTransition("recovery_pause", current, [
         { type: "clearContinuation" },
         { type: "setRecoveryPausedAttention", reason: request.recoveryReason },
       ]);
-
     case "recovery_shutdown_pause":
       return planDerivedActiveToPausedTransition("recovery_shutdown_pause", current, [
         { type: "clearContinuation" },
         { type: "clearHostOverflowRecovery" },
         { type: "setRecoveryPausedAttention", reason: request.recoveryReason },
       ]);
-
     case "runtime_accounting": {
       const { nextGoal } = request;
       validateRuntimeAccounting(current, nextGoal);
+
       const beforePersist = memoryEffectsFromGoalChange(current, nextGoal);
       if (crossedTimeLimitTransition(current, nextGoal)) {
         return {
@@ -365,6 +376,7 @@ export function planGoalTransition(
           afterPersist: [],
         };
       }
+
       return {
         persist: "defer",
         nextGoal,
@@ -373,7 +385,6 @@ export function planGoalTransition(
         afterPersist: [],
       };
     }
-
     case "set": {
       const { nextGoal, source } = request;
       const wasStoppedBefore = current?.status === "paused" || current?.status === "blocked";
@@ -388,6 +399,7 @@ export function planGoalTransition(
           afterPersist,
         };
       }
+
       return {
         persist: "set",
         nextGoal,
@@ -396,7 +408,6 @@ export function planGoalTransition(
         afterPersist,
       };
     }
-
     default: {
       const _exhaustive: never = request;
       throw new Error(`Unhandled goal transition request: ${String(_exhaustive)}`);

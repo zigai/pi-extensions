@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { vi } from "vitest";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 
 import type {
+  BeforeAgentStartEventResult,
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
 import goalExtension, { __testHooks } from "../../src/index.js";
+import type { GoalToolResponse } from "../../src/format.js";
+import type { CreateGoalArgs, GetGoalArgs, UpdateGoalArgs } from "../../src/glowup-rendering.js";
 import { isContextOverflowError } from "../../src/recovery.js";
 import { isGoalCustomEntry, reconstructGoal } from "../../src/state.js";
 import {
@@ -19,10 +24,52 @@ import {
 } from "../../src/queued-goal-messages.js";
 import { CUSTOM_ENTRY_TYPE } from "../../src/types.js";
 
-type EventHandler = (event: object, ctx: ExtensionContext) => unknown | Promise<unknown>;
+interface HarnessEvent {
+  type: string;
+}
+
+interface HarnessContextEventResult {
+  messages?: QueuedGoalContextInput[];
+}
+
+type HarnessEventResult = HarnessContextEventResult | BeforeAgentStartEventResult | void;
+type HarnessGoalToolInput = GetGoalArgs | CreateGoalArgs | UpdateGoalArgs;
+
+interface HarnessGoalToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  details: GoalToolResponse & { error: string | null };
+}
+
+type EventHandler = (
+  event: HarnessEvent,
+  ctx: ExtensionContext,
+) => HarnessEventResult | Promise<HarnessEventResult>;
+
+function isHarnessUserMessageStart(
+  event: HarnessEvent,
+): event is HarnessEvent & { type: "message_start"; message: { role: string } } {
+  return (
+    event.type === "message_start" &&
+    "message" in event &&
+    event.message !== null &&
+    typeof event.message === "object" &&
+    "role" in event.message &&
+    typeof event.message.role === "string"
+  );
+}
 
 function unsupportedHarnessMethod(name: string): never {
   throw new Error(`${name} is not implemented in this test harness.`);
+}
+
+function contextWindowModel(contextWindow: number): ExtensionContext["model"] {
+  // SAFETY: goal runtime reads only model.contextWindow; this fixture supplies that exact SDK
+  // field, while provider execution and the remaining Model capabilities are never invoked.
+  return {
+    id: "test-model",
+    provider: "test",
+    contextWindow,
+  } as ExtensionContext["model"];
 }
 
 export interface SentMessage {
@@ -35,6 +82,18 @@ export interface SentUserMessage {
   options: Parameters<ExtensionAPI["sendUserMessage"]>[1];
 }
 
+export function sentMessageText(message: SentMessage): string {
+  return Value.Parse(Type.String(), message.message.content);
+}
+
+export function sentUserMessageText(message: SentUserMessage): string {
+  return Value.Parse(Type.String(), message.content);
+}
+
+export function queuedGoalMessageText(message: QueuedGoalContextCarrier): string {
+  return Value.Parse(Type.String(), message.content);
+}
+
 type CompactionReason = "manual" | "threshold" | "overflow";
 
 interface CompactionEventOptions {
@@ -44,7 +103,7 @@ interface CompactionEventOptions {
   tokensBefore?: number;
 }
 
-export function sessionBeforeCompactEvent(options: CompactionEventOptions = {}): object {
+export function sessionBeforeCompactEvent(options: CompactionEventOptions = {}) {
   return {
     type: "session_before_compact",
     preparation: {},
@@ -55,9 +114,10 @@ export function sessionBeforeCompactEvent(options: CompactionEventOptions = {}):
   };
 }
 
-export function sessionCompactEvent(options: CompactionEventOptions = {}): object {
+export function sessionCompactEvent(options: CompactionEventOptions = {}) {
   const summary = options.summary ?? "compact summary";
   const tokensBefore = options.tokensBefore ?? 100;
+
   return {
     type: "session_compact",
     compactionEntry: {
@@ -77,8 +137,8 @@ export function sessionCompactEvent(options: CompactionEventOptions = {}): objec
 
 export function sessionShutdownEvent(
   reason: "quit" | "reload" | "new" | "resume" | "fork" = "quit",
-): object {
-  return { type: "session_shutdown", reason };
+) {
+  return { type: "session_shutdown" as const, reason };
 }
 
 export function createRuntimeHarness(
@@ -100,16 +160,18 @@ export function createRuntimeHarness(
   const handlers = new Map<string, EventHandler[]>();
   const sentMessages: SentMessage[] = [];
   const sentUserMessages: SentUserMessage[] = [];
-  const tools = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>();
+  const tools = new Map<string, (params: HarnessGoalToolInput) => Promise<HarnessGoalToolResult>>();
   const availableToolNames = new Set(options.availableTools ?? []);
   const activeToolNames = new Set(options.activeTools ?? options.availableTools ?? []);
   const compactCalls: Array<{
     customInstructions?: string;
+
     onComplete?: (result: {
       summary: string;
       tokensBefore: number;
       firstKeptEntryId: string;
     }) => void;
+
     onError?: (error: Error) => void;
   }> = [];
   const footerStatuses: Array<string | undefined> = [];
@@ -128,6 +190,8 @@ export function createRuntimeHarness(
   let ctx: ExtensionCommandContext;
   let entryIndex = 0;
 
+  // SAFETY: ExtensionAPI.on supplies handlers for the registered event name; emit stores and
+  // invokes each handler only under that same name, preserving the SDK event/result pairing.
   const on = ((event: string, handler: EventHandler) => {
     const currentHandlers = handlers.get(event) ?? [];
     currentHandlers.push(handler);
@@ -141,7 +205,7 @@ export function createRuntimeHarness(
   };
 
   const pi: ExtensionAPI = {
-    appendEntry(customType: string, data: unknown) {
+    appendEntry<Data>(customType: string, data: Data) {
       entries.push({
         type: "custom",
         id: `entry-${++entryIndex}`,
@@ -161,11 +225,14 @@ export function createRuntimeHarness(
     },
     exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
     getActiveTools: () => [...activeToolNames],
-    getAllTools: () =>
-      [...availableToolNames].map((name) => ({
+    getAllTools: () => {
+      // SAFETY: goal-tool policy consumes only ToolInfo.name; each fixture supplies that field,
+      // and no test or extension path reads omitted execution/render metadata from this list.
+      return [...availableToolNames].map((name) => ({
         name,
         description: `${name} test tool`,
-      })) as ReturnType<ExtensionAPI["getAllTools"]>,
+      })) as ReturnType<ExtensionAPI["getAllTools"]>;
+    },
     getCommands: () => [],
     getFlag: () => undefined,
     getSessionName: () => undefined,
@@ -191,15 +258,21 @@ export function createRuntimeHarness(
     registerTool(tool) {
       availableToolNames.add(tool.name);
       activeToolNames.add(tool.name);
-      tools.set(tool.name, (params) =>
-        tool.execute(
+      tools.set(tool.name, async (params) => {
+        // SAFETY: this harness loads only pi-codex-goal, and runTool callers pair each registered
+        // goal-tool name with input derived from that tool's exported schema.
+        const result = await tool.execute(
           "tool-call",
           params as Parameters<typeof tool.execute>[1],
           undefined,
           undefined,
           ctx,
-        ),
-      );
+        );
+
+        // SAFETY: all three goal tools return textResult, whose details are the shared
+        // GoalToolResponse plus its concrete null error field.
+        return result as HarnessGoalToolResult;
+      });
     },
     sendMessage(message, options) {
       sentMessages.push({ message, options });
@@ -209,6 +282,7 @@ export function createRuntimeHarness(
     },
     setActiveTools(names) {
       activeToolNames.clear();
+
       for (const name of names) {
         if (availableToolNames.has(name)) {
           activeToolNames.add(name);
@@ -279,6 +353,8 @@ export function createRuntimeHarness(
     setWorkingIndicator() {},
     setWorkingMessage() {},
     setWorkingVisible() {},
+    // SAFETY: pi-codex-goal never reads ui.theme; the field exists only because the external
+    // ExtensionCommandContext contract requires a host-provided Theme instance.
     theme: {} as ExtensionCommandContext["ui"]["theme"],
   };
 
@@ -297,20 +373,26 @@ export function createRuntimeHarness(
       if (options?.customInstructions !== undefined) {
         call.customInstructions = options.customInstructions;
       }
+
       if (options?.onComplete) {
         call.onComplete = (result) => options.onComplete?.(result);
       }
+
       if (options?.onError) {
         call.onError = (error) => options.onError?.(error);
       }
+
       compactCalls.push(call);
+
       if (runtime.compactBehavior === "unavailable") {
         unsupportedHarnessMethod("ctx.compact");
       }
+
       if (runtime.compactBehavior === "error") {
         options?.onError?.(new Error("compaction failed"));
         return;
       }
+
       if (runtime.compactCompletion === "immediate") {
         options?.onComplete?.({
           summary: "compact summary",
@@ -324,6 +406,8 @@ export function createRuntimeHarness(
     isProjectTrusted: () => options.projectTrusted ?? true,
     mode: "tui",
     model: undefined,
+    // SAFETY: pi-codex-goal never reads modelRegistry; model discovery is outside this harness,
+    // and the field exists only to satisfy the host-owned ExtensionCommandContext contract.
     modelRegistry: {} as ExtensionCommandContext["modelRegistry"],
     navigateTree: async () => ({ cancelled: false }),
     newSession: async () => ({ cancelled: false }),
@@ -338,14 +422,26 @@ export function createRuntimeHarness(
   } satisfies ExtensionCommandContext;
 
   if (options.contextWindow !== undefined) {
-    ctx.model = {
-      id: "test-model",
-      provider: "test",
-      contextWindow: options.contextWindow,
-    } as ExtensionCommandContext["model"];
+    ctx.model = contextWindowModel(options.contextWindow);
   }
 
   goalExtension(pi);
+
+  async function emit<Event extends HarnessEvent>(
+    event: string,
+    payload: Event,
+  ): Promise<HarnessEventResult[]> {
+    if (isHarnessUserMessageStart(payload) && payload.message.role === "user") {
+      runtime.hostOverflowRecoveryAttempted = false;
+    }
+
+    const results: HarnessEventResult[] = [];
+    for (const handler of handlers.get(event) ?? []) {
+      results.push(await handler(payload, ctx));
+    }
+
+    return results;
+  }
 
   function reloadExtension(): void {
     handlers.clear();
@@ -360,27 +456,14 @@ export function createRuntimeHarness(
   async function runCommand(args: string): Promise<void> {
     assert.ok(commandHandler);
     const managementCommand = args === "pause" || args === "resume" || args.length === 0;
+
     // Most runtime tests exercise continuation/recovery mechanics and need deterministic direct
     // goal creation. The public default now asks the model to generate an objective, so route test
     // objectives through the explicit raw mode while preserving management command spellings.
     await commandHandler(managementCommand || args.startsWith("-") ? args : `-r ${args}`, ctx);
   }
 
-  async function emit(event: string, payload: object): Promise<unknown[]> {
-    if (event === "message_start") {
-      const message = (payload as { message?: { role?: string } }).message;
-      if (message?.role === "user") {
-        runtime.hostOverflowRecoveryAttempted = false;
-      }
-    }
-    const results: unknown[] = [];
-    for (const handler of handlers.get(event) ?? []) {
-      results.push(await handler(payload, ctx));
-    }
-    return results;
-  }
-
-  async function runTool(name: string, params: Record<string, unknown>) {
+  async function runTool(name: string, params: HarnessGoalToolInput) {
     const tool = tools.get(name);
     assert.ok(tool, `Expected tool ${name} to be registered.`);
     return tool(params);
@@ -410,11 +493,7 @@ export function createRuntimeHarness(
       runtime.contextUsage = contextUsage;
     },
     setContextWindow(contextWindow: number) {
-      ctx.model = {
-        id: "test-model",
-        provider: "test",
-        contextWindow,
-      } as ExtensionCommandContext["model"];
+      ctx.model = contextWindowModel(contextWindow);
     },
     get hostOverflowRecoveryAttempted() {
       return runtime.hostOverflowRecoveryAttempted;
@@ -499,9 +578,14 @@ export function queuedCustomMessage(sent: SentMessage, timestamp = 1): QueuedGoa
   };
 }
 
+interface InactiveGoalQueuedDetails {
+  kind: "other";
+  goalId: string;
+}
+
 export function goalCustomContextMessage(options: {
   content: string;
-  details: ActiveGoalQueuedDetails | Record<string, unknown>;
+  details: ActiveGoalQueuedDetails | InactiveGoalQueuedDetails;
   display?: boolean;
   timestamp: number;
 }): QueuedGoalContextCarrier {
@@ -521,25 +605,23 @@ export interface ProviderContextResult {
 
 export type ProviderContextHandlerResult = ProviderContextResult | undefined;
 
-function parseProviderContextHandlerResult(result: unknown): ProviderContextHandlerResult {
+function parseProviderContextHandlerResult(
+  result: HarnessEventResult,
+): ProviderContextHandlerResult {
   if (result === undefined) {
     return undefined;
   }
 
-  assert.ok(
-    result && typeof result === "object",
-    "Expected provider context handler result object.",
-  );
-  const candidate = result as { messages?: unknown };
-  assert.ok(Array.isArray(candidate.messages), "Expected provider context handler messages array.");
-
+  assert.ok("messages" in result, "Expected provider context handler result object.");
+  assert.ok(Array.isArray(result.messages), "Expected provider context handler messages array.");
   const messages: QueuedGoalContextCarrier[] = [];
-  for (const [index, message] of candidate.messages.entries()) {
-    const carrier = toQueuedGoalContextCarrier(message as QueuedGoalContextInput);
+  for (const [index, message] of result.messages.entries()) {
+    const carrier = toQueuedGoalContextCarrier(message);
     assert.ok(
       carrier,
       `Expected provider context message ${index} to include a numeric timestamp.`,
     );
+
     messages.push(carrier);
   }
 
@@ -553,6 +635,7 @@ export function requireProviderContextResult(
   if (result === undefined) {
     assert.fail("Expected provider context handler to return rewritten messages.");
   }
+
   return result;
 }
 
@@ -590,10 +673,12 @@ export async function emitQueuedTurnThroughContext(
   turnIndex = 0,
 ): Promise<ProviderContextHandlerResult[]> {
   await harness.emit("turn_start", { type: "turn_start", turnIndex, timestamp: turnIndex + 1 });
+
   for (const message of messages) {
     await harness.emit("message_start", { type: "message_start", message });
     await harness.emit("message_end", { type: "message_end", message });
   }
+
   const results = await harness.emit("context", { type: "context", messages });
   return results.map(parseProviderContextHandlerResult);
 }
@@ -606,8 +691,8 @@ export function assistantMessage(
   const cacheRead = usage.cacheRead ?? 0;
   const cacheWrite = usage.cacheWrite ?? 0;
 
-  return {
-    role: "assistant",
+  const message = {
+    role: "assistant" as const,
     content: [],
     api: "test",
     provider: "test",
@@ -627,9 +712,12 @@ export function assistantMessage(
       },
     },
     stopReason,
-    ...(stopReason === "error" ? { errorMessage: errorMessage ?? "provider error" } : {}),
-    timestamp: 1,
   };
+  if (stopReason === "error") {
+    return { ...message, errorMessage: errorMessage ?? "provider error", timestamp: 1 };
+  }
+
+  return { ...message, timestamp: 1 };
 }
 
 export async function emitPersistentAssistantError(
@@ -638,6 +726,7 @@ export async function emitPersistentAssistantError(
   errorMessage: string,
 ): Promise<void> {
   const message = assistantMessage("error", { input: 1, output: 1 }, errorMessage);
+
   await harness.emit("turn_start", { type: "turn_start", turnIndex, timestamp: turnIndex + 1 });
   await harness.emit("turn_end", {
     type: "turn_end",
@@ -649,6 +738,7 @@ export async function emitPersistentAssistantError(
     type: "agent_end",
     messages: [message],
   });
+
   if (isContextOverflowError(errorMessage)) {
     harness.setHostOverflowRecoveryAttempted(true);
   }

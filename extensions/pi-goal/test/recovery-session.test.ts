@@ -60,10 +60,8 @@ test("session_start after pending transient shutdown does not auto-continue", as
 
   await harness.emit("session_shutdown", sessionShutdownEvent());
   assert.equal(harness.snapshot().goal?.status, "paused");
-
   harness.sentMessages.length = 0;
   await harness.emit("session_start", { type: "session_start", reason: "startup" });
-
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -77,9 +75,7 @@ test("session_tree with pending transient recovery does not auto-continue before
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
   assert.equal(harness.sentMessages.length, 0);
-
   await harness.emit("session_tree", { type: "session_tree" });
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -92,9 +88,7 @@ test("session_tree with pending overflow recovery does not auto-continue before 
   await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
-
   await harness.emit("session_tree", { type: "session_tree" });
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -107,10 +101,8 @@ test("session_tree after pending transient shutdown does not auto-continue", asy
   await emitPersistentAssistantError(harness, 0, "websocket closed");
   await harness.emit("session_shutdown", sessionShutdownEvent());
   assert.equal(harness.snapshot().goal?.status, "paused");
-
   harness.sentMessages.length = 0;
   await harness.emit("session_tree", { type: "session_tree" });
-
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -123,10 +115,8 @@ test("session_start after pending overflow shutdown does not auto-continue", asy
   await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
   await harness.emit("session_shutdown", sessionShutdownEvent());
   assert.equal(harness.snapshot().goal?.status, "paused");
-
   harness.sentMessages.length = 0;
   await harness.emit("session_start", { type: "session_start", reason: "startup" });
-
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -137,7 +127,6 @@ for (const kind of ["transient", "overflow"] as const) {
 
     harness.sentMessages.length = 0;
     await harness.emit("session_tree", { type: "session_tree" });
-
     assert.equal(harness.snapshot().goal?.status, "paused");
     assert.equal(harness.sentMessages.length, 0);
   });
@@ -154,9 +143,7 @@ test("session_tree keeps same-goal pending transient recovery suppressed", async
   assert.equal(harness.snapshot().goal?.goalId, goalAId);
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
   assert.equal(harness.sentMessages.length, 0);
-
   await harness.emit("session_tree", { type: "session_tree" });
-
   assert.equal(harness.snapshot().goal?.goalId, goalAId);
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
@@ -174,10 +161,8 @@ test("session_tree to a different active goal clears stale transient recovery an
   assert.equal(harness.snapshot().goal?.goalId, goalAId);
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
   assert.equal(harness.sentMessages.length, 0);
-
   const goalB = replaceHarnessBranchWithGoal(harness, "goal B");
   assert.notEqual(goalB.goalId, goalAId);
-
   harness.footerStatuses.length = 0;
   harness.sentMessages.length = 0;
   await harness.emit("session_tree", { type: "session_tree" });
@@ -205,10 +190,8 @@ test("session_tree to a different active goal clears stale overflow recovery and
   assert.equal(harness.snapshot().goal?.goalId, goalAId);
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
   assert.equal(harness.sentMessages.length, 0);
-
   const goalB = replaceHarnessBranchWithGoal(harness, "goal B");
   assert.notEqual(goalB.goalId, goalAId);
-
   harness.footerStatuses.length = 0;
   harness.sentMessages.length = 0;
   await harness.emit("session_tree", { type: "session_tree" });
@@ -232,12 +215,9 @@ test("delayed session_compact keeps goal active without premature pause or exten
     harness.sentMessages.length = 0;
 
     await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
-
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     await harness.emit("session_before_compact", sessionBeforeCompactEvent());
-
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
 

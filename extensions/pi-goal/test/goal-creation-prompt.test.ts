@@ -21,7 +21,7 @@ function writeText(path: string, content: string): void {
   writeFileSync(path, content, "utf8");
 }
 
-function writeJson(path: string, value: unknown): void {
+function writeJson<Value>(path: string, value: Value): void {
   writeText(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
@@ -38,7 +38,6 @@ test("goal settings files are discoverable and preserve existing config", () => 
     });
     assert.match(readFileSync(schemaPath, "utf8"), /creationPromptPath/);
     assert.match(readFileSync(schemaPath, "utf8"), /disabledToolsWhileGoalActive/);
-
     writeJson(configPath, { creationPromptPath: "keep-me.md" });
     ensureGoalConfigFiles(agentDir);
     assert.deepEqual(JSON.parse(readFileSync(configPath, "utf8")), {
@@ -70,6 +69,7 @@ test("configured prompt templates resolve by scope, interpolate attributes, and 
       globalTemplatePath,
       "global {{task}}\n{{constraints}}\n{{cwd}}\n{{currentGoal}}\n{{minimumTimeMinutes}}/{{maximumTimeMinutes}}",
     );
+
     writeJson(projectConfigPath, { creationPromptPath: "./project.md" });
     writeText(projectTemplatePath, "project-v1 {{task}}\n{{constraints}}");
 
@@ -97,7 +97,6 @@ test("configured prompt templates resolve by scope, interpolate attributes, and 
     assert.equal(trustedV1.ok, true);
     assert.equal(trustedV1.templatePath, projectTemplatePath);
     assert.match(trustedV1.prompt, /^project-v1/);
-
     writeText(projectTemplatePath, "project-v2 {{task}}\n{{constraints}}");
     const trustedV2 = createGoalCreationPrompt(
       input,
@@ -123,6 +122,7 @@ test("active-goal disabled tools resolve from global and trusted-project setting
     writeJson(globalConfigPath, {
       disabledToolsWhileGoalActive: ["ask_user_question", "ask_user_question"],
     });
+
     writeJson(projectConfigPath, {
       disabledToolsWhileGoalActive: ["agent_browser"],
     });

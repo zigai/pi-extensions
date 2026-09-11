@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
+import type { AgentStartEvent } from "@earendil-works/pi-coding-agent";
+
 import { formatFooterStatus } from "../src/format.js";
 import {
   createRecoveryPausedAttention,
@@ -17,7 +19,7 @@ import {
 } from "./support/runtime-harness.js";
 import { givenOverflowPausedGoal } from "./support/scenarios.js";
 
-function agentStartEvent(): object {
+function agentStartEvent(): AgentStartEvent {
   return { type: "agent_start" };
 }
 
@@ -88,10 +90,8 @@ test("host overflow session compaction does not queue extension continuation bef
     );
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     await harness.emit("agent_start", agentStartEvent());
     flushContinuationScheduler();
-
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
   } finally {
@@ -114,7 +114,6 @@ test("host overflow session compaction falls back when promised host retry never
 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     flushContinuationScheduler();
 
     const goal = harness.snapshot().goal;
@@ -155,7 +154,6 @@ test("host overflow retry success resumes goal continuation after clearing recov
     sessionCompactEvent({ reason: "overflow", willRetry: true }),
   );
   assert.equal(harness.sentMessages.length, 0);
-
   await harness.emit("agent_start", agentStartEvent());
   await harness.emit("agent_end", {
     type: "agent_end",
@@ -191,7 +189,6 @@ test("first overflow error stays active while host performs compact-and-retry", 
     sessionCompactEvent({ reason: "overflow", willRetry: true }),
   );
   await harness.emit("agent_start", agentStartEvent());
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -211,6 +208,7 @@ test("context overflow recovery preserves compaction attempts across host sessio
       "session_compact",
       sessionCompactEvent({ reason: "overflow", willRetry: true }),
     );
+
     if (harness.snapshot().goal?.status === "active") {
       await harness.emit("agent_start", agentStartEvent());
     }
@@ -241,15 +239,12 @@ test("overflow after compaction and intervening transient error pauses with reco
   );
   await harness.emit("agent_start", agentStartEvent());
   assert.equal(harness.snapshot().goal?.status, "active");
-
   await emitPersistentAssistantError(harness, 1, "websocket closed");
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
-
   await emitPersistentAssistantError(harness, 2, "context_length_exceeded");
-
   assert.equal(harness.compactCalls.length, 0);
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
@@ -287,7 +282,6 @@ test("transient errors surface pending attention without pausing before host ret
   harness.footerStatuses.length = 0;
 
   await emitPersistentAssistantError(harness, 0, "websocket closed");
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(
@@ -307,13 +301,10 @@ test("/goal pause after pending transient error clears recovery attention", asyn
   harness.footerStatuses.length = 0;
 
   await emitPersistentAssistantError(harness, 0, "websocket closed");
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
-
   await harness.runCommand("pause");
-
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.footerStatuses.at(-1), formatFooterStatus(harness.snapshot().goal));
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal paused \(\/goal resume\)/);
@@ -327,13 +318,10 @@ test("/goal pause after pending overflow error clears recovery attention", async
   harness.footerStatuses.length = 0;
 
   await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
-
   await harness.runCommand("pause");
-
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.footerStatuses.at(-1), formatFooterStatus(harness.snapshot().goal));
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal paused \(\/goal resume\)/);
@@ -368,10 +356,8 @@ test("successful turns reset transient error counters and continue active goals"
 
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 1);
-
   harness.sentMessages.length = 0;
   await emitPersistentAssistantError(harness, 2, "websocket closed");
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
 });
@@ -424,7 +410,6 @@ test("successful toolUse turns reset context overflow recovery counters", async 
     sessionCompactEvent({ reason: "overflow", willRetry: true }),
   );
   await harness.emit("agent_start", agentStartEvent());
-
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
   await harness.emit("turn_end", {
     type: "turn_end",
@@ -433,9 +418,7 @@ test("successful toolUse turns reset context overflow recovery counters", async 
     toolResults: [],
   });
   assert.equal(harness.sentMessages.length, 0);
-
   await emitPersistentAssistantError(harness, 2, "context_length_exceeded");
-
   assert.equal(harness.compactCalls.length, 0);
   assert.equal(harness.snapshot().goal?.status, "active");
 });
@@ -449,7 +432,6 @@ test("first overflow error shows recoverable attention while host recovery is pe
   harness.footerStatuses.length = 0;
 
   await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(
@@ -467,7 +449,6 @@ test("overflow without session_compact stays active with pending overflow attent
   harness.sentMessages.length = 0;
 
   await emitPersistentAssistantError(harness, 0, "context_length_exceeded");
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(

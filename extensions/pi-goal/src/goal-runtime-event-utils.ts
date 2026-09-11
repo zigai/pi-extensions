@@ -73,11 +73,13 @@ export function recordAssistantContextOverflow(
   }
 
   context.stateController.beginOverflowRecovery(ctx);
+
   if (isErrorAssistantMessage(message)) {
     context.recoveryRuntime.handlePersistentAssistantError(message, ctx);
   } else {
     context.recoveryRuntime.handleSilentContextOverflow(ctx);
   }
+
   return true;
 }
 
@@ -87,6 +89,7 @@ export function handleAgentErrorMessage(
   context: GoalRuntimeOverflowRecoveryContext,
 ): void {
   recordAssistantContextOverflow(message, ctx, context);
+
   if (!isContextOverflowError(message.errorMessage)) {
     context.recoveryRuntime.handlePersistentAssistantError(message, ctx);
   }

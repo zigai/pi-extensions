@@ -35,6 +35,7 @@ export function appendGoalTransitionEffectOnce(
   effect: GoalTransitionEffect,
 ): void {
   const key = goalTransitionEffectKey(effect);
+
   if (!effects.some((existing) => goalTransitionEffectKey(existing) === key)) {
     effects.push(effect);
   }
@@ -49,6 +50,7 @@ export function mergeGoalTransitionEffects(
       appendGoalTransitionEffectOnce(result, effect);
     }
   }
+
   return result;
 }
 

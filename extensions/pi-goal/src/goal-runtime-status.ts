@@ -44,9 +44,11 @@ export function createGoalRuntimeStatus(deps: GoalRuntimeStatusDeps) {
           stopStatusRefresh();
           return;
         }
+
         statusContext.ui.setStatus("codex-goal", formatFooterStatusForRuntime(deps));
       }, 1_000);
       statusRefreshTimer.unref?.();
+
       return;
     }
 

@@ -16,8 +16,11 @@ function createHarness(availableNames: readonly string[], activeNames: readonly 
   const changes: string[][] = [];
   const host = {
     getActiveTools: () => [...active],
-    getAllTools: () =>
-      [...available].map((name) => ({ name })) as ReturnType<ExtensionAPI["getAllTools"]>,
+    getAllTools: () => {
+      // SAFETY: goal-tool policy consumes only ToolInfo.name; these policy fixtures provide that
+      // exact field and never execute or render the omitted tool metadata.
+      return [...available].map((name) => ({ name })) as ReturnType<ExtensionAPI["getAllTools"]>;
+    },
     setActiveTools(names: string[]) {
       active = [...names];
       changes.push([...names]);
@@ -56,10 +59,8 @@ test("active-goal tool policy is relative and restores previous states", () => {
   );
   const goal = createThreadGoal("ship", undefined, 0);
   harness.controller.configure({ disabledTools: ["ask_user_question"] });
-
   harness.controller.sync(goal);
   assert.deepEqual(harness.active, ["read", "get_goal", "update_goal"]);
-
   harness.controller.sync({ ...goal, status: "blocked" });
   assert.deepEqual(harness.active, ["read", "get_goal", "update_goal", "ask_user_question"]);
 });
@@ -68,7 +69,6 @@ test("tool policy preserves unrelated changes and handles tools registered later
   const harness = createHarness(["read", "get_goal", "update_goal"], ["read"]);
   const goal = createThreadGoal("ship", undefined, 0);
   harness.controller.configure({ disabledTools: ["late_tool"] });
-
   harness.controller.sync(goal);
   harness.available.add("late_tool");
   harness.activate("late_tool");
@@ -77,7 +77,6 @@ test("tool policy preserves unrelated changes and handles tools registered later
   harness.controller.sync(goal);
   assert.equal(harness.active.includes("late_tool"), false);
   assert.equal(harness.active.includes("new_unrelated_tool"), true);
-
   harness.controller.release();
   assert.equal(harness.active.includes("late_tool"), true);
   assert.equal(harness.active.includes("new_unrelated_tool"), true);
@@ -92,7 +91,6 @@ test("changing configured disabled tools restores the old policy first", () => {
   harness.controller.configure({ disabledTools: ["ask_user_question"] });
   harness.controller.sync(goal);
   assert.equal(harness.active.includes("ask_user_question"), false);
-
   harness.controller.configure({ disabledTools: ["read"] });
   harness.controller.sync(goal);
   assert.equal(harness.active.includes("ask_user_question"), true);
@@ -109,18 +107,14 @@ test("runtime applies settings-based disabled tools only while a goal is active"
       activeTools: ["read", "ask_user_question"],
     });
     await harness.reloadSession();
-
     await harness.runTool("create_goal", { objective: "ship" });
     assert.equal(harness.activeTools.includes("ask_user_question"), false);
-
     await harness.runTool("update_goal", { status: "blocked" });
     assert.equal(harness.snapshot().goal?.status, "blocked");
     assert.equal(harness.activeTools.includes("ask_user_question"), true);
-
     await harness.runCommand("resume");
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.activeTools.includes("ask_user_question"), false);
-
     await harness.runTool("update_goal", { status: "complete" });
     assert.equal(harness.activeTools.includes("ask_user_question"), true);
   } finally {
@@ -140,7 +134,6 @@ test("session shutdown releases settings-based disabled tools", async () => {
     await harness.reloadSession();
     await harness.runTool("create_goal", { objective: "ship" });
     assert.equal(harness.activeTools.includes("ask_user_question"), false);
-
     await harness.emit("session_shutdown", sessionShutdownEvent("reload"));
     assert.equal(harness.activeTools.includes("ask_user_question"), true);
   } finally {

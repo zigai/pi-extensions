@@ -45,6 +45,16 @@ test("toQueuedGoalWorkSource ignores unrelated custom messages", () => {
   assert.equal(toQueuedGoalWorkSource(unrelated), null);
 });
 
+test("toQueuedGoalContextCarrier rejects malformed timestamps and carries numbers", () => {
+  for (const timestamp of [undefined, null, "1", true, {}, []] as const) {
+    assert.equal(toQueuedGoalContextCarrier({ role: "custom", timestamp }), null);
+  }
+
+  for (const timestamp of [0, -1, 42.5]) {
+    assert.equal(toQueuedGoalContextCarrier({ role: "custom", timestamp })?.timestamp, timestamp);
+  }
+});
+
 test("applyQueuedGoalProviderContextRewrites rewrites stale custom and user queued messages", () => {
   const completedGoal = { ...activeGoal, status: "complete" as const };
   const staleCustom = goalCustomContextMessage({

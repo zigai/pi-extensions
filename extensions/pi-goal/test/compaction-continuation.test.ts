@@ -33,7 +33,6 @@ test("willRetry session compaction falls back after grace when host retry never 
     const goal = harness.snapshot().goal;
     assert.equal(goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     flushContinuationScheduler();
     assert.equal(harness.sentMessages.length, 1);
     assert.deepEqual(harness.sentMessages[0]?.message.details, {
@@ -55,7 +54,6 @@ test("willRetry session compaction fallback keeps polling while session is busy"
 
     flushContinuationScheduler();
     assert.equal(harness.sentMessages.length, 0);
-
     harness.setIdle(true);
     flushContinuationScheduler();
     assert.equal(harness.sentMessages.length, 1);

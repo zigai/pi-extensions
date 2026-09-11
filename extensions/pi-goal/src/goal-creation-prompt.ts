@@ -8,16 +8,26 @@ import { escapeXmlText } from "./prompts.js";
 import type { ThreadGoal } from "./types.js";
 
 const BUNDLED_PROMPT_PATH = fileURLToPath(new URL("../prompts/create-goal.md", import.meta.url));
-
 const TEMPLATE_ATTRIBUTE_PATTERN = /{{\s*([A-Za-z][A-Za-z0-9]*)\s*}}/g;
-const KNOWN_TEMPLATE_ATTRIBUTES = new Set([
+
+const TEMPLATE_ATTRIBUTES = [
   "constraints",
   "currentGoal",
   "cwd",
   "maximumTimeMinutes",
   "minimumTimeMinutes",
   "task",
-]);
+] as const;
+
+type TemplateAttribute = (typeof TEMPLATE_ATTRIBUTES)[number];
+type TemplateValues = { [Key in TemplateAttribute]: string };
+
+const KNOWN_TEMPLATE_ATTRIBUTES = new Set<string>(TEMPLATE_ATTRIBUTES);
+
+function isTemplateAttribute(value: string): value is TemplateAttribute {
+  return KNOWN_TEMPLATE_ATTRIBUTES.has(value);
+}
+
 const REQUIRED_TEMPLATE_ATTRIBUTES = ["task", "constraints"] as const;
 
 export type GoalCreationPromptInput = {
@@ -38,15 +48,18 @@ function constraintsText(input: GoalCreationPromptInput): string {
       `- Pass minimum_time_minutes=${input.minimumTimeMinutes} to create_goal.`,
     );
   }
+
   if (input.maximumTimeMinutes !== undefined) {
     lines.push(
       `- Maximum active time: ${input.maximumTimeMinutes} minute${input.maximumTimeMinutes === 1 ? "" : "s"}.`,
       `- Pass maximum_time_minutes=${input.maximumTimeMinutes} to create_goal.`,
     );
   }
+
   if (lines.length === 0) {
     lines.push("- No active-time constraints requested.");
   }
+
   return lines.join("\n");
 }
 
@@ -54,6 +67,7 @@ function currentGoalText(goal: ThreadGoal | null): string {
   if (goal === null) {
     return "none";
   }
+
   return `${goal.status}: ${goal.objective}`;
 }
 
@@ -69,6 +83,7 @@ export function renderGoalCreationTemplate(
       attributes.add(attribute);
     }
   }
+
   const unknown = [...attributes].filter((attribute) => !KNOWN_TEMPLATE_ATTRIBUTES.has(attribute));
   if (unknown.length > 0) {
     return {
@@ -76,6 +91,7 @@ export function renderGoalCreationTemplate(
       message: `Unknown goal prompt attribute${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`,
     };
   }
+
   const missing = REQUIRED_TEMPLATE_ATTRIBUTES.filter((attribute) => !attributes.has(attribute));
   if (missing.length > 0) {
     return {
@@ -84,7 +100,7 @@ export function renderGoalCreationTemplate(
     };
   }
 
-  const values: Record<string, string> = {
+  const values: TemplateValues = {
     constraints: escapeXmlText(constraintsText(input)),
     currentGoal: escapeXmlText(currentGoalText(context.currentGoal)),
     cwd: escapeXmlText(context.cwd),
@@ -94,9 +110,8 @@ export function renderGoalCreationTemplate(
       input.minimumTimeMinutes === undefined ? "unset" : String(input.minimumTimeMinutes),
     task: escapeXmlText(input.task.trim()),
   };
-  const prompt = template.replace(
-    TEMPLATE_ATTRIBUTE_PATTERN,
-    (_match, attribute: string) => values[attribute] ?? "",
+  const prompt = template.replace(TEMPLATE_ATTRIBUTE_PATTERN, (_match, attribute: string) =>
+    isTemplateAttribute(attribute) ? values[attribute] : "",
   );
   return { ok: true, prompt, templatePath: "" };
 }
@@ -112,6 +127,7 @@ export function createGoalCreationPrompt(
   if (!loaded.ok) {
     return { ok: false, message: loaded.message };
   }
+
   try {
     const templatePath = loaded.settings.creationPromptPath ?? BUNDLED_PROMPT_PATH;
     const template = readFileSync(templatePath, "utf8");
@@ -122,6 +138,7 @@ export function createGoalCreationPrompt(
     if (!result.ok) {
       return result;
     }
+
     return { ok: true, prompt: result.prompt, templatePath };
   } catch (cause: unknown) {
     const message = cause instanceof Error ? cause.message : "Unknown prompt configuration error.";

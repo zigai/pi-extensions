@@ -36,6 +36,7 @@ export function createInputContextEventHandlers(
   return {
     onInput: (async (event, ctx) => {
       continuation.clearPassthroughContinuationInput();
+
       const continuationGoalId = continuationGoalIdFromPrompt(event.text);
 
       if (event.source !== "extension") {
@@ -46,10 +47,13 @@ export function createInputContextEventHandlers(
           ctx,
           deps,
         );
+
         if (continuationGoalId !== null) {
           continuation.notePassthroughContinuationInput(event.text);
         }
+
         status.refreshUi(ctx);
+
         return undefined;
       }
 
@@ -62,6 +66,7 @@ export function createInputContextEventHandlers(
         ctx,
         deps,
       );
+
       if (stateController.isCurrentActiveGoalId(continuationGoalId)) {
         continuation.markContinuationQueued(continuationGoalId);
         return { action: "continue" } as const;
@@ -69,6 +74,7 @@ export function createInputContextEventHandlers(
 
       continuation.clearContinuationStateFor(continuationGoalId);
       status.refreshUi(ctx);
+
       return { action: "handled" } as const;
     }) satisfies ExtensionHandler<InputEvent, InputEventResult>,
 
@@ -93,10 +99,12 @@ export function createInputContextEventHandlers(
       const continuationGoalId = continuation.continuationGoalIdFromRuntimePrompt(event.prompt);
       if (continuationGoalId !== null) {
         continuation.clearContinuationStateFor(continuationGoalId);
+
         if (!stateController.isCurrentActiveGoalId(continuationGoalId)) {
           status.refreshUi(ctx);
           return undefined;
         }
+
         applyStaleQueuedWorkEffects(
           runtimeState.staleQueuedWorkGuard.planBeforeAgentStartClearAbort().effects,
           ctx,
@@ -108,10 +116,12 @@ export function createInputContextEventHandlers(
           ctx,
           deps,
         );
+
         continuation.clearContinuationState();
       }
+
       return undefined;
-    }) satisfies ExtensionHandler<BeforeAgentStartEvent, undefined>,
+    }) satisfies ExtensionHandler<BeforeAgentStartEvent>,
 
     onMessageStart: (async (event, _ctx) => {
       if (event.message.role === "user") {
@@ -124,15 +134,19 @@ export function createInputContextEventHandlers(
           runtimeState.staleQueuedWorkGuard.noteRunnableWorkStarted();
           continuation.clearContinuationState();
         }
+
         return;
       }
 
       continuation.clearContinuationStateFor(queuedGoalId);
+
       if (stateController.isCurrentActiveGoalId(queuedGoalId)) {
         runtimeState.staleQueuedWorkGuard.noteRunnableWorkStarted();
+
         if (isCommandResumeQueuedGoalMessage(event.message)) {
           resetErrorRecovery();
         }
+
         return;
       }
 

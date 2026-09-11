@@ -48,7 +48,6 @@ test("terminal provider-limit 429 errors pause active goals immediately", async 
   harness.sentMessages.length = 0;
 
   await emitPersistentAssistantError(harness, 0, "insufficient_quota 429");
-
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
   assert.equal(
@@ -74,7 +73,6 @@ test("non-retryable provider error pause does not cancel host compaction", async
   );
 
   assert.equal(harness.snapshot().goal?.status, "paused");
-
   const compaction = await harness.emit("session_before_compact", sessionBeforeCompactEvent());
   assert.notDeepEqual(compaction[0], { cancel: true });
 });
@@ -202,10 +200,8 @@ test("host overflow compaction falls back to goal continuation when host retry n
       'Codex error: {"error":{"code":"context_length_exceeded"}}',
     );
     await emitHostSessionCompact(harness);
-
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
-
     flushContinuationScheduler();
 
     const goal = harness.snapshot().goal;
@@ -236,7 +232,6 @@ test("host overflow compaction fallback does not duplicate a host retry turn", a
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
 
     flushContinuationScheduler();
-
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 0);
   } finally {
@@ -290,7 +285,6 @@ test("repeated silent stop overflow after host compaction pauses without blockin
   );
   assert.notDeepEqual(firstCompaction[0], { cancel: true });
   await harness.emit("session_compact", sessionCompactEvent({ reason: "overflow" }));
-
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
 
@@ -300,7 +294,6 @@ test("repeated silent stop overflow after host compaction pauses without blockin
     cacheRead: 0,
   });
   await emitSilentContextOverflow(harness, 1, secondOverflow);
-
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
   assert.match(harness.footerStatuses.at(-1) ?? "", /Goal needs attention/);
@@ -325,7 +318,6 @@ test("repeated zero-output length overflow after host compaction pauses without 
   });
   await emitSilentContextOverflow(harness, 0, firstOverflow);
   await emitHostSessionCompact(harness);
-
   assert.equal(harness.snapshot().goal?.status, "active");
 
   const secondOverflow = assistantMessage("length", {
@@ -334,7 +326,6 @@ test("repeated zero-output length overflow after host compaction pauses without 
     cacheRead: 1_000,
   });
   await emitSilentContextOverflow(harness, 1, secondOverflow);
-
   assert.equal(harness.snapshot().goal?.status, "paused");
   assert.equal(harness.sentMessages.length, 0);
 

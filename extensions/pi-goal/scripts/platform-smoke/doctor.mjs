@@ -95,12 +95,14 @@ function disposableWindowsSshProbe(cbox, config) {
     300_000,
   );
   const leaseId = parseLeaseId(warm.stdout) ?? parseLeaseId(warm.stderr) ?? slug;
+
   try {
     if (!warm.ok)
       return {
         ok: false,
         message: `disposable Windows warmup failed: ${(warm.stderr || warm.stdout).slice(-500)}`,
       };
+
     const probeCommand =
       "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command 'Get-Command node,npm,git,tar -ErrorAction Stop | Out-Null; node --version; npm --version; git --version; tar --version | Select-Object -First 1; whoami'";
     const run = crabbox(
@@ -113,32 +115,38 @@ function disposableWindowsSshProbe(cbox, config) {
         ok: false,
         message: `disposable Windows probe failed: ${(run.stderr || run.stdout).slice(-500)}`,
       };
+
     const lines = run.stdout.trim().split(/\r?\n/).slice(-5);
     if (!/^v\d+\./.test(lines[0] ?? ""))
       return {
         ok: false,
         message: `disposable Windows node probe missing or invalid: ${lines.join(" | ")}`,
       };
+
     if (!/^\d+\.\d+\./.test(lines[1] ?? ""))
       return {
         ok: false,
         message: `disposable Windows npm probe missing or invalid: ${lines.join(" | ")}`,
       };
+
     if (!/^git version/i.test(lines[2] ?? ""))
       return {
         ok: false,
         message: `disposable Windows git probe missing or invalid: ${lines.join(" | ")}`,
       };
+
     if (!/tar/i.test(lines[3] ?? ""))
       return {
         ok: false,
         message: `disposable Windows tar probe missing or invalid: ${lines.join(" | ")}`,
       };
+
     if (!(lines[4] ?? "").trim())
       return {
         ok: false,
         message: `disposable Windows whoami probe missing: ${lines.join(" | ")}`,
       };
+
     return { ok: true, message: lines.join(" | ") };
   } finally {
     crabbox(cbox, ["stop", ...baseArgs, "--id", leaseId], 60_000);
@@ -147,6 +155,7 @@ function disposableWindowsSshProbe(cbox, config) {
 
 function parseVersion(version) {
   const match = /\d+(?:\.\d+){0,2}/.exec(String(version));
+
   return match ? match[0].split(".").map((part) => Number(part)) : null;
 }
 
@@ -154,12 +163,14 @@ function versionAtLeast(actual, minimum) {
   const parsedActual = parseVersion(actual);
   const parsedMinimum = parseVersion(minimum);
   if (!parsedActual || !parsedMinimum) return false;
+
   for (let i = 0; i < Math.max(parsedActual.length, parsedMinimum.length); i += 1) {
     const a = parsedActual[i] ?? 0;
     const b = parsedMinimum[i] ?? 0;
     if (a > b) return true;
     if (a < b) return false;
   }
+
   return true;
 }
 
@@ -169,6 +180,7 @@ function npmPackFiles() {
   try {
     const parsed = JSON.parse(output);
     const pack = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
+
     return pack?.files?.map((file) => file.path) ?? [];
   } catch {
     return null;
@@ -190,6 +202,7 @@ function checkForbiddenProjectFiles(failures) {
     fail("could not inspect npm pack contents", failures);
     return;
   }
+
   const packedForbidden = packFiles.filter(isForbiddenProjectPath);
   if (packedForbidden.length === 0) ok("npm package excludes forbidden local artifacts");
   else fail(`forbidden npm package path(s): ${packedForbidden.join(", ")}`, failures);
@@ -211,6 +224,7 @@ function checkRequiredProviders(cbox, failures) {
     fail("could not read crabbox providers", failures);
     return;
   }
+
   for (const provider of ["ssh", "local-container", "parallels"]) {
     if (providers.includes(provider)) ok(`crabbox provider available: ${provider}`);
     else fail(`crabbox provider missing: ${provider}`, failures);
@@ -223,6 +237,7 @@ function checkCrabboxProvider(cbox, args, label, failures) {
     fail(`${label} crabbox doctor failed`, failures);
     return;
   }
+
   try {
     const parsed = JSON.parse(output);
     if (parsed.ok) ok(`${label} provider OK`);
@@ -238,12 +253,10 @@ export async function runDoctor(config, options = {}) {
   const packageName = config?.packageName ?? "pi-codex-goal";
   const artifactRoot = config?.artifactRoot ?? ".artifacts/platform-smoke";
   const nodeMajor = config?.nodeValidationMajor ?? 24;
-
   console.log("\n── Platform smoke config ──");
   ok(`package: ${packageName}`);
   ok(`targets: ${(config?.requiredTargets ?? []).join(", ")}`);
   ok(`suites: ${(config?.requiredSuites ?? []).join(", ")}`);
-
   console.log("\n── Crabbox binary ──");
   const cbox = env("PLATFORM_SMOKE_CRABBOX") || "crabbox";
   const cboxPath = env("PLATFORM_SMOKE_CRABBOX") || commandPath("crabbox");
@@ -263,10 +276,12 @@ export async function runDoctor(config, options = {}) {
     } else {
       ok(`binary: ${cboxPath}`);
     }
+
     const version = silent(cbox, ["--version"]);
     if (version) {
       const displayVersion = version.split(/\r?\n/)[0];
       ok(`version: ${displayVersion}`);
+
       const minVersion = config?.requiredCrabbox?.minVersion;
       if (minVersion) {
         if (versionAtLeast(displayVersion, minVersion))
@@ -287,7 +302,9 @@ export async function runDoctor(config, options = {}) {
   )
     .map((name) => String(name).trim())
     .filter(Boolean);
+
   ok(`model: ${model}`);
+
   if ((config?.requiredSuites ?? []).includes("goal-runtime-smoke")) {
     const presentAuth = authEnv.filter((name) => env(name).length > 0);
     if (presentAuth.length > 0)
@@ -302,6 +319,7 @@ export async function runDoctor(config, options = {}) {
   }
 
   console.log("\n── Host tools ──");
+
   for (const [name, command] of [
     ["node", "node --version"],
     ["npm", "npm --version"],
@@ -312,12 +330,14 @@ export async function runDoctor(config, options = {}) {
     if (!output) fail(`${name} not found`, failures);
     else ok(`${name}: ${output.split(/\r?\n/)[0]}`);
   }
+
   const localNode = shell("node --version");
   const localNodeMajor = Number(localNode?.replace(/^v/, "").split(".")[0] ?? 0);
   if (localNodeMajor >= nodeMajor) ok(`host Node major ${localNodeMajor} >= ${nodeMajor}`);
   else fail(`host Node major ${localNodeMajor || "unknown"} < ${nodeMajor}`, failures);
 
   console.log("\n── Crabbox providers ──");
+
   if (cboxPath) {
     checkRequiredProviders(cbox, failures);
     checkCrabboxProvider(
@@ -326,6 +346,7 @@ export async function runDoctor(config, options = {}) {
       "ubuntu local-container",
       failures,
     );
+
     checkCrabboxProvider(cbox, buildTargetBaseArgs("macos", config), "macOS ssh", failures);
   }
 
@@ -345,10 +366,12 @@ export async function runDoctor(config, options = {}) {
 
   if ((config?.requiredTargets ?? []).includes("windows-native")) {
     console.log("\n── Windows native / Parallels ──");
+
     if (!hasCommand("prlctl")) {
       fail("prlctl not found", failures);
     } else {
       ok("prlctl found");
+
       const windows = config?.windowsParallels ?? {};
       const vmName =
         env("PLATFORM_SMOKE_WINDOWS_VM") || windows.sourceVm || "pi-extension-windows-template";
@@ -360,12 +383,14 @@ export async function runDoctor(config, options = {}) {
         windows.workRoot ||
         `C:\\crabbox\\${packageName}`;
       const list = shell("prlctl list -a --no-header 2>/dev/null");
+
       if (!list) {
         fail("prlctl list returned no VMs", failures);
       } else if (!list.includes(vmName)) {
         fail(`Windows VM ${vmName} not found`, failures);
       } else {
         ok(`Windows VM ${vmName} found`);
+
         const status = shell(`prlctl status "${vmName.replace(/"/g, '\\"')}" 2>/dev/null`);
         if (/\bstopped\b/i.test(status ?? "")) ok(`Windows source VM ${vmName} is stopped`);
         else
@@ -373,21 +398,26 @@ export async function runDoctor(config, options = {}) {
             `Windows source VM ${vmName} must be stopped for forkable snapshot use; current status: ${status ?? "unknown"}`,
             failures,
           );
+
         const snapshotsJson = shell(
           `prlctl snapshot-list "${vmName.replace(/"/g, '\\"')}" -j 2>/dev/null`,
         );
         let snapshotMatch = null;
+
         try {
           const snapshots = JSON.parse(snapshotsJson ?? "{}");
+
           snapshotMatch = Object.entries(snapshots).find(
             ([id, data]) => id === snapshot || data?.name === snapshot,
           );
         } catch {
           // Fall through to the failure below.
         }
+
         let snapshotPowerOff = false;
         if (snapshotMatch) {
           ok(`snapshot ${snapshot} found`);
+
           const snapshotState = snapshotMatch[1]?.state ?? "unknown";
           snapshotPowerOff = snapshotState === "poweroff";
           if (snapshotPowerOff) ok(`snapshot ${snapshot} state is poweroff`);
@@ -399,6 +429,7 @@ export async function runDoctor(config, options = {}) {
         } else {
           fail(`snapshot ${snapshot} not found on ${vmName}`, failures);
         }
+
         checkCrabboxProvider(
           cbox,
           buildTargetBaseArgs("windows-native", {
@@ -408,6 +439,7 @@ export async function runDoctor(config, options = {}) {
           "windows parallels",
           failures,
         );
+
         const ipLine = shell(
           `prlctl list -f --no-header "${vmName.replace(/"/g, '\\"')}" 2>/dev/null`,
         );
@@ -418,6 +450,7 @@ export async function runDoctor(config, options = {}) {
           const ip = parts.length >= 3 ? parts[2] : null;
           if (ip && ip !== "-") {
             ok(`Windows template IP: ${ip}`);
+
             const portCheck = shell(`nc -z -w 3 ${ip} 22 2>/dev/null && echo open || echo closed`);
             if (portCheck?.includes("open")) ok(`SSH open on ${ip}:22`);
             else
@@ -433,6 +466,7 @@ export async function runDoctor(config, options = {}) {
             ok(
               `template ${vmName} has no IP; verifying Windows SSH/tools through a disposable Crabbox clone`,
             );
+
             const probe = disposableWindowsSshProbe(cbox, {
               ...config,
               windowsParallels: { ...windows, sourceVm: vmName, snapshot, user, workRoot },
@@ -455,8 +489,10 @@ export async function runDoctor(config, options = {}) {
 
   console.log("\n── Artifact root ──");
   const artRoot = resolve(process.cwd(), artifactRoot);
+
   try {
     mkdirSync(artRoot, { recursive: true });
+
     const probe = resolve(artRoot, ".doctor-write-test");
     writeFileSync(probe, "ok");
     unlinkSync(probe);
@@ -470,9 +506,10 @@ export async function runDoctor(config, options = {}) {
   if (status)
     warn(`${status.split(/\r?\n/).length} uncommitted change(s) recorded for smoke evidence`);
   else ok("git status clean");
-  checkForbiddenProjectFiles(failures);
 
+  checkForbiddenProjectFiles(failures);
   console.log(`\n=== Results: ${failures.count} failure(s) ===`);
+
   if (failures.count > 0) {
     console.log("Fix doctor failures before running smoke:platform:all.");
     process.exitCode = 1;

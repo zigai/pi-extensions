@@ -42,12 +42,21 @@ export interface GoalRecoveryMachineState {
   phase: RecoveryPhase;
 }
 
+export interface HostOverflowRecoveryStart {
+  attention: RecoveryAttention;
+  persistHostOverflowCapReset: boolean;
+}
+
 export function createGoalRecoveryMachine(): GoalRecoveryMachineState {
   return {
     counters: createErrorRecoveryCounters(),
     attention: null,
     phase: idleRecoveryPhase,
   };
+}
+
+export function clearActiveHostOverflowRecovery(state: GoalRecoveryMachineState): void {
+  state.phase = clearHostOverflowRecoveryActive(state.phase);
 }
 
 export function resetRecoveryMachine(state: GoalRecoveryMachineState): void {
@@ -72,7 +81,9 @@ export function onRecoverySuccessfulTurn(
   if (!isSuccessfulAssistantTurn(message)) {
     return false;
   }
+
   resetRecoveryCounters(state);
+
   return true;
 }
 
@@ -108,10 +119,6 @@ export function setRecoveryPausedAttention(
   return attention;
 }
 
-export function clearActiveHostOverflowRecovery(state: GoalRecoveryMachineState): void {
-  state.phase = clearHostOverflowRecoveryActive(state.phase);
-}
-
 export function applyHostOverflowUserResetPersistence(
   state: GoalRecoveryMachineState,
   needsUserReset: boolean,
@@ -119,6 +126,7 @@ export function applyHostOverflowUserResetPersistence(
   if (recoveryPhaseNeedsUserStartTurn(state.phase) === needsUserReset) {
     return false;
   }
+
   state.phase = applyPersistedHostOverflowUserReset(state.phase, needsUserReset);
   return true;
 }
@@ -137,10 +145,9 @@ export function requireHostOverflowUserReset(state: GoalRecoveryMachineState): b
   return persistHostOverflowCapReset;
 }
 
-export function beginHostOverflowRecovery(state: GoalRecoveryMachineState): {
-  attention: RecoveryAttention;
-  persistHostOverflowCapReset: boolean;
-} {
+export function beginHostOverflowRecovery(
+  state: GoalRecoveryMachineState,
+): HostOverflowRecoveryStart {
   const persistHostOverflowCapReset = !recoveryPhaseNeedsUserStartTurn(state.phase);
   state.phase = hostOverflowRecoveringNeedsUserStartPhase();
   const attention = setRecoveryPendingAttention(state, HOST_OVERFLOW_RECOVERY_REASON);
@@ -159,6 +166,7 @@ function incrementOverflowCompactionAttempts(state: GoalRecoveryMachineState): R
       reason: "context window recovery failed after repeated compaction attempts",
     };
   }
+
   return { type: "noop" };
 }
 
@@ -189,6 +197,7 @@ export function planRecoveryForAssistantError(
     ...state.counters,
     transientAttempts: state.counters.transientAttempts + 1,
   };
+
   return {
     type: "pending",
     reason: `provider error (${signature})`,

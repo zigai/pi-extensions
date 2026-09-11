@@ -35,7 +35,6 @@ export function createGoalPersistence(deps: GoalPersistenceDeps) {
   let goal: ThreadGoal | null = null;
   let lastPersistedGoal: ThreadGoal | null = null;
   let lastRuntimePersistAt: number | null = null;
-
   const getGoal = (): ThreadGoal | null => (goal ? cloneGoal(goal) : null);
 
   const setGoalSnapshot = (nextGoal: ThreadGoal | null): void => {
@@ -51,6 +50,7 @@ export function createGoalPersistence(deps: GoalPersistenceDeps) {
     if (!goal) {
       return false;
     }
+
     if (lastPersistedGoal && goalsEquivalent(goal, lastPersistedGoal)) {
       return false;
     }
@@ -70,10 +70,12 @@ export function createGoalPersistence(deps: GoalPersistenceDeps) {
     if (!goal || goal.status !== "active") {
       return;
     }
+
     const now = Date.now();
     if (lastRuntimePersistAt !== null && now - lastRuntimePersistAt < RUNTIME_PERSIST_INTERVAL_MS) {
       return;
     }
+
     flushGoalPersistence(source);
   };
 

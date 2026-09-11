@@ -36,10 +36,10 @@ test("/goal registers a compact form with multiline objective editors", () => {
     if (before.has(candidate)) {
       return false;
     }
+
     return candidate.name === "goal";
   });
   assert.ok(command);
-
   assert.equal(command.args.disabledTools, undefined);
   assert.equal(command.args.enabledTools, undefined);
   assert.equal(command.args.adjustedDisabledTools, undefined);
@@ -52,7 +52,6 @@ test("/goal registers a compact form with multiline objective editors", () => {
 
   assert.equal(command.args.task?.ui?.widget, "textarea");
   assert.equal(command.args.task?.ui?.rows, 5);
-
   const raw = command.args.raw;
   assert.ok(raw);
   assert.equal(raw.type, "boolean");
@@ -60,7 +59,6 @@ test("/goal registers a compact form with multiline objective editors", () => {
   assert.equal(raw?.ui?.custom, undefined);
   assert.equal(raw.title, "Raw goal");
   assert.match(raw.description ?? "", /check.*exactly.*without model expansion/i);
-
   const adjustExisting = command.args.adjustExisting;
   const adjustedObjective = command.args.adjustedObjective;
   assert.equal(adjustExisting?.ui?.widget, "toggle");

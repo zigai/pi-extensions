@@ -42,7 +42,6 @@ test("createGoal validates objectives and active-time constraints", () => {
   assert.equal(createGoal(null, "ship it", constraints(0, null)).ok, false);
   assert.equal(createGoal(null, "ship it", constraints(null, -1)).ok, false);
   assert.equal(createGoal(null, "ship it", constraints(120, 60)).ok, false);
-
   const result = createGoal(null, " ship it ", constraints(60, 300));
   assert.equal(result.ok, true);
   assert.equal(result.goal?.objective, "ship it");
@@ -54,7 +53,6 @@ test("createGoal validates objectives and active-time constraints", () => {
 test("blocked goals stop work and can be explicitly resumed", () => {
   const created = createGoal(null, "finish").goal;
   assert.ok(created);
-
   const blocked = updateGoalStatus(created, "blocked");
   assert.equal(blocked.ok, true);
   assert.equal(blocked.goal?.status, "blocked");
@@ -74,7 +72,6 @@ test("adjustGoal preserves identity, status, usage, and time constraints", () =>
   assert.ok(created);
   const used = applyUsage(created, 12, 7).goal;
   assert.ok(used);
-
   const adjusted = adjustGoal(used, "revised");
   assert.equal(adjusted.ok, true);
   assert.equal(adjusted.goal?.goalId, used.goalId);
@@ -83,7 +80,6 @@ test("adjustGoal preserves identity, status, usage, and time constraints", () =>
   assert.equal(adjusted.goal?.minimumActiveSeconds, 5);
   assert.equal(adjusted.goal?.maximumActiveSeconds, 20);
   assert.deepEqual(adjusted.goal?.usage, { tokensUsed: 12, activeSeconds: 7 });
-
   const completed = updateGoalStatus(adjusted.goal, "complete").goal;
   assert.ok(completed);
   assert.equal(adjustGoal(completed, "too late").ok, false);
@@ -99,6 +95,7 @@ test("reconstructGoal follows branch-local set, usage, and clear entries", () =>
     usage: { tokensUsed: 11, activeSeconds: 13 },
     updatedAt: created.updatedAt + 1,
   };
+
   const branch = [
     { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: setEntry(created, "tool", 1) },
     { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: runtimeUsageEntry(used, 2) },
@@ -110,6 +107,7 @@ test("reconstructGoal follows branch-local set, usage, and clear entries", () =>
     customType: CUSTOM_ENTRY_TYPE,
     data: clearEntry(created.goalId, "runtime", 3),
   });
+
   assert.deepEqual(reconstructGoal(branch), { goal: null, hasGoal: false });
 });
 
@@ -123,6 +121,7 @@ test("reconstructGoal migrates token-budget-era snapshots without retaining a to
     createdAt: 1,
     updatedAt: 2,
   };
+
   const entries = [
     {
       type: "custom",
@@ -239,7 +238,6 @@ test("host overflow reset markers remain branch-local and independent of clear e
 test("applyUsage marks active goals timeLimited after crossing maximum active time", () => {
   const created = createGoal(null, "finish", constraints(null, 10)).goal;
   assert.ok(created);
-
   const result = applyUsage(created, 12_000, 11);
   assert.equal(result.changed, true);
   assert.equal(result.crossedTimeLimit, true);
@@ -265,7 +263,6 @@ test("minimum active time blocks completion until accounted usage satisfies it",
   const rejected = updateGoalStatus(early, "complete");
   assert.equal(rejected.ok, false);
   assert.match(rejected.message, /1 more active second/);
-
   const eligible = applyUsage(early, 0, 1).goal;
   assert.ok(eligible);
   const completed = updateGoalStatus(eligible, "complete");
@@ -290,14 +287,12 @@ test("formatters show time constraints without token-limit terminology", () => {
   assert.ok(created);
   const used = applyUsage(created, 123_456, 65).goal;
   assert.ok(used);
-
   assert.equal(formatDuration(3661), "1h 1m");
   assert.equal(formatTokenValue(123_456), "123K (123,456)");
   assert.match(formatGoalSummary(used), /Minimum active time: 1m/);
   assert.match(formatGoalSummary(used), /Maximum active time: 5m/);
   assert.doesNotMatch(formatGoalSummary(used), /token budget/i);
   assert.equal(formatFooterStatus(used), "Pursuing goal (1m / 5m max)");
-
   const response = goalToolResponse(used);
   assert.equal(response.minimumTimeRemainingSeconds, 0);
   assert.equal(response.maximumTimeRemainingSeconds, 235);
@@ -315,7 +310,6 @@ test("goalWithLiveUsage adds in-progress active time only to display snapshots",
 test("goal lifecycle validation and equivalence retain full snapshots", () => {
   assert.equal(createGoal(null, "x".repeat(8_000)).ok, true);
   assert.equal(createGoal(null, "x".repeat(8_001)).ok, false);
-
   const created = createGoal(null, "finish").goal;
   assert.ok(created);
   const paused = updateGoalStatus(created, "paused").goal;
@@ -348,7 +342,6 @@ test("hidden prompts XML-escape untrusted objectives and describe time limits", 
     constraints(null, 10),
   ).goal;
   assert.ok(created);
-
   const continuation = continuationPrompt(created);
   const limited = timeLimitPrompt(created);
   assert.match(continuation, /ship &amp; &lt;\/untrusted_objective&gt;&lt;evil&gt;/);

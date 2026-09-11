@@ -59,10 +59,12 @@ export function continuationGoalIdFromPrompt(prompt: string): string | null {
   if (!prompt.startsWith(CONTINUATION_MARKER_PREFIX)) {
     return null;
   }
+
   const end = prompt.indexOf('"', CONTINUATION_MARKER_PREFIX.length);
   if (end === -1) {
     return null;
   }
+
   return prompt.slice(CONTINUATION_MARKER_PREFIX.length, end);
 }
 
@@ -83,9 +85,11 @@ function usageAndConstraintPromptLines(goal: ThreadGoal, includeRemaining: boole
   if (goal.minimumActiveSeconds !== null) {
     lines.push(`- Minimum active time: ${formatOptionalDuration(goal.minimumActiveSeconds)}`);
   }
+
   if (goal.maximumActiveSeconds !== null) {
     lines.push(`- Maximum active time: ${formatOptionalDuration(goal.maximumActiveSeconds)}`);
   }
+
   if (includeRemaining && goal.minimumActiveSeconds !== null) {
     lines.push(
       `- Time remaining before completion is allowed: ${formatRemainingDuration(
@@ -94,6 +98,7 @@ function usageAndConstraintPromptLines(goal: ThreadGoal, includeRemaining: boole
       )}`,
     );
   }
+
   if (includeRemaining && goal.maximumActiveSeconds !== null) {
     lines.push(
       `- Time remaining before the maximum-time checkpoint: ${formatRemainingDuration(
@@ -102,6 +107,7 @@ function usageAndConstraintPromptLines(goal: ThreadGoal, includeRemaining: boole
       )}`,
     );
   }
+
   return lines;
 }
 

@@ -15,6 +15,7 @@ export interface AssistantErrorMessage {
   role: string;
   stopReason?: string;
   errorMessage?: string;
+
   usage?: {
     input: number;
     output: number;
@@ -45,20 +46,8 @@ export function isSuccessfulAssistantTurn(message: AssistantErrorMessage): boole
   if (message.role !== "assistant") {
     return false;
   }
-  return message.stopReason !== "error" && message.stopReason !== "aborted";
-}
 
-export function isAssistantContextOverflow(
-  message: AssistantErrorMessage,
-  contextWindow: number,
-): boolean {
-  if (message.role !== "assistant") {
-    return false;
-  }
-  if (contextWindow <= 0) {
-    return isContextOverflowError(message.errorMessage);
-  }
-  return isContextOverflow(assistantMessageForOverflowCheck(message), contextWindow);
+  return message.stopReason !== "error" && message.stopReason !== "aborted";
 }
 
 export function isContextOverflowError(errorMessage: string | undefined): boolean {
@@ -68,6 +57,21 @@ export function isContextOverflowError(errorMessage: string | undefined): boolea
       errorMessage: errorMessage ?? "",
     }),
   );
+}
+
+export function isAssistantContextOverflow(
+  message: AssistantErrorMessage,
+  contextWindow: number,
+): boolean {
+  if (message.role !== "assistant") {
+    return false;
+  }
+
+  if (contextWindow <= 0) {
+    return isContextOverflowError(message.errorMessage);
+  }
+
+  return isContextOverflow(assistantMessageForOverflowCheck(message), contextWindow);
 }
 
 export function isProviderLimitError(errorMessage: string | undefined): boolean {
@@ -89,12 +93,15 @@ export function isRetryableTransientError(errorMessage: string | undefined): boo
   if (!errorMessage) {
     return false;
   }
+
   if (isContextOverflowError(errorMessage)) {
     return false;
   }
+
   if (isNonRetryableProviderLimitError(errorMessage)) {
     return false;
   }
+
   return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|retrying upstream|request buffer limit|reset before headers|socket hang up|ended without|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
     errorMessage,
   );
@@ -112,6 +119,7 @@ export function failureSignature(errorMessage: string | undefined): string {
   if (isContextOverflowError(errorMessage)) {
     return CONTEXT_OVERFLOW_SIGNATURE;
   }
+
   const message = (errorMessage ?? "unknown_error").trim();
   const firstLine = message.split("\n")[0] ?? message;
   return normalizeTransientSignature(firstLine);
@@ -125,6 +133,7 @@ export function countersForFailureSignature(
   if (counters.signature === signature) {
     return counters;
   }
+
   return {
     signature,
     transientAttempts: 0,
@@ -156,6 +165,7 @@ export function formatRecoveryAttention(attention: RecoveryAttention | null): st
   if (!attention) {
     return null;
   }
+
   return attention.kind === "pending"
     ? recoveryPendingAttentionMessage(attention.reason)
     : recoveryPausedAttentionMessage(attention.reason);

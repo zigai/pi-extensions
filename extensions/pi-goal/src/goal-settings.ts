@@ -8,6 +8,9 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+
 import {
   normalizeActiveGoalToolPolicy,
   validateActiveGoalToolPolicy,
@@ -48,7 +51,16 @@ const DEFAULT_CONFIG = {
 } as const;
 
 const CONFIG_KEYS = new Set(["$schema", "creationPromptPath", "disabledToolsWhileGoalActive"]);
+const GoalConfigCandidateSchema = Type.Object(
+  {
+    $schema: Type.Optional(Type.Unknown()),
+    creationPromptPath: Type.Optional(Type.Unknown()),
+    disabledToolsWhileGoalActive: Type.Optional(Type.Unknown()),
+  },
+  { additionalProperties: true },
+);
 
+type GoalConfigCandidate = Static<typeof GoalConfigCandidateSchema>;
 type GoalSettingsContext = Pick<ExtensionContext, "cwd" | "isProjectTrusted">;
 
 type ParsedGoalConfig = {
@@ -78,10 +90,11 @@ export function getGoalGlobalConfigSchemaPath(agentDir: string = getAgentDir()):
   return join(agentDir, EXTENSION_ID, CONFIG_SCHEMA_BASENAME);
 }
 
-function writeJsonIfMissing(path: string, value: unknown): void {
+function writeJsonIfMissing<Value>(path: string, value: Value): void {
   if (existsSync(path)) {
     return;
   }
+
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, {
     encoding: "utf8",
@@ -93,73 +106,98 @@ function writeJsonIfMissing(path: string, value: unknown): void {
 export function ensureGoalConfigFiles(agentDir: string = getAgentDir()): void {
   const configPath = getGoalGlobalConfigPath(agentDir);
   const schemaPath = getGoalGlobalConfigSchemaPath(agentDir);
+
   writeJsonIfMissing(configPath, DEFAULT_CONFIG);
   mkdirSync(dirname(schemaPath), { recursive: true });
+
   const schemaText = `${JSON.stringify(CONFIG_SCHEMA, null, 2)}\n`;
   if (!existsSync(schemaPath) || readFileSync(schemaPath, "utf8") !== schemaText) {
     writeFileSync(schemaPath, schemaText, "utf8");
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function isOptionalSchemaPath(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
+}
+
+function isOptionalCreationPromptPath(value: unknown): value is string | null | undefined {
+  return (
+    value === undefined || value === null || (typeof value === "string" && value.trim().length > 0)
+  );
+}
+
+function isOptionalDisabledToolList(value: unknown): value is string[] | undefined {
+  return (
+    value === undefined ||
+    (Array.isArray(value) && value.every((name): name is string => typeof name === "string"))
+  );
+}
+
+function parseGoalConfigCandidate(value: unknown): GoalConfigCandidate | null {
+  try {
+    return Value.Parse(GoalConfigCandidateSchema, value);
+  } catch {
+    return null;
+  }
 }
 
 function readConfig(configPath: string): LoadedConfig | undefined {
   if (!existsSync(configPath)) {
     return undefined;
   }
-  const parsed: unknown = JSON.parse(readFileSync(configPath, "utf8"));
-  if (!isRecord(parsed)) {
+
+  const parsed = parseGoalConfigCandidate(JSON.parse(readFileSync(configPath, "utf8")));
+  if (parsed === null) {
     throw new Error(`Goal settings at ${configPath} must be a JSON object.`);
   }
+
   const unknownKeys = Object.keys(parsed).filter((key) => !CONFIG_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(
       `Unknown goal setting${unknownKeys.length === 1 ? "" : "s"} in ${configPath}: ${unknownKeys.join(", ")}.`,
     );
   }
-  if (parsed.$schema !== undefined && typeof parsed.$schema !== "string") {
+
+  if (!isOptionalSchemaPath(parsed.$schema)) {
     throw new Error(`$schema in ${configPath} must be a string.`);
   }
 
   const creationPromptPath = parsed.creationPromptPath;
-  if (
-    creationPromptPath !== undefined &&
-    creationPromptPath !== null &&
-    (typeof creationPromptPath !== "string" || creationPromptPath.trim().length === 0)
-  ) {
+  if (!isOptionalCreationPromptPath(creationPromptPath)) {
     throw new Error(`creationPromptPath in ${configPath} must be a non-empty string or null.`);
   }
 
   const disabledTools = parsed.disabledToolsWhileGoalActive;
-  if (
-    disabledTools !== undefined &&
-    (!Array.isArray(disabledTools) || !disabledTools.every((name) => typeof name === "string"))
-  ) {
+  if (!isOptionalDisabledToolList(disabledTools)) {
     throw new Error(`disabledToolsWhileGoalActive in ${configPath} must be an array of strings.`);
   }
+
   const policyError = validateActiveGoalToolPolicy(disabledTools ?? []);
   if (policyError !== null) {
     throw new Error(`${policyError} (${configPath})`);
   }
 
-  return {
-    config: {
-      ...(creationPromptPath === undefined ? {} : { creationPromptPath }),
-      ...(disabledTools === undefined ? {} : { disabledToolsWhileGoalActive: disabledTools }),
-    },
-    configPath,
-  };
+  const config: ParsedGoalConfig = {};
+  if (creationPromptPath !== undefined) {
+    config.creationPromptPath = creationPromptPath;
+  }
+
+  if (disabledTools !== undefined) {
+    config.disabledToolsWhileGoalActive = disabledTools;
+  }
+
+  return { config, configPath };
 }
 
 function expandHome(path: string): string {
   if (path === "~") {
     return homedir();
   }
+
   if (path.startsWith("~/")) {
     return join(homedir(), path.slice(2));
   }
+
   return path;
 }
 
@@ -167,10 +205,12 @@ function resolvePromptPath(config: LoadedConfig | undefined): string | null {
   if (config === undefined) {
     return null;
   }
+
   const configuredPath = config.config.creationPromptPath;
   if (configuredPath === undefined || configuredPath === null) {
     return null;
   }
+
   const expanded = expandHome(configuredPath);
   return isAbsolute(expanded) ? expanded : resolve(dirname(config.configPath), expanded);
 }
@@ -191,7 +231,6 @@ export function loadGoalSettings(
       project?.config.disabledToolsWhileGoalActive ??
       global?.config.disabledToolsWhileGoalActive ??
       [];
-
     return {
       ok: true,
       settings: {

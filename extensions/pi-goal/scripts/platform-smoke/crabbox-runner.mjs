@@ -116,10 +116,11 @@ function spawnCrabbox(args, options = {}) {
       spawnOptions,
     );
   }
+
   return spawn(bin, args, spawnOptions);
 }
 
-export function execCrabbox(args, options = {}) {
+export async function execCrabbox(args, options = {}) {
   return new Promise((resolvePromise) => {
     let child;
     try {
@@ -131,20 +132,25 @@ export function execCrabbox(args, options = {}) {
         code: 1,
         signal: null,
       });
+
       return;
     }
+
     const stdout = [];
     const stderr = [];
     let timeout;
     let killTimeout;
+
     if (options.timeout) {
       timeout = setTimeout(() => {
         stderr.push(
           Buffer.from(`\n[platform-smoke] crabbox timed out after ${options.timeout}ms\n`),
         );
+
         try {
           child.kill("SIGTERM");
         } catch {}
+
         killTimeout = setTimeout(() => {
           try {
             child.kill("SIGKILL");
@@ -152,11 +158,13 @@ export function execCrabbox(args, options = {}) {
         }, 10_000);
       }, options.timeout);
     }
+
     child.stdout.on("data", (chunk) => stdout.push(chunk));
     child.stderr.on("data", (chunk) => stderr.push(chunk));
     child.on("error", (error) => {
       if (timeout) clearTimeout(timeout);
       if (killTimeout) clearTimeout(killTimeout);
+
       resolvePromise({
         stdout: Buffer.concat(stdout).toString(),
         stderr: `${Buffer.concat(stderr).toString()}${error.message}\n`,
@@ -164,9 +172,11 @@ export function execCrabbox(args, options = {}) {
         signal: null,
       });
     });
+
     child.on("close", (code, signal) => {
       if (timeout) clearTimeout(timeout);
       if (killTimeout) clearTimeout(killTimeout);
+
       resolvePromise({
         stdout: Buffer.concat(stdout).toString(),
         stderr: Buffer.concat(stderr).toString(),
@@ -193,12 +203,15 @@ export async function runOnLease(targetName, leaseId, command, options = {}) {
   for (const name of options.allowEnv ?? []) {
     args.push("--allow-env", name);
   }
+
   if (options.sync === false) args.push("--no-sync");
   else args.push("--fresh-sync");
+
   args.push("--shell", command);
   console.log(
     `  [crabbox] run ${targetName} ${options.sync === false ? "--no-sync" : "--fresh-sync"}`,
   );
+
   return execCrabbox(args, { timeout: options.timeout ?? 900_000 });
 }
 
@@ -210,6 +223,7 @@ export async function stopLease(targetName, leaseId, config = {}) {
 
 export async function cleanupStaleTargetState(targetName, config = {}) {
   if (targetName === "macos") return null;
+
   const args = ["cleanup", ...buildTargetBaseArgs(targetName, config)];
   console.log(`  [crabbox] ${args.join(" ")}`);
   return execCrabbox(args, { timeout: 120_000 });

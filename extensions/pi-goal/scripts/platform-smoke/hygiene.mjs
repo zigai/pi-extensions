@@ -34,13 +34,16 @@ export function trackedForbiddenProjectPaths() {
 
 function scanLocalForbiddenArtifacts(dir, depth, maxDepth, results) {
   if (depth > maxDepth) return;
+
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (depth === 0 && entry.name === "node_modules") continue;
+
     const relative = dir === "." ? `./${entry.name}` : `${dir}/${entry.name}`;
     const projectPath = relative.replace(/^\.\//, "");
     if (isForbiddenLocalArtifactPath(projectPath)) {
       results.push(relative);
     }
+
     if (entry.isDirectory() && depth + 1 < maxDepth) {
       scanLocalForbiddenArtifacts(relative, depth + 1, maxDepth, results);
     } else if (entry.isSymbolicLink() && depth + 1 < maxDepth) {

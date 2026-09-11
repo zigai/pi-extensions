@@ -6,134 +6,144 @@ import {
   type GlowupToolResult,
 } from "@zigai/pi-glowup/protocol";
 
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+
 import { formatCompactTokenValue, formatDuration } from "./format.js";
-import type { GoalStatus } from "./types.js";
 
-type GetGoalArgs = Readonly<Record<string, never>>;
+export const GetGoalArgsSchema = Type.Object({});
+export const CreateGoalArgsSchema = Type.Object({
+  objective: Type.String({
+    description: "Concrete objective to pursue until completion.",
+  }),
+  minimum_time_minutes: Type.Optional(
+    Type.Integer({
+      description: "Optional positive whole minimum active time in minutes.",
+      minimum: 1,
+    }),
+  ),
+  maximum_time_minutes: Type.Optional(
+    Type.Integer({
+      description: "Optional positive whole maximum active time in minutes.",
+      minimum: 1,
+    }),
+  ),
+  replace_existing: Type.Optional(
+    Type.Boolean({
+      description:
+        "Replace an existing non-complete goal. Use only when the user explicitly asks to set a new goal over the current one.",
+    }),
+  ),
+});
 
-type CreateGoalArgs = {
-  readonly objective: string;
-  readonly minimum_time_minutes?: number;
-  readonly maximum_time_minutes?: number;
-  readonly replace_existing?: boolean;
-};
+export const UpdateGoalArgsSchema = Type.Object({
+  status: Type.Union([Type.Literal("complete"), Type.Literal("blocked")], {
+    description:
+      "Use complete only after every requirement is verified. Use blocked only when no safe in-scope path remains without unavailable input, authority, access, or dependencies.",
+  }),
+});
 
-type UpdateGoalArgs = {
-  readonly status: "complete" | "blocked";
-};
+const RenderedGoalSchema = Type.Object({
+  objective: Type.String(),
+  status: Type.Union([
+    Type.Literal("active"),
+    Type.Literal("paused"),
+    Type.Literal("blocked"),
+    Type.Literal("timeLimited"),
+    Type.Literal("complete"),
+  ]),
+  tokensUsed: Type.Number(),
+  timeUsedSeconds: Type.Number(),
+});
 
-type RenderedGoal = {
-  readonly objective: string;
-  readonly status: GoalStatus;
-  readonly tokensUsed: number;
-  readonly timeUsedSeconds: number;
-};
+const GoalRenderingResultSchema = Type.Object({
+  goal: Type.Union([RenderedGoalSchema, Type.Null()]),
+});
 
-type GoalRenderingResult = {
-  readonly goal: RenderedGoal | null;
-};
+const GlowupTextResultSchema = Type.Object({
+  content: Type.Optional(
+    Type.Array(
+      Type.Object({
+        type: Type.String(),
+        text: Type.Optional(Type.String()),
+      }),
+    ),
+  ),
+  details: Type.Optional(GoalRenderingResultSchema),
+});
 
-function isGoalStatus(value: unknown): value is GoalStatus {
-  return (
-    value === "active" ||
-    value === "paused" ||
-    value === "blocked" ||
-    value === "timeLimited" ||
-    value === "complete"
-  );
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function optionalPositiveInteger(record: Readonly<Record<string, unknown>>, key: string): boolean {
-  const value = record[key];
-  return (
-    value === undefined || (typeof value === "number" && Number.isSafeInteger(value) && value >= 1)
-  );
-}
+export type GetGoalArgs = Static<typeof GetGoalArgsSchema>;
+export type CreateGoalArgs = Static<typeof CreateGoalArgsSchema>;
+export type UpdateGoalArgs = Static<typeof UpdateGoalArgsSchema>;
+type GoalRenderingResult = Static<typeof GoalRenderingResultSchema>;
 
 function parseGetGoalArgs(value: unknown): GetGoalArgs | undefined {
-  return isRecord(value) ? {} : undefined;
+  try {
+    return Value.Parse(GetGoalArgsSchema, value);
+  } catch {
+    return undefined;
+  }
 }
 
 function parseCreateGoalArgs(value: unknown): CreateGoalArgs | undefined {
-  if (!isRecord(value) || typeof value.objective !== "string") return undefined;
-  if (
-    !optionalPositiveInteger(value, "minimum_time_minutes") ||
-    !optionalPositiveInteger(value, "maximum_time_minutes") ||
-    (value.replace_existing !== undefined && typeof value.replace_existing !== "boolean")
-  ) {
+  try {
+    return Value.Parse(CreateGoalArgsSchema, value);
+  } catch {
     return undefined;
   }
-  return {
-    objective: value.objective,
-    ...(typeof value.minimum_time_minutes === "number"
-      ? { minimum_time_minutes: value.minimum_time_minutes }
-      : {}),
-    ...(typeof value.maximum_time_minutes === "number"
-      ? { maximum_time_minutes: value.maximum_time_minutes }
-      : {}),
-    ...(typeof value.replace_existing === "boolean"
-      ? { replace_existing: value.replace_existing }
-      : {}),
-  };
 }
 
 function parseUpdateGoalArgs(value: unknown): UpdateGoalArgs | undefined {
-  if (!isRecord(value) || (value.status !== "complete" && value.status !== "blocked")) {
+  try {
+    return Value.Parse(UpdateGoalArgsSchema, value);
+  } catch {
     return undefined;
   }
-  return { status: value.status };
-}
-
-function parseGoal(value: unknown): RenderedGoal | null | undefined {
-  if (value === null) return null;
-  if (
-    !isRecord(value) ||
-    typeof value.objective !== "string" ||
-    !isGoalStatus(value.status) ||
-    typeof value.tokensUsed !== "number" ||
-    !Number.isFinite(value.tokensUsed) ||
-    typeof value.timeUsedSeconds !== "number" ||
-    !Number.isFinite(value.timeUsedSeconds)
-  ) {
-    return undefined;
-  }
-  return {
-    objective: value.objective,
-    status: value.status,
-    tokensUsed: Math.max(0, Math.trunc(value.tokensUsed)),
-    timeUsedSeconds: Math.max(0, Math.trunc(value.timeUsedSeconds)),
-  };
 }
 
 function parseGoalResponse(value: unknown): GoalRenderingResult | undefined {
-  if (!isRecord(value) || !("goal" in value)) return undefined;
-  const goal = parseGoal(value.goal);
-  return goal === undefined ? undefined : { goal };
+  try {
+    const result = Value.Parse(GoalRenderingResultSchema, value);
+    if (result.goal === null) {
+      return result;
+    }
+
+    return {
+      goal: {
+        ...result.goal,
+        tokensUsed: Math.max(0, Math.trunc(result.goal.tokensUsed)),
+        timeUsedSeconds: Math.max(0, Math.trunc(result.goal.timeUsedSeconds)),
+      },
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function resultText(result: GlowupToolResult): string | undefined {
-  if (!Array.isArray(result.content)) return undefined;
-  for (const item of result.content) {
-    if (isRecord(item) && item.type === "text" && typeof item.text === "string") {
-      return item.text;
-    }
+  try {
+    const parsed = Value.Parse(GlowupTextResultSchema, result);
+
+    return parsed.content?.find((item) => item.type === "text")?.text;
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
 
 function parseGoalResult(value: unknown): GoalRenderingResult | undefined {
-  if (!isRecord(value)) return undefined;
-  const details = parseGoalResponse(value.details);
-  if (details !== undefined) return details;
-  const text = resultText(value);
-  if (text === undefined) return undefined;
+  let result: Static<typeof GlowupTextResultSchema>;
   try {
-    const parsed: unknown = JSON.parse(text);
-    return parseGoalResponse(parsed);
+    result = Value.Parse(GlowupTextResultSchema, value);
+  } catch {
+    return undefined;
+  }
+
+  if (result.details !== undefined) return parseGoalResponse(result.details);
+
+  const serialized = resultText(result);
+  if (serialized === undefined) return undefined;
+  try {
+    return parseGoalResponse(JSON.parse(serialized));
   } catch {
     return undefined;
   }
@@ -141,6 +151,7 @@ function parseGoalResult(value: unknown): GoalRenderingResult | undefined {
 
 function formatGoalResult(result: GoalRenderingResult): string {
   if (result.goal === null) return "No active goal";
+
   const metadata = [
     result.goal.tokensUsed > 0
       ? `${formatCompactTokenValue(result.goal.tokensUsed)} tok`

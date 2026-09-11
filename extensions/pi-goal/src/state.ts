@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+
 import {
   CUSTOM_ENTRY_TYPE,
   MAX_OBJECTIVE_CHARS,
@@ -19,6 +22,52 @@ export interface ApplyUsageOptions {
   expectedGoalId?: string | null;
   accountTimeLimited?: boolean;
 }
+
+export interface ApplyUsageResult {
+  goal: ThreadGoal | null;
+  changed: boolean;
+  crossedTimeLimit: boolean;
+}
+
+const LegacyGoalUsageSchema = Type.Object({
+  tokensUsed: Type.Number(),
+  activeSeconds: Type.Number(),
+});
+
+const LegacyStoredGoalSchema = Type.Object({
+  goalId: Type.String(),
+  objective: Type.String(),
+  status: Type.Union([
+    Type.Literal("active"),
+    Type.Literal("paused"),
+    Type.Literal("budgetLimited"),
+    Type.Literal("complete"),
+  ]),
+  minimumActiveSeconds: Type.Optional(Type.Undefined()),
+  maximumActiveSeconds: Type.Optional(Type.Undefined()),
+  usage: LegacyGoalUsageSchema,
+  createdAt: Type.Number(),
+  updatedAt: Type.Number(),
+});
+
+const LegacySetEntrySchema = Type.Object({
+  version: Type.Literal(1),
+  kind: Type.Literal("set"),
+  at: Type.Number(),
+  goal: LegacyStoredGoalSchema,
+});
+
+const LegacyBudgetUsageEntrySchema = Type.Object({
+  version: Type.Literal(1),
+  kind: Type.Literal("usage"),
+  source: Type.Literal("runtime"),
+  status: Type.Literal("budgetLimited"),
+  goalId: Type.String(),
+  usage: LegacyGoalUsageSchema,
+  updatedAt: Type.Number(),
+});
+
+type LegacyStoredGoal = Static<typeof LegacyStoredGoalSchema>;
 
 export function unixSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -60,9 +109,11 @@ export function validateObjective(objective: string): string | null {
   if (trimmed.length === 0) {
     return "Objective must not be empty.";
   }
+
   if ([...trimmed].length > MAX_OBJECTIVE_CHARS) {
     return `Objective must be ${MAX_OBJECTIVE_CHARS} characters or fewer.`;
   }
+
   return null;
 }
 
@@ -70,9 +121,11 @@ function validateActiveSeconds(value: number | null, label: string): string | nu
   if (value === null) {
     return null;
   }
+
   if (!Number.isInteger(value) || value <= 0) {
     return `${label} must be a positive whole number of seconds.`;
   }
+
   return null;
 }
 
@@ -84,6 +137,7 @@ export function validateGoalTimeConstraints(constraints: GoalTimeConstraints): s
   if (minimumError !== null) {
     return minimumError;
   }
+
   const maximumError = validateActiveSeconds(
     constraints.maximumActiveSeconds,
     "Maximum active time",
@@ -91,6 +145,7 @@ export function validateGoalTimeConstraints(constraints: GoalTimeConstraints): s
   if (maximumError !== null) {
     return maximumError;
   }
+
   if (
     constraints.minimumActiveSeconds !== null &&
     constraints.maximumActiveSeconds !== null &&
@@ -98,6 +153,7 @@ export function validateGoalTimeConstraints(constraints: GoalTimeConstraints): s
   ) {
     return "Minimum active time must not exceed maximum active time.";
   }
+
   return null;
 }
 
@@ -113,6 +169,7 @@ export function statusAfterTimeLimit(
   ) {
     return "timeLimited";
   }
+
   return status;
 }
 
@@ -155,10 +212,59 @@ export function setEntry(
   };
 }
 
+export function isGoalStatus(status: unknown): status is GoalStatus {
+  return (
+    status === "active" ||
+    status === "paused" ||
+    status === "blocked" ||
+    status === "timeLimited" ||
+    status === "complete"
+  );
+}
+
+export function isGoalUsage(usage: unknown): usage is GoalUsage {
+  return (
+    usage !== null &&
+    typeof usage === "object" &&
+    "tokensUsed" in usage &&
+    typeof usage.tokensUsed === "number" &&
+    "activeSeconds" in usage &&
+    typeof usage.activeSeconds === "number"
+  );
+}
+
+export function isRuntimeUsageGoalStatus(status: unknown): status is RuntimeUsageGoalStatus {
+  return status === "active" || status === "timeLimited";
+}
+
+export function isThreadGoal(goal: unknown): goal is ThreadGoal {
+  return (
+    goal !== null &&
+    typeof goal === "object" &&
+    "goalId" in goal &&
+    typeof goal.goalId === "string" &&
+    "objective" in goal &&
+    typeof goal.objective === "string" &&
+    "status" in goal &&
+    isGoalStatus(goal.status) &&
+    "minimumActiveSeconds" in goal &&
+    (goal.minimumActiveSeconds === null || typeof goal.minimumActiveSeconds === "number") &&
+    "maximumActiveSeconds" in goal &&
+    (goal.maximumActiveSeconds === null || typeof goal.maximumActiveSeconds === "number") &&
+    "createdAt" in goal &&
+    typeof goal.createdAt === "number" &&
+    "updatedAt" in goal &&
+    typeof goal.updatedAt === "number" &&
+    "usage" in goal &&
+    isGoalUsage(goal.usage)
+  );
+}
+
 export function runtimeUsageEntry(goal: ThreadGoal, at = unixSeconds()): GoalCustomEntry {
   if (!isRuntimeUsageGoalStatus(goal.status)) {
     throw new Error(`Cannot persist ${goal.status} goal as runtime usage entry.`);
   }
+
   return {
     version: 1,
     kind: "usage",
@@ -195,93 +301,48 @@ export function hostOverflowCapResetEntry(active: boolean, at = unixSeconds()): 
 }
 
 export function isGoalCustomEntry(data: unknown): data is GoalCustomEntry {
-  if (!data || typeof data !== "object") {
+  if (
+    data === null ||
+    typeof data !== "object" ||
+    !("version" in data) ||
+    data.version !== 1 ||
+    !("at" in data) ||
+    typeof data.at !== "number" ||
+    !("kind" in data)
+  ) {
     return false;
   }
-  const entry = data as GoalCustomEntry;
-  if (entry.version !== 1 || typeof entry.at !== "number") {
-    return false;
-  }
-  if (entry.kind === "clear") {
-    return entry.clearedGoalId === null || typeof entry.clearedGoalId === "string";
-  }
-  if (entry.kind === "usage") {
+
+  if (data.kind === "clear") {
     return (
-      entry.source === "runtime" &&
-      typeof entry.goalId === "string" &&
-      isRuntimeUsageGoalStatus(entry.status) &&
-      isGoalUsage(entry.usage) &&
-      typeof entry.updatedAt === "number"
+      "clearedGoalId" in data &&
+      (data.clearedGoalId === null || typeof data.clearedGoalId === "string")
     );
   }
-  if (entry.kind === "host_overflow_cap_reset") {
-    return typeof entry.active === "boolean";
-  }
-  return entry.kind === "set" && isThreadGoal(entry.goal);
-}
 
-export function isGoalUsage(usage: unknown): usage is GoalUsage {
-  if (!usage || typeof usage !== "object") {
-    return false;
-  }
-  const candidate = usage as GoalUsage;
-  return typeof candidate.tokensUsed === "number" && typeof candidate.activeSeconds === "number";
-}
-
-export function isRuntimeUsageGoalStatus(status: unknown): status is RuntimeUsageGoalStatus {
-  return status === "active" || status === "timeLimited";
-}
-
-export function isThreadGoal(goal: unknown): goal is ThreadGoal {
-  if (!goal || typeof goal !== "object") {
-    return false;
-  }
-  const candidate = goal as ThreadGoal;
-  return (
-    typeof candidate.goalId === "string" &&
-    typeof candidate.objective === "string" &&
-    isGoalStatus(candidate.status) &&
-    (candidate.minimumActiveSeconds === null ||
-      typeof candidate.minimumActiveSeconds === "number") &&
-    (candidate.maximumActiveSeconds === null ||
-      typeof candidate.maximumActiveSeconds === "number") &&
-    typeof candidate.createdAt === "number" &&
-    typeof candidate.updatedAt === "number" &&
-    isGoalUsage(candidate.usage)
-  );
-}
-
-export function isGoalStatus(status: unknown): status is GoalStatus {
-  return (
-    status === "active" ||
-    status === "paused" ||
-    status === "blocked" ||
-    status === "timeLimited" ||
-    status === "complete"
-  );
-}
-
-function normalizeLegacyStoredGoal(value: unknown): ThreadGoal | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const candidate = value as Record<string, unknown>;
-  if (
-    candidate.minimumActiveSeconds !== undefined ||
-    candidate.maximumActiveSeconds !== undefined ||
-    typeof candidate.goalId !== "string" ||
-    typeof candidate.objective !== "string" ||
-    (candidate.status !== "active" &&
-      candidate.status !== "paused" &&
-      candidate.status !== "budgetLimited" &&
-      candidate.status !== "complete") ||
-    typeof candidate.createdAt !== "number" ||
-    typeof candidate.updatedAt !== "number" ||
-    !isGoalUsage(candidate.usage)
-  ) {
-    return null;
+  if (data.kind === "usage") {
+    return (
+      "source" in data &&
+      data.source === "runtime" &&
+      "goalId" in data &&
+      typeof data.goalId === "string" &&
+      "status" in data &&
+      isRuntimeUsageGoalStatus(data.status) &&
+      "usage" in data &&
+      isGoalUsage(data.usage) &&
+      "updatedAt" in data &&
+      typeof data.updatedAt === "number"
+    );
   }
 
+  if (data.kind === "host_overflow_cap_reset") {
+    return "active" in data && typeof data.active === "boolean";
+  }
+
+  return data.kind === "set" && "goal" in data && isThreadGoal(data.goal);
+}
+
+function normalizeLegacyStoredGoal(candidate: LegacyStoredGoal): ThreadGoal {
   return {
     goalId: candidate.goalId,
     objective: candidate.objective,
@@ -295,30 +356,26 @@ function normalizeLegacyStoredGoal(value: unknown): ThreadGoal | null {
 }
 
 function legacySetEntryGoal(data: unknown): ThreadGoal | null {
-  if (!data || typeof data !== "object") {
+  try {
+    const candidate = Value.Parse(LegacySetEntrySchema, data);
+    return normalizeLegacyStoredGoal(candidate.goal);
+  } catch {
     return null;
   }
-  const candidate = data as Record<string, unknown>;
-  if (candidate.version !== 1 || candidate.kind !== "set" || typeof candidate.at !== "number") {
-    return null;
-  }
-  return normalizeLegacyStoredGoal(candidate.goal);
 }
 
 function applyLegacyBudgetLimitedUsage(goal: ThreadGoal | null, data: unknown): ThreadGoal | null {
-  if (!goal || !data || typeof data !== "object") {
+  let candidate: Static<typeof LegacyBudgetUsageEntrySchema>;
+  try {
+    candidate = Value.Parse(LegacyBudgetUsageEntrySchema, data);
+  } catch {
     return goal;
   }
-  const candidate = data as Record<string, unknown>;
+
   if (
-    candidate.version !== 1 ||
-    candidate.kind !== "usage" ||
-    candidate.source !== "runtime" ||
-    candidate.status !== "budgetLimited" ||
+    !goal ||
     candidate.goalId !== goal.goalId ||
-    typeof candidate.updatedAt !== "number" ||
     candidate.updatedAt < goal.updatedAt ||
-    !isGoalUsage(candidate.usage) ||
     candidate.usage.tokensUsed < goal.usage.tokensUsed ||
     candidate.usage.activeSeconds < goal.usage.activeSeconds ||
     (goal.status !== "active" && goal.status !== "paused")
@@ -340,12 +397,15 @@ function canApplyRuntimeUsageEntry(
   if (!goal || goal.goalId !== entry.goalId) {
     return false;
   }
+
   if (!isRuntimeUsageGoalStatus(goal.status)) {
     return false;
   }
+
   if (goal.status === "timeLimited" && entry.status === "active") {
     return false;
   }
+
   return (
     entry.updatedAt >= goal.updatedAt &&
     entry.usage.tokensUsed >= goal.usage.tokensUsed &&
@@ -360,6 +420,7 @@ export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalSnapsh
     if (entry.type !== "custom" || entry.customType !== CUSTOM_ENTRY_TYPE) {
       continue;
     }
+
     if (!isGoalCustomEntry(entry.data)) {
       const legacyGoal = legacySetEntryGoal(entry.data);
       if (legacyGoal !== null) {
@@ -369,6 +430,7 @@ export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalSnapsh
       }
       continue;
     }
+
     if (entry.data.kind === "clear") {
       goal = null;
     } else if (entry.data.kind === "set") {
@@ -377,6 +439,7 @@ export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalSnapsh
       if (!canApplyRuntimeUsageEntry(goal, entry.data)) {
         continue;
       }
+
       goal = cloneGoal(goal);
       goal.status = entry.data.status;
       goal.usage = cloneUsage(entry.data.usage);
@@ -399,9 +462,11 @@ export function reconstructHostOverflowCapNeedsUserReset(
     if (entry.type !== "custom" || entry.customType !== CUSTOM_ENTRY_TYPE) {
       continue;
     }
+
     if (!isGoalCustomEntry(entry.data)) {
       continue;
     }
+
     if (entry.data.kind === "host_overflow_cap_reset") {
       needsReset = entry.data.active;
     }
@@ -468,6 +533,7 @@ export function adjustGoal(current: ThreadGoal | null, objective: string): GoalR
   if (!current) {
     return { ok: false, message: "No goal exists to adjust.", goal: null };
   }
+
   if (current.status === "complete" || current.status === "timeLimited") {
     return {
       ok: false,
@@ -475,10 +541,12 @@ export function adjustGoal(current: ThreadGoal | null, objective: string): GoalR
       goal: current,
     };
   }
+
   const objectiveError = validateObjective(objective);
   if (objectiveError) {
     return { ok: false, message: objectiveError, goal: current };
   }
+
   const normalizedObjective = objective.trim();
   if (current.objective === normalizedObjective) {
     return { ok: true, message: "Goal unchanged.", goal: current };
@@ -507,6 +575,7 @@ export function updateGoalStatus(current: ThreadGoal | null, status: GoalStatus)
         goal: current,
       };
     }
+
     return {
       ok: false,
       message: "Completed goals are terminal; use /goal to replace them.",
@@ -526,6 +595,7 @@ export function updateGoalStatus(current: ThreadGoal | null, status: GoalStatus)
         goal: current,
       };
     }
+
     const goal = cloneGoal(current);
     goal.status = "complete";
     goal.updatedAt = unixSeconds();
@@ -540,6 +610,7 @@ export function updateGoalStatus(current: ThreadGoal | null, status: GoalStatus)
     if (current.status === "blocked") {
       return { ok: true, message: "Goal already blocked.", goal: current };
     }
+
     if (current.status !== "active") {
       return {
         ok: false,
@@ -547,6 +618,7 @@ export function updateGoalStatus(current: ThreadGoal | null, status: GoalStatus)
         goal: current,
       };
     }
+
     const goal = cloneGoal(current);
     goal.status = "blocked";
     goal.updatedAt = unixSeconds();
@@ -576,7 +648,6 @@ export function updateGoalStatus(current: ThreadGoal | null, status: GoalStatus)
     goal.status = statusAfterTimeLimit(status, goal.usage.activeSeconds, goal.maximumActiveSeconds);
   }
   goal.updatedAt = unixSeconds();
-
   return {
     ok: true,
     message: `Goal marked ${goal.status}.`,
@@ -589,7 +660,7 @@ export function applyUsage(
   tokensDelta: number,
   activeSecondsDelta: number,
   options: ApplyUsageOptions = {},
-): { goal: ThreadGoal | null; changed: boolean; crossedTimeLimit: boolean } {
+): ApplyUsageResult {
   if (!current) {
     return { goal: current, changed: false, crossedTimeLimit: false };
   }
@@ -618,6 +689,7 @@ export function applyUsage(
   const goal = cloneGoal(current);
   const wasUnderTimeLimit =
     goal.maximumActiveSeconds === null || goal.usage.activeSeconds < goal.maximumActiveSeconds;
+
   goal.usage.tokensUsed += tokens;
   goal.usage.activeSeconds += seconds;
   goal.status = statusAfterTimeLimit(
@@ -632,7 +704,6 @@ export function applyUsage(
     wasUnderTimeLimit &&
     goal.maximumActiveSeconds !== null &&
     goal.usage.activeSeconds >= goal.maximumActiveSeconds;
-
   return { goal, changed: true, crossedTimeLimit };
 }
 

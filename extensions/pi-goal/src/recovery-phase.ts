@@ -81,6 +81,7 @@ export function applyPersistedHostOverflowUserReset(
   if (!needsUserReset) {
     return clearHostOverflowUserReset(phase);
   }
+
   switch (phase.kind) {
     case "hostOverflowRecovering":
       return { kind: "hostOverflowRecoveringNeedsUserStart" };

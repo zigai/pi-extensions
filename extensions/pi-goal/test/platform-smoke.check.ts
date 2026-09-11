@@ -2,6 +2,33 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { test } from "vitest";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+
+const StringDictionarySchema = Type.Record(Type.String(), Type.String());
+const ScriptInventorySchema = Type.Object({
+  platformSmokeCheckTest: Type.String(),
+  platformSmokePackageScripts: Type.Array(Type.String()),
+  platformSmokeSyntaxScripts: Type.Array(Type.String()),
+});
+
+const PlatformPackageSchema = Type.Object(
+  {
+    engines: Type.Optional(StringDictionarySchema),
+    files: Type.Optional(Type.Array(Type.String())),
+    scripts: Type.Optional(StringDictionarySchema),
+  },
+  { additionalProperties: true },
+);
+
+const PackDescriptionSchema = Type.Object({
+  files: Type.Array(Type.Object({ path: Type.String() })),
+});
+
+const PackOutputSchema = Type.Union([
+  Type.Array(PackDescriptionSchema),
+  Type.Record(Type.String(), PackDescriptionSchema),
+]);
 
 function run(command: string, args: string[]) {
   return spawnSync(command, args, {
@@ -21,11 +48,7 @@ console.log(JSON.stringify({ platformSmokeCheckTest, platformSmokePackageScripts
 `,
   ]);
   assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout) as {
-    platformSmokeCheckTest: string;
-    platformSmokePackageScripts: string[];
-    platformSmokeSyntaxScripts: string[];
-  };
+  return Value.Parse(ScriptInventorySchema, JSON.parse(result.stdout));
 }
 
 test("platform smoke scripts have working syntax and help", () => {
@@ -35,25 +58,25 @@ test("platform smoke scripts have working syntax and help", () => {
     inventory.platformSmokeSyntaxScripts.includes("scripts/platform-smoke/platform-build.mjs"),
   );
   assert.ok(inventory.platformSmokeSyntaxScripts.includes("scripts/platform-smoke/check.mjs"));
+
   for (const path of inventory.platformSmokeSyntaxScripts) {
     assert.equal(run(process.execPath, ["--check", path]).status, 0, path);
   }
 
   assert.ok(existsSync("scripts/platform-smoke/platform-build-windows.ps1"));
+
   const powershellScript = readFileSync(
     "scripts/platform-smoke/platform-build-windows.ps1",
     "utf8",
   );
   assert.match(powershellScript, /platform-build\.mjs/);
   assert.doesNotMatch(powershellScript, /npm run verify/);
-
   const goalRuntimeScript = readFileSync("scripts/platform-smoke/goal-runtime-smoke.mjs", "utf8");
   assert.match(goalRuntimeScript, /"install", "-l", installPath, "--approve"/);
   assert.match(goalRuntimeScript, /"list", "--approve"/);
   assert.match(goalRuntimeScript, /"--approve",\s*"--model"/);
   assert.match(goalRuntimeScript, /built-in read tool/);
   assert.match(goalRuntimeScript, /readToolObserved/);
-
   const help = run(process.execPath, ["scripts/platform-smoke.mjs", "--help"]);
   assert.equal(help.status, 0);
   assert.match(help.stdout, /windows-native/);
@@ -62,12 +85,10 @@ test("platform smoke scripts have working syntax and help", () => {
   assert.match(help.stdout, /goal-runtime-smoke/);
   assert.match(help.stdout, /zai\/glm-5\.2/);
   assert.match(help.stdout, /--skip-windows-disposable-probe/);
-
   const doctor = readFileSync("scripts/platform-smoke/doctor.mjs", "utf8");
   assert.match(doctor, /disposableWindowsSshProbe/);
   assert.match(doctor, /skipWindowsDisposableProbe/);
   assert.match(doctor, /disposable Windows clone SSH\/tool probe OK/);
-
   const readme = readFileSync("README.md", "utf8");
   const platformDocs = readFileSync("docs/platform-smoke.md", "utf8");
   assert.match(readme, /\[Platform smoke testing\]\(docs\/platform-smoke\.md\)/);
@@ -78,11 +99,10 @@ test("platform smoke scripts have working syntax and help", () => {
 });
 
 test("platform smoke config and package scripts require macOS, Ubuntu, and native Windows", () => {
-  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
-    engines?: Record<string, string>;
-    files?: string[];
-    scripts?: Record<string, string>;
-  };
+  const packageJson = Value.Parse(
+    PlatformPackageSchema,
+    JSON.parse(readFileSync("package.json", "utf8")),
+  );
   assert.equal(packageJson.engines?.node, ">=24.0.0");
   assert.ok(packageJson.files?.includes("scripts"));
   assert.ok(packageJson.files?.includes("platform-smoke.config.mjs"));
@@ -154,7 +174,9 @@ const result = {
 };
 if (!Object.values(result).every(Boolean)) process.exit(1);
 `;
+
   writeFileSync(".env.platform-smoke-test", "test-only");
+
   try {
     const result = run(process.execPath, ["--input-type=module", "-e", code]);
     assert.equal(result.status, 0, result.stderr + result.stdout);
@@ -316,8 +338,7 @@ try {
 test("npm pack includes platform smoke docs and scripts", () => {
   const result = run("npm", ["pack", "--dry-run", "--json"]);
   assert.equal(result.status, 0, result.stderr);
-  type PackDescription = { files: Array<{ path: string }> };
-  const parsed = JSON.parse(result.stdout) as PackDescription[] | Record<string, PackDescription>;
+  const parsed = Value.Parse(PackOutputSchema, JSON.parse(result.stdout));
   const pack = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
   const paths = new Set(pack?.files.map((file) => file.path) ?? []);
   for (const path of [
@@ -330,12 +351,14 @@ test("npm pack includes platform smoke docs and scripts", () => {
   ]) {
     assert.ok(paths.has(path), `expected npm pack to include ${path}`);
   }
+
   for (const forbidden of [".artifacts/", ".crabbox/", ".debug/", ".env", ".env."]) {
     assert.equal(
       [...paths].some((path) => path === forbidden || path.startsWith(forbidden)),
       false,
     );
   }
+
   assert.equal(
     [...paths].some((path) => path.endsWith(".tgz")),
     false,

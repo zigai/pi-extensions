@@ -28,7 +28,6 @@ test("active goals never initiate compaction from tool-use turns", async () => {
   await harness.runCommand("ship it");
 
   await emitToolUseTurnEnd(harness, 0);
-
   assert.equal(harness.compactCalls.length, 0);
   assert.equal(harness.snapshot().goal?.status, "active");
 });
@@ -53,10 +52,8 @@ test("post-compaction goal continuation waits for the host pending queue", async
     vi.advanceTimersByTime(1);
     assert.equal(harness.sentMessages.length, 0);
     assert.equal(harness.compactCalls.length, 0);
-
     harness.setPendingMessages(false);
     flushContinuationScheduler();
-
     assert.equal(harness.sentMessages.length, 1);
     assert.deepEqual(harness.sentMessages[0]?.message.details, {
       kind: "continuation",

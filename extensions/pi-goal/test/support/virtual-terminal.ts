@@ -17,25 +17,29 @@ export type InterpretedRow = {
   readonly cells: readonly InterpretedCell[];
 };
 
-function delay(milliseconds: number): Promise<void> {
+async function delay(milliseconds: number): Promise<void> {
   return new Promise<void>((resolve: () => void): void => {
     const onDelayElapsed = (): void => {
       resolve();
     };
+
     setTimeout(onDelayElapsed, milliseconds);
   });
 }
 
 function countOccurrences(text: string, search: string): number {
   if (search.length === 0) throw new TypeError("occurrence search must not be empty");
+
   let count = 0;
   let offset = 0;
   while (offset <= text.length - search.length) {
     const match = text.indexOf(search, offset);
     if (match === -1) break;
+
     count += 1;
     offset = match + search.length;
   }
+
   return count;
 }
 
@@ -69,14 +73,17 @@ export class VirtualTerminal implements Terminal {
 
   write(data: string): void {
     this.writes.push(data);
-    const writeToParser = (): Promise<void> => {
+
+    const writeToParser = async (): Promise<void> => {
       return new Promise<void>((resolve: () => void): void => {
         const onWriteParsed = (): void => {
           resolve();
         };
+
         this.terminal.write(data, onWriteParsed);
       });
     };
+
     this.pendingWrites = this.pendingWrites.then(writeToParser);
   }
 
@@ -94,6 +101,7 @@ export class VirtualTerminal implements Terminal {
 
   moveBy(lines: number): void {
     if (lines === 0) return;
+
     this.write(`\u001b[${Math.abs(lines)}${lines > 0 ? "B" : "A"}`);
   }
 
@@ -150,6 +158,7 @@ export class VirtualTerminal implements Terminal {
         rows.push({ index: viewportRow, text: "", isWrapped: false, cells: [] });
         continue;
       }
+
       const cells: InterpretedCell[] = [];
       for (let column = 0; column < this.columns; column += 1) {
         const cell = line.getCell(column);
@@ -163,6 +172,7 @@ export class VirtualTerminal implements Terminal {
           isDim: cell.isDim() !== 0,
         });
       }
+
       rows.push({
         index: viewportRow,
         text: line.translateToString(true),
@@ -170,12 +180,14 @@ export class VirtualTerminal implements Terminal {
         cells,
       });
     }
+
     return rows;
   }
 
   screenText(): string {
     const rows = this.interpretedRows().map((row) => row.text);
     while (rows.at(-1) === "") rows.pop();
+
     return rows.join("\n");
   }
 

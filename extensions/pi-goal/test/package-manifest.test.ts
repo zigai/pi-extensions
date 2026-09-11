@@ -1,16 +1,32 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "vitest";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+
+const StringDictionarySchema = Type.Record(Type.String(), Type.String());
+const PackageManifestSchema = Type.Object(
+  {
+    bundledDependencies: Type.Optional(Type.Array(Type.String())),
+    dependencies: Type.Optional(StringDictionarySchema),
+    devDependencies: Type.Optional(StringDictionarySchema),
+    files: Type.Optional(Type.Array(Type.String())),
+    pi: Type.Optional(
+      Type.Object({
+        extensions: Type.Optional(Type.Array(Type.String())),
+        prompts: Type.Optional(Type.Array(Type.String())),
+      }),
+    ),
+    scripts: Type.Optional(StringDictionarySchema),
+  },
+  { additionalProperties: true },
+);
 
 test("package keeps the bundled creation template without exposing /create-goal", () => {
-  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
-    bundledDependencies?: string[];
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-    files?: string[];
-    pi?: { extensions?: string[]; prompts?: string[] };
-    scripts?: Record<string, string>;
-  };
+  const packageJson = Value.Parse(
+    PackageManifestSchema,
+    JSON.parse(readFileSync("package.json", "utf8")),
+  );
 
   assert.ok(packageJson.files?.includes("prompts"));
   assert.deepEqual(packageJson.pi?.extensions, ["./src/index.ts"]);

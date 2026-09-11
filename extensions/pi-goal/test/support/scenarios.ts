@@ -31,6 +31,7 @@ export function replaceHarnessBranchWithGoal(
     customType: CUSTOM_ENTRY_TYPE,
     data: setEntry(branchGoal, "command"),
   });
+
   return branchGoal;
 }
 
@@ -47,6 +48,7 @@ export async function givenOverflowPausedGoal(objective = "ship it"): Promise<{
       "session_compact",
       sessionCompactEvent({ reason: "overflow", willRetry: true }),
     );
+
     if (harness.snapshot().goal?.status === "active") {
       await harness.emit("agent_start", { type: "agent_start" });
     }
@@ -88,9 +90,11 @@ export async function emitPendingRecoveryShutdown(
   kind: "overflow" | "transient",
 ): Promise<ReturnType<RuntimeHarness["snapshot"]>["goal"]> {
   await harness.emit("session_shutdown", sessionShutdownEvent());
+
   const pausedGoal = harness.snapshot().goal;
   assert.equal(pausedGoal?.status, "paused");
   assert.match(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
+
   if (kind === "overflow") {
     assert.equal(
       harness.footerStatuses.at(-1),
@@ -105,6 +109,7 @@ export async function emitPendingRecoveryShutdown(
       ),
     );
   }
+
   return pausedGoal;
 }
 
@@ -115,13 +120,14 @@ export async function givenPendingRecoveryWithStaleQueuedAbort(
     kind === "overflow"
       ? createRuntimeHarness({ compactBehavior: "unavailable" })
       : createRuntimeHarness();
-
   await harness.runCommand("old goal");
+
   const oldQueued = harness.sentMessages[0];
   assert.ok(oldQueued);
   const oldMessage = queuedCustomMessage(oldQueued);
 
   await harness.runCommand("ship it");
+
   const activeGoal = harness.snapshot().goal;
   assert.ok(activeGoal);
   harness.sentMessages.length = 0;
@@ -131,14 +137,11 @@ export async function givenPendingRecoveryWithStaleQueuedAbort(
   await emitPersistentAssistantError(harness, 0, errorMessage);
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /\/goal resume/);
-
   await emitQueuedTurnThroughContext(harness, [oldMessage]);
   assert.equal(harness.abortCount, 1);
-
   const pausedGoal = await emitPendingRecoveryShutdown(harness, kind);
   assert.ok(pausedGoal);
   assert.equal(pausedGoal.goalId, activeGoal.goalId);
-
   return { harness };
 }
 
@@ -151,15 +154,14 @@ export async function replaceGoalAfterOverflowPause(
 }> {
   const previousGoal = harness.snapshot().goal;
   assert.ok(previousGoal);
-
   harness.sentMessages.length = 0;
   harness.sentUserMessages.length = 0;
   await harness.runCommand(replacementObjective);
+
   const goal = harness.snapshot().goal;
   assert.ok(goal);
   assert.equal(goal.status, "active");
   assert.equal(goal.objective, replacementObjective);
   assert.notEqual(goal.goalId, previousGoal.goalId);
-
   return { previousGoalId: previousGoal.goalId, goal };
 }

@@ -124,6 +124,7 @@ test("provider-limit classifier recognizes only quota and usage-limit errors", (
   for (const errorMessage of terminalProviderLimitErrors) {
     assert.equal(isProviderLimitError(errorMessage), true, errorMessage);
   }
+
   assert.equal(isProviderLimitError("usage limit has been reached for this account"), true);
   assert.equal(
     isProviderLimitError("invalid tool call state: malformed function arguments"),
@@ -171,6 +172,7 @@ test("recovery pending attention helpers round-trip structured reasons", () => {
 
 test("changing context overflow messages share one recovery signature and reach the host cap", () => {
   const state = createGoalRecoveryMachine();
+
   const messages = [
     "prompt is too long: 100000 tokens > 200000 maximum",
     "The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)",
@@ -219,7 +221,6 @@ test("overflow compaction attempts survive intervening transient provider errors
   });
   assert.equal(firstOverflow.type, "noop");
   assert.equal(state.counters.compactionAttempts, 1);
-
   onRecoverySessionCompact(state);
   assert.equal(state.counters.compactionAttempts, 1);
 
@@ -243,6 +244,7 @@ test("overflow compaction attempts survive intervening transient provider errors
 
 test("varied retryable transient errors stay active without tripping signature-scoped cap", () => {
   const state = createGoalRecoveryMachine();
+
   const errors = [
     "HTTP 500 internal server error",
     "HTTP 502 bad gateway",
@@ -353,7 +355,6 @@ test("recovery session compact preserves overflow attempt counts after host comp
   };
 
   onRecoverySessionCompact(state);
-
   assert.equal(state.counters.compactionAttempts, 1);
   assert.equal(state.counters.transientAttempts, 0);
   assert.equal(state.counters.signature, CONTEXT_OVERFLOW_SIGNATURE);
@@ -371,7 +372,6 @@ test("recovery session compact preserves non-overflow pending attention and coun
   setRecoveryPendingAttention(state, action.reason);
 
   onRecoverySessionCompact(state);
-
   assert.equal(state.counters.transientAttempts, 1);
   assert.equal(state.counters.signature, "websocket closed");
   assert.deepEqual(state.attention, {
@@ -406,7 +406,6 @@ test("silent context overflow increments compaction attempts like error overflow
 test("repeat overflow compaction is due once host recovery cap is reached", () => {
   const state = createGoalRecoveryMachine();
   assert.equal(isRepeatOverflowCompactionDue(state), false);
-
   planRecoveryForSilentContextOverflow(state);
   assert.equal(isRepeatOverflowCompactionDue(state), true);
 });
@@ -446,6 +445,7 @@ test("non-retryable provider errors pause immediately", () => {
     errorMessage: "invalid tool call state: malformed function arguments",
   });
   assert.equal(action.type, "pause");
+
   if (action.type === "pause") {
     assert.match(action.reason, /non-retryable provider error/);
   }
@@ -460,8 +460,10 @@ test("terminal provider-limit errors pause immediately instead of pending host r
   });
 
   assert.equal(action.type, "pause");
+
   if (action.type === "pause") {
     assert.equal(action.reason, "non-retryable provider error (insufficient_quota 429)");
   }
+
   assert.equal(state.counters.transientAttempts, 0);
 });

@@ -4,7 +4,6 @@ import { test } from "vitest";
 import {
   assistantMessage,
   createRuntimeHarness,
-  emitProviderContext,
   emitQueuedTurnThroughContext,
   goalUserContextMessage,
   providerContextMessageAt,
@@ -32,7 +31,6 @@ test("older id-less agent_end during active abort does not finish newer abort", 
     const messageB = queuedCustomMessage(queuedB, 2);
     const goalBId = harness.snapshot().goal?.goalId;
     assert.ok(goalBId);
-
     await harness.runCommand("goal C");
     const replacement = harness.snapshot().goal;
     assert.equal(replacement?.objective, "goal C");
@@ -40,10 +38,8 @@ test("older id-less agent_end during active abort does not finish newer abort", 
 
     await emitQueuedTurnThroughContext(harness, [messageA], 0);
     assert.equal(harness.abortCount, 1);
-
     await emitQueuedTurnThroughContext(harness, [messageB], 1);
     assert.equal(harness.abortCount, 2);
-
     now = 4_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -52,7 +48,6 @@ test("older id-less agent_end during active abort does not finish newer abort", 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     now = 5_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -88,7 +83,6 @@ test("duplicate same-goal stale aborts keep replacement active through both agen
     const messageA = queuedCustomMessage(queuedA, 1);
     const goalAId = harness.snapshot().goal?.goalId;
     assert.ok(goalAId);
-
     await harness.runCommand("goal B");
     const replacement = harness.snapshot().goal;
     assert.equal(replacement?.objective, "goal B");
@@ -96,10 +90,8 @@ test("duplicate same-goal stale aborts keep replacement active through both agen
 
     await emitQueuedTurnThroughContext(harness, [messageA], 0);
     assert.equal(harness.abortCount, 1);
-
     await emitQueuedTurnThroughContext(harness, [messageA], 1);
     assert.equal(harness.abortCount, 2);
-
     now = 4_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -115,7 +107,6 @@ test("duplicate same-goal stale aborts keep replacement active through both agen
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     now = 5_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -151,7 +142,6 @@ test("duplicate queued messages in newer same-goal stale abort keep replacement 
     const messageA = queuedCustomMessage(queuedA, 1);
     const goalAId = harness.snapshot().goal?.goalId;
     assert.ok(goalAId);
-
     await harness.runCommand("goal B");
     const replacement = harness.snapshot().goal;
     assert.equal(replacement?.objective, "goal B");
@@ -159,7 +149,6 @@ test("duplicate queued messages in newer same-goal stale abort keep replacement 
 
     await emitQueuedTurnThroughContext(harness, [messageA], 0);
     assert.equal(harness.abortCount, 1);
-
     await emitQueuedTurnThroughContext(harness, [messageA, messageA], 1);
     assert.equal(harness.abortCount, 2);
 
@@ -181,7 +170,6 @@ test("duplicate queued messages in newer same-goal stale abort keep replacement 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.sentMessages.length, 0);
-
     now = 5_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -210,14 +198,12 @@ test("back-to-back stale aborts consume late first-turn terminals without pausin
     const messageA = queuedCustomMessage(queuedA, 1);
     const goalAId = harness.snapshot().goal?.goalId;
     assert.ok(goalAId);
-
     await harness.runCommand("goal B");
     const queuedB = harness.sentMessages.at(-1);
     assert.ok(queuedB);
     const messageB = queuedCustomMessage(queuedB, 2);
     const goalBId = harness.snapshot().goal?.goalId;
     assert.ok(goalBId);
-
     await harness.runCommand("goal C");
     const replacement = harness.snapshot().goal;
     assert.equal(replacement?.objective, "goal C");
@@ -225,10 +211,8 @@ test("back-to-back stale aborts consume late first-turn terminals without pausin
 
     await emitQueuedTurnThroughContext(harness, [messageA], 0);
     assert.equal(harness.abortCount, 1);
-
     await emitQueuedTurnThroughContext(harness, [messageB], 1);
     assert.equal(harness.abortCount, 2);
-
     now = 4_000;
     await harness.emit("turn_end", {
       type: "turn_end",
@@ -238,7 +222,6 @@ test("back-to-back stale aborts consume late first-turn terminals without pausin
     });
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
-
     now = 5_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -253,7 +236,6 @@ test("back-to-back stale aborts consume late first-turn terminals without pausin
     });
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
-
     now = 6_000;
     await harness.emit("agent_end", {
       type: "agent_end",
@@ -290,14 +272,12 @@ for (const stopReason of ["aborted", "stop"] as const) {
       const messageA = queuedCustomMessage(queuedA, 1);
       const goalAId = harness.snapshot().goal?.goalId;
       assert.ok(goalAId);
-
       await harness.runCommand("goal B");
       const queuedB = harness.sentMessages.at(-1);
       assert.ok(queuedB);
       const messageB = queuedCustomMessage(queuedB, 2);
       const goalBId = harness.snapshot().goal?.goalId;
       assert.ok(goalBId);
-
       await harness.runCommand("goal C");
       const replacement = harness.snapshot().goal;
       assert.equal(replacement?.objective, "goal C");
@@ -305,10 +285,8 @@ for (const stopReason of ["aborted", "stop"] as const) {
 
       await emitQueuedTurnThroughContext(harness, [messageA], 0);
       assert.equal(harness.abortCount, 1);
-
       await emitQueuedTurnThroughContext(harness, [messageB], 1);
       assert.equal(harness.abortCount, 2);
-
       now = 4_000;
       await harness.emit("agent_end", {
         type: "agent_end",
@@ -357,11 +335,9 @@ test("compaction between stale context abort and cleanup does not persist, accou
 
     await emitQueuedTurnThroughContext(harness, [oldMessage], 0);
     assert.equal(harness.abortCount, 1);
-
     now = 5_000;
     await harness.emit("session_before_compact", sessionBeforeCompactEvent());
     await harness.emit("session_compact", sessionCompactEvent());
-
     assert.equal(harness.entries.length, entryCountBeforeCompaction);
     assert.equal(harness.sentMessages.length, 0);
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
@@ -375,7 +351,6 @@ test("compaction between stale context abort and cleanup does not persist, accou
     });
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
-
     const userMessage = goalUserContextMessage("continue now", 2);
     now = 6_000;
     await emitQueuedTurnThroughContext(harness, [userMessage], 1);
@@ -410,7 +385,6 @@ test("mixed stale and current follow-up batch neutralizes stale work without abo
   const oldMessage = queuedCustomMessage(oldQueued, 1);
   const oldGoalId = harness.snapshot().goal?.goalId;
   assert.ok(oldGoalId);
-
   await harness.runCommand("new goal");
   const replacement = harness.snapshot().goal;
   assert.equal(replacement?.objective, "new goal");
@@ -421,7 +395,6 @@ test("mixed stale and current follow-up batch neutralizes stale work without abo
 
   const contextResults = await emitQueuedTurnThroughContext(harness, [oldMessage, currentMessage]);
   const contextResult = requireProviderContextResult(contextResults);
-
   assert.equal(harness.abortCount, 0);
   assert.equal(contextResult.messages.length, 2);
   assert.match(

@@ -4,13 +4,14 @@ import { test } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { createGoalPersistence } from "../src/goal-persistence.js";
+import { isGoalCustomEntry } from "../src/state.js";
 import { createGoalStateController } from "../src/goal-state-controller.js";
 import {
   createGoalRecoveryMachine,
   recoveryPhaseNeedsUserStartTurn,
 } from "../src/recovery-machine.js";
 import type { StatusContext } from "../src/goal-runtime-status.js";
-import type { ThreadGoal } from "../src/types.js";
+import type { GoalCustomEntry, ThreadGoal } from "../src/types.js";
 
 const activeGoal: ThreadGoal = {
   goalId: "goal-a",
@@ -25,9 +26,10 @@ const activeGoal: ThreadGoal = {
 
 function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) {
   const recoveryState = createGoalRecoveryMachine();
-  const entries: unknown[] = [];
+  const entries: GoalCustomEntry[] = [];
   const pi = {
-    appendEntry(_type: string, data: unknown) {
+    appendEntry<Data>(_type: string, data: Data) {
+      assert.ok(isGoalCustomEntry(data));
       entries.push(data);
     },
   } satisfies Pick<ExtensionAPI, "appendEntry">;
@@ -38,6 +40,7 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
   }
 
   let refreshCount = 0;
+
   const ctx = {
     ui: { setStatus() {} },
   } satisfies StatusContext;
@@ -91,7 +94,6 @@ test("goal snapshots are cloned at persistence and controller boundaries", () =>
   assert.ok(firstRead);
   assert.equal(firstRead.objective, "ship it");
   assert.equal(firstRead.usage.tokensUsed, 1);
-
   firstRead.objective = "mutated read";
   firstRead.usage.tokensUsed = 123;
 
@@ -99,7 +101,6 @@ test("goal snapshots are cloned at persistence and controller boundaries", () =>
   assert.ok(secondRead);
   assert.equal(secondRead.objective, "ship it");
   assert.equal(secondRead.usage.tokensUsed, 1);
-
   const directRead = harness.persistence.getGoal();
   assert.ok(directRead);
   directRead.usage.activeSeconds = 456;
@@ -115,7 +116,6 @@ test("beginOverflowRecovery without an active goal records user reset only", () 
   assert.equal(recoveryPhaseNeedsUserStartTurn(harness.recoveryState.phase), true);
   assert.equal(harness.refreshCount, 0);
   assert.equal(harness.entries.length, 1);
-
   harness.stateController.beginOverflowRecovery(harness.ctx);
   assert.equal(harness.entries.length, 1);
 });
@@ -129,9 +129,9 @@ test("beginOverflowRecovery with a paused goal records user reset without pendin
   assert.equal(harness.recoveryState.attention, null);
   assert.equal(harness.refreshCount, 0);
   assert.equal(harness.entries.length, 1);
-  const entry = harness.entries[0] as { kind?: string; active?: boolean };
-  assert.equal(entry.kind, "host_overflow_cap_reset");
-  assert.equal(entry.active, true);
+  const entry = harness.entries[0];
+  assert.equal(entry?.kind, "host_overflow_cap_reset");
+  assert.equal(entry?.kind === "host_overflow_cap_reset" && entry.active, true);
 });
 
 test("beginOverflowRecovery with an active goal records pending attention and durable reset", () => {
@@ -145,9 +145,9 @@ test("beginOverflowRecovery with an active goal records pending attention and du
   });
   assert.equal(harness.refreshCount, 1);
   assert.equal(harness.entries.length, 1);
-  const entry = harness.entries[0] as { kind?: string; active?: boolean };
-  assert.equal(entry.kind, "host_overflow_cap_reset");
-  assert.equal(entry.active, true);
+  const entry = harness.entries[0];
+  assert.equal(entry?.kind, "host_overflow_cap_reset");
+  assert.equal(entry?.kind === "host_overflow_cap_reset" && entry.active, true);
 });
 
 test("persistHostOverflowUserReset appends only when phase changes", () => {
@@ -155,13 +155,11 @@ test("persistHostOverflowUserReset appends only when phase changes", () => {
 
   harness.stateController.persistHostOverflowUserReset(true);
   assert.equal(harness.entries.length, 1);
-
   harness.stateController.persistHostOverflowUserReset(true);
   assert.equal(harness.entries.length, 1);
-
   harness.stateController.persistHostOverflowUserReset(false);
   assert.equal(harness.entries.length, 2);
-  const cleared = harness.entries[1] as { kind?: string; active?: boolean };
-  assert.equal(cleared.kind, "host_overflow_cap_reset");
-  assert.equal(cleared.active, false);
+  const cleared = harness.entries[1];
+  assert.equal(cleared?.kind, "host_overflow_cap_reset");
+  assert.equal(cleared?.kind === "host_overflow_cap_reset" && cleared.active, false);
 });

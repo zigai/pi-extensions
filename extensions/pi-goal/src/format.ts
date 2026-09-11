@@ -37,12 +37,15 @@ export function formatDuration(seconds: number): string {
   if (days > 0) {
     return `${days}d ${hours}h ${minutes}m`;
   }
+
   if (hours > 0) {
     return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
   }
+
   if (minutes > 0) {
     return `${minutes}m`;
   }
+
   return `${remainingSeconds}s`;
 }
 
@@ -76,6 +79,7 @@ export function formatTokenValue(value: number): string {
   if (compact === exact) {
     return exact;
   }
+
   return `${compact} (${exact})`;
 }
 
@@ -87,12 +91,15 @@ function commandHint(status: GoalStatus): string {
   if (status === "active") {
     return "/goal pause";
   }
+
   if (status === "paused" || status === "blocked") {
     return "/goal resume";
   }
+
   if (status === "complete") {
     return "/goal <goal> to replace";
   }
+
   return "/goal <goal> to replace";
 }
 
@@ -111,10 +118,13 @@ export function formatGoalSummary(goal: ThreadGoal | null): string {
   if (goal.minimumActiveSeconds !== null) {
     lines.push(`Minimum active time: ${formatDuration(goal.minimumActiveSeconds)}`);
   }
+
   if (goal.maximumActiveSeconds !== null) {
     lines.push(`Maximum active time: ${formatDuration(goal.maximumActiveSeconds)}`);
   }
+
   lines.push(`Hint: ${commandHint(goal.status)}`);
+
   return lines.join("\n");
 }
 
@@ -144,9 +154,11 @@ export function formatFooterStatus(
     if (goal.maximumActiveSeconds !== null) {
       return `Pursuing goal (${formatDuration(goal.usage.activeSeconds)} / ${formatDuration(goal.maximumActiveSeconds)} max)`;
     }
+
     if (goal.usage.activeSeconds > 0) {
       return `Pursuing goal (${formatDuration(goal.usage.activeSeconds)})`;
     }
+
     return "Pursuing goal";
   }
 
@@ -161,6 +173,7 @@ export function formatFooterStatus(
   if (goal.usage.activeSeconds > 0) {
     return `Goal achieved (${formatDuration(goal.usage.activeSeconds)})`;
   }
+
   return "Goal achieved";
 }
 
@@ -182,6 +195,7 @@ export function minimumTimeRemainingSeconds(goal: ThreadGoal | null): number | n
   if (!goal || goal.minimumActiveSeconds === null) {
     return null;
   }
+
   return Math.max(0, goal.minimumActiveSeconds - goal.usage.activeSeconds);
 }
 
@@ -189,6 +203,7 @@ export function maximumTimeRemainingSeconds(goal: ThreadGoal | null): number | n
   if (!goal || goal.maximumActiveSeconds === null) {
     return null;
   }
+
   return Math.max(0, goal.maximumActiveSeconds - goal.usage.activeSeconds);
 }
 
@@ -196,6 +211,7 @@ export function completionUsageReport(goal: ThreadGoal | null): string | null {
   if (!goal || goal.status !== "complete") {
     return null;
   }
+
   if (goal.usage.activeSeconds <= 0 && goal.usage.tokensUsed <= 0) {
     return null;
   }
@@ -204,6 +220,7 @@ export function completionUsageReport(goal: ThreadGoal | null): string | null {
   if (goal.usage.activeSeconds > 0) {
     parts.push(`time used: ${formatDuration(goal.usage.activeSeconds)}.`);
   }
+
   if (goal.usage.tokensUsed > 0) {
     parts.push(`tokens used: ${formatInteger(goal.usage.tokensUsed)}.`);
   }

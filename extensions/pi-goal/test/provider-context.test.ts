@@ -16,6 +16,7 @@ import {
   goalUserContextMessage,
   providerContextMessageAt,
   requireProviderContextResult,
+  sentMessageText,
 } from "./support/runtime-harness.js";
 
 test("provider context dedupes many active continuations without refreshing the latest prompt", async () => {
@@ -23,7 +24,6 @@ test("provider context dedupes many active continuations without refreshing the 
   await harness.runCommand("ship it");
   const goal = harness.snapshot().goal;
   assert.ok(goal);
-
   const fullStart = continuationPrompt(goal);
   const olderContinuation = continuationPrompt({
     ...goal,
@@ -81,12 +81,10 @@ test("active provider-context user marker without passthrough binding remains ve
   await harness.runCommand("ship it");
   const goal = harness.snapshot().goal;
   assert.ok(goal);
-
   const userPrompt = continuationPrompt(goal);
   const userMessage = goalUserContextMessage(userPrompt, 1);
 
   const contextResults = await emitProviderContext(harness, [userMessage]);
-
   assert.equal(contextResults[0], undefined);
   assert.match(userPrompt, /<untrusted_objective>/);
 });
@@ -96,7 +94,6 @@ test("active provider-context dedupe preserves historical user marker mixed with
   await harness.runCommand("ship it");
   const goal = harness.snapshot().goal;
   assert.ok(goal);
-
   const userPrompt = continuationPrompt(goal);
   const olderContinuation = continuationPrompt({
     ...goal,
@@ -108,6 +105,7 @@ test("active provider-context dedupe preserves historical user marker mixed with
   });
 
   const userMessage = goalUserContextMessage(userPrompt, 2);
+
   const messages = [
     goalCustomContextMessage({
       content: olderContinuation,
@@ -150,10 +148,7 @@ for (const source of ["interactive", "rpc"] as const) {
     assert.ok(goal);
     const queued = harness.sentMessages[0];
     assert.ok(queued);
-    const prompt = queued.message.content;
-    if (typeof prompt !== "string") {
-      assert.fail("Expected queued goal message content to be a string.");
-    }
+    const prompt = sentMessageText(queued);
 
     await harness.emit("input", {
       type: "input",
@@ -163,7 +158,6 @@ for (const source of ["interactive", "rpc"] as const) {
 
     const userMessage = goalUserContextMessage(prompt, 1);
     const contextResults = await emitQueuedTurnThroughContext(harness, [userMessage], 0);
-
     assert.equal(contextResults[0], undefined);
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.match(prompt, /<untrusted_objective>/);
@@ -175,7 +169,6 @@ test("active goal provider-context dedupe preserves pasted marker input mixed wi
   await harness.runCommand("ship it");
   const goal = harness.snapshot().goal;
   assert.ok(goal);
-
   const pastedPrompt = continuationPrompt(goal);
   const olderContinuation = continuationPrompt({
     ...goal,
@@ -193,6 +186,7 @@ test("active goal provider-context dedupe preserves pasted marker input mixed wi
   });
 
   const userMessage = goalUserContextMessage(pastedPrompt, 2);
+
   const messages = [
     goalCustomContextMessage({
       content: olderContinuation,
@@ -210,7 +204,6 @@ test("active goal provider-context dedupe preserves pasted marker input mixed wi
   const contextResults = await emitQueuedTurnThroughContext(harness, messages, 0);
   const result = requireProviderContextResult(contextResults);
   assert.equal(result.messages.length, 3);
-
   assert.deepEqual(providerContextMessageAt(result, 1).content, userMessage.content);
   assert.match(
     String(userContentFromUnknown(providerContextMessageAt(result, 1).content)[0]?.text),
@@ -232,7 +225,6 @@ test("latest active continuation remains runnable after provider-context dedupe"
   await harness.runCommand("ship it");
   const goal = harness.snapshot().goal;
   assert.ok(goal);
-
   const staleInBranch = continuationPrompt(goal);
   const latestInBranch = compactContinuationPrompt(goal);
   const contextResults = await emitProviderContext(harness, [
@@ -250,7 +242,6 @@ test("latest active continuation remains runnable after provider-context dedupe"
   const contextResult = requireProviderContextResult(contextResults);
   const latestContent = String(providerContextMessageAt(contextResult, 1).content);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
-
   harness.sentMessages.length = 0;
   await harness.emit("before_agent_start", {
     type: "before_agent_start",

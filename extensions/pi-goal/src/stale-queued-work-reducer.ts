@@ -79,13 +79,19 @@ function cloneState(state: StaleQueuedWorkState): StaleQueuedWorkState {
     case "idle":
       return { kind: "idle" };
     case "observingTurn":
+      if (state.terminalCleanup === undefined) {
+        return {
+          kind: "observingTurn",
+          staleGoalIds: new Set(state.staleGoalIds),
+          hasRunnableWork: state.hasRunnableWork,
+        };
+      }
+
       return {
         kind: "observingTurn",
         staleGoalIds: new Set(state.staleGoalIds),
         hasRunnableWork: state.hasRunnableWork,
-        ...(state.terminalCleanup
-          ? { terminalCleanup: cloneTerminalCleanup(state.terminalCleanup) }
-          : {}),
+        terminalCleanup: cloneTerminalCleanup(state.terminalCleanup),
       };
     case "abortingTurn":
       return {
@@ -108,11 +114,19 @@ function cloneState(state: StaleQueuedWorkState): StaleQueuedWorkState {
 function beginObservingFromIdleOrAwaiting(
   state: Extract<StaleQueuedWorkState, { kind: "idle" | "awaitingTerminalCleanup" }>,
 ): Extract<StaleQueuedWorkState, { kind: "observingTurn" }> {
+  if (state.kind === "awaitingTerminalCleanup") {
+    return {
+      kind: "observingTurn",
+      staleGoalIds: new Set(),
+      hasRunnableWork: false,
+      terminalCleanup: state.terminalCleanup,
+    };
+  }
+
   return {
     kind: "observingTurn",
     staleGoalIds: new Set(),
     hasRunnableWork: false,
-    ...(state.kind === "awaitingTerminalCleanup" ? { terminalCleanup: state.terminalCleanup } : {}),
   };
 }
 
@@ -125,6 +139,7 @@ function finishObservingTurn(
       terminalCleanup: state.terminalCleanup,
     };
   }
+
   return { kind: "idle" };
 }
 
@@ -145,6 +160,7 @@ function reduceObservingContextAbort(
     }
 
     setAnonymousMatching(state.terminalCleanup.pendingAgentEndObligations, false);
+
     return transition(
       {
         kind: "awaitingTerminalCleanup",
@@ -197,6 +213,7 @@ function releaseAbortingTurn(
     : includeRefresh
       ? [{ type: "refreshUi" }]
       : [];
+
   return transition(nextState, { skip: false, effects });
 }
 
@@ -205,6 +222,7 @@ function finishActiveAbortingLifecycle(
 ): StaleQueuedWorkTransitionResult {
   const cleanup = cloneTerminalCleanup(state.terminalCleanup);
   dropActiveObligations(cleanup);
+
   const nextState: StaleQueuedWorkState = terminalCleanupHasPending(cleanup)
     ? { kind: "awaitingTerminalCleanup", terminalCleanup: cleanup }
     : { kind: "idle" };
@@ -241,6 +259,7 @@ function reduceStartWorkFromIdleOrAwaiting(
   } else {
     next.staleGoalIds.add(event.goalId);
   }
+
   return transition(next, emptyPlan());
 }
 
@@ -327,9 +346,11 @@ function reduceAbortingTurnState(
         draft.terminalCleanup.pendingTurnEndIndexes.delete(event.turnIndex);
         return transition(draft, skipClearAccountingRefreshPlan());
       }
+
       if (consumeCleanupTurnEnd(draft.terminalCleanup, event.turnIndex)) {
         return transition(draft, skipRefreshPlan());
       }
+
       return transition(draft, emptyPlan());
     }
     case "agentEnd": {
@@ -337,12 +358,15 @@ function reduceAbortingTurnState(
       if (result.consumedActive) {
         return finishActiveAbortingLifecycle(draft);
       }
+
       if (result.consumedOlder) {
         return transition(draft, skipRefreshPlan());
       }
+
       if (result.activePending) {
         return transition(draft, emptyPlan());
       }
+
       return finishActiveAbortingLifecycle(draft);
     }
     case "sessionShutdown":
@@ -380,7 +404,6 @@ export function reduceStaleQueuedWork(
   event: StaleQueuedWorkEvent,
 ): StaleQueuedWorkTransitionResult {
   const draft = cloneState(state);
-
   switch (draft.kind) {
     case "idle":
       return reduceIdleState(draft, event);

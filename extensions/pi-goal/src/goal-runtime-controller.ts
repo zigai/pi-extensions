@@ -38,6 +38,7 @@ export interface GoalRuntimeController extends GoalRuntimeEventHandlers {
   configureGoalToolPolicy(policy: ActiveGoalToolPolicy): void;
   releaseGoalToolPolicy(): void;
   syncGoalToolPolicy(): void;
+
   resumeGoalWithContinuation(
     goalId: string,
     source: GoalEntrySource,
@@ -67,7 +68,30 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     );
 
   let autoResumeContext: ExtensionContext | null = null;
-  const providerLimitAutoResume = createProviderLimitAutoResumeScheduler({
+  let providerLimitAutoResume: ReturnType<typeof createProviderLimitAutoResumeScheduler>;
+  let stateController: ReturnType<typeof createGoalStateController>;
+
+  function resumeGoalWithContinuation(
+    goalId: string,
+    _source: GoalEntrySource,
+    ctx: StatusContext,
+  ): GoalResult {
+    const result = updateGoalStatus(stateController.getGoal(), "active");
+    if (!result.ok || !result.goal || result.goal.goalId !== goalId) {
+      return result;
+    }
+
+    providerLimitAutoResume.clear();
+    stateController.resumeStoppedGoal(ctx);
+    const resumedGoal = stateController.getGoal();
+    if (resumedGoal?.status === "active" && resumedGoal.goalId === goalId) {
+      pi.sendUserMessage(compactContinuationPrompt(resumedGoal), { deliverAs: "followUp" });
+    }
+
+    return result;
+  }
+
+  providerLimitAutoResume = createProviderLimitAutoResumeScheduler({
     onTimer(goalId) {
       if (
         !autoResumeContext ||
@@ -76,7 +100,9 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       ) {
         return false;
       }
+
       resumeGoalWithContinuation(goalId, "runtime", autoResumeContext);
+
       return true;
     },
   });
@@ -97,7 +123,7 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     getAgentRunSequence: () => runtimeState.agentRunSequence,
   });
 
-  const stateController = createGoalStateController({
+  stateController = createGoalStateController({
     pi,
     persistence,
     getRecoveryState: () => runtimeState.recoveryState,
@@ -117,7 +143,7 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       markContinuationQueued: continuation.markContinuationQueued,
       stopStatusRefresh: () => status.stopStatusRefresh(),
     },
-    syncGoalToolPolicy: goalToolPolicy.sync,
+    syncGoalToolPolicy: (goal) => goalToolPolicy.sync(goal),
     refreshUi: (ctx) => status.refreshUi(ctx),
   });
 
@@ -137,7 +163,7 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     pauseGoalForRecovery(ctx, recoveryReason) {
       stateController.applyGoalTransition({ kind: "recovery_pause", recoveryReason }, ctx);
     },
-    refreshUi: status.refreshUi,
+    refreshUi: (ctx) => status.refreshUi(ctx),
     maybeContinue: continuation.maybeContinue,
     scheduleProviderLimitAutoResume(goalId, ctx) {
       autoResumeContext = ctx;
@@ -145,24 +171,6 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       status.refreshUi(ctx);
     },
   });
-
-  const resumeGoalWithContinuation = (
-    goalId: string,
-    _source: GoalEntrySource,
-    ctx: StatusContext,
-  ): GoalResult => {
-    const result = updateGoalStatus(stateController.getGoal(), "active");
-    if (!result.ok || !result.goal || result.goal.goalId !== goalId) {
-      return result;
-    }
-    providerLimitAutoResume.clear();
-    stateController.resumeStoppedGoal(ctx);
-    const resumedGoal = stateController.getGoal();
-    if (resumedGoal?.status === "active" && resumedGoal.goalId === goalId) {
-      pi.sendUserMessage(compactContinuationPrompt(resumedGoal), { deliverAs: "followUp" });
-    }
-    return result;
-  };
 
   const eventHandlers = createGoalRuntimeEventHandlers({
     pi,
@@ -192,7 +200,7 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
 
   return {
     getGoalForDisplay: goalForDisplay,
-    getGoalForMutation: stateController.getGoal,
+    getGoalForMutation: () => stateController.getGoal(),
     getGoalStartTurnStrategy: () => goalStartTurnStrategy(runtimeState.recoveryState.phase),
     setGoal(nextGoal, source, ctx) {
       providerLimitAutoResume.clear();
@@ -204,7 +212,7 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       goalToolPolicy.configure(policy);
       goalToolPolicy.sync(stateController.getGoal());
     },
-    releaseGoalToolPolicy: goalToolPolicy.release,
+    releaseGoalToolPolicy: () => goalToolPolicy.release(),
     resumeGoalWithContinuation,
     syncGoalToolPolicy() {
       goalToolPolicy.sync(stateController.getGoal());
@@ -215,12 +223,14 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
 
 export function registerGoalRuntimeController(pi: ExtensionAPI): void {
   const controller = createGoalRuntimeController(pi);
+
   registerGoalTools(pi, {
     getGoal: () => controller.getGoalForDisplay(),
     setGoal: controller.setGoal.bind(controller),
     blockGoal: controller.blockGoal.bind(controller),
     completeGoal: controller.completeGoal.bind(controller),
   });
+
   registerGoalCommand(pi, {
     getGoal: () => controller.getGoalForDisplay(),
     getGoalForAdjustment: () => controller.getGoalForMutation(),
@@ -228,27 +238,32 @@ export function registerGoalRuntimeController(pi: ExtensionAPI): void {
     setGoal: controller.setGoal.bind(controller),
     resumeGoalWithContinuation: controller.resumeGoalWithContinuation.bind(controller),
   });
+
   pi.on("session_start", (_event, ctx) => {
     try {
       ensureGoalConfigFiles();
     } catch {
       ctx.ui.notify("Could not initialize pi-codex-goal settings files.", "warning");
     }
+
     const loaded = loadGoalSettings(ctx);
     if (!loaded.ok) {
       controller.configureGoalToolPolicy({ disabledTools: [] });
       ctx.ui.notify(loaded.message, "warning");
       return;
     }
+
     controller.configureGoalToolPolicy(loaded.settings.activeGoalToolPolicy);
   });
   registerGoalRuntimeEvents(pi, controller);
   pi.on("before_agent_start", () => {
     controller.syncGoalToolPolicy();
   });
+
   pi.on("tool_execution_end", () => {
     controller.syncGoalToolPolicy();
   });
+
   pi.on("session_shutdown", () => {
     controller.releaseGoalToolPolicy();
   });

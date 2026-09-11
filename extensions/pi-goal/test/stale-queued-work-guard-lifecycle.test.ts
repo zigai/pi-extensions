@@ -10,9 +10,11 @@ function effectTypes(plan: { effects: Array<{ type: string }> }): string[] {
 type GuardTransitionCase = {
   label: string;
   steps: Array<(guard: ReturnType<typeof createStaleQueuedWorkGuard>) => void>;
+
   act: (
     guard: ReturnType<typeof createStaleQueuedWorkGuard>,
   ) => { skip: boolean; effects: string[] } | null;
+
   lifecycle: string;
   result: { skip: boolean; effects: string[] } | null;
 };
@@ -84,14 +86,12 @@ for (const testCase of guardTransitionCases) {
 test("idle -> observingTurn when stale work is noted", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("goal-1");
-
   assert.equal(guard.lifecycleKind(), "observingTurn");
 });
 
 test("idle -> observingTurn when runnable work is noted", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteRunnableWorkStarted();
-
   assert.equal(guard.lifecycleKind(), "observingTurn");
   assert.equal(guard.planContextAbort(0), null);
 });
@@ -100,7 +100,6 @@ test("observingTurn: mixed stale and current work does not abort", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("stale-goal");
   guard.noteRunnableWorkStarted();
-
   assert.equal(guard.planContextAbort(0), null);
   assert.equal(guard.lifecycleKind(), "observingTurn");
   assert.equal(guard.isBlockingContinuation(), false);
@@ -110,7 +109,6 @@ test("observingTurn -> idle on turn_start clears observation", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("goal-1");
   guard.noteRunnableWorkStarted();
-
   const plan = guard.planTurnStart();
   assert.deepEqual(plan, { skip: false, effects: [] });
   assert.equal(guard.lifecycleKind(), "idle");
@@ -120,7 +118,6 @@ test("observingTurn -> abortingTurn on context abort with stale-only work", () =
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("goal-1");
   assert.equal(guard.lifecycleKind(), "observingTurn");
-
   const plan = guard.planContextAbort(2);
   assert.ok(plan !== null);
   assert.deepEqual(effectTypes(plan), ["clearAccounting", "abort", "refreshUi"]);
@@ -132,7 +129,6 @@ test("planTurnStart clears aborting turn without refreshUi", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("goal-1");
   guard.planContextAbort(4);
-
   const plan = guard.planTurnStart();
   assert.deepEqual(effectTypes(plan), ["clearAccounting"]);
   assert.equal(guard.lifecycleKind(), "awaitingTerminalCleanup");
@@ -164,7 +160,6 @@ test("planSessionShutdown clears aborting state", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("goal-1");
   guard.planContextAbort(0);
-
   const plan = guard.planSessionShutdown();
   assert.deepEqual(effectTypes(plan), ["clearAccounting"]);
   assert.equal(guard.lifecycleKind(), "idle");
@@ -174,7 +169,6 @@ test("planExtensionContinuationClearAbort applies clearAccounting only", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("goal-1");
   guard.planContextAbort(2);
-
   const plan = guard.planExtensionContinuationClearAbort();
   assert.deepEqual(effectTypes(plan), ["clearAccounting"]);
   assert.equal(guard.lifecycleKind(), "awaitingTerminalCleanup");
@@ -184,7 +178,6 @@ test("planBeforeAgentStartClearAbort matches extension clear", () => {
   const guard = createStaleQueuedWorkGuard();
   guard.noteStaleWorkStarted("goal-1");
   guard.planContextAbort(2);
-
   const plan = guard.planBeforeAgentStartClearAbort();
   assert.deepEqual(effectTypes(plan), ["clearAccounting"]);
 });

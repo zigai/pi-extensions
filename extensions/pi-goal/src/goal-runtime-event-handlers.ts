@@ -21,7 +21,6 @@ export function createGoalRuntimeEventHandlers(
   const queuedGoalWorkMessageIdForRuntime = createQueuedGoalWorkMessageIdResolver(
     context.continuation,
   );
-
   return {
     ...createInputContextEventHandlers(context, queuedGoalWorkMessageIdForRuntime),
     ...createTurnEventHandlers(context),

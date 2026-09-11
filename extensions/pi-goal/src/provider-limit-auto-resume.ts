@@ -12,6 +12,7 @@ export function createProviderLimitAutoResumeScheduler(deps: ProviderLimitAutoRe
   const clear = (): void => {
     generation += 1;
     scheduledGoalId = null;
+
     if (timer) {
       clearTimeout(timer);
       timer = null;
@@ -23,15 +24,19 @@ export function createProviderLimitAutoResumeScheduler(deps: ProviderLimitAutoRe
     scheduledGoalId = goalId;
     timer = setTimeout(() => {
       timer = null;
+
       if (timerGeneration !== generation || scheduledGoalId !== goalId) {
         return;
       }
+
       if (!deps.onTimer(goalId)) {
         if (timerGeneration === generation && scheduledGoalId === goalId) {
           scheduleTimer(goalId, CONTINUATION_RETRY_MS);
         }
+
         return;
       }
+
       if (timerGeneration === generation && scheduledGoalId === goalId) {
         scheduledGoalId = null;
       }
@@ -45,6 +50,5 @@ export function createProviderLimitAutoResumeScheduler(deps: ProviderLimitAutoRe
   };
 
   const isScheduledFor = (goalId: string): boolean => scheduledGoalId === goalId;
-
   return { clear, isScheduledFor, schedule };
 }

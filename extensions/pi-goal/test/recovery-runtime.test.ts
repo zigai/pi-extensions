@@ -100,6 +100,7 @@ test("successful toolUse turns reset recovery counters without continuing the go
     { role: "assistant", stopReason: "error", errorMessage: "context_length_exceeded" },
     harness.ctx,
   );
+
   assert.equal(harness.recoveryState.counters.compactionAttempts, 1);
 
   harness.runtime.finishSuccessfulAssistantTurn(
@@ -121,14 +122,15 @@ test("overflow compaction attempts survive intervening transient errors before p
     { role: "assistant", stopReason: "error", errorMessage: "context_length_exceeded" },
     harness.ctx,
   );
-  assert.equal(harness.recoveryState.counters.compactionAttempts, 1);
 
+  assert.equal(harness.recoveryState.counters.compactionAttempts, 1);
   harness.runtime.onSessionCompact();
 
   harness.runtime.handlePersistentAssistantError(
     { role: "assistant", stopReason: "error", errorMessage: "websocket closed" },
     harness.ctx,
   );
+
   assert.equal(harness.recoveryState.counters.compactionAttempts, 1);
   assert.equal(harness.continueCount, 0);
   assert.deepEqual(harness.recoveryState.attention, {
@@ -196,10 +198,9 @@ test("session compact after pending transient error preserves attention without 
     { role: "assistant", stopReason: "error", errorMessage: "websocket closed" },
     harness.ctx,
   );
+
   assert.equal(harness.continueCount, 0);
-
   harness.runtime.onSessionCompact();
-
   assert.equal(harness.continueCount, 0);
   assert.equal(harness.recoveryState.counters.transientAttempts, 1);
   assert.deepEqual(harness.recoveryState.attention, {
@@ -207,6 +208,7 @@ test("session compact after pending transient error preserves attention without 
     reason: "provider error (websocket closed)",
   });
 });
+
 test("successful non-toolUse turns reset recovery counters and continue the goal", () => {
   const harness = createRecoveryTestRuntime();
 
@@ -214,6 +216,7 @@ test("successful non-toolUse turns reset recovery counters and continue the goal
     { role: "assistant", stopReason: "error", errorMessage: "websocket closed" },
     harness.ctx,
   );
+
   assert.equal(harness.recoveryState.counters.transientAttempts, 1);
 
   harness.runtime.finishSuccessfulAssistantTurn(

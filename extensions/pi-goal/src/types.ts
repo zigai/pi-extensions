@@ -20,7 +20,6 @@ export interface ThreadGoal {
 }
 
 export type GoalEntrySource = "command" | "tool" | "runtime";
-
 export type RuntimeUsageGoalStatus = Extract<GoalStatus, "active" | "timeLimited">;
 
 export interface GoalTimeConstraints {

@@ -3,6 +3,7 @@ import type { AssistantMessage, StopReason } from "@earendil-works/pi-ai/compat"
 export interface OverflowCheckAssistantMessage {
   stopReason?: string;
   errorMessage?: string;
+
   usage?: {
     input: number;
     output: number;

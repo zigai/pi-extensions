@@ -45,6 +45,7 @@ function smokeModel(config) {
 function authEnvAllowList(config) {
   const raw = process.env.PLATFORM_SMOKE_AUTH_ENV;
   const names = raw ? raw.split(",") : (config.defaultAuthEnv ?? ["ZAI_API_KEY", "Z_AI_API_KEY"]);
+
   return names.map((name) => String(name).trim()).filter(Boolean);
 }
 
@@ -65,6 +66,7 @@ function writeRedacted(path, text, secretValues) {
 function jsonBlock(text, start, end) {
   const startIndex = text.indexOf(start);
   if (startIndex === -1) return "";
+
   const contentStart = startIndex + start.length;
   const endIndex = text.indexOf(end, contentStart);
   return (endIndex === -1 ? text.slice(contentStart) : text.slice(contentStart, endIndex)).trim();
@@ -75,6 +77,7 @@ function section(text, name) {
   const end = `--- ${name} END ---`;
   const startIndex = text.indexOf(start);
   if (startIndex === -1) return "";
+
   const contentStart = startIndex + start.length;
   const endIndex = text.indexOf(end, contentStart);
   return (endIndex === -1 ? text.slice(contentStart) : text.slice(contentStart, endIndex))
@@ -93,6 +96,7 @@ function argValue(args, flag) {
 
 function targetMetadata(config, targetName, runId, slug) {
   const baseArgs = buildTargetBaseArgs(targetName, config);
+
   return {
     targetName,
     platform: platformFor(targetName),
@@ -116,36 +120,43 @@ function writeExtracts(suiteDir, stdout, secretValues = []) {
     resolve(suiteDir, "node-version.txt"),
     `${marker(stdout, "PLATFORM_NODE_VERSION")}\n`,
   );
+
   writeRedacted(
     resolve(suiteDir, "packed-tarball.txt"),
     `${marker(stdout, "PLATFORM_PACKED_TARBALL")}\n`,
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "packed-node-install.stdout.txt"),
     section(stdout, "PACKED_NODE_INSTALL_STDOUT"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "packed-node-install.stderr.txt"),
     section(stdout, "PACKED_NODE_INSTALL_STDERR"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-install.stdout.txt"),
     section(stdout, "PI_INSTALL_STDOUT"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-install.stderr.txt"),
     section(stdout, "PI_INSTALL_STDERR"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-list.stdout.txt"),
     section(stdout, "PI_LIST_STDOUT"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-list.stderr.txt"),
     section(stdout, "PI_LIST_STDERR"),
@@ -157,13 +168,20 @@ function assertionsFromChecks(checks) {
   const evaluated = checks.map((check) => {
     let ok = false;
     let error = check.error;
+
     try {
       ok = check.fn() === true;
     } catch (err) {
       error = err.message;
     }
-    return { id: check.id, ok, ...(ok ? {} : { error: error ?? `${check.id} failed` }) };
+
+    if (ok) {
+      return { id: check.id, ok };
+    }
+
+    return { id: check.id, ok, error: error ?? `${check.id} failed` };
   });
+
   return {
     ok: evaluated.every((check) => check.ok),
     checks: evaluated,
@@ -174,6 +192,7 @@ function assertionsFromChecks(checks) {
 function writeAssertions(suiteDir, checks) {
   const assertions = assertionsFromChecks(checks);
   writeFileSync(resolve(suiteDir, "assertions.json"), JSON.stringify(assertions, null, 2));
+
   if (!assertions.ok) {
     writeFileSync(
       resolve(suiteDir, "failures.md"),
@@ -189,15 +208,18 @@ function writeAssertions(suiteDir, checks) {
       ].join("\n"),
     );
   }
+
   return assertions;
 }
 
 function finalizeSuite(suiteDir, checks, summary, expectedFiles) {
   const assertions = writeAssertions(suiteDir, checks);
   writeSummary(suiteDir, { ...summary, ok: assertions.ok });
+
   const expected = assertions.ok ? expectedFiles : [...expectedFiles, "failures.md"];
   const manifest = writeManifest(suiteDir, expected);
   if (manifest.missing.length === 0) return { assertions, manifest };
+
   const finalAssertions = writeAssertions(suiteDir, [
     ...checks,
     {
@@ -206,7 +228,9 @@ function finalizeSuite(suiteDir, checks, summary, expectedFiles) {
       error: `missing required artifact(s): ${manifest.missing.join(", ")}`,
     },
   ]);
+
   writeSummary(suiteDir, { ...summary, ok: false });
+
   return {
     assertions: finalAssertions,
     manifest: writeManifest(suiteDir, [...expectedFiles, "failures.md"]),
@@ -230,14 +254,17 @@ export function createWarmupFailureResult(
     existing.command ??
     `crabbox warmup ${buildTargetBaseArgs(targetName, config).join(" ")} --slug ${slug} --keep`;
   const elapsedMs = Date.now() - startedAt;
+
   writeFileSync(
     resolve(suiteDir, "target.json"),
     JSON.stringify(targetMetadata(config, targetName, runId, slug), null, 2),
   );
+
   writeFileSync(
     resolve(suiteDir, "suite.json"),
     JSON.stringify({ suiteName, phase: "warmup", modelCalls: 0 }, null, 2),
   );
+
   writeCommand(suiteDir, command);
   writeExitCode(suiteDir, lease.code, lease.signal);
   writeRedacted(resolve(suiteDir, "crabbox.stdout.txt"), lease.stdout ?? "", secretValues);
@@ -246,12 +273,14 @@ export function createWarmupFailureResult(
     resolve(suiteDir, "crabbox.timing.json"),
     JSON.stringify({ elapsedMs, code: lease.code, signal: lease.signal }, null, 2),
   );
+
   const secretViolations = [
     ...scanForSecrets(`${lease.stdout ?? ""}\n${lease.stderr ?? ""}`, secretValues),
     ...scanArtifactTextFiles(suiteDir, secretValues).map(
       (finding) => `${finding.file}: ${finding.violation}`,
     ),
   ];
+
   const { assertions } = finalizeSuite(
     suiteDir,
     [
@@ -280,6 +309,7 @@ export function createWarmupFailureResult(
       "assertions.json",
     ],
   );
+
   return { ok: false, suiteDir, assertions };
 }
 
@@ -294,6 +324,7 @@ export function createLeaseCleanupResult(
   const runId = makeRunId();
   const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
   const secretValues = collectSecretValues(authEnvAllowList(config));
+
   writeFileSync(
     resolve(suiteDir, "target.json"),
     JSON.stringify(
@@ -302,10 +333,12 @@ export function createLeaseCleanupResult(
       2,
     ),
   );
+
   writeFileSync(
     resolve(suiteDir, "suite.json"),
     JSON.stringify({ suiteName, leaseId, modelCalls: 0 }, null, 2),
   );
+
   writeCommand(suiteDir, `crabbox stop ${targetName} --id ${leaseId}`);
   writeExitCode(suiteDir, stopResult.code, stopResult.signal);
   writeRedacted(
@@ -313,37 +346,44 @@ export function createLeaseCleanupResult(
     stopResult.stdout ?? "",
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "crabbox.stop.stderr.txt"),
     stopResult.stderr ?? "",
     secretValues,
   );
+
   writeFileSync(
     resolve(suiteDir, "crabbox.stop.exit-code.txt"),
     `code=${stopResult.code}\nsignal=${stopResult.signal ?? "none"}\n`,
   );
+
   if (staleCleanupResult) {
     writeRedacted(
       resolve(suiteDir, "crabbox.cleanup.stdout.txt"),
       staleCleanupResult.stdout ?? "",
       secretValues,
     );
+
     writeRedacted(
       resolve(suiteDir, "crabbox.cleanup.stderr.txt"),
       staleCleanupResult.stderr ?? "",
       secretValues,
     );
+
     writeFileSync(
       resolve(suiteDir, "crabbox.cleanup.exit-code.txt"),
       `code=${staleCleanupResult.code}\nsignal=${staleCleanupResult.signal ?? "none"}\n`,
     );
   }
+
   const secretViolations = [
     ...scanForSecrets(`${stopResult.stdout ?? ""}\n${stopResult.stderr ?? ""}`, secretValues),
     ...scanArtifactTextFiles(suiteDir, secretValues).map(
       (finding) => `${finding.file}: ${finding.violation}`,
     ),
   ];
+
   const { assertions } = finalizeSuite(
     suiteDir,
     [
@@ -390,6 +430,7 @@ export function createLeaseCleanupResult(
       "assertions.json",
     ],
   );
+
   return { ok: assertions.ok, suiteDir, assertions };
 }
 
@@ -403,6 +444,7 @@ export function buildGoalRuntimeSmokeCommand(config, targetName) {
   if (platformFor(targetName) === "powershell") {
     return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "node .\\scripts\\platform-smoke\\goal-runtime-smoke.mjs --model ${model.replace(/"/g, '`"')} --package-name ${packageName.replace(/"/g, '`"')}"`;
   }
+
   return `node scripts/platform-smoke/goal-runtime-smoke.mjs --model ${shellQuote(model)} --package-name ${shellQuote(packageName)}`;
 }
 
@@ -414,6 +456,7 @@ export function buildPlatformBuildCommand(
   if (platformFor(targetName) === "powershell") {
     return `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\platform-smoke\\platform-build-windows.ps1 -PackageName ${psSingleQuote(packageName)} -NodeValidationMajor ${nodeValidationMajor}`;
   }
+
   return `node scripts/platform-smoke/platform-build.mjs --package-name ${shellQuote(packageName)} --node-validation-major ${nodeValidationMajor}`;
 }
 
@@ -423,19 +466,24 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
   const startedAt = Date.now();
   const slug = `${config.packageName}-${targetName}`;
   const command = buildGoalRuntimeSmokeCommand(config, targetName);
+
   writeFileSync(
     resolve(suiteDir, "target.json"),
     JSON.stringify(targetMetadata(config, targetName, runId, slug), null, 2),
   );
+
   writeFileSync(
     resolve(suiteDir, "suite.json"),
     JSON.stringify({ suiteName, modelCalls: 1, model: smokeModel(config) }, null, 2),
   );
+
   writeCommand(suiteDir, command);
 
   let lease = leaseSession;
   const ownsLease = !lease;
+
   if (!lease) lease = await warmupLease(targetName, slug, config);
+
   if (!lease.ok) {
     return createWarmupFailureResult(config, targetName, suiteName, lease, startedAt, {
       runId,
@@ -453,12 +501,14 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
     allowEnv,
   });
   const elapsedMs = Date.now() - startedAt;
+
   writeRedacted(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout, secretValues);
   writeRedacted(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr, secretValues);
   writeFileSync(
     resolve(suiteDir, "crabbox.timing.json"),
     JSON.stringify({ elapsedMs, code: result.code, signal: result.signal }, null, 2),
   );
+
   writeExitCode(suiteDir, result.code, result.signal);
 
   let stopResult;
@@ -477,66 +527,80 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
     "PLATFORM_GOAL_RUNTIME_JSON_START",
     "PLATFORM_GOAL_RUNTIME_JSON_END",
   );
+
   let runtimeResult = {};
+
   try {
     runtimeResult = JSON.parse(resultJsonText);
   } catch {}
+
   writeRedacted(
     resolve(suiteDir, "goal-runtime-result.json"),
     resultJsonText ? `${resultJsonText}\n` : "{}\n",
     secretValues,
   );
+
   writeFileSync(resolve(suiteDir, "packed-tarball.txt"), `${runtimeResult.packedTarball ?? ""}\n`);
   writeRedacted(
     resolve(suiteDir, "npm-pack.stdout.txt"),
     section(result.stdout, "NPM_PACK_STDOUT"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "npm-pack.stderr.txt"),
     section(result.stdout, "NPM_PACK_STDERR"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "packed-node-install.stdout.txt"),
     section(result.stdout, "PACKED_NODE_INSTALL_STDOUT"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "packed-node-install.stderr.txt"),
     section(result.stdout, "PACKED_NODE_INSTALL_STDERR"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-install.stdout.txt"),
     section(result.stdout, "PI_INSTALL_STDOUT"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-install.stderr.txt"),
     section(result.stdout, "PI_INSTALL_STDERR"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-list.stdout.txt"),
     section(result.stdout, "PI_LIST_STDOUT"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-list.stderr.txt"),
     section(result.stdout, "PI_LIST_STDERR"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-run.stdout.txt"),
     section(result.stdout, "PI_RUN_STDOUT"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "pi-run.stderr.txt"),
     section(result.stdout, "PI_RUN_STDERR"),
     secretValues,
   );
+
   writeRedacted(
     resolve(suiteDir, "session.jsonl"),
     sectionBase64(result.stdout, "SESSION_JSONL_B64"),
@@ -549,6 +613,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
       (finding) => `${finding.file}: ${finding.violation}`,
     ),
   ];
+
   const checks = [
     { id: "command-exit-zero", fn: () => result.code === 0, error: `exit ${result.code}` },
     {
@@ -585,6 +650,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
       fn: () => stopResult.code === 0,
       error: `stop exit ${stopResult.code}`,
     });
+
   const expectedFiles = [
     "summary.json",
     "artifact-manifest.json",
@@ -616,6 +682,7 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
       "crabbox.stop.stderr.txt",
       "crabbox.stop.exit-code.txt",
     );
+
   const { assertions } = finalizeSuite(
     suiteDir,
     checks,
@@ -629,13 +696,15 @@ async function runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSess
     },
     expectedFiles,
   );
+
   return { ok: assertions.ok, suiteDir, assertions };
 }
 
 export async function runTargetSuite(config, targetName, suiteName, leaseSession) {
   if (suiteName === "goal-runtime-smoke")
-    return await runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSession);
+    return runGoalRuntimeSmokeSuite(config, targetName, suiteName, leaseSession);
   if (suiteName !== "platform-build") throw new Error(`unknown suite: ${suiteName}`);
+
   const runId = makeRunId();
   const suiteDir = createSuiteDir(config.artifactRoot, runId, targetName, suiteName);
   const startedAt = Date.now();
@@ -645,20 +714,25 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
     config.packageName,
     config.nodeValidationMajor,
   );
+
   mkdirSync(dirname(suiteDir), { recursive: true });
   writeFileSync(
     resolve(suiteDir, "target.json"),
     JSON.stringify(targetMetadata(config, targetName, runId, slug), null, 2),
   );
+
   writeFileSync(
     resolve(suiteDir, "suite.json"),
     JSON.stringify({ suiteName, modelCalls: 0 }, null, 2),
   );
+
   writeCommand(suiteDir, command);
 
   let lease = leaseSession;
   const ownsLease = !lease;
+
   if (!lease) lease = await warmupLease(targetName, slug, config);
+
   if (!lease.ok) {
     return createWarmupFailureResult(config, targetName, suiteName, lease, startedAt, {
       runId,
@@ -674,14 +748,17 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
     sync: leaseSession?.sync,
   });
   const elapsedMs = Date.now() - startedAt;
+
   writeRedacted(resolve(suiteDir, "crabbox.stdout.txt"), result.stdout, secretValues);
   writeRedacted(resolve(suiteDir, "crabbox.stderr.txt"), result.stderr, secretValues);
   writeFileSync(
     resolve(suiteDir, "crabbox.timing.json"),
     JSON.stringify({ elapsedMs, code: result.code, signal: result.signal }, null, 2),
   );
+
   writeExitCode(suiteDir, result.code, result.signal);
   writeExtracts(suiteDir, result.stdout, secretValues);
+
   let stopResult;
   if (ownsLease) {
     stopResult = await stopLease(targetName, lease.leaseId, config);
@@ -698,12 +775,14 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
   const nodeMajor = Number(
     marker(stdout, "PLATFORM_NODE_VERSION").replace(/^v/, "").split(".")[0] ?? 0,
   );
+
   const secretViolations = [
     ...scanForSecrets(`${result.stdout}\n${result.stderr}`, secretValues),
     ...scanArtifactTextFiles(suiteDir, secretValues).map(
       (finding) => `${finding.file}: ${finding.violation}`,
     ),
   ];
+
   const checks = [
     { id: "command-exit-zero", fn: () => result.code === 0, error: `exit ${result.code}` },
     { id: "platform-marker", fn: () => stdout.includes("PLATFORM_BUILD_OK") },
@@ -742,6 +821,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
       fn: () => stopResult.code === 0,
       error: `stop exit ${stopResult.code}`,
     });
+
   const expectedFiles = [
     "summary.json",
     "artifact-manifest.json",
@@ -768,6 +848,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
       "crabbox.stop.stderr.txt",
       "crabbox.stop.exit-code.txt",
     );
+
   const { assertions } = finalizeSuite(
     suiteDir,
     checks,
@@ -780,6 +861,7 @@ export async function runTargetSuite(config, targetName, suiteName, leaseSession
     },
     expectedFiles,
   );
+
   return { ok: assertions.ok, suiteDir, assertions };
 }
 
@@ -792,25 +874,30 @@ export async function runTargetSuites(config, targetName, suiteNames) {
       ok: false,
       results: [createWarmupFailureResult(config, targetName, "warmup-failure", lease, startedAt)],
     };
+
   const results = [];
   let stopResult;
   let staleCleanupResult;
+
   try {
     let sync = true;
     for (const suiteName of suiteNames) {
       const result = await runTargetSuite(config, targetName, suiteName, { ...lease, sync });
       results.push(result);
       sync = false;
+
       if (!result.ok) break;
     }
   } finally {
     stopResult = await stopLease(targetName, lease.leaseId, config);
     staleCleanupResult = await cleanupStaleTargetState(targetName, config);
   }
+
   if (stopResult) {
     results.push(
       createLeaseCleanupResult(config, targetName, lease.leaseId, stopResult, staleCleanupResult),
     );
   }
+
   return { ok: results.every((result) => result.ok), results };
 }

@@ -33,6 +33,7 @@ function usageChannelTokens(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
+
   return Math.max(0, Math.trunc(value));
 }
 
@@ -40,6 +41,7 @@ export function assistantTurnTokens(message: AssistantTurnMessage): number {
   if (message.role !== "assistant" || !message.usage) {
     return 0;
   }
+
   return usageChannelTokens(message.usage.input) + usageChannelTokens(message.usage.output);
 }
 
@@ -98,6 +100,7 @@ export function createGoalAccounting(deps: GoalAccountingDeps) {
       accounting.lastAccountedAt === null
         ? 0
         : Math.floor((now - accounting.lastAccountedAt) / 1000);
+
     accounting.lastAccountedAt = now;
 
     const result = applyUsage(goal, completedTurnTokens, elapsed, {

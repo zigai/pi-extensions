@@ -1,5 +1,4 @@
 import type {
-  ExtensionContext,
   ExtensionHandler,
   TurnEndEvent,
   TurnStartEvent,
@@ -55,17 +54,21 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
       const completedTurnTokens = assistantTurnTokens(event.message);
       goalAccounting.accountProgress(ctx, true, completedTurnTokens);
       stateController.flushGoalPersistence("runtime");
+
       if (isAbortedAssistantMessage(event.message)) {
         stateController.pauseForAbort(ctx);
         return;
       }
+
       if (isErrorAssistantMessage(event.message)) {
         return;
       }
+
       if (isAssistantContextOverflow(event.message, getContextWindow(ctx))) {
         stateController.beginOverflowRecovery(ctx);
         return;
       }
+
       recoveryRuntime.finishSuccessfulAssistantTurn(event.message, ctx, {
         continueGoal: !isToolUseAssistantMessage(event.message),
       });

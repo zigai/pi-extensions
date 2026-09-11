@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { defineTypedCommand, installTypedCommandUx, registerTypedCommand } from "pi-typed-args/pi";
 
-import { createGoalCreationPrompt } from "./goal-creation-prompt.js";
+import { createGoalCreationPrompt, type GoalCreationPromptInput } from "./goal-creation-prompt.js";
 import { formatGoalSummary } from "./format.js";
 import type { GoalStartTurnStrategy } from "./recovery-machine.js";
 import { compactContinuationPrompt, continuationPrompt } from "./prompts.js";
@@ -18,6 +18,7 @@ export interface CommandHost {
   getGoalForAdjustment(): ThreadGoal | null;
   setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: GoalCommandContext): void;
   getGoalStartTurnStrategy(): GoalStartTurnStrategy;
+
   resumeGoalWithContinuation(
     goalId: string,
     source: GoalEntrySource,
@@ -85,6 +86,7 @@ async function confirmReplacement(
   if (current === null || current.status === "complete") {
     return true;
   }
+
   if (!ctx.hasUI) {
     ctx.ui.notify(
       "An existing non-complete goal cannot be replaced without confirmation.",
@@ -92,6 +94,7 @@ async function confirmReplacement(
     );
     return false;
   }
+
   const shouldReplace = await ctx.ui.confirm(
     "Replace goal?",
     `Current goal:\n${current.objective}\n\nNew task:\n${task}`,
@@ -99,6 +102,7 @@ async function confirmReplacement(
   if (!shouldReplace) {
     ctx.ui.notify("Goal unchanged.");
   }
+
   return shouldReplace;
 }
 
@@ -130,6 +134,7 @@ function handleManagementCommand(
     ctx.ui.notify(result.message, "warning");
     return;
   }
+
   host.setGoal(result.goal, "command", ctx);
   ctx.ui.notify(result.message);
 }
@@ -144,13 +149,16 @@ async function createRawGoal(
   if (!(await confirmReplacement(host, objective, ctx))) {
     return;
   }
+
   const result = replaceGoal(objective, constraintsFromArguments(args));
   if (!result.ok || !result.goal) {
     ctx.ui.notify(result.message, "error");
     return;
   }
+
   host.setGoal(result.goal, "command", ctx);
   ctx.ui.notify(result.message);
+
   if (host.getGoalStartTurnStrategy() === "userFollowUp") {
     queueGoalUserTurn(pi, result.goal);
   } else {
@@ -168,23 +176,22 @@ async function requestGeneratedGoal(
   if (!(await confirmReplacement(host, task, ctx))) {
     return;
   }
-  const rendered = createGoalCreationPrompt(
-    {
-      task,
-      ...(args.minimumTimeMinutes === undefined
-        ? {}
-        : { minimumTimeMinutes: args.minimumTimeMinutes }),
-      ...(args.maximumTimeMinutes === undefined
-        ? {}
-        : { maximumTimeMinutes: args.maximumTimeMinutes }),
-    },
-    ctx,
-    host.getGoal(),
-  );
+
+  const input: GoalCreationPromptInput = { task };
+  if (args.minimumTimeMinutes !== undefined) {
+    input.minimumTimeMinutes = args.minimumTimeMinutes;
+  }
+
+  if (args.maximumTimeMinutes !== undefined) {
+    input.maximumTimeMinutes = args.maximumTimeMinutes;
+  }
+
+  const rendered = createGoalCreationPrompt(input, ctx, host.getGoal());
   if (!rendered.ok) {
     ctx.ui.notify(rendered.message, "error");
     return;
   }
+
   pi.sendUserMessage(rendered.prompt, { deliverAs: "followUp" });
 }
 
@@ -199,21 +206,26 @@ function adjustExistingGoal(
     ctx.ui.notify("No goal exists to adjust.", "warning");
     return;
   }
+
   const objective = args.adjustedObjective?.trim() || current.objective;
   const result = adjustGoal(current, objective);
   if (!result.ok || !result.goal) {
     ctx.ui.notify(result.message, "warning");
     return;
   }
+
   if (goalsEquivalent(current, result.goal)) {
     ctx.ui.notify(result.message);
     return;
   }
+
   host.setGoal(result.goal, "command", ctx);
   ctx.ui.notify(result.message);
+
   if (result.goal.status !== "active") {
     return;
   }
+
   if (host.getGoalStartTurnStrategy() === "userFollowUp") {
     queueGoalUserTurn(pi, result.goal);
   } else {
@@ -233,9 +245,12 @@ export async function handleGoalCommand(
         "Exact wording and time constraints apply only when creating a goal.",
         "warning",
       );
+
       return;
     }
+
     adjustExistingGoal(pi, host, args, ctx);
+
     return;
   }
 
@@ -245,7 +260,9 @@ export async function handleGoalCommand(
       ctx.ui.notify("A task or raw objective is required for these options.", "warning");
       return;
     }
+
     ctx.ui.notify(formatGoalSummary(host.getGoal()));
+
     return;
   }
 
@@ -254,7 +271,9 @@ export async function handleGoalCommand(
       ctx.ui.notify("Goal options apply only when creating a goal.", "warning");
       return;
     }
+
     handleManagementCommand(pi, host, task, ctx);
+
     return;
   }
 
@@ -379,6 +398,7 @@ export function registerGoalCommand(pi: ExtensionAPI, host: CommandHost): void {
           relatedPaths: [["maximumTimeMinutes"]],
         });
       }
+
       if (
         args.adjustExisting === true &&
         (args.raw === true ||
@@ -407,6 +427,7 @@ export function registerGoalCommand(pi: ExtensionAPI, host: CommandHost): void {
           path: ["adjustedObjective"],
         });
       }
+
       return issues;
     },
     async run(args, ctx) {

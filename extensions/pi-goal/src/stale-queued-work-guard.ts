@@ -3,7 +3,6 @@ import {
   lifecycleKindFromState,
   reduceStaleQueuedWork,
   type AgentEndMessage,
-  type StaleQueuedWorkEffect,
   type StaleQueuedWorkEvent,
   type StaleQueuedWorkLifecycleKind,
   type StaleQueuedWorkPlan,

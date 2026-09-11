@@ -42,6 +42,7 @@ test("tool prompt guidelines include exposed and namespaced goal tool guidance",
   );
   assert.match(combined, /status blocked only when no safe in-scope path remains/);
   assert.match(combined, /does not grant new authority/);
+
   for (const guideline of completionAuditToolGuidelines()) {
     assert.ok(TOOL_PROMPT_GUIDELINES.includes(guideline));
   }
@@ -53,7 +54,6 @@ test("continuation prompt uses the concise completion-audit contract", () => {
     maximumActiveSeconds: 10,
   }).goal;
   assert.ok(created);
-
   const continuation = continuationPrompt(created);
   assert.match(
     continuation,
@@ -68,10 +68,8 @@ test("continuation prompt uses the concise completion-audit contract", () => {
 test("compact continuation keeps marker detection and the exact objective", () => {
   const created = createGoal(null, "ship it").goal;
   assert.ok(created);
-
   const compact = compactContinuationPrompt(created);
   const full = continuationPrompt(created);
-
   assert.equal(continuationGoalIdFromPrompt(compact), created.goalId);
   assert.match(compact, /<pi_goal_continuation goal_id="/);
   assert.match(compact, /<untrusted_objective>[\s\S]*ship it[\s\S]*<\/untrusted_objective>/);
@@ -82,7 +80,6 @@ test("compact continuation keeps marker detection and the exact objective", () =
 test("superseded continuation bookkeeping does not expose a runnable marker", () => {
   const created = createGoal(null, "ship it").goal;
   assert.ok(created);
-
   const superseded = supersededContinuationMessage(created.goalId);
   assert.equal(continuationGoalIdFromPrompt(superseded), null);
   assert.match(superseded, /Superseded hidden goal continuation bookkeeping/);
@@ -94,10 +91,8 @@ test("continuation and time-limit prompts reference exposed goal-completion tool
     maximumActiveSeconds: 10,
   }).goal;
   assert.ok(created);
-
   const continuation = continuationPrompt(created);
   const limited = timeLimitPrompt(created);
-
   assert.match(limited, /marked the goal as timeLimited/);
   assert.doesNotMatch(limited, /token budget/i);
 

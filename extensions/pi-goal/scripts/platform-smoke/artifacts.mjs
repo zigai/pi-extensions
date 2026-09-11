@@ -2,6 +2,10 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+
+const SecretValueSchema = Type.String({ minLength: 8 });
 
 export function createSuiteDir(artifactRoot, runId, targetName, suiteName) {
   const dir = resolve(process.cwd(), artifactRoot, runId, targetName, suiteName);
@@ -26,6 +30,7 @@ export function writeSummary(dir, data) {
 
 export function writeManifest(dir, expectedFiles) {
   const present = [];
+
   function walk(current) {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       const path = resolve(current, entry.name);
@@ -33,7 +38,9 @@ export function writeManifest(dir, expectedFiles) {
       else if (entry.isFile()) present.push(relative(dir, path));
     }
   }
+
   if (existsSync(dir)) walk(dir);
+
   const allPresent = [...new Set([...present, "artifact-manifest.json"])].sort();
   const manifest = {
     expected: expectedFiles,
@@ -41,16 +48,22 @@ export function writeManifest(dir, expectedFiles) {
     missing: expectedFiles.filter((file) => !allPresent.includes(file)),
     writtenAt: new Date().toISOString(),
   };
+
   writeFileSync(resolve(dir, "artifact-manifest.json"), JSON.stringify(manifest, null, 2));
+
   return manifest;
 }
 
 export function collectSecretValues(envNames, env = process.env) {
   return [
     ...new Set(
-      envNames
-        .map((name) => env[name])
-        .filter((value) => typeof value === "string" && value.length >= 8),
+      envNames.flatMap((name) => {
+        try {
+          return [Value.Parse(SecretValueSchema, env[name])];
+        } catch {
+          return [];
+        }
+      }),
     ),
   ];
 }
@@ -60,6 +73,7 @@ export function redactSecrets(text, secretValues = []) {
   for (const secret of secretValues) {
     redacted = redacted.split(secret).join("[REDACTED_SECRET]");
   }
+
   return redacted;
 }
 
@@ -69,6 +83,7 @@ export function scanForSecrets(text, secretValues = []) {
   for (const secret of secretValues) {
     if (secret && content.includes(secret)) violations.push("raw forwarded secret value");
   }
+
   for (const [pattern, label] of [
     [/bearer\s+[A-Za-z0-9\-._~+/]{20,}=*/gi, "bearer token"],
     [/Authorization:\s*Bearer\s+[A-Za-z0-9\-._~+/]{20,}=*/gi, "authorization header"],
@@ -79,11 +94,13 @@ export function scanForSecrets(text, secretValues = []) {
   ]) {
     if (pattern.test(content)) violations.push(label);
   }
+
   return [...new Set(violations)];
 }
 
 export function scanArtifactTextFiles(dir, secretValues = []) {
   const findings = [];
+
   function walk(current) {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       const path = resolve(current, entry.name);
@@ -91,6 +108,7 @@ export function scanArtifactTextFiles(dir, secretValues = []) {
         walk(path);
         continue;
       }
+
       if (!entry.isFile()) continue;
       if (!/\.(?:txt|json|jsonl|md|log|ps1|mjs|js)$/i.test(entry.name)) continue;
       try {
@@ -102,6 +120,8 @@ export function scanArtifactTextFiles(dir, secretValues = []) {
       }
     }
   }
+
   walk(dir);
+
   return findings;
 }

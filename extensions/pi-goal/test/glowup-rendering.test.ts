@@ -22,15 +22,20 @@ import {
 } from "../src/glowup-rendering.js";
 import { VirtualTerminal } from "./support/virtual-terminal.js";
 
-type ExtensionHandler = (...args: unknown[]) => unknown;
+interface GlowupHarnessEvent {
+  type: string;
+  reason?: string;
+}
+
+type GlowupHarnessContext = Readonly<Record<string, never>>;
+type ExtensionHandler = (
+  event: GlowupHarnessEvent,
+  context: GlowupHarnessContext,
+) => void | Promise<void>;
 type GlowupConsumerApi = {
-  readonly on: (eventName: string, handler: unknown) => void;
+  readonly on: (eventName: string, handler: ExtensionHandler) => void;
 };
 type GlowupInstaller = (api: GlowupConsumerApi) => Promise<void>;
-
-function isExtensionHandler(value: unknown): value is ExtensionHandler {
-  return typeof value === "function";
-}
 
 function isGlowupInstaller(value: unknown): value is GlowupInstaller {
   return typeof value === "function";
@@ -42,9 +47,7 @@ class GlowupConsumerHarness {
 
   constructor() {
     const boundary = {
-      on: (eventName: string, handler: unknown): void => {
-        if (!isExtensionHandler(handler))
-          throw new TypeError(`${eventName} handler must be callable`);
+      on: (eventName: string, handler: ExtensionHandler): void => {
         const eventHandlers = this.handlers.get(eventName) ?? [];
         eventHandlers.push(handler);
         this.handlers.set(eventName, eventHandlers);
@@ -56,6 +59,7 @@ class GlowupConsumerHarness {
   async install(): Promise<void> {
     const installer: unknown = glowupExtension;
     if (!isGlowupInstaller(installer)) throw new TypeError("Glowup extension must be callable");
+
     await installer(this.api);
   }
 
@@ -130,6 +134,7 @@ function goalResult(objective: string, status: "active" | "complete" = "active")
     createdAt: 1,
     updatedAt: 2,
   };
+
   return {
     content: [{ type: "text" as const, text: JSON.stringify({ goal }) }],
     details: { goal },
@@ -173,6 +178,7 @@ afterAll(async () => {
   await consumer.shutdown();
   setCapabilities(originalCapabilities);
   rmSync(agentDirectory, { recursive: true, force: true });
+
   if (originalAgentDirectory === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = originalAgentDirectory;
 });

@@ -12,8 +12,10 @@ function tsFiles(root: string): string[] {
       files.push(...tsFiles(path));
       continue;
     }
+
     if (path.endsWith(".ts")) files.push(path);
   }
+
   return files;
 }
 
@@ -35,5 +37,6 @@ test("source and tests avoid banned TypeScript escape hatches", () => {
       if (pattern.test(text)) violations.push(`${file}: ${label}`);
     }
   }
+
   assert.deepEqual(violations, []);
 });

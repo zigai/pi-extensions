@@ -196,6 +196,7 @@ test("runtime accounting rejects identity, objective, constraint, and usage muta
     usage: { tokensUsed: 1, activeSeconds: 1 },
     updatedAt: 101,
   };
+
   const cases: Array<{ next: ThreadGoal; pattern: RegExp }> = [
     { next: { ...valid, goalId: "other" }, pattern: /goalId mismatch/ },
     { next: { ...valid, objective: "other" }, pattern: /objective must be unchanged/ },
@@ -297,6 +298,7 @@ test("applyGoalTransitionEffects dispatches each effect exactly once", () => {
     ],
     handlers,
   );
+
   assert.deepEqual(calls, [
     "clearContinuation",
     "clearActiveAccounting",

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 
 import {
   createAgentSession,
@@ -12,19 +14,40 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import goalExtension, { __testHooks } from "../src/index.js";
+import { isActiveGoalQueuedDetails } from "../src/queued-goal-messages.js";
 import { CUSTOM_ENTRY_TYPE } from "../src/types.js";
 
+const GoalIdToolResultSchema = Type.Object(
+  {
+    details: Type.Object(
+      {
+        goal: Type.Object(
+          {
+            goalId: Type.String(),
+          },
+          { additionalProperties: true },
+        ),
+      },
+      { additionalProperties: true },
+    ),
+  },
+  { additionalProperties: true },
+);
+
+const GlowupRenderingOwnerSchema = Type.Object(
+  {
+    glowupRendering: Type.Object(
+      {
+        version: Type.Literal(3),
+      },
+      { additionalProperties: true },
+    ),
+  },
+  { additionalProperties: true },
+);
+
 function goalIdFromToolResult(result: unknown): string {
-  assert.ok(result && typeof result === "object");
-  const details = (result as { details?: unknown }).details;
-  assert.ok(details && typeof details === "object");
-  const goal = (details as { goal?: unknown }).goal;
-  assert.ok(goal && typeof goal === "object");
-  const goalId = (goal as { goalId?: unknown }).goalId;
-  if (typeof goalId !== "string") {
-    assert.fail("Expected tool result goal id.");
-  }
-  return goalId;
+  return Value.Parse(GoalIdToolResultSchema, result).details.goal.goalId;
 }
 
 test("SDK runtime emits a continuation after willRetry compaction when no retry agent starts", async () => {
@@ -75,10 +98,10 @@ test("SDK runtime emits a continuation after willRetry compaction when no retry 
     for (const toolName of ["get_goal", "create_goal", "update_goal"]) {
       const definition = runner.getToolDefinition(toolName);
       assert.ok(definition);
-      const rendering: unknown = Reflect.get(definition, "glowupRendering");
-      assert.ok(rendering && typeof rendering === "object");
-      assert.equal(Reflect.get(rendering, "version"), 3);
+      const renderingOwner = Value.Parse(GlowupRenderingOwnerSchema, definition);
+      assert.equal(renderingOwner.glowupRendering.version, 3);
     }
+
     const createGoal = runner.getToolDefinition("create_goal");
     assert.ok(createGoal);
     const result = await createGoal.execute(
@@ -112,7 +135,8 @@ test("SDK runtime emits a continuation after willRetry compaction when no retry 
         entry.type === "custom_message" &&
         entry.customType === CUSTOM_ENTRY_TYPE &&
         "details" in entry &&
-        (entry.details as { kind?: unknown } | undefined)?.kind === "continuation"
+        isActiveGoalQueuedDetails(entry.details) &&
+        entry.details.kind === "continuation"
       );
     });
     assert.equal(continuationMessages.length, 1);

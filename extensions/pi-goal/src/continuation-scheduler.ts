@@ -38,6 +38,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
       clearTimeout(continuationTimer);
       continuationTimer = null;
     }
+
     continuationScheduledFor = null;
     continuationScheduledDelayMs = null;
   };
@@ -46,6 +47,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     if (!postCompactContinuationTimer) {
       return;
     }
+
     clearTimeout(postCompactContinuationTimer);
     postCompactContinuationTimer = null;
   };
@@ -59,6 +61,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     if (continuationQueuedFor === goalId) {
       continuationQueuedFor = null;
     }
+
     if (continuationScheduledFor === goalId) {
       clearContinuationTimer();
     }
@@ -76,10 +79,12 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     if (!passthroughContinuationInput) {
       return;
     }
+
     if (passthroughContinuationInput.turnIndex === null) {
       passthroughContinuationInput = { ...passthroughContinuationInput, turnIndex };
       return;
     }
+
     if (passthroughContinuationInput.turnIndex !== turnIndex) {
       clearPassthroughContinuationInput();
     }
@@ -89,6 +94,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     if (!passthroughContinuationInput || passthroughContinuationInput.text !== text) {
       return false;
     }
+
     const currentTurnIndex = deps.getCurrentTurnIndex();
     return (
       passthroughContinuationInput.turnIndex === null ||
@@ -100,6 +106,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     if (isPassthroughContinuationInput(prompt)) {
       return null;
     }
+
     return continuationGoalIdFromPrompt(prompt);
   };
 
@@ -109,8 +116,8 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
 
   const hasPendingRecoveryAttention = (): boolean => {
     const goal = deps.getGoal();
-    return Boolean(
-      goal?.status === "active" && isRecoveryPendingAttention(deps.getRecoveryState().attention),
+    return (
+      goal?.status === "active" && isRecoveryPendingAttention(deps.getRecoveryState().attention)
     );
   };
 
@@ -140,13 +147,14 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
 
   const scheduleContinuationCheck = (
     goalId: string,
-    ctx: ExtensionContext,
     delayMs: number,
+    onReady: () => void,
   ): void => {
     if (continuationTimer && continuationScheduledFor === goalId) {
       if (continuationScheduledDelayMs !== null && delayMs >= continuationScheduledDelayMs) {
         return;
       }
+
       clearContinuationTimer();
     } else if (continuationTimer) {
       clearContinuationTimer();
@@ -158,12 +166,12 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
       continuationTimer = null;
       continuationScheduledFor = null;
       continuationScheduledDelayMs = null;
-      maybeContinue(ctx);
+      onReady();
     }, delayMs);
     continuationTimer.unref?.();
   };
 
-  const maybeContinue = (ctx: ExtensionContext): void => {
+  function maybeContinue(ctx: ExtensionContext): void {
     const goal = deps.getGoal();
     if (!canPlanContinuationFor(goal)) {
       return;
@@ -171,24 +179,28 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
 
     const goalId = goal.goalId;
     if (!ctx.isIdle() || ctx.hasPendingMessages()) {
-      scheduleContinuationCheck(goalId, ctx, CONTINUATION_RETRY_MS);
+      scheduleContinuationCheck(goalId, CONTINUATION_RETRY_MS, () => maybeContinue(ctx));
+
       return;
     }
 
     clearContinuationTimer();
+
     const currentGoal = deps.getGoal();
     if (!currentGoal || currentGoal.status !== "active" || currentGoal.goalId !== goalId) {
       return;
     }
+
     sendContinuation(currentGoal);
-  };
+  }
 
   const maybeContinueAfterCurrentEvent = (ctx: ExtensionContext): void => {
     const goal = deps.getGoal();
     if (!canPlanContinuationFor(goal)) {
       return;
     }
-    scheduleContinuationCheck(goal.goalId, ctx, 0);
+
+    scheduleContinuationCheck(goal.goalId, 0, () => maybeContinue(ctx));
   };
 
   const canSchedulePostCompactFallbackFor = (
@@ -210,6 +222,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     options: PostCompactContinuationOptions,
   ): void => {
     clearPostCompactContinuationFallback();
+
     const goal = deps.getGoal();
     if (!canSchedulePostCompactFallbackFor(goal, options.prepareContinuation)) {
       return;
@@ -218,24 +231,30 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     const goalId = goal.goalId;
     const runFallback = (): void => {
       postCompactContinuationTimer = null;
+
       const currentGoal = deps.getGoal();
       if (!currentGoal || currentGoal.status !== "active" || currentGoal.goalId !== goalId) {
         return;
       }
+
       if (deps.getCurrentTurnIndex() !== options.turnIndex) {
         return;
       }
+
       if (deps.getAgentRunSequence() !== options.agentRunSequence) {
         return;
       }
+
       if (!ctx.isIdle() || ctx.hasPendingMessages()) {
         postCompactContinuationTimer = setTimeout(runFallback, CONTINUATION_RETRY_MS);
         postCompactContinuationTimer.unref?.();
         return;
       }
+
       if (options.prepareContinuation && !options.prepareContinuation()) {
         return;
       }
+
       maybeContinue(ctx);
     };
 

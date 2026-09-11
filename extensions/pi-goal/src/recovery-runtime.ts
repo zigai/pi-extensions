@@ -40,9 +40,11 @@ export function createGoalRecoveryRuntime<TContext>(deps: RecoveryRuntimeDeps<TC
         if (!goal || goal.status !== "active") {
           return;
         }
+
         deps.clearContinuationState();
         setRecoveryPendingAttention(deps.getRecoveryState(), action.reason);
         deps.refreshUi(ctx);
+
         return;
       }
       case "pause":
@@ -60,6 +62,7 @@ export function createGoalRecoveryRuntime<TContext>(deps: RecoveryRuntimeDeps<TC
     const wasProviderLimit = isProviderLimitError(message.errorMessage);
     const action = planRecoveryForAssistantError(deps.getRecoveryState(), message);
     applyRecoveryAction(action, ctx);
+
     const currentGoal = deps.getGoal();
     if (
       wasProviderLimit &&
@@ -87,6 +90,7 @@ export function createGoalRecoveryRuntime<TContext>(deps: RecoveryRuntimeDeps<TC
   ): void => {
     if (onRecoverySuccessfulTurn(deps.getRecoveryState(), message)) {
       deps.refreshUi(ctx);
+
       if (options?.continueGoal !== false) {
         deps.maybeContinue(ctx);
       }

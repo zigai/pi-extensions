@@ -1,8 +1,41 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+
+const ContentCandidatesSchema = Type.Array(Type.Unknown());
+const TextContentSchema = Type.Object(
+  { type: Type.Literal("text"), text: Type.String() },
+  { additionalProperties: true },
+);
+const SessionEntrySchema = Type.Object({ message: Type.Unknown() }, { additionalProperties: true });
+const AssistantMessageSchema = Type.Object(
+  { role: Type.Literal("assistant"), content: ContentCandidatesSchema },
+  { additionalProperties: true },
+);
+const ReadToolCallSchema = Type.Object(
+  {
+    type: Type.Literal("toolCall"),
+    name: Type.Literal("read"),
+    id: Type.String(),
+    arguments: Type.Object({ path: Type.String() }, { additionalProperties: true }),
+  },
+  { additionalProperties: true },
+);
+
+const ReadToolResultSchema = Type.Object(
+  {
+    role: Type.Literal("toolResult"),
+    toolName: Type.Literal("read"),
+    isError: Type.Literal(false),
+    toolCallId: Type.String(),
+    content: ContentCandidatesSchema,
+  },
+  { additionalProperties: true },
+);
 
 function parseArgs(argv) {
   const args = { model: "zai/glm-5.2", packageName: "pi-codex-goal" };
@@ -12,18 +45,23 @@ function parseArgs(argv) {
       console.log(
         `Usage: node scripts/platform-smoke/goal-runtime-smoke.mjs --model <model> --package-name <name>`,
       );
+
       process.exit(0);
     }
+
     if (arg === "--model" && argv[i + 1]) {
       args.model = argv[++i];
       continue;
     }
+
     if (arg === "--package-name" && argv[i + 1]) {
       args.packageName = argv[++i];
       continue;
     }
+
     throw new Error(`unknown argument: ${arg}`);
   }
+
   return args;
 }
 
@@ -39,6 +77,7 @@ function run(command, args, options = {}) {
     maxBuffer: 20 * 1024 * 1024,
     shell: process.platform === "win32" && command.toLowerCase().endsWith(".cmd"),
   });
+
   return {
     command: [command, ...args].join(" "),
     cwd: options.cwd,
@@ -61,20 +100,25 @@ function b64(text) {
 
 function walkFiles(root) {
   const files = [];
+
   function visit(dir) {
     let entries = [];
+
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
+
     for (const entry of entries) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) visit(path);
       else if (entry.isFile()) files.push(path);
     }
   }
+
   visit(root);
+
   return files;
 }
 
@@ -84,17 +128,20 @@ function findSessionJsonl(sessionDir) {
   let bestScore = -1;
   for (const file of candidates) {
     let text = "";
+
     try {
       text = readFileSync(file, "utf8");
     } catch {
       continue;
     }
+
     const score = (text.includes("pi-codex-goal") ? 10_000 : 0) + text.length;
     if (score > bestScore) {
       best = file;
       bestScore = score;
     }
   }
+
   return best;
 }
 
@@ -102,15 +149,28 @@ function latestPackedTarball(packDir, packageName) {
   const files = readdirSync(packDir)
     .filter((file) => file.startsWith(`${packageName}-`) && file.endsWith(".tgz"))
     .map((file) => join(packDir, file));
+
   files.sort();
+
   return files.at(-1) ?? "";
 }
 
 function textContent(content) {
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((part) => part?.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
+  let candidates;
+  try {
+    candidates = Value.Parse(ContentCandidatesSchema, content);
+  } catch {
+    return "";
+  }
+
+  return candidates
+    .flatMap((candidate) => {
+      try {
+        return [Value.Parse(TextContentSchema, candidate).text];
+      } catch {
+        return [];
+      }
+    })
     .join("\n");
 }
 
@@ -120,37 +180,41 @@ function observedSuccessfulReadTool(sessionJsonl, expectedPath, expectedContent)
 
   for (const line of sessionJsonl.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    let entry;
+
+    let message;
     try {
-      entry = JSON.parse(line);
+      message = Value.Parse(SessionEntrySchema, JSON.parse(line)).message;
     } catch {
       continue;
     }
-    const message = entry?.message;
-    if (!message || typeof message !== "object") continue;
 
-    if (message.role === "assistant" && Array.isArray(message.content)) {
-      for (const part of message.content) {
-        if (
-          part?.type === "toolCall" &&
-          part.name === "read" &&
-          part.arguments?.path === expectedPath &&
-          typeof part.id === "string"
-        ) {
-          readCallIds.add(part.id);
+    try {
+      const assistantMessage = Value.Parse(AssistantMessageSchema, message);
+      for (const candidate of assistantMessage.content) {
+        try {
+          const readCall = Value.Parse(ReadToolCallSchema, candidate);
+          if (readCall.arguments.path === expectedPath) {
+            readCallIds.add(readCall.id);
+          }
+        } catch {
+          // Ignore non-read content blocks in assistant messages.
         }
       }
       continue;
+    } catch {
+      // The message may instead be the matching tool result.
     }
 
-    if (
-      message.role === "toolResult" &&
-      message.toolName === "read" &&
-      message.isError === false &&
-      readCallIds.has(message.toolCallId) &&
-      textContent(message.content).trim() === expectedContent
-    ) {
-      successfulReadResult = true;
+    try {
+      const readResult = Value.Parse(ReadToolResultSchema, message);
+      if (
+        readCallIds.has(readResult.toolCallId) &&
+        textContent(readResult.content).trim() === expectedContent
+      ) {
+        successfulReadResult = true;
+      }
+    } catch {
+      // Ignore unrelated session messages.
     }
   }
 
@@ -169,6 +233,7 @@ const piProject = join(runRoot, "pi-project");
 const sessionDir = join(runRoot, "session");
 const agentDir = join(runRoot, "agent-config");
 const smokeFile = join(piProject, "goal-runtime-smoke.txt");
+
 mkdirSync(packDir, { recursive: true });
 mkdirSync(piProject, { recursive: true });
 mkdirSync(sessionDir, { recursive: true });
@@ -192,24 +257,27 @@ const piJs = resolve(
 const piCommand = existsSync(piJs) ? process.execPath : existsSync(piCli) ? piCli : "pi";
 const piPrefixArgs = existsSync(piJs) ? [piJs] : [];
 const piEnv = { PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1" };
-
 const commands = [];
 const pack = run(npm, ["pack", "--silent", "--pack-destination", packDir], { cwd: sourceRoot });
 commands.push({ name: "npm-pack", ...pack });
+
 const packedTarball =
   latestPackedTarball(packDir, args.packageName) ||
   join(packDir, pack.stdout.trim().split(/\r?\n/).at(-1) ?? "");
 
 const npmInit = run(npm, ["init", "-y"], { cwd: piProject });
 commands.push({ name: "npm-init", ...npmInit });
+
 const npmInstall = run(npm, ["install", "--no-save", packedTarball], { cwd: piProject });
 commands.push({ name: "npm-install-packed", ...npmInstall });
+
 const installPath = `.${process.platform === "win32" ? "\\" : "/"}node_modules${process.platform === "win32" ? "\\" : "/"}${args.packageName}`;
 const piInstall = run(piCommand, [...piPrefixArgs, "install", "-l", installPath, "--approve"], {
   cwd: piProject,
   env: piEnv,
 });
 commands.push({ name: "pi-install", ...piInstall });
+
 const piList = run(piCommand, [...piPrefixArgs, "list", "--approve"], {
   cwd: piProject,
   env: piEnv,
@@ -246,14 +314,18 @@ const piRun = run(
 commands.push({ name: "pi-run", ...piRun });
 
 let fileContent = "";
+
 try {
   fileContent = readFileSync(smokeFile, "utf8").trim();
 } catch {}
+
 const sessionJsonlPath = findSessionJsonl(sessionDir);
 let sessionJsonl = "";
+
 try {
   sessionJsonl = readFileSync(sessionJsonlPath, "utf8");
 } catch {}
+
 const finalMarkerObserved = piRun.stdout.includes(
   `GOAL_RUNTIME_SMOKE_OK status=complete file=${expectedContent}`,
 );
