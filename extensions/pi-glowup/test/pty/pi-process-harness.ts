@@ -63,6 +63,7 @@ function processEnvironment(agentDir: string): PiProcessEnvironment {
         PI_CLEAR_ON_SHRINK: "1",
     };
     if (process.env.TMPDIR !== undefined) environment.TMPDIR = process.env.TMPDIR;
+
     return environment;
 }
 
@@ -76,6 +77,7 @@ function screenRows(terminal: HeadlessTerminal): readonly PtyScreenRow[] {
             isWrapped: line?.isWrapped ?? false,
         });
     }
+
     return rows;
 }
 
@@ -200,6 +202,7 @@ export class PiPtyProcess {
 
     async stop(): Promise<ProcessExit> {
         if (this.exitState !== undefined) return this.exitState;
+
         this.process.write("\u0004");
 
         const graceful = await Promise.race([this.exitPromise, delay(1_500).then(() => undefined)]);
@@ -265,8 +268,8 @@ export class PiPtyProcess {
 
     private flushTrailingAnsi(): void {
         if (this.pendingAnsi.length === 0) return;
-        const trailing = this.pendingAnsi;
 
+        const trailing = this.pendingAnsi;
         this.pendingAnsi = "";
         this.enqueueAnsi(trailing);
     }

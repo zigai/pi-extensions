@@ -313,7 +313,6 @@ export function createCommandScriptFormatter(
         cacheBytes -= cache.get(key)?.bytes ?? 0;
         cache.set(key, { output, bytes });
         cacheBytes += bytes;
-
         while (cache.size > MAX_FORMATTER_CACHE_ENTRIES || cacheBytes > MAX_FORMATTER_CACHE_BYTES) {
             const oldest = cache.keys().next().value;
             if (oldest === undefined) break;
@@ -337,6 +336,7 @@ export function createCommandScriptFormatter(
         }
 
         const [executable, ...args] = command;
+
         if (executable === undefined) {
             return undefined;
         }

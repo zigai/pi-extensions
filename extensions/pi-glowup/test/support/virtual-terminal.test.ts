@@ -31,6 +31,7 @@ describe("VirtualTerminal query and invariant support", () => {
         expect(() => terminal.requireRowContaining("missing")).toThrow(
             /expected exactly one terminal row.*found 0.*Screen:.*alpha/s,
         );
+
         expect(() => terminal.requireRowMatching(/beta/)).toThrow(
             /expected exactly one terminal row.*found 2.*rows: 1, 2/,
         );
@@ -56,6 +57,7 @@ describe("VirtualTerminal query and invariant support", () => {
         await writeAndSettle(terminal, "\u001b[48;2;22;53;30m        \u001b[0m");
         const [row] = terminal.rowRange(0, 1);
         if (row === undefined) throw new Error("missing RGB test row");
+
         expect(row.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
         terminal.assertFullRowBackground(row, rgbFromHex("#16351E"));
         expect(() => terminal.assertFullRowBackground(row, rgbFromHex("#16351F"))).toThrow(

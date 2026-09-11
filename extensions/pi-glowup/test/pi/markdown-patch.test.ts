@@ -59,6 +59,7 @@ describe("markdown syntax patch", () => {
             render(this: FakeMarkdownInstance, _width: number): string[] {
                 const highlightCode = this.theme?.highlightCode;
                 if (highlightCode === undefined) throw new Error("expected injected highlighter");
+
                 highlightedFunctions.push(highlightCode);
 
                 return ["rendered"];

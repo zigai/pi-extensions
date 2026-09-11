@@ -32,10 +32,12 @@ function createFixtureWorkspace(workspaceName = "workspace"): FixtureWorkspace {
         join(extensionDirectory, "glowup.ts"),
         `export { default } from ${JSON.stringify(glowupPath)};\n`,
     );
+
     writeFileSync(
         join(extensionDirectory, "offline-provider.ts"),
         `export { default } from ${JSON.stringify(providerPath)};\n`,
     );
+
     copyFileSync(resolve("test/pty/fixtures/settings.json"), join(agentDir, "settings.json"));
     copyFileSync(resolve("test/pty/fixtures/keybindings.json"), join(agentDir, "keybindings.json"));
     copyFileSync(resolve("test/pty/fixtures/config.json"), getGlowupGlobalConfigPath(agentDir));
@@ -67,6 +69,7 @@ function launchOptions(
 function mutationBlock(frame: PtyScreenFrame, path: string, followingText: string): string {
     const start = frame.rows.findIndex((row) => row.text.includes(`Patched ${path}`));
     if (start < 0) throw new Error(`missing completed mutation header for ${path}`);
+
     const end = frame.rows.findIndex(
         (row, index) => index > start && row.text.includes(followingText),
     );
@@ -104,6 +107,7 @@ function expectTerminalInvariants(frame: PtyScreenFrame, internalPaths: readonly
 function trailingBlankRowsBefore(frame: PtyScreenFrame, text: string): number {
     const end = frame.rows.findIndex((row) => row.text.includes(text));
     if (end < 0) throw new Error(`missing terminal row containing ${text}`);
+
     let blanks = 0;
     for (let index = end - 1; index >= 0 && frame.rows[index]?.text.trim() === ""; index -= 1) {
         blanks += 1;
@@ -330,6 +334,7 @@ describe("actual Pi CLI in a real PTY", () => {
             expect(
                 changedRows.every((row) => !(row.text.includes("old") && row.text.includes("new"))),
             ).toBe(true);
+
             expectTerminalInvariants(unified, [resolve("test/pty/fixtures/offline-provider.ts")]);
 
             const wideSequence = pi.frames().length;
@@ -390,6 +395,7 @@ describe("actual Pi CLI in a real PTY", () => {
                     )
                     .every((row) => !row.isWrapped),
             ).toBe(true);
+
             expectTerminalInvariants(narrow, [resolve("test/pty/fixtures/offline-provider.ts")]);
 
             const restoredSequence = pi.frames().length;
@@ -408,6 +414,7 @@ describe("actual Pi CLI in a real PTY", () => {
                     (row) => row.text.includes("Bash") && row.text.includes("CHAIN_ALPHA"),
                 ),
             ).toHaveLength(1);
+
             expectTerminalInvariants(restored, [resolve("test/pty/fixtures/offline-provider.ts")]);
         } catch (cause: unknown) {
             await pi.writeFailureArtifacts("bash-chain-resize", cause);

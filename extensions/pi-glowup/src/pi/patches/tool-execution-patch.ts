@@ -593,6 +593,7 @@ function shouldUseThirdPartyRenderer(
     }
 
     const definition = instance.toolDefinition;
+
     const preserveInput =
         options === undefined
             ? { toolName, toolDefinition: definition }
@@ -1095,7 +1096,6 @@ export function configureThirdPartyToolRendererPatch(
             ) {
                 return true;
             }
-
             return originalHasRendererDefinition?.call(this) ?? false;
         };
 

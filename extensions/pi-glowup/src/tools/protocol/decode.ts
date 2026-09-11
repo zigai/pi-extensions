@@ -260,12 +260,10 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
     switch (readField(value, "kind", state)) {
         case "empty":
             return capture(nodeSchemas.empty, value, state);
-
         case "text": {
             const node = capture(nodeSchemas.text, value, state);
             return { kind: "text", text: decodeInline(node.text, state) };
         }
-
         case "summary": {
             const node = capture(nodeSchemas.summary, value, state);
             const { values, length } = collection(
@@ -288,7 +286,6 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return { kind: "summary", rows };
         }
-
         case "code": {
             const source = capture(nodeSchemas.code, value, state, ["text"]);
             let node: GlowupCodeNode = { kind: "code", text: source.text };
@@ -306,7 +303,6 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return node;
         }
-
         case "list": {
             const source = capture(nodeSchemas.list, value, state);
             const { values, length } = collection(
@@ -326,7 +322,6 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return node;
         }
-
         case "call": {
             const source = capture(nodeSchemas.call, value, state);
             let node: GlowupCallNode = {
@@ -346,7 +341,6 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return node;
         }
-
         case "output": {
             const source = capture(nodeSchemas.output, value, state, ["text", "noOutputLabel"]);
             let node: GlowupOutputNode = { kind: "output" };
@@ -365,7 +359,6 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return node;
         }
-
         case "mutation": {
             const source = capture(nodeSchemas.mutation, value, state, ["patch"]);
             const labels = capture(labelsSchema, source.labels, state, [
@@ -410,7 +403,6 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return node;
         }
-
         case "stack": {
             const source = capture(nodeSchemas.stack, value, state);
             const { values, length } = collection(
@@ -426,7 +418,6 @@ function decodeVariant(value: unknown, state: DecodeState, depth: number): Glowu
 
             return { kind: "stack", children };
         }
-
         default:
             return reject();
     }

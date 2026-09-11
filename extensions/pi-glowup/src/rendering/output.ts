@@ -73,7 +73,6 @@ export function collapsedPreviewLinesFromText(
     );
     const headCount = mode === "headTail" ? Math.ceil(lineBudget / 2) : lineBudget;
     const tailCount = mode === "headTail" ? Math.floor(lineBudget / 2) : 0;
-
     const headLines: string[] = [];
     const tailLines: string[] = [];
     let allLines: string[] | undefined = [];

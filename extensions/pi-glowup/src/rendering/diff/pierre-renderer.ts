@@ -786,6 +786,7 @@ class PierreDiffComponent implements Component {
 
         const metadata = this.payload.metadata;
         const scheduler = diffHighlightScheduler;
+
         void scheduler
             .schedule(
                 nextKey,

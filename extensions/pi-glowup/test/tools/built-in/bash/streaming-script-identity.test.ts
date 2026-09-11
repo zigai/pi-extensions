@@ -12,6 +12,7 @@ describe("streaming script identity", () => {
                 "cd /tmp && node --input-type=module <<'EOF'\nimport { value } from './value.js';",
             ),
         ).toBeUndefined();
+
         expect(
             store.resolve(
                 "call-1",

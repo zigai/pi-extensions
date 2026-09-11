@@ -209,6 +209,7 @@ describe("script formatter settings", () => {
             // Each distinct marker proves one live slot is occupied; startup order is irrelevant.
             await vi.waitUntil(() => {
                 if (!existsSync(logFile)) return false;
+
                 const jobs = readFileSync(logFile, "utf8").trim().split("\n");
                 return jobs.includes(first.code) && jobs.includes(second.code);
             });
@@ -268,6 +269,7 @@ describe("script formatter settings", () => {
                 formatter,
                 signal === undefined ? {} : { signal },
             );
+
         const pending = [invoke("first", controller.signal), invoke("second", controller.signal)];
         try {
             await vi.waitUntil(

@@ -143,12 +143,15 @@ function streamPatchResponse(
         if (timer !== undefined) clearTimeout(timer);
         options?.signal?.removeEventListener("abort", abort);
     };
+
     const fail = (cause: unknown): void => {
         if (finished) return;
+
         finished = true;
         cleanup();
         finishWithError(stream, output, cause);
     };
+
     const abort = (): void => fail(options?.signal?.reason ?? new Error("offline stream aborted"));
     const emitNext = (): void => {
         if (finished) return;
@@ -261,12 +264,15 @@ function streamReclassifiedBashResponse(
         if (timer !== undefined) clearTimeout(timer);
         options?.signal?.removeEventListener("abort", abort);
     };
+
     const fail = (cause: unknown): void => {
         if (finished) return;
+
         finished = true;
         cleanup();
         finishWithError(stream, output, cause);
     };
+
     const abort = (): void => fail(options?.signal?.reason ?? new Error("offline stream aborted"));
     const emitNext = (): void => {
         if (finished) return;
@@ -384,21 +390,27 @@ function streamOfflineProvider(
     options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
     if (hasToolResult(context)) return streamTextResponse(model);
+
     const prompt = latestUserText(context);
     if (prompt.includes("deterministic wrapping patch")) {
         return streamWrappingEditResponse(model);
     }
+
     if (prompt.includes("deterministic bash chain")) return streamBashChainResponse(model);
     if (prompt.includes("deterministic bash layout")) return streamBashLayoutResponse(model);
+
     if (prompt.includes("deterministic reclassified bash")) {
         return streamReclassifiedBashResponse(model, options);
     }
+
     if (prompt.includes("deterministic formatted python")) {
         return streamFormattedPythonResponse(model);
     }
+
     if (prompt.includes("deterministic uv python args")) {
         return streamUvPythonArgsResponse(model);
     }
+
     if (prompt.includes("deterministic inline python pipeline")) {
         return streamInlinePythonPipelineResponse(model);
     }

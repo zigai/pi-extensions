@@ -79,6 +79,7 @@ describe("opaque owner parser values", () => {
             expect(
                 renderer.renderCall({}, plainTheme, renderContext).render(80).join("\n"),
             ).toContain("opaque call");
+
             expect(
                 renderer
                     .renderResult(
@@ -90,6 +91,7 @@ describe("opaque owner parser values", () => {
                     .render(80)
                     .join("\n"),
             ).toContain("opaque result");
+
             expect(received).toHaveLength(3);
 
             for (const value of received) expect(value).toBe(parsed);
@@ -374,6 +376,7 @@ describe("third-party tool renderers", () => {
                 .render(120)
                 .join("\n"),
         ).toContain("DB Query select * from users");
+
         expect(
             renderer
                 .renderResult(
@@ -621,6 +624,7 @@ describe("third-party tool renderers", () => {
                 toolDefinition,
             }),
         ).toBe(false);
+
         expect(
             createThirdPartyToolRenderer("custom_tool", undefined, toolDefinition)
                 .renderCall({}, plainTheme, renderContext)
@@ -1275,6 +1279,7 @@ describe("third-party tool renderers", () => {
         expect(compactRenderedText(stripAccentStyle(rendered))).toContain(
             "Which items should `/loti review` consider eligible for promotion into durable memory?",
         );
+
         expect(rendered).toContain("Choose one:");
         expect(rendered).toContain("Stable durable only (Recommended)");
         expect(rendered).not.toContain('"questions"');
@@ -1320,6 +1325,7 @@ describe("third-party tool renderers", () => {
         expect(stripAccentStyle(rendered)).toContain(
             "Which items should `/loti review` consider eligible for promotion into durable memory?",
         );
+
         expect(rendered).not.toContain("User has answered your questions");
         expect(rendered).not.toContain("You can now continue");
     });

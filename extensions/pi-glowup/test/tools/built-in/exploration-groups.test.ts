@@ -30,6 +30,7 @@ describe("exploration groups", () => {
             actions: ["Read a.ts", "Search needle"],
             active: false,
         });
+
         expect(invalidations).toBe(1);
     });
 
@@ -79,6 +80,7 @@ describe("exploration groups", () => {
             actions: ["Read a.ts", "Search haystack"],
             active: false,
         });
+
         expect(invalidations).toBe(2);
     });
 
@@ -96,7 +98,6 @@ describe("exploration groups", () => {
         const store = new ExplorationGroupStore();
         store.registerGroupStart("first");
         store.registerGroupStart("third");
-
         const first = store.register({ toolCallId: "first", invalidate: noop }, "Read a.ts");
         const second = store.register({ toolCallId: "second", invalidate: noop }, "Search a");
         const third = store.register({ toolCallId: "third", invalidate: noop }, "Read b.ts");
@@ -242,6 +243,7 @@ describe("exploration groups", () => {
             expect(
                 store.register({ toolCallId: "352", invalidate: noop }, "Read child.ts"),
             ).toEqual({ kind: "child" });
+
             store.registerBoundary("353");
             expect(
                 store.register({ toolCallId: "354", invalidate: noop }, "Read next.ts"),
@@ -256,6 +258,7 @@ describe("exploration groups", () => {
         expect(store.register({ toolCallId: "401", invalidate: noop }, "Read child.ts")).toEqual({
             kind: "child",
         });
+
         expect(store.stats().pendingBoundaries).toBe(0);
     });
 

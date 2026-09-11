@@ -56,6 +56,7 @@ async function interpretedDiffRows(
 function tokenCell(rows: readonly InterpretedRow[], token: string) {
     const row = rows.find((candidate) => candidate.text.includes(token));
     if (row === undefined) throw new Error(`Missing rendered token: ${token}`);
+
     const cell = row.cells[row.text.indexOf(token)];
     if (cell === undefined) throw new Error(`Missing terminal cell: ${token}`);
     return cell;
@@ -88,6 +89,7 @@ const fgColors = {
     toolDiffContext: "#cccccc",
     toolDiffRemoved: "#ff0000",
 } satisfies Record<ThemeColor, string>;
+
 const bgColors = {
     ...TEST_THEME_BACKGROUND_COLORS,
     toolErrorBg: "#220000",
@@ -136,6 +138,7 @@ describe("Pierre diff rendering", () => {
         expect(probe.array[10]).toBeUndefined();
         expect(probe.accessCount()).toBe(2);
     });
+
     beforeEach(() => configureRenderingAppearance(defaultAppearance));
 
     it("accepts valid persisted summaries and rejects malformed payload details", () => {
@@ -150,6 +153,7 @@ describe("Pierre diff rendering", () => {
         expect(getPierreDiffPayloadFromDetails({ pierreDiff: validSummary })).toMatchObject(
             validSummary,
         );
+
         expect(
             getPierreDiffPayloadFromDetails({
                 pierreDiff: {
@@ -158,6 +162,7 @@ describe("Pierre diff rendering", () => {
                 },
             }),
         ).toBeUndefined();
+
         expect(
             getPierreDiffPayloadFromDetails({
                 pierreDiff: {
@@ -166,6 +171,7 @@ describe("Pierre diff rendering", () => {
                 },
             }),
         ).toBeUndefined();
+
         expect(getPierreDiffPayloadFromDetails({ pierreDiff: "not-an-object" })).toBeUndefined();
     });
 
@@ -179,9 +185,11 @@ describe("Pierre diff rendering", () => {
             canBuildPierreDiff: true,
         });
         if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
         const restored = structuredClone(payload);
         const firstHunk = restored.metadata.hunks[0];
         if (firstHunk === undefined) throw new Error("expected hunk");
+
         Reflect.set(firstHunk, "additionCount", Number.MAX_SAFE_INTEGER);
 
         expect(getPierreDiffPayloadFromDetails({ pierreDiff: restored })).toMatchObject({
@@ -190,6 +198,7 @@ describe("Pierre diff rendering", () => {
         });
         const normalized = getPierreDiffPayloadFromDetails({ pierreDiff: restored });
         if (normalized === undefined) throw new Error("expected bounded fallback");
+
         expect(
             stripAnsi(
                 renderPierreDiff(
@@ -400,9 +409,11 @@ describe("Pierre diff rendering", () => {
         expect(buildPierreDiffPayload(snapshot, { maxBytes: null, maxLines: 2 })?.kind).toBe(
             "summary",
         );
+
         expect(buildPierreDiffPayload(snapshot, { maxBytes: 4, maxLines: null })?.kind).toBe(
             "summary",
         );
+
         expect(buildPierreDiffPayload(snapshot, { maxBytes: null, maxLines: null })?.kind).toBe(
             "renderable",
         );
@@ -726,6 +737,7 @@ describe("Pierre diff rendering", () => {
             canBuildPierreDiff: true,
         });
         if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
         const originalHunk = payload.metadata.hunks[0];
         if (originalHunk === undefined) throw new Error("expected hunk");
 
@@ -881,6 +893,7 @@ describe("Pierre diff rendering", () => {
             { maxBytes: null, maxLines: null },
         );
         if (payload?.kind !== "renderable") throw new Error("expected rename payload");
+
         let invalidations = 0;
         const component = renderPierreDiff(
             payload,
@@ -911,6 +924,7 @@ describe("Pierre diff rendering", () => {
             canBuildPierreDiff: true,
         });
         if (payload?.kind !== "renderable") throw new Error("expected payload");
+
         const metadata = { ...payload.metadata, lang: "not-a-real-grammar" };
         const highlighted = await loadHighlightedDiff(metadata);
 
@@ -940,6 +954,7 @@ describe("Pierre diff rendering", () => {
                 canBuildPierreDiff: true,
             });
             if (payload?.kind !== "renderable") throw new Error("expected restored payload");
+
             renderPierreDiff(
                 payload,
                 testTheme,
@@ -1256,6 +1271,7 @@ describe("Pierre diff rendering", () => {
             { maxBytes: null, maxLines: null },
         );
         if (payload?.kind !== "renderable") throw new Error("expected renderable payload");
+
         const lines = renderPierreDiff(
             payload,
             testTheme,
@@ -1281,6 +1297,7 @@ describe("Pierre diff rendering", () => {
         expect(splitLines.some((line) => line.includes("aaaa") && line.includes("bbbb"))).toBe(
             true,
         );
+
         expectLinesWithinWidth(splitLines, 140);
     });
 
@@ -1412,6 +1429,7 @@ describe("Pierre diff rendering", () => {
             canBuildPierreDiff: true,
         });
         if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+
         const context = {
             lastComponent: undefined,
             toolCallId: "appearance-cache",
@@ -1447,6 +1465,7 @@ describe("Pierre diff rendering", () => {
             canBuildPierreDiff: true,
         });
         if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+
         const component = renderPierreDiff(
             payload,
             testTheme,

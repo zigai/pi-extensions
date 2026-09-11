@@ -66,7 +66,6 @@ export function createNativeToolRenderers(features: {
                         formatReadAction(theme, readActionArgs(args)),
                         options.labelMode,
                     );
-
                 case "find":
                     if (shouldDeferSimpleToolCall(context)) return emptyComponent();
                     return renderExplorationCall(
@@ -75,7 +74,6 @@ export function createNativeToolRenderers(features: {
                         formatFindAction(theme, findActionArgs(args)),
                         options.labelMode,
                     );
-
                 case "grep":
                     if (shouldDeferSimpleToolCall(context)) return emptyComponent();
                     return renderExplorationCall(
@@ -84,7 +82,6 @@ export function createNativeToolRenderers(features: {
                         formatGrepAction(theme, grepActionArgs(args)),
                         options.labelMode,
                     );
-
                 case "ls":
                     if (shouldDeferSimpleToolCall(context)) return emptyComponent();
                     return renderExplorationCall(
@@ -93,7 +90,6 @@ export function createNativeToolRenderers(features: {
                         formatLsAction(theme, lsActionArgs(args)),
                         options.labelMode,
                     );
-
                 case "bash":
                     return renderBashCall(
                         jsonValueParser.parse(args),
@@ -105,14 +101,12 @@ export function createNativeToolRenderers(features: {
                         options.shellLayout,
                         options.shellOperatorPosition,
                     );
-
                 case "write":
                     return renderWriteCall(jsonValueParser.parse(args), theme, context, {
                         labelMode: options.labelMode,
                         movingViewport: options.movingWriteViewport,
                         mutationSettings: options.mutationSettings,
                     });
-
                 case "edit":
                     return renderEditCall(
                         jsonValueParser.parse(args),
@@ -120,7 +114,6 @@ export function createNativeToolRenderers(features: {
                         context,
                         options.labelMode,
                     );
-
                 case "delete":
                     return renderDeleteCall(
                         jsonValueParser.parse(args),
@@ -129,7 +122,6 @@ export function createNativeToolRenderers(features: {
                         options.labelMode,
                         options.mutationSettings,
                     );
-
                 case "webSearch":
                     return renderWebSearchCall(
                         jsonValueParser.parse(args),
@@ -156,15 +148,12 @@ export function createNativeToolRenderers(features: {
                         : renderExplorationResult(result, options.expanded, theme, {
                               syntaxPath: syntaxPathFromToolArg(pathField(context.args)),
                           });
-
                 case "find":
                 case "grep":
                 case "ls":
                     return renderExplorationResult(result, options.expanded, theme);
-
                 case "bash":
                     return renderBashResult(result, options, theme, context, settings.headerLayout);
-
                 case "write":
                     return renderWriteResult(
                         result,
@@ -173,7 +162,6 @@ export function createNativeToolRenderers(features: {
                         context,
                         settings.mutationSettings,
                     );
-
                 case "edit":
                     return renderEditResult(
                         result,
@@ -182,7 +170,6 @@ export function createNativeToolRenderers(features: {
                         context,
                         settings.mutationSettings,
                     );
-
                 case "delete":
                     return context.isError
                         ? renderGlowupOutput(theme, textOutput(result), {
@@ -191,7 +178,6 @@ export function createNativeToolRenderers(features: {
                               maxPreviewLines: 5,
                           })
                         : emptyComponent();
-
                 case "webSearch":
                     return renderGlowupOutput(theme, textOutput(result), {
                         expanded: options.expanded,

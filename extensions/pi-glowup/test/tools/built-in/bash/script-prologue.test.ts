@@ -85,9 +85,11 @@ describe("script import prologue selection", () => {
                 2,
             ),
         ).toBeUndefined();
+
         expect(
             omitLeadingImportPrologue('"""module"""\nimport os\nprint(os.getcwd())', "python", 2),
         ).toBeUndefined();
+
         expect(omitLeadingImportPrologue("import os\nimport sys", "python", 1)).toBeUndefined();
     });
 });

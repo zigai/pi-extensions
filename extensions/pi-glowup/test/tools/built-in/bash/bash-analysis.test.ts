@@ -19,6 +19,7 @@ describe("bash command analysis", () => {
         expect(composed.reflowedCommand).toBe(
             `cd app &&\npython -c "print('check')" &&\njust test`,
         );
+
         expect(
             analyzeBashCommand(`python -c "import sys; print(sys.argv)" -- --help`).pureScript,
         ).toEqual({
@@ -26,9 +27,11 @@ describe("bash command analysis", () => {
             language: "python",
             code: "import sys; print(sys.argv)",
         });
+
         expect(
             analyzeBashCommand(`node -e "console.log('ok')" 2>/dev/null`).pureScript,
         ).toBeUndefined();
+
         expect(analyzeBashCommand("one && two").structurallyComplex).toBe(false);
     });
 
@@ -36,9 +39,11 @@ describe("bash command analysis", () => {
         expect(reflowBashCommand(`echo "a && b | c" && cat data | python -c "print('x')"`)).toBe(
             `echo "a && b | c" &&\ncat data | python -c "print('x')"`,
         );
+
         expect(reflowBashCommand(`check cache || rebuild cache && publish`)).toBe(
             `check cache || rebuild cache &&\npublish`,
         );
+
         expect(reflowBashCommand(`opencode debug --help | head -80`)).toBeUndefined();
         expect(reflowBashCommand(`ls -l /tmp/opencode || true`)).toBeUndefined();
         expect(reflowBashCommand(`echo $(first && second) && final`)).toBe(
@@ -68,12 +73,15 @@ describe("bash command analysis", () => {
         expect(reflowBashCommand(`if check; then one && two; else three; fi`)).toBe(
             [`if check; then`, `  one &&`, `  two;`, `else`, `  three;`, `fi`].join("\n"),
         );
+
         expect(reflowBashCommand(`f() { one && two; }`)).toBe(
             [`f() {`, `  one &&`, `  two;`, `}`].join("\n"),
         );
+
         expect(reflowBashCommand(`(one && two) || three`)).toBe(
             [`(`, `  one &&`, `  two`, `) || three`].join("\n"),
         );
+
         expect(reflowBashCommand(`case "$x" in a) one && two;; b) three;& esac`)).toBe(
             [`case "$x" in`, `  a)`, `    one &&`, `    two;;`, `  b)`, `    three;&`, `esac`].join(
                 "\n",

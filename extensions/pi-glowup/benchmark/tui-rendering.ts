@@ -185,6 +185,7 @@ function parseOptions(args: readonly string[]): BenchmarkOptions {
 
 function percentile(sorted: readonly number[], ratio: number): number {
     if (sorted.length === 0) return 0;
+
     const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1);
     return sorted[index] ?? 0;
 }
@@ -331,6 +332,7 @@ function resizeTimings(cycles: number): readonly number[] {
         canBuildPierreDiff: true,
     });
     if (payload?.kind !== "renderable") throw new Error("expected benchmark Pierre payload");
+
     const component = renderPierreDiff(
         payload,
         benchmarkTheme,
@@ -453,6 +455,7 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
         { maxBytes: null, maxLines: null },
     );
     if (restoredPayload?.kind !== "renderable") throw new Error("expected restored payload");
+
     let restoredComponent: Component | undefined;
     const restoredRenders: number[] = [];
     for (let sample = 0; sample < 200; sample += 1) {
@@ -463,6 +466,7 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
                     { maxBytes: null, maxLines: null },
                 );
                 if (normalized === undefined) throw new Error("expected normalized payload");
+
                 restoredComponent = renderPierreDiff(
                     normalized,
                     benchmarkTheme,
@@ -488,8 +492,10 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
         canBuildPierreDiff: true,
     });
     if (basePayload?.kind !== "renderable") throw new Error("expected replacement payload");
+
     const baseHunk = basePayload.metadata.hunks.at(0);
     if (baseHunk === undefined) throw new Error("expected replacement hunk");
+
     const replacementMetadata = {
         ...basePayload.metadata,
         deletionLines: Array.from({ length: 20_000 }, (_value, index) => `old ${index}`),
@@ -546,6 +552,7 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
         { maxBytes: null, maxLines: null },
     );
     if (highlightedPayload?.kind !== "renderable") throw new Error("expected highlight payload");
+
     const highlighted = (await loadHighlightedDiff(highlightedPayload.metadata)).dark;
     const highlightedRows = Array.from({ length: 100 }, () =>
         measure(() => {
@@ -574,6 +581,7 @@ async function reviewFindingTimings(): Promise<Readonly<Record<string, readonly 
         { maxBytes: null, maxLines: null },
     );
     if (renderPayload?.kind !== "renderable") throw new Error("expected render payload");
+
     const firstRenderComponent = renderPierreDiff(
         renderPayload,
         benchmarkTheme,
@@ -600,6 +608,7 @@ async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkReport>
 
     const startingHeap = process.memoryUsage().heapUsed;
     const rounds = options.quick ? 1 : 3;
+
     const timings: Record<string, readonly number[]> = {};
     timings["cold-large-diff"] = renderColdLargeDiff(options.quick ? 3 : 9);
     timings["write-stream-300"] = writeStreamTimings(300, rounds);

@@ -57,6 +57,7 @@ describe("module ownership", () => {
             }
 
             if (complete.has(file)) return;
+
             stack.push(file);
 
             for (const edge of edges) if (edge.from === file) visit(edge.to);

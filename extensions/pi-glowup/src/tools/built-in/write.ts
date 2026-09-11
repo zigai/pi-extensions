@@ -33,6 +33,7 @@ export function renderWriteCall(
     },
 ) {
     const labelColumnWidth = mutationLabelColumnWidth(context, options.labelMode);
+
     const writeContext: WriteCallContext =
         labelColumnWidth === undefined
             ? {

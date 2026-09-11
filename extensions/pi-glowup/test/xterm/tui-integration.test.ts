@@ -372,6 +372,7 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
             },
             isError: false,
         });
+
         activeTui.requestRender();
         await pendingTerminal.settle();
         const completed = pendingTerminal.screenText();
@@ -404,7 +405,6 @@ describe.each(tuiVariants)("Pi $mode TUI through headless xterm", ({ mode, creat
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
-
         let screen = pendingTerminal.screenText();
         expect(screen).not.toContain("Writing");
         expect(screen).not.toContain("undefined");
@@ -609,9 +609,11 @@ export const grownWriteTwelve = 12;
             0,
             pendingTerminal.columns,
         );
+
         expectDefaultBackgroundWithoutDiffAttributes(
             pendingTerminal.requireRowContaining("Writing src/final-write.ts (+3)"),
         );
+
         pendingTerminal.assertNeutralRange(pendingTerminal.requireRowContaining(afterSentinel));
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
@@ -637,9 +639,11 @@ export const grownWriteTwelve = 12;
             0,
             pendingTerminal.columns,
         );
+
         expectDefaultBackgroundWithoutDiffAttributes(
             pendingTerminal.requireRowContaining("Writing src/final-write.ts (+3)"),
         );
+
         pendingTerminal.assertNeutralRange(pendingTerminal.requireRowContaining(afterSentinel));
         pendingTerminal.assertNoWrappedRows();
         pendingTerminal.assertRowsFitWidth();
@@ -650,6 +654,7 @@ export const grownWriteTwelve = 12;
             details: undefined,
             isError: false,
         });
+
         activeTui.requestRender();
         await pendingTerminal.settle();
         screen = pendingTerminal.screenText();
@@ -736,7 +741,6 @@ export const grownWriteTwelve = 12;
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
-
         let screen = pendingTerminal.screenText();
         expect(screen).toContain("Editing");
         expect(screen).not.toContain("undefined");
@@ -760,6 +764,7 @@ export const grownWriteTwelve = 12;
             path: "src/obsolete-edit.ts",
             edits: [{ oldText: "obsoleteEditOld" }],
         });
+
         activeTui.requestRender();
         await pendingTerminal.settle();
         screen = pendingTerminal.screenText();
@@ -778,6 +783,7 @@ export const grownWriteTwelve = 12;
                 { oldText: "obsoleteSecondOld", newText: "obsoleteSecondNew" },
             ],
         });
+
         activeTui.requestRender();
         await pendingTerminal.settle();
         screen = pendingTerminal.screenText();
@@ -809,6 +815,7 @@ export const grownWriteTwelve = 12;
             path: finalPath,
             edits: [{ oldText: "const obsoleteValue = 1;", newText: "const currentValue = 2;" }],
         });
+
         activeTui.requestRender();
         await pendingTerminal.settle();
         screen = pendingTerminal.screenText();
@@ -866,6 +873,7 @@ export const grownWriteTwelve = 12;
             canBuildPierreDiff: true,
         });
         if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+
         const displayDiff =
             "src/final-edit.ts\n- 2 const obsoleteValue = 1;\n+ 2 const currentValue = 2;\n";
         const patch =
@@ -876,6 +884,7 @@ export const grownWriteTwelve = 12;
             details: { diff: displayDiff, patch, firstChangedLine: 2, pierreDiff: payload },
             isError: false,
         });
+
         activeTui.requestRender();
         await pendingTerminal.settle();
 
@@ -914,12 +923,14 @@ export const grownWriteTwelve = 12;
                 rgbFromHex(DEFAULT_APPEARANCE.deletedContentBackground),
             ]),
         );
+
         expect(new Set(addition.cells.map((cell) => cell.background))).toEqual(
             new Set([
                 rgbFromHex(DEFAULT_APPEARANCE.addedRowBackground),
                 rgbFromHex(DEFAULT_APPEARANCE.addedContentBackground),
             ]),
         );
+
         expect(context.cells.every((cell) => cell.isBackgroundDefault)).toBe(true);
         expect(trailingContext.cells.every((cell) => cell.isBackgroundDefault)).toBe(true);
         const additionCode = requireDisplayCellSpan(addition, "const currentValue = 2;");
@@ -980,7 +991,6 @@ export const grownWriteTwelve = 12;
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
-
         let screen = pendingTerminal.screenText();
         expect(screen).toContain("Deleting");
         expect(screen).not.toContain("undefined");
@@ -1028,6 +1038,7 @@ export const grownWriteTwelve = 12;
         );
         const installedExtension = extension;
         if (installedExtension === undefined) throw new Error("extension must be installed");
+
         await installedExtension.emitToolCall(
             {
                 type: "tool_call",
@@ -1061,6 +1072,7 @@ export const grownWriteTwelve = 12;
             details: undefined,
             isError: false,
         });
+
         activeTui.requestRender();
         await pendingTerminal.settle();
 
@@ -1112,6 +1124,7 @@ export const grownWriteTwelve = 12;
                 ),
             ),
         ).toBe(true);
+
         pendingTerminal.assertNeutralRange(
             pendingTerminal.requireRowContaining(beforeSentinel),
             0,
@@ -1150,6 +1163,7 @@ export const grownWriteTwelve = 12;
             },
             isError: false,
         });
+
         activeTui.addChild(new LinesComponent([beforeSentinel]));
         activeTui.addChild(tool);
         activeTui.addChild(new LinesComponent([afterSentinel]));
@@ -1157,7 +1171,6 @@ export const grownWriteTwelve = 12;
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
-
         const screen = pendingTerminal.screenText();
         expect(existsSync(join(cwd, path))).toBe(false);
         expect(screen).toContain("Deleted src/restored-delete.ts (-2)");
@@ -1234,7 +1247,6 @@ export const grownWriteTwelve = 12;
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
-
         const screen = pendingTerminal.screenText();
         const rawWrites = pendingTerminal.rawWrites().join("");
         expect(screen).toContain("BEFORE_CONTROL_SENTINEL");
@@ -1271,28 +1283,31 @@ export const grownWriteTwelve = 12;
         expect(
             pendingTerminal.requireRowContaining("uv run pytest").text.trimEnd().endsWith("&&"),
         ).toBe(true);
+
         expect(
             pendingTerminal.requireRowContaining("just test feature").text.trimEnd().endsWith("&&"),
         ).toBe(true);
+
         pendingTerminal.requireRowContaining("git status --short");
         pendingTerminal.assertNoWrappedRows();
-
         pendingTerminal.resize(42, 20);
         await pendingTerminal.settle();
         expect(
             pendingTerminal.requireRowContaining("just test feature").text.trimEnd().endsWith("&&"),
         ).toBe(true);
+
         pendingTerminal.requireRowContaining("git status --short");
         pendingTerminal.assertNoWrappedRows();
-
         pendingTerminal.resize(110, 20);
         await pendingTerminal.settle();
         expect(
             pendingTerminal.requireRowContaining("uv run pytest").text.trimEnd().endsWith("&&"),
         ).toBe(true);
+
         expect(
             pendingTerminal.requireRowContaining("just test feature").text.trimEnd().endsWith("&&"),
         ).toBe(true);
+
         pendingTerminal.requireRowContaining("git status --short");
         pendingTerminal.assertNoWrappedRows();
         expect(pendingTerminal.countOccurrences("BEFORE_BASH_CHAIN")).toBe(1);
@@ -1311,6 +1326,7 @@ export const grownWriteTwelve = 12;
             canBuildPierreDiff: true,
         });
         if (payload?.kind !== "renderable") throw new Error("expected renderable Pierre payload");
+
         const tool = new ToolExecutionComponent(
             "edit",
             "call-xterm-resize",
@@ -1331,6 +1347,7 @@ export const grownWriteTwelve = 12;
             details: { pierreDiff: payload },
             isError: false,
         });
+
         activeTui.addChild(new LinesComponent(["BEFORE_SENTINEL"]));
         activeTui.addChild(tool);
         activeTui.addChild(new LinesComponent(["AFTER_SENTINEL"]));
@@ -1338,7 +1355,6 @@ export const grownWriteTwelve = 12;
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
-
         const firstWide = pendingTerminal.screenText();
         expect(firstWide).toContain(" │ ");
         expect(pendingTerminal.countOccurrences("BEFORE_SENTINEL")).toBe(1);
@@ -1348,7 +1364,6 @@ export const grownWriteTwelve = 12;
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).not.toContain(" │ ");
         pendingTerminal.assertNoWrappedRows();
-
         pendingTerminal.resize(180, 30);
         await pendingTerminal.settle();
         expect(pendingTerminal.screenText()).toBe(firstWide);
@@ -1407,7 +1422,6 @@ export const grownWriteTwelve = 12;
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
-
         const wide = pendingTerminal.screenText();
         expect(wide).toContain("Patched src/example.ts (+1 -1)");
         expect(wide).toContain("alpha");
@@ -1465,7 +1479,6 @@ export const grownWriteTwelve = 12;
         tui = activeTui;
         activeTui.start();
         await pendingTerminal.settle();
-
         const rendered = pendingTerminal.screenText();
         expect(rendered).toContain("value1 = 1");
         expect(rendered).toContain("value6 = 6");
@@ -1529,6 +1542,7 @@ export const grownWriteTwelve = 12;
             },
             isError: false,
         });
+
         activeTui.addChild(new LinesComponent(["BEFORE_TRANSCRIPT"]));
         activeTui.addChild(tool);
         activeTui.addChild(new LinesComponent(["AFTER_TRANSCRIPT"]));
@@ -1552,6 +1566,7 @@ export const grownWriteTwelve = 12;
 
             return after.index;
         };
+
         const collapsed = pendingTerminal.screenText();
         const collapsedAfter = assertAdjacentTranscript();
         expect(collapsed).not.toContain("line5");
@@ -1672,7 +1687,6 @@ export const grownWriteTwelve = 12;
             tui = activeTui;
             activeTui.start();
             await pendingTerminal.settle();
-
             const standaloneDeletion = pendingTerminal.requireRowContaining("removedOnly");
             const standaloneAddition = pendingTerminal.requireRowContaining("insertedOnly");
             const replacementDeletion = pendingTerminal.requireRowContaining("previousValue");
@@ -1707,11 +1721,13 @@ export const grownWriteTwelve = 12;
                 [deletedRow, deletedContent],
                 pendingTerminal.columns,
             );
+
             expectRgbBackgrounds(
                 replacementAddition,
                 [addedRow, addedContent],
                 pendingTerminal.columns,
             );
+
             expect(standaloneDeletion.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
             expect(standaloneAddition.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
             expect(blankAddition.cells.every((cell) => cell.isBackgroundRgb)).toBe(true);
@@ -1730,6 +1746,7 @@ export const grownWriteTwelve = 12;
                 isForegroundDefault: false,
                 isForegroundRgb: true,
             });
+
             expect(replacementAddition.cells[additionMarker.start]).toMatchObject({
                 foreground: addedForeground,
                 isForegroundDefault: false,
@@ -1803,6 +1820,7 @@ export const grownWriteTwelve = 12;
             "/second stale completion",
             "/third stale completion",
         ]);
+
         const running = await start([content], 80, 20);
         expect(running.terminal.screenText()).toContain("third stale completion");
         const writesBeforeCleanup = running.terminal.rawWrites().length;

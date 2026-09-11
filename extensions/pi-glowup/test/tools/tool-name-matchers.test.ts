@@ -68,6 +68,7 @@ describe("tool preservation policies", () => {
                 ],
             }),
         ).toBe(true);
+
         expect(calls).toBe(0);
         expect(preserves("rich_tool", {})).toBe(false);
     });

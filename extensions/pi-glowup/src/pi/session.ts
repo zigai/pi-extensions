@@ -47,6 +47,7 @@ export function installExplorationSession(
         exploration.clear();
 
         const sessionManager = ctx.sessionManager;
+
         exploration.setSource(() => sessionManager.getBranch());
         restoreExplorationGroupStarts(sessionManager.getBranch());
     });

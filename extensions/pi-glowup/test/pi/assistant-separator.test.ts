@@ -239,14 +239,17 @@ describe("assistant separator patch", () => {
             expect(
                 component.render(80).map((line) => stripVTControlCharacters(line).trim()),
             ).toEqual(expected);
+
             component.invalidate();
             expect(
                 component.render(80).map((line) => stripVTControlCharacters(line).trim()),
             ).toEqual(expected);
+
             component.setHideThinkingBlock(true);
             expect(
                 component.render(80).map((line) => stripVTControlCharacters(line).trim()),
             ).toEqual(["", "text A", "", "Thinking...", "", "text B", "", "Thinking..."]);
+
             component.setHideThinkingBlock(false);
             expect(
                 component.render(80).map((line) => stripVTControlCharacters(line).trim()),
@@ -319,9 +322,11 @@ describe("assistant separator patch", () => {
             expect(() => prototype.updateContent.call(instance, assistantMessage([]))).toThrow(
                 failure,
             );
+
             expect(Object.getOwnPropertyDescriptor(contentContainer, "addChild")?.value).toBe(
                 originalDescriptor?.value,
             );
+
             expect(contentContainer.render(20)).toEqual(["before failure"]);
         } finally {
             configureAssistantSeparatorPatch(false, prototype);
@@ -361,9 +366,11 @@ describe("assistant separator patch", () => {
         expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(
             originalRenderDescriptor,
         );
+
         expect(Object.getOwnPropertyDescriptor(prototype, "updateContent")).toEqual(
             originalUpdateDescriptor,
         );
+
         expect(Object.getOwnPropertyDescriptor(containerPrototype, "addChild")).toEqual(
             originalAddChildDescriptor,
         );
@@ -415,6 +422,7 @@ describe("assistant separator patch", () => {
         expect(Object.getOwnPropertyDescriptor(containerPrototype, "addChild")).toEqual(
             laterAddChildDescriptor,
         );
+
         expect(prototype.render.call({ [ASSISTANT_SEPARATOR_RENDER_KEY]: true }, 6)).toEqual([]);
         containerPrototype.addChild(new LabelComponent("child"));
         expect(addedChildren.flatMap((child) => child.render(20))).toEqual(["child"]);
@@ -428,12 +436,14 @@ describe("assistant separator patch", () => {
                 { type: "thinking", thinking: "next" },
             ]),
         );
+
         expect(contentContainer.render(20)).toEqual([
             "initial-spacer",
             "text:first",
             "",
             "thinking:next",
         ]);
+
         expect(Object.getOwnPropertyDescriptor(prototype, "render")).toEqual(laterRenderDescriptor);
         configureAssistantSeparatorPatch(false, prototype, containerPrototype);
     });

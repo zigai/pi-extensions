@@ -109,6 +109,7 @@ function createPrototype(): FakeToolExecutionPrototype {
         },
         invalidate(): void {},
     });
+
     const existingCallRenderer: FakeCallRenderer = () => existingComponent();
     const existingResultRenderer: FakeResultRenderer = () => existingComponent();
 
@@ -139,6 +140,7 @@ describe("tool execution patches", () => {
             expect(() => configureThirdPartyToolRendererPatch(true, undefined, prototype)).toThrow(
                 "Invalid Pi tool execution prototype methods",
             );
+
             expect(Object.getOwnPropertyDescriptors(prototype)).toEqual(before);
             Object.defineProperties(prototype, descriptors);
             expect(toolRendererPatchStats(prototype).thirdPartyPatchEnabled).toBe(false);
@@ -152,9 +154,11 @@ describe("tool execution patches", () => {
                 throw new Error("unreadable prototype");
             },
         });
+
         expect(() => configureThirdPartyToolRendererPatch(true, undefined, prototype)).toThrow(
             "unreadable prototype",
         );
+
         expect(Object.getOwnPropertySymbols(prototype)).toEqual([]);
     });
 
@@ -168,6 +172,7 @@ describe("tool execution patches", () => {
         expect(() => prototype.getCallRenderer.call({ toolName: "read" })).toThrow(
             "original getter failure",
         );
+
         configureThirdPartyToolRendererPatch(false, undefined, prototype);
         expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(original);
     });
@@ -188,6 +193,7 @@ describe("tool execution patches", () => {
             render: () => [args.query],
             invalidate: noop,
         });
+
         const renderResult = (result: AgentToolResult<{ label: string }>): FakeComponent => ({
             render: () => [result.details.label],
             invalidate: noop,
@@ -261,6 +267,7 @@ describe("tool execution patches", () => {
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["existing renderer"]);
+
         configureBuiltInToolRendererPatch(false, undefined, prototype);
         prototype.hasRendererDefinition.call(instance);
         expect(observed).toHaveLength(2);
@@ -308,6 +315,7 @@ describe("tool execution patches", () => {
         expect(renderer?.(args, plainTheme, { ...renderContext, args }).render(80)).toEqual([
             "rendered",
         ]);
+
         expect(received).toEqual([expected, expected]);
     });
 
@@ -343,6 +351,7 @@ describe("tool execution patches", () => {
                 .call(readInstance)?.({}, plainTheme, renderContext)
                 .render(80),
         ).toEqual(["called read"]);
+
         expect(
             prototype.getResultRenderer
                 .call(readInstance)?.(
@@ -353,6 +362,7 @@ describe("tool execution patches", () => {
                 )
                 .render(80),
         ).toEqual(["result read"]);
+
         expect(prototype.getRenderShell.call(customInstance)).toBe("default");
     });
 
@@ -446,6 +456,7 @@ describe("tool execution patches", () => {
         expect(
             prototype.getCallRenderer.call(lsInstance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["called ls"]);
+
         expect(
             prototype.getResultRenderer
                 .call(lsInstance)?.(
@@ -456,6 +467,7 @@ describe("tool execution patches", () => {
                 )
                 .render(80),
         ).toEqual(["result ls"]);
+
         expect(
             prototype.getCallRenderer
                 .call(deleteInstance)?.({}, plainTheme, renderContext)
@@ -485,6 +497,7 @@ describe("tool execution patches", () => {
             },
             prototype,
         );
+
         expect(prototype.getRenderShell.call(readInstance)).toBe("self");
 
         configureBuiltInToolRendererPatch(false, undefined, prototype);
@@ -513,6 +526,7 @@ describe("tool execution patches", () => {
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["glowup call"]);
+
         expect(
             prototype.getResultRenderer
                 .call(instance)?.(
@@ -523,9 +537,11 @@ describe("tool execution patches", () => {
                 )
                 .render(80),
         ).toEqual(["glowup result"]);
+
         expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
             laterDescriptor,
         );
+
         configureBuiltInToolRendererPatch(false, undefined, prototype);
     });
 
@@ -787,9 +803,11 @@ describe("tool execution patches", () => {
         expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
             laterRendererDescriptor,
         );
+
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["existing renderer"]);
+
         expect(prototype.getRenderShell.call(instance)).toBe("default");
         configureThirdPartyToolRendererPatch(true, undefined, prototype);
         expect(prototype.getRenderShell.call(instance)).toBe("self");
@@ -797,6 +815,7 @@ describe("tool execution patches", () => {
         expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
             laterRendererDescriptor,
         );
+
         configureThirdPartyToolRendererPatch(false, undefined, prototype);
     });
 
@@ -847,6 +866,7 @@ describe("tool execution patches", () => {
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["called recorded_tool"]);
+
         expect(
             prototype.getResultRenderer
                 .call(instance)?.(
@@ -857,9 +877,11 @@ describe("tool execution patches", () => {
                 )
                 .render(80),
         ).toEqual(["result recorded_tool"]);
+
         expect(
             prototype.getCallRenderer.call(instance)?.({}, plainTheme, renderContext).render(80),
         ).toEqual(["called recorded_tool"]);
+
         expect(createdRenderers).toBe(1);
     });
 
@@ -897,6 +919,7 @@ describe("tool execution patches", () => {
         expect(Object.getOwnPropertyDescriptor(prototype, "getCallRenderer")).toEqual(
             patchedGetCallRendererDescriptor,
         );
+
         expect(prototype.getRenderShell.call(instance)).toBe("default");
         expect(prototype.hasRendererDefinition.call(instance)).toBe(false);
         expect(
@@ -1219,6 +1242,7 @@ describe("tool execution patches", () => {
             lastComponent: undefined,
             state: {},
         };
+
         const args = {};
         const first = prototype.getCallRenderer.call(instance)?.(args, plainTheme, context);
         const repeated = prototype.getCallRenderer.call(instance)?.(args, plainTheme, {
@@ -1277,6 +1301,7 @@ describe("tool execution patches", () => {
                 },
             );
             if (component === undefined) throw new Error("expected completed renderer");
+
             components.push(component);
             component.render(80);
         }
@@ -1285,10 +1310,12 @@ describe("tool execution patches", () => {
         expect(filled.completedLineCacheBytes).toBeLessThanOrEqual(
             filled.completedLineCacheLimitBytes,
         );
+
         expect(filled.completedLineCacheEntries).toBeLessThan(components.length);
         expect(filled.completedLineCacheEntries).toBeLessThanOrEqual(
             filled.completedLineCacheLimitEntries,
         );
+
         expect(filled.completedLineCacheEvictions).toBeGreaterThan(
             before.completedLineCacheEvictions,
         );
@@ -1310,6 +1337,7 @@ describe("tool execution patches", () => {
         expect(afterReconfiguration.completedLineCacheBytes).toBeLessThanOrEqual(
             afterReconfiguration.completedLineCacheLimitBytes,
         );
+
         expect(afterReconfiguration.completedLineCacheEntries).toBeLessThanOrEqual(2);
 
         configureBuiltInToolRendererPatch(false, undefined, prototype);

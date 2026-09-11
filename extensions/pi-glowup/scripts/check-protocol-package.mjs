@@ -70,6 +70,7 @@ export async function checkProtocolPackage(packageRoot) {
       ],
       { cwd: consumerRoot, stdio: "pipe" },
     );
+
     execFileSync(
       process.execPath,
       [

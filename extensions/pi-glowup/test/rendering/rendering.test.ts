@@ -73,6 +73,7 @@ describe("Glowup rendering helpers", () => {
         expect(formatReadAction(plainTheme, { path: "/tmp/example.ts", offset: 4, limit: 3 })).toBe(
             "Read /tmp/example.ts:4-6",
         );
+
         expect(
             formatGrepAction(plainTheme, {
                 pattern: "needle",
@@ -90,6 +91,7 @@ describe("Glowup rendering helpers", () => {
                 "/home/me/.pi/agent/npm/node_modules/pi-autoresearch/skills/autoresearch-create/SKILL.md",
             ),
         ).toBe(true);
+
         expect(isInstructionFilePath("src/AGENTS.md")).toBe(true);
         expect(isInstructionFilePath("src/rendering.ts")).toBe(false);
 
@@ -98,9 +100,11 @@ describe("Glowup rendering helpers", () => {
         ).toBe(
             "<toolTitle>Read</toolTitle> <customMessageLabel>/home/me/.pi/agent/skills/typescript/SKILL.md</customMessageLabel>",
         );
+
         expect(formatReadAction(tokenTheme, { path: "src/AGENTS.md", offset: 1, limit: 2 })).toBe(
             "<toolTitle>Read</toolTitle> <customMessageLabel>src/AGENTS.md</customMessageLabel><muted>:1-2</muted>",
         );
+
         expect(formatReadAction(tokenTheme, { path: "src/rendering.ts" })).toBe(
             "<toolTitle>Read</toolTitle> <accent>src/rendering.ts</accent>",
         );
@@ -153,6 +157,7 @@ describe("Glowup rendering helpers", () => {
                 "/home/me/.pi/agent/npm/node_modules/pi-autoresearch/skills/autoresearch-create",
             ),
         ).toBe(true);
+
         expect(isPartialInstructionFilePath("src/AGENTS.")).toBe(true);
         expect(isPartialInstructionFilePath("src/rendering")).toBe(false);
 
@@ -165,9 +170,11 @@ describe("Glowup rendering helpers", () => {
         ).toContain(
             "<customMessageLabel>/home/me/.pi/agent/skills/typescript</customMessageLabel>",
         );
+
         expect(
             formatReadAction(tokenTheme, { path: "/home/me/.pi/agent/sk" }, { isPartial: true }),
         ).toContain("<muted>/home/me/.pi/agent/sk</muted>");
+
         expect(
             formatReadAction(tokenTheme, { path: "src/rendering" }, { isPartial: true }),
         ).toContain("<muted>src/rendering</muted>");
@@ -239,18 +246,21 @@ describe("Glowup rendering helpers", () => {
                 statusText: "Bash",
             }).render(80)[0],
         ).toContain("<success><bold>•</bold></success>");
+
         expect(
             renderGlowupCall(styledTheme, {
                 state: "error",
                 statusText: "Bash",
             }).render(80)[0],
         ).toContain("<toolDiffRemoved><bold>•</bold></toolDiffRemoved>");
+
         expect(
             renderGlowupCall(styledTheme, {
                 state: "running",
                 statusText: "Bash",
             }).render(80)[0],
         ).toContain("<muted><bold>•</bold></muted>");
+
         expect(
             renderGlowupCall(styledTheme, {
                 state: "muted",
@@ -287,6 +297,7 @@ describe("Glowup rendering helpers", () => {
         expect(renderMutationCall(plainTheme, summary).render(80)[0]).toContain(
             "Wrote src/example.ts (+1)",
         );
+
         expect(
             renderMutationCall(plainTheme, summary, { labelColumnWidth: 7 }).render(80)[0],
         ).toContain("Wrote   src/example.ts (+1)");
@@ -477,6 +488,7 @@ describe("Glowup rendering helpers", () => {
         expect(lines).toContain(
             "    Creating domain...                                      |      00:00",
         );
+
         expect(lines).not.toContain("    ");
     });
 
@@ -633,6 +645,7 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain(
             "<toolTitle>/tmp/pi-tweaks-live-tui-demo.zLtsoL/env.sh</toolTitle>",
         );
+
         expect(rendered).toContain("<dim># Ensure a clean input before demo 1.</dim>");
         expect(rendered).toContain('<syntaxString>"$target"</syntaxString>');
         expect(rendered).not.toContain("<syntaxFunction></syntaxFunction>");
@@ -669,6 +682,7 @@ describe("Glowup rendering helpers", () => {
         expect(rendered).toContain(
             "<toolTitle>vps.01:~/Projects/config/Packages/manifests/vps.toml</toolTitle>",
         );
+
         expect(rendered).not.toContain("<dim>--</dim>");
         expect(rendered).not.toContain("<dim>-</dim><syntaxOperator>az</syntaxOperator>");
         expect(rendered).not.toContain("<toolOutput>fedora</toolOutput>");
@@ -764,6 +778,7 @@ describe("Glowup rendering helpers", () => {
             language: "python",
             code: "print('hi')",
         });
+
         expect(parseScriptInvocation("python - <<-'PY'\nprint('hi')\n  PY")).toEqual({
             label: "Python",
             language: "python",
@@ -797,16 +812,19 @@ describe("Glowup rendering helpers", () => {
             language: "typescript",
             code: "console.log('typed')",
         });
+
         expect(parseScriptInvocation(`bun --eval "console.log('bun')"`)).toEqual({
             label: "Bun",
             language: "typescript",
             code: "console.log('bun')",
         });
+
         expect(parseScriptInvocation(`deno eval "console.log('deno')"`)).toEqual({
             label: "Deno",
             language: "typescript",
             code: "console.log('deno')",
         });
+
         expect(parseScriptInvocation(`deno eval --ext=ts "const value: number = 1"`)).toEqual({
             label: "Deno",
             language: "typescript",
@@ -822,11 +840,13 @@ describe("Glowup rendering helpers", () => {
             language: "python",
             code: "print('ok')",
         });
+
         expect(parseScriptInvocation(`pnpm exec tsx -e "console.log('ok')"`)).toEqual({
             label: "TypeScript",
             language: "typescript",
             code: "console.log('ok')",
         });
+
         expect(
             parseScriptInvocation(
                 `uv run env NODE_PATH=./node_modules node --input-type=module -e "console.log('ok')"`,
@@ -836,6 +856,7 @@ describe("Glowup rendering helpers", () => {
             language: "javascript",
             code: "console.log('ok')",
         });
+
         expect(
             parseScriptInvocation(
                 `uv run --offline --no-project python -c 'import sys\nprint(sys.argv)' -- demo --verbose`,
@@ -845,6 +866,7 @@ describe("Glowup rendering helpers", () => {
             language: "python",
             code: "import sys\nprint(sys.argv)",
         });
+
         expect(parseScriptInvocation(`xargs node -e "console.log('nested')"`)).toBeUndefined();
         expect(
             parseScriptInvocation(`find . -exec node -e "console.log('nested')"`),
@@ -877,6 +899,7 @@ describe("Glowup rendering helpers", () => {
         expect(
             parseScriptInvocation(`python -c "print('hi')" && rm -f tmp/demo.py`),
         ).toBeUndefined();
+
         expect(
             parseScriptInvocation(
                 `node -e 'process.stderr.write("diagnostic")' 2>/dev/null || true`,
@@ -1294,11 +1317,13 @@ describe("Glowup rendering helpers", () => {
         expect(deletion.indexOf(deletedRow, deletion.indexOf(deletedContent))).toBeGreaterThan(
             deletion.indexOf(deletedContent),
         );
+
         expect(addition).toContain(addedRow);
         expect(addition).toContain(addedContent);
         expect(addition.indexOf(addedRow, addition.indexOf(addedContent))).toBeGreaterThan(
             addition.indexOf(addedContent),
         );
+
         expectLinesWithinWidth(lines, 80);
     });
 

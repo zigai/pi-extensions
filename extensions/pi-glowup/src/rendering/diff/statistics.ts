@@ -60,6 +60,7 @@ function matchesDiffStatLine(
     }
 
     const digitStart = index;
+
     while (index < end && isDigit(text.charCodeAt(index))) {
         index += 1;
     }

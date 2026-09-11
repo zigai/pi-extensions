@@ -97,11 +97,9 @@ function matcherMatches(toolName: string, matcher: ToolNameMatcher): boolean {
     const { pattern } = matcher;
     pattern.lastIndex = 0;
     const matchesToolName = pattern.test(toolName);
-
     pattern.lastIndex = 0;
     const matchesBaseName = pattern.test(baseToolName(toolName));
     pattern.lastIndex = 0;
-
     return matchesToolName || matchesBaseName;
 }
 

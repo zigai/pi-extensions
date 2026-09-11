@@ -166,7 +166,6 @@ export function parseGlowupConfig(
         options.reportWarning?.(
             `[pi-glowup] Ignoring invalid ${options.source ?? "config"}: ${configSchemaErrorSummary(candidate)}`,
         );
-
         return normalizeGlowupConfig(
             Value.Decode(settingsSchema, extensionSettingsDefinition.defaultSettings),
             options.reportWarning,

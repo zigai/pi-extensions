@@ -110,6 +110,7 @@ function renderCallLines(testCase: RendererConformanceCase, width: number): stri
 
 function renderResultLines(testCase: RendererConformanceCase, width: number): string[] {
     if (testCase.result === undefined) return [];
+
     const renderer = createThirdPartyToolRenderer(testCase.toolName, {
         labelMode: "lifecycle",
     });

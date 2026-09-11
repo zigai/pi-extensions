@@ -52,9 +52,11 @@ describe("package manifest", () => {
             expect(publishedFiles, `Public dependency must be shipped: ${file}`).toContain(
                 relative(process.cwd(), file),
             );
+
             expect(file).not.toMatch(
                 /\/src\/(?:rendering|pi|config|diagnostics|themes)(?:\/|\.ts$)/,
             );
+
             expect(file).not.toMatch(/\/src\/index\.ts$/);
         }
     });

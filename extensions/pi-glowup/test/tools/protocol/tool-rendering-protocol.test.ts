@@ -152,6 +152,7 @@ describe("Glowup tool-rendering protocol", () => {
         expect(decoded).toBeDefined();
 
         if (decoded === undefined) throw new Error("Valid snapshot rejected");
+
         const accepted = structuredClone(source);
         const theme: GlowupRenderTheme = {
             fg: (token, content) =>
@@ -203,11 +204,13 @@ describe("Glowup tool-rendering protocol", () => {
         rows.push(
             ...Array.from({ length: limits.maxCollectionItems + 1 }, () => ({ label, value })),
         );
+
         lines.push({
             kind: "addition",
             text: "x".repeat(limits.maxTextCharacters + 1),
             newLine: 2,
         });
+
         files.push({ ...file, path: "appended.txt" });
         children.push(text("appended child"));
 
@@ -282,6 +285,7 @@ describe("Glowup tool-rendering protocol", () => {
                 maxTextCharacters: 100,
             }),
         ).toBeUndefined();
+
         expect(
             decodeGlowupNode(broad, {
                 maxDepth: 8,
@@ -290,6 +294,7 @@ describe("Glowup tool-rendering protocol", () => {
                 maxTextCharacters: 100,
             }),
         ).toBeUndefined();
+
         expect(
             decodeGlowupNode(manyNodes, {
                 maxDepth: 8,
@@ -298,6 +303,7 @@ describe("Glowup tool-rendering protocol", () => {
                 maxTextCharacters: 100,
             }),
         ).toBeUndefined();
+
         expect(
             decodeGlowupNode(largeText, {
                 maxDepth: 8,
@@ -325,6 +331,7 @@ describe("bounded protocol snapshot traversal", () => {
         expect(
             decodeGlowupNode(cyclic, { ...limits, maxDepth: Number.MAX_SAFE_INTEGER }),
         ).toBeUndefined();
+
         expect(reads).toBe(1);
         const shared = text({ kind: "text", text: "shared", tone: "accent" });
         expect(decodeGlowupNode(stack([shared, shared]), limits)).toEqual(stack([shared, shared]));
@@ -375,18 +382,21 @@ describe("bounded protocol snapshot traversal", () => {
                 { ...limits, maxDepth: 0 },
             ),
         ).toBeUndefined();
+
         expect(
             decodeGlowupNode(
                 { kind: "stack", children: [unreachable] },
                 { ...limits, maxNodes: 1 },
             ),
         ).toBeUndefined();
+
         expect(
             decodeGlowupNode(
                 { kind: "stack", children: [text("x".repeat(101)), unreachable] },
                 limits,
             ),
         ).toBeUndefined();
+
         expect(reads).toBe(0);
     });
 
@@ -437,6 +447,7 @@ describe("bounded protocol snapshot traversal", () => {
             items: [accepted, { kind: "text", text: accepted }],
             preview: { mode: "head", collapsedLines: 2, expandedLines: 4, expandable: false },
         });
+
         expect([...reads.values()]).toEqual([1, 1, 1, 1]);
         preview.collapsedLines = 99;
         expect(decoded).toMatchObject({ preview: { collapsedLines: 2 } });
@@ -457,6 +468,7 @@ describe("bounded protocol snapshot traversal", () => {
                 },
             }),
         ).toBeUndefined();
+
         expect(changingReads).toBe(1);
     });
 

@@ -14,6 +14,7 @@ export function readModuleGraph(entries: readonly string[]) {
     function visit(file: string): void {
         const from = resolve(file);
         if (visited.has(from)) return;
+
         visited.add(from);
 
         const source = ts.createSourceFile(

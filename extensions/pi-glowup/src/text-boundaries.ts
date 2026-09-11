@@ -116,7 +116,6 @@ export function expandTerminalTabs(
     const tail = text.slice(runStart);
     output += tail;
     displayColumn += visibleWidth(tail);
-
     return {
         text: runStart === 0 ? text : output,
         finalDisplayColumn: displayColumn,

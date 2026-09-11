@@ -142,11 +142,13 @@ describe("central syntax highlighting", () => {
             themeName: "pi-glowup-darker-modern",
             themePath: bundledThemePath,
         });
+
         expect(loadSyntaxConfig({ PI_GLOWUP_SYNTAX_THEME: "/tmp/theme.json" })).toEqual({
             enabled: true,
             themeName: "pi-glowup-darker-modern",
             themePath: "/tmp/theme.json",
         });
+
         expect(loadSyntaxConfig({ PI_GLOWUP_SYNTAX: "off" })).toEqual({
             enabled: false,
             reason: "PI_GLOWUP_SYNTAX=off",

@@ -41,11 +41,13 @@ export function rgbFromHex(color: string): number {
 
 function countExactOccurrences(text: string, search: string): number {
     if (search.length === 0) throw new TypeError("occurrence search must not be empty");
+
     let count = 0;
     let offset = 0;
     while (offset <= text.length - search.length) {
         const match = text.indexOf(search, offset);
         if (match === -1) break;
+
         count += 1;
         offset = match + search.length;
     }
@@ -106,6 +108,7 @@ export class VirtualTerminal implements Terminal {
 
     moveBy(lines: number): void {
         if (lines === 0) return;
+
         this.write(`\u001b[${Math.abs(lines)}${lines > 0 ? "B" : "A"}`);
     }
 
@@ -234,6 +237,7 @@ export class VirtualTerminal implements Terminal {
         if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) {
             throw new RangeError(`row range must satisfy 0 <= start <= end`);
         }
+
         if (end > this.rows) {
             throw new RangeError(`row range [${start}, ${end}) exceeds ${this.rows} terminal rows`);
         }
@@ -301,6 +305,7 @@ export class VirtualTerminal implements Terminal {
                     cell.isDim,
             );
         if (offset === -1) return;
+
         const column = start + offset;
         throw this.invariantError(
             row.index,
@@ -336,6 +341,7 @@ export class VirtualTerminal implements Terminal {
     ): InterpretedRow {
         const match = matches[0];
         if (matches.length === 1 && match !== undefined) return match;
+
         const matchingRows =
             matches.length === 0 ? "none" : matches.map((row) => row.index).join(", ");
 
@@ -346,6 +352,7 @@ export class VirtualTerminal implements Terminal {
 
     private cellSummary(column: number, cell: InterpretedCell | undefined): string {
         if (cell === undefined) return `column=${column}, missing cell`;
+
         const foreground = cell.isForegroundDefault
             ? "default"
             : `${cell.isForegroundRgb ? "rgb" : "palette"}:${cell.foreground}`;

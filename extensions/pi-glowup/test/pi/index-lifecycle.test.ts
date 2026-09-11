@@ -338,6 +338,7 @@ describe("extension lifecycle", () => {
                 "session_shutdown",
             ]),
         );
+
         expect(entries.find((entry) => entry.event === "tool_result")).toMatchObject({
             fields: {
                 toolName: "bash",
@@ -346,6 +347,7 @@ describe("extension lifecycle", () => {
                 scheduledFormattedPreview: false,
             },
         });
+
         expect(isSyntaxHighlightingReady()).toBe(false);
     });
 
@@ -538,6 +540,7 @@ describe("extension lifecycle", () => {
             await pi.startSession(root, false, "tui");
 
             if (order !== "restored") await pi.updateAssistant(message);
+
             const tui = createTui();
             const makeRow = (call: AssistantSourceMessage["content"][number]) =>
                 new ToolExecutionComponent(
@@ -556,10 +559,12 @@ describe("extension lifecycle", () => {
                     tui,
                     root,
                 );
+
             const ready = (row: ToolExecutionComponent): void => {
                 if (order === "restored") row.updateResult({ content: [], isError: false });
                 else row.setArgsComplete();
             };
+
             const firstCall = calls[0];
             const afterCall = calls[351];
             const childCall = calls[352];
@@ -657,6 +662,7 @@ describe("extension lifecycle", () => {
         const first = rows[0];
         const last = rows[2];
         if (!first || !last) throw new Error("missing readiness fixture rows");
+
         expect(stripAnsi(first.render(100).join("\n"))).toContain("first.ts");
         expect(stripAnsi(first.render(100).join("\n"))).not.toContain("last.ts");
         expect(stripAnsi(last.render(100).join("\n"))).toContain("last.ts");
@@ -679,6 +685,7 @@ describe("extension lifecycle", () => {
         for (const row of rebuilt) row.setArgsComplete();
         const rebuiltLast = rebuilt[2];
         if (!rebuiltLast) throw new Error("missing rebuilt fixture row");
+
         expect(stripAnsi(rebuiltLast.render(100).join("\n"))).toContain("last.ts");
         await pi.shutdownSession();
     });

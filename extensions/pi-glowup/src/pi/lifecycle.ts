@@ -286,6 +286,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
             const command = commandField(event.input);
             if (command !== undefined) {
                 const formatterGeneration = sessionGeneration;
+
                 scheduledFormattedPreview = bash.schedule({
                     toolCallId: event.toolCallId,
                     command,
@@ -318,6 +319,7 @@ export function installGlowup(pi: Pick<ExtensionAPI, "on">): void {
         }
 
         const output = textOutput(event);
+
         debugLogger.record("tool_result", () => ({
             toolName: event.toolName,
             builtInToolName: canonicalBuiltInToolName(event.toolName),

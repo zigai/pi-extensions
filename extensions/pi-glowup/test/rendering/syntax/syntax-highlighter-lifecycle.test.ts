@@ -125,16 +125,19 @@ describe("syntax highlighter lifecycle", () => {
                 theme: "glowup-custom-theme",
             }),
         ).toEqual([[expect.objectContaining({ content: "hello", color: "#123456" })]]);
+
         expect(getLoadedSyntaxHighlighterForLanguage("text")?.highlighter).toBe(highlighter);
         expect((await getSyntaxHighlighterForLanguage("typescript"))?.highlighter).toBe(
             highlighter,
         );
+
         expect(() =>
             highlighter.codeToTokensBase("hello", {
                 lang: "glowup-missing-language",
                 theme: "glowup-custom-theme",
             }),
         ).toThrow(/not found|not loaded/);
+
         expect(() =>
             highlighter.codeToTokensBase("hello", {
                 lang: "glowup-custom-language",
@@ -148,6 +151,7 @@ describe("syntax highlighter lifecycle", () => {
             expect(() => {
                 pendingLoads.push(highlighter.loadLanguage("glowup-missing-language"));
             }).toThrow(/not included/);
+
             expect(() => {
                 pendingLoads.push(highlighter.loadTheme("glowup-missing-theme"));
             }).toThrow(/not included/);
@@ -173,6 +177,7 @@ describe("syntax highlighter lifecycle", () => {
         let releaseFactory: (() => void) | undefined;
         let resolveFactoryStarted: (() => void) | undefined;
         let disposedCount = 0;
+
         const factoryStarted = new Promise<void>((resolve) => {
             resolveFactoryStarted = resolve;
         });
@@ -205,6 +210,7 @@ describe("syntax highlighter lifecycle", () => {
         let releaseReplacement: (() => void) | undefined;
         let resolveReplacementStarted: (() => void) | undefined;
         let oldDisposedCount = 0;
+
         const replacementStarted = new Promise<void>((resolve) => {
             resolveReplacementStarted = resolve;
         });
@@ -240,6 +246,7 @@ describe("syntax highlighter lifecycle", () => {
         expect(getLoadedSyntaxHighlighterForLanguage("typescript")?.highlighter).toBe(
             oldHighlighter,
         );
+
         expect(oldDisposedCount).toBe(0);
 
         releaseReplacement?.();
@@ -248,6 +255,7 @@ describe("syntax highlighter lifecycle", () => {
         expect(getLoadedSyntaxHighlighterForLanguage("typescript")?.highlighter).toBe(
             newHighlighter,
         );
+
         expect(oldDisposedCount).toBe(1);
     });
 
@@ -304,6 +312,7 @@ describe("syntax highlighter lifecycle", () => {
                 expect(state.status).toBe("ready");
 
                 if (state.status !== "ready") throw new Error("theme snapshot was not installed");
+
                 expect(state.theme.path).toBe(path);
                 expect(state.theme.registration.colors?.["editor.foreground"]).toBe("#123456");
                 expect(configurationReads).toBe(1);
@@ -322,6 +331,7 @@ describe("syntax highlighter lifecycle", () => {
         const env = { PI_GLOWUP_SYNTAX_THEME: path };
         const theme = (color: string) =>
             JSON.stringify({ tokenColors: [], colors: { "editor.foreground": color } });
+
         let factoryCalls = 0;
         const options = {
             preloadLanguages: [],
@@ -337,12 +347,14 @@ describe("syntax highlighter lifecycle", () => {
             expect(first.status).toBe("ready");
 
             if (first.status !== "ready") throw new Error("initial theme was not installed");
+
             expect(first.theme.registration.colors?.["editor.foreground"]).toBe("#123456");
 
             const second = await refreshSyntaxHighlighting(env, options);
             expect(second.status).toBe("ready");
 
             if (second.status !== "ready") throw new Error("replacement theme was not installed");
+
             expect(second.theme.registration.colors?.["editor.foreground"]).toBe("#abcdef");
             expect(second).not.toBe(first);
             expect(await refreshSyntaxHighlighting(env, options)).toBe(second);
@@ -368,6 +380,7 @@ describe("syntax highlighter lifecycle", () => {
                 status: "failed",
                 reason: "Syntax theme JSON must include tokenColors",
             });
+
             expect(await refreshSyntaxHighlighting(env, options)).toBe(malformed);
             writeFileSync(path, "{ }");
             const changedMalformed = await refreshSyntaxHighlighting(env, options);
@@ -427,6 +440,7 @@ describe("syntax highlighter lifecycle", () => {
         scheduleCodeOutputSyntaxLoad({ path: "src/example.ts" }, () => {
             invalidations += 1;
         });
+
         expect(invalidations).toBe(0);
 
         await initializeSyntaxHighlighting(
@@ -524,6 +538,7 @@ describe("syntax highlighter lifecycle", () => {
             expect.stringContaining('Ignoring unknown syntax preload language "not-real"'),
             expect.stringContaining('Ignoring unknown syntax preload language "text"'),
         ]);
+
         expect(syntaxHighlighterDiagnostics()).toEqual(
             expect.objectContaining({
                 configuredPreloadLanguages: ["markdown", "ts", "not-real", "text"],
@@ -561,6 +576,7 @@ describe("syntax highlighter lifecycle", () => {
             expect(requestedLanguages).toEqual(
                 expect.arrayContaining(["markdown", "typescript", "python", "docker"]),
             );
+
             expect(requestedLanguages).not.toContain("ruby");
             const diagnostics = syntaxHighlighterDiagnostics();
             expect(diagnostics.projectLanguageDetectionEnabled).toBe(true);
@@ -611,6 +627,7 @@ describe("syntax highlighter lifecycle", () => {
         expect(diagnostics.loadedLanguages).toEqual(
             expect.arrayContaining(["markdown", "typescript"]),
         );
+
         expect(diagnostics.dynamicLanguages).toEqual(["typescript"]);
     });
 

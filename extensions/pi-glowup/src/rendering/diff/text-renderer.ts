@@ -57,6 +57,7 @@ function diffLineNumberWidth(
         width = Math.max(width, normalizedDiffLineNumber(parsed.lineNumber).length);
 
         const rowCoordinates = coordinates?.[index];
+
         width = Math.max(
             width,
             rowCoordinates?.oldLine === undefined ? 0 : String(rowCoordinates.oldLine).length,
@@ -561,7 +562,6 @@ export function renderGlowupDiff(
                     if (section.path !== undefined) {
                         rowOptions = { ...rowOptions, path: section.path };
                     }
-
                     rowOptions = { ...rowOptions, lineNumberWidth: sectionLineNumberWidth };
 
                     const lineCoordinates = section.lineCoordinates?.[index];

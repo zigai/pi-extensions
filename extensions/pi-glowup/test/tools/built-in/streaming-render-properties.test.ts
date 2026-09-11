@@ -149,6 +149,7 @@ test("preserves every generated top-level shell-chain segment and operator", () 
             const command = scenario.commands
                 .map((part, index) => {
                     if (index === 0) return part;
+
                     const operator =
                         scenario.operators[(index - 1) % scenario.operators.length] ?? "&&";
 

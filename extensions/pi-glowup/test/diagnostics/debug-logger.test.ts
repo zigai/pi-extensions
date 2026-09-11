@@ -36,6 +36,7 @@ describe("debug file logger", () => {
             event: "test_event",
             fields: { memory: { heapUsedBytes: 123 }, explicitNull: null },
         });
+
         expect(entries[0]).not.toHaveProperty("fields.omitted");
     });
 
@@ -125,6 +126,7 @@ describe("debug file logger", () => {
         expect(readJsonLines(join(extensionDirectory, "debug.log"))[0]).toMatchObject({
             event: "second_event",
         });
+
         expect(readJsonLines(join(extensionDirectory, "debug.log.1"))[0]).toMatchObject({
             event: "first_event",
         });

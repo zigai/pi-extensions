@@ -50,6 +50,7 @@ describe("glowup config", () => {
                 maxDeletePreimageBytes: 256 * 1024,
             },
         });
+
         expect(config.appearance).toEqual({
             diffBackgroundStyle: "two-tone",
             diffLineNumberStyle: "dual",
@@ -62,16 +63,19 @@ describe("glowup config", () => {
             instructionPathColor: null,
             dimUnchangedDiffText: false,
         });
+
         expect(config.debugLog).toEqual({
             enabled: false,
             path: "debug.log",
             maxBytes: null,
             memorySampleIntervalMs: 10_000,
         });
+
         expect(config.renderCache).toEqual({
             maxBytes: 64 * 1024 * 1024,
             maxEntries: 10_000,
         });
+
         expect(config.scriptFormatters.size).toBe(0);
         expect(config.scriptHeaderLayout).toBe("auto");
         expect(config.scriptMaxCodePreviewLines).toBe(8);
@@ -86,6 +90,7 @@ describe("glowup config", () => {
             bracketPairColoring: true,
             projectLanguageDetection: { enabled: true },
         });
+
         expect(config.patches).toEqual({
             assistantSeparator: true,
             workingWidgetSpacing: false,
@@ -257,11 +262,13 @@ describe("glowup config", () => {
             "javascript",
             "json",
         ]);
+
         expect(config.syntax.projectLanguageDetection.enabled).toBe(true);
         expect(config.patches.workingWidgetSpacing).toBe(false);
         expect(reportedWarnings).toEqual([
             expect.stringContaining("[pi-glowup] Ignoring invalid test config:"),
         ]);
+
         expect(reportedWarnings[0]).not.toContain("unknownSetting");
     });
 
@@ -285,6 +292,7 @@ describe("glowup config", () => {
         expect(JSON.parse(readFileSync(getGlowupGlobalConfigPath(agentDir), "utf8"))).toEqual(
             DEFAULT_GLOWUP_CONFIG_JSON,
         );
+
         expect(JSON.parse(readFileSync(getGlowupGlobalConfigSchemaPath(agentDir), "utf8"))).toEqual(
             bundledSchema(),
         );
@@ -367,6 +375,7 @@ describe("glowup config", () => {
             "javascript",
             "json",
         ]);
+
         expect(config.scriptMaxCodePreviewLines).toBe(8);
         expect(readFileSync(configPath, "utf8")).toBe("{not json");
         expect(reportedWarnings).toEqual([
@@ -457,6 +466,7 @@ describe("glowup config", () => {
                 scriptPreview: { headerLayout: "block", maxCodePreviewLines: 12 },
             }),
         );
+
         writeFileSync(
             projectConfigPath,
             JSON.stringify({
@@ -484,12 +494,14 @@ describe("glowup config", () => {
             defaultView: "preview",
             limits: { maxDiffBytes: 512 * 1024, maxDiffLines: 1_000 },
         });
+
         expect(config.debugLog).toEqual({
             enabled: false,
             path: "debug.log",
             maxBytes: null,
             memorySampleIntervalMs: 0,
         });
+
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptMaxCodePreviewLines).toBe(12);
         expect(config.scriptFormatters.get("python")).toBeUndefined();
@@ -533,6 +545,7 @@ describe("glowup config", () => {
                 scriptPreview: { headerLayout: "block", maxCodePreviewLines: 12 },
             }),
         );
+
         writeFileSync(
             projectConfigPath,
             JSON.stringify({
@@ -560,12 +573,14 @@ describe("glowup config", () => {
             defaultView: "full",
             limits: { maxDiffBytes: null, maxDiffLines: 1_000 },
         });
+
         expect(config.debugLog).toEqual({
             enabled: true,
             path: "project-debug.log",
             maxBytes: null,
             memorySampleIntervalMs: 0,
         });
+
         expect(config.scriptHeaderLayout).toBe("block");
         expect(config.scriptMaxCodePreviewLines).toBe(4);
         expect(config.scriptFormatters.get("python")).toEqual(["black", "-"]);

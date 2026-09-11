@@ -17,6 +17,7 @@ describe("edit previews", () => {
             added: 1,
             removed: 1,
         });
+
         expect("diff" in preview).toBe(false);
     });
 
@@ -29,6 +30,7 @@ describe("edit previews", () => {
             added: 1,
             removed: 1,
         });
+
         expect(JSON.stringify(preview)).not.toContain("context");
     });
 

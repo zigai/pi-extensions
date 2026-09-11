@@ -120,6 +120,7 @@ function writeDiffSection(path: string, preview: string, totalLines: number): Di
             }
 
             const rendered = `+${lineNumber} ${line}`;
+
             lineNumber += 1;
             return rendered;
         }),

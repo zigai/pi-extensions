@@ -108,7 +108,6 @@ export function applyBackgroundToTextRanges(
         output += character;
         index += character.length;
         sourceOffset += character.length;
-
         if (backgroundOpen && range !== undefined && sourceOffset >= range.end) {
             output += background.close;
             backgroundOpen = false;

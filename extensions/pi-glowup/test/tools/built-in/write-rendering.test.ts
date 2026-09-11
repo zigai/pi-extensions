@@ -410,6 +410,7 @@ describe("write rendering", () => {
                 content: "export const value = 1;\n",
             })?.render(80),
         ).toEqual([]);
+
         expect(renderSuccessfulWriteResultFallback({ path: "src/example.ts" })).toBeUndefined();
     });
 });
