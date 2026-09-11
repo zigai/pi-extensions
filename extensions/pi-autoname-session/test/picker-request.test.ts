@@ -30,6 +30,7 @@ describe("picker request", () => {
             parallel_tool_calls: false,
             reasoning: { effort: "low", summary: "auto", context: "all_turns" },
         });
+
         expect(payload.parallel_tool_calls).toBe(true);
     });
 
@@ -75,6 +76,7 @@ describe("picker request", () => {
             parallel_tool_calls: false,
             reasoning: { context: "all_turns" },
         });
+
         expect(
             preparePickerPayload(createModel("gpt-5.6-sol"), payload, {
                 authorization: "Bearer token",

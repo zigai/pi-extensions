@@ -1,8 +1,9 @@
 import { defineConfig, type OxlintConfig } from "oxlint";
+import blankLines from "oxlint-rules/config/blank-lines";
 
 const projectConfig: OxlintConfig = {
     plugins: ["oxc", "typescript", "unicorn", "promise"],
-    jsPlugins: ["oxlint-rules"],
+    jsPlugins: ["oxlint-rules", "oxlint-rules/blank-lines"],
     options: {
         typeAware: true,
     },
@@ -11,7 +12,9 @@ const projectConfig: OxlintConfig = {
         node: true,
     },
     ignorePatterns: ["node_modules/**"],
+    overrides: [...(blankLines.overrides ?? [])],
     rules: {
+        ...blankLines.rules,
         "antislop/no-chained-type-assertions": "error",
         "antislop/no-conditional-empty-object-spread": "error",
         "antislop/no-known-value-widening": "error",

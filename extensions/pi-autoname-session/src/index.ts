@@ -62,6 +62,7 @@ type NamingCheckpoint =
 type AuthenticationResolution =
     | {
           readonly type: "resolved";
+
           readonly auth: Awaited<
               ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>
           >;
@@ -150,6 +151,7 @@ function restoreNamingState(
         currentName !== undefined || missingStateBaseline === "current"
             ? currentMetrics
             : createZeroMetrics();
+
     return {
         state: createSessionNamingState({
             initialNameSet: currentName !== undefined,
@@ -183,28 +185,34 @@ async function resolveAuthentication(
             if (completed) {
                 return;
             }
+
             completed = true;
             resolve({ type: "cancelled" });
         };
+
         const finish = (resolution: AuthenticationResolution): void => {
             if (completed) {
                 return;
             }
+
             completed = true;
             signal.removeEventListener("abort", handleAbort);
             resolve(resolution);
         };
 
         signal.addEventListener("abort", handleAbort, { once: true });
+
         let authenticationPromise: ReturnType<
             ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]
         >;
+
         try {
             authenticationPromise = ctx.modelRegistry.getApiKeyAndHeaders(model);
         } catch {
             finish({ type: "failed" });
             return;
         }
+
         void authenticationPromise.then(
             (auth) => finish({ type: "resolved", auth }),
             () => finish({ type: "failed" }),
@@ -230,6 +238,7 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
             ? { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) }
             : { type: "cancelled" };
     }
+
     if (authentication.type === "failed") {
         return {
             type: "authenticationUnavailable",
@@ -239,17 +248,20 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
     }
 
     const { auth } = authentication;
+
     if (operationSignal.aborted) {
         return timeoutSignal.aborted
             ? { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) }
             : { type: "cancelled" };
     }
+
     if (!auth.ok) {
         return {
             type: "authenticationUnavailable",
             diagnostic: `Session naming skipped: picker model "${formatPickerModelReference(settings.model)}" has no available authentication.`,
         };
     }
+
     // auth.ok may legitimately carry only headers, or no credentials at all
     // (header-only and credential-free local providers); apiKey is optional
     // in the model registry contract.
@@ -276,15 +288,19 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         if (auth.apiKey !== undefined) {
             streamOptions.apiKey = auth.apiKey;
         }
+
         if (auth.headers !== undefined) {
             streamOptions.headers = auth.headers;
         }
+
         if (auth.env !== undefined) {
             streamOptions.env = auth.env;
         }
+
         if (settings.reasoningEffort !== "off") {
             streamOptions.reasoning = settings.reasoningEffort;
         }
+
         // Request headers decide whether the picker model requires the
         // Responses Lite payload shape, so the resolved auth headers must
         // accompany every payload inspection.
@@ -309,6 +325,7 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
             if (timeoutSignal.aborted) {
                 return { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) };
             }
+
             return { type: "cancelled" };
         }
 
@@ -342,9 +359,11 @@ async function pickSessionName(options: PickSessionNameOptions): Promise<PickSes
         if (timeoutSignal.aborted) {
             return { type: "timeout", diagnostic: timeoutDiagnostic(settings.timeoutMs) };
         }
+
         if (signal.aborted) {
             return { type: "cancelled" };
         }
+
         return {
             type: "requestFailed",
             diagnostic:
@@ -387,6 +406,7 @@ export default function extension(pi: ExtensionAPI): void {
 
         const loaded = loadAutonameSessionSettings(ctx);
         settings = loaded.settings;
+
         for (const diagnostic of loaded.diagnostics) {
             ctx.ui.notify(diagnostic.message, diagnostic.severity);
         }
@@ -398,6 +418,7 @@ export default function extension(pi: ExtensionAPI): void {
             Date.now(),
         );
         namingState = restored.state;
+
         if (restored.storedStateIssue !== undefined && ctx.hasUI) {
             storedStateDiagnosticShown = true;
             ctx.ui.notify(
@@ -414,6 +435,7 @@ export default function extension(pi: ExtensionAPI): void {
             pendingAutoName = undefined;
             return;
         }
+
         pendingAutoName = undefined;
 
         // A user-initiated rename invalidates any in-flight naming attempt:
@@ -446,6 +468,7 @@ export default function extension(pi: ExtensionAPI): void {
             Date.now(),
         );
         namingState = restored.state;
+
         if (restored.storedStateIssue !== undefined && !storedStateDiagnosticShown && ctx.hasUI) {
             storedStateDiagnosticShown = true;
             ctx.ui.notify(
@@ -455,6 +478,7 @@ export default function extension(pi: ExtensionAPI): void {
                 "warning",
             );
         }
+
         pi.appendEntry(AUTONAME_STATE_ENTRY_TYPE, namingState);
     });
 
@@ -526,7 +550,9 @@ export default function extension(pi: ExtensionAPI): void {
             nameAtStart: pi.getSessionName(),
             leafIdAtStart: ctx.sessionManager.getLeafId(),
         };
+
         activeAttempt = attempt;
+
         const entries = ctx.sessionManager.buildContextEntries();
         const operationSignal = AbortSignal.any([sessionAbort.signal, attempt.controller.signal]);
         let repositoryContext = buildRepositoryContext(ctx.cwd);
@@ -587,6 +613,7 @@ export default function extension(pi: ExtensionAPI): void {
             if (outcome.type === "picked") {
                 if (outcome.name !== pi.getSessionName()) {
                     pendingAutoName = outcome.name;
+
                     try {
                         pi.setSessionName(outcome.name);
                     } catch (cause: unknown) {
@@ -651,6 +678,7 @@ export default function extension(pi: ExtensionAPI): void {
             event.images === undefined || event.images.length === 0
                 ? ""
                 : `\n[${event.images.length} image${event.images.length === 1 ? "" : "s"} attached]`;
+
         startBackgroundNaming(ctx, {
             type: "prompt",
             prompt: event.prompt + imageSummary,

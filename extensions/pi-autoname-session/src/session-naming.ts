@@ -10,7 +10,6 @@ const MAX_FIRST_USER_CONTEXT_CHARACTERS = 2_000;
 const MAX_WORKSPACE_CONTEXT_CHARACTERS = 2_000;
 const MAX_CHANGED_AREAS = 20;
 const NAMING_STATE_VERSION = 1;
-
 export const AUTONAME_STATE_ENTRY_TYPE = "pi-autoname-session.state";
 
 /**
@@ -56,6 +55,7 @@ const storedSessionNamingStateCandidateSchema = Type.Union([
     legacySessionNamingStateSchema,
     Type.Object({ version: Type.Number() }),
 ]);
+
 const storedSessionNamingStateParser = {
     parse: (Value.Parse<typeof storedSessionNamingStateCandidateSchema>).bind(
         undefined,
@@ -69,6 +69,7 @@ const primitiveValueSchema = Type.Union([
     Type.Number(),
     Type.String(),
 ]);
+
 const referenceValueSchema = Type.Union([
     Type.Array(Type.Unknown()),
     Type.Object({}, { additionalProperties: true }),
@@ -92,6 +93,7 @@ export type StoredSessionNamingStateResult =
     | { readonly type: "found"; readonly state: SessionNamingState }
     | { readonly type: "invalid" }
     | { readonly type: "unsupportedVersion" };
+
 export type NamingTrigger = ExtensionSettings["initialNaming"]["trigger"];
 export type NamingPhase = "initial" | "refresh";
 
@@ -138,6 +140,7 @@ export function parseStoredSessionNamingState(value: unknown): StoredSessionNami
             if (candidate.version !== NAMING_STATE_VERSION) {
                 return { type: "unsupportedVersion" };
             }
+
             if (!Value.Check(sessionNamingStateSchema, candidate)) {
                 return { type: "invalid" };
             }
@@ -225,7 +228,9 @@ export function measureSession(entries: readonly SessionEntry[]): SessionMetrics
                 metrics.toolCalls += entry.message.content.filter(
                     (block) => block.type === "toolCall",
                 ).length;
+
                 const usage = entry.message.usage;
+
                 // Session files are persisted boundary data: the framework
                 // type requires usage on assistant messages, but a message
                 // written by an older or third-party writer may lack it.
@@ -324,7 +329,6 @@ export function renderNamingPrompt(
     const rendered = prompt.replace(/\{\{\w+\}\}/g, (placeholder) => {
         return replacements.get(placeholder) ?? placeholder;
     });
-
     return [
         rendered,
         "",
@@ -343,6 +347,7 @@ function truncatePromptContext(text: string, maxCharacters: number): string {
     if (contentCharacters === 0) {
         return marker.slice(0, maxCharacters);
     }
+
     const headLength = Math.floor(contentCharacters / 2);
     const tailLength = contentCharacters - headLength;
     return `${text.slice(0, headLength)}${marker}${text.slice(-tailLength)}`;
@@ -350,12 +355,14 @@ function truncatePromptContext(text: string, maxCharacters: number): string {
 
 function stringifyPromptValue(value: ToolCall["arguments"]): string {
     const seen = new WeakSet();
+
     try {
         return (
             JSON.stringify(value, (_key, nestedValue) => {
                 if (Value.Check(bigintSchema, nestedValue)) {
                     return nestedValue.toString();
                 }
+
                 if (
                     Object.is(nestedValue, Number.NaN) ||
                     nestedValue === Number.POSITIVE_INFINITY ||
@@ -363,16 +370,21 @@ function stringifyPromptValue(value: ToolCall["arguments"]): string {
                 ) {
                     return null;
                 }
+
                 if (Value.Check(referenceValueSchema, nestedValue)) {
                     if (seen.has(nestedValue)) {
                         return "[circular]";
                     }
+
                     seen.add(nestedValue);
+
                     return nestedValue;
                 }
+
                 if (Value.Check(primitiveValueSchema, nestedValue)) {
                     return nestedValue;
                 }
+
                 return undefined;
             }) ?? "[unserializable value]"
         );
@@ -403,7 +415,6 @@ export function normalizeSessionName(
 
     let name = firstLine.replace(/^#+\s*/, "").replace(/^session\s+name\s*:\s*/i, "");
     name = name.replace(/\s+/g, " ").trim();
-
     if (name.length >= 2) {
         const firstCharacter = name[0];
         const lastCharacter = name[name.length - 1];
@@ -453,11 +464,13 @@ export function isOpaqueNamingPrompt(prompt: string): boolean {
     if (normalized.length === 0) {
         return false;
     }
+
     if (/^[/$][\w.-]+(?:\s|$)/u.test(normalized)) {
         return true;
     }
 
     const words = normalized.toLowerCase().match(/[\p{L}\p{N}_+-]+/gu) ?? [];
+
     return (
         words.length > 0 &&
         words.length <= 5 &&
@@ -476,6 +489,7 @@ function summarizeChangedPath(rawPath: string): string | undefined {
     if (segments.length >= 2 && ["apps", "crates", "packages"].includes(segments[0] ?? "")) {
         return `${segments[0]}/${segments[1]}`;
     }
+
     return path;
 }
 
@@ -496,6 +510,7 @@ export function buildRepositoryContext(cwd: string, gitStatus?: string): string 
             branch = line.slice(3).split("...")[0]?.split(" [")[0]?.trim();
             continue;
         }
+
         if (line.length < 4) {
             continue;
         }
@@ -509,6 +524,7 @@ export function buildRepositoryContext(cwd: string, gitStatus?: string): string 
     if (branch !== undefined && branch.length > 0) {
         sections.push(`Branch: ${branch}`);
     }
+
     if (changedAreas.length > 0) {
         const visibleAreas = changedAreas.slice(0, MAX_CHANGED_AREAS);
         const omitted = changedAreas.length - visibleAreas.length;
@@ -516,6 +532,7 @@ export function buildRepositoryContext(cwd: string, gitStatus?: string): string 
         if (omitted > 0) {
             lines.push(`- ...and ${omitted} more`);
         }
+
         sections.push(`Changed areas:\n${lines.join("\n")}`);
     }
 
@@ -588,6 +605,7 @@ function collectConversationSections(
             sections.push({ role: "SUMMARY", text: entry.summary.trim() });
             continue;
         }
+
         if (entry.type !== "message") {
             continue;
         }
@@ -596,6 +614,7 @@ function collectConversationSections(
         if (text.length === 0) {
             continue;
         }
+
         if (entry.message.role === "user") {
             sections.push({ role: "USER", text });
         } else if (entry.message.role === "assistant") {
@@ -604,6 +623,7 @@ function collectConversationSections(
             sections.push({ role: "TOOL", text });
         }
     }
+
     return sections;
 }
 
@@ -617,6 +637,7 @@ function truncateInitialUserMessage(message: string): string {
     if (message.length <= available) {
         return `${prefix}${message}`;
     }
+
     return `${prefix}${message.slice(0, available - "\n[message truncated]".length)}\n[message truncated]`;
 }
 
@@ -639,6 +660,7 @@ export function buildConversationContext(
             options.pendingPrompt ??
             sections.find((section) => section.role === "USER")?.text ??
             "";
+
         return truncateInitialUserMessage(firstUserMessage);
     }
 
@@ -663,20 +685,24 @@ export function buildConversationContext(
         if (index === firstUserIndex) {
             continue;
         }
+
         const section = rendered[index];
         if (section === undefined) {
             continue;
         }
+
         const separator = recent.length > 0 ? 2 : 0;
         const available = remaining - separator;
         if (available <= 0) {
             break;
         }
+
         if (section.length > available) {
             recent.unshift(section.slice(-available));
             remaining = 0;
             break;
         }
+
         recent.unshift(section);
         remaining -= section.length + separator;
     }

@@ -66,6 +66,7 @@ class FakeModelRegistry {
         if (this.authenticationThrows) {
             throw new Error("authentication resolver failed");
         }
+
         return this.authPromise ?? Promise.resolve(this.authResult);
     }
 }
@@ -91,8 +92,10 @@ type TestEvent =
           readonly type: "before_agent_start";
           readonly prompt: string;
           readonly images: undefined;
+
           readonly systemPromptOptions: {
               readonly cwd: string;
+
               readonly contextFiles: readonly {
                   readonly path: string;
                   readonly content: string;
@@ -126,8 +129,10 @@ class FakePi {
     readonly handlers = new Map<string, Handler>();
     readonly appended: { customType: string; data: SessionNamingState }[] = [];
     readonly notified: { message: string; severity: "info" | "warning" | "error" }[] = [];
+
     readonly execCalls: { command: string; args: readonly string[]; cwd: string | undefined }[] =
         [];
+
     sessionName: string | undefined = undefined;
     lastCtx: TestContext | undefined;
     gitStatus = "## main\n";
@@ -196,6 +201,7 @@ class Harness {
         const agentDir = mkdtempSync(join(tmpdir(), "pi-autoname-session-test-"));
         process.env.PI_CODING_AGENT_DIR = agentDir;
         const faux = registerFauxProvider({ api: FAUX_API, provider: FAUX_PROVIDER });
+
         // The extension only reads this subset of ExtensionAPI; the harness
         // implements exactly those members (on, appendEntry, setSessionName,
         // getSessionName, and exec), which is why the full interface is asserted away.
@@ -219,6 +225,7 @@ class Harness {
             model,
             isProjectTrusted: () => false,
         };
+
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the harness implements the on, appendEntry, setSessionName, getSessionName, and exec operations read by the extension factory, and these tests exercise every registered event through that adapter; TypeScript cannot express a callable subset of ExtensionAPI where on retains its event-specific callback types.
         extension(pi as ExtensionAPI & FakePi);
         const harness = new Harness(agentDir, faux, model, registry, session, pi, ctx);
@@ -229,6 +236,7 @@ class Harness {
     dispose(): void {
         this.faux.unregister();
         rmSync(this.agentDir, { recursive: true, force: true });
+
         if (process.env.PI_CODING_AGENT_DIR === this.agentDir) {
             delete process.env.PI_CODING_AGENT_DIR;
         }
@@ -342,6 +350,7 @@ function createDeferred<T>(): Deferred<T> {
     const promise = new Promise<T>((res) => {
         resolve = res;
     });
+
     return { promise, resolve };
 }
 
@@ -497,7 +506,6 @@ describe("extension orchestration", () => {
                 }),
             );
             await harness.startSession();
-
             await harness.beforeAgentStart("Fix the parser");
             expect(harness.faux.state.callCount).toBe(0);
             expect(harness.pi.sessionName).toBeUndefined();
@@ -528,7 +536,6 @@ describe("extension orchestration", () => {
                 }),
             );
             await harness.startSession();
-
             await harness.beforeAgentStart("Fix the parser");
             expect(harness.faux.state.callCount).toBe(0);
 
@@ -637,7 +644,6 @@ describe("extension orchestration", () => {
             const deferred = createDeferred<AssistantMessage>();
             harness.faux.setResponses([async () => deferred.promise]);
             const settled = harness.settled();
-
             harness.rename("user chosen name");
             deferred.resolve(
                 fauxAssistantMessage("ignored", {
@@ -668,7 +674,6 @@ describe("extension orchestration", () => {
             harness.faux.setResponses([async () => deferred.promise]);
             const settled = harness.settled();
             const oldLeafId = harness.session.getLeafId();
-
             harness.session.resetLeaf();
             deferred.resolve(fauxAssistantMessage("stale branch name"));
             await settled;
@@ -786,6 +791,7 @@ describe("extension orchestration", () => {
                 baseline: { messages: 10, turns: 10, toolCalls: 0, tokens: 0 },
                 baselineAtMs: 0,
             });
+
             // Navigate away: the stored state is no longer on the active branch.
             harness.session.resetLeaf();
             appendUserMessage(harness.session, "New branch work", 2);
@@ -811,6 +817,7 @@ describe("extension orchestration", () => {
                     refreshNaming: { enabled: true, trigger: "turns", threshold: 2 },
                 }),
             );
+
             appendUserMessage(harness.session, "Root work", 1);
             harness.session.appendCustomEntry(AUTONAME_STATE_ENTRY_TYPE, {
                 version: 1,
@@ -1175,6 +1182,7 @@ describe("extension orchestration", () => {
             await harness.flushEvents();
 
             expect(harness.pi.sessionName).toBe("Applied name");
+
             // Only the completion entry: the extension's own
             // session_info_changed event was suppressed while applying.
             expect(stateEntries(harness)).toHaveLength(1);

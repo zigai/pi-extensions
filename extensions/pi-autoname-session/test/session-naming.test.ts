@@ -117,6 +117,7 @@ describe("session naming", () => {
                 1_000,
             ),
         ).toBeUndefined();
+
         expect(
             getNamingRequest(
                 refreshSettings,
@@ -150,6 +151,7 @@ describe("session naming", () => {
                 309_999,
             ),
         ).toBeUndefined();
+
         expect(
             getNamingRequest(
                 timeSettings,
@@ -167,6 +169,7 @@ describe("session naming", () => {
         expect(normalizeSessionName('Session name: "Fix parser tests"\nExplanation', 3, 20)).toBe(
             "Fix parser tests",
         );
+
         expect(normalizeSessionName("ab", 3, 20)).toBeUndefined();
         expect(normalizeSessionName("A very long session name", 3, 10)).toBe("A very lon");
     });
@@ -188,6 +191,7 @@ describe("session naming", () => {
         expect(prompt).toContain(
             "initial /workspace/project (unnamed) Fix the parser TypeScript project",
         );
+
         expect(prompt).toContain("between 3 and 60 characters");
     });
 
@@ -220,6 +224,7 @@ describe("session naming", () => {
         expect(
             parseSessionNamingState({ ...state, baseline: { messages: "one" } }),
         ).toBeUndefined();
+
         expect(parseSessionNamingState({ ...state, version: 2 })).toBeUndefined();
     });
 
@@ -358,11 +363,13 @@ describe("session naming", () => {
 
     it("serializes cyclic and bigint tool arguments safely in full scope", () => {
         const session = SessionManager.inMemory("/workspace/project");
+
         type CyclicArguments = {
             readonly count: bigint;
             readonly notFinite: number;
             self?: CyclicArguments;
         };
+
         const cyclicArguments: CyclicArguments = { count: 10n, notFinite: Number.NaN };
         cyclicArguments.self = cyclicArguments;
         session.appendMessage({ role: "user", content: "Inspect arguments", timestamp: 1 });

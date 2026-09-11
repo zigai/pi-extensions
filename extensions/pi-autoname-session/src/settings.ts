@@ -11,22 +11,26 @@ export type PickerModelReference =
 
 export type ExtensionSettings = {
     readonly enabled: boolean;
+
     readonly initialNaming: {
         readonly enabled: boolean;
         readonly timing: ExtensionSettingsDocument["initialNaming"]["timing"];
         readonly trigger: ExtensionSettingsDocument["initialNaming"]["trigger"];
         readonly threshold: number;
     };
+
     readonly refreshNaming: {
         readonly enabled: boolean;
         readonly trigger: ExtensionSettingsDocument["refreshNaming"]["trigger"];
         readonly threshold: number;
     };
+
     readonly model: PickerModelReference;
     readonly reasoningEffort: ExtensionSettingsDocument["reasoningEffort"];
     readonly timeoutMs: number;
     readonly conversationScope: ExtensionSettingsDocument["conversationScope"];
     readonly prompt: string;
+
     readonly nameConstraints: {
         readonly minLength: number;
         readonly maxLength: number;
@@ -35,6 +39,7 @@ export type ExtensionSettings = {
 
 type AutonameSessionSettingsLoadResult = {
     readonly settings: ExtensionSettings | undefined;
+
     readonly diagnostics: readonly {
         readonly severity: "error" | "warning";
         readonly message: string;
@@ -52,6 +57,7 @@ export function parsePickerModelReference(model: string): PickerModelReference |
     if (model.trim() !== model) {
         return undefined;
     }
+
     if (model === "current") {
         return { type: "current" };
     }

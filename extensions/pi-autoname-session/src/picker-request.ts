@@ -37,11 +37,13 @@ const pickerPayloadSchema = Type.Refine(jsonRecordSchema, (payload) => {
         return false;
     }
 });
+
 const pickerPayloadParser = {
     parse: (Value.Parse<typeof pickerPayloadSchema>).bind(undefined, pickerPayloadSchema),
 };
 
 type PickerPayload = Static<typeof pickerPayloadSchema>;
+
 type LitePickerPayload = PickerPayload & {
     readonly parallel_tool_calls: false;
     readonly reasoning: PickerPayload;
@@ -80,6 +82,7 @@ export function preparePickerPayload(
 ): LitePickerPayload | undefined {
     try {
         const parsedPayload = pickerPayloadParser.parse(payload);
+
         if (!requiresResponsesLitePayload(model, requestHeaders)) {
             return undefined;
         }
