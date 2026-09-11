@@ -41,6 +41,7 @@ export function buildRemoteCompactionTransportMetadata(input: {
         },
         turn_started_at_unix_ms: input.startedAtMs,
     });
+
     return {
         sessionId,
         turnId,

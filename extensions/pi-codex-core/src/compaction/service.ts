@@ -86,6 +86,7 @@ export async function handleCodexNativeCompaction(
 ): Promise<
     | {
           readonly cancel?: true;
+
           readonly compaction?: {
               readonly summary: string;
               readonly firstKeptEntryId: string;
@@ -96,8 +97,10 @@ export async function handleCodexNativeCompaction(
     | undefined
 > {
     const runtimeServices = options.runtime ?? defaultCodexRuntime;
+
     if (!config.compaction.enabled) return undefined;
     if (event.signal.aborted) return { cancel: true };
+
     if (!event.branchEntries.some((entry) => entry.id === event.preparation.firstKeptEntryId)) {
         if (ctx.hasUI) {
             ctx.ui.notify(
@@ -105,8 +108,10 @@ export async function handleCodexNativeCompaction(
                 "warning",
             );
         }
+
         return { cancel: true };
     }
+
     const runtime = await resolveActiveCodexResponsesProvider(ctx);
     if (runtime.isErr() || !runtime.value) return undefined;
 
@@ -143,6 +148,7 @@ export async function handleCodexNativeCompaction(
         notifyCompactionFallback(ctx, incompatibility.message);
         return undefined;
     }
+
     const sessionId = ctx.sessionManager.getSessionId();
     const requestTemplate = getProviderRequestTemplate(
         sessionId,
@@ -162,6 +168,7 @@ export async function handleCodexNativeCompaction(
     });
     let promptInput = buildRemoteCompactionPromptInput(event, targetModel, latestNativeCompaction);
     if (promptInput.input.length === 0) return undefined;
+
     const instructions = buildCompactionInstructions(
         requestTemplate?.instructions ?? ctx.getSystemPrompt(),
         event.customInstructions,
@@ -192,6 +199,7 @@ export async function handleCodexNativeCompaction(
         tokenCache,
         { tokenizer: options.tokenizer, signal: event.signal },
     );
+
     promptInput = { ...promptInput, input: preflight.input };
 
     const request = buildRemoteCompactionV2Request({
@@ -220,13 +228,17 @@ export async function handleCodexNativeCompaction(
         );
         return undefined;
     }
+
     tokenCache = createTokenEstimateCache();
+
     try {
         const headers = new Headers(runtime.value.headers);
         if (requestProfile?.useResponsesLite) {
             headers.set(CODEX_RESPONSES_LITE_HEADER, "true");
         }
+
         applyRemoteCompactionTransportHeaders(headers, transportMetadata);
+
         const responseResult = await executeRemoteCompactionV2(
             { responsesUrl: runtime.value.responsesUrl, headers },
             shrink.request,
@@ -238,6 +250,7 @@ export async function handleCodexNativeCompaction(
                 ? { cancel: true }
                 : undefined;
         }
+
         const response = responseResult.value;
         const compactedWindow = await buildRemoteCompactionV2Window(
             shrink.promptInput,
@@ -251,6 +264,7 @@ export async function handleCodexNativeCompaction(
         );
         const worldState = captureNativeCompactionWorldState(ctx, pi, runtimeServices, event);
         const lifecycle = buildWindowLifecycle(latestNativeCompaction, runtimeServices);
+
         return {
             compaction: {
                 summary: NATIVE_COMPACTION_SHIM_SUMMARY,
@@ -290,8 +304,10 @@ export async function handleCodexNativeCompaction(
         if (isCodexAbortCause(cause) || event.signal.aborted) {
             return { cancel: true };
         }
+
         const message = safeCauseMessage(cause);
         notifyCompactionFallback(ctx, `Codex remote compaction v2 failed: ${message}`);
+
         return undefined;
     }
 }
@@ -305,6 +321,7 @@ export async function rewriteProviderRequestWithNativeCompaction(
 ): Promise<ResponsesPayload | undefined> {
     const request = NativeReplayRequestDecoder.decode(payload, ctx, config);
     if (!request) return undefined;
+
     const { responsesPayload, model, branchEntries, latestNativeCompaction } = request;
 
     const incompatibility = nativeCompactionCompatibilityFailure(
@@ -334,6 +351,7 @@ export async function rewriteProviderRequestWithNativeCompaction(
     if (replay.ok) return replay.payload;
 
     notifyNativeReplayFallbackOnce(ctx, latestNativeCompaction.entry.id, replay.reason);
+
     return buildLenientNativeReplayPayload(responsesPayload, replacementInput);
 }
 
@@ -352,10 +370,13 @@ const NativeReplayRequestDecoder = {
         config: CodexCoreConfig,
     ): NativeReplayRequest | undefined {
         if (!config.compaction.enabled) return undefined;
+
         const model = ctx.model;
         if (!model) return undefined;
+
         const modelApi = JsonStringDecoder.decode(model.api);
         if (modelApi === undefined) return undefined;
+
         const match: NativeCompactionMatch = {
             provider: model.provider,
             api: modelApi,
@@ -364,6 +385,7 @@ const NativeReplayRequestDecoder = {
         const branchEntries = ctx.sessionManager.getBranch();
         const latestNativeCompaction = findLatestActiveNativeCompactionEntry(branchEntries, match);
         if (!latestNativeCompaction) return undefined;
+
         const responsesPayload = ResponsesPayloadDecoder.decode(payload);
         return responsesPayload
             ? { responsesPayload, model, branchEntries, latestNativeCompaction }
@@ -388,6 +410,7 @@ function nativeCompactionCompatibilityFailure(
     ) {
         return undefined;
     }
+
     return new CodexNativeCompactionIncompatible({
         operation: "nativeCompaction",
         checkpointModel,
@@ -476,6 +499,7 @@ function buildWorldStateInput(
             : []),
         `</${CODEX_CORE_WORLD_STATE_TAG}>`,
     ];
+
     return [{ role: "user", content: [{ type: "input_text", text: lines.join("\n") }] }];
 }
 
@@ -495,11 +519,13 @@ function normalizeCreatedAt(value: number | string | undefined, runtime: CodexRu
     const numeric = JsonNumberDecoder.decode(value);
     if (numeric !== undefined)
         return new Date(numeric > 1_000_000_000_000 ? numeric : numeric * 1000).toISOString();
+
     const text = JsonStringDecoder.decode(value)?.trim();
     if (text) {
         const parsed = Date.parse(text);
         return Number.isNaN(parsed) ? text : new Date(parsed).toISOString();
     }
+
     return runtime.clock.nowDate().toISOString();
 }
 

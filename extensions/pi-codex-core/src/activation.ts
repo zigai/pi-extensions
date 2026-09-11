@@ -55,6 +55,7 @@ export function codexCoreActivationDecisions(
     config: CodexCoreConfig,
 ): readonly ToolActivationDecision[] {
     const enabled = new Set(enabledCodexToolNames(ctx, config));
+
     return [
         ...CODEX_CORE_TOOL_NAMES.map((name) => ({
             target: { kind: "tool" as const, name },
@@ -81,6 +82,7 @@ export function enabledCodexToolNames(
         )
             toolNames.push(VIEW_IMAGE_TOOL_NAME);
     }
+
     if (shouldExposeApplyPatch(ctx, config)) toolNames.push(APPLY_PATCH_TOOL_NAME);
     return toolNames;
 }
@@ -97,9 +99,11 @@ export function shouldExposeApplyPatch(ctx: ExtensionContext, config: CodexCoreC
 
 export function isCodexLikeModel(model: ExtensionContext["model"]): boolean {
     if (!model) return false;
+
     const provider = model.provider.toLowerCase();
     const api = StringDecoder.decode(model.api)?.toLowerCase() ?? "";
     const id = model.id.toLowerCase();
+
     if (provider.includes("codex")) return true;
     if (api.includes("codex")) return true;
     if (id.includes("codex")) return true;

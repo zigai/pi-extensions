@@ -29,7 +29,6 @@ import type {
 
 const DiagnosticScalarDecoder = compileSchema(Type.Union([Type.String(), Type.Number()]));
 const NonNegativeIntegerDecoder = compileSchema(Type.Integer({ minimum: 0 }));
-
 const MAX_SSE_TAIL_CHARS = 1_000_000;
 const MAX_SSE_EVENT_CHARS = 2_000_000;
 const MAX_HTTP_ERROR_BODY_BYTES = 8 * 1024;
@@ -70,6 +69,7 @@ export async function executeRemoteCompactionV2(
     const encodedRequest = encodeRemoteCompactionRequest(request, runtime.headers);
     for (let attempt = 0; ; attempt += 1) {
         if (signal.aborted) return cancelledRemoteCompaction(signal.reason);
+
         const linkedAttempt = createLinkedAttemptController(signal);
         let result: CodexResult<RemoteCompactionV2Response>;
         try {
@@ -89,6 +89,7 @@ export async function executeRemoteCompactionV2(
         } finally {
             linkedAttempt.dispose();
         }
+
         if (
             result.isOk() ||
             !isRetryableRemoteCompactionFailure(result.error) ||
@@ -96,6 +97,7 @@ export async function executeRemoteCompactionV2(
         ) {
             return result;
         }
+
         try {
             await waitWithScheduler(
                 services.scheduler,
@@ -122,12 +124,15 @@ function encodeRemoteCompactionRequest(
     const serialized = JSON.stringify(request);
     const headers = new Headers(sourceHeaders);
     headers.set("Accept", "text/event-stream");
+
     try {
         const zlib = process.getBuiltinModule("node:zlib");
         const body = zlib.zstdCompressSync(serialized, {
             params: { [zlib.constants.ZSTD_c_compressionLevel]: 3 },
         });
+
         headers.set("Content-Encoding", "zstd");
+
         return { body, headers };
     } catch {
         headers.delete("Content-Encoding");
@@ -161,6 +166,7 @@ async function executeRemoteCompactionV2Attempt(
                 }),
             );
         }
+
         return fail(
             new CodexNetworkUnavailable({
                 operation: "nativeCompaction",
@@ -170,6 +176,7 @@ async function executeRemoteCompactionV2Attempt(
             }),
         );
     }
+
     if (!response.ok) {
         let detail: string | undefined;
         try {
@@ -177,6 +184,7 @@ async function executeRemoteCompactionV2Attempt(
         } catch (cause: unknown) {
             return cancelledRemoteCompaction(cause);
         }
+
         return fail(
             new CodexHttpRequestFailed({
                 operation: "nativeCompaction",
@@ -186,6 +194,7 @@ async function executeRemoteCompactionV2Attempt(
             }),
         );
     }
+
     try {
         if (!response.body) {
             const text = await readRemoteCompactionResponseText(
@@ -196,6 +205,7 @@ async function executeRemoteCompactionV2Attempt(
             );
             return collectRemoteCompactionV2Output(text);
         }
+
         return await collectRemoteCompactionV2OutputFromStream(
             response.body,
             signal,
@@ -213,6 +223,7 @@ async function executeRemoteCompactionV2Attempt(
                 }),
             );
         }
+
         if (cause instanceof RemoteCompactionTransportFailure) {
             return fail(
                 new CodexNetworkUnavailable({
@@ -223,9 +234,11 @@ async function executeRemoteCompactionV2Attempt(
                 }),
             );
         }
+
         if (isCodexAbortCause(cause) || parentSignal.aborted) {
             return cancelledRemoteCompaction(cause);
         }
+
         throw cause;
     }
 }
@@ -255,6 +268,7 @@ function createLinkedAttemptController(parentSignal: AbortSignal): LinkedAttempt
         controller.abort(parentSignal.reason ?? new DOMException("Aborted", "AbortError"));
     if (parentSignal.aborted) onParentAbort();
     else parentSignal.addEventListener("abort", onParentAbort, { once: true });
+
     return {
         controller,
         dispose: () => parentSignal.removeEventListener("abort", onParentAbort),
@@ -278,7 +292,7 @@ function cancelledRemoteCompaction<T>(cause: unknown): CodexResult<T> {
     );
 }
 
-function withRemoteCompactionIdleTimeout<T>(
+async function withRemoteCompactionIdleTimeout<T>(
     operation: Promise<T>,
     signal: AbortSignal,
     services: CodexRuntime,
@@ -287,18 +301,22 @@ function withRemoteCompactionIdleTimeout<T>(
     if (signal.aborted) {
         return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
     }
+
     return new Promise<T>((resolve, reject) => {
         let settled = false;
         let timeoutTask: ScheduledTask | undefined;
         const settle = (complete: () => void) => {
             if (settled) return;
+
             settled = true;
             timeoutTask?.cancel();
             signal.removeEventListener("abort", onAbort);
             complete();
         };
+
         const onAbort = () =>
             settle(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
+
         signal.addEventListener("abort", onAbort, { once: true });
         operation.then(
             (value) => settle(() => resolve(value)),
@@ -306,6 +324,7 @@ function withRemoteCompactionIdleTimeout<T>(
         );
         timeoutTask = services.scheduler.set(REMOTE_COMPACTION_STREAM_IDLE_TIMEOUT_MS, () => {
             const cause = new RemoteCompactionIdleTimeout();
+
             settle(() => reject(cause));
             onTimeout(cause);
         });
@@ -313,7 +332,7 @@ function withRemoteCompactionIdleTimeout<T>(
     });
 }
 
-function readRemoteCompactionResponseText(
+async function readRemoteCompactionResponseText(
     response: Response,
     signal: AbortSignal,
     services: CodexRuntime,
@@ -326,6 +345,7 @@ function readRemoteCompactionResponseText(
             cause,
         );
     });
+
     return withRemoteCompactionIdleTimeout(text, signal, services, (cause) =>
         attemptController.abort(cause),
     );
@@ -339,6 +359,7 @@ async function readSafeHttpErrorDetail(
 ): Promise<string | undefined> {
     const requestId = safeDiagnosticValue(response.headers.get("x-request-id"));
     let payload: unknown;
+
     try {
         const body = await readResponseTextPrefix(
             response,
@@ -352,11 +373,14 @@ async function readSafeHttpErrorDetail(
         if (signal.reason instanceof RemoteCompactionIdleTimeout) {
             return requestId ? `request_id=${requestId}` : undefined;
         }
+
         if (isCodexAbortCause(cause) || signal.aborted) throw cause;
         return requestId ? `request_id=${requestId}` : undefined;
     }
+
     const root = JsonObjectDecoder.decode(payload);
     if (!root) return requestId ? `request_id=${requestId}` : undefined;
+
     const nestedError = JsonObjectDecoder.decode(root.error);
     const error = nestedError ?? root;
     const type = safeDiagnosticValue(error.type);
@@ -368,6 +392,7 @@ async function readSafeHttpErrorDetail(
         message ? `message=${message}` : undefined,
         requestId ? `request_id=${requestId}` : undefined,
     ].filter((field): field is string => field !== undefined);
+
     return fields.length > 0 ? fields.join(" ") : undefined;
 }
 
@@ -379,10 +404,12 @@ async function readResponseTextPrefix(
     attemptController: AbortController,
 ): Promise<string> {
     if (!response.body) return "";
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let remaining = maxBytes;
     let text = "";
+
     try {
         for (;;) {
             const { value, done } = await readRemoteCompactionStreamChunk(
@@ -391,8 +418,10 @@ async function readResponseTextPrefix(
                 services,
                 attemptController,
             );
+
             if (done) return text + decoder.decode();
             if (!value || value.length === 0) continue;
+
             const retained = value.subarray(0, remaining);
             text += decoder.decode(retained, { stream: retained.length === value.length });
             remaining -= retained.length;
@@ -407,7 +436,7 @@ async function readResponseTextPrefix(
     }
 }
 
-function readRemoteCompactionStreamChunk(
+async function readRemoteCompactionStreamChunk(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     signal: AbortSignal,
     services: CodexRuntime,
@@ -417,6 +446,7 @@ function readRemoteCompactionStreamChunk(
         if (isCodexAbortCause(cause) || signal.aborted) throw cause;
         throw new RemoteCompactionTransportFailure("Remote compaction stream read failed.", cause);
     });
+
     return withRemoteCompactionIdleTimeout(read, signal, services, (cause) =>
         attemptController.abort(cause),
     );
@@ -425,6 +455,7 @@ function readRemoteCompactionStreamChunk(
 function safeDiagnosticValue(value: unknown, maxCharacters = 128): string | undefined {
     const diagnosticValue = DiagnosticScalarDecoder.decode(value);
     if (diagnosticValue === undefined) return undefined;
+
     const normalized = String(diagnosticValue)
         .replaceAll(/Bearer\s+[^\s,;]+/gi, "Bearer [redacted]")
         .replaceAll(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
@@ -445,6 +476,7 @@ async function collectRemoteCompactionV2OutputFromStream(
     const decoder = new TextDecoder();
     const collector = createRemoteCompactionV2Collector();
     let buffer = "";
+
     try {
         for (;;) {
             const { value, done } = await readRemoteCompactionStreamChunk(
@@ -453,7 +485,9 @@ async function collectRemoteCompactionV2OutputFromStream(
                 services,
                 attemptController,
             );
+
             if (done) break;
+
             buffer += decoder.decode(value, { stream: true });
             if (
                 buffer.length > MAX_SSE_TAIL_CHARS &&
@@ -462,20 +496,25 @@ async function collectRemoteCompactionV2OutputFromStream(
                 await cancelStreamReader(reader);
                 return fail(createOversizedRemoteCompactionStreamError());
             }
+
             const drained = drainCompleteServerSentEventBlocks(buffer);
             buffer = drained.tail;
+
             for (const block of drained.blocks) {
                 if (block.length > MAX_SSE_EVENT_CHARS) {
                     await cancelStreamReader(reader);
                     return fail(createOversizedRemoteCompactionStreamError());
                 }
+
                 const event = parseServerSentEventBlock(block);
                 if (!event) continue;
+
                 const consumed = collector.consume(event);
                 if (consumed.isErr()) {
                     await cancelStreamReader(reader);
                     return fail(consumed.error);
                 }
+
                 if (collector.isComplete()) {
                     await cancelStreamReader(reader);
                     return collector.finish();
@@ -486,16 +525,19 @@ async function collectRemoteCompactionV2OutputFromStream(
         await cancelStreamReader(reader);
         throw cause;
     }
+
     buffer += decoder.decode();
     if (buffer.trim().length > 0) {
         if (buffer.length > MAX_SSE_EVENT_CHARS)
             return fail(createOversizedRemoteCompactionStreamError());
+
         const event = parseServerSentEventBlock(buffer);
         if (event) {
             const consumed = collector.consume(event);
             if (consumed.isErr()) return fail(consumed.error);
         }
     }
+
     return collector.finish();
 }
 
@@ -513,6 +555,7 @@ function collectRemoteCompactionV2Output(sseText: string): CodexResult<RemoteCom
         const consumed = collector.consume(event);
         if (consumed.isErr()) return fail(consumed.error);
     }
+
     return collector.finish();
 }
 
@@ -530,24 +573,31 @@ function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
                 const item = parseEventItem(event.data);
                 if (item.isErr()) return fail(item.error);
                 if (!item.value) return ok(undefined);
+
                 outputItemCount += 1;
+
                 if (isRemoteCompactionOutputItem(item.value)) {
                     compactionItems.push(item.value);
                 }
+
                 return ok(undefined);
             }
+
             if (event.event === "response.completed") {
                 const response = parseEventResponse(event.data);
                 if (response.isErr()) return fail(response.error);
+
                 completed = true;
                 responseId = JsonStringDecoder.decode(response.value?.id);
                 createdAt = parseCreatedAt(response.value);
                 usage = parseCompactionUsage(response.value);
                 return ok(undefined);
             }
+
             if (event.event === "response.failed" || event.event === "response.incomplete") {
                 return fail(parseResponsesStreamFailure(event.data, event.event));
             }
+
             return ok(undefined);
         },
         isComplete: () => completed,
@@ -564,6 +614,7 @@ function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
                     }),
                 );
             }
+
             if (compactionItems.length !== 1) {
                 return fail(
                     new CodexUnexpectedResponse({
@@ -573,6 +624,7 @@ function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
                     }),
                 );
             }
+
             const [compactionOutput] = compactionItems;
             if (!compactionOutput) {
                 return fail(
@@ -583,6 +635,7 @@ function createRemoteCompactionV2Collector(): RemoteCompactionV2Collector {
                     }),
                 );
             }
+
             return ok({ compactionOutput, id: responseId, createdAt, usage });
         },
     };
@@ -603,9 +656,11 @@ function createOversizedRemoteCompactionStreamError(): CodexUnexpectedResponse {
 function drainCompleteServerSentEventBlocks(buffer: string): ServerSentEventDrainResult {
     const blocks: string[] = [];
     let tail = buffer;
+
     for (;;) {
         const separator = /\r?\n\r?\n/.exec(tail);
         if (!separator) return { blocks, tail };
+
         blocks.push(tail.slice(0, separator.index));
         tail = tail.slice(separator.index + separator[0].length);
     }
@@ -625,6 +680,7 @@ function parseServerSentEventBlock(block: string): ServerSentEvent | undefined {
         if (line.startsWith("event:")) event = line.slice("event:".length).trim();
         else if (line.startsWith("data:")) data.push(line.slice("data:".length).trimStart());
     }
+
     return data.length > 0 ? { event, data } : undefined;
 }
 
@@ -667,6 +723,7 @@ function parseCompactionUsage(
 ): RemoteCompactionV2Response["usage"] {
     const usage = JsonObjectDecoder.decode(response?.usage);
     if (!usage) return undefined;
+
     const inputTokens = nonNegativeTokenCount(usage.input_tokens);
     const inputTokenDetails = JsonObjectDecoder.decode(usage.input_tokens_details);
     const cachedInputTokens = nonNegativeTokenCount(inputTokenDetails?.cached_tokens);
@@ -697,6 +754,7 @@ const FATAL_RESPONSES_ERROR_CODES = new Set([
 function parseResponsesStreamFailure(data: readonly string[], event: string): CodexFailure {
     const response = parseEventResponse(data);
     if (response.isErr()) return response.error;
+
     const error = JsonObjectDecoder.decode(response.value?.error);
     const code = JsonStringDecoder.decode(error?.code);
     const type = JsonStringDecoder.decode(error?.type);
@@ -704,6 +762,7 @@ function parseResponsesStreamFailure(data: readonly string[], event: string): Co
     const message = detail
         ? `${event}: ${detail}`
         : `${event} event received during remote compaction v2`;
+
     if (
         event === "response.failed" &&
         error &&
@@ -718,6 +777,7 @@ function parseResponsesStreamFailure(data: readonly string[], event: string): Co
             retryAfterMs: code === "rate_limit_exceeded" ? parseRateLimitDelay(detail) : undefined,
         });
     }
+
     return new CodexUnexpectedResponse({
         operation: "nativeCompaction",
         provider: "openai-codex",
@@ -728,6 +788,7 @@ function parseResponsesStreamFailure(data: readonly string[], event: string): Co
 function parseRateLimitDelay(message: string | undefined): number | undefined {
     const match = /try again in\s*(\d+(?:\.\d+)?)\s*(ms|seconds?|s)/i.exec(message ?? "");
     if (!match) return undefined;
+
     const delayMs = Number(match[1]) * (match[2]?.toLowerCase() === "ms" ? 1 : 1000);
     return Number.isFinite(delayMs) && delayMs <= 2_147_483_647 ? Math.floor(delayMs) : undefined;
 }

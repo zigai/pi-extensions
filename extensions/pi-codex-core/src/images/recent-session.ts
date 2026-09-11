@@ -34,11 +34,14 @@ export async function recentImageContents(
     const imageRefs: RecentImageRef[] = [];
     const branch = ctx.sessionManager.getBranch();
     options.signal?.throwIfAborted();
+
     for (let index = branch.length - 1; index >= 0 && imageRefs.length < count; index -= 1) {
         const entry = branch[index];
         if (!entry) continue;
+
         for (const imageRef of extractImageRefsFromEntry(entry).reverse()) {
             imageRefs.push(imageRef);
+
             if (imageRefs.length >= count) break;
         }
     }
@@ -46,10 +49,12 @@ export async function recentImageContents(
     const images: ImageContent[] = [];
     for (const imageRef of imageRefs.reverse()) {
         options.signal?.throwIfAborted();
+
         if (imageRef.kind === "inline") {
             images.push(imageRef.content);
             continue;
         }
+
         images.push(
             await prepareCodexPromptImageContent(
                 await loadImageContent(imageRef.path, ctx.cwd, options),
@@ -58,12 +63,15 @@ export async function recentImageContents(
             ),
         );
     }
+
     return images;
 }
 
 function extractImageRefsFromEntry(entry: SessionEntry): RecentImageRef[] {
     if (entry.type !== "message") return [];
+
     const inlineImages = extractInlineImageRefs(entry.message);
+
     // Current imagegen results attach every generated image inline; saved artifacts
     // are alternate representations (and may be only a subset after save failures).
     // Restored results without attachments use the persisted artifacts instead.
@@ -72,6 +80,7 @@ function extractImageRefsFromEntry(entry: SessionEntry): RecentImageRef[] {
 
 function extractInlineImageRefs(message: unknown): RecentImageRef[] {
     const parsed = MessageWithArrayContentSchema.decode(message);
+
     return parsed
         ? parsed.content.flatMap((value): RecentImageRef[] => {
               const content = ImageContentSchema.decode(value);
@@ -82,6 +91,7 @@ function extractInlineImageRefs(message: unknown): RecentImageRef[] {
 
 function extractImagegenArtifactRefs(message: unknown): RecentImageRef[] {
     const parsed = ImagegenArtifactDetailsSchema.decode(message);
+
     return parsed
         ? parsed.details.images.map(
               (image): RecentImageRef => ({ kind: "artifact", path: image.path }),

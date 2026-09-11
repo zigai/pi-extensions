@@ -42,6 +42,7 @@ export const CODEX_WEB_SEARCH_MODES: readonly CodexWebSearchMode[] = ["cached", 
 export const CODEX_PROMPT_MODES: readonly CodexPromptMode[] = ["pi", "codex"];
 export const CODEX_PERSONALITIES: readonly CodexPersonality[] = ["friendly", "pragmatic", "none"];
 export const CODEX_VERBOSITY_LEVELS: readonly CodexVerbosity[] = ["low", "medium", "high"];
+
 export const CODEX_COMPACTION_REASONING_LEVELS: readonly CodexCompactionReasoning[] = [
     "current",
     "none",
@@ -58,6 +59,7 @@ export type CodexCoreConfig = {
     readonly scope: {
         readonly tools: CodexToolScope;
     };
+
     readonly tools: {
         readonly webSearch: boolean;
         readonly webSearchMode: CodexWebSearchMode;
@@ -66,15 +68,18 @@ export type CodexCoreConfig = {
         readonly viewImageDescriptions: boolean;
         readonly applyPatch: CodexApplyPatchMode;
     };
+
     readonly prompt: {
         readonly mode: CodexPromptMode;
         readonly personality: CodexPersonality;
     };
+
     readonly compaction: {
         readonly enabled: boolean;
         readonly auto: boolean;
         readonly thresholdPercent: number;
     };
+
     readonly recovery: {
         readonly enabled: boolean;
         readonly batchFollowUps: boolean;
@@ -82,6 +87,7 @@ export type CodexCoreConfig = {
         readonly baseDelayMs: number;
         readonly maxDelayMs: number;
     };
+
     readonly openai: {
         readonly webSearchModel: string;
         readonly imageModel: string;
@@ -98,10 +104,8 @@ export const CODEX_CORE_EXTENSION_ID = "pi-codex-core";
 export const CODEX_CORE_CONFIG_BASENAME = "config.json";
 export const CODEX_CORE_CONFIG_SCHEMA_BASENAME = "config.schema.json";
 export const CODEX_CORE_CONFIG_SCHEMA_REFERENCE = `./${CODEX_CORE_CONFIG_SCHEMA_BASENAME}`;
-
 const JSON_SCHEMA_DRAFT_URI = "https://json-schema.org/draft/2020-12/schema";
 const CODEX_CORE_CONFIG_SCHEMA_ID = "https://github.com/zigai/pi-codex-core/config.schema.json";
-
 const CodexToolScopeSchema = Type.Union([Type.Literal("codex"), Type.Literal("all")]);
 const CodexApplyPatchModeSchema = Type.Union([
     Type.Literal("off"),
@@ -118,16 +122,19 @@ const CodexPersonalitySchema = Type.Union([
     Type.Literal("pragmatic"),
     Type.Literal("none"),
 ]);
+
 const CodexVerbositySchema = Type.Union([
     Type.Literal("low"),
     Type.Literal("medium"),
     Type.Literal("high"),
 ]);
+
 const CodexCompactionReasoningSchema = Type.String({
     minLength: 1,
     pattern: "\\S",
     default: "medium",
 });
+
 const CodexCoreConfigJsonSchema = Type.Object(
     {
         scope: Type.Object(
@@ -274,7 +281,6 @@ export function parseCodexCoreConfigWithDiagnostics(
     const decodedValue = JsonValueDecoder.decode(value);
     const diagnostics: CodexConfigDiagnostic[] = [];
     const root = parseRecord(decodedValue, "$", diagnostics);
-
     const scope = parseRecord(root.scope, "$.scope", diagnostics);
     const tools = parseRecord(root.tools, "$.tools", diagnostics);
     const prompt = parseRecord(root.prompt, "$.prompt", diagnostics);
@@ -484,12 +490,14 @@ export function readCodexCoreConfigWithDiagnostics(
     if (directConfigPath !== undefined) {
         return parseReadConfigInput(readConfigInput(directConfigPath));
     }
+
     const readOptions = ConfigReadOptionsSchema.decode(options) ?? {};
     if (readOptions.configPath !== undefined) {
         return parseReadConfigInput(readConfigInput(readOptions.configPath));
     }
 
     ensureCodexCoreGlobalConfigFiles(readOptions.agentDir);
+
     const globalInput = readConfigInput(getCodexCoreGlobalConfigPath(readOptions.agentDir));
     const projectInput =
         readOptions.cwd === undefined
@@ -543,9 +551,11 @@ export function resolveCodexRequestModel(
             ? CODEX_CURRENT_MODEL_SELECTION
             : configuredText;
     if (configured !== CODEX_CURRENT_MODEL_SELECTION) return configured;
+
     const activeModel = currentModel?.trim() ?? "";
     if (activeModel.length === 0)
         throw new Error("Codex current model selection requires an active Codex model.");
+
     return activeModel;
 }
 
@@ -582,6 +592,7 @@ export function writeCodexCoreConfig(
 
 function existingConfigWriteBlocker(configPath: string): string | undefined {
     if (!existsSync(configPath)) return undefined;
+
     const unsafeDiagnostic = readConfigInput(configPath).diagnostics.find(
         (diagnostic) =>
             diagnostic.reason === "malformed-json" || diagnostic.reason === "unreadable",
@@ -609,6 +620,7 @@ function writeJsonFileIfMissing(filePath: string, value: ScaffoldedJson): void {
         });
     } catch (cause: unknown) {
         if (hasNodeErrorCode(cause, "EEXIST")) return;
+
         const message = cause instanceof Error ? cause.message : String(cause);
         console.warn(`[pi-codex-core] Failed to create ${filePath}: ${message}`);
     }
@@ -619,6 +631,7 @@ function writeJsonFileIfChanged(filePath: string, value: ScaffoldedJson): void {
 
     try {
         if (existsSync(filePath) && readFileSync(filePath, "utf8") === nextContent) return;
+
         mkdirSync(dirname(filePath), { recursive: true });
         writeFileAtomically(filePath, nextContent, existingFileMode(filePath, 0o644));
     } catch (cause: unknown) {
@@ -664,6 +677,7 @@ function writeFileAtomically(filePath: string, content: string, mode: number): v
         directory,
         `.${basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
     );
+
     try {
         writeFileSync(temporaryPath, content, { encoding: "utf8", flag: "wx", mode });
         renameSync(temporaryPath, filePath);
@@ -692,14 +706,17 @@ function mergeConfigInputs(
 ): JsonValue | undefined {
     const baseObject = JsonObjectDecoder.decode(base);
     if (baseObject === undefined) return override ?? base;
+
     const overrideObject = JsonObjectDecoder.decode(override);
     if (overrideObject === undefined) return base;
 
     const merged: Record<string, JsonValue | undefined> = {};
     for (const [key, value] of Object.entries(baseObject)) merged[key] = value;
+
     for (const [key, value] of Object.entries(overrideObject)) {
         merged[key] = mergeConfigInputs(merged[key], value);
     }
+
     return merged;
 }
 
@@ -709,9 +726,12 @@ function parseRecord(
     diagnostics: CodexConfigDiagnostic[],
 ): JsonObject {
     if (value === undefined) return {};
+
     const parsed = JsonObjectDecoder.decode(value);
     if (parsed !== undefined) return parsed;
+
     diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected an object."));
+
     return {};
 }
 
@@ -726,9 +746,12 @@ function parseBoolean(
     diagnostics: CodexConfigDiagnostic[],
 ): boolean {
     if (value === undefined) return fallback;
+
     const parsed = BooleanSchema.decode(value);
     if (parsed !== undefined) return parsed;
+
     diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a boolean."));
+
     return fallback;
 }
 
@@ -741,6 +764,7 @@ function parseIntegerInRange(
     diagnostics: CodexConfigDiagnostic[],
 ): number {
     if (value === undefined) return fallback;
+
     const parsed = NumberSchema.decode(value);
     if (parsed === undefined || !Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
         diagnostics.push(
@@ -752,6 +776,7 @@ function parseIntegerInRange(
         );
         return fallback;
     }
+
     return parsed;
 }
 
@@ -762,10 +787,13 @@ function parseNonEmptyString(
     diagnostics: CodexConfigDiagnostic[],
 ): string {
     if (value === undefined) return fallback;
+
     const parsed = StringSchema.decode(value);
     const text = parsed?.trim() ?? "";
     if (text.length > 0) return text;
+
     diagnostics.push(makeConfigDiagnostic(path, "invalid", "Expected a non-empty string."));
+
     return fallback;
 }
 
@@ -777,11 +805,14 @@ function parseStringEnum<const TValue extends string>(
     diagnostics: CodexConfigDiagnostic[],
 ): TValue {
     if (value === undefined) return fallback;
+
     const parsed = StringSchema.decode(value);
     if (parsed !== undefined && isOneOf(allowed, parsed)) return parsed;
+
     diagnostics.push(
         makeConfigDiagnostic(path, "invalid", `Expected one of: ${allowed.join(", ")}.`),
     );
+
     return fallback;
 }
 

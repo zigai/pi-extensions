@@ -26,6 +26,7 @@ function renderViewImageCall(args: ViewImageGlowupArgs) {
         running: "Viewing Image",
         completed: "Viewed Image",
     };
+
     return path === undefined || path.length === 0
         ? { kind: "call" as const, labels }
         : {

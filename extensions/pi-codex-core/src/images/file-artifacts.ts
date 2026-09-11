@@ -15,7 +15,6 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 
 /** Maximum accepted size for an image loaded from disk. */
 export const MAX_INPUT_IMAGE_BYTES = 5 * 1024 * 1024;
-
 const IMAGE_VALIDATION_MAX_BYTES = 8 * 1024 * 1024;
 
 /** A validated image file loaded into memory. */
@@ -47,22 +46,26 @@ export async function loadImageContent(
     const absolutePath = await authorizeImagePath(requestedPath, cwd, options);
     options.signal?.throwIfAborted();
     const file = await open(absolutePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+
     try {
         options.signal?.throwIfAborted();
         const fileStat = await file.stat();
         options.signal?.throwIfAborted();
         if (!fileStat.isFile()) throw new Error(`Image path is not a file: ${path}`);
+
         if (fileStat.size > MAX_INPUT_IMAGE_BYTES) {
             throw new Error(
                 `Image is too large: ${path} (${fileStat.size} bytes; max ${MAX_INPUT_IMAGE_BYTES} bytes).`,
             );
         }
+
         const bytes = await readBoundedFile(file, MAX_INPUT_IMAGE_BYTES, options);
         options.signal?.throwIfAborted();
         const mimeType = detectImageMimeType(bytes);
         if (!mimeType || !(await imageFullyDecodes(bytes, mimeType, options))) {
             throw new Error(`Unsupported or invalid image file: ${path}`);
         }
+
         return { absolutePath, bytes, mimeType };
     } finally {
         await file.close();
@@ -97,6 +100,7 @@ export async function saveGeneratedImage(
         agentDir: args.agentDir,
     });
     const bytes = decodeGeneratedPng(args.base64);
+
     return withFileMutationQueue(latestAbsolutePath, async () => {
         options.signal?.throwIfAborted();
         let absolutePath: string | undefined;
@@ -115,6 +119,7 @@ export async function saveGeneratedImage(
             if (absolutePath && options.signal?.aborted) {
                 await rm(absolutePath, { force: true });
             }
+
             throw cause;
         }
     });
@@ -139,6 +144,7 @@ async function writeUniqueGeneratedImage(
         fileName: baseFileName,
         agentDir: args.agentDir,
     });
+
     options.signal?.throwIfAborted();
     await mkdir(dirname(firstPath), { recursive: true });
     options.signal?.throwIfAborted();
@@ -152,6 +158,7 @@ async function writeUniqueGeneratedImage(
             fileName,
             agentDir: args.agentDir,
         });
+
         try {
             await writeFile(absolutePath, bytes, { flag: "wx", signal: options.signal });
             options.signal?.throwIfAborted();
@@ -161,6 +168,7 @@ async function writeUniqueGeneratedImage(
                 await rm(absolutePath, { force: true });
                 throw cause;
             }
+
             if (!hasNodeErrorCode(cause, "EEXIST")) throw cause;
         }
     }
@@ -205,6 +213,7 @@ async function authorizeImagePath(
     } catch {
         // The artifact root does not exist yet, so it cannot contain this existing file.
     }
+
     throw new Error(`Image path is outside the workspace: ${path}`);
 }
 
@@ -225,8 +234,10 @@ async function readBoundedFile(
         const { bytesRead } = await file.read(buffer, offset, buffer.length - offset, offset);
         options.signal?.throwIfAborted();
         if (bytesRead === 0) break;
+
         offset += bytesRead;
     }
+
     if (offset > maxBytes) throw new Error(`Image exceeds the ${maxBytes}-byte read limit.`);
     return buffer.subarray(0, offset);
 }
@@ -237,11 +248,13 @@ async function imageFullyDecodes(
     options: { readonly signal?: AbortSignal | undefined },
 ): Promise<boolean> {
     options.signal?.throwIfAborted();
+
     const resized = await resizeImage(bytes, mimeType, {
         maxWidth: 6000,
         maxHeight: 6000,
         maxBytes: IMAGE_VALIDATION_MAX_BYTES,
     });
+
     options.signal?.throwIfAborted();
     return resized !== null;
 }
@@ -253,6 +266,7 @@ async function writeLatestGeneratedImage(
 ): Promise<void> {
     options.signal?.throwIfAborted();
     const temporaryPath = `${latestAbsolutePath}.${randomUUID()}.tmp`;
+
     try {
         await writeFile(temporaryPath, bytes, { flag: "wx", signal: options.signal });
         options.signal?.throwIfAborted();
@@ -272,9 +286,11 @@ function decodeGeneratedPng(base64: string): Buffer {
     ) {
         throw new Error("Generated image payload is not valid base64.");
     }
+
     const bytes = Buffer.from(normalized, "base64");
     if (bytes.toString("base64") !== normalized || detectImageMimeType(bytes) !== "image/png") {
         throw new Error("Generated image payload is not a valid PNG.");
     }
+
     return bytes;
 }

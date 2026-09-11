@@ -17,6 +17,7 @@ const CODEX_HIGH_DETAIL_LIMITS: CodexPromptImageResizeLimits = {
     maxDimension: 2048,
     maxPatches: 2_500,
 };
+
 const CODEX_ORIGINAL_DETAIL_LIMITS: CodexPromptImageResizeLimits = {
     maxDimension: 6000,
     maxPatches: 10_000,
@@ -45,6 +46,7 @@ export async function prepareCodexPromptImageContent(
         maxHeight: target.height,
         maxBytes: CODEX_PROMPT_IMAGE_MAX_BYTES,
     });
+
     options.signal?.throwIfAborted();
     if (!resized) throw new Error(`Unable to resize image for view_image: ${image.absolutePath}`);
     return { type: "image", data: resized.data, mimeType: resized.mimeType };

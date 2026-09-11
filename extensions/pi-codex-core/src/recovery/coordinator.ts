@@ -7,7 +7,6 @@ import { compileSchema } from "../schema-parsing.ts";
 import type { CodexCoreConfig } from "../config/config.ts";
 
 export const CODEX_RECOVERY_ENTRY_TYPE = "pi-codex-core.recovery";
-
 const RECOVERY_STATE_VERSION = 1;
 const TERMINAL_ERROR_PATTERN =
     /aborted|cancel(?:led)?|context (?:length|window)|prompt (?:is )?too long|usage limit|quota|billing|insufficient[_ ]quota|authentication|unauthori[sz]ed|forbidden|invalid api key/i;
@@ -80,6 +79,7 @@ export class CodexRecoveryCoordinator {
 
     applyConfig(pi: ExtensionAPI): void {
         if (this.getConfig().recovery.enabled) return;
+
         this.cancelScheduledTask();
         this.resumeAtMs = undefined;
         this.errorMessage = undefined;
@@ -93,6 +93,7 @@ export class CodexRecoveryCoordinator {
     queueFollowUp(pi: ExtensionAPI, ctx: ExtensionContext, text: string): void {
         const normalized = text.trim();
         if (normalized.length === 0) return;
+
         this.pendingFollowUps.push(normalized);
         this.persist(pi);
         notify(
@@ -105,10 +106,11 @@ export class CodexRecoveryCoordinator {
     mergePendingIntoManualInput(pi: ExtensionAPI, text: string): string | undefined {
         if (this.pendingFollowUps.length === 0 && this.scheduledTask === undefined)
             return undefined;
-        this.cancelScheduledTask();
+
         const pending = this.takePendingFollowUps();
         this.resetRecovery();
         this.persist(pi);
+
         if (pending.length === 0) return undefined;
         return formatQueuedUpdate(text, pending);
     }
@@ -120,8 +122,10 @@ export class CodexRecoveryCoordinator {
 
         if (assistant.stopReason !== "error") {
             this.resetRecovery();
+
             if (this.pendingFollowUps.length > 0) this.schedule(pi, ctx, 0, false);
             else this.persist(pi);
+
             return;
         }
 
@@ -130,6 +134,7 @@ export class CodexRecoveryCoordinator {
             this.resumeAtMs = undefined;
             this.errorMessage = undefined;
             this.persist(pi);
+
             if (this.pendingFollowUps.length > 0) {
                 notify(
                     ctx,
@@ -137,6 +142,7 @@ export class CodexRecoveryCoordinator {
                     "warning",
                 );
             }
+
             return;
         }
 
@@ -151,11 +157,13 @@ export class CodexRecoveryCoordinator {
                 `Codex automatic recovery stopped after ${this.recoveryAttempt} attempt${this.recoveryAttempt === 1 ? "" : "s"}; send a message to resume with held follow-ups.`,
                 "warning",
             );
+
             return;
         }
 
         this.recoveryAttempt += 1;
         this.errorMessage = assistant.errorMessage;
+
         const delayMs = Math.min(
             recovery.baseDelayMs * 2 ** (this.recoveryAttempt - 1),
             recovery.maxDelayMs,
@@ -165,6 +173,7 @@ export class CodexRecoveryCoordinator {
             `Codex remains unavailable; recovery ${this.recoveryAttempt}/${recovery.maxAttempts} will resume in ${formatDelay(delayMs)}.`,
             "warning",
         );
+
         this.schedule(pi, ctx, delayMs, true);
     }
 
@@ -184,6 +193,7 @@ export class CodexRecoveryCoordinator {
                 this.persist(pi);
                 return;
             }
+
             const pending = [...this.pendingFollowUps];
             const message = interrupted
                 ? formatRecoveryPrompt(pending)
@@ -199,8 +209,10 @@ export class CodexRecoveryCoordinator {
         this.recoveryAttempt = 0;
         this.resumeAtMs = undefined;
         this.errorMessage = undefined;
+
         for (const entry of entries) {
             if (entry.type !== "custom" || entry.customType !== CODEX_RECOVERY_ENTRY_TYPE) continue;
+
             const state = RecoveryStateSchema.decode(entry.data);
             if (!state) continue;
             this.pendingFollowUps = [...state.pendingFollowUps];
@@ -268,6 +280,7 @@ function formatPending(pending: readonly string[]): string {
 
 function formatDelay(delayMs: number): string {
     if (delayMs < 1000) return `${delayMs}ms`;
+
     const seconds = Math.ceil(delayMs / 1000);
     return `${seconds}s`;
 }

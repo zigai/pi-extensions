@@ -87,9 +87,11 @@ export function parseGlowupWireArgs(value: unknown): GlowupWireRecord | undefine
 export function parseGlowupWireResult(value: unknown): GlowupWireToolResult | undefined {
     const result = GlowupWireToolResultDecoder.decode(value);
     if (!result) return undefined;
+
     if (result.content === undefined) {
         return result.details === undefined ? {} : { details: result.details };
     }
+
     return result.details === undefined
         ? { content: result.content }
         : { content: result.content, details: result.details };
@@ -97,6 +99,7 @@ export function parseGlowupWireResult(value: unknown): GlowupWireToolResult | un
 
 export function glowupWireTextOutput(result: GlowupWireToolResult): string | undefined {
     if (!Array.isArray(result.content)) return undefined;
+
     const texts: string[] = [];
     for (const item of result.content) {
         const record = GlowupWireRecordDecoder.decode(item);
@@ -104,5 +107,6 @@ export function glowupWireTextOutput(result: GlowupWireToolResult): string | und
         if (record?.type !== "text" || text === undefined) continue;
         texts.push(text);
     }
+
     return texts.length === 0 ? undefined : texts.join("\n");
 }

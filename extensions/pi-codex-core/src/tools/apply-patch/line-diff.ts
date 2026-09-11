@@ -18,6 +18,7 @@ function makeLcsTable(oldLines: readonly string[], newLines: readonly string[]):
                     : Math.max(nextRow[newIndex] ?? 0, row[newIndex + 1] ?? 0);
         }
     }
+
     return table;
 }
 
@@ -29,6 +30,7 @@ export function diffPatchLines(
     const lines: PatchLineEdit[] = [];
     let oldIndex = 0;
     let newIndex = 0;
+
     while (oldIndex < oldLines.length && newIndex < newLines.length) {
         const oldLine = oldLines[oldIndex] ?? "";
         const newLine = newLines[newIndex] ?? "";
@@ -46,13 +48,16 @@ export function diffPatchLines(
             newIndex += 1;
         }
     }
+
     while (oldIndex < oldLines.length) {
         lines.push({ kind: "deletion", text: oldLines[oldIndex] ?? "" });
         oldIndex += 1;
     }
+
     while (newIndex < newLines.length) {
         lines.push({ kind: "addition", text: newLines[newIndex] ?? "" });
         newIndex += 1;
     }
+
     return lines;
 }

@@ -29,6 +29,7 @@ const GPT_5_5_FRIENDLY_PERSONALITY_PATH = fileURLToPath(
 const GPT_5_5_PRAGMATIC_PERSONALITY_PATH = fileURLToPath(
     new URL("./codex-gpt-5.5-personality-pragmatic.md", import.meta.url),
 );
+
 const CODEX_PROMPT_PATHS_BY_MODEL = new Map<string, string>([
     ["gpt-6-astra", fileURLToPath(new URL("./codex-gpt-6-astra.md", import.meta.url))],
     ["gpt-5.5", GPT_5_5_CODEX_PROMPT_PATH],
@@ -36,6 +37,7 @@ const CODEX_PROMPT_PATHS_BY_MODEL = new Map<string, string>([
     ["gpt-5.6-terra", GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH],
     ["gpt-5.6-luna", GPT_5_6_TERRA_LUNA_CODEX_PROMPT_PATH],
 ]);
+
 const cachedCodexPromptsByPath = new Map<string, string>();
 const CODEX_PERSONALITY_PLACEHOLDER = "{{ personality }}";
 const PI_DEFAULT_PROMPT_START =
@@ -96,6 +98,7 @@ export function buildCodexCoreSystemPromptResult(
         context.clock ?? defaultCodexRuntime.clock,
         earlierPrompt.appendedInstructions,
     );
+
     return {
         prompt: [codexPrompt, piContext].filter((section) => section.length > 0).join("\n\n"),
         interop: earlierPrompt.interop,
@@ -120,6 +123,7 @@ function renderCodexPrompt(
 ): string {
     const prompt = readCodexPrompt(modelId);
     if (!supportsCodexPromptPersonality(modelId)) return prompt;
+
     const personalityPrompt =
         personality === "friendly"
             ? readPromptFile(GPT_5_5_FRIENDLY_PERSONALITY_PATH)
@@ -132,8 +136,10 @@ function renderCodexPrompt(
 function readPromptFile(promptPath: string): string {
     const cachedPrompt = cachedCodexPromptsByPath.get(promptPath);
     if (cachedPrompt !== undefined) return cachedPrompt;
+
     const prompt = readFileSync(promptPath, "utf8").trim();
     cachedCodexPromptsByPath.set(promptPath, prompt);
+
     return prompt;
 }
 
@@ -162,6 +168,7 @@ function adaptCodexPromptForPi(prompt: string, tools: readonly string[]): string
         adaptedPrompt = removeLineContaining(adaptedPrompt, "Do not chain shell commands");
         adaptedPrompt = removeLineContaining(adaptedPrompt, "You parallelize tool calls whenever");
     }
+
     if (editTool) {
         adaptedPrompt = adaptedPrompt.replaceAll("`apply_patch`", editTool);
     } else {
@@ -176,6 +183,7 @@ function adaptCodexPromptForPi(prompt: string, tools: readonly string[]): string
             )
             .replaceAll("`apply_patch`", "an active Pi file-editing tool");
     }
+
     if (!hasShellTool && !editTool) {
         adaptedPrompt = removeMarkdownSection(
             adaptedPrompt,
@@ -192,6 +200,7 @@ function adaptCodexPromptForPi(prompt: string, tools: readonly string[]): string
         "You use `multi_tool_use.parallel` for that parallelism, and only that.",
         "Use Pi's parallel tool interface for that parallelism when it is available.",
     );
+
     const skillsHeading = "\n# Using skills";
     const skillsIndex = adaptedPrompt.indexOf(skillsHeading);
     const promptWithoutCodexSkills =
@@ -208,6 +217,7 @@ function adaptCodexInteractionGuidance(prompt: string, tools: readonly string[])
         parallelGuidance,
     );
     adapted = removeLineContaining(adapted, "When calling `functions.exec`");
+
     const asyncTool = tools.includes("request_user_input_async");
     const questionGuidance = asyncTool
         ? undefined
@@ -220,6 +230,7 @@ function adaptCodexInteractionGuidance(prompt: string, tools: readonly string[])
             questionGuidance,
         );
     }
+
     return adapted.replaceAll("functions.request_user_input_async", "request_user_input_async");
 }
 
@@ -233,6 +244,7 @@ function removeLineContaining(prompt: string, marker: string): string {
 function removeMarkdownSection(prompt: string, heading: string, nextHeading: string): string {
     const sectionStart = prompt.indexOf(`${heading}\n`);
     if (sectionStart < 0) return prompt;
+
     const nextSectionStart = prompt.indexOf(`${nextHeading}\n`, sectionStart);
     if (nextSectionStart < 0) return prompt.slice(0, sectionStart).trimEnd();
     return `${prompt.slice(0, sectionStart).trimEnd()}\n\n${prompt.slice(nextSectionStart)}`;
@@ -303,6 +315,7 @@ function findLastExactLineEnd(text: string, expectedLine: string): number | unde
         if (line.replace(/\r$/, "") === expectedLine) matchEnd = lineEnd;
         offset = lineEnd + 1;
     }
+
     return matchEnd;
 }
 
@@ -326,6 +339,7 @@ function buildPiToolsSection(options: BuildSystemPromptOptions): string {
         "",
         "In addition to the tools above, you may have access to other custom tools depending on the project.",
     );
+
     return lines.join("\n");
 }
 
@@ -336,6 +350,7 @@ function buildPiGuidelinesSection(options: BuildSystemPromptOptions): string {
     const addGuideline = (guideline: string): void => {
         const normalized = guideline.trim();
         if (normalized.length === 0 || seenGuidelines.has(normalized)) return;
+
         seenGuidelines.add(normalized);
         guidelines.push(normalized);
     };
@@ -348,6 +363,7 @@ function buildPiGuidelinesSection(options: BuildSystemPromptOptions): string {
     ) {
         addGuideline("Use bash for file operations like ls, rg, find");
     }
+
     for (const guideline of options.promptGuidelines ?? []) addGuideline(guideline);
     addGuideline("Be concise in your responses");
     addGuideline("Show file paths clearly when working with files");
@@ -393,12 +409,15 @@ function buildPiProjectContextSection(options: BuildSystemPromptOptions): string
             "",
         );
     }
+
     lines.push("</project_context>");
+
     return lines.join("\n");
 }
 
 function buildPiSkillsSection(options: BuildSystemPromptOptions): string {
     if (!selectedTools(options).includes("read")) return "";
+
     const skills = options.skills ?? [];
     if (skills.length === 0) return "";
     return formatSkillsForPrompt(skills);
@@ -427,6 +446,7 @@ function findLastLineStartingWith(text: string, prefix: string): string | undefi
         const line = lines[index];
         if (line !== undefined && line.startsWith(prefix)) return line;
     }
+
     return undefined;
 }
 

@@ -34,9 +34,11 @@ function nodeText<Value>(node: Value): string {
     if (record.kind === "text") return inlineText(record.text);
     if (record.kind === "call") return nodeText(record.body);
     if (record.kind === "output") return StringDecoder.decode(record.text) ?? "";
+
     if (record.kind === "stack" && Array.isArray(record.children)) {
         return record.children.map(nodeText).join("\n");
     }
+
     return "";
 }
 
@@ -119,15 +121,18 @@ test("apply_patch adapter owns partial, planned, settled, and restored mutation 
         patch: `*** Begin Patch\n*** Add File: src/live.ts\n+text${"🧪".slice(0, 1)}`,
     });
     assert.equal(splitNode.kind, "mutation");
+
     if (splitNode.kind === "mutation") {
         const text = splitNode.files[0]?.lines[0]?.text;
         assert.equal(text, "text");
         assert.doesNotMatch(text ?? "", /[\uD800-\uDFFF]/u);
     }
+
     const completeEmoji = rendering.renderPartialCall({
         patch: "*** Begin Patch\n*** Add File: src/live.ts\n+text🧪",
     });
     assert.equal(completeEmoji.kind, "mutation");
+
     if (completeEmoji.kind === "mutation") {
         assert.equal(completeEmoji.files[0]?.lines[0]?.text, "text🧪");
     }
@@ -189,10 +194,10 @@ test("web_run adapter summarizes calls and bounded source results", () => {
     const args = parseArgs(renderer, { search_query: [{ q: "latest pi docs" }] });
     assert.equal(renderer.parseArgs?.(null), undefined);
     assert.equal("renderPartialCall" in renderer, false);
-
     const call = renderer.renderCall?.(args, completeContext);
     assert.equal(call?.kind, "call");
     if (call?.kind !== "call") return;
+
     assert.equal(call.labels.static, "Web Search");
     assert.equal(nodeText(call), '"latest pi docs"');
     assert.doesNotMatch(nodeText(call), /search search/u);
@@ -325,7 +330,6 @@ test("imagegen adapter preserves streaming, multiline, Unicode, and private-path
         /First composition line\.\nSecond lighting line\.\nThird material line\./u,
     );
     assert.doesNotMatch(multiline, /"First composition/u);
-
     const emojiPrompt = `${"a".repeat(87)}🧪${"b".repeat(10)}`;
     const emojiArgs = parseArgs(renderer, { prompt: emojiPrompt });
     const emoji = nodeText(renderer.renderCall?.(emojiArgs, { ...completeContext, expanded: true }))

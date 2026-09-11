@@ -14,9 +14,7 @@ test("Codex tool auth requires account ids and omits empty account headers", asy
         accountId: "",
     });
     assert.equal(headers.has("ChatGPT-Account-ID"), false);
-
     const result = await resolveCodexToolProvider(makeToolAuthContext({ apiKey: "token" }));
-
     assert.ok(result.isErr());
     assert.match(result.error.message, /account id is unavailable/);
 });
@@ -111,5 +109,6 @@ function makeToolAuthContext(auth: {
             }),
         },
     };
+
     return testDouble<ExtensionContext>()(ctx);
 }

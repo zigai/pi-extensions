@@ -15,10 +15,12 @@ export type SharedCodexSettingsTabAction = {
 export type SharedCodexSettingsTabSession = {
     readonly getItems: () => readonly SharedCodexSettingItem[];
     readonly getHeaderLines?: (theme: Theme) => readonly string[];
+
     readonly onChange: (
         id: string,
         value: string,
     ) => Promise<SharedCodexSettingsTabAction | void> | SharedCodexSettingsTabAction | void;
+
     readonly dispose?: () => Promise<void> | void;
 };
 
@@ -60,9 +62,11 @@ const INTEGRATION_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
 
 export function registerCodexSettingsHost(id: string): () => void {
     validateIntegrationId(id);
+
     const token = Symbol(id);
     const registry = getRegistry();
     registry.hosts.set(id, token);
+
     return () => {
         if (registry.hosts.get(id) === token) registry.hosts.delete(id);
     };
@@ -74,12 +78,15 @@ export function hasCodexSettingsHost(): boolean {
 
 export function registerCodexIntegration(contribution: CodexIntegrationContribution): () => void {
     validateIntegrationId(contribution.id);
+
     if (contribution.settingsTab !== undefined) {
         validateIntegrationId(contribution.settingsTab.id);
     }
+
     const token = Symbol(contribution.id);
     const registry = getRegistry();
     registry.contributions.set(contribution.id, { token, value: contribution });
+
     return () => {
         if (registry.contributions.get(contribution.id)?.token === token) {
             registry.contributions.delete(contribution.id);

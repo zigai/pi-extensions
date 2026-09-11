@@ -14,6 +14,7 @@ for (const failure of ["status", "network", "body"]) {
                 calls += 1;
                 if (calls === 4) return new Response("complete");
                 if (failure === "network") throw new Error("offline");
+
                 if (failure === "body")
                     return new Response(
                         new ReadableStream({
@@ -22,12 +23,14 @@ for (const failure of ["status", "network", "body"]) {
                             },
                         }),
                     );
+
                 return new Response("busy", { status: 503 });
             }),
             scheduler: {
                 set(delay: number, task: () => void) {
                     delays.push(delay);
                     task();
+
                     return {
                         cancel: () => {
                             cancellations += 1;
@@ -62,6 +65,7 @@ test("HTTP abort during backoff cancels scheduled work without another fetch", a
             set(_delay: number, task: () => void) {
                 fire = task;
                 ready();
+
                 return {
                     cancel: () => {
                         cancellations += 1;

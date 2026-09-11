@@ -16,13 +16,17 @@ export class ResponsesLiteRequestPolicy {
             this.#suppressedHeaderSessions.delete(sessionId);
             return true;
         }
+
         this.#suppressedHeaderSessions.add(sessionId);
+
         return false;
     }
 
     shouldRewriteLitePayload(sessionId: string): boolean {
         if (!this.#suppressedHeaderSessions.delete(sessionId)) return true;
+
         this.#piFallbackSessions.delete(sessionId);
+
         return false;
     }
 

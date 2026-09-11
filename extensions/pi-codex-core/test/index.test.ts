@@ -99,11 +99,11 @@ test("model selection resynchronizes tool activation for the newly selected mode
             value: DEFAULT_TEST_EXTENSION_MODEL,
         });
         await harness.selectModel(ctx);
-
         assert.deepEqual(harness.activeTools, ["web_run", "imagegen", "view_image", "apply_patch"]);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -170,6 +170,7 @@ test("input lifecycle holds follow-ups and merges them into the next manual mess
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -184,6 +185,7 @@ test("session shutdown releases Pi Toggles lifecycle subscriptions", async () =>
         harness.events.on("pi-toggles:set-activation-proposal", () => {
             proposals += 1;
         });
+
         extension(harness.api);
         const ctx = makeExtensionContext("/workspace", false);
         await harness.startSession(ctx);
@@ -191,8 +193,8 @@ test("session shutdown releases Pi Toggles lifecycle subscriptions", async () =>
             version: 1,
             sessionId: "extension-session",
         });
-        assert.equal(proposals, 1);
 
+        assert.equal(proposals, 1);
         await harness.shutdownSession("quit", ctx);
         harness.events.emit("pi-toggles:activation-ready", {
             version: 1,
@@ -203,6 +205,7 @@ test("session shutdown releases Pi Toggles lifecycle subscriptions", async () =>
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -221,18 +224,16 @@ test("apply_patch replaces edit when enabled for OpenAI-like models", async () =
         const harness = makeExtensionHarness(["read", "edit", "bash"]);
         extension(harness.api);
         await harness.startSession(makeExtensionContext(cwd, true));
-
         assert.ok(harness.activeTools.includes("apply_patch"));
         assert.equal(harness.activeTools.includes("edit"), false);
-
         await writeFile(globalConfigPath, JSON.stringify({ tools: { applyPatch: "off" } }));
         await harness.startSession(makeExtensionContext(cwd, true));
-
         assert.equal(harness.activeTools.includes("apply_patch"), false);
         assert.ok(harness.activeTools.includes("edit"));
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -258,6 +259,7 @@ test("delegates tool activation defaults to Pi Toggles without mutating active t
                 owner: packageName,
             });
         });
+
         extension(harness.api);
         harness.events.emit("pi-toggles:activation-ready", {
             version: 1,
@@ -265,7 +267,6 @@ test("delegates tool activation defaults to Pi Toggles without mutating active t
         });
 
         await harness.startSession(makeExtensionContext(cwd, true));
-
         assert.deepEqual(harness.activeTools, ["read", "edit", "bash"]);
         assert.equal(proposals.length, 1);
         const proposal = proposals[0];
@@ -295,6 +296,7 @@ test("delegates tool activation defaults to Pi Toggles without mutating active t
         } else {
             process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         }
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -327,6 +329,7 @@ test("apply_patch all mode replaces edit for non-OpenAI models", async () => {
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -366,6 +369,7 @@ test("shows a scrollable startup warning when fast mode is enabled", async () =>
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -388,6 +392,7 @@ function makeStartupWarningContext(
             notify: onNotify,
         },
     };
+
     return testDouble<ExtensionContext>()(context);
 }
 
@@ -408,6 +413,7 @@ test("applies GPT-5.6 Responses Lite compatibility through extension hooks", asy
             },
             { agentActive: true },
         );
+
         const headers: Record<string, string | null> = {};
 
         await harness.startSession(ctx);
@@ -437,6 +443,7 @@ test("applies GPT-5.6 Responses Lite compatibility through extension hooks", asy
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -462,21 +469,20 @@ test("does not opt Pi internal summarization into Responses Lite", async () => {
             ...DEFAULT_TEST_EXTENSION_MODEL,
             id: "gpt-5.6-sol",
         });
+
         const headers: Record<string, string | null> = {};
 
         await harness.startSession(ctx);
         await harness.beginCompaction(ctx);
         await harness.prepareProviderHeaders(headers, ctx);
-
         assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], undefined);
-
         await harness.finishCompaction(ctx);
         await harness.prepareProviderHeaders(headers, ctx);
-
         assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], "true");
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -496,14 +502,15 @@ test("routes unexpected native compaction failures through Pi fallback", async (
 
         await harness.startSession(ctx);
         const result = await harness.beginCompaction(ctx);
+
         const headers: Record<string, string | null> = {};
         await harness.prepareProviderHeaders(headers, ctx);
-
         assert.equal(result, undefined);
         assert.equal(headers[CODEX_RESPONSES_LITE_HEADER], undefined);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -569,6 +576,7 @@ test("suppresses reasoning traces only for GPT Responses models", async () => {
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -618,6 +626,7 @@ test("extension prompt hook follows the selected GPT model", async () => {
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -649,13 +658,13 @@ test("warns once when an earlier extension fully replaces the system prompt", as
 
         await harness.prepareSystemPrompt(replacedPrompt, options, ctx);
         await harness.prepareSystemPrompt(replacedPrompt, options, ctx);
-
         assert.equal(notifications.length, 1);
         assert.equal(notifications[0]?.type, "warning");
         assert.match(notifications[0]?.message ?? "", /could not safely merge/);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });

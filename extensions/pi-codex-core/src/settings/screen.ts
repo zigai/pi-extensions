@@ -41,6 +41,7 @@ export type CodexSettingsScreenOptions = {
     readonly additionalTabs?: readonly SharedCodexSettingsTab[] | undefined;
     readonly initialUsage?: CodexUsageSnapshot | { readonly error: string } | undefined;
     readonly onChange: (config: CodexCoreConfig) => CodexSettingsSaveResult;
+
     readonly onConsumeResetCredit?: (
         redeemRequestId: string,
         options?: { readonly signal?: AbortSignal | undefined },
@@ -48,6 +49,7 @@ export type CodexSettingsScreenOptions = {
 };
 
 const BUILT_IN_TAB_ORDER: readonly CodexSettingsTab[] = ["general", "tools", "openai", "usage"];
+
 type DescribedSettingItem = SettingItem & { readonly description: string };
 
 type ActiveSharedTab = {
@@ -61,6 +63,7 @@ export async function openCodexSettingsScreen(
 ): Promise<void> {
     const tasks = new SettingsScreenTaskOwner();
     const sharedTabs = createSharedTabs(ctx, options.additionalTabs ?? []);
+
     const tabOrder = [
         "general",
         "tools",
@@ -68,6 +71,7 @@ export async function openCodexSettingsScreen(
         ...sharedTabs.map(({ definition }) => definition.id),
         "usage",
     ];
+
     let draft = options.initialConfig;
     let activeTab =
         options.initialTab !== undefined && tabOrder.includes(options.initialTab)
@@ -86,6 +90,7 @@ export async function openCodexSettingsScreen(
         await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
             const getActiveSharedTab = (): ActiveSharedTab | undefined =>
                 sharedTabs.find(({ definition }) => definition.id === activeTab);
+
             const buildCurrentItems = (): DescribedSettingItem[] => {
                 const sharedTab = getActiveSharedTab();
                 if (sharedTab !== undefined) {
@@ -94,6 +99,7 @@ export async function openCodexSettingsScreen(
                         values: [...item.values],
                     }));
                 }
+
                 return buildItems(
                     builtInTab(activeTab),
                     draft,
@@ -103,15 +109,19 @@ export async function openCodexSettingsScreen(
                     personalitySupported,
                 );
             };
+
             const formatCurrentHeader = (): string[] => {
                 const sharedTab = getActiveSharedTab();
                 if (sharedTab !== undefined) {
                     return [...(sharedTab.session.getHeaderLines?.(theme) ?? []), ""];
                 }
+
                 return formatHeaderLines(builtInTab(activeTab), draft, theme, personalitySupported);
             };
+
             const loadUsage = (): void => {
                 if (usageLoading || tasks.signal.aborted) return;
+
                 usageLoading = true;
                 resetMessage = undefined;
                 tui.requestRender();
@@ -125,6 +135,7 @@ export async function openCodexSettingsScreen(
                             : { error: usage.error.message };
                     } catch (cause: unknown) {
                         if (signal.aborted) return;
+
                         usageState = {
                             error: cause instanceof Error ? cause.message : String(cause),
                         };
@@ -140,36 +151,45 @@ export async function openCodexSettingsScreen(
 
             const consumeResetCredit = (): void => {
                 if (resetLoading) return;
+
                 if (!canConsumeResetCredit(usageState)) {
                     resetMessage = { kind: "info", text: "No banked Codex resets are available." };
                     pendingResetConfirm = false;
                     tui.requestRender();
                     return;
                 }
+
                 resetLoading = true;
                 pendingResetConfirm = false;
                 resetMessage = undefined;
                 usageState = undefined;
                 tui.requestRender();
+
                 const redeemRequestId = createCodexRateLimitResetRedeemRequestId();
+
                 tasks.start(async (signal) => {
                     try {
                         const result = await (
                             options.onConsumeResetCredit ??
                             (async (id, consumeOptions) => {
                                 consumeOptions?.signal?.throwIfAborted();
+
                                 const result = await consumeCodexRateLimitResetCredit(ctx, id, {
                                     signal: consumeOptions?.signal,
                                 });
+
                                 consumeOptions?.signal?.throwIfAborted();
                                 return result;
                             })
                         )(redeemRequestId, { signal });
+
                         if (signal.aborted) return;
+
                         if (Result.isError(result)) {
                             resetMessage = { kind: "error", text: result.error.message };
                             return;
                         }
+
                         resetMessage = {
                             kind:
                                 result.value.outcome === "reset" ||
@@ -180,6 +200,7 @@ export async function openCodexSettingsScreen(
                         };
                     } catch (cause: unknown) {
                         if (signal.aborted) return;
+
                         resetMessage = {
                             kind: "error",
                             text: cause instanceof Error ? cause.message : String(cause),
@@ -202,17 +223,21 @@ export async function openCodexSettingsScreen(
                         const sharedTab = getActiveSharedTab();
                         if (sharedTab !== undefined) {
                             if (sharedChangePending) return;
+
                             sharedChangePending = true;
                             tui.requestRender();
                             tasks.start(async (signal) => {
                                 try {
                                     const action = await sharedTab.session.onChange(id, value);
+
                                     if (signal.aborted) return;
+
                                     if (action?.afterClose !== undefined) {
                                         afterClose = action.afterClose;
                                         done(undefined);
                                         return;
                                     }
+
                                     for (const item of buildCurrentItems()) {
                                         settingsList.updateValue(item.id, item.currentValue);
                                     }
@@ -232,12 +257,15 @@ export async function openCodexSettingsScreen(
                                     }
                                 }
                             });
+
                             return;
                         }
+
                         if (activeTab === "usage" && id === "refreshUsage") {
                             loadUsage();
                             return;
                         }
+
                         if (activeTab === "usage" && id === "useReset") {
                             if (!canConsumeResetCredit(usageState)) {
                                 resetMessage = {
@@ -248,22 +276,29 @@ export async function openCodexSettingsScreen(
                                 pendingResetConfirm = true;
                                 resetMessage = undefined;
                             }
+
                             tui.requestRender();
+
                             return;
                         }
+
                         const nextDraft = applySettingChange(id, value, draft);
                         if (nextDraft === draft) return;
+
                         const saveResult = options.onChange(nextDraft);
                         if (saveResult.ok) draft = saveResult.effectiveConfig;
+
                         for (const item of buildCurrentItems()) {
                             settingsList.updateValue(item.id, item.currentValue);
                         }
+
                         tui.requestRender();
                     },
                     () => done(undefined),
                 );
 
             let settingsList = createSettingsList();
+
             if (activeTab === "usage" && !usageState) loadUsage();
 
             const switchTab = (): void => {
@@ -271,6 +306,7 @@ export async function openCodexSettingsScreen(
                 activeTab = tabOrder[(currentIndex + 1) % tabOrder.length] ?? "general";
                 pendingResetConfirm = false;
                 settingsList = createSettingsList();
+
                 if (activeTab === "usage" && !usageState) loadUsage();
                 tui.requestRender();
             };
@@ -298,6 +334,7 @@ export async function openCodexSettingsScreen(
                         ...settingsList.render(width),
                         rule(width, theme, "accent"),
                     ];
+
                     return body.map((line) => truncateToWidth(line, width, ""));
                 },
                 invalidate(): void {
@@ -310,6 +347,7 @@ export async function openCodexSettingsScreen(
                             consumeResetCredit();
                             return;
                         }
+
                         if (lowered === "n" || data === "\x1b") {
                             pendingResetConfirm = false;
                             resetMessage = { kind: "info", text: "Codex reset cancelled." };
@@ -317,10 +355,12 @@ export async function openCodexSettingsScreen(
                             return;
                         }
                     }
+
                     if (data === "\t") {
                         switchTab();
                         return;
                     }
+
                     settingsList.handleInput(data);
                     tui.requestRender();
                 },
@@ -334,6 +374,7 @@ export async function openCodexSettingsScreen(
             }),
         );
     }
+
     await afterClose?.();
 }
 
@@ -348,7 +389,9 @@ function createSharedTabs(
             ctx.ui.notify(`Codex integration tab id is already in use: ${definition.id}`, "error");
             continue;
         }
+
         reservedIds.add(definition.id);
+
         try {
             tabs.push({ definition, session: definition.create(ctx) });
         } catch (cause: unknown) {
@@ -360,6 +403,7 @@ function createSharedTabs(
             );
         }
     }
+
     return tabs;
 }
 
@@ -377,6 +421,7 @@ class SettingsScreenTaskOwner {
 
     start(task: (signal: AbortSignal) => Promise<void>): void {
         if (this.signal.aborted) return;
+
         const ownedTask = (async () => {
             try {
                 await task(this.signal);
@@ -596,6 +641,7 @@ function buildItems(
 
     if (tab === "usage") {
         const canReset = canConsumeResetCredit(usageState);
+
         return [
             {
                 id: "refreshUsage",
@@ -620,14 +666,17 @@ function buildItems(
 function applySettingChange(id: string, value: string, config: CodexCoreConfig): CodexCoreConfig {
     if (id === "toolScope")
         return { ...config, scope: { tools: value === "all" ? "all" : "codex" } };
+
     if (id === "promptMode")
         return {
             ...config,
             prompt: { ...config.prompt, mode: value === "codex" ? "codex" : "pi" },
         };
+
     if (id === "personality") {
         const personality = CODEX_PERSONALITIES.find((item) => item === value);
         if (!personality) return config;
+
         return {
             ...config,
             prompt: {
@@ -636,39 +685,50 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
             },
         };
     }
+
     if (id === "nativeCompaction") {
         return { ...config, compaction: { ...config.compaction, enabled: value === "on" } };
     }
+
     if (id === "autoCompaction") {
         return { ...config, compaction: { ...config.compaction, auto: value === "on" } };
     }
+
     if (id === "autoThreshold") {
         const thresholdPercent = Number.parseInt(value, 10);
         return Number.isFinite(thresholdPercent)
             ? { ...config, compaction: { ...config.compaction, thresholdPercent } }
             : config;
     }
+
     if (id === "outageRecovery") {
         return { ...config, recovery: { ...config.recovery, enabled: value === "on" } };
     }
+
     if (id === "batchFollowUps") {
         return { ...config, recovery: { ...config.recovery, batchFollowUps: value === "on" } };
     }
+
     if (id === "recoveryAttempts") {
         return updateRecoveryInteger(config, "maxAttempts", value);
     }
+
     if (id === "recoveryBaseDelay") {
         return updateRecoveryInteger(config, "baseDelayMs", value);
     }
+
     if (id === "recoveryMaxDelay") {
         return updateRecoveryInteger(config, "maxDelayMs", value);
     }
+
     if (id === "webSearch")
         return { ...config, tools: { ...config.tools, webSearch: value === "on" } };
+
     if (id === "webSearchMode") {
         const webSearchMode = CODEX_WEB_SEARCH_MODES.find((mode) => mode === value);
         return webSearchMode ? { ...config, tools: { ...config.tools, webSearchMode } } : config;
     }
+
     if (id === "imageGeneration")
         return { ...config, tools: { ...config.tools, imageGeneration: value === "on" } };
     if (id === "viewImage")
@@ -678,26 +738,33 @@ function applySettingChange(id: string, value: string, config: CodexCoreConfig):
     if (id === "applyPatch" && (value === "off" || value === "openai" || value === "all"))
         return { ...config, tools: { ...config.tools, applyPatch: value } };
     if (id === "fast") return { ...config, openai: { ...config.openai, fast: value === "on" } };
+
     if (id === "reasoningTraces") {
         return {
             ...config,
             openai: { ...config.openai, showReasoningTraces: value === "on" },
         };
     }
+
     if (id === "verbosity" && (value === "low" || value === "medium" || value === "high")) {
         return { ...config, openai: { ...config.openai, verbosity: value } };
     }
+
     if (id === "webSearchModel")
         return { ...config, openai: { ...config.openai, webSearchModel: value } };
     if (id === "imageModel") return { ...config, openai: { ...config.openai, imageModel: value } };
+
     if (id === "imageDescriptionModel") {
         return { ...config, openai: { ...config.openai, imageDescriptionModel: value } };
     }
+
     if (id === "compactionModel")
         return { ...config, openai: { ...config.openai, compactionModel: value } };
+
     if (id === "compactionReasoning" && value.trim().length > 0) {
         return { ...config, openai: { ...config.openai, compactionReasoning: value } };
     }
+
     return config;
 }
 
@@ -744,7 +811,9 @@ function formatHeaderLines(
     personalitySupported: boolean,
 ): string[] {
     if (tab !== "general") return [""];
+
     const personality = personalitySupported ? `, personality ${config.prompt.personality}` : "";
+
     return [
         `  ${theme.bold("Pi Codex Core")}: tools ${config.scope.tools}, prompt ${config.prompt.mode}${personality}, compaction ${config.compaction.enabled ? "on" : "off"}`,
         "",
@@ -779,7 +848,9 @@ function formatUsageLines(
             ),
         );
     }
+
     if (resetLoading) lines.push(theme.fg("dim", "  Applying reset..."));
+
     if (resetMessage) {
         lines.push(
             resetMessage.kind === "error"
@@ -787,7 +858,9 @@ function formatUsageLines(
                 : theme.fg("dim", `  ${resetMessage.text}`),
         );
     }
+
     lines.push("");
+
     return lines;
 }
 
@@ -808,6 +881,7 @@ function formatTabs(
 ): string {
     const renderTab = (tab: string, label: string): string =>
         activeTab === tab ? theme.bold(label) : theme.fg("dim", label);
+
     const tabs = [
         { id: "general", label: "General" },
         { id: "tools", label: "Tools" },
@@ -818,6 +892,7 @@ function formatTabs(
         })),
         { id: "usage", label: "Usage" },
     ];
+
     return `  ${tabs
         .map(({ id, label }) => renderTab(id, label))
         .join(`  ${theme.fg("dim", "/")}  `)}`;

@@ -74,6 +74,7 @@ const ViewImageArgumentsSchema = compileSchema(
         detail: Type.Optional(StringEnum(["high", "original"] as const)),
     }),
 );
+
 const DescriptionResponseSchema = compileSchema(
     Type.Object({
         output_text: Type.Optional(Type.String()),
@@ -161,6 +162,7 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
         renderCall(args, theme, _context) {
             const parts = [args.path || "..."];
             if (args.detail) parts.push(`detail=${args.detail}`);
+
             const text =
                 theme.fg("toolTitle", theme.bold("view_image ")) +
                 theme.fg(args.path ? "accent" : "dim", parts.join(" • "));
@@ -168,6 +170,7 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
         },
         renderResult(result, { expanded, isPartial }, theme, context) {
             if (isPartial) return new Text(theme.fg("warning", "Loading image..."), 0, 0);
+
             const path = result.details.path || context.args.path || "image";
             const displayedImage = firstImageContent(result.content);
             const capabilities = (
@@ -175,6 +178,7 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
             ).getCapabilities();
             const lines: string[] = [];
             if (!displayedImage) lines.push(theme.fg("toolOutput", `Image saved at ${path}`));
+
             if (displayedImage && (!capabilities.images || !context.showImages)) {
                 const dimensions =
                     getImageDimensions(displayedImage.data, displayedImage.mimeType) ?? undefined;
@@ -185,6 +189,7 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
                     ),
                 );
             }
+
             const rawDescription = firstTextContent(result.content);
             const description =
                 rawDescription && !isImageDetailMarker(rawDescription) ? rawDescription : undefined;
@@ -193,15 +198,18 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
                     theme.fg("toolOutput", expanded ? description : compactText(description, 180)),
                 );
             }
+
             if (!displayedImage || !capabilities.images || !context.showImages) {
                 if (lines.length === 0) return new Container();
                 return new Text(lines.join("\n"), 0, 0);
             }
+
             const container = new Container();
             if (lines.length > 0) {
                 container.addChild(new Text(lines.join("\n"), 0, 0));
                 container.addChild(new Spacer(1));
             }
+
             container.addChild(
                 (options.imageComponentFactory ?? defaultViewImageComponentFactory)({
                     image: displayedImage,
@@ -209,6 +217,7 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
                     theme,
                 }),
             );
+
             return container;
         },
         async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -226,7 +235,9 @@ export function createViewImageTool(options: ViewImageToolOptions): ToolDefiniti
                         `view_image detail "original" is not supported by ${ctx.model?.id ?? "the active model"}.`,
                     );
                 }
+
                 const content = await prepareCodexPromptImageContent(image, detail, { signal });
+
                 return {
                     content: [content, { type: "text", text: imageDetailMarker(detail) }],
                     details: {
@@ -285,6 +296,7 @@ function defaultViewImageComponentFactory(args: {
 export function prepareViewImageArguments(args: unknown): ViewImageParams {
     const input = ViewImageArgumentsSchema.decode(args);
     if (!input) throw new Error("Invalid view_image arguments.");
+
     const path = normalizeImageReferencePath(
         input.path ?? input.file_path ?? input.image_path ?? "",
     );
@@ -297,6 +309,7 @@ function firstImageContent(content: readonly unknown[]): ImageContent | undefine
         const image = ImageContentBlockSchema.decode(item);
         if (image !== undefined) return image;
     }
+
     return undefined;
 }
 
@@ -308,6 +321,7 @@ function firstTextContent(content: readonly unknown[]): string | undefined {
             if (text.length > 0) return text;
         }
     }
+
     return undefined;
 }
 
@@ -328,6 +342,7 @@ async function describeImage(
     const promptImage = await prepareCodexPromptImageContent(image, detail, { signal });
     const provider = await resolveCodexToolProvider(ctx);
     if (provider.isErr()) return provider;
+
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("OpenAI-Beta", "responses=experimental");
     headers.set("accept", "application/json");
@@ -365,9 +380,9 @@ async function describeImage(
         ],
     };
     const compatibleRequestBody = rewriteCodexResponsesPayload(requestBody, model) ?? requestBody;
-
     let response: Response;
     let responseText: string;
+
     try {
         const fetched = await fetchTextWithRetries(
             runtime,
@@ -375,6 +390,7 @@ async function describeImage(
             { method: "POST", headers, body: JSON.stringify(compatibleRequestBody) },
             { signal },
         );
+
         response = fetched.response;
         responseText = fetched.text;
     } catch (cause: unknown) {
@@ -387,6 +403,7 @@ async function describeImage(
                 }),
             );
         }
+
         return fail(
             new CodexNetworkUnavailable({
                 operation: "viewImageDescription",
@@ -407,6 +424,7 @@ async function describeImage(
             }),
         );
     }
+
     let rawDescriptionPayload: unknown;
     try {
         rawDescriptionPayload = JSON.parse(responseText);
@@ -420,6 +438,7 @@ async function describeImage(
             }),
         );
     }
+
     const description = extractOutputText(rawDescriptionPayload);
     if (!description) {
         return fail(
@@ -430,6 +449,7 @@ async function describeImage(
             }),
         );
     }
+
     return ok(description);
 }
 
@@ -438,12 +458,14 @@ function extractOutputText(value: unknown): string | undefined {
     if (!response) return undefined;
     if (response.output_text && response.output_text.trim().length > 0)
         return response.output_text.trim();
+
     const parts: string[] = [];
     for (const item of response.output ?? []) {
         for (const content of item.content ?? []) {
             if (content.text) parts.push(content.text);
         }
     }
+
     const text = parts.join("").trim();
     return text.length > 0 ? text : undefined;
 }

@@ -40,6 +40,7 @@ const NativeCompactionRequestMetaSchema = Type.Object({
     inputTokens: Type.Optional(Type.Number()),
     cachedInputTokens: Type.Optional(Type.Number()),
 });
+
 const NativeCompactionWorldStateSchema = Type.Object({
     cwd: Type.String(),
     model: Type.String(),
@@ -48,6 +49,7 @@ const NativeCompactionWorldStateSchema = Type.Object({
     modifiedFiles: StringArraySchema,
     capturedAt: Type.String(),
 });
+
 const NativeCompactionDetailsSchema = Type.Object({
     strategy: Type.Literal(NATIVE_COMPACTION_STRATEGY),
     provider: Type.String(),
@@ -70,7 +72,6 @@ const NativeCompactionDetailsSchema = Type.Object({
 const NativeCompactionRequestMetaValidator = compileSchema(NativeCompactionRequestMetaSchema);
 const NativeCompactionWorldStateValidator = compileSchema(NativeCompactionWorldStateSchema);
 const NativeCompactionDetailsValidator = compileSchema(NativeCompactionDetailsSchema);
-
 const nativeReplayWarningKeys = new Set<string>();
 
 export function isNativeCompactionDetails<Value>(
@@ -82,6 +83,7 @@ export function isNativeCompactionDetails<Value>(
 function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails | undefined {
     const details = NativeCompactionDetailsValidator.decode(value);
     if (!details) return undefined;
+
     const compactedWindow = parseResponsesInputItems(details.compactedWindow);
     const legacyReplacementInput =
         details.replacementInput === undefined
@@ -92,6 +94,7 @@ function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails |
         details.requestMeta === undefined
             ? undefined
             : NativeCompactionRequestMetaValidator.decode(details.requestMeta);
+
     if (
         !compactedWindow ||
         !isValidCompactedWindow(compactedWindow) ||
@@ -103,6 +106,7 @@ function parseNativeCompactionDetails(value: unknown): NativeCompactionDetails |
     ) {
         return undefined;
     }
+
     return {
         strategy: NATIVE_COMPACTION_STRATEGY,
         provider: details.provider,
@@ -145,11 +149,13 @@ export function findLatestNativeCompactionEntry(
     for (let index = branch.length - 1; index >= 0; index -= 1) {
         const entry = branch[index];
         if (!entry || entry.type !== "compaction") continue;
+
         const details = parseNativeCompactionDetails(entry.details);
         if (!details) continue;
         if (match && !nativeCompactionMatches(details, match)) continue;
         return { entry: { ...entry, details }, index };
     }
+
     return undefined;
 }
 
@@ -159,6 +165,7 @@ export function findLatestActiveNativeCompactionEntry(
 ): FoundNativeCompactionEntry | undefined {
     const latestNative = findLatestNativeCompactionEntry(branch, match);
     if (!latestNative) return undefined;
+
     const superseded = branch
         .slice(latestNative.index + 1)
         .some((entry) => entry.type === "compaction");
@@ -191,6 +198,7 @@ export function buildWindowLifecycle(
     const previousDetails = latestNativeCompaction?.entry.details;
     const windowId = runtime.idGenerator.randomUUID();
     const previousWindowId = previousDetails?.windowId;
+
     return {
         windowNumber: (previousDetails?.windowNumber ?? 0) + 1,
         windowId,
@@ -232,6 +240,7 @@ export function rewriteResponsesPayloadWithNativeReplay(input: {
     const afterShimIndex = shimIndex + 1;
     let keptReplayIndex = afterShimIndex;
     let afterKeptReplayIndex = afterShimIndex;
+
     if (preCompactionKeptInput.length > 0) {
         const matchedReplayIndex = findInputSliceIndex(
             inputItems,
@@ -241,6 +250,7 @@ export function rewriteResponsesPayloadWithNativeReplay(input: {
         if (matchedReplayIndex < 0) {
             return { ok: false, reason: "expected-pi-replay-mismatch" };
         }
+
         keptReplayIndex = matchedReplayIndex;
         afterKeptReplayIndex = matchedReplayIndex + preCompactionKeptInput.length;
     }
@@ -266,6 +276,7 @@ export function buildLenientNativeReplayPayload(
     const withoutShim = payload.input.filter((item) => !itemContainsShimSummary(item));
     let insertAt = 0;
     while (insertAt < withoutShim.length && isInstructionItem(withoutShim[insertAt])) insertAt += 1;
+
     return {
         ...payload,
         input: [
@@ -283,8 +294,10 @@ export function notifyNativeReplayFallbackOnce(
 ): void {
     if (reason === "expected-pi-replay-mismatch") return;
     if (!ctx.hasUI) return;
+
     const key = `${ctx.sessionManager.getSessionId()}:${compactionEntryId}:${reason}`;
     if (nativeReplayWarningKeys.has(key)) return;
+
     nativeReplayWarningKeys.add(key);
     ctx.ui.notify(
         `Codex native compaction replay fell back to lenient rewrite (${reason}).`,
@@ -314,6 +327,7 @@ function findInputSliceIndex(
     fromIndex: number,
 ): number {
     if (expected.length === 0) return fromIndex;
+
     const expectedKeys = expected.map(stableFingerprint);
     const prefixTable = buildPrefixTable(expectedKeys);
     let matched = 0;
@@ -322,10 +336,12 @@ function findInputSliceIndex(
         while (matched > 0 && inputKey !== expectedKeys[matched]) {
             matched = prefixTable[matched - 1] ?? 0;
         }
+
         if (inputKey !== expectedKeys[matched]) continue;
         matched += 1;
         if (matched === expectedKeys.length) return index - expectedKeys.length + 1;
     }
+
     return -1;
 }
 
@@ -336,16 +352,19 @@ function buildPrefixTable(values: readonly string[]): number[] {
         while (prefixLength > 0 && values[index] !== values[prefixLength]) {
             prefixLength = table[prefixLength - 1] ?? 0;
         }
+
         if (values[index] === values[prefixLength]) prefixLength += 1;
         table[index] = prefixLength;
     }
+
     return table;
 }
 
 function stableFingerprint(value: JsonValue | undefined): string {
     const hash = createHash("sha256");
     const stats = { chars: 0, nodes: 0 };
-    updateStableFingerprint(hash, value, stats, new WeakSet<object>());
+    updateStableFingerprint(hash, value, stats, new WeakSet());
+
     return `${stats.chars}:${stats.nodes}:${hash.digest("base64url")}`;
 }
 
@@ -356,14 +375,17 @@ function updateStableFingerprint(
     seen: WeakSet<object>,
 ): void {
     stats.nodes += 1;
+
     if (value === undefined) {
         hash.update("undefined;");
         return;
     }
+
     if (value === null) {
         hash.update("null;");
         return;
     }
+
     const text = JsonStringDecoder.decode(value);
     if (text !== undefined) {
         stats.chars += text.length;
@@ -372,41 +394,51 @@ function updateStableFingerprint(
         hash.update(";");
         return;
     }
+
     const number = JsonNumberDecoder.decode(value);
     if (number !== undefined) {
         hash.update(`number:${String(number)};`);
         return;
     }
+
     const boolean = BooleanDecoder.decode(value);
     if (boolean !== undefined) {
         hash.update(`boolean:${String(boolean)};`);
         return;
     }
+
     const array = JsonArrayDecoder.decode(value);
     if (array !== undefined) {
         if (seen.has(array)) {
             hash.update("circular;");
             return;
         }
+
         seen.add(array);
         hash.update(`array:${array.length}[`);
+
         for (const item of array) updateStableFingerprint(hash, item, stats, seen);
         hash.update("];");
         seen.delete(array);
+
         return;
     }
+
     const object = JsonObjectDecoder.Parse(value);
     if (seen.has(object)) {
         hash.update("circular;");
         return;
     }
+
     seen.add(object);
     hash.update("object{");
+
     const keys = Object.keys(object).sort((left, right) => left.localeCompare(right));
     for (const key of keys) {
         updateStableFingerprint(hash, key, stats, seen);
         updateStableFingerprint(hash, object[key], stats, seen);
     }
+
     hash.update("};");
     seen.delete(object);
 }

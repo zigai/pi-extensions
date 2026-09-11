@@ -51,6 +51,7 @@ const PatchFileSummaryWireSchema = Type.Object({
     addedLines: Type.Integer({ minimum: 0 }),
     removedLines: Type.Optional(Type.Integer({ minimum: 0 })),
 });
+
 const ApplyPatchResultSchema = compileSchema(
     Type.Object({
         details: Type.Object({
@@ -75,14 +76,17 @@ function removeUnpairedSurrogates(value: string): string {
             }
             continue;
         }
+
         if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) continue;
         normalized += value[index] ?? "";
     }
+
     return normalized;
 }
 
 function splitContentLines(value: string): readonly string[] {
     if (value.length === 0) return [];
+
     const normalized = value.replace(/\r\n?/gu, "\n");
     const withoutTrailingLineBreak = normalized.endsWith("\n")
         ? normalized.slice(0, -1)
@@ -98,8 +102,10 @@ function updateLines(
         if (chunk.changeContext !== undefined && chunk.changeContext.length > 0) {
             lines.push({ kind: "metadata", text: `@@ ${chunk.changeContext}` });
         }
+
         lines.push(...diffPatchLines(chunk.oldLines, chunk.newLines));
     }
+
     return lines;
 }
 
@@ -115,6 +121,7 @@ function mutationFileFromHunk(hunk: ApplyPatchHunk): GlowupMutationFile {
             removed: 0,
         };
     }
+
     if (hunk.type === "delete") {
         return {
             path: hunk.path,
@@ -124,9 +131,11 @@ function mutationFileFromHunk(hunk: ApplyPatchHunk): GlowupMutationFile {
             countsKnown: false,
         };
     }
+
     const lines = updateLines(hunk);
     const added = lines.filter((line) => line.kind === "addition").length;
     const removed = lines.filter((line) => line.kind === "deletion").length;
+
     return hunk.movePath === undefined
         ? { path: hunk.path, lines, added, removed }
         : { path: hunk.movePath, previousPath: hunk.path, lines, added, removed };
@@ -139,8 +148,10 @@ function patchText(value: unknown): string | undefined {
 function parseApplyPatchArgs(value: unknown): ApplyPatchRenderingArgs | undefined {
     const patch = patchText(value);
     if (patch === undefined) return undefined;
+
     const parsed = parseApplyPatch(patch);
     if (parsed.isErr() || parsed.value.hunks.length === 0) return undefined;
+
     return { patch, files: parsed.value.hunks.map(mutationFileFromHunk) };
 }
 
@@ -183,7 +194,9 @@ function parsePartialPatchFiles(patch: string): readonly GlowupMutationFile[] {
             }
             continue;
         }
+
         if (current === undefined) continue;
+
         if (current.kind === "update" && rawLine.startsWith("*** Move to: ")) {
             const movePath = rawLine.slice("*** Move to: ".length).trim();
             if (movePath.length > 0) {
@@ -192,16 +205,20 @@ function parsePartialPatchFiles(patch: string): readonly GlowupMutationFile[] {
             }
             continue;
         }
+
         if (rawLine.startsWith("@@")) {
             current.lines.push({ kind: "metadata", text: rawLine });
             continue;
         }
+
         if (current.kind === "add" && rawLine.startsWith("+")) {
             current.lines.push({ kind: "addition", text: rawLine.slice(1) });
             current.added += 1;
             continue;
         }
+
         if (current.kind !== "update") continue;
+
         if (rawLine.startsWith("+")) {
             current.lines.push({ kind: "addition", text: rawLine.slice(1) });
             current.added += 1;
@@ -212,6 +229,7 @@ function parsePartialPatchFiles(patch: string): readonly GlowupMutationFile[] {
             current.lines.push({ kind: "context", text: rawLine.slice(1) });
         }
     }
+
     return files.map((file) => {
         const mutationFile: GlowupMutationFileConstruction =
             file.previousPath === undefined
@@ -228,7 +246,9 @@ function parsePartialPatchFiles(patch: string): readonly GlowupMutationFile[] {
                       added: file.added,
                       removed: file.removed,
                   };
+
         if (!file.countsKnown) mutationFile.countsKnown = false;
+
         return mutationFile;
     });
 }
@@ -236,12 +256,14 @@ function parsePartialPatchFiles(patch: string): readonly GlowupMutationFile[] {
 function parsePartialCall(value: unknown): ApplyPatchCallNode {
     const patch = patchText(value);
     if (patch === undefined) return call(PATCH_LABELS);
+
     const files = parsePartialPatchFiles(patch);
     return files.length === 0 ? call(PATCH_LABELS) : mutation(PATCH_LABELS, files);
 }
 
 function parseFileSummary(value: PatchFileSummaryWire): PatchFileSummary {
     const removed = value.removedLines;
+
     return value.originalPath === undefined
         ? {
               path: value.path,
@@ -263,6 +285,7 @@ function parseUnifiedPatchLines(patch: string): readonly (readonly GlowupMutatio
     let lines: GlowupMutationLine[] | undefined;
     let oldLine: number | undefined;
     let newLine: number | undefined;
+
     for (const line of patch.replace(/\r\n?/gu, "\n").split("\n")) {
         if (line.startsWith("--- ")) {
             lines = [];
@@ -271,13 +294,16 @@ function parseUnifiedPatchLines(patch: string): readonly (readonly GlowupMutatio
             newLine = undefined;
             continue;
         }
+
         if (lines === undefined || line.startsWith("+++ ")) continue;
+
         const hunk = /^@@ -(?<old>\d+)(?:,\d+)? \+(?<next>\d+)(?:,\d+)? @@/u.exec(line);
         if (hunk?.groups !== undefined) {
             oldLine = Number(hunk.groups.old);
             newLine = Number(hunk.groups.next);
             continue;
         }
+
         if (line.startsWith("+") && newLine !== undefined) {
             lines.push({ kind: "addition", text: line.slice(1), newLine });
             newLine += 1;
@@ -292,18 +318,22 @@ function parseUnifiedPatchLines(patch: string): readonly (readonly GlowupMutatio
             lines.push({ kind: "metadata", text: line });
         }
     }
+
     return sections;
 }
 
 function parseApplyPatchResult(value: unknown): ApplyPatchRenderingResult | undefined {
     const result = ApplyPatchResultSchema.decode(value);
     if (result === undefined || result.details.lineSummary.files.length === 0) return undefined;
+
     const patch = result.details.patch;
     const patchLines = parseUnifiedPatchLines(patch);
+
     return {
         patch,
         files: result.details.lineSummary.files.map((rawFile, index) => {
             const file = parseFileSummary(rawFile);
+
             const mutationFile: GlowupMutationFileConstruction =
                 file.previousPath === undefined
                     ? {
@@ -319,7 +349,9 @@ function parseApplyPatchResult(value: unknown): ApplyPatchRenderingResult | unde
                           added: file.added,
                           removed: file.removed,
                       };
+
             if (!file.countsKnown) mutationFile.countsKnown = false;
+
             return mutationFile;
         }),
     };

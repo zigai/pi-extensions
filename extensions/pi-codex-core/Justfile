@@ -41,3 +41,7 @@ clean:
 alias cov := coverage
 alias fmt := format
 alias tsc := typecheck
+
+# Install the extension into Pi
+install:
+    pi install .

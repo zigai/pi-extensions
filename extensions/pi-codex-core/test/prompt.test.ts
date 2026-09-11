@@ -145,6 +145,7 @@ test("selects Codex prompts by active GPT model and preserves Pi mode", () => {
         prompt: { mode: "pi" },
     });
     const piPrompt = "Pi system prompt";
+
     const options: BuildSystemPromptOptions = {
         cwd: "/workspace",
         selectedTools: ["read", "bash", "edit"],
@@ -216,7 +217,6 @@ test("renders Codex personality variants only for supported bundled prompts", ()
     assert.doesNotMatch(pragmatic, /You have a vivid inner life as Codex/);
     assert.doesNotMatch(none, /# Personality|\{\{ personality \}\}/);
     assert.match(none, /# General/);
-
     assert.equal(build("friendly", "gpt-5.6-sol"), build("none", "gpt-5.6-sol"));
     assert.equal(supportsCodexPromptPersonality("GPT-5.5"), true);
     assert.equal(supportsCodexPromptPersonality("gpt-5.6-sol"), false);

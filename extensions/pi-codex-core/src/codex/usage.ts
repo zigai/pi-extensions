@@ -130,17 +130,20 @@ export async function fetchCodexUsage(
     const signal = options.signal ?? ctx.signal;
     const model = requireOpenAICodexModel(ctx.model);
     if (model.isErr()) return model;
+
     const headers = await buildCodexUsageHeaders(ctx, model.value);
     if (headers.isErr()) return headers;
 
     const requestInit: RequestInit = { method: "GET", headers: headers.value };
     if (signal) requestInit.signal = signal;
+
     const response = await fetchUsageResponse(
         runtime,
         buildCodexUsageUrl(model.value.baseUrl),
         requestInit,
     );
     if (response.isErr()) return response;
+
     if (!response.value.ok) {
         return fail(
             new CodexHttpRequestFailed({
@@ -154,6 +157,7 @@ export async function fetchCodexUsage(
 
     const rawUsagePayload = await parseJsonResponse(response.value, "codexUsage");
     if (rawUsagePayload.isErr()) return rawUsagePayload;
+
     const snapshot = parseCodexUsagePayload(rawUsagePayload.value);
     if (snapshot.resetCredits && snapshot.resetCredits.availableCount <= 0) return ok(snapshot);
 
@@ -182,8 +186,10 @@ export async function consumeCodexRateLimitResetCredit(
     const signal = options.signal ?? ctx.signal;
     const model = requireOpenAICodexModel(ctx.model);
     if (model.isErr()) return model;
+
     const headers = await buildCodexUsageHeaders(ctx, model.value);
     if (headers.isErr()) return headers;
+
     headers.value.set("content-type", "application/json");
     resetCreditsCacheGeneration += 1;
     resetCreditsCache = undefined;
@@ -194,6 +200,7 @@ export async function consumeCodexRateLimitResetCredit(
         body: JSON.stringify({ redeem_request_id: redeemRequestId }),
     };
     if (signal) requestInit.signal = signal;
+
     const response = await fetchUsageResponse(
         runtime,
         buildCodexRateLimitResetConsumeUrl(model.value.baseUrl),
@@ -203,6 +210,7 @@ export async function consumeCodexRateLimitResetCredit(
         resetCreditsCache = undefined;
     });
     if (response.isErr()) return response;
+
     if (!response.value.ok) {
         return fail(
             new CodexHttpRequestFailed({
@@ -240,6 +248,7 @@ export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
     };
 
     addLimit("codex", undefined, root.rate_limit);
+
     if (Array.isArray(root.additional_rate_limits)) {
         for (const item of root.additional_rate_limits) {
             const additionalLimit = JsonObjectDecoder.decode(item);
@@ -265,8 +274,10 @@ export function parseCodexRateLimitResetCreditsPayload(
 ): CodexRateLimitResetCredits | undefined {
     const root = JsonObjectDecoder.decode(payload);
     if (!root) return undefined;
+
     const availableCount = parseInteger(root.available_count);
     if (availableCount === undefined) return undefined;
+
     const rawCredits = JsonArrayDecoder.decode(root.credits) ?? [];
     const credits = rawCredits.flatMap((item) => {
         const credit = parseResetCredit(item);
@@ -279,6 +290,7 @@ export function formatCodexUsage(snapshot: CodexUsageSnapshot, clock: Clock = sy
     const lines = [
         `Codex usage${snapshot.planType ? ` (${formatUsageTitle(snapshot.planType)})` : ""}:`,
     ];
+
     const rows = snapshot.limits.map((limit) => ({
         title: formatUsageTitle(limit.limitName ?? limit.limitId),
         usage: formatLimitUsage(limit, clock),
@@ -287,10 +299,12 @@ export function formatCodexUsage(snapshot: CodexUsageSnapshot, clock: Clock = sy
     for (const row of rows) {
         lines.push(`- ${`${row.title}:`.padEnd(titleWidth + 1)} ${row.usage}`);
     }
+
     if (snapshot.resetCredits) {
         lines.push(`- Resets available: ${snapshot.resetCredits.availableCount}`);
         lines.push(...formatResetCreditLines(snapshot.resetCredits, clock));
     }
+
     return lines.join("\n");
 }
 
@@ -338,12 +352,14 @@ function isAvailableResetCredit(credit: CodexRateLimitResetCredit): boolean {
 function resetCreditExpirationMs(credit: CodexRateLimitResetCredit): number | undefined {
     const explicitExpirationMs = parseTimestampMs(credit.expiresAt);
     if (explicitExpirationMs !== undefined) return explicitExpirationMs;
+
     const grantedAtMs = parseTimestampMs(credit.grantedAt);
     return grantedAtMs === undefined ? undefined : grantedAtMs + RESET_CREDIT_LIFETIME_MS;
 }
 
 function parseTimestampMs(value: string | undefined): number | undefined {
     if (value === undefined) return undefined;
+
     const timestampMs = Date.parse(value);
     return Number.isFinite(timestampMs) ? timestampMs : undefined;
 }
@@ -352,10 +368,13 @@ function formatExpiration(timestampMs: number, clock: Clock): string {
     const absolute = new Date(timestampMs).toLocaleString();
     const remainingMs = timestampMs - clock.nowMs();
     if (remainingMs < 0) return `expired ${absolute}`;
+
     const minutes = Math.round(remainingMs / 60000);
     if (minutes < 90) return `in ~${minutes}m (${absolute})`;
+
     const hours = Math.round(minutes / 60);
     if (hours < 48) return `in ~${hours}h (${absolute})`;
+
     const days = Math.round(hours / 24);
     return `in ~${days}d (${absolute})`;
 }
@@ -374,18 +393,23 @@ async function buildCodexUsageHeaders(
             }),
         );
     }
+
     const headers = new Headers();
     applyProviderHeaders(headers, model.headers);
     applyProviderHeaders(headers, auth.headers);
+
     if (auth.apiKey) headers.set("authorization", `Bearer ${auth.apiKey}`);
+
     const token = auth.apiKey ?? extractBearerToken(headers);
     const accountId = token ? extractAccountId(token) : undefined;
     if (!headers.has("chatgpt-account-id") && accountId) {
         headers.set("chatgpt-account-id", accountId);
     }
+
     headers.set("accept", "application/json");
     headers.set("OAI-Language", "en");
     headers.set("originator", "pi");
+
     return ok(headers);
 }
 
@@ -415,6 +439,7 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
             }),
         );
     }
+
     const creditsUrl = buildCodexRateLimitResetCreditsUrl(modelBaseUrl);
     const accountId = headers.get("chatgpt-account-id")?.trim();
     const cacheKey = accountId && accountId.length > 0 ? `${creditsUrl}:${accountId}` : undefined;
@@ -426,17 +451,21 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
     ) {
         return ok(resetCreditsCache.credits);
     }
+
     // Cold requests remain caller-owned: overlapping callers may each perform a GET.
     // Only settled data is shared; expiry remains anchored to this request's start.
     const generation = resetCreditsCacheGeneration;
     const expiresAt = runtime.clock.nowMs() + RESET_CREDITS_CACHE_MS;
     const requestInit: RequestInit = { method: "GET", headers };
     if (signal) requestInit.signal = signal;
+
     const response = await fetchUsageResponse(runtime, creditsUrl, requestInit);
     if (response.isErr()) return response;
     if (!response.value.ok) return ok(undefined);
+
     const rawCreditsPayload = await parseJsonResponse(response.value, "codexResetCredits");
     if (rawCreditsPayload.isErr()) return rawCreditsPayload;
+
     const credits = parseCodexRateLimitResetCreditsPayload(rawCreditsPayload.value);
     if (
         cacheKey &&
@@ -447,6 +476,7 @@ async function fetchCodexRateLimitResetCreditsWithHeaders(
     ) {
         resetCreditsCache = { key: cacheKey, expiresAt, credits };
     }
+
     return ok(credits);
 }
 
@@ -467,6 +497,7 @@ async function fetchUsageResponse(
                 }),
             );
         }
+
         return fail(
             new CodexNetworkUnavailable({
                 operation: "codexUsage",
@@ -483,6 +514,7 @@ async function parseJsonResponse(
     operation: "codexUsage" | "codexResetCredit" | "codexResetCredits",
 ): Promise<CodexResult<JsonValue>> {
     const text = await response.text();
+
     try {
         const parsed: unknown = JSON.parse(text);
         const value = JsonValueDecoder.decode(parsed);
@@ -509,6 +541,7 @@ function requireOpenAICodexModel(model: ExtensionContext["model"]): CodexResult<
             }),
         );
     }
+
     if (model.provider !== "openai-codex") {
         return fail(
             new CodexUnsupportedModel({
@@ -518,6 +551,7 @@ function requireOpenAICodexModel(model: ExtensionContext["model"]): CodexResult<
             }),
         );
     }
+
     return ok(model);
 }
 
@@ -542,6 +576,7 @@ function parseCodexRateLimitResetCreditsSummary(
 ): CodexRateLimitResetCredits | undefined {
     const summary = JsonObjectDecoder.decode(value);
     if (!summary) return undefined;
+
     const availableCount = parseInteger(summary.available_count);
     return availableCount === undefined ? undefined : { availableCount, credits: [], raw: summary };
 }
@@ -549,6 +584,7 @@ function parseCodexRateLimitResetCreditsSummary(
 function parseResetCredit(value: JsonValue): CodexRateLimitResetCredit | undefined {
     const credit = JsonObjectDecoder.decode(value);
     if (!credit) return undefined;
+
     return {
         id: parseString(credit.id),
         resetType: parseString(credit.reset_type),
@@ -570,6 +606,7 @@ type ParsedRateLimit = {
 function parseRateLimit(value: JsonValue | undefined): ParsedRateLimit {
     const rateLimit = JsonObjectDecoder.decode(value);
     if (!rateLimit) return {};
+
     return {
         primary: parseWindow(rateLimit.primary_window) ?? parseWindow(rateLimit.primary),
         secondary: parseWindow(rateLimit.secondary_window) ?? parseWindow(rateLimit.secondary),
@@ -579,6 +616,7 @@ function parseRateLimit(value: JsonValue | undefined): ParsedRateLimit {
 function parseWindow(value: JsonValue | undefined): CodexUsageWindow | undefined {
     const window = JsonObjectDecoder.decode(value);
     if (!window) return undefined;
+
     const usedPercent = JsonNumberDecoder.decode(window.used_percent);
     const limitWindowSeconds = JsonNumberDecoder.decode(window.limit_window_seconds);
     const windowMinutes =
@@ -600,6 +638,7 @@ function formatLimitUsage(limit: CodexUsageLimit, clock: Clock): string {
 
 function formatWindow(window: CodexUsageWindow | undefined, clock: Clock): string | undefined {
     if (!window) return undefined;
+
     const minutes = window.windowMinutes;
     let label = "usage";
     if (minutes !== undefined && minutes > 0) {
@@ -608,6 +647,7 @@ function formatWindow(window: CodexUsageWindow | undefined, clock: Clock): strin
         else if (minutes % 60 === 0) label = `${minutes / 60}h`;
         else label = `${minutes}m`;
     }
+
     const remainingPercent =
         window.usedPercent === undefined
             ? undefined
@@ -638,6 +678,7 @@ function formatUsageTitleWord(value: string): string {
 
 function formatReset(timestampSeconds: number | undefined, clock: Clock): string {
     if (!timestampSeconds) return "reset unknown";
+
     const minutes = Math.max(0, Math.round((timestampSeconds * 1000 - clock.nowMs()) / 60000));
     return minutes < 90
         ? `resets in ~${minutes}m`
@@ -653,6 +694,7 @@ function extractBearerToken(headers: Headers): string | undefined {
 function parseString(value: JsonValue | undefined): string | undefined {
     const parsed = StringSchema.decode(value);
     if (parsed === undefined) return undefined;
+
     const text = parsed.trim();
     return text.length > 0 ? text : undefined;
 }
@@ -660,8 +702,10 @@ function parseString(value: JsonValue | undefined): string | undefined {
 function parseInteger(value: JsonValue | undefined): number | undefined {
     const numericValue = JsonNumberDecoder.decode(value);
     if (numericValue !== undefined) return Math.max(0, Math.trunc(numericValue));
+
     const text = StringSchema.decode(value)?.trim();
     if (!text) return undefined;
+
     const parsed = Number(text);
     return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : undefined;
 }

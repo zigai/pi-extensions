@@ -122,7 +122,6 @@ test("reads codex config as optional defaults and scaffolds global files", async
     try {
         const agentDir = join(root, "agent");
         const config = readCodexCoreConfig({ agentDir });
-
         assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
         assert.deepEqual(
             JSON.parse(await readFile(getCodexCoreConfigPath(agentDir), "utf8")),
@@ -146,7 +145,6 @@ test("does not overwrite malformed existing codex config", async () => {
         await writeFile(configPath, "{not json");
 
         const readResult = readCodexCoreConfigWithDiagnostics({ agentDir });
-
         assert.deepEqual(readResult.config, DEFAULT_CODEX_CORE_CONFIG);
         assert.equal(readResult.diagnostics.length, 1);
         assert.equal(readResult.diagnostics[0]?.reason, "malformed-json");
@@ -184,6 +182,7 @@ test("fails extension activation on malformed global config", async () => {
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -199,7 +198,6 @@ test("replaces user config atomically without leaving temporary files", async ()
         };
 
         const result = writeCodexCoreConfig(nextConfig, configPath);
-
         assert.deepEqual(result, { ok: true });
         assert.equal(readCodexCoreConfig(configPath).tools.webSearch, false);
         assert.equal((await stat(configPath)).mode & 0o777, 0o640);
@@ -220,7 +218,6 @@ test("refreshes stale codex config schema without rewriting user config", async 
         await writeFile(schemaPath, "{}\n");
 
         const config = readCodexCoreConfig({ agentDir });
-
         assert.deepEqual(config, DEFAULT_CODEX_CORE_CONFIG);
         assert.equal(await readFile(configPath, "utf8"), "{not json");
         assert.deepEqual(
@@ -234,7 +231,6 @@ test("refreshes stale codex config schema without rewriting user config", async 
 
 test("keeps codex config schema file aligned with TypeBox source", async () => {
     const schema: unknown = JSON.parse(await readFile("config.schema.json", "utf8"));
-
     assert.deepEqual(schema, codexCoreConfigJsonSchema());
 });
 
@@ -251,7 +247,6 @@ test("merges project codex config over global config", async () => {
         await writeFile(projectConfigPath, JSON.stringify({ tools: { webSearch: false } }));
 
         const config = readCodexCoreConfig({ agentDir, cwd });
-
         assert.equal(config.prompt.mode, "codex");
         assert.equal(config.tools.webSearch, false);
     } finally {
@@ -276,12 +271,12 @@ test("ignores project codex config when session cwd is untrusted", async () => {
         const harness = makeExtensionHarness();
         extension(harness.api);
         await harness.startSession(makeExtensionContext(cwd, false));
-
         assert.ok(harness.activeTools.includes("web_run"));
         assert.equal(harness.activeTools.includes("apply_patch"), false);
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -312,6 +307,7 @@ test("fails session startup on trusted project config diagnostics", async () => 
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });

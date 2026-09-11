@@ -29,8 +29,10 @@ export function captureProviderRequestTemplate(
         templatesBySessionId.delete(sessionId);
         return undefined;
     }
+
     if (options.activeToolNames) template.activeToolNames = [...options.activeToolNames];
     templatesBySessionId.set(sessionId, template);
+
     return template;
 }
 
@@ -39,6 +41,7 @@ const ProviderRequestTemplateDecoder = {
     decode(payload: unknown): ProviderRequestTemplateConstruction | undefined {
         try {
             if (!isRequestObject(payload)) return undefined;
+
             const input: unknown = Object.getOwnPropertyDescriptor(payload, "input")?.value;
             const modelValue: unknown = Object.getOwnPropertyDescriptor(payload, "model")?.value;
             const instructionsValue: unknown = Object.getOwnPropertyDescriptor(
@@ -75,6 +78,7 @@ const ProviderRequestTemplateDecoder = {
                 ? JsonObjectDecoder.decode(rawFirstInput)
                 : undefined;
             if (hasAdditionalTools && !additionalToolsItem) return undefined;
+
             const layout: ProviderRequestLayout = additionalToolsItem
                 ? "responses-lite"
                 : "responses";
@@ -82,6 +86,7 @@ const ProviderRequestTemplateDecoder = {
                 ? leadingLiteInstructionItems(input)
                 : undefined;
             if (additionalToolsItem && !instructionItems) return undefined;
+
             const instructions = additionalToolsItem
                 ? (instructionItems ?? [])
                       .map((item) => textFromResponsesContent(item.content))
@@ -95,11 +100,14 @@ const ProviderRequestTemplateDecoder = {
             const template: ProviderRequestTemplateConstruction = { model, layout, instructions };
             if (tools) template.tools = tools;
             if (additionalToolsItem) template.additionalToolsItem = additionalToolsItem;
+
             if (instructionItems && instructionItems.length > 0)
                 template.instructionItems = instructionItems;
+
             if (promptCacheKey) template.promptCacheKey = promptCacheKey;
             if (reasoning) template.reasoning = reasoning;
             if (serviceTier) template.serviceTier = serviceTier;
+
             return template;
         } catch {
             return undefined;
@@ -132,10 +140,12 @@ function leadingLiteInstructionItems(input: readonly unknown[]): ResponsesInputI
         Object.getOwnPropertyDescriptor(input, "length")?.value,
     );
     if (length === undefined) return undefined;
+
     const items: ResponsesInputItem[] = [];
     for (let index = 1; index < length; index += 1) {
         const rawItem: unknown = Object.getOwnPropertyDescriptor(input, String(index))?.value;
         if (!isRequestObject(rawItem)) break;
+
         const type: unknown = Object.getOwnPropertyDescriptor(rawItem, "type")?.value;
         if (
             Object.getOwnPropertyDescriptor(rawItem, "role")?.value !== "developer" ||
@@ -143,10 +153,13 @@ function leadingLiteInstructionItems(input: readonly unknown[]): ResponsesInputI
         ) {
             break;
         }
+
         const item = JsonObjectDecoder.decode(rawItem);
         if (!item) return undefined;
+
         items.push(item);
     }
+
     return items;
 }
 
@@ -161,12 +174,15 @@ function isAdditionalToolsRecord(item: unknown): item is object {
 function parseTools(value: unknown): ResponsesTool[] | undefined {
     const rawTools = UnknownArrayDecoder.decode(value);
     if (rawTools === undefined) return undefined;
+
     const tools: ResponsesTool[] = [];
     for (const item of rawTools) {
         const tool = JsonObjectDecoder.decode(item);
         if (!tool || StringDecoder.decode(tool.type) === undefined) return undefined;
+
         tools.push(tool);
     }
+
     return tools;
 }
 

@@ -49,7 +49,6 @@ test("codex command only opens settings UI for the bare command", async () => {
 
     await command.run("", ctx);
     await command.run("traces", ctx);
-
     assert.deepEqual(command.registeredCommands, ["codex"]);
     assert.equal(command.hasArgumentCompletions, false);
     assert.equal(opened, 1);
@@ -109,6 +108,7 @@ test("codex command persists changed global settings and applies trusted project
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -143,7 +143,6 @@ test("codex command refuses malformed config without applying or overwriting it"
         });
 
         await command.run("", ctx);
-
         assert.equal(applied, 0);
         assert.equal(await readFile(configPath, "utf8"), "{not json");
         assert.equal(notifications.length, 1);
@@ -152,6 +151,7 @@ test("codex command refuses malformed config without applying or overwriting it"
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -188,7 +188,6 @@ test("codex command reports write errors without applying settings", async () =>
         });
 
         await command.run("", ctx);
-
         assert.equal(applied, 0);
         assert.equal(notifications.length, 1);
         assert.equal(notifications[0]?.type, "error");
@@ -197,6 +196,7 @@ test("codex command reports write errors without applying settings", async () =>
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -246,7 +246,6 @@ test("codex command merges contributed settings tabs and routes subcommands", as
 
         await command.run("voice", ctx);
         await command.run("start", ctx);
-
         assert.match(rendered, /General.*Tools.*OpenAI.*Voice.*Usage/);
         assert.match(rendered, /Realtime voice/);
         assert.equal(starts, 1);
@@ -342,6 +341,7 @@ test("settings tasks recover from failures and dispose contributions before afte
     const events: string[] = [];
     const notifications: string[] = [];
     let changes = 0;
+
     const ctx = makeSettingsContext({
         async run(factory) {
             const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {
@@ -377,8 +377,10 @@ test("settings tasks recover from failures and dispose contributions before afte
                     onChange() {
                         changes += 1;
                         if (changes === 1) throw new Error("Synchronous task failure");
+
                         if (changes === 2)
                             return Promise.reject(new Error("Asynchronous task failure"));
+
                         return {
                             afterClose() {
                                 events.push("afterClose");
@@ -460,6 +462,7 @@ test("settings screen shows personality only for supported bundled prompts", asy
             initialConfig: DEFAULT_CODEX_CORE_CONFIG,
             onChange: () => ({ ok: false }),
         });
+
         return rendered;
     };
 
@@ -533,6 +536,7 @@ test("settings screen renders a description for every setting", async () => {
                 rendered.includes(description),
                 `${tab} selection ${index} did not render its description: ${description}`,
             );
+
             for (const otherDescription of descriptionsByTab[tab]) {
                 if (otherDescription !== description) {
                     assert.equal(rendered.includes(otherDescription), false);
@@ -544,6 +548,7 @@ test("settings screen renders a description for every setting", async () => {
 
 test("settings screen cancels owned reset work when the custom UI closes", async () => {
     let resetTaskCancelled = false;
+
     const ctx = makeSettingsContext({
         run(factory) {
             const component = factory({ requestRender() {} }, TEST_THEME, {}, () => {});
@@ -563,13 +568,14 @@ test("settings screen cancels owned reset work when the custom UI closes", async
         },
         onChange: () => ({ ok: false }),
         onConsumeResetCredit: async (_redeemRequestId, options) =>
-            await new Promise<never>((_resolve, reject) => {
+            new Promise<never>((_resolve, reject) => {
                 const signal = options?.signal;
                 if (signal?.aborted) {
                     resetTaskCancelled = true;
                     reject(signal.reason);
                     return;
                 }
+
                 signal?.addEventListener(
                     "abort",
                     () => {
@@ -601,10 +607,12 @@ test("settings screen aborts its default reset HTTP request when closed", async 
         request.on("data", (chunk: string) => {
             body += chunk;
         });
+
         request.on("end", () => {
             requests.push({ method: request.method, url: request.url, body });
             receiveRequest?.();
         });
+
         response.on("close", () => observeDisconnect?.());
     });
     server.listen(0, "127.0.0.1");
@@ -689,14 +697,16 @@ function makeSettingsContext(options: {
     if (options.model) {
         Object.defineProperty(ctx, "model", { configurable: true, value: options.model });
     }
+
     Object.defineProperty(ctx, "hasUI", { configurable: true, value: true });
     Object.defineProperty(ctx, "ui", {
         configurable: true,
         value: {
-            custom: async (factory: SettingsScreenFactory) => await options.run(factory),
+            custom: async (factory: SettingsScreenFactory) => options.run(factory),
             notify: options.notify ?? (() => {}),
         },
     });
+
     return ctx;
 }
 
@@ -723,9 +733,11 @@ function makeCodexCommandHarness(): CodexCommandHarness {
         ) {
             registeredCommands.push(name);
             hasArgumentCompletions = command.getArgumentCompletions !== undefined;
+
             if (name === "codex") codexHandler = command.handler;
         },
     };
+
     return {
         api: testDouble<ExtensionAPI>()(api),
         registeredCommands,

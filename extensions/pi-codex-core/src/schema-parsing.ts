@@ -26,8 +26,10 @@ function createSchemaValidator<TValue>(
 /** Creates a runtime validator backed by TypeBox's schema compiler. */
 export function compileSchema<const T extends TSchema>(schema: T): SchemaValidator<Static<T>> {
     const validator = Compile(schema);
+
     return createSchemaValidator((value): Static<T> => {
         if (!validator.Check(value)) throw new Error("Value does not match schema.");
+
         // oxlint-disable-next-line typescript/no-unsafe-return -- SAFETY: TypeBox's compiled validator checked the value against the schema that defines Static<T>.
         return value;
     });

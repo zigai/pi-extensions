@@ -152,10 +152,12 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
                 theme.fg("toolTitle", theme.bold("imagegen ")) +
                 theme.fg(args.prompt ? "accent" : "dim", prompt);
             if (optionsSummary) text += `\n${theme.fg("dim", optionsSummary)}`;
+
             return new Text(text, 0, 0);
         },
         renderResult(result, { expanded, isPartial }, theme, _context) {
             if (isPartial) return new Text(theme.fg("warning", "Generating image..."), 0, 0);
+
             const images = result.details.images;
             const count = result.details.generatedCount;
             const firstImage = images.at(0);
@@ -163,15 +165,18 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
             let text = theme.fg("success", `Generated ${count} image${count === 1 ? "" : "s"}`);
             if (firstImage) text += theme.fg("dim", ` → ${firstImage.latestPath}`);
             if (metadata) text += theme.fg("dim", ` (${metadata})`);
+
             if (expanded) {
                 for (const image of images) {
                     text += `\n${theme.fg("dim", `image: ${image.path}`)}`;
                     text += `\n${theme.fg("dim", `latest: ${image.latestPath}`)}`;
                 }
+
                 for (const error of result.details.saveErrors) {
                     text += `\n${theme.fg("warning", `save warning: ${error}`)}`;
                 }
             }
+
             return new Text(text, 0, 0);
         },
         async execute(toolCallId, params, signal, _onUpdate, ctx) {
@@ -186,12 +191,15 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
                 options.runtime ?? defaultCodexRuntime,
             );
             if (response.isErr()) throw codexFailureToError(response.error);
+
             const saveImage = options.saveImage ?? saveGeneratedImage;
             const savedImages: SavedImage[] = [];
             const saveErrors: string[] = [];
             const generatedImages = response.value.images.map(generatedPngContent);
+
             for (const [index, image] of generatedImages.entries()) {
                 signal?.throwIfAborted();
+
                 try {
                     savedImages.push(
                         await saveImage(
@@ -206,10 +214,13 @@ export function createImagegenTool(options: ImagegenOptions): ToolDefinition<
                     );
                 } catch (cause: unknown) {
                     if (signal?.aborted || isAbortCause(cause)) throw cause;
+
                     saveErrors.push(cause instanceof Error ? cause.message : String(cause));
                 }
             }
+
             const text = formatImagegenOutput(savedImages, saveErrors, response.value);
+
             return {
                 content: [
                     ...generatedImages,
@@ -241,17 +252,21 @@ function readImagegenDescription(): string {
 export function prepareImagegenArguments(args: unknown): ImagegenParams {
     const input = ImagegenParametersValidator.decode(args);
     if (!input) throw new Error("Invalid imagegen arguments.");
+
     const prompt = input.prompt.trim();
     if (prompt.length === 0) throw new Error("imagegen requires a non-empty prompt.");
+
     const prepared: ImagegenParams = { prompt };
     if (input.referenced_image_paths) {
         prepared.referenced_image_paths = input.referenced_image_paths.map(
             normalizeImageReferencePath,
         );
     }
+
     if (input.num_last_images_to_include !== undefined) {
         prepared.num_last_images_to_include = input.num_last_images_to_include;
     }
+
     return prepared;
 }
 
@@ -259,8 +274,10 @@ function summarizeImagegenOptions(args: ImagegenParams): string {
     const parts: string[] = [];
     const referencedPaths = args.referenced_image_paths ?? [];
     if (referencedPaths.length > 0) parts.push(`refs=${referencedPaths.length}`);
+
     if (args.num_last_images_to_include !== undefined)
         parts.push(`recent=${args.num_last_images_to_include}`);
+
     return parts.join(" • ");
 }
 
@@ -293,26 +310,34 @@ async function resolveEditImages(
             "Provide only one of referenced_image_paths or num_last_images_to_include.",
         );
     }
+
     if (paths.length > 5) throw new Error("imagegen supports at most 5 edit images.");
+
     if (paths.length > 0) {
         const editImages: ImageContent[] = [];
         for (const path of paths) {
             options.signal?.throwIfAborted();
+
             const image = await loadImageContent(path, ctx.cwd, {
                 ...options,
                 allowOutsideWorkspace: true,
             });
             editImages.push(await prepareCodexPromptImageContent(image, "original", options));
         }
+
         return editImages;
     }
+
     if (params.num_last_images_to_include === undefined) return [];
+
     const count = Math.trunc(params.num_last_images_to_include);
     if (count < 1 || count > 5)
         throw new Error("num_last_images_to_include must be between 1 and 5.");
+
     const recent = await recentImageContents(ctx, count, options);
     if (recent.length !== count)
         throw new Error(`Requested ${count} recent image(s), but only found ${recent.length}.`);
+
     return recent;
 }
 
@@ -333,10 +358,13 @@ async function requestImageGeneration(
 > {
     const provider = await resolveImageGenerationProvider(ctx);
     if (provider.isErr()) return provider;
+
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
+
     const isEdit = editImages.length > 0;
     const path = isEdit ? "images/edits" : "images/generations";
+
     const body = isEdit
         ? {
               images: editImages.map((image) => ({ image_url: imageContentToDataUrl(image) })),
@@ -356,6 +384,7 @@ async function requestImageGeneration(
 
     let response: Response;
     let responseText: string;
+
     try {
         const fetched = await fetchTextWithRetries(
             runtime,
@@ -363,6 +392,7 @@ async function requestImageGeneration(
             { method: "POST", headers, body: JSON.stringify(body) },
             { signal },
         );
+
         response = fetched.response;
         responseText = fetched.text;
     } catch (cause: unknown) {
@@ -375,6 +405,7 @@ async function requestImageGeneration(
                 }),
             );
         }
+
         return fail(
             new CodexNetworkUnavailable({
                 operation: "imagegen",
@@ -395,6 +426,7 @@ async function requestImageGeneration(
             }),
         );
     }
+
     let rawImagePayload: unknown;
     try {
         rawImagePayload = JSON.parse(responseText);
@@ -408,6 +440,7 @@ async function requestImageGeneration(
             }),
         );
     }
+
     return parseImageResponse(rawImagePayload);
 }
 
@@ -422,6 +455,7 @@ async function resolveImageGenerationProvider(
         const activeProvider = await resolveCodexToolProvider(ctx, { useActiveModel: true });
         if (activeProvider.isOk()) return activeProvider;
     }
+
     return resolveCodexToolProvider(ctx);
 }
 
@@ -436,6 +470,7 @@ function parseImageResponse(value: unknown): CodexResult<ImageGenerationResponse
             }),
         );
     }
+
     const images = response.data.flatMap((item) => (item.b64_json ? [item.b64_json] : []));
     if (images.length === 0) {
         return fail(
@@ -446,10 +481,12 @@ function parseImageResponse(value: unknown): CodexResult<ImageGenerationResponse
             }),
         );
     }
+
     const imageResponse: ImageGenerationResponseConstruction = { images };
     if (response.background) imageResponse.background = response.background;
     if (response.quality) imageResponse.quality = response.quality;
     if (response.size) imageResponse.size = response.size;
+
     return ok(imageResponse);
 }
 
@@ -460,10 +497,12 @@ function formatImagegenOutput(
 ): string {
     const lines: string[] = [];
     if (savedImages.length > 0) lines.push("Generated image output:");
+
     for (const image of savedImages) {
         lines.push(`- image: ${image.path}`);
         lines.push(`- latest image: ${image.latestPath}`);
     }
+
     for (const error of saveErrors) lines.push(`- save warning: ${error}`);
     const metadata = imagegenMetadata(response);
     if (metadata) lines.push(`- ${metadata}`);

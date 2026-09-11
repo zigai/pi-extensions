@@ -24,6 +24,7 @@ type VisibleMessage = {
 export type WebSearchInputItem = {
     readonly type: "message";
     readonly role: "user" | "assistant";
+
     readonly content: readonly [
         {
             readonly type: "input_text" | "output_text";
@@ -54,6 +55,7 @@ export async function recentWebSearchInput(
         let text = message.text;
         if (message.role === "assistant") {
             if (assistantTokensRemaining <= 0) continue;
+
             const tokenCount = await tokenizer.count(text, options);
             if (tokenCount > assistantTokensRemaining) {
                 text = await tokenizer.truncate(text, assistantTokensRemaining, options);
@@ -61,8 +63,10 @@ export async function recentWebSearchInput(
             } else {
                 assistantTokensRemaining -= tokenCount;
             }
+
             if (text.length === 0) continue;
         }
+
         input.push({
             type: "message",
             role: message.role,
@@ -74,6 +78,7 @@ export async function recentWebSearchInput(
             ],
         });
     }
+
     return input.length > 0 ? input : undefined;
 }
 
@@ -81,19 +86,23 @@ function findPreviousUserIndex(messages: readonly VisibleMessage[], before: numb
     for (let index = before - 1; index >= 0; index -= 1) {
         if (messages[index]?.role === "user") return index;
     }
+
     return -1;
 }
 
 function visibleMessage(entry: SessionEntry): VisibleMessage | undefined {
     if (entry.type !== "message") return undefined;
+
     const message = MessageSchema.decode(entry.message);
     if (!message || (message.role !== "user" && message.role !== "assistant")) return undefined;
+
     const text = textFromContent(message.content);
     return text ? { role: message.role, text } : undefined;
 }
 
 function textFromContent(content: string | unknown[]): string | undefined {
     if (!Array.isArray(content)) return content.trim() || undefined;
+
     const text = content
         .flatMap((item) => {
             const block = TextBlockSchema.decode(item);
@@ -101,5 +110,6 @@ function textFromContent(content: string | unknown[]): string | undefined {
         })
         .join("\n")
         .trim();
+
     return text.length > 0 ? text : undefined;
 }

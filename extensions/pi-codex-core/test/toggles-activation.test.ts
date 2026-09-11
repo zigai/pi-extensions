@@ -36,7 +36,6 @@ test("delegates when Pi Toggles becomes ready before the extension session handl
     const coordination = new OptionalTogglesActivation(events, "pi-codex-core");
 
     events.emit(READY_EVENT, { version: 1, sessionId: "session-1" });
-
     assert.equal(coordination.update("session-1", decisions), "delegated");
     assert.deepEqual(proposals, [
         {
@@ -46,6 +45,7 @@ test("delegates when Pi Toggles becomes ready before the extension session handl
             decisions,
         },
     ]);
+
     coordination.dispose();
 });
 
@@ -59,7 +59,6 @@ test("switches from standalone to delegated after a later ready handshake", () =
         });
     });
     const coordination = new OptionalTogglesActivation(events, "pi-codex-core");
-
     assert.equal(coordination.update("session-1", decisions), "standalone");
     events.emit(READY_EVENT, { version: 1, sessionId: "session-1" });
     assert.equal(coordination.update("session-1", decisions), "delegated");
@@ -77,6 +76,7 @@ test("requires a fresh handshake after the session changes", () => {
     events.on(PROPOSAL_EVENT, (value) => {
         const sessionId = JsonStringDecoder.decode(JsonObjectDecoder.decode(value)?.sessionId);
         if (sessionId === undefined) return;
+
         events.emit(ACCEPTED_EVENT, {
             version: 1,
             sessionId,
@@ -123,7 +123,6 @@ test("ignores acknowledgements for another owner or session", () => {
     });
     const coordination = new OptionalTogglesActivation(events, "pi-codex-core");
     events.emit(READY_EVENT, { version: 1, sessionId: "session-1" });
-
     assert.equal(coordination.update("session-1", decisions), "standalone");
     coordination.dispose();
 });

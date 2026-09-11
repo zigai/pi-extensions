@@ -35,18 +35,22 @@ function wrapPromptLine(line: string): string[] {
             current = word;
             continue;
         }
+
         if (current.length > 0 && current.length + word.length + 1 <= PROMPT_WRAP_GRAPHEMES) {
             current += ` ${word}`;
             continue;
         }
+
         if (current.length > 0) {
             lines.push(current);
             current = "";
         }
+
         if (word.length <= PROMPT_WRAP_GRAPHEMES) {
             current = word;
             continue;
         }
+
         const chunks = chunkGraphemeText(word, PROMPT_WRAP_GRAPHEMES);
         for (const [index, chunk] of chunks.entries()) {
             if (index < chunks.length - 1 || chunk.length >= PROMPT_WRAP_GRAPHEMES) {
@@ -56,6 +60,7 @@ function wrapPromptLine(line: string): string[] {
             }
         }
     }
+
     if (current.length > 0) lines.push(current);
     return lines;
 }
@@ -68,12 +73,14 @@ function wrappedPromptLines(value: string): string[] {
         .flatMap(wrapPromptLine);
     while (lines.length > 0 && lines[0]?.length === 0) lines.shift();
     while (lines.length > 0 && lines.at(-1)?.length === 0) lines.pop();
+
     return lines;
 }
 
 function expandedPromptLines(value: string): string[] {
     const segments = chunkGraphemeText(value, EXPANDED_PROMPT_GRAPHEMES);
     if (segments.length <= 1) return wrappedPromptLines(value);
+
     const side = Math.floor(EXPANDED_PROMPT_GRAPHEMES / 2);
     return [
         ...wrappedPromptLines(takeGraphemePrefix(value, side)),
@@ -86,12 +93,14 @@ function activePromptLines(value: string): string[] {
     const suffix = takeGraphemeSuffix(value, PARTIAL_PROMPT_SCAN_GRAPHEMES);
     const lines = wrappedPromptLines(suffix);
     if (suffix === value && lines.length <= COLLAPSED_PROMPT_LINES) return lines;
+
     return ["… earlier prompt", ...lines.slice(-(COLLAPSED_PROMPT_LINES - 1))];
 }
 
 function completedPromptLines(value: string): string[] {
     const lines = expandedPromptLines(value);
     if (lines.length <= COLLAPSED_PROMPT_LINES) return lines;
+
     return [...lines.slice(0, 2), "… prompt omitted", ...lines.slice(-2)];
 }
 
@@ -100,6 +109,7 @@ function promptPreview(
     context: GlowupWireCallContext,
 ): string | undefined {
     if (value === undefined || value.trim().length === 0) return undefined;
+
     const lines = context.expanded
         ? expandedPromptLines(value)
         : context.phase === "complete"
@@ -123,14 +133,17 @@ function summarizeArgs(
     const summary = [prompt, metadata.join(" • ")]
         .filter((value): value is string => value !== undefined && value.length > 0)
         .join("\n");
+
     return summary.length === 0 ? undefined : summary;
 }
 
 function generatedImageCount(result: ImagegenGlowupResult): number | undefined {
     const details = parseGlowupWireRecord(result.details);
     if (!details) return undefined;
+
     const images = glowupWireArray(details, "images");
     if (images !== undefined && images.length > 0) return images.length;
+
     const generatedCount = glowupWireNumber(details, "generatedCount");
     return generatedCount === undefined ? undefined : Math.max(0, Math.trunc(generatedCount));
 }
@@ -146,6 +159,7 @@ function renderImagegenCall(args: ImagegenGlowupArgs, context: GlowupWireCallCon
         collapsedLines: COLLAPSED_PROMPT_LINES + 1,
         expandedLines: 500,
     };
+
     return summary === undefined
         ? { kind: "call" as const, labels, preview }
         : {
@@ -171,6 +185,7 @@ export const imagegenGlowupRendering = {
         _context: GlowupWireResultContext<ImagegenGlowupArgs>,
     ) {
         const count = generatedImageCount(result);
+
         return count === undefined
             ? undefined
             : {

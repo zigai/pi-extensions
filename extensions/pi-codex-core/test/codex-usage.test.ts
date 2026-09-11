@@ -177,7 +177,6 @@ test("formats Codex reset credit expiration from granted time", () => {
 
     assert.ok(credits);
     const formatted = formatCodexUsage({ limits: [], resetCredits: credits, raw: {} }, FIXED_CLOCK);
-
     assert.match(formatted, /- Resets available: 1\n  - Reset 1: expires in ~30d \(/);
 });
 
@@ -185,17 +184,20 @@ test("fetches Codex usage from the selected provider base URL", async () => {
     const urls: string[] = [];
     const runtime = makeTestRuntime(async (input) => {
         urls.push(String(input));
+
         if (String(input).endsWith("/wham/usage")) {
             return new Response(
                 JSON.stringify({ rate_limit_reset_credits: { available_count: 1 } }),
                 { status: 200 },
             );
         }
+
         if (String(input).endsWith("/wham/rate-limit-reset-credits")) {
             return new Response(JSON.stringify({ available_count: 1, credits: [] }), {
                 status: 200,
             });
         }
+
         return new Response("not found", { status: 404 });
     });
 
@@ -217,9 +219,11 @@ test("preserves an explicitly selected account over the token claim", async () =
     const accountIds: Array<string | null> = [];
     const runtime = makeTestRuntime(async (input, init) => {
         accountIds.push(new Headers(init?.headers).get("chatgpt-account-id"));
+
         if (String(input).endsWith("/wham/usage")) {
             return new Response(JSON.stringify({ rate_limit: {} }), { status: 200 });
         }
+
         return new Response(JSON.stringify({ available_count: 0, credits: [] }), {
             status: 200,
         });
@@ -242,9 +246,11 @@ test("omits provider headers explicitly cleared with null", async () => {
     const requestHeaders: Headers[] = [];
     const runtime = makeTestRuntime(async (input, init) => {
         requestHeaders.push(new Headers(init?.headers));
+
         if (String(input).endsWith("/wham/usage")) {
             return new Response(JSON.stringify({ rate_limit: {} }), { status: 200 });
         }
+
         return new Response(JSON.stringify({ available_count: 0, credits: [] }), {
             status: 200,
         });
@@ -267,6 +273,7 @@ test("omits provider headers explicitly cleared with null", async () => {
 
     assert.ok(result.isOk());
     assert.equal(requestHeaders.length, 2);
+
     for (const headers of requestHeaders) {
         assert.equal(headers.get("x-model"), "model-value");
         assert.equal(headers.has("x-removed"), false);
@@ -280,6 +287,7 @@ test("reuses settled credits for a shared account until request-start expiry", a
     const runtime = {
         ...makeTestRuntime(async (input) => {
             if (String(input).endsWith("/wham/usage")) return Response.json({ rate_limit: {} });
+
             creditRequests += 1;
             return Response.json({ available_count: creditRequests, credits: [] });
         }),
@@ -306,6 +314,7 @@ test("credit cache separates accounts and URLs and retains only one slot", async
     let requests = 0;
     const runtime = makeTestRuntime(async (input) => {
         if (String(input).endsWith("/usage")) return Response.json({});
+
         requests += 1;
         return Response.json({ available_count: requests, credits: [] });
     });
@@ -319,6 +328,7 @@ test("credit cache separates accounts and URLs and retains only one slot", async
         assert.ok(result.isOk());
         assert.equal(result.value.resetCredits?.availableCount, requests);
     }
+
     assert.equal(requests, 4);
 });
 
@@ -326,6 +336,7 @@ test("failed enrichment remains optional and does not poison the credit cache", 
     let requests = 0;
     const runtime = makeTestRuntime(async (input) => {
         if (String(input).endsWith("/usage")) return Response.json({ plan_type: "pro" });
+
         requests += 1;
         if (requests === 1) return new Response("unavailable", { status: 503 });
         return Response.json({ available_count: 3, credits: [] });
@@ -348,6 +359,7 @@ function deferred<T>() {
         resolve = resolvePromise;
         reject = rejectPromise;
     });
+
     return { promise, resolve, reject };
 }
 
@@ -360,11 +372,12 @@ for (const abortedCaller of [0, 1]) {
         const ctx = makeUsageContext(`https://overlap-${abortedCaller}.example`, {
             accountId: "overlap",
         });
-        const results = controllers.map((controller, index) =>
+        const results = controllers.map(async (controller, index) =>
             fetchCodexUsage(ctx, {
                 signal: controller.signal,
                 runtime: makeTestRuntime(async (input, init) => {
                     if (String(input).endsWith("/usage")) return Response.json({ rate_limit: {} });
+
                     requests.push(init?.signal);
                     const response = responses[index];
                     assert.ok(response);
@@ -373,12 +386,14 @@ for (const abortedCaller of [0, 1]) {
                         () => response.reject(init.signal?.reason),
                         { once: true },
                     );
+
                     started[index]?.resolve();
+
                     return response.promise;
                 }),
             }),
         );
-        await Promise.all(started.map((item) => item.promise));
+        await Promise.all(started.map(async (item) => item.promise));
         assert.equal(requests.length, 2);
         assert.notEqual(requests[0], requests[1]);
         controllers[abortedCaller]?.abort();
@@ -402,11 +417,13 @@ for (const settleAfterExpiry of [false, true]) {
         const runtime = {
             ...makeTestRuntime(async (input) => {
                 if (String(input).endsWith("/usage")) return Response.json({});
+
                 requests += 1;
                 if (requests === 1) {
                     started.resolve();
                     return response.promise;
                 }
+
                 return Response.json({ available_count: 2, credits: [] });
             }),
             clock: { nowMs: () => now, nowDate: () => new Date(now) },
@@ -439,12 +456,15 @@ for (const readDuringConsumption of [false, true]) {
                 postStarted.resolve();
                 return postResponse.promise;
             }
+
             if (String(input).endsWith("/usage")) return Response.json({});
+
             requests += 1;
             if (requests === 1) {
                 readStarted.resolve();
                 return readResponse.promise;
             }
+
             return Response.json({ available_count: 0, credits: [] });
         });
         const ctx = makeUsageContext(`https://invalidate-${readDuringConsumption}.example`, {
@@ -454,6 +474,7 @@ for (const readDuringConsumption of [false, true]) {
             ? consumeCodexRateLimitResetCredit(ctx, "stable-redemption", { runtime })
             : undefined;
         if (consume) await postStarted.promise;
+
         const pending = fetchCodexUsage(ctx, { runtime });
         await readStarted.promise;
         const consumption =
@@ -497,6 +518,7 @@ function makeUsageContext(
             }),
         },
     };
+
     return testDouble<ExtensionContext>()(ctx);
 }
 

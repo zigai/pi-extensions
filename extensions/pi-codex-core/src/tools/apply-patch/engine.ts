@@ -190,14 +190,14 @@ export type ApplyPatchOptions = {
 };
 
 const nodeFileSystem: ApplyPatchFileSystem = {
-    readFile: (path) => nodeReadFile(path, "utf8"),
-    writeFile: (path, contents) => nodeWriteFile(path, contents, "utf8"),
-    lstat: (path) => nodeLstat(path),
+    readFile: async (path) => nodeReadFile(path, "utf8"),
+    writeFile: async (path, contents) => nodeWriteFile(path, contents, "utf8"),
+    lstat: async (path) => nodeLstat(path),
     mkdir: async (path) => {
         await nodeMkdir(path, { recursive: true });
     },
-    readlink: (path) => nodeReadlink(path),
-    realpath: (path) => nodeRealpath(path),
+    readlink: async (path) => nodeReadlink(path),
+    realpath: async (path) => nodeRealpath(path),
     removeFile: async (path) => {
         await nodeRm(path, { force: false, recursive: false });
     },
@@ -245,7 +245,7 @@ export class StreamingPatchParser {
     private lineBuffer = "";
     private mode: StreamingParserMode = { type: "notStarted" };
     private lineNumber = 0;
-    private hunks: MutableApplyPatchHunk[] = [];
+    private readonly hunks: MutableApplyPatchHunk[] = [];
     private parsedEnvironmentId: string | undefined;
 
     environmentId(): string | undefined {
@@ -263,6 +263,7 @@ export class StreamingPatchParser {
                 this.lineBuffer += char;
             }
         }
+
         return cloneHunks(this.hunks);
     }
 
@@ -271,6 +272,7 @@ export class StreamingPatchParser {
             const line = this.lineBuffer;
             this.lineBuffer = "";
             this.lineNumber += 1;
+
             if (line.trim() === END_PATCH_MARKER) {
                 this.ensureUpdateHunkIsNotEmpty(line.trim());
                 this.mode = { type: "endedPatch" };
@@ -302,6 +304,7 @@ export class StreamingPatchParser {
             if (line === END_PATCH_MARKER) {
                 throw invalidHunk("Update hunk does not contain any lines", this.lineNumber);
             }
+
             throw invalidHunk(unexpectedUpdateLineMessage(line), this.lineNumber);
         }
     }
@@ -315,10 +318,12 @@ export class StreamingPatchParser {
                         "apply_patch environment_id cannot be specified more than once",
                     );
                 }
+
                 const id = environmentId.trim();
                 if (id.length === 0) {
                     throw invalidPatch("apply_patch environment_id cannot be empty");
                 }
+
                 this.parsedEnvironmentId = id;
                 return true;
             }
@@ -370,6 +375,7 @@ export class StreamingPatchParser {
                     this.mode = { type: "startedPatch" };
                     return;
                 }
+
                 throw invalidPatch("The first line of the patch must be '*** Begin Patch'");
             }
             case "startedPatch": {
@@ -378,12 +384,14 @@ export class StreamingPatchParser {
             }
             case "addFile": {
                 if (this.handleHunkHeadersAndEndPatch(trimmed)) return;
+
                 const lineToAdd = stripPrefix(line, "+");
                 const hunk = this.hunks.at(-1);
                 if (lineToAdd !== undefined && hunk?.type === "add") {
                     hunk.contents += `${lineToAdd}\n`;
                     return;
                 }
+
                 throw invalidHunk(invalidHunkHeaderMessage(trimmed), this.lineNumber);
             }
             case "deleteFile": {
@@ -413,6 +421,7 @@ export class StreamingPatchParser {
         const previousChunk = hunk.chunks.at(-1);
         if (previousChunk?.isEndOfFile) {
             if (updateLine.length === 0) return;
+
             if (
                 updateLine !== EMPTY_CHANGE_CONTEXT_MARKER &&
                 !updateLine.startsWith(CHANGE_CONTEXT_MARKER)
@@ -462,6 +471,7 @@ export class StreamingPatchParser {
             ) {
                 throw invalidHunk("Update hunk does not contain any lines", this.lineNumber);
             }
+
             if (previousChunk !== undefined) previousChunk.isEndOfFile = true;
             this.mode = { type: "updateFile", hunkLineNumber };
             return;
@@ -572,6 +582,7 @@ async function applyPatchHunksOrThrow(
             "apply_patch environment_id is not supported because Pi has no environment selector",
         );
     }
+
     if (hunks.length === 0) throw new ApplyPatchError("compute", "No files were modified.");
 
     throwIfAborted(options.signal);
@@ -598,6 +609,7 @@ async function applyPatchHunksOrThrow(
                 ...uncertainPaths,
             ]);
         }
+
         throw error;
     }
 
@@ -612,20 +624,25 @@ export function formatApplyPatchError(error: ApplyPatchError): string {
         if (error.committedResult.changes.length > 0) {
             sections.push(formatCommittedPatchSummary(error.committedResult.affectedPaths));
         }
+
         if (error.uncertainPaths.length > 0) {
             sections.push(formatUncertainPatchSummary(error.uncertainPaths));
         }
+
         return sections.join("\n\n");
     }
+
     return formatApplyPatchFailure(error);
 }
 
 function formatApplyPatchFailure(error: ApplyPatchError): string {
     if (error.kind === "invalidPatch") return `Invalid patch: ${error.message}`;
+
     if (error.kind === "invalidHunk") {
         const line = error.lineNumber ?? 0;
         return `Invalid patch hunk on line ${line}: ${error.message}`;
     }
+
     if (error.kind === "cancelled") return `Patch application cancelled: ${error.message}`;
     return error.message;
 }
@@ -648,6 +665,7 @@ export function formatApplyPatchSummary(affected: ApplyPatchAffectedPaths): stri
     for (const filePath of affected.added) lines.push(`A ${filePath}`);
     for (const filePath of affected.modified) lines.push(`M ${filePath}`);
     for (const filePath of affected.deleted) lines.push(`D ${filePath}`);
+
     return `${lines.join("\n")}\n`;
 }
 
@@ -685,6 +703,7 @@ function checkPatchBoundariesLenient(originalLines: readonly string[]): readonly
         return checkPatchBoundariesStrict(originalLines);
     } catch (cause: unknown) {
         if (!(cause instanceof ApplyPatchError)) throw cause;
+
         const first = originalLines[0];
         const last = originalLines.at(-1);
         if (
@@ -696,6 +715,7 @@ function checkPatchBoundariesLenient(originalLines: readonly string[]): readonly
         ) {
             return checkPatchBoundariesStrict(originalLines.slice(1, -1));
         }
+
         throw cause;
     }
 }
@@ -704,9 +724,11 @@ function checkPatchBoundariesStrict(lines: readonly string[]): readonly string[]
     const first = lines[0]?.trim();
     const last = lines.at(-1)?.trim();
     if (first === BEGIN_PATCH_MARKER && last === END_PATCH_MARKER) return lines;
+
     if (first !== undefined && first !== BEGIN_PATCH_MARKER) {
         throw invalidPatch("The first line of the patch must be '*** Begin Patch'");
     }
+
     throw invalidPatch("The last line of the patch must be '*** End Patch'");
 }
 
@@ -719,6 +741,7 @@ function cloneHunks(hunks: readonly MutableApplyPatchHunk[]): ApplyPatchHunk[] {
     return hunks.map((hunk) => {
         if (hunk.type === "add") return { type: "add", path: hunk.path, contents: hunk.contents };
         if (hunk.type === "delete") return { type: "delete", path: hunk.path };
+
         return {
             type: "update",
             path: hunk.path,
@@ -740,8 +763,10 @@ function makeUpdateChunk(changeContext: string | undefined): MutableUpdateFileCh
 function ensureCurrentUpdateChunk(hunk: MutableUpdateFileHunk): MutableUpdateFileChunk {
     const existing = hunk.chunks.at(-1);
     if (existing !== undefined) return existing;
+
     const chunk = makeUpdateChunk(undefined);
     hunk.chunks.push(chunk);
+
     return chunk;
 }
 
@@ -766,14 +791,17 @@ async function preflightPatchHunks(
                 `Patch paths ${existingLexicalPath} and ${absolutePath} resolve to the same filesystem target`,
             );
         }
+
         lexicalPathByPhysicalPath.set(physicalPath, absolutePath);
     };
 
     const snapshot = async (absolutePath: string): Promise<FileSnapshot> => {
         const existing = virtualFiles.get(absolutePath);
         if (existing !== undefined) return existing;
+
         const loaded = await readFileSnapshot(fileSystem, absolutePath);
         virtualFiles.set(absolutePath, loaded);
+
         return loaded;
     };
 
@@ -781,6 +809,7 @@ async function preflightPatchHunks(
         throwIfAborted(signal);
         const absolutePath = resolvePatchPath(root, hunk.path);
         await registerPath(absolutePath);
+
         const before = await snapshot(absolutePath);
 
         if (hunk.type === "add") {
@@ -818,9 +847,12 @@ async function preflightPatchHunks(
         if (absoluteMovePath === absolutePath) {
             throw new ApplyPatchError("compute", `Cannot move ${absolutePath} onto the same path`);
         }
+
         if (absoluteMovePath !== undefined) await registerPath(absoluteMovePath);
+
         const moveBefore =
             absoluteMovePath === undefined ? undefined : await snapshot(absoluteMovePath);
+
         plan.push({
             type: "update",
             patchPath: hunk.path,
@@ -832,6 +864,7 @@ async function preflightPatchHunks(
             before,
             moveBefore,
         });
+
         if (absoluteMovePath === undefined) {
             virtualFiles.set(absolutePath, fileSnapshot(newContents));
         } else {
@@ -870,6 +903,7 @@ async function executePlannedMutation(
                 overwrittenContent: snapshotContents(mutation.before),
             },
         });
+
         return;
     }
 
@@ -886,6 +920,7 @@ async function executePlannedMutation(
             patchPath: mutation.patchPath,
             change: { type: "delete", path: mutation.absolutePath, content: mutation.content },
         });
+
         return;
     }
 
@@ -911,12 +946,14 @@ async function executePlannedMutation(
                 overwrittenMoveContent: undefined,
             },
         });
+
         return;
     }
 
     if (mutation.moveBefore === undefined) {
         throw new ApplyPatchError("compute", "Move destination snapshot was not planned");
     }
+
     await verifyMutationSnapshot(fileSystem, mutation.absolutePath, mutation.before);
     await verifyMutationSnapshot(fileSystem, mutation.absoluteMovePath, mutation.moveBefore);
     throwIfAborted(signal);
@@ -960,6 +997,7 @@ function destinationWriteChange(
     if (movePath === undefined || movePatchPath === undefined) {
         throw new ApplyPatchError("compute", "Move destination was not planned");
     }
+
     const overwrittenMoveContent = snapshotContents(mutation.moveBefore);
     if (overwrittenMoveContent === undefined) {
         return {
@@ -973,6 +1011,7 @@ function destinationWriteChange(
             },
         };
     }
+
     return {
         action: "modified",
         patchPath: movePatchPath,
@@ -1011,6 +1050,7 @@ async function resolvePhysicalPath(
                 `Failed to resolve apply_patch path with a symbolic-link loop: ${absolutePath}`,
             );
         }
+
         if (!hasNodeErrorCode(cause, "ENOENT") && !hasNodeErrorCode(cause, "ENOTDIR")) {
             throw ioError(`Failed to resolve apply_patch path ${absolutePath}`, cause);
         }
@@ -1025,7 +1065,9 @@ async function resolvePhysicalPath(
                     `Failed to resolve apply_patch path with a symbolic-link loop: ${absolutePath}`,
                 );
             }
+
             seenLinks.add(absolutePath);
+
             const linkTarget = await fileSystem.readlink(absolutePath);
             return resolvePhysicalPath(
                 fileSystem,
@@ -1033,9 +1075,11 @@ async function resolvePhysicalPath(
                 seenLinks,
             );
         }
+
         throw new ApplyPatchError("io", `Failed to resolve apply_patch path: ${absolutePath}`);
     } catch (cause: unknown) {
         if (cause instanceof ApplyPatchError) throw cause;
+
         if (!hasNodeErrorCode(cause, "ENOENT") && !hasNodeErrorCode(cause, "ENOTDIR")) {
             throw ioError(`Failed to resolve apply_patch path ${absolutePath}`, cause);
         }
@@ -1043,6 +1087,7 @@ async function resolvePhysicalPath(
 
     const parent = dirname(absolutePath);
     if (parent === absolutePath) return absolutePath;
+
     const physicalParent = await resolvePhysicalPath(fileSystem, parent, seenLinks);
     return normalize(resolve(physicalParent, basename(absolutePath)));
 }
@@ -1059,6 +1104,7 @@ function buildApplyPatchResult(committed: readonly CommittedPatchChange[]): Appl
             .filter((entry) => entry.action === "deleted")
             .map((entry) => entry.patchPath),
     };
+
     return {
         summary: formatApplyPatchSummary(affectedPaths),
         affectedPaths,
@@ -1108,6 +1154,7 @@ function computeReplacements(
                     `Failed to find context '${chunk.changeContext}' in ${filePath}`,
                 );
             }
+
             lineIndex = contextIndex + 1;
         }
 
@@ -1128,6 +1175,7 @@ function computeReplacements(
 
         if (found === undefined && pattern.at(-1) === "") {
             pattern = pattern.slice(0, -1);
+
             if (newLines.at(-1) === "") newLines = newLines.slice(0, -1);
             found = seekSequence(originalLines, pattern, lineIndex, chunk.isEndOfFile);
         }
@@ -1154,6 +1202,7 @@ function applyReplacements(
     for (const replacement of [...replacements].reverse()) {
         nextLines.splice(replacement.startIndex, replacement.oldLength, ...replacement.newLines);
     }
+
     return nextLines;
 }
 
@@ -1205,6 +1254,7 @@ async function verifyMutationSnapshot(
             `apply_patch detected a concurrent change at ${absolutePath}: ${error.message}`,
         );
     }
+
     if (snapshotsEqual(expected, actual)) return;
     throw new ApplyPatchError(
         "conflict",
@@ -1237,13 +1287,16 @@ async function writeFileWithMissingParentRetry(
     signal: AbortSignal | undefined,
 ): Promise<void> {
     throwIfAborted(signal);
+
     try {
         await writeFileAttempt(fileSystem, absolutePath, contents, uncertainPaths);
     } catch (cause: unknown) {
         if (!hasNodeErrorCode(cause, "ENOENT")) {
             throw ioError(`Failed to write file ${absolutePath}`, cause);
         }
+
         uncertainPaths.delete(absolutePath);
+
         try {
             throwIfAborted(signal);
             await fileSystem.mkdir(dirname(absolutePath));
@@ -1251,6 +1304,7 @@ async function writeFileWithMissingParentRetry(
             if (mkdirCause instanceof ApplyPatchError) throw mkdirCause;
             throw ioError(`Failed to create parent directories for ${absolutePath}`, mkdirCause);
         }
+
         await writeFileWithContext(fileSystem, absolutePath, contents, uncertainPaths, signal);
     }
 }
@@ -1263,6 +1317,7 @@ async function writeFileWithContext(
     signal: AbortSignal | undefined,
 ): Promise<void> {
     throwIfAborted(signal);
+
     try {
         await writeFileAttempt(fileSystem, absolutePath, contents, uncertainPaths);
     } catch (cause: unknown) {
@@ -1297,12 +1352,14 @@ function sequenceMatches(
         if (line === undefined || patternLine === undefined) return false;
         if (!matchesLine(line, patternLine)) return false;
     }
+
     return true;
 }
 
 function normalizeMatchText(text: string): string {
     let normalized = "";
     for (const char of text.trim()) normalized += normalizeMatchCharacter(char);
+
     return normalized;
 }
 

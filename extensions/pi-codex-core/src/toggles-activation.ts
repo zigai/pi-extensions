@@ -35,6 +35,7 @@ export type ToolActivationDecision = {
         readonly kind: "tool";
         readonly name: string;
     };
+
     readonly state: "inherit" | "on" | "off" | "lazy";
 };
 
@@ -68,6 +69,7 @@ export class OptionalTogglesActivation {
             events.on(ACTIVATION_READY_EVENT, (value) => {
                 const ready = parseEvent<ActivationReady>(value, activationReadyValidator);
                 if (ready === undefined) return;
+
                 this.#readySessionId = ready.sessionId;
                 this.publishIfReady();
             }),
@@ -83,6 +85,7 @@ export class OptionalTogglesActivation {
                 ) {
                     return;
                 }
+
                 this.#delegatedSessionId = accepted.sessionId;
             }),
         ];
@@ -98,6 +101,7 @@ export class OptionalTogglesActivation {
         }
         this.#decisions = [...decisions];
         this.publishIfReady();
+
         return this.#delegatedSessionId === sessionId ? "delegated" : "standalone";
     }
 
@@ -111,6 +115,7 @@ export class OptionalTogglesActivation {
 
     private publishIfReady(): void {
         if (this.#sessionId === undefined || this.#readySessionId !== this.#sessionId) return;
+
         this.events.emit(SET_ACTIVATION_PROPOSAL_EVENT, {
             version: ACTIVATION_COORDINATION_VERSION,
             sessionId: this.#sessionId,

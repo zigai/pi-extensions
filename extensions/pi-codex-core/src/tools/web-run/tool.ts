@@ -162,6 +162,7 @@ const WEB_RUN_INITIAL_RETRY_DELAY_MS = 100;
 
 type WebRunParams = Static<typeof WEB_RUN_PARAMETERS>;
 type WebRunCommandKey = (typeof WEB_RUN_COMMAND_KEYS)[number];
+
 type WebRunCommands = {
     [Key in WebRunCommandKey]?: WebRunParams[Key];
 } & {
@@ -218,6 +219,7 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
         },
         renderResult(result, { expanded, isPartial }, theme, _context) {
             if (isPartial) return new Text(theme.fg("warning", "Searching web..."), 0, 0);
+
             const rawOutput = firstTextContent(result.content);
             const output = rawOutput
                 ? formatWebRunToolOutput(rawOutput, result.details.fullOutputPath).text
@@ -230,16 +232,20 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
             const lines = [formatWebRunResultHeader(sourceCount, theme)];
             for (const [index, card] of cards.slice(0, 2).entries()) {
                 lines.push(theme.fg("dim", `${index + 1}. ${card.title}`));
+
                 if (card.url) lines.push(theme.fg("muted", `   ${card.url}`));
             }
+
             const hiddenCount = Math.max(0, sourceCount - Math.min(cards.length, 2));
             const hint = "Ctrl+U to expand";
             if (hiddenCount > 0) lines.push(theme.fg("muted", `… ${hiddenCount} more (${hint})`));
             else if (output) lines.push(theme.fg("muted", `(${hint})`));
+
             return new Text(lines.join("\n"), 0, 0);
         },
         async execute(toolCallId, params, signal, _onUpdate, ctx) {
             const tokenizer = options.tokenizer ?? new CodexTokenizer();
+
             try {
                 const response = await executeWebRun(
                     params,
@@ -250,6 +256,7 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
                     tokenizer,
                 );
                 if (response.isErr()) throw codexFailureToError(response.error);
+
                 const output = await prepareWebRunOutput(
                     response.value.output,
                     toolCallId,
@@ -257,6 +264,7 @@ export function createWebRunTool(options: WebRunOptions): ToolDefinition<
                     options.agentDir,
                     { signal },
                 );
+
                 return {
                     // Preserve Codex's response verbatim for follow-up open/click/find reference ids.
                     content: [{ type: "text", text: response.value.output }],
@@ -283,7 +291,9 @@ function readWebRunDescription(): string {
 function prepareWebRunArguments(args: unknown): WebRunParams {
     const params = WebRunParametersValidator.decode(args);
     if (!params) throw new Error("Invalid web_run arguments.");
+
     splitSearchRequest(params);
+
     return params;
 }
 
@@ -297,12 +307,13 @@ async function executeWebRun(
 ): Promise<CodexResult<{ readonly output: string }>> {
     const provider = await resolveCodexToolProvider(ctx);
     if (provider.isErr()) return provider;
+
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("accept", "application/json");
+
     const commands = splitSearchRequest(params);
     const input = await recentWebSearchInput(ctx, tokenizer, { signal });
     const model = resolveCodexRequestModel(config.openai.webSearchModel, provider.value.model);
-
     const id = ctx.sessionManager.getSessionId();
     const settings = {
         allowed_callers: ["direct"],
@@ -321,6 +332,7 @@ async function executeWebRun(
         runtime,
     );
     if (fetched.isErr()) return fetched;
+
     const { response, responseText } = fetched.value;
     if (!response.ok) {
         return fail(
@@ -332,6 +344,7 @@ async function executeWebRun(
             }),
         );
     }
+
     let rawSearchPayload: unknown;
     try {
         rawSearchPayload = JSON.parse(responseText);
@@ -345,6 +358,7 @@ async function executeWebRun(
             }),
         );
     }
+
     const output = parseSearchOutput(rawSearchPayload);
     if (output === undefined) {
         return fail(
@@ -355,6 +369,7 @@ async function executeWebRun(
             }),
         );
     }
+
     return ok({ output });
 }
 
@@ -373,18 +388,22 @@ async function fetchWebRunWithRetries(
 ): Promise<CodexResult<{ readonly response: Response; readonly responseText: string }>> {
     for (let attempt = 0; attempt < WEB_RUN_MAX_ATTEMPTS; attempt += 1) {
         let response: Response;
+
         try {
             const requestInit: RequestInit = signal
                 ? { method: "POST", headers, signal, body }
                 : { method: "POST", headers, body };
+
             response = await runtime.fetch(url, requestInit);
         } catch (cause: unknown) {
             if (isAbortCause(cause) || signal?.aborted) return cancelledWebRun(cause);
+
             if (attempt + 1 < WEB_RUN_MAX_ATTEMPTS) {
                 const waited = await waitBeforeRetry(attempt, signal);
                 if (!waited) return cancelledWebRun(signal?.reason);
                 continue;
             }
+
             return unavailableWebRun(cause);
         }
 
@@ -393,11 +412,13 @@ async function fetchWebRunWithRetries(
             responseText = await response.text();
         } catch (cause: unknown) {
             if (isAbortCause(cause) || signal?.aborted) return cancelledWebRun(cause);
+
             if (attempt + 1 < WEB_RUN_MAX_ATTEMPTS) {
                 const waited = await waitBeforeRetry(attempt, signal);
                 if (!waited) return cancelledWebRun(signal?.reason);
                 continue;
             }
+
             return unavailableWebRun(cause);
         }
 
@@ -406,8 +427,10 @@ async function fetchWebRunWithRetries(
             if (!waited) return cancelledWebRun(signal?.reason);
             continue;
         }
+
         return ok({ response, responseText });
     }
+
     return unavailableWebRun(new Error("web_run retry limit exhausted."));
 }
 
@@ -434,8 +457,10 @@ function unavailableWebRun(cause: unknown): CodexResult<never> {
 
 async function waitBeforeRetry(attempt: number, signal: AbortSignal | undefined): Promise<boolean> {
     if (signal?.aborted) return false;
+
     const delay = WEB_RUN_INITIAL_RETRY_DELAY_MS * 2 ** attempt;
-    return await new Promise<boolean>((resolve) => {
+
+    return new Promise<boolean>((resolve) => {
         const timeout = setTimeout(() => {
             signal?.removeEventListener("abort", onAbort);
             resolve(true);
@@ -444,22 +469,26 @@ async function waitBeforeRetry(attempt: number, signal: AbortSignal | undefined)
             clearTimeout(timeout);
             resolve(false);
         };
+
         signal?.addEventListener("abort", onAbort, { once: true });
     });
 }
 
 function summarizeWebRunCall(args: WebRunParams): string {
     const parts: string[] = [];
+
     appendCountedValues(
         parts,
         "search",
         args.search_query?.map((query) => compactQuotedText(query.q)),
     );
+
     appendCountedValues(
         parts,
         "image",
         args.image_query?.map((query) => compactQuotedText(query.q)),
     );
+
     appendCountedValues(
         parts,
         "open",
@@ -467,11 +496,13 @@ function summarizeWebRunCall(args: WebRunParams): string {
             request.lineno === undefined ? request.ref_id : `${request.ref_id}:L${request.lineno}`,
         ),
     );
+
     appendCountedValues(
         parts,
         "click",
         args.click?.map((request) => `${request.ref_id}#${request.id}`),
     );
+
     appendCountedValues(
         parts,
         "find",
@@ -479,31 +510,37 @@ function summarizeWebRunCall(args: WebRunParams): string {
             (request) => `${compactQuotedText(request.pattern, 48)} in ${request.ref_id}`,
         ),
     );
+
     appendCountedValues(
         parts,
         "screenshot",
         args.screenshot?.map((request) => `${request.ref_id} p${request.pageno}`),
     );
+
     appendCountedValues(
         parts,
         "finance",
         args.finance?.map((request) => `${request.ticker}:${request.type}`),
     );
+
     appendCountedValues(
         parts,
         "weather",
         args.weather?.map((request) => request.location),
     );
+
     appendCountedValues(
         parts,
         "sports",
         args.sports?.map((request) => `${request.league} ${request.fn}`),
     );
+
     appendCountedValues(
         parts,
         "time",
         args.time?.map((request) => request.utc_offset),
     );
+
     if (args.response_length) parts.push(`length=${args.response_length}`);
     return parts.join(" • ");
 }
@@ -514,6 +551,7 @@ function appendCountedValues(
     values: readonly string[] | undefined,
 ): void {
     if (!values || values.length === 0) return;
+
     const displayed = values.slice(0, 2).join(", ");
     const hiddenCount = values.length - 2;
     parts.push(hiddenCount > 0 ? `${label} ${displayed} +${hiddenCount}` : `${label} ${displayed}`);
@@ -536,6 +574,7 @@ function formatWebRunResultHeader(
 
 function parseWebRunSourceCards(output: string | undefined): WebRunSourceCard[] {
     if (!output) return [];
+
     const cards: WebRunSourceCard[] = [];
     const lines = output.split("\n");
     for (let index = 0; index < lines.length; index += 1) {
@@ -543,6 +582,7 @@ function parseWebRunSourceCards(output: string | undefined): WebRunSourceCard[] 
         if (!title) continue;
         cards.push({ title, url: findCardUrl(lines, index + 1) });
     }
+
     return cards;
 }
 
@@ -555,9 +595,11 @@ function findCardUrl(lines: readonly string[], startIndex: number): string | und
     for (let index = startIndex; index < lines.length; index += 1) {
         const line = lines[index] ?? "";
         if (/^\d+\.\s+/.test(line)) return undefined;
+
         const match = /^\s*URL:\s+(.+?)\s*$/.exec(line);
         if (match?.[1]) return match[1];
     }
+
     return undefined;
 }
 
@@ -566,6 +608,7 @@ function firstTextContent(content: readonly unknown[]): string | undefined {
         const block = TextContentBlockSchema.decode(item);
         if (block && block.text.trim().length > 0) return block.text.trim();
     }
+
     return undefined;
 }
 
@@ -589,7 +632,9 @@ function splitSearchRequest(params: WebRunParams): WebRunCommands {
         if (Array.isArray(value) && value.length === 0) continue;
         setWebRunCommand(commands, key, value);
     }
+
     if (params.response_length) commands.response_length = params.response_length;
+
     return commands;
 }
 
@@ -629,12 +674,14 @@ async function saveFullWebRunOutput(
     options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<string> {
     options.signal?.throwIfAborted();
+
     const absolutePath = resolveCodexCoreArtifactPath({
         category: "web-run",
         sessionId,
         fileName: `${sanitizeArtifactPathPart(toolCallId, "web_run")}.txt`,
         agentDir,
     });
+
     await withFileMutationQueue(absolutePath, async () => {
         options.signal?.throwIfAborted();
         await mkdir(dirname(absolutePath), { recursive: true });
@@ -642,6 +689,7 @@ async function saveFullWebRunOutput(
         await writeFile(absolutePath, output, { encoding: "utf8", signal: options.signal });
         options.signal?.throwIfAborted();
     });
+
     return absolutePath;
 }
 

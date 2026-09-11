@@ -22,7 +22,7 @@ export type Scheduler = {
 };
 
 /** Wait with caller-owned cancellation and cleanup, including synchronous schedulers. */
-export function waitWithScheduler(
+export async function waitWithScheduler(
     scheduler: Scheduler,
     delayMs: number,
     options: {
@@ -38,19 +38,24 @@ export function waitWithScheduler(
                 : (signal.reason ?? new DOMException("Aborted", "AbortError")),
         );
     }
+
     return new Promise<void>((resolve, reject) => {
         let settled = false;
         let task: ScheduledTask | undefined;
         const settle = (complete: () => void) => {
             if (settled) return;
+
             settled = true;
             task?.cancel();
             signal?.removeEventListener("abort", onAbort);
             complete();
         };
+
         const onAbort = () =>
             settle(() => reject(signal?.reason ?? new DOMException("Aborted", "AbortError")));
+
         signal?.addEventListener("abort", onAbort, { once: true });
+
         try {
             task = scheduler.set(delayMs, () => settle(resolve));
             if (settled) task.cancel();
@@ -80,12 +85,13 @@ export const cryptoIdGenerator: IdGenerator = {
 export const timeoutScheduler: Scheduler = {
     set(delayMs, task) {
         const timer = setTimeout(task, delayMs);
+
         return { cancel: () => clearTimeout(timer) };
     },
 };
 
 export const defaultCodexRuntime: CodexRuntime = {
-    fetch: (input, init) => globalThis.fetch(input, init),
+    fetch: async (input, init) => globalThis.fetch(input, init),
     clock: systemClock,
     idGenerator: cryptoIdGenerator,
     scheduler: timeoutScheduler,

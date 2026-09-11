@@ -28,6 +28,7 @@ export function registerCodexCommand(pi: ExtensionAPI, options: CodexCommandOpti
                 await openCodexMenu(ctx, options, tabs);
                 return;
             }
+
             const requestedTab = tabs.find(
                 (tab) => tab.id === action || tab.aliases?.includes(action) === true,
             );
@@ -35,6 +36,7 @@ export function registerCodexCommand(pi: ExtensionAPI, options: CodexCommandOpti
                 await openCodexMenu(ctx, options, tabs, requestedTab.id);
                 return;
             }
+
             const command = getCodexCommandContributions().find((contribution) =>
                 contribution.commands.includes(action),
             );
@@ -42,10 +44,12 @@ export function registerCodexCommand(pi: ExtensionAPI, options: CodexCommandOpti
                 await command.handle(action, ctx);
                 return;
             }
+
             const actions = [
                 ...tabs.flatMap((tab) => tab.aliases ?? [tab.id]),
                 ...getCodexCommandContributions().flatMap((contribution) => contribution.commands),
             ];
+
             notify(
                 ctx,
                 actions.length === 0
@@ -96,6 +100,7 @@ function saveAndApply(
         );
         return { ok: false };
     }
+
     const globalConfig = globalRead.config;
     const configToPersist = applyChangedConfigValues(globalConfig, options.getConfig(), config);
     const result = writeCodexCoreConfig(configToPersist);
@@ -103,11 +108,13 @@ function saveAndApply(
         notify(ctx, `Failed to save Codex settings: ${result.error}`, "error");
         return { ok: false };
     }
+
     const effectiveConfig = ctx.isProjectTrusted()
         ? readCodexCoreConfig({ cwd: ctx.cwd })
         : readCodexCoreConfig();
     options.applyConfig(effectiveConfig, ctx);
     notify(ctx, "Codex settings saved.", "info");
+
     return { ok: true, effectiveConfig };
 }
 
@@ -270,6 +277,7 @@ function notify(ctx: ExtensionContext, message: string, type: "info" | "warning"
         ctx.ui.notify(message, type);
         return;
     }
+
     if (type === "error") console.error(message);
     else if (type === "warning") console.warn(message);
     else console.log(message);

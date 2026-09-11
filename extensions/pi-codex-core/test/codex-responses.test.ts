@@ -34,9 +34,11 @@ test("tracks upstream native compaction compatibility families", () => {
     for (const model of ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
         assert.equal(codexModelRequestProfile(model)?.compHash, "3000");
     }
+
     for (const model of ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]) {
         assert.equal(codexModelRequestProfile(model)?.compHash, "2911");
     }
+
     assert.equal(codexModelRequestProfile("future-model"), undefined);
 });
 
@@ -197,6 +199,7 @@ test("keeps Lite prefix identities stable across retries, resumes and compaction
     } finally {
         clearProviderRequestTemplate(sessionId);
     }
+
     assert.deepEqual(responsePrefix(rewriteCodexResponsesPayload(payload, sessionId)), prefix);
     const otherSession = responsePrefix(rewriteCodexResponsesPayload(payload, "different-session"));
     assert.notEqual(otherSession[0]?.id, prefix[0]?.id);
@@ -260,12 +263,9 @@ test("suppresses Responses Lite throughout Pi fallback compaction", () => {
     const policy = new ResponsesLiteRequestPolicy();
 
     policy.beginPiCompactionFallback("session-1");
-
     assert.equal(policy.shouldAttachLiteHeader("session-1"), false);
     assert.equal(policy.shouldAttachLiteHeader("session-1"), false);
-
     policy.finishCompaction("session-1");
-
     assert.equal(policy.shouldAttachLiteHeader("session-1"), true);
 });
 
@@ -274,7 +274,6 @@ test("recovers Responses Lite state after a failed Pi fallback", () => {
 
     policy.beginPiCompactionFallback("session-1");
     assert.equal(policy.shouldAttachLiteHeader("session-1"), false);
-
     assert.equal(policy.shouldAttachLiteHeader("session-1"), false);
     assert.equal(policy.shouldRewriteLitePayload("session-1"), false);
     assert.equal(policy.shouldAttachLiteHeader("session-1"), true);

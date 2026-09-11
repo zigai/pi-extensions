@@ -57,7 +57,9 @@ function runScenario(
                 scheduler: {
                     set(delayMs, task) {
                         if (delayMs === 300_000) return { cancel() {} };
+
                         delays.push(delayMs);
+
                         if (onDelay) return onDelay(delayMs, task);
                         return services.scheduler.set(delayMs, task);
                     },
@@ -65,6 +67,7 @@ function runScenario(
             },
         },
     );
+
     return { controller, delays, signals, bodies, result, calls: () => calls };
 }
 
@@ -109,6 +112,7 @@ test("synchronous retry scheduling disposes tasks and preserves compaction attem
     let cancellations = 0;
     const scenario = runScenario([failure({ code: "server_error" }), success], (_delay, task) => {
         task();
+
         return {
             cancel: () => {
                 cancellations += 1;
@@ -126,10 +130,12 @@ test("stream retries exhaust after two retries and preserve the last failure", a
     const result = await scenario.result;
     assert.ok(result.isErr());
     assert.equal(result.error._tag, "CodexStreamRetryable");
+
     if (result.error._tag === "CodexStreamRetryable") {
         assert.equal(result.error.code, "rate_limit_exceeded");
         assert.equal(result.error.retryAfterMs, undefined);
     }
+
     assert.equal(result.error.message, "response.failed: Busy");
     assert.equal(scenario.calls(), 3);
     assert.deepEqual(scenario.delays, [200, 400]);
@@ -147,6 +153,7 @@ test("aborting a server-directed retry delay cancels the task and prevents anoth
         (_delayMs, task) => {
             scheduled = task;
             notifyScheduled();
+
             return {
                 cancel: () => {
                     cancelled = true;

@@ -123,21 +123,26 @@ export function createApplyPatchTool(): ToolDefinition<
             prepareArguments: prepareApplyPatchArguments,
             async execute(_toolCallId, params, signal, _onUpdate, ctx) {
                 const cwd = resolve(ctx.cwd);
+
                 try {
                     const parsedResult = parseApplyPatch(params.patch);
                     if (parsedResult.isErr()) {
                         throw new Error(formatApplyPatchError(parsedResult.error));
                     }
+
                     const parsed = parsedResult.value;
                     const mutationPaths = await resolvePatchMutationQueuePaths(parsed.hunks, cwd);
+
                     return await withFileMutationQueues(mutationPaths, async () => {
                         const applied = await applyPatchHunks(parsed.hunks, cwd, {
                             signal,
                             environmentId: parsed.environmentId,
                         });
                         if (applied.isErr()) throw new Error(formatApplyPatchError(applied.error));
+
                         const result = applied.value;
                         const diffSummary = summarizeAppliedPatchDiff(result.changes, parsed.hunks);
+
                         return {
                             content: [{ type: "text", text: result.summary }],
                             details: {
@@ -157,6 +162,7 @@ export function createApplyPatchTool(): ToolDefinition<
                     if (cause instanceof ApplyPatchError) {
                         throw new Error(formatApplyPatchError(cause));
                     }
+
                     if (cause instanceof Error) throw cause;
                     throw new Error(String(cause));
                 }
@@ -178,10 +184,12 @@ export function createApplyPatchTool(): ToolDefinition<
                 if (diff.length > 0) {
                     text += `\n\n${renderApplyPatchDiff(truncateDiffLines(diff, COMPACT_DIFF_LINE_LIMIT), theme)}`;
                 }
+
                 return new Text(text, 0, 0);
             },
             renderResult(result, { expanded, isPartial }, theme, _context) {
                 if (isPartial) return new Text(theme.fg("warning", "Applying patch..."), 0, 0);
+
                 const output = result.content
                     .filter((item) => item.type === "text")
                     .map((item) => item.text)
@@ -193,6 +201,7 @@ export function createApplyPatchTool(): ToolDefinition<
                         0,
                     );
                 }
+
                 return new Text(
                     compactApplyPatchResult(
                         output,
@@ -233,14 +242,16 @@ async function canonicalMutationQueuePath(path: string): Promise<string> {
     }
 }
 
-function withFileMutationQueues<T>(
+async function withFileMutationQueues<T>(
     paths: readonly string[],
     operation: () => Promise<T>,
     index = 0,
 ): Promise<T> {
     const path = paths[index];
     if (path === undefined) return operation();
-    return withFileMutationQueue(path, () => withFileMutationQueues(paths, operation, index + 1));
+    return withFileMutationQueue(path, async () =>
+        withFileMutationQueues(paths, operation, index + 1),
+    );
 }
 
 function comparePaths(left: string, right: string): number {
@@ -261,13 +272,16 @@ function prepareApplyPatchArguments(args: unknown): ApplyPatchParams {
 function normalizeApplyPatchArguments(args: unknown): ApplyPatchParams | undefined {
     const parsed = ApplyPatchArgumentsDecoder.decode(args);
     if (parsed === undefined) return undefined;
+
     const directPatch = StringDecoder.decode(parsed);
     if (directPatch !== undefined) return { patch: directPatch };
 
     const parsedObject = ApplyPatchArgumentObjectDecoder.decode(parsed);
     if (!parsedObject) return undefined;
+
     const entries = Object.entries(parsedObject);
     if (entries.length !== 1) return undefined;
+
     const patch = entries[0]?.[1];
     return patch === undefined ? undefined : { patch };
 }
@@ -284,6 +298,7 @@ function formatPlannedPatchHunkDiff(hunk: ApplyPatchHunk): string {
         const lines = splitContentLines(hunk.contents).map((line) => `+ ${line}`);
         return lines.length === 0 ? "" : `${hunk.path}\n${lines.join("\n")}`;
     }
+
     if (hunk.type === "delete") return "";
 
     const lines = hunk.chunks.flatMap((chunk) => [
@@ -319,6 +334,7 @@ function compactApplyPatchSummary(
         ...affectedPaths.deleted.map((path) => `D ${path}`),
     ];
     if (paths.length === 0) return output.trimEnd();
+
     const visible = paths.slice(0, 4);
     const remaining = paths.length - visible.length;
     return remaining > 0 ? `${visible.join("\n")}\n… ${remaining} more` : visible.join("\n");
@@ -389,24 +405,29 @@ function formatAppliedChangePath(
 ): string {
     if (hunk?.type === "add") return hunk.path;
     if (hunk?.type === "delete") return hunk.path;
+
     if (hunk?.type === "update") {
         return hunk.movePath === undefined ? hunk.path : `${hunk.path} → ${hunk.movePath}`;
     }
+
     if (change.type === "update") {
         return change.movePath === undefined ? change.path : `${change.path} → ${change.movePath}`;
     }
+
     return change.path;
 }
 
 function getAppliedChangeContents(change: AppliedPatchFileChange): AppliedPatchChangeContents {
     if (change.type === "add") return { oldContent: "", newContent: change.content };
     if (change.type === "delete") return { oldContent: change.content, newContent: "" };
+
     return { oldContent: change.oldContent, newContent: change.newContent };
 }
 
 function truncateDiffLines(diff: string, limit: number): string {
     const trimmed = diff.trimEnd();
     if (trimmed.length === 0) return "";
+
     const lines = trimmed.split("\n");
     if (lines.length <= limit) return trimmed;
     return `${lines.slice(0, limit).join("\n")}\n… ${lines.length - limit} more diff lines`;
@@ -447,12 +468,14 @@ function summarizePatchFiles(files: readonly ApplyPatchFileLineSummary[]): Apply
     let unknownRemovedFileCount = 0;
     for (const file of files) {
         addedLines += file.addedLines;
+
         if (file.removedLines === undefined) {
             unknownRemovedFileCount += 1;
         } else {
             removedLines += file.removedLines;
         }
     }
+
     return { files, addedLines, removedLines, unknownRemovedFileCount };
 }
 
@@ -465,11 +488,13 @@ function summarizePlannedPatchFile(hunk: ApplyPatchHunk): ApplyPatchFileLineSumm
             removedLines: 0,
         };
     }
+
     if (hunk.type === "delete") {
         return { action: "D", path: hunk.path, addedLines: 0, removedLines: undefined };
     }
 
     const stats = countUpdateLineChanges(hunk);
+
     return {
         action: "M",
         path: hunk.movePath ?? hunk.path,
@@ -495,6 +520,7 @@ function summarizeAppliedPatchFile(
             removedLines: 0,
         };
     }
+
     if (change.type === "delete") {
         return {
             action: "D",
@@ -508,6 +534,7 @@ function summarizeAppliedPatchFile(
     const stats = updateHunk
         ? countUpdateLineChanges(updateHunk)
         : countWholeFileLineChanges(change.oldContent, change.newContent);
+
     return {
         action: "M",
         path: updateHunk?.movePath ?? updateHunk?.path ?? change.movePath ?? change.path,
@@ -526,6 +553,7 @@ function summarizeAppliedChangeFallback(change: AppliedPatchFileChange): ApplyPa
             removedLines: 0,
         };
     }
+
     if (change.type === "delete") {
         return {
             action: "D",
@@ -534,6 +562,7 @@ function summarizeAppliedChangeFallback(change: AppliedPatchFileChange): ApplyPa
             removedLines: countTextLines(change.content),
         };
     }
+
     const stats = countWholeFileLineChanges(change.oldContent, change.newContent);
     return {
         action: "M",
@@ -551,6 +580,7 @@ function formatPatchCallSummary(summary: ApplyPatchLineSummary): string {
     const parts = [visibleFiles.join(", ") || `${summary.files.length} files`];
     const totals = formatPatchLineTotals(summary);
     if (totals.length > 0) parts.push(totals);
+
     if (summary.unknownRemovedFileCount > 0) {
         parts.push(
             `${summary.unknownRemovedFileCount} ${
@@ -558,6 +588,7 @@ function formatPatchCallSummary(summary: ApplyPatchLineSummary): string {
             }`,
         );
     }
+
     return parts.join(" • ");
 }
 
@@ -594,6 +625,7 @@ function countUpdateLineChanges(
         addedLines += chunk.newLines.length - unchangedLineCount;
         removedLines += chunk.oldLines.length - unchangedLineCount;
     }
+
     return { addedLines, removedLines };
 }
 
@@ -626,6 +658,7 @@ function formatDisplayLineDiff(
 
 function splitContentLines(text: string): readonly string[] {
     if (text.length === 0) return [];
+
     const withoutTrailingLineBreak = text.endsWith("\n") ? text.slice(0, -1) : text;
     if (withoutTrailingLineBreak.length === 0) return [];
     return withoutTrailingLineBreak.split("\n");
@@ -644,8 +677,10 @@ function longestCommonSubsequenceLength(
                     ? (previousRow[newIndex] ?? 0) + 1
                     : Math.max(previousRow[newIndex + 1] ?? 0, currentRow[newIndex] ?? 0);
         }
+
         previousRow = currentRow;
     }
+
     return previousRow[newLines.length] ?? 0;
 }
 

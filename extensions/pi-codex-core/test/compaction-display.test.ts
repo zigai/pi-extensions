@@ -16,7 +16,6 @@ test("native compaction renderer displays checkpoint details at normal and narro
     const harness = makeExtensionHarness();
     extension(harness.api);
     const component = harness.renderMessage(NATIVE_COMPACTION_MESSAGE_TYPE, {});
-
     assert.deepEqual(component.render(200), NATIVE_COMPACTION_MESSAGE_TEXT.split("\n"));
     assert.deepEqual(
         component.render(12).map(stripVTControlCharacters),
@@ -26,6 +25,7 @@ test("native compaction renderer displays checkpoint details at normal and narro
 
 test("native compaction renderer clips colored CJK and emoji by terminal columns", () => {
     type Renderer = Parameters<ExtensionAPI["registerMessageRenderer"]>[1];
+
     let renderer: Renderer | undefined;
     registerNativeCompactionDisplay(
         testDouble<ExtensionAPI>()({
@@ -35,6 +35,7 @@ test("native compaction renderer clips colored CJK and emoji by terminal columns
             },
         }),
     );
+
     assert.ok(renderer);
     const theme = testDouble<Theme>()({
         fg(color: string, text: string) {
@@ -54,6 +55,7 @@ test("native compaction renderer clips colored CJK and emoji by terminal columns
         theme,
     );
     assert.ok(component);
+
     for (const [width, expected] of [
         [0, ["", ""]],
         [1, ["", "A"]],
@@ -64,8 +66,10 @@ test("native compaction renderer clips colored CJK and emoji by terminal columns
     ] as const) {
         const lines = component.render(width);
         assert.deepEqual(lines.map(stripVTControlCharacters), expected);
+
         for (const line of lines) {
             assert.ok(visibleWidth(line) <= width);
+
             // Every escape must start a complete SGR sequence, including at the clipped edge.
             for (const segment of line.split("\u001b").slice(1)) {
                 assert.match(segment, /^\[[0-9;]*m/);
@@ -83,13 +87,10 @@ test("native compaction renderer reflects message updates after invalidation", (
     extension(harness.api);
     const message: MutableCompactionMessage = { content: "Initial checkpoint\nSecond line" };
     const component = harness.renderMessage(NATIVE_COMPACTION_MESSAGE_TYPE, message);
-
     assert.deepEqual(component.render(80), ["Initial checkpoint", "Second line"]);
-
     message.content = "Updated checkpoint";
     assert.doesNotThrow(() => component.invalidate());
     assert.deepEqual(component.render(8).map(stripVTControlCharacters), ["Updated "]);
-
     message.content = { unsupported: true };
     component.invalidate();
     assert.deepEqual(component.render(200), NATIVE_COMPACTION_MESSAGE_TEXT.split("\n"));

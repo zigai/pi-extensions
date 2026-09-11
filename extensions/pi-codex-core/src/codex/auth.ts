@@ -59,10 +59,12 @@ export function resolveCodexApiProviderBaseUrl(modelBaseUrl: string | undefined)
     } catch {
         return normalized;
     }
+
     if (normalized.endsWith("/codex/responses")) return normalized.slice(0, -"/responses".length);
     if (normalized.endsWith("/codex")) return normalized;
     if (normalized.endsWith("/backend-api") || normalized.endsWith("/api"))
         return `${normalized}/codex`;
+
     return normalized;
 }
 
@@ -77,14 +79,18 @@ export function codexToolProviderHeaders(provider: CodexToolProvider): Headers {
     for (const [name, value] of Object.entries(provider.redactedHeaders ?? {})) {
         headers.set(name, value.reveal());
     }
+
     if (provider.token) headers.set("Authorization", `Bearer ${provider.token.reveal()}`);
+
     if (provider.accountId.trim().length > 0) {
         headers.set("ChatGPT-Account-ID", provider.accountId);
     }
+
     headers.set("originator", CODEX_ORIGINATOR);
     headers.set("User-Agent", codexUserAgent(CODEX_ORIGINATOR));
     headers.delete("version");
     headers.set("content-type", "application/json");
+
     return headers;
 }
 
@@ -136,6 +142,7 @@ function resolveActiveCompatibleToolModel(ctx: ExtensionContext): CodexResult<Ru
     if (isModelWithStringApi(model) && model.api.toLowerCase().includes("responses")) {
         return ok(model);
     }
+
     return fail(
         new CodexUnsupportedModel({
             operation: "codexAuth",
@@ -150,13 +157,16 @@ export async function resolveActiveCodexResponsesProvider(
 ): Promise<CodexResult<CodexResponsesProvider | undefined>> {
     const model = ctx.model;
     if (!isUsableOpenAICodexModel(model)) return ok(undefined);
+
     const provider = await resolveCodexProviderForModel(ctx, model, {
         tokenUnavailableMessage: "OpenAI Codex auth is unavailable.",
         requireAccountId: true,
     });
     if (provider.isErr()) return provider;
+
     const headers = codexToolProviderHeaders(provider.value);
     headers.set("OpenAI-Beta", "responses=experimental");
+
     return ok({
         ...provider.value,
         provider: model.provider,
@@ -171,6 +181,7 @@ export function extractAccountId(token: string): string | undefined {
         const parts = token.split(".");
         const payloadPart = parts[1];
         if (parts.length !== 3 || !payloadPart) return undefined;
+
         const rawPayload: unknown = JSON.parse(
             Buffer.from(payloadPart, "base64url").toString("utf8"),
         );
@@ -224,10 +235,13 @@ async function resolveCodexProviderForModel(
 
     const redactedHeaders = redactProviderHeaders(auth.headers);
     const baseUrl = resolveCodexApiProviderBaseUrl(model.baseUrl);
+
     const provider: CodexToolProviderConstruction = token
         ? { baseUrl, model: model.id, token: Redacted.of(token), accountId: accountId ?? "" }
         : { baseUrl, model: model.id, accountId: accountId ?? "" };
+
     if (Object.keys(redactedHeaders).length > 0) provider.redactedHeaders = redactedHeaders;
+
     return ok(provider);
 }
 
@@ -293,15 +307,18 @@ function redactProviderHeaders(
         if (value === null) continue;
         redactedHeaders[name] = Redacted.of(value);
     }
+
     return redactedHeaders;
 }
 
 function headerValue(headers: ProviderHeaders | undefined, name: string): string | undefined {
     if (!headers) return undefined;
+
     const lowerName = name.toLowerCase();
     for (const [key, value] of Object.entries(headers)) {
         if (key.toLowerCase() === lowerName && value !== null && value.trim().length > 0)
             return value;
     }
+
     return undefined;
 }

@@ -44,14 +44,14 @@ function expectApplyPatchFailure<T>(result: BetterResult<T, ApplyPatchError>): A
 
 function createNodeFileSystem(): ApplyPatchFileSystem {
     return {
-        readFile: (path) => readFile(path, "utf8"),
-        writeFile: (path, contents) => writeFile(path, contents, "utf8"),
-        lstat: (path) => lstat(path),
+        readFile: async (path) => readFile(path, "utf8"),
+        writeFile: async (path, contents) => writeFile(path, contents, "utf8"),
+        lstat: async (path) => lstat(path),
         mkdir: async (path) => {
             await mkdir(path, { recursive: true });
         },
-        readlink: (path) => readlink(path),
-        realpath: (path) => realpath(path),
+        readlink: async (path) => readlink(path),
+        realpath: async (path) => realpath(path),
         removeFile: async (path) => {
             await rm(path, { force: false, recursive: false });
         },
@@ -112,7 +112,6 @@ test("applies Codex apply_patch changes to the local filesystem", async () => {
 +new name`);
 
         const result = expectApplyPatchSuccess(await applyPatchText(patch, root));
-
         assert.equal(await readFile(join(root, "nested", "add.txt"), "utf8"), "created\n");
         await assert.rejects(readFile(join(root, "delete.txt"), "utf8"));
         assert.equal(await readFile(join(root, "update.txt"), "utf8"), "foo\nbaz\n");
@@ -140,7 +139,6 @@ test("apply_patch update matching follows Codex whitespace and Unicode lenience"
 +import asyncio  # ok`);
 
         expectApplyPatchSuccess(await applyPatchText(patch, root));
-
         assert.equal(await readFile(join(root, "unicode.txt"), "utf8"), "import asyncio  # ok\n");
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -177,7 +175,6 @@ test("applies an add followed by a dependent update to the same path", async () 
 +final`);
 
         const result = expectApplyPatchSuccess(await applyPatchText(patch, root));
-
         assert.equal(await readFile(join(root, "sequential.txt"), "utf8"), "final\n");
         assert.deepEqual(result.affectedPaths, {
             added: ["sequential.txt"],
@@ -204,7 +201,6 @@ test("applies sequential dependent updates to the same path", async () => {
 +final`);
 
         expectApplyPatchSuccess(await applyPatchText(patch, root));
-
         assert.equal(await readFile(filePath, "utf8"), "final\n");
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -226,7 +222,6 @@ test("applies an operation to the destination of an earlier move", async () => {
 +final`);
 
         expectApplyPatchSuccess(await applyPatchText(patch, root));
-
         await assert.rejects(readFile(join(root, "source.txt"), "utf8"));
         assert.equal(await readFile(join(root, "destination.txt"), "utf8"), "final\n");
     } finally {
@@ -269,7 +264,6 @@ test("allows traversal and absolute paths outside the working directory", async 
 +after`);
 
         expectApplyPatchSuccess(await applyPatchText(patch, root));
-
         assert.equal(await readFile(join(outside, "traversal.txt"), "utf8"), "created\n");
         assert.equal(await readFile(absolutePath, "utf8"), "after\n");
     } finally {
@@ -291,6 +285,7 @@ test("allows paths outside the working directory through an existing symlink", a
                 root,
             ),
         );
+
         assert.equal(await readFile(join(outside, "through-link.txt"), "utf8"), "created\n");
     } finally {
         await rm(base, { recursive: true, force: true });
@@ -349,10 +344,12 @@ test("rejects a stale preflight snapshot before overwriting an external mutation
             ...baseFileSystem,
             readFile: async (path) => {
                 const contents = await baseFileSystem.readFile(path);
+
                 if (path === filePath && !injectedMutation) {
                     injectedMutation = true;
                     await baseFileSystem.writeFile(path, "external\n");
                 }
+
                 return contents;
             },
         };
@@ -410,11 +407,9 @@ test("apply_patch tool executes patch argument and formats parser errors", async
             patch: wrapPatch("*** Add File: hello.txt\n+hi"),
         });
         assert.ok(params);
-
         const ctx = { cwd: root };
         const executionContext = testDouble<ExtensionContext>()(ctx);
         const result = await tool.execute("call-1", params, undefined, undefined, executionContext);
-
         assert.equal(await readFile(join(root, "hello.txt"), "utf8"), "hi\n");
         assert.equal(result.content[0]?.type, "text");
         assert.match(result.content[0]?.text ?? "", /A hello\.txt/);
@@ -488,12 +483,10 @@ test("apply_patch argument preparation accepts compatibility shapes and rejects 
     const prepareArguments = createApplyPatchTool().prepareArguments;
     assert.ok(prepareArguments);
     const patch = wrapPatch("*** Add File: compatible.txt\n+compatible");
-
     assert.deepEqual(prepareArguments(patch), { patch });
     assert.deepEqual(prepareArguments({ patch }), { patch });
     assert.deepEqual(prepareArguments({ input: patch }), { patch });
     assert.deepEqual(prepareArguments({ command: patch }), { patch });
-
     assert.throws(() => prepareArguments({ patch, extra: true }), /Invalid apply_patch arguments/);
     assert.throws(() => prepareArguments({ patch, input: patch }), /Invalid apply_patch arguments/);
     assert.throws(

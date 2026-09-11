@@ -271,6 +271,7 @@ test("does not traverse conversation items while capturing a Lite prefix", () =>
     const sessionId = "provider-template-bounded-capture";
     let contentReads = 0;
     let tailReads = 0;
+
     const conversationItem = {
         role: "user",
         get content() {
@@ -278,6 +279,7 @@ test("does not traverse conversation items while capturing a Lite prefix", () =>
             return "conversation content";
         },
     };
+
     const input = [
         { type: "additional_tools", role: "developer", tools: [] },
         {

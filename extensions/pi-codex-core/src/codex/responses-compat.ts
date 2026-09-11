@@ -21,6 +21,7 @@ export function rewriteCodexResponsesPayload(
 ): JsonObject | undefined {
     const request = JsonObjectDecoder.decode(payload);
     if (!request) return undefined;
+
     const model = JsonStringDecoder.decode(request.model);
     const requestInput = JsonArrayDecoder.decode(request.input);
     if (model === undefined || requestInput === undefined) return undefined;
@@ -55,6 +56,7 @@ export function rewriteCodexResponsesPayload(
             "service_tier",
         ]),
     );
+
     const result: JsonObjectConstruction = {};
     for (const [key, value] of Object.entries(rewritten)) result[key] = value;
     result.input = input;
@@ -65,6 +67,7 @@ export function rewriteCodexResponsesPayload(
         [CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY]: "true",
     };
     if (request.service_tier === "priority") result.service_tier = "priority";
+
     return result;
 }
 
@@ -75,12 +78,14 @@ export function omitReasoningSummary(
 ): JsonObject | undefined {
     const request = JsonObjectDecoder.decode(payload);
     if (!request) return undefined;
+
     const model = JsonStringDecoder.decode(request.model);
     if (model === undefined) return undefined;
     if (expectedModelId !== undefined && model !== expectedModelId) return undefined;
 
     const reasoning = JsonObjectDecoder.decode(request.reasoning);
     if (!reasoning || !Object.hasOwn(reasoning, "summary")) return undefined;
+
     return { ...request, reasoning: omitJsonObjectKeys(reasoning, new Set(["summary"])) };
 }
 
@@ -109,13 +114,16 @@ function responsesLiteReasoning(
 
 function stripInputImageDetail(value: JsonValue): JsonValue {
     if (Array.isArray(value)) return value.map(stripInputImageDetail);
+
     const record = JsonObjectDecoder.decode(value);
     if (!record) return value;
+
     const stripped: JsonObjectConstruction = {};
     for (const [key, item] of Object.entries(record)) {
         if (record.type === "input_image" && key === "detail") continue;
         stripped[key] = item === undefined ? undefined : stripInputImageDetail(item);
     }
+
     return stripped;
 }
 
@@ -128,5 +136,6 @@ function omitJsonObjectKeys(object: JsonObject, excluded: ReadonlySet<string>): 
     for (const [key, value] of Object.entries(object)) {
         if (!excluded.has(key)) filtered[key] = value;
     }
+
     return filtered;
 }

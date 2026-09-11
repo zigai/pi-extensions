@@ -84,7 +84,9 @@ export class CodexTokenizer {
         this.workerState = undefined;
         this.warmupPromise = undefined;
         this.mainEncodingPromise = undefined;
+
         if (state === undefined) return;
+
         rejectPendingRequests(state, new Error("Codex tokenizer worker was shut down."));
         await state.worker.terminate();
     }
@@ -103,6 +105,7 @@ export class CodexTokenizer {
         } catch {
             options.signal?.throwIfAborted();
         }
+
         return this.countInMainThread(text, options);
     }
 
@@ -124,6 +127,7 @@ export class CodexTokenizer {
         } catch {
             options.signal?.throwIfAborted();
         }
+
         return this.truncateInMainThread(text, maxTokens, options);
     }
 
@@ -140,17 +144,21 @@ export class CodexTokenizer {
             const abort = () => {
                 const pending = state.pending.get(request.id);
                 if (pending === undefined) return;
+
                 state.pending.delete(request.id);
                 pending.disposeAbort();
                 reject(signal?.reason);
             };
+
             const disposeAbort = () => signal?.removeEventListener("abort", abort);
             state.pending.set(request.id, { resolve, reject, disposeAbort });
             signal?.addEventListener("abort", abort, { once: true });
+
             if (signal?.aborted) {
                 abort();
                 return;
             }
+
             try {
                 state.worker.postMessage(request);
             } catch (cause: unknown) {
@@ -168,6 +176,7 @@ export class CodexTokenizer {
             ? this.options.createWorker(TOKENIZER_WORKER_URL)
             : new Worker(TOKENIZER_WORKER_URL);
         worker.unref();
+
         const pending = new Map<number, PendingTokenizerRequest>();
         let readyResolve: (() => void) | undefined;
         let readyReject: ((cause: Error) => void) | undefined;
@@ -197,6 +206,7 @@ export class CodexTokenizer {
                 );
             }
         });
+
         return state;
     }
 
@@ -210,14 +220,18 @@ export class CodexTokenizer {
             state.readyReject = undefined;
             return;
         }
+
         const pendingRequest = state.pending.get(message.id);
         if (pendingRequest === undefined) return;
+
         state.pending.delete(message.id);
         pendingRequest.disposeAbort();
+
         if (message.type === "error") {
             pendingRequest.reject(new Error(message.error));
             return;
         }
+
         pendingRequest.resolve(message.value);
     }
 
@@ -226,6 +240,7 @@ export class CodexTokenizer {
             this.workerState = undefined;
             this.warmupPromise = undefined;
         }
+
         state.readyReject?.(cause);
         state.readyResolve = undefined;
         state.readyReject = undefined;
@@ -237,6 +252,7 @@ export class CodexTokenizer {
         options: TokenizerOperationOptions,
     ): Promise<number> {
         options.signal?.throwIfAborted();
+
         try {
             const encoding = await this.loadMainThreadEncoding();
             options.signal?.throwIfAborted();
@@ -263,15 +279,18 @@ export class CodexTokenizer {
             options.signal?.throwIfAborted();
             const tokens = encoding.encode(text);
             options.signal?.throwIfAborted();
+
             if (tokens.length <= maxTokens) {
                 options.signal?.throwIfAborted();
                 return text;
             }
+
             if (maxTokens <= 3) {
                 const result = encoding.decode(tokens.slice(0, maxTokens));
                 options.signal?.throwIfAborted();
                 return result;
             }
+
             const marker = "\n…\n";
             const markerTokens = encoding.encode(marker).length;
             const remaining = Math.max(1, maxTokens - markerTokens);
@@ -280,6 +299,7 @@ export class CodexTokenizer {
             const result = `${encoding.decode(tokens.slice(0, headCount))}${marker}${encoding.decode(
                 tokens.slice(tokens.length - tailCount),
             )}`;
+
             options.signal?.throwIfAborted();
             return result;
         } catch {
@@ -290,27 +310,34 @@ export class CodexTokenizer {
         }
     }
 
-    private loadMainThreadEncoding(): Promise<TokenEncoding> {
+    private async loadMainThreadEncoding(): Promise<TokenEncoding> {
         this.mainEncodingPromise ??= import("js-tiktoken").then(({ getEncoding }) => {
             const encoding = getEncoding("o200k_base");
+
             return {
                 encode: (text: string) => encoding.encode(text),
                 decode: (tokens: number[]) => encoding.decode(tokens),
             };
         });
+
         return this.mainEncodingPromise;
     }
 }
 
-function waitForPromise<T>(promise: Promise<T>, options: TokenizerOperationOptions): Promise<T> {
+async function waitForPromise<T>(
+    promise: Promise<T>,
+    options: TokenizerOperationOptions,
+): Promise<T> {
     const { signal } = options;
     if (signal === undefined) return promise;
+
     signal.throwIfAborted();
     return new Promise((resolve, reject) => {
         const abort = () => {
             signal.removeEventListener("abort", abort);
             reject(signal.reason);
         };
+
         signal.addEventListener("abort", abort, { once: true });
         promise.then(
             (value) => {
@@ -330,6 +357,7 @@ function rejectPendingRequests(state: TokenizerWorkerState, cause: Error): void 
         pendingRequest.disposeAbort();
         pendingRequest.reject(cause);
     }
+
     state.pending.clear();
 }
 
@@ -339,9 +367,11 @@ function approximateTextTokens(text: string): number {
 
 function truncateTextByApproximateTokenBudget(text: string, maxTokens: number): string {
     if (maxTokens <= 0) return "";
+
     const maxChars = Math.max(1, maxTokens * 4);
     if (text.length <= maxChars) return text;
     if (maxChars <= 3) return text.slice(0, maxChars);
+
     const marker = "\n…\n";
     const remaining = Math.max(1, maxChars - marker.length);
     const headCount = Math.ceil(remaining / 2);

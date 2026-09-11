@@ -14,6 +14,7 @@ export function registerNativeCompactionDisplay(pi: ExtensionAPI): void {
             render(width: number): string[] {
                 const text =
                     MessageContentSchema.decode(message.content) ?? NATIVE_COMPACTION_MESSAGE_TEXT;
+
                 return text
                     .split("\n")
                     .map((line) => truncateToWidth(theme.fg("dim", line), width, ""));

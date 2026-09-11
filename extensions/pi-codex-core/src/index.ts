@@ -41,7 +41,7 @@ type CompactionModule = typeof import("./compaction/service.ts");
 let compactionModulePromise: Promise<CompactionModule> | undefined;
 const activatedApis = new WeakSet<ExtensionAPI>();
 
-function loadCompactionModule(): Promise<CompactionModule> {
+async function loadCompactionModule(): Promise<CompactionModule> {
     compactionModulePromise ??= import("./compaction/service.ts");
     return compactionModulePromise;
 }
@@ -49,15 +49,17 @@ function loadCompactionModule(): Promise<CompactionModule> {
 /** Register the Pi Codex Core Pi extension. */
 export default function extension(pi: ExtensionAPI): void {
     if (activatedApis.has(pi)) return;
+
     let config: CodexCoreConfig = readCodexCoreStartupConfig();
+
     activatedApis.add(pi);
+
     const responsesLitePolicy = new ResponsesLiteRequestPolicy();
     const tokenizer = new CodexTokenizer();
     const recovery = new CodexRecoveryCoordinator({ getConfig: () => config });
     const togglesActivation = new OptionalTogglesActivation(pi.events, packageName);
     const warnedPromptConflictSessions = new Set<string>();
     const unregisterCodexSettingsHost = registerCodexSettingsHost(packageName);
-
     const getConfig = (): CodexCoreConfig => config;
     const syncToolActivation = (ctx: Parameters<typeof syncCodexCoreTools>[1]): void => {
         const activation = togglesActivation.update(
@@ -66,6 +68,7 @@ export default function extension(pi: ExtensionAPI): void {
         );
         syncCodexCoreTools(pi, ctx, config, { activation });
     };
+
     const applyConfig = (
         nextConfig: CodexCoreConfig,
         ctx: Parameters<typeof syncCodexCoreTools>[1],
@@ -73,9 +76,11 @@ export default function extension(pi: ExtensionAPI): void {
         config = nextConfig;
         recovery.applyConfig(pi);
         clearProviderRequestTemplate(ctx.sessionManager.getSessionId());
+
         if (config.compaction.enabled) {
             tokenizer.warm();
         }
+
         syncToolActivation(ctx);
     };
 
@@ -97,8 +102,10 @@ export default function extension(pi: ExtensionAPI): void {
         if (config.compaction.enabled) {
             tokenizer.warm();
         }
+
         recovery.start(pi, ctx);
         syncToolActivation(ctx);
+
         if (config.openai.fast && ctx.hasUI) {
             ctx.ui.notify(FAST_MODE_STARTUP_WARNING, "warning");
         }
@@ -118,6 +125,7 @@ export default function extension(pi: ExtensionAPI): void {
         ) {
             return { action: "continue" };
         }
+
         const hasImages = (event.images?.length ?? 0) > 0;
         if (
             config.recovery.batchFollowUps &&
@@ -127,10 +135,12 @@ export default function extension(pi: ExtensionAPI): void {
             recovery.queueFollowUp(pi, ctx, event.text);
             return { action: "handled" };
         }
+
         if (event.streamingBehavior === undefined) {
             const text = recovery.mergePendingIntoManualInput(pi, event.text);
             if (text !== undefined) return { action: "transform", text };
         }
+
         return { action: "continue" };
     });
 
@@ -157,6 +167,7 @@ export default function extension(pi: ExtensionAPI): void {
                 "warning",
             );
         }
+
         return {
             systemPrompt: result.prompt,
         };
@@ -178,6 +189,7 @@ export default function extension(pi: ExtensionAPI): void {
             responsesLitePolicy.beginPiCompactionFallback(sessionId);
             return undefined;
         }
+
         try {
             const { handleCodexNativeCompaction } = await loadCompactionModule();
             const result = await handleCodexNativeCompaction(event, ctx, config, pi, {
@@ -187,13 +199,16 @@ export default function extension(pi: ExtensionAPI): void {
             return result;
         } catch {
             if (event.signal.aborted) return { cancel: true };
+
             responsesLitePolicy.beginPiCompactionFallback(sessionId);
+
             if (ctx.hasUI) {
                 ctx.ui.notify(
                     "Codex native compaction failed before completing its request; Pi compaction will run.",
                     "warning",
                 );
             }
+
             return undefined;
         }
     });
@@ -207,6 +222,7 @@ export default function extension(pi: ExtensionAPI): void {
         if (!config.compaction.enabled || !config.compaction.auto) {
             return;
         }
+
         const { scheduleCodexAutoCompaction } = await loadCompactionModule();
         scheduleCodexAutoCompaction(ctx, config, undefined, {
             completedMessages: event.messages,
@@ -217,7 +233,9 @@ export default function extension(pi: ExtensionAPI): void {
         if (supportsInteractiveRecovery(ctx) && isActiveCodexResponsesModel(ctx)) {
             recovery.settle(pi, ctx);
         }
+
         if (!config.compaction.enabled || !config.compaction.auto) return;
+
         const { scheduleCodexAutoCompaction } = await loadCompactionModule();
         scheduleCodexAutoCompaction(ctx, config);
     });
@@ -239,6 +257,7 @@ export default function extension(pi: ExtensionAPI): void {
                 : undefined;
         const requestPayload = reasoningTracePayload ?? compatiblePayload;
         let finalPayload = requestPayload;
+
         if (config.compaction.enabled) {
             const { rewriteProviderRequestWithNativeCompaction } = await loadCompactionModule();
             const compactionPayload = await rewriteProviderRequestWithNativeCompaction(
@@ -249,11 +268,13 @@ export default function extension(pi: ExtensionAPI): void {
             );
             finalPayload = compactionPayload ?? requestPayload;
         }
+
         if (!isPiCompactionFallback && isActiveCodexResponsesModel(ctx)) {
             captureProviderRequestTemplate(sessionId, finalPayload, {
                 activeToolNames: pi.getActiveTools(),
             });
         }
+
         return finalPayload === event.payload ? undefined : finalPayload;
     });
 
@@ -261,10 +282,12 @@ export default function extension(pi: ExtensionAPI): void {
         unregisterCodexSettingsHost();
         recovery.stop();
         togglesActivation.dispose();
+
         const sessionId = ctx.sessionManager.getSessionId();
         responsesLitePolicy.clearSession(sessionId);
         clearProviderRequestTemplate(sessionId);
         warnedPromptConflictSessions.delete(sessionId);
+
         if (compactionModulePromise !== undefined) {
             const { cancelScheduledCodexAutoCompaction, clearCodexCompactionSessionState } =
                 await compactionModulePromise;
@@ -274,6 +297,7 @@ export default function extension(pi: ExtensionAPI): void {
                 clearCodexCompactionSessionState(ctx.sessionManager.getSessionId());
             }
         }
+
         await tokenizer.shutdown();
     });
 }

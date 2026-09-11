@@ -42,6 +42,7 @@ const RESIZED_IMAGE_BYTES_ESTIMATE = 7_373;
 const RESIZED_IMAGE_TOKEN_ESTIMATE = Math.ceil(
     RESIZED_IMAGE_BYTES_ESTIMATE / APPROX_BYTES_PER_TOKEN,
 );
+
 const ORIGINAL_IMAGE_PATCH_SIZE = 32;
 const ORIGINAL_IMAGE_MAX_PATCHES = 10_000;
 const StringValueSchema = JsonStringDecoder;
@@ -92,6 +93,7 @@ export function buildRemoteCompactionV2Request(input: {
     const include = ["reasoning.encrypted_content"];
     const text = { verbosity: input.verbosity };
     const clientMetadata = { ...input.clientMetadata };
+
     if (profile?.useResponsesLite) {
         const instructions = sanitizeSurrogates(input.instructions);
         const [additionalToolsItem, ...instructionItems] = buildResponsesLitePrefix(
@@ -99,6 +101,7 @@ export function buildRemoteCompactionV2Request(input: {
             tools ?? [],
             instructions,
         );
+
         return {
             model: input.model,
             input: [
@@ -124,6 +127,7 @@ export function buildRemoteCompactionV2Request(input: {
             },
         };
     }
+
     const request: RemoteCompactionV2RequestConstruction = {
         model: input.model,
         instructions: sanitizeSurrogates(input.instructions),
@@ -140,6 +144,7 @@ export function buildRemoteCompactionV2Request(input: {
     };
     if (tools && tools.length > 0) request.tools = tools;
     if (Object.keys(clientMetadata).length > 0) request.client_metadata = clientMetadata;
+
     return request;
 }
 
@@ -152,6 +157,7 @@ function buildLiteAdditionalToolsItem(
             ? requestTemplate.additionalToolsItem
             : undefined;
     if (base && JSON.stringify(base.tools) === JSON.stringify(generated.tools)) return base;
+
     return { ...base, ...generated };
 }
 
@@ -161,6 +167,7 @@ function buildLiteInstructionItems(
     generated: readonly ResponsesInputItem[],
 ): readonly ResponsesInputItem[] {
     if (instructions.length === 0) return [];
+
     if (
         requestTemplate?.layout === "responses-lite" &&
         requestTemplate.instructions === instructions &&
@@ -168,6 +175,7 @@ function buildLiteInstructionItems(
     ) {
         return requestTemplate.instructionItems;
     }
+
     return generated;
 }
 
@@ -226,9 +234,11 @@ export async function rewriteRemoteCompactionToolOutputsForContextWindow(
     ) {
         const item = rewrittenInput[index];
         if (!item || !isRewritableToolOutputItem(item)) continue;
+
         const rewrittenItem = rewriteToolOutputItem(item);
         rewrittenInput[index] = rewrittenItem;
         rewrittenToolOutputs += 1;
+
         const [beforeTokens, afterTokens] = await Promise.all([
             estimateResponsesInputItemTokens(item, cache, options),
             estimateResponsesInputItemTokens(rewrittenItem, cache, options),
@@ -261,6 +271,7 @@ export async function shrinkRemoteCompactionRequestForContextWindow(
     let rewrittenToolOutputs = preflight?.rewrittenToolOutputs ?? 0;
     let estimatedTokensAfter = preflight?.estimatedTokensAfter ?? estimatedTokensBefore;
     const promptInput = request.input.filter((item) => item.type !== "compaction_trigger");
+
     if (budgetTokens === undefined || estimatedTokensAfter <= budgetTokens) {
         return {
             kind: "ok",
@@ -277,9 +288,11 @@ export async function shrinkRemoteCompactionRequestForContextWindow(
     for (let index = 0; index < input.length && estimatedTokensAfter > budgetTokens; index += 1) {
         const item = input[index];
         if (!item || !isRewritableToolOutputItem(item)) continue;
+
         const rewrittenItem = rewriteToolOutputItem(item);
         input[index] = rewrittenItem;
         rewrittenToolOutputs += 1;
+
         const [beforeTokens, afterTokens] = await Promise.all([
             estimateResponsesInputItemTokens(item, cache, options),
             estimateResponsesInputItemTokens(rewrittenItem, cache, options),
@@ -298,6 +311,7 @@ export async function shrinkRemoteCompactionRequestForContextWindow(
     }
 
     const shrunkRequest = { ...request, input };
+
     return {
         kind: "ok",
         request: shrunkRequest,
@@ -334,6 +348,7 @@ export async function buildRemoteCompactionV2Window(
 
 function isRetainedRemoteCompactionMessage(item: ResponsesInputItem): boolean {
     if (item.role !== "user") return false;
+
     const text = textFromResponsesContent(item.content).trim();
     if (text.includes(NATIVE_COMPACTION_SHIM_SUMMARY)) return false;
     if (/^<environment_context>[\s\S]*<\/environment_context>$/i.test(text)) return false;
@@ -353,8 +368,10 @@ async function truncateRetainedMessages(
     const retainedReversed: ResponsesInputItem[] = [];
     for (let index = items.length - 1; index >= 0; index -= 1) {
         if (remaining <= 0) continue;
+
         const item = items[index];
         if (item === undefined) continue;
+
         const imageBudgetItem = imageBudgetItems[index] ?? item;
         const tokenCount = Math.max(
             1,
@@ -377,9 +394,11 @@ async function truncateRetainedMessages(
                         : truncated,
                 );
             }
+
             remaining = 0;
         }
     }
+
     return retainedReversed.reverse();
 }
 
@@ -393,10 +412,12 @@ async function messageTextTokenCount(
         const text = JsonStringDecoder.decode(content);
         return text === undefined ? 0 : estimateTextTokens(text, cache, options);
     }
+
     let tokenCount = 0;
     for (const part of content) {
         tokenCount += await retainedContentPartTokenCount(part, cache, options);
     }
+
     return tokenCount;
 }
 
@@ -415,6 +436,7 @@ async function retainedContentPartTokenCount(
 function inputImageTokenCount(part: ResponsesInputItem): number {
     const imageUrl = StringValueSchema.decode(part.image_url);
     if (part.detail !== "original" || !imageUrl) return RESIZED_IMAGE_TOKEN_ESTIMATE;
+
     const dataUrl = parseBase64ImageDataUrl(imageUrl);
     if (!dataUrl) return RESIZED_IMAGE_TOKEN_ESTIMATE;
     try {
@@ -446,6 +468,7 @@ async function truncateMessageTextToTokenBudget(
     options: TokenWorkOptions,
 ): Promise<ResponsesInputItem | undefined> {
     if (maxTokens <= 0) return undefined;
+
     const cloned = structuredClone(item);
     const content = cloned.content;
     const textContent = JsonStringDecoder.decode(content);
@@ -453,6 +476,7 @@ async function truncateMessageTextToTokenBudget(
         const text = await options.tokenizer.truncate(textContent, maxTokens, options);
         return text.length > 0 ? { ...cloned, content: text } : undefined;
     }
+
     if (!isJsonArray(content)) return cloned;
 
     let remaining = maxTokens;
@@ -460,6 +484,7 @@ async function truncateMessageTextToTokenBudget(
     for (let index = content.length - 1; index >= 0; index -= 1) {
         const part = content[index];
         if (part === undefined) continue;
+
         const object = JsonObjectDecoder.decode(part);
         if (object?.type === "input_image") {
             const tokenCount = inputImageTokenCount(object);
@@ -472,7 +497,9 @@ async function truncateMessageTextToTokenBudget(
             }
             continue;
         }
+
         if (remaining <= 0) continue;
+
         const partText = JsonStringDecoder.decode(object?.text);
         if (partText !== undefined) {
             const tokenCount = await estimateTextTokens(partText, cache, options);
@@ -480,10 +507,13 @@ async function truncateMessageTextToTokenBudget(
                 tokenCount <= remaining
                     ? partText
                     : await options.tokenizer.truncate(partText, remaining, options);
+
             remaining -= Math.min(tokenCount, remaining);
+
             if (text.length > 0 && object !== undefined) retainedReversed.push({ ...object, text });
             continue;
         }
+
         const tokenCount = await estimateTokenCount(part, cache, options);
         if (tokenCount <= remaining) {
             retainedReversed.push(part);
@@ -492,8 +522,11 @@ async function truncateMessageTextToTokenBudget(
             remaining = 0;
         }
     }
+
     if (retainedReversed.length === 0) return undefined;
+
     retainedReversed.reverse();
+
     return { ...cloned, content: retainedReversed };
 }
 
@@ -524,6 +557,7 @@ export function buildReasoning(
     if (profile?.useResponsesLite) {
         return { reasoning: effort ? { effort, context: "all_turns" } : { context: "all_turns" } };
     }
+
     return { reasoning: effort ? { effort, summary: "auto" } : { summary: "auto" } };
 }
 
@@ -549,11 +583,13 @@ function stripResponsesLiteJsonObject(value: JsonObject): JsonObject {
         if (value.type === "input_image" && key === "detail") continue;
         rewritten[key] = stripResponsesLiteJsonValue(item);
     }
+
     return rewritten;
 }
 
 function stripResponsesLiteJsonValue(value: JsonValue | undefined): JsonValue | undefined {
     if (isJsonArray(value)) return value.map((item) => stripResponsesLiteJsonValue(item) ?? null);
+
     const object = JsonObjectDecoder.decode(value);
     if (object !== undefined) return stripResponsesLiteJsonObject(object);
     return value;
@@ -593,18 +629,19 @@ export function createTokenEstimateCache(): TokenEstimateCache {
     return { objectTokens: new WeakMap(), textTokens: new Map() };
 }
 
-function estimateTokenCount(
+async function estimateTokenCount(
     value: JsonValue,
     cache: TokenEstimateCache | undefined,
     options: TokenWorkOptions,
 ): Promise<number> {
     const object = JsonObjectDecoder.decode(value) ?? (Array.isArray(value) ? value : undefined);
     if (cache && object !== undefined) {
-        return cachedObjectTokenCount(object, cache, () => {
+        return cachedObjectTokenCount(object, cache, async () => {
             const serialized = JSON.stringify(sanitizeForTokenEstimate(value)) ?? "";
             return estimateTextTokens(serialized, cache, options);
         });
     }
+
     const serialized =
         JsonStringDecoder.decode(value) ?? JSON.stringify(sanitizeForTokenEstimate(value)) ?? "";
     return estimateTextTokens(serialized, cache, options);
@@ -623,6 +660,7 @@ async function estimateRemoteCompactionRequestTokens(
     for (const item of request.input) {
         total += await estimateResponsesInputItemTokens(item, cache, options);
     }
+
     return total;
 }
 
@@ -648,6 +686,7 @@ function* responsesInputItemTokenParts(item: ResponsesInputItem): Generator<stri
         yield output;
         return;
     }
+
     yield JSON.stringify(sanitizeForTokenEstimate(item)) ?? "";
 }
 
@@ -655,17 +694,22 @@ function nestedInputImageTokenCount(value: JsonValue | undefined): number {
     if (isJsonArray(value)) {
         let total = 0;
         for (const nested of value) total += nestedInputImageTokenCount(nested);
+
         return total;
     }
+
     const object = JsonObjectDecoder.decode(value);
     if (object === undefined) return 0;
+
     let total = object.type === "input_image" ? inputImageTokenCount(object) : 0;
     for (const nested of Object.values(object)) total += nestedInputImageTokenCount(nested);
+
     return total;
 }
 
 function sanitizeForTokenEstimate(value: JsonValue): JsonValue {
     if (Array.isArray(value)) return value.map(sanitizeForTokenEstimate);
+
     const object = JsonObjectDecoder.decode(value);
     if (object === undefined) return value;
 
@@ -677,6 +721,7 @@ function sanitizeForTokenEstimate(value: JsonValue): JsonValue {
                 ? INLINE_IMAGE_TOKEN_ESTIMATE_TEXT
                 : sanitizeForTokenEstimate(nested);
     }
+
     return next;
 }
 
@@ -693,15 +738,19 @@ async function estimateTokenParts(
                 total += await estimateTextTokens(chunk, cache, options);
                 chunk = "";
             }
+
             total += await estimateTextTokens(part, cache, options);
             continue;
         }
+
         if (chunk.length + part.length > TOKEN_ESTIMATE_CHUNK_CHARS) {
             total += await estimateTextTokens(chunk, cache, options);
             chunk = "";
         }
+
         chunk += part;
     }
+
     return chunk.length > 0 ? total + (await estimateTextTokens(chunk, cache, options)) : total;
 }
 
@@ -712,8 +761,10 @@ async function cachedObjectTokenCount<Value extends object>(
 ): Promise<number> {
     const cached = cache.objectTokens.get(value);
     if (cached !== undefined) return cached;
+
     const count = await compute();
     cache.objectTokens.set(value, count);
+
     return count;
 }
 
@@ -723,12 +774,16 @@ async function estimateTextTokens(
     options: TokenWorkOptions,
 ): Promise<number> {
     options.signal?.throwIfAborted();
+
     if (!cache || text.length > TOKEN_ESTIMATE_CACHE_TEXT_MAX_CHARS) {
         return options.tokenizer.count(text, options);
     }
+
     const cached = cache.textTokens.get(text);
     if (cached !== undefined) return cached;
+
     const count = await options.tokenizer.count(text, options);
     cache.textTokens.set(text, count);
+
     return count;
 }

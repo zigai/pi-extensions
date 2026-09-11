@@ -24,16 +24,22 @@ type HarnessInputEvent = {
     readonly images?: readonly JsonValue[];
     readonly streamingBehavior?: "steer" | "followUp" | undefined;
 };
+
 type HarnessMessageEndEvent = { readonly type: "message_end"; readonly message: JsonValue };
+
 type HarnessAgentEndEvent = {
     readonly type: "agent_end";
     readonly messages: readonly JsonValue[];
 };
+
 type HarnessModelSelectEvent = { readonly type: "model_select" };
+
 type HarnessLifecycleEvent = {
     readonly type: "agent_settled" | "session_compact" | "session_start";
 };
+
 type HarnessShutdownEvent = { readonly type: "session_shutdown"; readonly reason: string };
+
 type HarnessBeforeCompactEvent = {
     readonly type: "session_before_compact";
     readonly reason: string;
@@ -61,15 +67,19 @@ type ExtensionEventHandler = (
     event: ExtensionHarnessEvent,
     ctx: ExtensionContext,
 ) => ExtensionHarnessResult | Promise<ExtensionHarnessResult>;
+
 type MessageComponent = {
     readonly render: (width: number) => string[];
     readonly invalidate: () => void;
 };
+
 type HarnessRenderOptions = {
     readonly expanded?: boolean;
     readonly outputPad?: number;
 };
+
 type HarnessMessage = { readonly content?: JsonValue };
+
 type MessageRenderer = (
     message: HarnessMessage,
     options: HarnessRenderOptions,
@@ -80,38 +90,48 @@ type ExtensionHarness = {
     readonly api: ExtensionAPI;
     readonly events: EventBus;
     readonly activeTools: readonly string[];
+
     readonly appendedEntries: readonly {
         readonly customType: string;
         readonly data: JsonValue;
     }[];
+
     readonly sentUserMessages: readonly JsonValue[];
     readonly startSession: (ctx: ExtensionContext) => Promise<void>;
     readonly selectModel: (ctx: ExtensionContext) => Promise<void>;
+
     readonly submitInput: (
         event: HarnessInputEvent,
         ctx: ExtensionContext,
     ) => Promise<Readonly<Record<string, JsonValue | undefined>> | undefined>;
+
     readonly endMessage: (message: JsonValue, ctx: ExtensionContext) => Promise<void>;
     readonly endAgent: (messages: readonly JsonValue[], ctx: ExtensionContext) => Promise<void>;
     readonly settleAgent: (ctx: ExtensionContext) => Promise<void>;
     readonly shutdownSession: (reason: string, ctx: ExtensionContext) => Promise<void>;
+
     readonly renderMessage: (
         type: string,
         message: Parameters<MessageRenderer>[0],
         options?: Parameters<MessageRenderer>[1],
     ) => MessageComponent;
+
     readonly prepareProviderHeaders: (
         headers: Record<string, string | null>,
         ctx: ExtensionContext,
     ) => Promise<void>;
+
     readonly rewriteProviderRequest: <Payload>(
         payload: Payload,
         ctx: ExtensionContext,
     ) => Promise<(Payload & Readonly<Record<string, JsonValue | undefined>>) | undefined>;
+
     readonly beginCompaction: (
         ctx: ExtensionContext,
     ) => Promise<Readonly<Record<string, JsonValue | undefined>> | undefined>;
+
     readonly finishCompaction: (ctx: ExtensionContext) => Promise<void>;
+
     readonly prepareSystemPrompt: (
         systemPrompt: string,
         options: BuildSystemPromptOptions,
@@ -141,6 +161,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         },
         on(eventName: string, handler: ExtensionEventHandler) {
             handlers.set(eventName, handler);
+
             if (eventName === "session_start") sessionStart = handler;
             if (eventName === "before_provider_headers") beforeProviderHeaders = handler;
             if (eventName === "before_provider_request") beforeProviderRequest = handler;
@@ -160,6 +181,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
         },
         getAllTools: () => [],
     };
+
     return {
         api: testDouble<ExtensionAPI>()(api),
         events,
@@ -215,6 +237,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             ctx: ExtensionContext,
         ): Promise<(Payload & Readonly<Record<string, JsonValue | undefined>>) | undefined> {
             assert.ok(beforeProviderRequest);
+
             const result = await beforeProviderRequest(
                 { type: "before_provider_request", payload },
                 ctx,
@@ -230,6 +253,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             ctx: ExtensionContext,
         ): Promise<Readonly<Record<string, JsonValue | undefined>> | undefined> {
             assert.ok(sessionBeforeCompact);
+
             const result = await sessionBeforeCompact(
                 {
                     type: "session_before_compact",
@@ -260,6 +284,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
                 },
                 ctx,
             );
+
             return JsonObjectDecoder.decode(result);
         },
         async finishCompaction(ctx: ExtensionContext): Promise<void> {
@@ -272,6 +297,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             ctx: ExtensionContext,
         ): Promise<string> {
             assert.ok(beforeAgentStart);
+
             const result = await beforeAgentStart(
                 {
                     type: "before_agent_start",
@@ -286,6 +312,7 @@ export function makeExtensionHarness(initialActiveTools: readonly string[] = [])
             if (preparedPrompt === undefined) {
                 assert.fail("before_agent_start did not return a system prompt");
             }
+
             return preparedPrompt;
         },
     };
@@ -329,6 +356,7 @@ export function makeExtensionContext(
         getSessionId: () => "extension-session",
         getBranch: () => [],
     };
+
     const ctx = options.agentActive
         ? {
               cwd,
@@ -339,6 +367,7 @@ export function makeExtensionContext(
               sessionManager,
           }
         : { cwd, hasUI: false, isProjectTrusted: () => trusted, model, sessionManager };
+
     return testDouble<ExtensionContext>()(ctx);
 }
 
@@ -357,6 +386,7 @@ export function makeTestRuntime(
         scheduler: {
             set(_delayMs, task) {
                 const timer = setTimeout(task, 0);
+
                 return { cancel: () => clearTimeout(timer) } satisfies ScheduledTask;
             },
         },
@@ -433,6 +463,7 @@ function makeTestTheme(): Theme {
         getThinkingBorderColor: () => (text: string) => text,
         getBashModeBorderColor: () => (text: string) => text,
     };
+
     return testDouble<Theme>()(theme);
 }
 

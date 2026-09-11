@@ -12,6 +12,7 @@ for (const abort of [false, true]) {
             set(delay, task) {
                 assert.equal(delay, 123);
                 fire = task;
+
                 return {
                     cancel: () => {
                         cancellations += 1;
@@ -29,6 +30,7 @@ for (const abort of [false, true]) {
             fire();
             await wait;
         }
+
         assert.equal(cancellations, 1);
         assert.equal(getEventListeners(controller.signal, "abort").length, 0);
         fire();
@@ -44,6 +46,7 @@ test("synchronously firing schedulers still dispose their returned task", async 
         {
             set(_delay, task) {
                 task();
+
                 return {
                     cancel: () => {
                         cancellations += 1;

@@ -6,7 +6,6 @@ import { NATIVE_COMPACTION_STRATEGY } from "./messages.ts";
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
 export type JsonObject = { readonly [key: string]: JsonValue | undefined };
-
 export type ResponsesInputItem = JsonObject;
 
 export type CompactionTextBlock = {
@@ -64,7 +63,6 @@ export type CompactionMessage =
 
 /** Provider-serialized Responses tool definition, retained without schema rewriting. */
 export type ResponsesTool = JsonObject;
-
 export type ProviderRequestLayout = "responses" | "responses-lite";
 
 /** Static, cache-shaping fields captured from a real provider request. */

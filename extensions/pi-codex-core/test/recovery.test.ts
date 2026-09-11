@@ -31,9 +31,7 @@ test("batches held follow-ups into one request after a successful turn", () => {
     fixture.coordinator.queueFollowUp(fixture.api, fixture.ctx, "Second constraint");
     fixture.coordinator.queueFollowUp(fixture.api, fixture.ctx, "Third constraint");
     fixture.coordinator.observeAssistant(successMessage());
-
     fixture.coordinator.settle(fixture.api, fixture.ctx);
-
     assert.deepEqual(fixture.scheduler.delays, [0]);
     fixture.scheduler.runNext();
     assert.equal(fixture.sent.length, 1);
@@ -46,9 +44,7 @@ test("resumes an interrupted Codex turn after a bounded outage cooldown", () => 
     fixture.coordinator.start(fixture.api, fixture.ctx);
     fixture.coordinator.queueFollowUp(fixture.api, fixture.ctx, "Keep edits out of src/cli.ts");
     fixture.coordinator.observeAssistant(errorMessage("WebSocket error"));
-
     fixture.coordinator.settle(fixture.api, fixture.ctx);
-
     assert.deepEqual(fixture.scheduler.delays, [30_000]);
     assert.match(fixture.notifications.at(-1)?.message ?? "", /recovery 1\/3/);
     fixture.scheduler.runNext();
@@ -67,9 +63,7 @@ test("stops automatic recovery after the configured extension retry budget", () 
     fixture.coordinator.settle(fixture.api, fixture.ctx);
     fixture.scheduler.runNext();
     fixture.coordinator.observeAssistant(errorMessage("server overloaded"));
-
     fixture.coordinator.settle(fixture.api, fixture.ctx);
-
     assert.deepEqual(fixture.scheduler.delays, [30_000]);
     assert.equal(fixture.sent.length, 1);
     assert.match(fixture.notifications.at(-1)?.message ?? "", /stopped after 1 attempt/);
@@ -84,7 +78,6 @@ test("does not inject recovery into a new active turn", () => {
     fixture.setIdle(false);
 
     fixture.scheduler.runNext();
-
     assert.deepEqual(fixture.sent, []);
     fixture.setIdle(true);
     fixture.coordinator.observeAssistant(successMessage());
@@ -126,6 +119,7 @@ function makeRecoveryFixture(config: CodexCoreConfig = DEFAULT_CODEX_CORE_CONFIG
     const entries: SessionEntry[] = [];
     const notifications: Array<{ readonly message: string; readonly type: string }> = [];
     let idle = true;
+
     const api = {
         appendEntry<Data>(customType: string, data: Data) {
             entries.push({
@@ -151,6 +145,7 @@ function makeRecoveryFixture(config: CodexCoreConfig = DEFAULT_CODEX_CORE_CONFIG
         isIdle: () => idle,
         sessionManager: { getBranch: () => entries },
     };
+
     return {
         coordinator: new CodexRecoveryCoordinator({
             getConfig: () => config,
@@ -177,9 +172,11 @@ class TestScheduler implements Scheduler {
         this.delays.push(delayMs);
         const scheduled = { cancelled: false, run: task };
         this.tasks.push(scheduled);
+
         return {
             cancel: () => {
                 if (scheduled.cancelled) return;
+
                 scheduled.cancelled = true;
                 this.cancelled += 1;
             },
@@ -227,5 +224,6 @@ function assistantMessage(
         timestamp: 0,
     };
     if (errorMessage !== undefined) message.errorMessage = errorMessage;
+
     return message;
 }

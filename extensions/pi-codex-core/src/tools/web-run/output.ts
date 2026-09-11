@@ -64,6 +64,7 @@ function parseWebRunSection(section: string): ParsedWebRunSource | undefined {
     const metadata = parseMetadata(lines);
     const snippets = parseSnippets(lines);
     if (!url && snippets.length === 0 && title.length < 10) return undefined;
+
     return { title: title || "Web result", url, metadata, snippets };
 }
 
@@ -75,22 +76,28 @@ function formatSources(
         `web_run results (${sources.length} source${sources.length === 1 ? "" : "s"}, compact view)`,
     ];
     if (fullOutputPath) lines.push(`Full raw Codex search output: ${fullOutputPath}`);
+
     lines.push(
         "Codex citation markers were removed; cite the URLs shown below, not turn/view markers.",
     );
+
     sources.forEach((source, index) => {
         lines.push("");
         lines.push(`${index + 1}. ${source.title}`);
+
         if (source.url) lines.push(`   URL: ${source.url}`);
         if (source.metadata) lines.push(`   ${source.metadata}`);
+
         if (source.snippets.length > 0) {
             lines.push("   Key lines:");
+
             for (const snippet of source.snippets) {
                 const prefix = snippet.line === undefined ? "-" : `L${snippet.line}:`;
                 lines.push(`   ${prefix} ${snippet.text}`);
             }
         }
     });
+
     return lines;
 }
 
@@ -107,6 +114,7 @@ function formatPlainText(rawOutput: string, fullOutputPath: string | undefined):
 
 function truncateCompactOutput(text: string, fullOutputPath: string | undefined): string {
     if (text.length <= MAX_COMPACT_OUTPUT_CHARS) return text;
+
     const suffix = fullOutputPath
         ? `\n[web_run compact output truncated after ${MAX_COMPACT_OUTPUT_CHARS} characters. Full raw output saved to ${fullOutputPath}.]`
         : `\n[web_run compact output truncated after ${MAX_COMPACT_OUTPUT_CHARS} characters.]`;
@@ -126,6 +134,7 @@ function firstUrl(lines: readonly string[]): string | undefined {
         const match = URL_PATTERN.exec(line);
         if (match) return match[0];
     }
+
     return undefined;
 }
 
@@ -133,6 +142,7 @@ function parseTitle(lines: readonly string[], url: string | undefined): string {
     const firstContentLine = lines.find((line) => !isMetadataLine(line));
     if (!firstContentLine) return "";
     if (!url) return stripLineNoise(firstContentLine);
+
     const withoutUrl = firstContentLine
         .replace(`(${url})`, "")
         .replace(url, "")
@@ -144,11 +154,13 @@ function parseTitle(lines: readonly string[], url: string | undefined): string {
 function parseMetadata(lines: readonly string[]): string | undefined {
     const line = lines.find(isMetadataLine);
     if (!line) return undefined;
+
     const parts = [
         parseMetadataPart(line, /Content type:\s*([^;]+)/),
         parseMetadataPart(line, /Source:\s*([^;]+)/),
         parseMetadataPart(line, /Total lines:\s*(\d+)/, (value) => `${value} lines`),
     ].filter((part): part is string => part !== undefined);
+
     return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
@@ -167,20 +179,26 @@ function parseSnippets(lines: readonly string[]): WebRunSnippet[] {
     for (const line of lines) {
         const match = /^L(\d+):\s*(.*)$/.exec(line);
         if (!match) continue;
+
         const text = stripLineNoise(match[2] ?? "");
         if (!isUsefulSnippet(text)) continue;
         snippets.push({ line: Number(match[1]), text });
+
         if (snippets.length >= MAX_SNIPPETS_PER_SOURCE) break;
     }
+
     if (snippets.length > 0) return snippets;
 
     for (const line of lines) {
         if (isMetadataLine(line) || URL_PATTERN.test(line)) continue;
+
         const text = stripLineNoise(line);
         if (!isUsefulSnippet(text)) continue;
         snippets.push({ text });
+
         if (snippets.length >= 3) break;
     }
+
     return snippets;
 }
 
@@ -200,9 +218,11 @@ function isMetadataLine(line: string): boolean {
 
 function isUsefulSnippet(text: string): boolean {
     if (text.length < 18) return false;
+
     if (/^(search|menu|skip to|share:|email|sms|facebook|twitter|linkedin|bluesky)$/i.test(text)) {
         return false;
     }
+
     if (/^image:/i.test(text)) return false;
     if (/^add .* on google/i.test(text)) return false;
     return true;

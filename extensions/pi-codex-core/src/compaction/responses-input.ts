@@ -85,6 +85,7 @@ export function buildRemoteCompactionPromptInput(
     if (event.preparation.previousSummary) {
         messages.push(compactionSummaryMessage(event.preparation.previousSummary));
     }
+
     for (const rawMessage of [
         ...event.preparation.messagesToSummarize,
         ...event.preparation.turnPrefixMessages,
@@ -105,6 +106,7 @@ export function buildRemoteCompactionPromptInput(
             messages.push(message);
         }
     }
+
     return { input: serializeMessagesToResponsesInput(model, messages) };
 }
 
@@ -141,6 +143,7 @@ function serializeMessagesToResponsesInput(
 
     const insertSyntheticToolResults = () => {
         if (pendingToolCalls.length === 0) return;
+
         for (const toolCall of pendingToolCalls) {
             const id = StringValidator.decode(toolCall.call_id);
             if (id && !existingToolResultIds.has(id)) {
@@ -151,6 +154,7 @@ function serializeMessagesToResponsesInput(
                 });
             }
         }
+
         pendingToolCalls = [];
         existingToolResultIds = new Set();
     };
@@ -159,26 +163,31 @@ function serializeMessagesToResponsesInput(
         const message = transformMessageForResponses(model, rawMessage, toolCallIdMap);
         if (message.role === "assistant") {
             insertSyntheticToolResults();
+
             if (message.stopReason === "error" || message.stopReason === "aborted") continue;
             pendingToolCalls = toolCallsFromContent(message.content);
             serializeNormalizedMessage(message);
             continue;
         }
+
         if (message.role === "toolResult") {
             const callId = responseCallIdFromToolCallId(message.toolCallId);
             if (callId) existingToolResultIds.add(callId);
             serializeNormalizedMessage(message);
             continue;
         }
+
         if (message.role === "user") {
             insertSyntheticToolResults();
             serializeNormalizedMessage(message);
             continue;
         }
+
         serializeNormalizedMessage(message);
     }
 
     insertSyntheticToolResults();
+
     return input;
 }
 
@@ -192,6 +201,7 @@ function transformMessageForResponses(
             message.toolCallId === undefined ? undefined : toolCallIdMap.get(message.toolCallId);
         return mapped ? { ...message, toolCallId: mapped } : message;
     }
+
     if (message.role !== "assistant") return message;
 
     const isSameModel =
@@ -207,21 +217,26 @@ function transformMessageForResponses(
                 ? [{ type: "text", text: block.thinking }]
                 : [];
         }
+
         if (block.type === "toolCall") {
             const normalizedId = normalizeResponsesToolCallId(block.id, Boolean(isSameModel));
             if (normalizedId !== block.id) toolCallIdMap.set(block.id, normalizedId);
             return [{ ...block, id: normalizedId }];
         }
+
         return [block];
     });
+
     return { ...message, content };
 }
 
 function compactionMessageFromSessionEntry(entry: SessionEntry): CompactionMessage | undefined {
     if (entry.type === "message") return parseCompactionMessage(entry.message);
+
     if (entry.type === "custom_message") {
         return parseCompactionMessage({ role: "user", content: entry.content });
     }
+
     if (entry.type === "branch_summary") {
         return {
             role: "user",
@@ -233,9 +248,11 @@ function compactionMessageFromSessionEntry(entry: SessionEntry): CompactionMessa
             ],
         };
     }
+
     if (entry.type === "compaction") {
         return compactionSummaryMessage(entry.summary);
     }
+
     return undefined;
 }
 
@@ -254,13 +271,16 @@ function compactionSummaryMessage(summary: string): CompactionMessage {
 function parseCompactionMessage(value: unknown): CompactionMessage | undefined {
     const message = parseJsonObject(value);
     if (message === undefined) return undefined;
+
     if (message.role === "user") {
         const content = parseCompactionMessageContent(message.content);
         return content === undefined ? undefined : { role: "user", content };
     }
+
     if (message.role === "assistant") {
         const content = parseCompactionContentBlocks(message.content);
         if (!content) return undefined;
+
         return {
             role: "assistant",
             content,
@@ -270,15 +290,18 @@ function parseCompactionMessage(value: unknown): CompactionMessage | undefined {
             stopReason: parseOptionalString(message.stopReason),
         };
     }
+
     if (message.role === "toolResult") {
         const content = parseCompactionContentBlocks(message.content);
         if (!content) return undefined;
+
         return {
             role: "toolResult",
             toolCallId: parseOptionalString(message.toolCallId),
             content,
         };
     }
+
     return undefined;
 }
 
@@ -295,24 +318,29 @@ function parseCompactionContentBlocks(
 ): readonly CompactionContentBlock[] | undefined {
     const values = UnknownArrayValidator.decode(value);
     if (values === undefined) return undefined;
+
     const content: CompactionContentBlock[] = [];
     for (const item of values) {
         const block = parseCompactionContentBlock(item);
         if (block) content.push(block);
     }
+
     return content;
 }
 
 function parseCompactionContentBlock(value: unknown): CompactionContentBlock | undefined {
     const block = parseJsonObject(value);
     if (block === undefined) return undefined;
+
     const text = StringValidator.decode(block.text);
     if (block.type === "text" && text !== undefined) return { type: "text", text };
+
     const data = StringValidator.decode(block.data);
     const mimeType = StringValidator.decode(block.mimeType);
     if (block.type === "image" && data !== undefined && mimeType !== undefined) {
         return { type: "image", data, mimeType, detail: imageDetailForResponses(block.detail) };
     }
+
     if (block.type === "thinking") {
         return {
             type: "thinking",
@@ -321,11 +349,13 @@ function parseCompactionContentBlock(value: unknown): CompactionContentBlock | u
             redacted: block.redacted === true ? true : undefined,
         };
     }
+
     const id = StringValidator.decode(block.id);
     const name = StringValidator.decode(block.name);
     if (block.type === "toolCall" && id !== undefined && name !== undefined) {
         return { type: "toolCall", id, name, arguments: parseJsonObject(block.arguments) };
     }
+
     return undefined;
 }
 
@@ -338,6 +368,7 @@ function serializeMessage(
         const content = inputContentFromContent(message.content, model);
         return content.length > 0 ? [{ role: "user", content }] : [];
     }
+
     if (message.role === "assistant") {
         const items: ResponsesInputItem[] = [];
         const text = textFromContent(message.content);
@@ -350,12 +381,15 @@ function serializeMessage(
                 id: `msg_pi_compact_${messageIndex}`,
             });
         }
+
         for (const toolCall of toolCallsFromContent(message.content)) items.push(toolCall);
         return items;
     }
+
     if (message.role === "toolResult") {
         const callId = responseCallIdFromToolCallId(message.toolCallId);
         if (!callId) return [];
+
         return [
             {
                 type: "function_call_output",
@@ -364,6 +398,7 @@ function serializeMessage(
             },
         ];
     }
+
     return [];
 }
 
@@ -375,6 +410,7 @@ function inputContentFromContent(
         if (item.type === "text") {
             return [{ type: "input_text", text: sanitizeSurrogates(item.text) }];
         }
+
         if (item.type === "image" && modelSupportsImages(model)) {
             return [
                 {
@@ -384,9 +420,11 @@ function inputContentFromContent(
                 },
             ];
         }
+
         if (item.type === "image") {
             return [{ type: "input_text", text: "(image omitted: model does not support images)" }];
         }
+
         return [];
     });
 }
@@ -398,6 +436,7 @@ function toolResultOutputFromContent(
     const text = content.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n");
     const images = content.flatMap((item): ResponsesInputItem[] => {
         if (item.type !== "image") return [];
+
         return [
             {
                 type: "input_image",
@@ -414,6 +453,7 @@ function toolResultOutputFromContent(
             ...images,
         ];
     }
+
     if (text.trim().length > 0) return sanitizeSurrogates(text);
     return images.length > 0 ? "(see attached image)" : "(no output)";
 }
@@ -429,9 +469,13 @@ function textFromContent(content: CompactionMessageContent): string | undefined 
 function toolCallsFromContent(content: readonly CompactionContentBlock[]): ResponsesInputItem[] {
     return content.flatMap((item) => {
         if (item.type !== "toolCall") return [];
+
         const [callId, itemId] = splitResponseToolCallId(item.id);
+
         if (!callId) return [];
+
         const argumentsText = JSON.stringify(item.arguments ?? {});
+
         return itemId
             ? [
                   {
@@ -460,12 +504,15 @@ export function parseResponsesPayload(value: unknown): ResponsesPayload | undefi
 export function parseResponsesInputItems(value: unknown): ResponsesInputItem[] | undefined {
     const rawItems = UnknownArrayValidator.decode(value);
     if (rawItems === undefined) return undefined;
+
     const items: ResponsesInputItem[] = [];
     for (const item of rawItems) {
         const inputItem = parseJsonObject(item);
         if (!inputItem) return undefined;
+
         items.push(inputItem);
     }
+
     return items;
 }
 
@@ -527,6 +574,7 @@ function normalizeResponsesToolCallId(id: string, isSameModel: boolean): string 
     const [callId, itemId] = splitResponseToolCallId(id);
     const normalizedCallId = normalizeResponseIdPart(callId ?? id);
     if (!itemId) return normalizedCallId;
+
     const normalizedItemId = normalizeResponseIdPart(
         isSameModel ? itemId : `fc_${shortHash(itemId)}`,
     );
@@ -557,6 +605,7 @@ function shortHash(value: string): string {
         hash ^= char.charCodeAt(0);
         hash = Math.imul(hash, 16_777_619);
     }
+
     const unsignedHash = hash < 0 ? hash + 4_294_967_296 : hash;
     return Math.trunc(unsignedHash).toString(16);
 }

@@ -25,8 +25,10 @@ export async function fetchTextWithRetries(
         try {
             const requestInit: RequestInit = { ...init };
             if (signal !== undefined) requestInit.signal = signal;
+
             const response = await runtime.fetch(input, requestInit);
             const text = await response.text();
+
             if ((response.status === 429 || response.status >= 500) && attempt + 1 < attempts) {
                 await waitWithScheduler(runtime.scheduler, initialDelayMs * 2 ** attempt, {
                     signal,
@@ -34,16 +36,19 @@ export async function fetchTextWithRetries(
                 });
                 continue;
             }
+
             return { response, text };
         } catch (cause: unknown) {
             if (signal?.aborted) throw asError(cause);
             if (attempt + 1 >= attempts) throw asError(cause);
+
             await waitWithScheduler(runtime.scheduler, initialDelayMs * 2 ** attempt, {
                 signal,
                 preservePreAbortReason: true,
             });
         }
     }
+
     throw new Error("Codex request retry limit exhausted.");
 }
 

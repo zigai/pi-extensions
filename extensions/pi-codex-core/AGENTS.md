@@ -7,8 +7,18 @@
 - Validate changes with `npm run check` before handing off when practical.
 - Keep `apply_patch`, `web_run`, `imagegen`, and `view_image` Glowup protocol adapters with their owning tools in this repository. Preserve native renderers alongside passive adapters, and keep the bundled protocol runtime available so this extension still loads when the Glowup extension itself is absent.
 - Glowup adapters return semantic protocol nodes only; do not import Pi TUI components, Glowup themes, ANSI helpers, or pi-glowup internal modules.
-- Preserve each tool's native Pi renderer alongside its optional `glowupRendering` adapter, and test both paths.
+- Test both native rendering and optional `glowupRendering` paths.
 - Keep `src/settings/integration.ts` wire-compatible with Pi Codex Voice's `src/codex-integration-registry.ts`; this versioned global registry is what lets independently installed Codex extensions share one `/codex` command and settings tabs without package dependencies.
+
+## Settings and Session Lifecycle
+
+Keep the existing `src/config` and `src/settings` architecture, shared `/codex` registry, explicit updates, and reload behavior. Glowup’s dependency does not make this extension a direct settings-library consumer. Keep imports free of settings I/O; preserve the current startup configuration boundary and synchronous resource registration. Load new behavior’s settings only where needed.
+
+Gate feature side effects on their resolved configuration. Cancel/dispose owned async work before clearing session state; use the existing recovery and activation owners. Report configuration failures without raw values or secrets. `pi config` is the zero-load switch, preventing import and registration.
+
+Native renderers receive `ToolRenderContext`, not `ExtensionContext`: return components even for history before activation, using arguments/results and renderer state without settings I/O or retained execution contexts. Keep passive Glowup adapters on their protocol contract. Guard dialogs/notifications with `ctx.hasUI` and terminal UI with `ctx.mode === "tui"`.
+
+Preserve the current configuration owner; these instructions do not require a settings-library migration. If adopting `@zigai/pi-extension-settings` as part of a requested change, follow its `docs/manual-setup.md` and `docs/runtime.md`.
 
 ## Codex Parity Policy
 
@@ -23,17 +33,7 @@
 
 ## User-Facing Configuration Docs
 
-- README and `docs/configuration.md` configuration docs are user-facing: explain available settings and examples, not implementation lifecycle.
-- Add a Configuration section only when the extension has meaningful user-facing settings.
-- README configuration sections must use one short global config path sentence, a compact option table, and one JSON block showing the full scaffolded default config.
-- README and `docs/configuration.md` Configuration/Settings JSON blocks must show the full default config, not partial overrides; do not omit default-valued settings.
-- Include `"$schema"` in JSON examples when the scaffolded default config includes it, but do not explain it in prose.
-- Option tables should list actual user-editable setting keys, preferably dot paths like `tools.webSearch`; avoid vague category rows such as `tools`, `openai`, or `appearance` unless that object is edited as a single meaningful value.
-- If a setting has no default, document it in the option table but do not invent a value for it in JSON.
-- In README configuration sections, mention only the global path `~/.pi/agent/pi-codex-core/config.json`; do not mention trusted project overrides or project-specific config paths.
-- `docs/configuration.md` may include advanced project override details only in a dedicated Advanced section when they are genuinely useful.
-- Do not mention TypeBox, `getAgentDir()`, `CONFIG_DIR_NAME`, schema refresh mechanics, user-owned/extension-owned terminology, or malformed-config overwrite policy in README/config docs.
-- Keep lifecycle implementation policy in `AGENTS.md`, tests, and source code rather than user docs.
+Keep README/configuration docs user-facing, without lifecycle or schema implementation details. Show one global path sentence (`~/.pi/agent/pi-codex-core/config.json`), a compact table of actual editable keys/dot paths, and the complete default JSON, including `$schema` when scaffolded. Do not invent defaults. Put useful project-override details only in a dedicated Advanced section of `docs/configuration.md`, not the README.
 
 ## Pi Extension Configuration
 

@@ -23,6 +23,7 @@ export function rewriteProviderImageDetails(payload: unknown): JsonObject | unde
     const parsedPayload = JsonObjectDecoder.decode(payload);
     const parsedInput = parseResponsesInputItems(parsedPayload?.input);
     if (!parsedPayload || !parsedInput) return undefined;
+
     let changed = false;
     const input = parsedInput.map((item) => {
         const rewritten = rewriteFunctionOutput(item);
@@ -30,6 +31,7 @@ export function rewriteProviderImageDetails(payload: unknown): JsonObject | unde
             changed = true;
             return rewritten;
         }
+
         return item;
     });
     return changed ? { ...parsedPayload, input } : undefined;
@@ -38,10 +40,12 @@ export function rewriteProviderImageDetails(payload: unknown): JsonObject | unde
 function rewriteFunctionOutput(item: ResponsesInputItem): ResponsesInputItem | undefined {
     const output = JsonArrayDecoder.decode(item.output);
     if (item.type !== "function_call_output" || !output) return undefined;
+
     const detail = output.flatMap((part) => {
         const object = JsonObjectDecoder.decode(part);
         const text = JsonStringDecoder.decode(object?.text);
         if (object?.type !== "input_text" || text === undefined) return [];
+
         const parsed = parseImageDetailFromText(text);
         return parsed ? [parsed] : [];
     })[0];
@@ -60,7 +64,9 @@ function rewriteFunctionOutput(item: ResponsesInputItem): ResponsesInputItem | u
                     .trim();
                 return text.length > 0 ? [{ ...object, text }] : [];
             }
+
             if (object?.type === "input_image") return [{ ...object, detail }];
+
             return [part];
         }),
     };
@@ -71,6 +77,7 @@ function parseImageDetailFromText(text: string): ImageDetail | undefined {
         const detail = parseImageDetailMarker(line);
         if (detail) return detail;
     }
+
     return undefined;
 }
 

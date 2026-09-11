@@ -105,7 +105,6 @@ test("renders compact invocation summaries for Codex tools", () => {
     assert.match(renderedImagegenCall, /not truncated early"/);
     assert.doesNotMatch(renderedImagegenCall, /…/);
     assert.match(renderedImagegenCall, /refs=1/);
-
     const viewImageTool = createViewImageTool({ getConfig: () => DEFAULT_CODEX_CORE_CONFIG });
     assert.ok(viewImageTool.renderCall);
     const viewImageArgs = {
@@ -307,6 +306,7 @@ test("reads image dimensions without full-buffer base64 conversion", () => {
             if (encoding === "base64" && start === undefined && end === undefined) {
                 throw new Error("full-buffer base64 conversion attempted");
             }
+
             return originalToString(encoding, start, end);
         },
     });
@@ -372,7 +372,6 @@ test("loads image references with Pi's leading-at path convention", async () => 
 
         const relative = await loadImageContent("@input.png", root);
         const absolute = await loadImageContent(`@${imagePath}`, root);
-
         assert.equal(relative.absolutePath, imagePath);
         assert.equal(absolute.absolutePath, imagePath);
     } finally {
@@ -388,7 +387,6 @@ test("rejects image paths outside the workspace and through symlinks", async () 
         await mkdir(cwd, { recursive: true });
         await writeFile(outside, solidPngBytes(1, 1, [1, 2, 3, 255]));
         await symlink(outside, join(cwd, "escape.png"));
-
         await assert.rejects(loadImageContent(outside, cwd), /outside the workspace/);
         await assert.rejects(loadImageContent("escape.png", cwd), /outside the workspace/);
     } finally {
@@ -591,6 +589,7 @@ test("renders non-inline view_image results without loading a preview file", () 
             mimeType: "image/png",
         },
     };
+
     const state = {};
 
     const rendered = renderComponent(
@@ -658,7 +657,6 @@ test("formats web_run output without Codex citation markers", () => {
 
     const rawOutputPath = "/tmp/pi-agent/pi-codex-core/web-run/session/call.txt";
     const formatted = formatWebRunToolOutput(rawOutput, rawOutputPath);
-
     assert.equal(formatted.sourceCount, 1);
     assert.doesNotMatch(formatted.text, /cite/);
     assert.match(
@@ -697,7 +695,6 @@ test("saves web_run raw output outside workspace", async () => {
             makeWebRunContext(cwd),
         );
         const rawOutputPath = join(agentDir, "pi-codex-core", "web-run", "session_1", "call_1.txt");
-
         assert.ok(isRecord(requestBody));
         assert.deepEqual(requestBody.commands, {
             search_query: [{ q: "Pi docs" }],
@@ -878,7 +875,6 @@ test("imagegen returns model-visible images and saved paths", async () => {
         );
         const imagePath = join(agentDir, "pi-codex-core", "imagegen", "session_1", "call_1.png");
         const latestPath = join(agentDir, "pi-codex-core", "imagegen", "session_1", "latest.png");
-
         assert.equal(result.content.length, 3);
         assert.deepEqual(result.content[0], {
             type: "image",
@@ -898,6 +894,7 @@ test("imagegen returns model-visible images and saved paths", async () => {
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -1195,6 +1192,7 @@ test("imagegen edits recent generated image artifacts from tool details", async 
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -1281,6 +1279,7 @@ test("imagegen edits two distinct recent inline-plus-artifact results in chronol
     } finally {
         if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+
         await rm(root, { recursive: true, force: true });
     }
 });
@@ -1304,7 +1303,6 @@ test("saves generated images outside the workspace", async () => {
         });
         const imagePath = join(agentDir, "pi-codex-core", "imagegen", "session_1", "call_1.png");
         const latestPath = join(agentDir, "pi-codex-core", "imagegen", "session_1", "latest.png");
-
         assert.equal(saved.path, imagePath);
         assert.equal(saved.latestPath, latestPath);
         assert.deepEqual(await readFile(saved.absolutePath), png);
@@ -1479,6 +1477,7 @@ function makeImageContext(cwd: string): ExtensionContext {
             getSessionId: () => "session/1",
         },
     };
+
     return testDouble<ExtensionContext>()(ctx);
 }
 
@@ -1488,6 +1487,7 @@ function makeWebRunContext(
     cwd: string,
     options: {
         readonly model?: NonNullable<ExtensionContext["model"]> | undefined;
+
         readonly findModel?: (
             provider: string,
             modelId: string,
@@ -1521,6 +1521,7 @@ function makeWebRunContext(
             getBranch: () => [],
         },
     };
+
     return testDouble<ExtensionContext>()(ctx);
 }
 
@@ -1536,6 +1537,7 @@ function makeWebRunContextWithBranch(
             getBranch: () => branchEntries,
         },
     };
+
     return testDouble<ExtensionContext>()(ctx);
 }
 
@@ -1552,6 +1554,7 @@ function solidPngBytes(
         row[pixelOffset + 2] = rgba[2];
         row[pixelOffset + 3] = rgba[3];
     }
+
     const raw = Buffer.alloc(row.length * height);
     for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
         row.copy(raw, rowIndex * row.length);
@@ -1580,6 +1583,7 @@ function pngChunk(type: string, data: Buffer): Buffer {
     const typeBytes = Buffer.from(type, "ascii");
     const checksum = Buffer.alloc(4);
     checksum.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])), 0);
+
     return Buffer.concat([length, typeBytes, data, checksum]);
 }
 
@@ -1597,11 +1601,14 @@ function makeCrc32Table(): Uint32Array {
     const table = new Uint32Array(256);
     for (let tableIndex = 0; tableIndex < table.length; tableIndex += 1) {
         let value = tableIndex;
+
         for (let bitIndex = 0; bitIndex < 8; bitIndex += 1) {
             value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
         }
+
         table[tableIndex] = value;
     }
+
     return table;
 }
 
@@ -1610,5 +1617,6 @@ function crc32(bytes: Buffer): number {
     for (const byte of bytes) {
         value = (value >>> 8) ^ (CRC32_TABLE[(value ^ byte) & 0xff] ?? 0);
     }
+
     return Uint32Array.of(value ^ 0xffffffff)[0] ?? 0;
 }

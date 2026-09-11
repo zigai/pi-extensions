@@ -73,12 +73,9 @@ test("Codex tokenizer preserves count and truncation after shutdown", async () =
         tokenizer.warm();
         const countBeforeShutdown = await tokenizer.count(text);
         const truncatedBeforeShutdown = await tokenizer.truncate(text, 3);
-
         await tokenizer.shutdown();
-
         const countAfterShutdown = await tokenizer.count(text);
         const truncatedAfterShutdown = await tokenizer.truncate(text, 3);
-
         assert.ok(countBeforeShutdown > 3);
         assert.equal(countAfterShutdown, countBeforeShutdown);
         assert.equal(truncatedAfterShutdown, truncatedBeforeShutdown);
@@ -106,6 +103,7 @@ test("Codex tokenizer creates real workers and completes requests across shutdow
             worker.on("message", (message: unknown): number =>
                 record.messages.push(JsonObjectDecoder.Parse(message)),
             );
+
             return {
                 on: worker.on.bind(worker),
                 unref: worker.unref.bind(worker),
@@ -162,10 +160,12 @@ test("Codex tokenizer uses exact fallback after controlled worker creation failu
         createWorker(url) {
             attempts += 1;
             if (attempts <= 2) throw new Error("controlled worker creation failure");
+
             const worker = new Worker(url);
             worker.on("message", (message: unknown): number =>
                 recoveredMessages.push(JsonObjectDecoder.Parse(message)),
             );
+
             return {
                 on: worker.on.bind(worker),
                 unref: worker.unref.bind(worker),
@@ -209,7 +209,6 @@ test("Codex tokenizer cancels pending work without affecting later requests", as
         });
         await Promise.resolve();
         controller.abort(new Error("cancel token work"));
-
         await assert.rejects(pending, /cancel token work/);
         assert.ok((await tokenizer.count("later request")) > 0);
     } finally {
@@ -273,6 +272,7 @@ test("creates native compaction using remote compaction v2", async () => {
             'data: {"type":"response.completed","response":{"id":"resp_1","created_at":123}}',
             "",
         ].join("\n");
+
         return new Response(body, { status: 200 });
     });
 
@@ -486,6 +486,7 @@ test("removes response item ids from remote compaction history", async () => {
             { status: 200 },
         );
     });
+
     const branchEntries = [
         messageEntry("entry-1", null, userMessage("inspect ids")),
         messageEntry(
@@ -701,6 +702,7 @@ test("retries transient remote compaction failures", async () => {
         requestBodies.push(init.body);
         decodedRequests.push(decodeRequestBody(init));
         requestHeaders.push(new Headers(init.headers));
+
         if (attempts === 1) return new Response("temporary", { status: 500 });
         return new Response(
             [
@@ -739,12 +741,14 @@ test("retries transient remote compaction failures", async () => {
     assert.equal(requestBodies.length, 2);
     assert.equal(requestBodies.at(0), requestBodies.at(1));
     assert.deepEqual(decodedRequests, [request, request]);
+
     for (const headers of requestHeaders) {
         assert.equal(headers.get("accept"), "text/event-stream");
         assert.equal(headers.get("content-encoding"), "zstd");
         assert.equal(headers.get("content-type"), "application/json");
         assert.equal(headers.get("x-existing-header"), "preserved");
     }
+
     assert.equal(sourceHeaders.get("accept"), null);
     assert.equal(sourceHeaders.get("content-encoding"), null);
     assert.equal(result.value.compactionOutput.encrypted_content, "retried");
@@ -796,11 +800,13 @@ test("times out and retries idle remote compaction streams", async () => {
                     cancellations += 1;
                 },
             });
+
             return new Response(body, { status: 200 });
         }),
         scheduler: {
             set(_delayMs, task) {
                 task();
+
                 return { cancel() {} };
             },
         },
@@ -1127,6 +1133,7 @@ test("uses Pi's active summary boundary instead of superseded raw history", asyn
             { status: 200 },
         );
     });
+
     const branchEntries = [
         messageEntry("superseded", null, userMessage("superseded raw instruction")),
         messageEntry("active-old", "superseded", userMessage("active old context")),
@@ -1596,6 +1603,7 @@ test("Responses Lite preflight charges original images before detail projection"
             ],
         },
     ];
+
     const requestParts = {
         sessionId: "session",
         model: "gpt-5.6-sol",
@@ -1681,6 +1689,7 @@ test("retained native compaction window truncates huge text and preserves its im
 
 test("does not replay a native checkpoint superseded by Pi compaction", async () => {
     const runtime = makeTestRuntime(async () => new Response("limit", { status: 429 }));
+
     const branchEntries = [
         nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
         messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
@@ -1694,6 +1703,7 @@ test("does not replay a native checkpoint superseded by Pi compaction", async ()
             tokensBefore: 100,
         },
     ];
+
     const ctx = makeNativeCompactionContext({ branchEntries });
 
     const result = await handleCodexNativeCompaction(
@@ -1737,10 +1747,12 @@ test("does not replay a native checkpoint superseded by Pi compaction", async ()
 
 test("keeps native fallback replay isolated by session branch", async () => {
     const runtime = makeTestRuntime(async () => new Response("limit", { status: 429 }));
+
     const branchEntries = [
         nativeCompactionEntry({ id: "compact-1", firstKeptEntryId: "entry-old" }),
         messageEntry("entry-tail", "compact-1", userMessage("new live tail")),
     ];
+
     const sessionA = makeNativeCompactionContext({ sessionId: "session-a", branchEntries });
     const sessionB = makeNativeCompactionContext({ sessionId: "session-b" });
     const config = {
@@ -1862,6 +1874,7 @@ test("auto compaction defers until Pi is idle after agent_end", async () => {
         scheduler: {
             set(_delayMs: number, task: () => void): ScheduledTask {
                 scheduledTasks.push(task);
+
                 return { cancel() {} };
             },
         },
@@ -1898,6 +1911,7 @@ test("auto compaction ignores stale session contexts", () => {
         scheduler: {
             set(_delayMs: number, task: () => void): ScheduledTask {
                 scheduledTasks.push(task);
+
                 return { cancel() {} };
             },
         },
@@ -1909,7 +1923,6 @@ test("auto compaction ignores stale session contexts", () => {
 
     assert.equal(scheduleCodexAutoCompaction(fixture.context, config, runtime), true);
     fixture.invalidate();
-
     assert.doesNotThrow(() => scheduledTasks.shift()?.());
     assert.equal(compactCalls.length, 0);
 });
@@ -1961,7 +1974,6 @@ test("auto compaction waits for pending messages to drain", () => {
 
     assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), false);
     assert.equal(compactCalls.length, 0);
-
     pendingMessages.value = false;
     assert.equal(maybeTriggerCodexAutoCompaction(ctx, config), true);
     assert.equal(compactCalls.length, 1);
@@ -2001,6 +2013,7 @@ test("auto compaction skips interrupted assistant turns", async () => {
         scheduler: {
             set(_delayMs: number, task: () => void): ScheduledTask {
                 scheduledTasks.push(task);
+
                 return { cancel() {} };
             },
         },
@@ -2029,6 +2042,7 @@ test("auto compaction skips interrupted assistant turns", async () => {
         }),
         false,
     );
+
     cancelScheduledCodexAutoCompaction();
 });
 
@@ -2218,6 +2232,7 @@ test("rewrites native compaction replay in long payloads", async () => {
             userMessage(`pre kept ${index}`),
         ),
     );
+
     const branchEntries = [
         ...keptEntries,
         nativeCompactionEntry({
@@ -2228,6 +2243,7 @@ test("rewrites native compaction replay in long payloads", async () => {
         }),
         messageEntry("tail", "compact-long", userMessage("post tail")),
     ];
+
     const ctx = makeCompactionContext({ branchEntries });
     const filler = Array.from({ length: 120 }, (_unused, index) => ({
         role: "user",
@@ -2285,6 +2301,7 @@ test("leaves a newer Pi fallback summary authoritative", async () => {
             tokensBefore: 100,
         },
     ];
+
     const ctx = makeCompactionContext({
         branchEntries,
         sessionId: "pi-fallback-barrier-session",
@@ -2447,6 +2464,7 @@ function makeBeforeCompactEvent(
         willRetry: false,
         signal: new AbortController().signal,
     };
+
     return testDouble<SessionBeforeCompactEvent>()(event);
 }
 
@@ -2458,6 +2476,7 @@ function nativeCompactionEntry(options: {
     readonly compHash?: string | undefined;
 }) {
     const worldState = worldStateInput("window: 1");
+
     return {
         type: "compaction",
         id: options.id,
@@ -2546,6 +2565,7 @@ function originalDetailPngDataUrl(width: number, height: number, marker: number)
         pngChunk("IDAT", deflateSync(raw)),
         pngChunk("IEND", Buffer.alloc(0)),
     ]);
+
     return `data:image/png;base64,${bytes.toString("base64")}`;
 }
 
@@ -2555,6 +2575,7 @@ function pngChunk(type: string, data: Buffer): Buffer {
     const typeBytes = Buffer.from(type, "ascii");
     const checksum = Buffer.alloc(4);
     checksum.writeUInt32BE(pngCrc32(Buffer.concat([typeBytes, data])), 0);
+
     return Buffer.concat([length, typeBytes, data, checksum]);
 }
 
@@ -2566,6 +2587,7 @@ function pngCrc32(bytes: Buffer): number {
             value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
         }
     }
+
     return (value ^ 0xffffffff) >>> 0;
 }
 
@@ -2636,6 +2658,7 @@ function makeCompactionApi(): ExtensionAPI {
             },
         ],
     };
+
     return testDouble<ExtensionAPI>()(api);
 }
 
@@ -2683,6 +2706,7 @@ function makeNativeCompactionContext(
         },
         getSystemPrompt: () => "system prompt",
     };
+
     return testDouble<ExtensionContext>()(ctx);
 }
 
@@ -2729,6 +2753,7 @@ function makeAutoCompactionContext(
             getBranch: () => [{ type: "message", id: options.latestEntryId?.() ?? "entry-auto" }],
         },
     };
+
     return testDouble<ExtensionContext>()(ctx);
 }
 
@@ -2739,6 +2764,7 @@ type StaleAutoCompactionFixture = {
 
 function makeStaleAutoCompactionFixture(compactCalls: unknown[]): StaleAutoCompactionFixture {
     let valid = true;
+
     const baseContext = makeAutoCompactionContext(
         compactCalls,
         { value: true },
@@ -2753,6 +2779,7 @@ function makeStaleAutoCompactionFixture(compactCalls: unknown[]): StaleAutoCompa
             return true;
         },
     };
+
     return {
         context,
         invalidate: () => {
@@ -2795,6 +2822,7 @@ function makeCompactionContext(
                 ],
         },
     };
+
     const ctx = options.warnings
         ? {
               hasUI: true,
@@ -2802,6 +2830,7 @@ function makeCompactionContext(
               ...contextFields,
           }
         : { hasUI: false, ...contextFields };
+
     return testDouble<ExtensionContext>()(ctx);
 }
 
@@ -2815,10 +2844,12 @@ function decodeRequestBody(init: RequestInit | undefined): JsonValue {
         assert.ok(body instanceof Uint8Array);
         bytes = Buffer.from(body);
     }
+
     const contentEncoding = new Headers(init?.headers).get("content-encoding");
     assert.ok(contentEncoding === null || contentEncoding === "zstd");
     const serialized =
         contentEncoding === "zstd" ? zstdDecompressSync(bytes).toString() : bytes.toString();
+
     return JsonValueDecoder.Parse(JSON.parse(serialized));
 }
 
@@ -2845,6 +2876,7 @@ function textFromResponseItem<Value>(item: Value): string {
     const content = JsonObjectDecoder.decode(item)?.content;
     const directText = JsonStringDecoder.decode(content);
     if (directText !== undefined) return directText;
+
     const parts = JsonArrayDecoder.decode(content);
     if (!parts) return "";
     return parts

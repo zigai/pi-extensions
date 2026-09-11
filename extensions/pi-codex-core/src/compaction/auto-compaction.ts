@@ -17,6 +17,7 @@ export function scheduleCodexAutoCompaction(
     options: ScheduleCodexAutoCompactionOptions = {},
 ): boolean {
     if (!config.compaction.enabled || !config.compaction.auto) return false;
+
     const sessionId = ctx.sessionManager.getSessionId();
     const latestEntryId = ctx.sessionManager.getBranch().at(-1)?.id;
     const state = autoCompactionBySession.get(sessionId);
@@ -29,6 +30,7 @@ export function scheduleCodexAutoCompaction(
         });
         return false;
     }
+
     if (state?.blockedEntryId === latestEntryId) return false;
     if (state?.timer || state?.inFlight) return false;
 
@@ -37,6 +39,7 @@ export function scheduleCodexAutoCompaction(
         if (latestState?.timer === timer) {
             autoCompactionBySession.set(sessionId, { ...latestState, timer: undefined });
         }
+
         try {
             maybeTriggerCodexAutoCompaction(ctx, config, runtime);
         } catch {
@@ -50,6 +53,7 @@ export function scheduleCodexAutoCompaction(
         inFlight: state?.inFlight ?? false,
         timer,
     });
+
     return true;
 }
 
@@ -57,6 +61,7 @@ export function cancelAutoCompactionState(): void {
     for (const state of autoCompactionBySession.values()) {
         if (state.timer) state.timer.cancel();
     }
+
     autoCompactionBySession.clear();
 }
 
@@ -70,12 +75,14 @@ function latestAssistantWasInterrupted(
     messages: readonly AgentEndCompactionMessage[] | undefined,
 ): boolean {
     if (messages === undefined) return false;
+
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
         if (message?.role === "assistant") {
             return message.stopReason === "error" || message.stopReason === "aborted";
         }
     }
+
     return false;
 }
 
@@ -87,8 +94,10 @@ export function maybeTriggerCodexAutoCompaction(
     if (!config.compaction.enabled || !config.compaction.auto) return false;
     if (!ctx.isIdle()) return false;
     if (ctx.hasPendingMessages()) return false;
+
     const usage = ctx.getContextUsage();
     if (!usage) return false;
+
     const usagePercent = usage.percent;
     if (usagePercent === null || usagePercent < config.compaction.thresholdPercent) return false;
 
@@ -96,6 +105,7 @@ export function maybeTriggerCodexAutoCompaction(
     const branch = ctx.sessionManager.getBranch();
     const latestEntry = branch.at(-1);
     if (latestEntry?.type === "compaction") return false;
+
     const latestEntryId = latestEntry?.id;
     const state = autoCompactionBySession.get(sessionId);
     if (state?.inFlight) return false;
@@ -108,11 +118,13 @@ export function maybeTriggerCodexAutoCompaction(
         inFlight: true,
         timer: state?.timer,
     });
+
     try {
         ctx.compact({
             onComplete: () => finishAutoCompaction(sessionId),
             onError: () => finishAutoCompaction(sessionId),
         });
+
         return true;
     } catch {
         finishAutoCompaction(sessionId);
@@ -123,5 +135,6 @@ export function maybeTriggerCodexAutoCompaction(
 function finishAutoCompaction(sessionId: string): void {
     const state = autoCompactionBySession.get(sessionId);
     if (!state) return;
+
     autoCompactionBySession.set(sessionId, { ...state, inFlight: false });
 }
