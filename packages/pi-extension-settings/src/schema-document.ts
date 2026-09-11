@@ -27,7 +27,9 @@ const SCHEMA_MAP_KEYWORDS = new Set([
     "patternProperties",
     "properties",
 ]);
+
 const SCHEMA_ARRAY_KEYWORDS = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
+
 const SCHEMA_VALUE_KEYWORDS = new Set([
     "additionalProperties",
     "contains",
@@ -45,6 +47,7 @@ function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
     const transformed: Record<string, JsonValue> = {};
     for (const [key, value] of Object.entries(schema)) {
         if (key === "required") continue;
+
         if (key === "properties" && isJsonObject(value)) {
             const properties: Record<string, JsonValue> = {};
             for (const [name, child] of Object.entries(value)) {
@@ -53,11 +56,14 @@ function makeSettingsObjectPartial(schema: JsonObject): JsonObject {
                         ? makeSettingsObjectPartial(child)
                         : cloneJson(child);
             }
+
             transformed[key] = properties;
             continue;
         }
+
         transformed[key] = cloneJson(value);
     }
+
     return transformed;
 }
 
@@ -72,6 +78,7 @@ function stripTypeBoxMetadata(value: JsonValue): JsonValue {
         if (key.startsWith("~")) continue;
         sanitized[key] = stripTypeBoxMetadata(child);
     }
+
     return sanitized;
 }
 
@@ -85,6 +92,7 @@ function schemaRecord(schema: TSchema): JsonObject {
     if (!isJsonObject(parsed)) {
         throw new TypeError("The TypeBox settings schema must serialize to a JSON object.");
     }
+
     return stripTypeBoxMetadata(parsed);
 }
 
@@ -100,12 +108,14 @@ function visitChildSchemas(
             }
             continue;
         }
+
         if (SCHEMA_ARRAY_KEYWORDS.has(key) && isJsonArray(value)) {
             for (const [index, child] of value.entries()) {
                 if (isJsonObject(child)) visit(child, `${path}/${key}/${index}`);
             }
             continue;
         }
+
         if (SCHEMA_VALUE_KEYWORDS.has(key) && isJsonObject(value)) {
             visit(value, `${path}/${key}`);
         }
@@ -122,6 +132,7 @@ export function findUndocumentedSettings(schema: TSchema): readonly string[] {
     if (!isJsonObject(root.properties)) return ["<root>"];
 
     const issues: string[] = [];
+
     function visit(properties: JsonObject, prefix: string): void {
         for (const [key, value] of Object.entries(properties)) {
             const path = prefix === "" ? key : `${prefix}.${key}`;
@@ -129,6 +140,7 @@ export function findUndocumentedSettings(schema: TSchema): readonly string[] {
                 visit(value.properties, path);
                 continue;
             }
+
             if (
                 !isJsonObject(value) ||
                 !isJsonString(value.description) ||
@@ -140,6 +152,7 @@ export function findUndocumentedSettings(schema: TSchema): readonly string[] {
     }
 
     visit(root.properties, "");
+
     return issues;
 }
 
@@ -150,10 +163,12 @@ export function findNonStrictObjectSchemas(schema: TSchema): readonly string[] {
         if (value.type === "object" && isJsonObject(value.properties)) {
             if (value.additionalProperties !== false) issues.push(path);
         }
+
         visitChildSchemas(value, path, visit);
     }
 
     visit(schemaRecord(schema), "#");
+
     return issues;
 }
 
@@ -178,6 +193,7 @@ export function createSettingsFileSchema(input: SchemaDocumentInput): JsonObject
         if (["$schema", "$id", "title", "description", "properties", "required"].includes(key)) {
             continue;
         }
+
         schemaKeywords[key] = cloneJson(value);
     }
 

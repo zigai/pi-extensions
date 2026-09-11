@@ -17,7 +17,6 @@ import {
 
 export const README_GENERATED_START = "<!-- pi-extension-settings:start -->";
 export const README_GENERATED_END = "<!-- pi-extension-settings:end -->";
-
 const MAX_INLINE_DEFAULT_CHARACTERS = 48;
 const MAX_INLINE_TYPE_CHARACTERS = 120;
 const TYPE_NAME_PATTERN = /^[A-Z][A-Za-z0-9]{0,39}$/;
@@ -31,12 +30,16 @@ type SettingsRow = {
 
 function valueAtPath(root: JsonObject, path: readonly string[]): JsonValue | undefined {
     let current: JsonValue = root;
+
     for (const segment of path) {
         if (!isJsonObject(current)) return undefined;
+
         const next: JsonValue | undefined = current[segment];
         if (next === undefined) return undefined;
+
         current = next;
     }
+
     return current;
 }
 
@@ -47,6 +50,7 @@ function markdownCode(value: string): string {
     for (const match of value.matchAll(/`+/g)) {
         longestBacktickRun = Math.max(longestBacktickRun, match[0].length);
     }
+
     const fence = "`".repeat(longestBacktickRun + 1);
     const needsPadding =
         value.startsWith("`") ||
@@ -65,18 +69,22 @@ function literalType(value: JsonValue): string {
 function directPrimitiveType(schema: JsonObject): string | undefined {
     if (schema.const !== undefined || isJsonArray(schema.enum)) return undefined;
     if (!isJsonString(schema.type)) return undefined;
+
     if (["boolean", "integer", "null", "number", "string"].includes(schema.type)) {
         return schema.type;
     }
+
     return undefined;
 }
 
 function valueCoveredByPrimitiveTypes(value: JsonValue, types: ReadonlySet<string>): boolean {
     if (value === null) return types.has("null");
+
     if (isJsonNumber(value)) {
         if (types.has("number")) return true;
         return Number.isInteger(value) && types.has("integer");
     }
+
     if (isJsonBoolean(value)) return types.has("boolean");
     if (isJsonString(value)) return types.has("string");
     return false;
@@ -86,12 +94,14 @@ function schemaCoveredByPrimitiveTypes(schema: JsonObject, types: ReadonlySet<st
     if (schema.const !== undefined) {
         return valueCoveredByPrimitiveTypes(schema.const, types);
     }
+
     if (isJsonArray(schema.enum)) {
         return (
             schema.enum.length > 0 &&
             schema.enum.every((value) => valueCoveredByPrimitiveTypes(value, types))
         );
     }
+
     const alternatives = schema.anyOf ?? schema.oneOf;
     if (!isJsonArray(alternatives) || alternatives.length === 0) return false;
     return alternatives.every(
@@ -102,12 +112,14 @@ function schemaCoveredByPrimitiveTypes(schema: JsonObject, types: ReadonlySet<st
 
 function schemaTypeTitle(schema: JsonObject): string | undefined {
     if (!isJsonString(schema.title)) return undefined;
+
     const title = schema.title.trim();
     return TYPE_NAME_PATTERN.test(title) ? title : undefined;
 }
 
 function schemaType(schema: JsonObject): string {
     if (schema.const !== undefined) return literalType(schema.const);
+
     if (isJsonArray(schema.enum)) {
         return schema.enum.map(literalType).join(" | ");
     }
@@ -128,6 +140,7 @@ function schemaType(schema: JsonObject): string {
                 if (directType !== undefined) {
                     return !(directType === "integer" && numberSubsumesInteger);
                 }
+
                 return !schemaCoveredByPrimitiveTypes(alternative, primitiveTypes);
             })
             .map(schemaType)
@@ -137,13 +150,16 @@ function schemaType(schema: JsonObject): string {
 
     if (schema.type === "array") {
         if (!isJsonObject(schema.items)) return "array";
+
         const itemType = schemaType(schema.items);
         if (itemType.includes(" | ")) return `(${itemType})[]`;
         return `${itemType}[]`;
     }
+
     if (schema.type === "object") {
         const title = schemaTypeTitle(schema);
         if (title !== undefined) return title;
+
         if (isJsonObject(schema.properties)) {
             const required = new Set(
                 isJsonArray(schema.required) ? schema.required.filter(isJsonString) : [],
@@ -153,27 +169,34 @@ function schemaType(schema: JsonObject): string {
                 const type = isJsonObject(value) ? schemaType(value) : "JSON value";
                 return `${key}${optional}: ${type}`;
             });
+
             return `{ ${fields.join("; ")} }`;
         }
+
         if (isJsonObject(schema.patternProperties)) {
             const valueTypes = Object.values(schema.patternProperties)
                 .map((value) => (isJsonObject(value) ? schemaType(value) : "JSON value"))
                 .filter((value, index, values) => values.indexOf(value) === index);
             if (valueTypes.length > 0) return `Record<string, ${valueTypes.join(" | ")}>`;
         }
+
         return "object";
     }
+
     if (isJsonArray(schema.type)) {
         return schema.type
             .filter(isJsonString)
             .filter((value, index, values) => values.indexOf(value) === index)
             .join(" | ");
     }
+
     if (isJsonString(schema.type)) return schema.type;
+
     if (isJsonString(schema.$ref)) {
         const segments = schema.$ref.split(/[/#]/).filter((segment) => segment !== "");
         return segments.at(-1) ?? "referenced value";
     }
+
     return "JSON value";
 }
 
@@ -185,17 +208,20 @@ function collectRows(
     const rows: SettingsRow[] = [];
     for (const [key, value] of Object.entries(properties)) {
         if (key === "$schema" || !isJsonObject(value)) continue;
+
         const path = [...prefix, key];
         if (value.type === "object" && isJsonObject(value.properties)) {
             rows.push(...collectRows(value.properties, defaults, path));
             continue;
         }
+
         const type = schemaType(value);
         if (type.length > MAX_INLINE_TYPE_CHARACTERS) {
             throw new TypeError(
                 `Generated README type for "${path.join(".")}" is too long; add a concise PascalCase title to the complex item or record-value schema.`,
             );
         }
+
         rows.push({
             path: path.join("."),
             type,
@@ -203,6 +229,7 @@ function collectRows(
             description: isJsonString(value.description) ? value.description : "",
         });
     }
+
     return rows;
 }
 
@@ -212,11 +239,13 @@ function markdownCell(value: string): string {
 
 function canRenderDefaultInline(value: JsonValue): boolean {
     if (value === null || isJsonBoolean(value) || isJsonNumber(value)) return true;
+
     if (isJsonString(value)) {
         return (
             !value.includes("\n") && JSON.stringify(value).length <= MAX_INLINE_DEFAULT_CHARACTERS
         );
     }
+
     if (Array.isArray(value)) return value.length === 0;
     return Object.keys(value).length === 0;
 }
@@ -248,6 +277,7 @@ export function renderReadmeSettingsSection(
     );
     const globalPath = options.globalPath ?? defaultGlobalSettingsDisplayPath(definition.id);
     const defaultDocument = createDefaultSettingsDocument(definition);
+
     const documentation = [
         "## Configuration",
         "",
@@ -262,6 +292,7 @@ export function renderReadmeSettingsSection(
     if (definition.exampleSettings !== undefined) {
         documentation.push("### Defaults", "");
     }
+
     documentation.push("```json", JSON.stringify(defaultDocument, undefined, 2), "```");
 
     if (definition.exampleSettings !== undefined) {
@@ -288,9 +319,10 @@ export function replaceGeneratedReadmeSection(
     if (start < 0 && end < 0) {
         return `${readme.trimEnd()}\n\n${README_GENERATED_START}\n${generatedSection.trim()}\n${README_GENERATED_END}\n`;
     }
+
     if (start < 0 || end < start) return undefined;
-    if (readme.indexOf(README_GENERATED_START, start + 1) >= 0) return undefined;
-    if (readme.indexOf(README_GENERATED_END, end + 1) >= 0) return undefined;
+    if (readme.includes(README_GENERATED_START, start + 1)) return undefined;
+    if (readme.includes(README_GENERATED_END, end + 1)) return undefined;
 
     const before = readme.slice(0, start + README_GENERATED_START.length);
     const after = readme.slice(end);

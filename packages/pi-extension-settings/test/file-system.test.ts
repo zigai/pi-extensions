@@ -124,6 +124,7 @@ describe("file operations", () => {
                 throw failure;
             }),
         ).toThrow(failure);
+
         expect(readTextIfPresent(path)).toBeUndefined();
         expect(readdirSync(root)).toEqual([]);
     });

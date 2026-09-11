@@ -22,6 +22,7 @@ const PackDescriptionSchema = Type.Object({
     filename: Type.String(),
     files: Type.Array(Type.Object({ path: Type.String() })),
 });
+
 const PackOutputSchema = Type.Union([
     Type.Array(PackDescriptionSchema, { minItems: 1 }),
     Type.Record(Type.String(), PackDescriptionSchema),
@@ -33,7 +34,7 @@ type CommandResult = {
     readonly stderr: string;
 };
 
-function runCommand(
+async function runCommand(
     command: string,
     arguments_: readonly string[],
     cwd: string,
@@ -42,20 +43,24 @@ function runCommand(
         const child = spawn(command, arguments_, { cwd, stdio: ["ignore", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
+
         child.stdout.setEncoding("utf8");
         child.stderr.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => {
             stdout += chunk;
         });
+
         child.stderr.on("data", (chunk: string) => {
             stderr += chunk;
         });
+
         child.once("error", reject);
         child.once("close", (code, signal) => {
             if (code === 0) {
                 resolve({ stdout, stderr });
                 return;
             }
+
             reject(
                 new Error(
                     `${command} ${arguments_.join(" ")} failed (${String(code ?? signal)}): ${stderr || stdout}`,
@@ -83,6 +88,7 @@ async function collectTextFiles(directory: string): Promise<readonly string[]> {
             found.push(entryPath);
         }
     }
+
     return found;
 }
 
@@ -92,10 +98,12 @@ async function assertMissing(pathname: string, message: string): Promise<void> {
     } catch {
         return;
     }
+
     throw new Error(message);
 }
 
 const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pi-extension-settings-package-"));
+
 try {
     const packDirectory = path.join(temporaryRoot, "pack");
     const consumerDirectory = path.join(temporaryRoot, "consumer");
@@ -136,6 +144,7 @@ try {
     ]) {
         if (!packedFiles.has(required)) throw new Error(`npm package is missing ${required}`);
     }
+
     for (const packedFile of packedFiles) {
         if (
             packedFile.startsWith("node_modules/") ||
@@ -163,6 +172,7 @@ try {
             2,
         )}\n`,
     );
+
     const piVersion = await installedVersion(
         path.join(packageRoot, "node_modules", "@earendil-works", "pi-coding-agent"),
     );
@@ -256,6 +266,7 @@ try {
         ].join("\n"),
     );
     await runCommand(process.execPath, ["smoke.mjs"], consumerDirectory);
+
     const cli = await runCommand(
         npmExecutable,
         ["exec", "--dry-run=false", "--", "pi-extension-settings", "--help"],
@@ -272,6 +283,7 @@ try {
         path.join(installedPackage, "node_modules"),
         "installed package contains nested node_modules",
     );
+
     const workspacePaths = new Set([packageRoot, packageRoot.split(path.sep).join("/")]);
     for (const file of await collectTextFiles(installedPackage)) {
         const content = await readFile(file, "utf8");

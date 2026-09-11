@@ -23,7 +23,9 @@ function schemaContent(): string {
 }
 
 afterEach(async () => {
-    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
 });
 
 describe("settings loader failure isolation", () => {
@@ -83,6 +85,7 @@ describe("settings loader failure isolation", () => {
                 expect(loaded.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
                     testCase.codes,
                 );
+
                 expect(await readFile(initial.globalConfigPath, "utf8")).toBe(testCase.content);
                 expect(await readdir(configDirectory)).toEqual(["pi-example.json", "schemas"]);
             } finally {

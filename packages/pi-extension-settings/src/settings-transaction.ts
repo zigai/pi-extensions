@@ -29,14 +29,15 @@ import { mergeSettings } from "./settings-merge.ts";
 import { createSettingsRevision, type PiSettingsRevision } from "./settings-revision.ts";
 
 export type PiSettingsUpdateScope = "global" | "project";
-
 export type PiSettingsUpdateIssue = SettingsValidationIssue;
 
 export type UpdatePiExtensionSettingsOptions<Schema extends TObject> = {
     /** Settings layer to update. Project updates require a trusted project. */
     readonly scope: PiSettingsUpdateScope;
+
     /** Reject the update if the relevant sources no longer match this loader revision. */
     readonly expectedRevision?: PiSettingsRevision;
+
     /**
      * Produce the next encoded settings layer from the latest valid layer.
      *
@@ -138,6 +139,7 @@ function parseExistingLayer(
     if (parsedLayer.settings === undefined) {
         return { status: "invalid", diagnostics: parsedLayer.diagnostics };
     }
+
     return {
         status: "valid",
         settings: parsedLayer.settings,
@@ -170,8 +172,9 @@ async function withInterprocessLocks<Result>(
     const path = paths[index];
     if (path === undefined) return operation();
 
-    await persistently(() => mkdir(dirname(path), { recursive: true }));
-    const release = await persistently(() =>
+    await persistently(async () => mkdir(dirname(path), { recursive: true }));
+
+    const release = await persistently(async () =>
         lockfile.lock(path, {
             realpath: false,
             retries: {
@@ -183,6 +186,7 @@ async function withInterprocessLocks<Result>(
             },
         }),
     );
+
     try {
         return await withInterprocessLocks(paths, operation, index + 1);
     } finally {
@@ -196,7 +200,7 @@ async function runSettingsTransaction<Schema extends TObject>(
 ): Promise<UpdatePiExtensionSettingsResult> {
     const layerSchema = createSettingsFileSchema(definition);
     const expectedSchema = formatJson(layerSchema);
-    const installedSchema = await persistently(() =>
+    const installedSchema = await persistently(async () =>
         readTextIfPresentAsync(options.paths.global.schemaPath),
     );
     if (installedSchema !== expectedSchema) {
@@ -207,12 +211,14 @@ async function runSettingsTransaction<Schema extends TObject>(
         };
     }
 
-    const globalText = await persistently(() =>
+    const globalText = await persistently(async () =>
         readTextIfPresentAsync(options.paths.global.configPath),
     );
     const projectText =
         options.scope === "project"
-            ? await persistently(() => readTextIfPresentAsync(options.paths.project.configPath))
+            ? await persistently(async () =>
+                  readTextIfPresentAsync(options.paths.project.configPath),
+              )
             : undefined;
     const revision =
         options.scope === "global"
@@ -266,6 +272,7 @@ async function runSettingsTransaction<Schema extends TObject>(
         if (projectApplied.diagnostic !== undefined) {
             return invalidExisting([projectApplied.diagnostic]);
         }
+
         currentLayer = projectResult;
         validationBase = globalApplied.settings;
     }
@@ -284,16 +291,19 @@ async function runSettingsTransaction<Schema extends TObject>(
             { path: "/", message: "Expected a JSON object" },
         ]);
     }
+
     if (!isJsonObject(candidateJson)) {
         return invalidUpdate("The settings updater must return a JSON object.", [
             { path: "/", message: "Expected a JSON object" },
         ]);
     }
+
     if ("$schema" in candidateJson) {
         return invalidUpdate("The settings updater cannot modify $schema metadata.", [
             { path: "/$schema", message: "$schema is reserved for editor metadata" },
         ]);
     }
+
     if (!Value.Check(layerSchema, candidateJson)) {
         return invalidUpdate(
             "The settings update does not match the extension schema.",
@@ -309,6 +319,7 @@ async function runSettingsTransaction<Schema extends TObject>(
             settingsValidationIssues(definition.schema, resolved),
         );
     }
+
     try {
         Value.Decode(Value.Clone(definition.schema), resolved);
     } catch {
@@ -326,7 +337,9 @@ async function runSettingsTransaction<Schema extends TObject>(
         currentLayer.schemaReference ??
         (options.scope === "global" ? targetPaths.schemaReference : definition.schemaId);
     const content = formatJson(createSettingsDocument(definition.id, nextLayer, schemaReference));
-    await persistently(() => writeTextAtomicallyAsync(targetPaths.configPath, content));
+
+    await persistently(async () => writeTextAtomicallyAsync(targetPaths.configPath, content));
+
     const nextRevision =
         options.scope === "global"
             ? createSettingsRevision(content)
@@ -350,8 +363,9 @@ export async function updateSettingsTransaction<Schema extends TObject>(
         options.scope === "global"
             ? [options.paths.global.configPath]
             : [options.paths.global.configPath, options.paths.project.configPath].sort();
+
     try {
-        return await withInterprocessLocks(lockPaths, () =>
+        return await withInterprocessLocks(lockPaths, async () =>
             runSettingsTransaction(definition, options),
         );
     } catch (cause: unknown) {
@@ -361,6 +375,7 @@ export async function updateSettingsTransaction<Schema extends TObject>(
                 message: `The ${options.scope} settings transaction failed.`,
             };
         }
+
         if (cause instanceof Error) throw cause;
         throw new Error("The settings transaction threw a non-Error value.", { cause });
     }

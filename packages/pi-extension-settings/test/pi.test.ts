@@ -34,7 +34,9 @@ function restoreAgentDir(): void {
 
 afterEach(async () => {
     restoreAgentDir();
-    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
 });
 
 describe("Pi settings adapter", () => {

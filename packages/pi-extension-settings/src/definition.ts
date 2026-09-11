@@ -45,19 +45,23 @@ export type ExtensionSettingsDefinitionCandidate = Static<
 
 function isSettingsSchema(value: TSchema): value is TObject {
     if (!IsSchema(value)) return false;
+
     let serialized: string | undefined;
     try {
         serialized = JSON.stringify(value);
     } catch {
         return false;
     }
+
     if (serialized === undefined) return false;
+
     const parsed = parseJson(serialized);
     return isJsonObject(parsed) && parsed.type === "object" && isJsonObject(parsed.properties);
 }
 
 function freezeRecursively(value: JsonArray | JsonObject | TSchema): void {
     if (Object.isFrozen(value)) return;
+
     for (const child of Object.values(value)) {
         if (Value.Check(JsonValueSchema, child)) {
             if (Array.isArray(child) || isJsonObject(child)) freezeRecursively(child);
@@ -65,6 +69,7 @@ function freezeRecursively(value: JsonArray | JsonObject | TSchema): void {
             freezeRecursively(child);
         }
     }
+
     Object.freeze(value);
 }
 
@@ -89,18 +94,25 @@ export class InvalidSettingsDefinition extends Error {
  */
 export type ExtensionSettingsDefinition<Schema extends TObject = TObject> = {
     readonly [definitionMarker]: true;
+
     /** The stable identifier used in settings and schema filenames. */
     readonly id: string;
+
     /** The display name used in generated schema and README content. */
     readonly title: string;
+
     /** The summary used in generated schema and README content. */
     readonly description: string;
+
     /** The absolute URI written to the generated JSON Schema `$id` field. */
     readonly schemaId: string;
+
     /** A validated, recursively frozen clone of the supplied TypeBox schema. */
     readonly schema: Schema;
+
     /** The schema defaults as recursively frozen JSON data, before TypeBox decoding. */
     readonly defaultSettings: JsonObject;
+
     /** An optional validated example settings layer rendered in generated documentation. */
     readonly exampleSettings: JsonObject | undefined;
 };
@@ -141,16 +153,20 @@ export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
      * settings files.
      */
     readonly id: string;
+
     /** Non-blank display name for generated documentation and JSON Schema metadata. */
     readonly title: string;
+
     /** Non-blank summary for generated documentation and JSON Schema metadata. */
     readonly description: string;
+
     /**
      * Absolute URI for the generated JSON Schema `$id`.
      *
      * Defaults to `urn:pi-extension-settings:<id>`.
      */
     readonly schemaId?: string;
+
     /**
      * TypeBox object schema for resolved settings.
      *
@@ -159,6 +175,7 @@ export type ExtensionSettingsDefinitionInput<Schema extends TObject> = {
      * `$schema` is reserved for editor metadata and cannot be declared as a setting.
      */
     readonly schema: Schema;
+
     /**
      * A realistic, non-default settings layer rendered after the default configuration.
      *
@@ -222,6 +239,7 @@ export function defineExtensionSettings(
             "id must be 1-128 lowercase filename-safe characters and cannot end with punctuation",
         );
     }
+
     if (!SETTINGS_ID_PATTERN.test(id)) {
         throw new InvalidSettingsDefinition(
             "id must be 1-128 lowercase filename-safe characters and cannot end with punctuation",
@@ -234,6 +252,7 @@ export function defineExtensionSettings(
     } catch {
         throw new InvalidSettingsDefinition("title must not be blank");
     }
+
     if (title.trim() === "") throw new InvalidSettingsDefinition("title must not be blank");
 
     let description: string;
@@ -242,6 +261,7 @@ export function defineExtensionSettings(
     } catch {
         throw new InvalidSettingsDefinition("description must not be blank");
     }
+
     if (description.trim() === "") {
         throw new InvalidSettingsDefinition("description must not be blank");
     }
@@ -254,6 +274,7 @@ export function defineExtensionSettings(
             throw new InvalidSettingsDefinition("schemaId must be an absolute URI");
         }
     }
+
     try {
         new URL(schemaId);
     } catch {
@@ -263,6 +284,7 @@ export function defineExtensionSettings(
     if (!IsSchema(input.schema) || !isSettingsSchema(input.schema)) {
         throw new InvalidSettingsDefinition("schema must be a TypeBox object schema");
     }
+
     const schema = Value.Clone(input.schema);
     if (hasReservedSchemaProperty(schema)) {
         throw new InvalidSettingsDefinition("$schema is reserved for editor metadata");
@@ -274,6 +296,7 @@ export function defineExtensionSettings(
             `object schemas must set additionalProperties to false: ${nonStrictObjects.join(", ")}`,
         );
     }
+
     const undocumentedSettings = findUndocumentedSettings(schema);
     if (undocumentedSettings.length > 0) {
         throw new InvalidSettingsDefinition(
@@ -286,16 +309,19 @@ export function defineExtensionSettings(
         const issues = [...Value.Errors(schema, rawDefaults)]
             .map((issue) => `${issue.instancePath || "/"}: ${issue.message}`)
             .join("; ");
+
         throw new InvalidSettingsDefinition(
             `required settings must have valid defaults${issues === "" ? "" : `: ${issues}`}`,
         );
     }
+
     let serializedDefaults: string;
     try {
         serializedDefaults = JSON.stringify(rawDefaults);
     } catch {
         throw new InvalidSettingsDefinition("schema defaults must produce a JSON object");
     }
+
     const parsedDefaults = parseJson(serializedDefaults);
     if (!isJsonObject(parsedDefaults) || !isDeepStrictEqual(rawDefaults, parsedDefaults)) {
         throw new InvalidSettingsDefinition("schema defaults must produce a JSON object");
@@ -316,6 +342,7 @@ export function defineExtensionSettings(
         } catch {
             throw new InvalidSettingsDefinition("exampleSettings must be a JSON object");
         }
+
         const parsedExample = parseJson(serializedExample);
         if (
             !isJsonObject(parsedExample) ||
@@ -335,6 +362,7 @@ export function defineExtensionSettings(
             const issues = [...Value.Errors(fileSchema, parsedExample)]
                 .map((issue) => `${issue.instancePath || "/"}: ${issue.message}`)
                 .join("; ");
+
             throw new InvalidSettingsDefinition(
                 `exampleSettings must match the settings-file schema${issues === "" ? "" : `: ${issues}`}`,
             );
@@ -346,21 +374,25 @@ export function defineExtensionSettings(
                 "exampleSettings must resolve to valid settings when merged with defaults",
             );
         }
+
         try {
             Value.Decode(schema, mergedExample);
         } catch {
             throw new InvalidSettingsDefinition("exampleSettings could not be decoded");
         }
+
         if (isDeepStrictEqual(mergedExample, defaultSettings)) {
             throw new InvalidSettingsDefinition(
                 "exampleSettings must demonstrate configuration that differs from the defaults",
             );
         }
+
         exampleSettings = cloneJson(parsedExample);
     }
 
     freezeRecursively(schema);
     freezeRecursively(defaultSettings);
+
     if (exampleSettings !== undefined) freezeRecursively(exampleSettings);
 
     const definition: ExtensionSettingsDefinition = Object.freeze({
@@ -376,6 +408,7 @@ export function defineExtensionSettings(
 
     // Build once during definition so malformed schema structures fail at startup.
     createSettingsFileSchema(definition);
+
     return definition;
 }
 
@@ -383,6 +416,7 @@ export function isExtensionSettingsDefinition(
     value: ExtensionSettingsDefinitionCandidate,
 ): value is ExtensionSettingsDefinition {
     if (!(definitionMarker in value) || value[definitionMarker] !== true) return false;
+
     if (
         !("id" in value) ||
         !Value.Check(StringValueSchema, value.id) ||
@@ -390,15 +424,21 @@ export function isExtensionSettingsDefinition(
     ) {
         return false;
     }
+
     if (!("title" in value) || !Value.Check(StringValueSchema, value.title)) return false;
+
     if (!("description" in value) || !Value.Check(StringValueSchema, value.description)) {
         return false;
     }
+
     if (!("schemaId" in value) || !Value.Check(StringValueSchema, value.schemaId)) return false;
+
     if (!("schema" in value) || !IsSchema(value.schema) || !isSettingsSchema(value.schema)) {
         return false;
     }
+
     if (!("defaultSettings" in value)) return false;
+
     const exampleSettings = "exampleSettings" in value ? value.exampleSettings : undefined;
     let serializedDefaults: string;
     try {
@@ -406,6 +446,7 @@ export function isExtensionSettingsDefinition(
     } catch {
         return false;
     }
+
     const parsedDefaults = parseJson(serializedDefaults);
     if (
         !isJsonObject(parsedDefaults) ||
@@ -413,6 +454,7 @@ export function isExtensionSettingsDefinition(
     ) {
         return false;
     }
+
     if (exampleSettings !== undefined) {
         let serializedExample: string;
         try {
@@ -420,11 +462,13 @@ export function isExtensionSettingsDefinition(
         } catch {
             return false;
         }
+
         const parsedExample = parseJson(serializedExample);
         if (!isJsonObject(parsedExample) || !isDeepStrictEqual(exampleSettings, parsedExample)) {
             return false;
         }
     }
+
     return true;
 }
 

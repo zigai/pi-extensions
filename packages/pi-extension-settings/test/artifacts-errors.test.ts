@@ -21,7 +21,9 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 afterEach(async () => {
-    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
 });
 
 describe("artifact filesystem failures", () => {

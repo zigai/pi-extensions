@@ -29,12 +29,14 @@ export type BundledSchemaSource =
     | {
           /** Use schema text already loaded by the extension. */
           readonly kind: "content";
+
           /** Complete generated JSON Schema, including its trailing newline. */
           readonly content: string;
       }
     | {
           /** Read the schema synchronously from a bundled file URL. */
           readonly kind: "url";
+
           /** A `file:` URL, usually `new URL("../config.schema.json", import.meta.url)`. */
           readonly url: URL;
       };
@@ -62,18 +64,25 @@ export type LoadSettingsOptions = {
 export type LoadedSettings<Schema extends TObject> = {
     /** Fully resolved and TypeBox-decoded settings safe for extension code to consume. */
     readonly settings: StaticDecode<Schema>;
+
     /** Accepted encoded global layer after removal of editor-only metadata. */
     readonly globalSettingsLayer: JsonObject | undefined;
+
     /** Accepted encoded trusted-project layer after removal of editor metadata. */
     readonly projectSettingsLayer: JsonObject | undefined;
+
     /** Non-fatal problems encountered while installing, reading, validating, or decoding settings. */
     readonly diagnostics: readonly SettingsDiagnostic[];
+
     /** Absolute path of the extension's global settings file. */
     readonly globalConfigPath: string;
+
     /** Absolute project settings path, even when the project is untrusted; absent without a project. */
     readonly projectConfigPath: string | undefined;
+
     /** Revision of the exact global settings source read during this load; absent after a read failure. */
     readonly globalRevision: PiSettingsRevision | undefined;
+
     /**
      * Combined revision of the global and trusted-project sources read during this load.
      *
@@ -81,12 +90,16 @@ export type LoadedSettings<Schema extends TObject> = {
      * read. A missing settings file still has a revision and is distinct from an unreadable file.
      */
     readonly projectRevision: PiSettingsRevision | undefined;
+
     /** Whether a valid global layer contributed to {@link LoadedSettings.settings}. */
     readonly usedGlobalConfig: boolean;
+
     /** Whether a valid trusted-project layer contributed to {@link LoadedSettings.settings}. */
     readonly usedProjectConfig: boolean;
+
     /** Whether this load created the global settings file from schema defaults. */
     readonly scaffoldedGlobalConfig: boolean;
+
     /**
      * Result of installing the bundled editor schema in Pi's global settings directory.
      *
@@ -158,9 +171,9 @@ export function loadSettings<const Schema extends TObject>(
     const layerSchema = createSettingsFileSchema(definition);
     const expectedSchema = formatJson(layerSchema);
     const sourceSchema = bundledSchemaContent(options.bundledSchema);
-
     let schemaStatus: LoadedSettings<Schema>["schemaStatus"] = "unavailable";
     let scaffoldedGlobalConfig = false;
+
     if (sourceSchema === undefined) {
         diagnostics.push({
             code: "bundled-schema-read-failed",
@@ -210,6 +223,7 @@ export function loadSettings<const Schema extends TObject>(
 
     const globalLayer = readLayer(globalPaths.configPath, "global", layerSchema);
     diagnostics.push(...globalLayer.diagnostics);
+
     const globalApplied = applySettingsLayer(
         definition.schema,
         definition.defaultSettings,
@@ -223,9 +237,11 @@ export function loadSettings<const Schema extends TObject>(
     let projectSettingsLayer: JsonObject | undefined;
     let usedProjectConfig = false;
     let projectRevision: PiSettingsRevision | undefined;
+
     if (projectPaths !== undefined && options.project?.trusted === true) {
         const projectLayer = readLayer(projectPaths.configPath, "project", layerSchema);
         diagnostics.push(...projectLayer.diagnostics);
+
         const projectApplied = applySettingsLayer(
             definition.schema,
             resolved,
@@ -234,11 +250,13 @@ export function loadSettings<const Schema extends TObject>(
             "project",
         );
         if (projectApplied.diagnostic !== undefined) diagnostics.push(projectApplied.diagnostic);
+
         if (projectLayer.settings !== undefined && projectApplied.diagnostic === undefined) {
             resolved = projectApplied.settings;
             projectSettingsLayer = projectLayer.settings;
             usedProjectConfig = true;
         }
+
         if (
             globalLayer.source.status === "available" &&
             projectLayer.source.status === "available"

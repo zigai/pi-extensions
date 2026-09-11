@@ -38,7 +38,9 @@ function restoreAgentDir(): void {
 
 afterEach(async () => {
     restoreAgentDir();
-    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
 });
 
 async function definitionSetup<Schema extends TObject>(
@@ -104,7 +106,9 @@ describe("settings transactions", () => {
         });
 
         expect(result.status).toBe("updated");
+
         if (result.status !== "updated") throw new Error("Expected updated settings");
+
         const reloaded = loadPiExtensionSettings(setup.definition, setup.context, {
             bundledSchema: setup.bundledSchema,
         });
@@ -143,6 +147,7 @@ describe("settings transactions", () => {
     it("rejects a stale snapshot without overwriting the newer file", async () => {
         const setup = await testSetup();
         expect(setup.loaded.globalRevision).toBeDefined();
+
         if (setup.loaded.globalRevision === undefined) throw new Error("Expected global revision");
 
         const external = formatJson({
@@ -325,7 +330,7 @@ describe("settings transactions", () => {
 
     it("serializes concurrent semantic updates over the latest layer", async () => {
         const setup = await testSetup();
-        const appendTool = (tool: string) =>
+        const appendTool = async (tool: string) =>
             updatePiExtensionSettings(setup.definition, setup.context, {
                 scope: "global" as const,
                 update: (current) => ({
@@ -353,7 +358,7 @@ describe("settings transactions", () => {
                 setup.definition.id,
             ),
         };
-        const appendTool = (tool: string) =>
+        const appendTool = async (tool: string) =>
             updateSettingsTransaction(setup.definition, {
                 scope: "global" as const,
                 paths,
@@ -377,6 +382,7 @@ describe("settings transactions", () => {
     it("creates explicit trusted-project settings without copying global values", async () => {
         const setup = await testSetup();
         expect(setup.loaded.projectRevision).toBeDefined();
+
         if (setup.loaded.projectRevision === undefined)
             throw new Error("Expected project revision");
 
@@ -387,13 +393,16 @@ describe("settings transactions", () => {
         });
 
         expect(result.status).toBe("updated");
+
         if (result.status !== "updated") throw new Error("Expected updated settings");
+
         const projectPath = getPiProjectSettingsPath(setup.definition.id, setup.context.cwd);
         const projectDocument: unknown = JSON.parse(await readFile(projectPath, "utf8"));
         expect(projectDocument).toEqual({
             $schema: setup.definition.schemaId,
             mode: "expanded",
         });
+
         expect((await stat(projectPath)).mode & 0o777).toBe(0o600);
         const reloaded = loadPiExtensionSettings(setup.definition, setup.context, {
             bundledSchema: setup.bundledSchema,
@@ -471,8 +480,10 @@ describe("settings transactions", () => {
     it("includes the global source in project snapshot conflicts", async () => {
         const setup = await testSetup();
         expect(setup.loaded.projectRevision).toBeDefined();
+
         if (setup.loaded.projectRevision === undefined)
             throw new Error("Expected project revision");
+
         await updatePiExtensionSettings(setup.definition, setup.context, {
             scope: "global",
             update: (current) => ({ ...current, enabled: false }),

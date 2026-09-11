@@ -23,6 +23,7 @@ function recordingIo() {
         stdout: (message) => out.push(message),
         stderr: (message) => err.push(message),
     };
+
     return { io, out, err };
 }
 
@@ -34,7 +35,9 @@ async function writeDefinition(path: string): Promise<void> {
 }
 
 afterEach(async () => {
-    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
 });
 
 describe("project discovery failures and options", () => {

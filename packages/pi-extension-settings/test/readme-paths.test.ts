@@ -23,6 +23,7 @@ describe("settings paths", () => {
             schemaPath: "/agent/extension-settings/schemas/pi-example.schema.json",
             schemaReference: "./schemas/pi-example.schema.json",
         });
+
         expect(defaultGlobalSettingsDisplayPath("pi-example")).toBe(
             "~/.pi/agent/extension-settings/pi-example.json",
         );
@@ -44,18 +45,22 @@ describe("README generation", () => {
         expect(rendered).toContain(
             "Global settings are stored in `~/.pi/agent/extension-settings/pi-example.json`.",
         );
+
         expect(rendered).toContain('| `appearance.color` | string | `"blue"` | Accent color. |');
         expect(rendered).toContain(
             '| `mode` | `compact` \\| `expanded` | `"compact"` | Display mode. |',
         );
+
         expect(rendered).toContain('"$schema": "./schemas/pi-example.schema.json"');
         expect(rendered).toContain('"opacity": 0.8');
         expect(rendered).toContain(
             "| `tools` | string[] | *See JSON below* | Enabled tool names. |",
         );
+
         expect(rendered).toContain(
             "| `tools` | string[] | *See JSON below* | Enabled tool names. |\n\n### Defaults\n\n```json",
         );
+
         expect(rendered).not.toContain("Complete default settings");
         expect(rendered).not.toContain("<details>");
     });

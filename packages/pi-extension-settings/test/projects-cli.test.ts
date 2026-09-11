@@ -58,7 +58,9 @@ async function writeConfiguredPackage(
 }
 
 afterEach(async () => {
-    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
 });
 
 describe("project discovery", () => {
@@ -166,6 +168,7 @@ describe("CLI", () => {
             stdout: (message) => stdout.push(message),
             stderr: (message) => stderr.push(message),
         };
+
         return { io, stdout, stderr };
     }
 

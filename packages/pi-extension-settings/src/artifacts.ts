@@ -69,6 +69,7 @@ function expectedReadme(readmePath: string, section: string): string {
     if (expected === undefined) {
         throw new Error(`README generation markers are invalid in ${readmePath}`);
     }
+
     return expected;
 }
 
@@ -78,14 +79,15 @@ export function generateSettingsArtifacts(
 ): GeneratedSettingsArtifacts {
     const rendered = renderSettingsArtifacts(definition, targets);
     const readme = expectedReadme(targets.readmePath, rendered.readmeSection);
-
     const changedPaths: string[] = [];
     if (writeTextAtomically(targets.schemaPath, rendered.schema) !== "unchanged") {
         changedPaths.push(targets.schemaPath);
     }
+
     if (writeTextAtomically(targets.readmePath, readme) !== "unchanged") {
         changedPaths.push(targets.readmePath);
     }
+
     if (
         targets.prevalidationPath !== undefined &&
         rendered.prevalidation !== undefined &&
@@ -113,6 +115,7 @@ export function checkSettingsArtifacts(
     const stalePaths: string[] = [];
     if (schemaCurrent !== rendered.schema) stalePaths.push(targets.schemaPath);
     if (readmeCurrent !== readme) stalePaths.push(targets.readmePath);
+
     if (
         targets.prevalidationPath !== undefined &&
         prevalidationCurrent !== rendered.prevalidation

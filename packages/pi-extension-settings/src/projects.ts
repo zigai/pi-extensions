@@ -47,6 +47,7 @@ function parseSettingsManifest(
 ): SettingsProjectManifest | undefined {
     const raw = packageJson[PACKAGE_MANIFEST_KEY];
     if (raw === undefined) return undefined;
+
     if (!isJsonObject(raw)) {
         throw manifestError(packagePath, `${PACKAGE_MANIFEST_KEY} must be an object`);
     }
@@ -66,11 +67,13 @@ function parseSettingsManifest(
     const readme = stringProperty(raw, "readme") ?? "README.md";
     const prevalidation = stringProperty(raw, "prevalidation");
     const globalPath = stringProperty(raw, "globalPath");
+
     if (prevalidation === undefined) {
         return globalPath === undefined
             ? { definition, schema, readme }
             : { definition, schema, readme, globalPath };
     }
+
     return globalPath === undefined
         ? { definition, schema, readme, prevalidation }
         : { definition, schema, readme, prevalidation, globalPath };
@@ -78,11 +81,13 @@ function parseSettingsManifest(
 
 function resolveInside(packageRoot: string, configuredPath: string): string | undefined {
     if (isAbsolute(configuredPath)) return undefined;
+
     const resolved = resolve(packageRoot, configuredPath);
     const relativePath = relative(packageRoot, resolved);
     if (relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath))) {
         return resolved;
     }
+
     return undefined;
 }
 
@@ -91,6 +96,7 @@ function workspacePatterns(packageJson: JsonObject): readonly string[] {
     if (Array.isArray(workspaces)) {
         return workspaces.filter(isJsonString);
     }
+
     if (!isJsonObject(workspaces) || !Array.isArray(workspaces.packages)) return [];
     return workspaces.packages.filter(isJsonString);
 }
@@ -107,7 +113,6 @@ function readPackageJson(path: string): JsonObject {
 async function packageJsonPaths(root: string): Promise<readonly string[]> {
     const rootPackagePath = resolve(root, "package.json");
     const rootPackage = readPackageJson(rootPackagePath);
-
     const paths = new Set<string>([rootPackagePath]);
     for (const pattern of workspacePatterns(rootPackage)) {
         const packagePattern = pattern.endsWith("package.json")
@@ -120,6 +125,7 @@ async function packageJsonPaths(root: string): Promise<readonly string[]> {
             paths.add(resolve(root, match));
         }
     }
+
     return [...paths].sort();
 }
 
@@ -143,6 +149,7 @@ async function importDefinition(path: string): Promise<ExtensionSettingsDefiniti
     } catch (cause: unknown) {
         throw new Error(invalidDefaultMessage, { cause });
     }
+
     try {
         // Always execute exhaustive authoring validation, including when the module exported a
         // pre-existing definition created through a runtime fast path.
@@ -165,6 +172,7 @@ async function loadProject(packagePath: string): Promise<SettingsArtifactProject
         manifest.prevalidation === undefined
             ? undefined
             : resolveInside(packageRoot, manifest.prevalidation);
+
     if (
         definitionPath === undefined ||
         schemaPath === undefined ||
@@ -195,6 +203,7 @@ async function loadProject(packagePath: string): Promise<SettingsArtifactProject
                       globalPath: manifest.globalPath,
                   };
     }
+
     return { packageRoot, definition, targets };
 }
 
@@ -207,5 +216,6 @@ export async function discoverSettingsProjects(
         const project = await loadProject(path);
         if (project !== undefined) projects.push(project);
     }
+
     return projects;
 }

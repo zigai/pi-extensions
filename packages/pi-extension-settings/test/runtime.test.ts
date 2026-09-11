@@ -62,6 +62,7 @@ describe("prevalidated settings runtime", () => {
             class CodecOwner {
                 label = "original";
             }
+
             const owner = new CodecOwner();
             const decode = Object.assign((value: string) => value.toUpperCase(), {
                 metadata: { calls: 0 },
@@ -84,11 +85,13 @@ describe("prevalidated settings runtime", () => {
             const artifact = createPrevalidatedExtensionSettingsArtifact(
                 defineExtensionSettings(codecInput),
             );
+
             // Function identity, not its prototype, determines whether the clone owns it.
             if (customPrototypes) {
                 Object.setPrototypeOf(decode, null);
                 Object.setPrototypeOf(encode, Object.prototype);
             }
+
             const hydrated = definePrevalidatedExtensionSettings(codecInput, artifact);
 
             expect(Object.isFrozen(decode)).toBe(false);
@@ -106,6 +109,7 @@ describe("prevalidated settings runtime", () => {
             expect(Value.Decode(hydrated.schema, hydrated.defaultSettings)).toEqual({
                 value: "HELLO",
             });
+
             expect(Value.Encode(hydrated.schema, { value: "HELLO" })).toEqual({ value: "hello" });
         },
     );
@@ -140,12 +144,15 @@ describe("prevalidated settings runtime", () => {
         const defaults = hydrated.defaultSettings;
         if (!Value.Check(authoringInput.schema, defaults))
             throw new Error("Invalid hydrated defaults");
+
         expect(Object.isFrozen(defaults.labels)).toBe(true);
         expect(defaults.labels[0]).toBe(defaults.labels[1]);
+
         for (const entry of defaults.labels) {
             expect(Object.isFrozen(entry)).toBe(true);
             expect(Reflect.set(entry, "value", "changed")).toBe(false);
         }
+
         expect(Reflect.set(defaults.labels, "0", { value: "changed" })).toBe(false);
         expect(Object.isFrozen(artifact.defaultSettings.labels)).toBe(false);
         expect(Object.isFrozen(label)).toBe(false);
@@ -165,12 +172,14 @@ describe("prevalidated settings runtime", () => {
                 first,
             ),
         ).toThrowError(InvalidPrevalidatedSettingsArtifact);
+
         expect(() =>
             definePrevalidatedExtensionSettings(authoringInput, {
                 ...first,
                 defaultSettings: { ...first.defaultSettings, enabled: false },
             }),
         ).toThrowError("artifact is stale");
+
         expect(() =>
             definePrevalidatedExtensionSettings(authoringInput, {
                 ...first,
@@ -247,11 +256,13 @@ describe("prevalidated settings runtime", () => {
         const artifactA = createPrevalidatedExtensionSettingsArtifact(validated);
         const artifactB = createPrevalidatedExtensionSettingsArtifact(validatedB);
         expect(artifactA.semanticFingerprint).not.toBe(artifactB.semanticFingerprint);
+
         // The runtime uses the supplied codecs; source-text drift belongs to artifact checking.
         const hydratedB = definePrevalidatedExtensionSettings(inputB, artifactA);
         expect(Value.Decode(hydratedB.schema, hydratedB.defaultSettings)).toEqual({
             value: "value-b",
         });
+
         expect(Value.Decode(inputA.schema, defaults)).toEqual({ value: "value-a" });
         const hydrated = definePrevalidatedExtensionSettings(inputA, artifactA);
         expect(Value.Decode(hydrated.schema, hydrated.defaultSettings)).toEqual({

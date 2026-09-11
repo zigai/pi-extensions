@@ -16,7 +16,6 @@ const {
 } = Typebox;
 
 export type JsonPrimitive = boolean | null | number | string;
-
 export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
 
 export interface JsonArray extends ReadonlyArray<JsonValue> {
@@ -31,6 +30,7 @@ const JsonObjectCandidateSchema = RecordType(StringType(), Unknown());
 
 function isPlainJsonObject(value: JsonValue): value is JsonObject {
     if (!Value.Check(JsonObjectCandidateSchema, value)) return false;
+
     const prototype = Reflect.getPrototypeOf(value);
     return (
         (prototype === Object.prototype || prototype === null) &&

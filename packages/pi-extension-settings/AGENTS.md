@@ -1,49 +1,50 @@
 # AGENTS.md
 
-## Project Contract
+## Work and verification
 
-- This package provides settings runtime and artifact tooling specifically for Pi extensions; it is not itself a Pi extension.
-- Keep the public API limited to defining settings, loading and transactionally updating them through Pi, and the `generate`/`check` CLI. Filesystem, schema-document, artifact, and workspace-discovery modules are implementation details.
-- `src/definition.ts` owns definition invariants, `src/settings-layer.ts` owns parsing and merge validation, `src/settings-loader.ts` owns synchronous load orchestration, `src/settings-transaction.ts` owns explicit asynchronous updates, and `src/artifacts.ts` owns repository artifact generation.
-- Keep Pi-specific path and trust resolution in `src/pi.ts`; internal loading remains testable with explicit paths.
-- Publish compiled JavaScript and declarations from `dist`, but do not commit that generated directory. Git installs and package publishing build it through `prepare`; executable package exports must continue to target compiled JavaScript rather than TypeScript source.
+This library provides settings runtime and artifact tooling for Pi extensions; it is not itself an extension. Run `just setup` after cloning and `just check` before handing off changes. Preserve strict TypeScript, type-aware Oxlint, coverage thresholds, and non-mutating generation checks. Test filesystem behavior with real temporary directories, not module mocks or method spies.
 
-## Consumer Lifecycle Contract
+## Ownership and package surface
 
-- Loading performs synchronous filesystem work. Public documentation and examples must keep module import and the extension factory free of settings I/O.
-- This package is stateless with respect to Pi sessions. The consuming extension owns its cached load result, diagnostic presentation, enabled behavior, and reset. Cache the result even when disabled or rejected by extension-specific validation; a separate activation flag is unnecessary when the cached result records completion. Add cancellation, stale-result rejection, and disposal only for asynchronous work or resources the extension owns.
-- Recommend `session_start` as the reset boundary and the first callback that needs settings as the activation boundary. When enabled behavior genuinely begins during `session_start`, loading there is correct.
-- Explain that deferred loading moves work from Pi startup to first feature use; it does not remove the load cost.
-- Keep renderers free of settings I/O. Pi's `ToolRenderContext` does not provide the `ExtensionContext` needed for loading and notifications; rendering must work before activation using execution data or already-owned presentation state.
-- Do not add a generic session activation helper unless it can preserve extension-specific lifecycle ownership without hiding diagnostics, invalid settings, cancellation, or cleanup.
+Keep the public API limited to settings definitions, runtime hydration, Pi loading/updates, and the `generate`/`check` CLI. Filesystem, schema, artifact, and workspace-discovery helpers remain internal.
 
-## Configuration Invariants
+- `src/definition.ts`: definition invariants.
+- `src/settings-layer.ts`: parsing and merge validation.
+- `src/settings-loader.ts`: synchronous loading.
+- `src/settings-transaction.ts`: explicit asynchronous updates.
+- `src/pi.ts`: Pi paths and project trust; internal operations accept explicit paths for testing.
+- `src/artifacts.ts`: repository artifact generation.
 
-- TypeBox definitions are the source of truth for runtime types, persisted input schemas, defaults, checked-in JSON Schema, README option tables, README default JSON, and optional example settings.
-- `exampleSettings` is optional. Define it only when complex settings—such as structured arrays, nested objects, maps, unions, or meaningful interactions between options—need a realistic advanced example. Omit it for simple scalars or settings already obvious from the type table and defaults.
-- Treat a defined `exampleSettings` value as a validated partial settings layer. It must be JSON, merge to a valid configuration, differ from the defaults, stay focused, and demonstrate realistic non-secret usage rather than duplicate the scaffold.
-- Give complex array-item and record-value object schemas a concise PascalCase `title`, such as `ModelMode`. Generated tables use that title as the type name; generation rejects unnamed types that would make a table row unreadably long.
-- Parse persisted JSON to `unknown`, validate and decode at the boundary, then pass decoded settings inward. Never cast serialized input to a settings type.
-- Apply defaults once, then layer global settings and trusted project settings. Deep-merge objects and replace arrays/scalars.
-- Store global config under `getAgentDir()/extension-settings/<id>.json` and global schemas under `getAgentDir()/extension-settings/schemas/<id>.schema.json`.
-- Resolve project overrides with `CONFIG_DIR_NAME` and honor them only for trusted projects.
-- Loading must never overwrite or repair an existing centralized user settings file. Scaffold global settings exclusively when missing; never scaffold project settings. Legacy settings may be copied only into a missing centralized target, with the original left untouched.
-- Explicit settings transactions may create a missing trusted-project file, but must reject untrusted projects and preserve malformed or invalid existing files exactly.
-- Settings transaction callbacks operate on encoded layers, run synchronously once while locked, and must be followed by layer, resolved-settings, and codec validation before publication.
-- Coordinate the whole transaction through Pi's per-file mutation queue and the package's cooperative inter-process lock. Publish complete settings documents through atomic replacement while preserving existing permissions.
-- Treat schemas as generated extension-owned artifacts. Verify bundled schema content and refresh the global copy atomically when stale.
-- Diagnostics must not include raw setting values or secrets.
+Publish generated runtime artifacts and declarations from `dist`; do not commit that directory. Preserve the manifest's root JavaScript entry and Pi-facing generated `/runtime` and `/pi` bundles. Preserve build and prepack verification; do not redirect executable exports to authoring source.
 
-## Generated Artifacts
+## Agent-facing usage contract
 
-- Never hand-edit generated `config.schema.json` content or README text between `<!-- pi-extension-settings:start -->` and `<!-- pi-extension-settings:end -->`. Generated README content includes the exact type table, complete defaults, and the optional advanced example.
-- Run `pi-extension-settings generate` after changing a definition.
-- `pi-extension-settings check` must remain non-mutating and deterministic for pre-commit and CI. Prevalidation checks codec function text during authoring only; runtime hydration checks JSON-visible drift because Pi and bundlers transform function text.
-- Standalone packages and npm workspace packages use the same package-level `piExtensionSettings` manifest.
+Keep documentation and examples sufficient for agents to implement consumers correctly:
 
-## Quality Gates
+- Author TypeBox schemas in generation-safe `settings-input.ts`; derive resolved types with `StaticDecode`. Hydrate prevalidation in `settings.ts` through `/runtime`; load/update through `/pi`. The package root serves authoring APIs.
+- Declare and publish the input, prevalidation, schema, and README artifacts. Generate after definition changes; never hand-edit generated content.
+- Keep I/O out of imports, factories, and renderers. Consumers own caching, diagnostics, activation, and reset; this library does not own Pi sessions. Cache disabled and semantically invalid results too, without a redundant activation flag.
+- Reset at `session_start` and load at the first callback needing settings, including `session_start` when behavior begins there. Dispose owned resources before clearing state; add cancellation/stale-result handling only for owned async work. Deferred loading moves the cost, not eliminates it.
+- Renderers use execution/presentation data and work before activation; `ToolRenderContext` cannot substitute for `ExtensionContext`.
+- Load before `updatePiExtensionSettings()`, handle typed outcomes, and use revisions for snapshot edits rather than semantic updates. Do not add consumer-side settings writers or mutation queues.
 
-- Run `just setup` after cloning to install dependencies and Git hooks and verify the package. Run `just check` before handing off later changes.
-- Keep strict TypeScript and type-aware Oxlint enabled; do not add unsafe casts or broad lint suppressions.
-- Exercise filesystem behavior through real temporary directories rather than module mocks or method spies.
-- Preserve the enforced coverage thresholds. New failure paths and boundary behavior require observable tests.
+Keep API recipes in `docs/manual-setup.md`, `docs/runtime.md`, and `docs/generation.md` aligned with this contract. Do not introduce a generic session helper that hides extension-specific validation, diagnostics, or resource ownership.
+
+## Persistence invariants
+
+- Parse persisted JSON from `unknown`, validate/decode once, and pass typed values inward. Apply defaults once, then global and trusted-project layers; deep-merge objects and replace arrays/scalars.
+- Resolve global files through `getAgentDir()/extension-settings/` and schemas through its `schemas/` directory. Resolve project overrides through `CONFIG_DIR_NAME`, only for trusted projects.
+- Loading scaffolds global settings only when missing. Never overwrite or repair existing user settings or scaffold project settings. Legacy migration may copy into a missing centralized target only, leaving the original untouched.
+- Explicit transactions may create trusted-project files. Reject untrusted projects and preserve malformed/invalid existing files exactly.
+- Transaction callbacks receive the latest encoded layer and run synchronously once under lock. Validate the layer, resolved settings, and codecs before publication. Coordinate through Pi's per-file mutation queue and the cooperative inter-process lock; replace atomically and preserve permissions.
+- Verify bundled schemas and refresh stale global copies atomically. Diagnostics never include raw setting values or secrets.
+
+## Schema and generation invariants
+
+TypeBox definitions own types, defaults, persisted schemas, prevalidation, README tables/defaults, and examples. Complex array-item/record-value objects need concise PascalCase titles; reject unnamed types that produce unreadable tables.
+
+`exampleSettings` is optional: use it for structured or interacting options, not obvious scalars. Validate it as a partial JSON layer that differs from defaults, resolves successfully, and demonstrates focused non-secret usage.
+
+Never hand-edit generated schemas or README text between the settings markers. Keep `generate` and `check` consistent for standalone and workspace manifests. `check` must remain deterministic and non-mutating. Compare codec function text during authoring prevalidation only; runtime hydration checks JSON-visible drift because Pi and bundlers transform function text.
+
+New boundary and failure paths require observable tests; preserve package verification and enforced coverage.

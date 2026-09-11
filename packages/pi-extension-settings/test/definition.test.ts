@@ -34,11 +34,13 @@ describe("defineExtensionSettings", () => {
             appearance: { color: "blue", opacity: 0.8 },
             tools: ["read"],
         });
+
         expect(definition.exampleSettings).toEqual({
             mode: "expanded",
             appearance: { color: "amber" },
             tools: ["read", "bash"],
         });
+
         expect(isExtensionSettingsDefinition(definition)).toBe(true);
         expect(isExtensionSettingsDefinition({ id: "pi-example" })).toBe(false);
         expect(Object.isFrozen(definition)).toBe(true);
@@ -52,6 +54,7 @@ describe("defineExtensionSettings", () => {
         const valid = testDefinition();
         const marker = Object.getOwnPropertySymbols(valid)[0];
         if (marker === undefined) throw new Error("definition marker is missing");
+
         const definitionMarker = marker;
 
         function marked<const Fields extends object>(fields: Fields) {
@@ -67,6 +70,7 @@ describe("defineExtensionSettings", () => {
                 marked({ id: "pi-fake", title: "Fake", description: "Fake settings." }),
             ),
         ).toBe(false);
+
         expect(
             isExtensionSettingsDefinition(
                 marked({
@@ -79,6 +83,7 @@ describe("defineExtensionSettings", () => {
                 }),
             ),
         ).toBe(true);
+
         expect(
             isExtensionSettingsDefinition(
                 marked({
@@ -91,6 +96,7 @@ describe("defineExtensionSettings", () => {
                 }),
             ),
         ).toBe(false);
+
         expect(
             isExtensionSettingsDefinition(
                 marked({
@@ -104,6 +110,7 @@ describe("defineExtensionSettings", () => {
                 }),
             ),
         ).toBe(false);
+
         expect(
             isExtensionSettingsDefinition(
                 marked({
@@ -117,6 +124,7 @@ describe("defineExtensionSettings", () => {
                 }),
             ),
         ).toBe(false);
+
         expect(
             isExtensionSettingsDefinition(
                 marked({
@@ -129,6 +137,7 @@ describe("defineExtensionSettings", () => {
                 }),
             ),
         ).toBe(false);
+
         expect(
             isExtensionSettingsDefinition(
                 marked({
@@ -416,10 +425,15 @@ describe("generated schema documents", () => {
                 },
             },
         });
+
         expect(isJsonObject(schema.properties)).toBe(true);
+
         if (!isJsonObject(schema.properties)) return;
+
         expect(isJsonObject(schema.properties.appearance)).toBe(true);
+
         if (!isJsonObject(schema.properties.appearance)) return;
+
         expect(schema.properties.appearance.required).toBeUndefined();
     });
 
@@ -441,7 +455,9 @@ describe("generated schema documents", () => {
 
         const schema = createSettingsFileSchema(definition);
         expect(isJsonObject(schema.not)).toBe(true);
+
         if (!isJsonObject(schema.not)) return;
+
         expect(schema.not.required).toEqual(["legacy"]);
     });
 

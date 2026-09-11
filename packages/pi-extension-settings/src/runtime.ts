@@ -35,8 +35,10 @@ type SettingsFingerprintPayload = {
 /** Generated, authoring-validated values used by the startup-only definition fast path. */
 export type PrevalidatedExtensionSettingsArtifact = {
     readonly formatVersion: typeof PREVALIDATION_FORMAT_VERSION;
+
     /** Fast runtime proof over the complete JSON-visible definition contract. */
     readonly fingerprint: string;
+
     /** Authoring-only fingerprint checked by `check`; codec function text can change in Pi. */
     readonly semanticFingerprint: string;
     readonly defaultSettings: JsonObject;
@@ -63,14 +65,19 @@ function freezeRecursively<Value extends object>(value: Value, original: Value):
             Object.isFrozen(current)
         )
             continue;
+
         for (const key of Reflect.ownKeys(current)) {
             const descriptor = Reflect.getOwnPropertyDescriptor(current, key);
             if (descriptor === undefined || !("value" in descriptor)) continue;
+
             const child: unknown = descriptor.value;
             if (Object.isFrozen(child)) continue;
+
             const sourceDescriptor = Reflect.getOwnPropertyDescriptor(source, key);
             if (sourceDescriptor === undefined || !("value" in sourceDescriptor)) continue;
+
             const originalChild: unknown = sourceDescriptor.value;
+
             // TypeBox retains codec functions and other atomic values by identity. Only descend
             // into values that were copied; never mutate those caller-owned references.
             if (child === originalChild) continue;
@@ -80,6 +87,7 @@ function freezeRecursively<Value extends object>(value: Value, original: Value):
             // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: the clone/source correspondence proves both worklist values are objects.
             pending.push(...([originalChild, child] as [object, object]));
         }
+
         Object.freeze(current);
     }
 }
@@ -157,6 +165,7 @@ export function createPrevalidatedExtensionSettingsArtifact<Schema extends TObje
         exampleSettings,
     );
     const semantic = semanticFingerprint(input, defaultSettings, exampleSettings);
+
     return exampleSettings === undefined
         ? {
               formatVersion: PREVALIDATION_FORMAT_VERSION,
@@ -199,11 +208,13 @@ export function definePrevalidatedExtensionSettings<const Schema extends TObject
             `unsupported prevalidation format version: ${String(artifact.formatVersion)}`,
         );
     }
+
     if (!hasPlainObjectPrototype(artifact.defaultSettings)) {
         throw new InvalidPrevalidatedSettingsArtifact(
             "prevalidated defaultSettings must be a JSON object",
         );
     }
+
     if (
         artifact.exampleSettings !== undefined &&
         !hasPlainObjectPrototype(artifact.exampleSettings)
@@ -228,8 +239,10 @@ export function definePrevalidatedExtensionSettings<const Schema extends TObject
     const defaultSettings = cloneJson(artifact.defaultSettings);
     const exampleSettings =
         artifact.exampleSettings === undefined ? undefined : cloneJson(artifact.exampleSettings);
+
     freezeRecursively(schema, input.schema);
     freezeRecursively(defaultSettings, artifact.defaultSettings);
+
     if (exampleSettings !== undefined && artifact.exampleSettings !== undefined) {
         freezeRecursively(exampleSettings, artifact.exampleSettings);
     }

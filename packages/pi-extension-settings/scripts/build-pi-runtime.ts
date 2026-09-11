@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 const external = [
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-agent-core/*",
@@ -44,6 +45,7 @@ for (const entry of ["pi", "runtime"]) {
     if (bundledHostInputs.length > 0) {
         throw new Error(`Host identity modules entered ${entry}: ${bundledHostInputs.join(", ")}`);
     }
+
     const output = await readFile(outfile, "utf8");
     if (output.includes(packageRoot)) {
         throw new Error(`${entry} bundle contains an absolute workspace path`);

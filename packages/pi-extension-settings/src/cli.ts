@@ -39,11 +39,14 @@ function parseArguments(args: readonly string[]): ParsedArguments | undefined {
     for (let index = 1; index < args.length; index += 1) {
         const argument = args[index];
         if (argument !== "--root") return undefined;
+
         const value = args[index + 1];
         if (value === undefined || value.startsWith("--")) return undefined;
+
         root = resolve(value);
         index += 1;
     }
+
     return { command, root };
 }
 
@@ -67,6 +70,7 @@ async function runCommand(parsed: ParsedArguments, io: CliIo): Promise<number> {
             const generated = generateSettingsArtifacts(project.definition, project.targets);
             for (const path of generated.changedPaths) io.stdout(line(`updated ${path}`));
         }
+
         return 0;
     }
 
@@ -78,12 +82,14 @@ async function runCommand(parsed: ParsedArguments, io: CliIo): Promise<number> {
             io.stderr(line(`stale ${path}`));
         }
     }
+
     if (stale) {
         io.stderr(line("Run pi-extension-settings generate and commit the resulting changes."));
         return 1;
     }
 
     io.stdout(line(`settings artifacts are current (${projects.length} package(s))`));
+
     return 0;
 }
 

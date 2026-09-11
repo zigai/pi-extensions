@@ -28,7 +28,9 @@ function bundledSchema() {
 }
 
 afterEach(async () => {
-    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
 });
 
 describe("loadSettings", () => {
@@ -51,6 +53,7 @@ describe("loadSettings", () => {
             $schema: "./schemas/pi-example.schema.json",
             ...definition.defaultSettings,
         });
+
         expect(await readFile(paths.schemaPath, "utf8")).toBe(bundledSchema().content);
     });
 
@@ -78,6 +81,7 @@ describe("loadSettings", () => {
             appearance: { color: "red", opacity: 0.8 },
             tools: ["read"],
         });
+
         expect(loaded.usedGlobalConfig).toBe(true);
         expect(loaded.scaffoldedGlobalConfig).toBe(false);
         expect(loaded.schemaStatus).toBe("updated");
@@ -106,6 +110,7 @@ describe("loadSettings", () => {
             appearance: { color: "blue", opacity: 0.25 },
             tools: ["bash"],
         });
+
         expect(loaded.usedProjectConfig).toBe(true);
         expect(loaded.projectRevision).toMatch(/^sha256:[0-9a-f]{64}$/);
         expect(loaded.projectSettingsLayer).toEqual({
@@ -150,6 +155,7 @@ describe("loadSettings", () => {
         expect(loaded.diagnostics).toContainEqual(
             expect.objectContaining({ code: "config-malformed", scope: "global" }),
         );
+
         expect(loaded.globalRevision).toMatch(/^sha256:[0-9a-f]{64}$/);
         expect(await readFile(paths.configPath, "utf8")).toBe("{ malformed");
     });
@@ -272,6 +278,7 @@ describe("loadSettings", () => {
         expect(loaded.diagnostics).toContainEqual(
             expect.objectContaining({ code: "config-read-failed" }),
         );
+
         expect(loaded.globalRevision).toBeUndefined();
     });
 });

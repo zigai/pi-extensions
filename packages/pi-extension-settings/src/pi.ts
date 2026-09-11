@@ -38,6 +38,7 @@ export type LoadPiExtensionSettingsOptions = {
  * @template Schema The TypeBox object schema from the supplied extension definition.
  */
 export type LoadedPiExtensionSettings<Schema extends TObject> = LoadedSettings<Schema>;
+
 export type {
     BundledSchemaSource,
     PiSettingsRevision,
@@ -139,7 +140,7 @@ async function withFileMutationQueues<Result>(
 ): Promise<Result> {
     const path = paths[index];
     if (path === undefined) return operation();
-    return withFileMutationQueue(path, () =>
+    return withFileMutationQueue(path, async () =>
         withFileMutationQueues(paths, operation, withFileMutationQueue, index + 1),
     );
 }
@@ -185,9 +186,10 @@ export async function updatePiExtensionSettings<const Schema extends TObject>(
         options.scope === "global"
             ? [global.configPath]
             : [global.configPath, project.configPath].sort();
+
     return withFileMutationQueues(
         paths,
-        () =>
+        async () =>
             updateSettingsTransaction(definition, {
                 ...options,
                 paths: { global, project },

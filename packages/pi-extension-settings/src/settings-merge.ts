@@ -5,9 +5,11 @@ function mergeValue(current: JsonValue | undefined, next: JsonValue): JsonValue 
 
     const merged: Record<string, JsonValue> = {};
     for (const [key, value] of Object.entries(current)) merged[key] = cloneJson(value);
+
     for (const [key, value] of Object.entries(next)) {
         merged[key] = mergeValue(merged[key], value);
     }
+
     return merged;
 }
 
@@ -17,6 +19,7 @@ export function settingsLayerFromFile(file: JsonObject): JsonObject {
         if (key === "$schema") continue;
         settings[key] = cloneJson(value);
     }
+
     return settings;
 }
 
@@ -26,5 +29,6 @@ export function mergeSettings(current: JsonObject, next: JsonObject): JsonObject
     if (!isJsonObject(merged)) {
         throw new TypeError("Settings merge unexpectedly produced a non-object value.");
     }
+
     return merged;
 }

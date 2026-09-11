@@ -28,11 +28,14 @@ async function artifactFiles(readmeContent?: string) {
         readmeContent ??
             `# Package\n\nIntro.\n\n${README_GENERATED_START}\nold\n${README_GENERATED_END}\n`,
     );
+
     return targets;
 }
 
 afterEach(async () => {
-    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+    await Promise.all(
+        temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true })),
+    );
 });
 
 describe("settings artifacts", () => {
@@ -46,6 +49,7 @@ describe("settings artifacts", () => {
         expect(rendered.schema).toContain(
             '"$id": "https://example.test/pi-example/config.schema.json"',
         );
+
         expect(rendered.readmeSection).toContain("| `appearance.opacity` | number | `0.8`");
         expect(rendered.readmeSection).toContain("### Defaults");
         expect(rendered.readmeSection).toContain("### Advanced example");
@@ -80,6 +84,7 @@ describe("settings artifacts", () => {
             current: false,
             stalePaths: [targets.schemaPath, targets.readmePath],
         });
+
         expect(await readFile(targets.schemaPath, "utf8")).toBe("stale\n");
     });
 
@@ -124,10 +129,12 @@ describe("settings artifacts", () => {
             current: false,
             stalePaths: [targets.prevalidationPath],
         });
+
         expect(await readFile(targets.prevalidationPath, "utf8")).toBe(original);
         expect(generateSettingsArtifacts(changed, targets).changedPaths).toEqual([
             targets.prevalidationPath,
         ]);
+
         expect(checkSettingsArtifacts(changed, targets)).toEqual({ current: true, stalePaths: [] });
     });
 

@@ -55,6 +55,7 @@ export function writeTextIfMissing(
     try {
         mkdirSync(directory, { recursive: true });
         writeFileSync(temporaryPath, produceContent(), { encoding: "utf8", flag: "wx", mode });
+
         try {
             linkSync(temporaryPath, path);
             return "created";
@@ -77,10 +78,12 @@ export function writeTextAtomically(path: string, content: string, mode = 0o644)
 
     const directory = dirname(path);
     const temporaryPath = join(directory, `.${basename(path)}.${randomUUID()}.tmp`);
+
     try {
         mkdirSync(directory, { recursive: true });
         writeFileSync(temporaryPath, content, { encoding: "utf8", flag: "wx", mode });
         renameSync(temporaryPath, path);
+
         return current === undefined ? "created" : "updated";
     } finally {
         try {
@@ -98,6 +101,7 @@ export async function writeTextAtomicallyAsync(
     defaultMode = 0o600,
 ): Promise<void> {
     let mode = defaultMode;
+
     try {
         mode = (await stat(path)).mode & 0o777;
     } catch (cause: unknown) {
@@ -106,7 +110,9 @@ export async function writeTextAtomicallyAsync(
 
     const directory = dirname(path);
     const temporaryPath = join(directory, `.${basename(path)}.${randomUUID()}.tmp`);
+
     await mkdir(directory, { recursive: true });
+
     try {
         const handle = await open(temporaryPath, "wx", mode);
         try {
@@ -115,6 +121,7 @@ export async function writeTextAtomicallyAsync(
         } finally {
             await handle.close();
         }
+
         await chmod(temporaryPath, mode);
         await rename(temporaryPath, path);
     } finally {

@@ -41,6 +41,7 @@ export type SettingsDiagnosticCode =
 export type SettingsValidationIssue = {
     /** JSON Pointer to the invalid setting, or `/` for the document root. */
     readonly path: string;
+
     /** TypeBox validation message for this issue. */
     readonly message: string;
 };
@@ -54,14 +55,19 @@ export type SettingsValidationIssue = {
 export type SettingsDiagnostic = {
     /** Stable category intended for programmatic handling. */
     readonly code: SettingsDiagnosticCode;
+
     /** All current diagnostics are errors; the field allows direct use with `ctx.ui.notify`. */
     readonly severity: "error";
+
     /** The settings layer or editor-schema operation that failed. */
     readonly scope: SettingsScope | "schema";
+
     /** Absolute path of the affected settings or schema file. */
     readonly path: string;
+
     /** User-facing summary that does not include settings values. */
     readonly message: string;
+
     /** JSON Pointer paths and validator messages when schema validation failed. */
     readonly issues?: readonly SettingsValidationIssue[];
 };
@@ -69,6 +75,7 @@ export type SettingsDiagnostic = {
 export type ParsedSettingsLayer = {
     /** Encoded JSON settings after editor-only metadata is removed. */
     readonly settings: JsonObject | undefined;
+
     /** Editor schema reference from the file, when present and valid. */
     readonly schemaReference: string | undefined;
     readonly diagnostics: readonly SettingsDiagnostic[];
@@ -126,6 +133,7 @@ export function parseSettingsLayer(
 
     const schemaReference =
         isJsonObject(parsed) && isJsonString(parsed.$schema) ? parsed.$schema : undefined;
+
     try {
         const decoded: unknown = Value.Decode(layerSchema, parsed);
         const decodedJson = Value.Parse(JsonValueSchema, decoded);
@@ -144,6 +152,7 @@ export function parseSettingsLayer(
                 ],
             };
         }
+
         return { settings: settingsLayerFromFile(decodedJson), schemaReference, diagnostics: [] };
     } catch {
         return {
@@ -167,8 +176,8 @@ export type AppliedSettingsLayer = {
     readonly diagnostic?: SettingsDiagnostic;
 };
 
-export function applySettingsLayer<Schema extends TObject>(
-    schema: Schema,
+export function applySettingsLayer(
+    schema: TObject,
     current: JsonObject,
     layer: Pick<ParsedSettingsLayer, "settings">,
     path: string,

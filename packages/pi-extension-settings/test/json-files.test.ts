@@ -23,6 +23,7 @@ describe("JSON values", () => {
         class JsonCarrier {
             readonly value = 1;
         }
+
         const symbolKeyed = { value: 1, [Symbol("hidden")]: "not JSON" };
         const spoofedTag = { value: 1, [Symbol.toStringTag]: "Object" };
         const nullPrototype = { value: 1 };
@@ -48,6 +49,7 @@ describe("JSON values", () => {
         expect(parseJson("not json")).toBeUndefined();
 
         if (!isJsonObject(parsed)) return;
+
         const cloned = cloneJson(parsed);
         expect(cloned).toEqual(parsed);
         expect(cloned).not.toBe(parsed);

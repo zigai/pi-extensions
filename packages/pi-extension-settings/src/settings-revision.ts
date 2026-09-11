@@ -18,9 +18,11 @@ export function createSettingsRevision(
             hash.update("missing\0");
             continue;
         }
+
         const content = Buffer.from(source, "utf8");
         hash.update(`present:${content.byteLength}\0`);
         hash.update(content);
     }
+
     return `sha256:${hash.digest("hex")}`;
 }

@@ -146,36 +146,45 @@ describe("README schema rendering", () => {
         expect(rendered).toContain(
             "| `optional` | string | — | Optional \\| setting. Second line. |",
         );
+
         expect(rendered).toContain("| `limits` | number[] | *See JSON below* | Numeric limits. |");
         expect(rendered).toContain(
             "| `mixed` | (`one` \\| integer)[] | *See JSON below* | Mixed values. |",
         );
+
         expect(rendered).toContain(
             "| `entries` | { id: string; enabled?: boolean }[] | `[]` | Structured entries. |",
         );
+
         expect(rendered).toContain(
             "| `entriesByName` | Record<string, { count: integer }> | `{}` | Named entries. |",
         );
+
         expect(rendered).toContain("| `namedEntries` | ModelMode[] | `[]` | Named model modes. |");
         expect(rendered).toContain('| `color` | integer \\| string | `"#123456"`');
         expect(rendered).toContain(
             "| `primitiveUnion` | number \\| null \\| boolean | `true` | Primitive alternatives. |",
         );
+
         expect(rendered).toContain(
             "| `blankTitleEntries` | { id: string }[] | `[]` | Entries without a usable title. |",
         );
+
         expect(rendered).toContain(
             "| `humanTitleEntries` | { id: string }[] | `[]` | Entries with a human-readable title. |",
         );
+
         expect(rendered).toContain(
             '| `backtickChoice` | `plain` \\| `` `quoted` `` \\| `""` | `"plain"` |',
         );
+
         expect(rendered).toContain("command\\|`name`");
         expect(rendered).toContain('``"run `pi` now"``');
         expect(rendered).toContain("| `fixed` | `true` | `true` | A fixed boolean. |");
         expect(rendered).toContain(
             "| `tags` | (`stable` \\| `preview`)[] | `[]` | Release tags. |",
         );
+
         expect(rendered).toContain("| `recursiveEntry` | Entry | — | A recursive entry. |");
         expect(rendered).toContain('| `choice` | `one` \\| `two` | `"one"`');
         expect(rendered).toContain("| `mystery` | JSON value | `null`");
